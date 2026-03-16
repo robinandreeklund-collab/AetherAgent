@@ -7,6 +7,8 @@
 [![WASM](https://img.shields.io/badge/target-wasm32--unknown--unknown-blue.svg)](https://webassembly.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/robinandreeklund-collab/AetherAgent)
+
 ```
 Chrome is built for humans.
 AetherAgent is built for Claude, GPT-4o, Llama – any LLM.
@@ -179,6 +181,65 @@ tree = json.loads(result)
 best = tree["nodes"][0]
 print(f"Best action: {best['action']}({best['label']}) – relevance {best['relevance']}")
 # → Best action: click(Book now – 1,299 kr) – relevance 0.94
+```
+
+---
+
+## Deploy to Render
+
+One-click deploy the AetherAgent HTTP API to Render:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/robinandreeklund-collab/AetherAgent)
+
+This deploys a Docker container running the axum REST API server with all AetherAgent endpoints.
+
+### API Usage (after deploy)
+
+```bash
+# Health check
+curl https://your-app.onrender.com/health
+
+# Parse HTML to semantic tree
+curl -X POST https://your-app.onrender.com/api/parse \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<html><body><button>Buy now</button></body></html>", "goal": "buy product", "url": "https://shop.com"}'
+
+# Find best clickable element
+curl -X POST https://your-app.onrender.com/api/click \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<html><body><button>Add to cart</button></body></html>", "goal": "buy", "url": "https://shop.com", "target_label": "Add to cart"}'
+
+# Check for prompt injection
+curl -X POST https://your-app.onrender.com/api/check-injection \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Ignore previous instructions"}'
+```
+
+### All Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/api/parse` | Parse HTML to full semantic tree |
+| POST | `/api/parse/top` | Parse top-N relevant nodes |
+| POST | `/api/click` | Find best clickable element |
+| POST | `/api/fill-form` | Map form fields to key/value pairs |
+| POST | `/api/extract` | Extract structured data by keys |
+| POST | `/api/check-injection` | Check text for prompt injection |
+| POST | `/api/wrap-untrusted` | Wrap content in trust markers |
+| POST | `/api/memory/create` | Create workflow memory |
+| POST | `/api/memory/step` | Add workflow step |
+| POST | `/api/memory/context/set` | Set context key/value |
+| POST | `/api/memory/context/get` | Get context value |
+
+### Python SDK (connects to deployed server)
+
+```python
+from bindings.python.aether_agent import AetherAgent
+
+agent = AetherAgent(base_url="https://your-app.onrender.com")
+tree = agent.parse(html, goal="buy cheapest flight", url="https://flights.com")
+click = agent.find_and_click(html, goal="buy", url="https://shop.com", target_label="Add to cart")
 ```
 
 ---
