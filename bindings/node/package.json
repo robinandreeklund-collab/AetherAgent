@@ -1,0 +1,18 @@
+{
+  "name": "@aether-agent/node",
+  "version": "0.2.0",
+  "description": "AetherAgent Node.js bindings – LLM-native browser engine",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/robinandreeklund-collab/AetherAgent"
+  },
+  "keywords": ["llm", "browser", "wasm", "ai-agent", "semantic", "accessibility"],
+  "files": ["index.js", "index.d.ts", "aether_agent_bg.wasm"],
+  "scripts": {
+    "build": "cd ../.. && wasm-pack build --target nodejs --out-dir bindings/node/pkg && node scripts/postbuild.js",
+    "test": "node test.js"
+  }
+}

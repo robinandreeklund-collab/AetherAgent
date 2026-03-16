@@ -96,6 +96,30 @@ jobs:
           path: pkg/
           retention-days: 7
 
+  # ─── Server build ──────────────────────────────────────────────────────────
+  server-build:
+    name: HTTP server build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installera Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-server-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-server-
+
+      - name: Bygg HTTP-server
+        run: cargo build --features server --bin aether-server --release
+
   # ─── Python-integration ─────────────────────────────────────────────────────
   python-test:
     name: Python integration test
@@ -110,6 +134,21 @@ jobs:
 
       - name: Kör Python mock-test (utan WASM)
         run: python examples/python_test.py
+
+  # ─── Node.js-integration ───────────────────────────────────────────────────
+  node-test:
+    name: Node.js SDK test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sätt upp Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Kör Node.js SDK-test (mock)
+        run: node bindings/node/test.js
 
   # ─── Security audit ─────────────────────────────────────────────────────────
   security:

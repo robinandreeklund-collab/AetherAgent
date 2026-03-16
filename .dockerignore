@@ -1,0 +1,10 @@
+target/
+pkg/
+node_modules/
+.git/
+.github/
+examples/
+bindings/
+tests/
+benches/
+*.md

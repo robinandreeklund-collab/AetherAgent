@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Logga in – MinBank</title></head>
+<body>
+  <main>
+    <h1>Logga in på MinBank</h1>
+    <form id="login-form" action="/auth/login" method="POST">
+      <label for="personnummer">Personnummer</label>
+      <input type="text" id="personnummer" name="personnummer" placeholder="YYYYMMDD-XXXX" required />
+      <label for="password">Lösenord</label>
+      <input type="password" id="password" name="password" placeholder="Ange lösenord" required />
+      <label>
+        <input type="checkbox" name="remember" /> Kom ihåg mig på denna enhet
+      </label>
+      <button type="submit" id="login-btn">Logga in</button>
+    </form>
+    <a href="/forgot-password">Glömt lösenord?</a>
+    <a href="/bankid">Logga in med BankID</a>
+    <a href="/register">Bli kund</a>
+  </main>
+</body>
+</html>

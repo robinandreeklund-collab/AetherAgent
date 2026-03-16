@@ -192,14 +192,27 @@ AetherAgent/
 │   ├── parser.rs       # html5ever + rcdom DOM builder
 │   ├── semantic.rs     # Accessibility tree → semantic JSON
 │   ├── trust.rs        # Trust shield – prompt injection filter
-│   └── types.rs        # Core data structures
+│   ├── intent.rs       # Intent API – find_and_click, fill_form, extract_data
+│   ├── memory.rs       # Workflow memory – stateless context across WASM
+│   ├── types.rs        # Core data structures
+│   └── bin/
+│       └── server.rs   # HTTP API server (axum) for deployment
+├── bindings/
+│   ├── node/           # Node.js SDK with TypeScript types
+│   └── python/         # Python SDK (HTTP + WASM)
+├── benches/
+│   └── bench_main.rs   # Performance benchmark suite
 ├── examples/
 │   └── python_test.py  # Complete Python agent loop demo
 ├── tests/
-│   └── integration_test.rs  # WebArena-inspired integration tests
+│   ├── integration_test.rs  # WebArena-inspired integration tests
+│   ├── fixture_tests.rs     # 20 real-site HTML scenario tests
+│   └── fixtures/            # 20 realistic HTML test pages
 ├── .github/
 │   └── workflows/
 │       └── ci.yml      # CI: build, test, WASM size check, security audit
+├── Dockerfile          # Multi-stage Docker build for deployment
+├── render.yaml         # Render.com deployment blueprint
 └── Cargo.toml
 ```
 
@@ -213,7 +226,7 @@ AetherAgent/
 |-------|-------|--------|-------------|
 | **Fas 1** – Grund & säkerhet | 1–2 | ✅ Done | HTML parser, semantic layer, trust shield, WASM build |
 | **Fas 2** – Intent API & minne | 3–4 | ✅ Done | find_and_click, fill_form, extract_data, workflow memory |
-| **Fas 3** – Runtime & integration | 5–6 | 🔲 Next | Python + Node bindings, benchmarks, 20 real-site tests |
+| **Fas 3** – Runtime & integration | 5–6 | ✅ Done | HTTP API, Python + Node bindings, benchmarks, 20 real-site tests |
 
 ### Post-MVP
 

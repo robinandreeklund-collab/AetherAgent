@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Feed – SocialApp</title></head>
+<body>
+  <nav>
+    <a href="/feed">Feed</a>
+    <a href="/explore">Explore</a>
+    <a href="/messages">Messages (3)</a>
+    <a href="/profile">Profile</a>
+  </nav>
+  <main>
+    <h1>Your Feed</h1>
+    <form id="new-post">
+      <textarea placeholder="What's on your mind?" name="content" aria-label="Write a post"></textarea>
+      <button type="submit">Post</button>
+    </form>
+    <article>
+      <h3>@techguru</h3>
+      <p>Just deployed my first Rust WASM app. The performance is incredible!</p>
+      <button aria-label="Like post by techguru">Like (42)</button>
+      <button aria-label="Comment on post by techguru">Comment (7)</button>
+      <button aria-label="Share post by techguru">Share</button>
+    </article>
+    <article>
+      <h3>@designpro</h3>
+      <p>New UI trends for 2026: minimalism meets accessibility</p>
+      <button aria-label="Like post by designpro">Like (128)</button>
+      <button aria-label="Comment on post by designpro">Comment (23)</button>
+      <button aria-label="Share post by designpro">Share</button>
+    </article>
+    <button id="load-more">Load more</button>
+  </main>
+</body>
+</html>

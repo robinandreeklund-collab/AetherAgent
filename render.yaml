@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: aether-agent-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 10000
+    healthCheckPath: /health

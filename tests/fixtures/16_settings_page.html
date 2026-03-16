@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Account Settings</title></head>
+<body>
+  <nav>
+    <a href="/profile">Profile</a>
+    <a href="/settings" aria-current="page">Settings</a>
+    <a href="/billing">Billing</a>
+    <a href="/security">Security</a>
+  </nav>
+  <main>
+    <h1>Account Settings</h1>
+    <form id="settings-form">
+      <h2>Notifications</h2>
+      <label><input type="checkbox" name="email_notifications" checked /> Email notifications</label>
+      <label><input type="checkbox" name="push_notifications" /> Push notifications</label>
+      <label><input type="checkbox" name="sms_notifications" /> SMS notifications</label>
+      <h2>Privacy</h2>
+      <label><input type="checkbox" name="public_profile" checked /> Public profile</label>
+      <label><input type="checkbox" name="show_email" /> Show email on profile</label>
+      <h2>Preferences</h2>
+      <label for="language">Language</label>
+      <select id="language" name="language">
+        <option>English</option>
+        <option>Svenska</option>
+        <option>Deutsch</option>
+      </select>
+      <label for="timezone">Timezone</label>
+      <select id="timezone" name="timezone">
+        <option>Europe/Stockholm</option>
+        <option>Europe/London</option>
+        <option>America/New_York</option>
+      </select>
+      <button type="submit" id="save-btn">Save changes</button>
+      <button type="reset">Reset to defaults</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Kontakt – Företaget AB</title></head>
+<body>
+  <main>
+    <h1>Kontakta oss</h1>
+    <p>Fyll i formuläret nedan så återkommer vi inom 24 timmar.</p>
+    <form id="contact-form" action="/api/contact" method="POST">
+      <label for="name">Namn</label>
+      <input type="text" id="name" name="name" required />
+      <label for="email">E-post</label>
+      <input type="email" id="email" name="email" required />
+      <label for="subject">Ämne</label>
+      <select id="subject" name="subject">
+        <option>Allmän fråga</option>
+        <option>Teknisk support</option>
+        <option>Fakturafrågor</option>
+        <option>Partnerskap</option>
+      </select>
+      <label for="message">Meddelande</label>
+      <textarea id="message" name="message" placeholder="Beskriv ditt ärende..." required></textarea>
+      <label><input type="checkbox" name="copy" /> Skicka en kopia till mig</label>
+      <button type="submit" id="send-btn">Skicka meddelande</button>
+    </form>
+    <h2>Övrig kontaktinfo</h2>
+    <p>Telefon: 08-555 12 34</p>
+    <p>E-post: info@foretaget.se</p>
+    <p>Adress: Sveavägen 100, 113 50 Stockholm</p>
+  </main>
+</body>
+</html>

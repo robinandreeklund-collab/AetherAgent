@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Överföring – MinBank</title></head>
+<body>
+  <nav>
+    <a href="/overview">Översikt</a>
+    <a href="/transfer">Överföring</a>
+    <a href="/cards">Kort</a>
+    <a href="/loans">Lån</a>
+    <button id="signout">Logga ut</button>
+  </nav>
+  <main>
+    <h1>Ny överföring</h1>
+    <form id="transfer-form">
+      <label for="from-account">Från konto</label>
+      <select id="from-account" name="from_account">
+        <option value="1001">Lönekonto – 45 230 kr</option>
+        <option value="1002">Sparkonto – 128 500 kr</option>
+      </select>
+      <label for="to-account">Till konto/mottagare</label>
+      <input type="text" id="to-account" name="to_account" placeholder="Kontonummer eller Swish-nummer" />
+      <label for="amount">Belopp</label>
+      <input type="number" id="amount" name="amount" placeholder="0 kr" min="1" />
+      <label for="message">Meddelande</label>
+      <input type="text" id="message" name="message" placeholder="Valfritt meddelande" />
+      <label for="date">Datum</label>
+      <input type="date" id="date" name="date" />
+      <button type="submit" id="transfer-btn">Genomför överföring</button>
+      <button type="button" id="cancel-btn">Avbryt</button>
+    </form>
+  </main>
+</body>
+</html>

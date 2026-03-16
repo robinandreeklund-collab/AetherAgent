@@ -153,4 +153,6 @@ Types:
 
 **Fas 2 (Complete)**: Intent API — `find_and_click`, `fill_form`, `extract_data`, workflow memory.
 
-**Fas 3 (Next)**: Runtime & integration — Python + Node bindings, benchmarks, 20 real-site tests.
+**Fas 3 (Complete)**: Runtime & integration — HTTP API server, Python + Node bindings, benchmarks, 20 real-site tests.
+
+**Fas 4 (Next)**: CDP fallback for JavaScript-heavy SPAs (React, Next.js, Vue).
