@@ -144,6 +144,10 @@ impl SemanticBuilder {
 
         let action = SemanticNode::infer_action(&role);
 
+        // Hämta HTML id och name för selector hints / formulärmatchning
+        let html_id = get_attr(handle, "id").filter(|v| !v.is_empty());
+        let name = get_attr(handle, "name").filter(|v| !v.is_empty());
+
         // Hämta value för inputs
         let value = get_attr(handle, "value").or_else(|| get_attr(handle, "aria-valuenow"));
 
@@ -153,10 +157,10 @@ impl SemanticBuilder {
             self.traverse(child, &mut children, depth + 1);
         }
 
-        // Filtrera barn med 0-relevans om de inte är interaktiva
+        // Filtrera barn med 0-relevans om de inte är interaktiva och saknar egna barn
         let filtered_children: Vec<SemanticNode> = children
             .into_iter()
-            .filter(|c| c.relevance > 0.05 || c.action.is_some())
+            .filter(|c| c.relevance > 0.05 || c.action.is_some() || !c.children.is_empty())
             .collect();
 
         let mut node = SemanticNode::new(id, &role, &label);
@@ -166,6 +170,8 @@ impl SemanticBuilder {
         node.relevance = relevance;
         node.trust = trust;
         node.children = filtered_children;
+        node.html_id = html_id;
+        node.name = name;
 
         Some(node)
     }
@@ -175,19 +181,8 @@ impl SemanticBuilder {
     /// 2. ARIA-rollprioritet
     /// 3. Djupberoende (grundare = viktigare)
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
-        let label_lower = label.to_lowercase();
-        let goal_words: Vec<&str> = self.goal.split_whitespace().collect();
-
-        // 1. Textuell likhet – hur många goal-ord finns i label?
-        let text_score = if goal_words.is_empty() {
-            0.0
-        } else {
-            let matches = goal_words
-                .iter()
-                .filter(|w| label_lower.contains(*w))
-                .count();
-            matches as f32 / goal_words.len() as f32
-        };
+        // 1. Textuell likhet
+        let text_score = text_similarity(&self.goal, label);
 
         // 2. Roll-prioritet
         let role_score = SemanticNode::role_priority(role);
@@ -201,6 +196,32 @@ impl SemanticBuilder {
         // Klipp till [0.0, 1.0]
         raw.clamp(0.0, 1.0)
     }
+}
+
+/// Beräkna textlikhet mellan query och candidate (normaliserad word overlap)
+///
+/// Returnerar 0.0–1.0. Bonus för exakt substring-match.
+pub fn text_similarity(query: &str, candidate: &str) -> f32 {
+    let query_lower = query.to_lowercase();
+    let candidate_lower = candidate.to_lowercase();
+
+    let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+    if query_words.is_empty() {
+        return 0.0;
+    }
+
+    // Exakt substring-match ger full poäng
+    if candidate_lower.contains(&query_lower) {
+        return 1.0;
+    }
+
+    // Word overlap
+    let matches = query_words
+        .iter()
+        .filter(|w| candidate_lower.contains(*w))
+        .count();
+
+    matches as f32 / query_words.len() as f32
 }
 
 /// Extrahera sidtitel ur DOM

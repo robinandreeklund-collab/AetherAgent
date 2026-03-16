@@ -1,38 +1,64 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod intent;
+mod memory;
 mod parser;
 mod semantic;
 mod trust;
 mod types;
 
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wasm_bindgen::prelude::*;
 
 use parser::parse_html;
 use semantic::{extract_title, SemanticBuilder};
+use types::{SemanticTree, WorkflowMemory};
 
-// --- Publik API ---
+// ─── Intern hjälpfunktion ────────────────────────────────────────────────────
+
+/// Gemensam parse-pipeline: HTML -> DOM -> SemanticTree
+fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
+    let dom = parse_html(html);
+    let title = extract_title(&dom);
+    let mut builder = SemanticBuilder::new(goal);
+    let mut tree = builder.build(&dom, url, &title);
+    tree.parse_time_ms = 0; // sätts av anroparen
+    tree
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode> {
+    let mut result = vec![];
+    for node in nodes {
+        result.push(node);
+        result.extend(collect_all_nodes(&node.children));
+    }
+    result
+}
+
+// ─── Fas 1: Publik API ──────────────────────────────────────────────────────
 
 /// Parsa HTML till ett semantiskt träd med goal-relevance scoring
 ///
 /// # Arguments
-/// * `html` - Rå HTML-sträng från webbsidan
-/// * `goal` - Agentens nuvarande mål (t.ex. "köp billigaste flyg")
-/// * `url` - Sidans URL (för kontext)
+/// * `html` - Raw HTML string from the web page
+/// * `goal` - The agent's current goal (e.g. "buy cheapest flight")
+/// * `url` - The page URL (for context)
 ///
 /// # Returns
-/// JSON-sträng med SemanticTree, redo att skickas till LLM:en
+/// JSON string with SemanticTree, ready to send to the LLM
 #[wasm_bindgen]
 pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     let start = now_ms();
-
-    let dom = parse_html(html);
-    let title = extract_title(&dom);
-
-    let mut builder = SemanticBuilder::new(goal);
-    let mut tree = builder.build(&dom, url, &title);
-
+    let mut tree = build_tree(html, goal, url);
     tree.parse_time_ms = now_ms() - start;
 
     // Sortera noder efter relevance (högst först) för LLM-effektivitet
@@ -46,22 +72,16 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
 }
 
 /// Snabbversion – returnerar bara de mest relevanta noderna
-/// Perfekt för snabba agent-beslut utan att fylla hela kontextfönstret
 ///
 /// # Arguments
-/// * `html` - Rå HTML-sträng
-/// * `goal` - Agentens mål
-/// * `url` - Sidans URL
-/// * `top_n` - Max antal noder att returnera (rekommenderat: 10-20)
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's goal
+/// * `url` - The page URL
+/// * `top_n` - Max number of nodes to return (recommended: 10-20)
 #[wasm_bindgen]
 pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String {
     let start = now_ms();
-    let dom = parse_html(html);
-    let title = extract_title(&dom);
-
-    let mut builder = SemanticBuilder::new(goal);
-    let mut tree = builder.build(&dom, url, &title);
-
+    let mut tree = build_tree(html, goal, url);
     tree.parse_time_ms = now_ms() - start;
 
     // Samla alla noder platt och sortera
@@ -75,7 +95,6 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
         .cloned()
         .collect();
 
-    // Bygg ett förenklat svar
     let result = serde_json::json!({
         "url": tree.url,
         "title": tree.title,
@@ -89,7 +108,6 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
 }
 
 /// Analysera ett textstycke för prompt injection
-/// Kan användas separat för extra skydd i agent-loopar
 #[wasm_bindgen]
 pub fn check_injection(text: &str) -> String {
     let (_, warning) = trust::analyze_text(0, text);
@@ -109,28 +127,155 @@ pub fn wrap_untrusted(content: &str) -> String {
 /// Sanitetskontroll – verifiera att WASM-modulen laddats korrekt
 #[wasm_bindgen]
 pub fn health_check() -> String {
-    r#"{"status": "ok", "version": "0.1.0", "engine": "AetherAgent"}"#.to_string()
+    r#"{"status": "ok", "version": "0.2.0", "engine": "AetherAgent"}"#.to_string()
 }
 
-// --- Internals ---
+// ─── Fas 2: Intent API ──────────────────────────────────────────────────────
 
-fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode> {
-    let mut result = vec![];
-    for node in nodes {
-        result.push(node);
-        result.extend(collect_all_nodes(&node.children));
+/// Hitta det bäst matchande klickbara elementet
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `target_label` - What to click (e.g. "Add to cart", "Log in")
+///
+/// # Returns
+/// JSON with ClickResult: found, node_id, role, label, selector_hint, relevance
+#[wasm_bindgen]
+pub fn find_and_click(html: &str, goal: &str, url: &str, target_label: &str) -> String {
+    let start = now_ms();
+    let mut tree = build_tree(html, goal, url);
+    tree.parse_time_ms = now_ms() - start;
+
+    let result = intent::find_best_clickable(&tree, target_label);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Matcha formulärfält med angivna nycklar och värden
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `fields_json` - JSON object: {"email": "user@test.com", "password": "secret"}
+///
+/// # Returns
+/// JSON with FillFormResult: mappings, unmapped_keys, unmapped_fields
+#[wasm_bindgen]
+pub fn fill_form(html: &str, goal: &str, url: &str, fields_json: &str) -> String {
+    let start = now_ms();
+    let mut tree = build_tree(html, goal, url);
+    tree.parse_time_ms = now_ms() - start;
+
+    let fields: HashMap<String, String> = match serde_json::from_str(fields_json) {
+        Ok(f) => f,
+        Err(e) => {
+            return format!(r#"{{"error": "Invalid fields_json: {}"}}"#, e);
+        }
+    };
+
+    let result = intent::map_form_fields(&tree, &fields);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Extrahera strukturerad data från en sida baserat på nycklar
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `data_keys_json` - JSON array: ["price", "title", "description"]
+///
+/// # Returns
+/// JSON with ExtractDataResult: entries, missing_keys
+#[wasm_bindgen]
+pub fn extract_data(html: &str, goal: &str, url: &str, data_keys_json: &str) -> String {
+    let start = now_ms();
+    let mut tree = build_tree(html, goal, url);
+    tree.parse_time_ms = now_ms() - start;
+
+    let keys: Vec<String> = match serde_json::from_str(data_keys_json) {
+        Ok(k) => k,
+        Err(e) => {
+            return format!(r#"{{"error": "Invalid data_keys_json: {}"}}"#, e);
+        }
+    };
+
+    let result = intent::extract_by_keys(&tree, &keys);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+// ─── Fas 2: Workflow Memory ──────────────────────────────────────────────────
+
+/// Skapa ett nytt tomt workflow-minne
+///
+/// # Returns
+/// JSON string with empty WorkflowMemory
+#[wasm_bindgen]
+pub fn create_workflow_memory() -> String {
+    WorkflowMemory::new().to_json()
+}
+
+/// Lägg till ett steg i workflow-minnet
+///
+/// # Arguments
+/// * `memory_json` - Existing workflow memory (from create_workflow_memory or previous call)
+/// * `action` - Action type: "click", "fill_form", "extract_data", "parse"
+/// * `url` - The URL where the action took place
+/// * `goal` - The agent's goal for this step
+/// * `summary` - Short description of what happened
+///
+/// # Returns
+/// Updated workflow memory JSON
+#[wasm_bindgen]
+pub fn add_workflow_step(
+    memory_json: &str,
+    action: &str,
+    url: &str,
+    goal: &str,
+    summary: &str,
+) -> String {
+    let mut mem = match WorkflowMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    mem.add_step(action, url, goal, summary, now_ms());
+    mem.to_json()
+}
+
+/// Spara ett nyckel-värde-par i workflow-kontexten
+///
+/// # Returns
+/// Updated workflow memory JSON
+#[wasm_bindgen]
+pub fn set_workflow_context(memory_json: &str, key: &str, value: &str) -> String {
+    let mut mem = match WorkflowMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    mem.set_context(key, value);
+    mem.to_json()
+}
+
+/// Hämta ett värde från workflow-kontexten
+///
+/// # Returns
+/// JSON: {"value": "..."} or {"value": null}
+#[wasm_bindgen]
+pub fn get_workflow_context(memory_json: &str, key: &str) -> String {
+    let mem = match WorkflowMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    match mem.get_context(key) {
+        Some(v) => format!(r#"{{"value": "{}"}}"#, v.replace('"', "\\\"")),
+        None => r#"{"value": null}"#.to_string(),
     }
-    result
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-// --- WASM-tester ---
+// ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -140,6 +285,7 @@ mod tests {
     fn test_health_check() {
         let result = health_check();
         assert!(result.contains("ok"));
+        assert!(result.contains("0.2.0"));
     }
 
     #[test]
@@ -174,5 +320,97 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).expect("Ska vara valid JSON");
 
         assert!(parsed["top_nodes"].as_array().unwrap().len() <= 3);
+    }
+
+    // ─── Fas 2: Intent API smoke tests ───────────────────────────────────────
+
+    #[test]
+    fn test_find_and_click_returns_valid_json() {
+        let html = r#"<html><body><button>Köp nu</button></body></html>"#;
+        let result = find_and_click(html, "köp", "https://test.com", "Köp nu");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["found"], true);
+        assert_eq!(parsed["action"], "click");
+    }
+
+    #[test]
+    fn test_fill_form_returns_valid_json() {
+        let html = r#"<html><body><form>
+            <input name="email" placeholder="E-post" />
+        </form></body></html>"#;
+        let result = fill_form(
+            html,
+            "logga in",
+            "https://test.com",
+            r#"{"email": "test@test.se"}"#,
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["mappings"].is_array());
+    }
+
+    #[test]
+    fn test_fill_form_invalid_json() {
+        let html = r#"<html><body></body></html>"#;
+        let result = fill_form(html, "test", "https://test.com", "not json");
+        assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_extract_data_returns_valid_json() {
+        let html = r#"<html><body>
+            <h1>Produkt</h1>
+            <p>999 kr</p>
+        </body></html>"#;
+        let result = extract_data(html, "hämta pris", "https://test.com", r#"["Produkt"]"#);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["entries"].is_array());
+    }
+
+    #[test]
+    fn test_extract_data_invalid_json() {
+        let html = r#"<html><body></body></html>"#;
+        let result = extract_data(html, "test", "https://test.com", "not json");
+        assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_create_workflow_memory_returns_valid_json() {
+        let json = create_workflow_memory();
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("Valid JSON");
+        assert!(parsed["steps"].is_array());
+        assert_eq!(parsed["steps"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_add_workflow_step_returns_updated_memory() {
+        let mem = create_workflow_memory();
+        let updated = add_workflow_step(
+            &mem,
+            "click",
+            "https://shop.se",
+            "köp produkt",
+            "Klickade på Köp-knappen",
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&updated).expect("Valid JSON");
+        assert_eq!(parsed["steps"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["steps"][0]["action"], "click");
+    }
+
+    #[test]
+    fn test_add_workflow_step_invalid_memory() {
+        let result = add_workflow_step("bad json", "click", "url", "goal", "summary");
+        assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_workflow_context_set_and_get() {
+        let mem = create_workflow_memory();
+        let updated = set_workflow_context(&mem, "user_email", "test@test.se");
+        let parsed: serde_json::Value = serde_json::from_str(&updated).expect("Valid JSON");
+        assert_eq!(parsed["context"]["user_email"], "test@test.se");
+
+        let value = get_workflow_context(&updated, "user_email");
+        let val_parsed: serde_json::Value = serde_json::from_str(&value).expect("Valid JSON");
+        assert_eq!(val_parsed["value"], "test@test.se");
     }
 }

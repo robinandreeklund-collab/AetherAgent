@@ -151,4 +151,6 @@ Types:
 
 **Fas 1 (Complete)**: HTML parser, semantic layer, trust shield, WASM build, CI.
 
-**Fas 2 (Next)**: Intent API — `find_and_click`, `fill_form`, `extract_data`, workflow memory.
+**Fas 2 (Complete)**: Intent API — `find_and_click`, `fill_form`, `extract_data`, workflow memory.
+
+**Fas 3 (Next)**: Runtime & integration — Python + Node bindings, benchmarks, 20 real-site tests.

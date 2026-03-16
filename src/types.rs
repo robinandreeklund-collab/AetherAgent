@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// ─── Semantic Tree Types ─────────────────────────────────────────────────────
 
 /// En nod i det semantiska trädet – det LLM:en faktiskt ser
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +15,12 @@ pub struct SemanticNode {
     pub relevance: f32,
     pub trust: TrustLevel,
     pub children: Vec<SemanticNode>,
+    /// Originalt HTML id-attribut, för selector hints
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub html_id: Option<String>,
+    /// Originalt HTML name-attribut, för formulärmatchning
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Elementets interaktionstillstånd
@@ -62,6 +71,85 @@ pub enum WarningSeverity {
     High,
 }
 
+// ─── Intent API Types (Fas 2) ────────────────────────────────────────────────
+
+/// Resultat från find_and_click
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClickResult {
+    pub found: bool,
+    pub node_id: u32,
+    pub role: String,
+    pub label: String,
+    pub action: String,
+    pub relevance: f32,
+    pub selector_hint: String,
+    pub trust: TrustLevel,
+    pub injection_warnings: Vec<InjectionWarning>,
+    pub parse_time_ms: u64,
+}
+
+/// Mappning av ett formulärfält
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormFieldMapping {
+    pub field_label: String,
+    pub field_role: String,
+    pub node_id: u32,
+    pub matched_key: String,
+    pub value: String,
+    pub selector_hint: String,
+    pub confidence: f32,
+}
+
+/// Resultat från fill_form
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FillFormResult {
+    pub mappings: Vec<FormFieldMapping>,
+    pub unmapped_keys: Vec<String>,
+    pub unmapped_fields: Vec<String>,
+    pub injection_warnings: Vec<InjectionWarning>,
+    pub parse_time_ms: u64,
+}
+
+/// En extraherad datapost
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractedEntry {
+    pub key: String,
+    pub value: String,
+    pub source_node_id: u32,
+    pub confidence: f32,
+}
+
+/// Resultat från extract_data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractDataResult {
+    pub entries: Vec<ExtractedEntry>,
+    pub missing_keys: Vec<String>,
+    pub injection_warnings: Vec<InjectionWarning>,
+    pub parse_time_ms: u64,
+}
+
+// ─── Workflow Memory Types (Fas 2) ───────────────────────────────────────────
+
+/// In-memory kontext mellan agent-steg (stateless över WASM-gränsen)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowMemory {
+    pub steps: Vec<WorkflowStep>,
+    pub context: HashMap<String, String>,
+}
+
+/// Ett steg i agentens workflow
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    pub step_index: u32,
+    pub action: String,
+    pub url: String,
+    pub goal: String,
+    pub summary: String,
+    pub timestamp_ms: u64,
+}
+
+// ─── Implementations ─────────────────────────────────────────────────────────
+
 impl SemanticNode {
     pub fn new(id: u32, role: &str, label: &str) -> Self {
         SemanticNode {
@@ -80,6 +168,8 @@ impl SemanticNode {
             relevance: 0.0,
             trust: TrustLevel::Untrusted,
             children: vec![],
+            html_id: None,
+            name: None,
         }
     }
 
@@ -107,6 +197,33 @@ impl SemanticNode {
             "img" => 0.4,
             "text" | "paragraph" => 0.3,
             _ => 0.2,
+        }
+    }
+}
+
+impl ClickResult {
+    /// Tomt resultat när inget element hittades
+    pub fn not_found(warnings: Vec<InjectionWarning>, parse_time_ms: u64) -> Self {
+        ClickResult {
+            found: false,
+            node_id: 0,
+            role: String::new(),
+            label: String::new(),
+            action: String::new(),
+            relevance: 0.0,
+            selector_hint: String::new(),
+            trust: TrustLevel::Untrusted,
+            injection_warnings: warnings,
+            parse_time_ms,
+        }
+    }
+}
+
+impl WorkflowMemory {
+    pub fn new() -> Self {
+        WorkflowMemory {
+            steps: vec![],
+            context: HashMap::new(),
         }
     }
 }

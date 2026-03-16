@@ -212,8 +212,8 @@ AetherAgent/
 | Phase | Weeks | Status | Description |
 |-------|-------|--------|-------------|
 | **Fas 1** – Grund & säkerhet | 1–2 | ✅ Done | HTML parser, semantic layer, trust shield, WASM build |
-| **Fas 2** – Intent API & minne | 3–4 | 🔲 Next | find_and_click, fill_form, extract_data, workflow memory |
-| **Fas 3** – Runtime & integration | 5–6 | 🔲 Planned | Python + Node bindings, benchmarks, 20 real-site tests |
+| **Fas 2** – Intent API & minne | 3–4 | ✅ Done | find_and_click, fill_form, extract_data, workflow memory |
+| **Fas 3** – Runtime & integration | 5–6 | 🔲 Next | Python + Node bindings, benchmarks, 20 real-site tests |
 
 ### Post-MVP
 
