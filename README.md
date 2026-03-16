@@ -1,155 +1,290 @@
-AetherAgent är den världens första embeddable, helt serverless och LLM-native webbläsarmotor – speciellt designad och optimerad endast för AI-agenter (inte för människor).
-Tänk på det som ”Chrome, men byggd från grunden för Claude, GPT-4o, Llama eller vilken LLM som helst” – fast 10–50× snabbare, 10–30× mindre i minne, och med inbyggd intelligens som gör att agenter lyckas betydligt oftare.
-Kort elevator pitch (vad du kan använda direkt)
-AetherAgent är en WASM-baserad webbläsare som körs direkt i din agents runtime (Python, Node, edge-function eller till och med i webbläsaren). Den ger aldrig rå HTML eller screenshots – istället levererar den semantic accessibility tree + goal-aware JSON direkt till LLM:en. Resultatet: agenter som navigerar, fyller formulär och handlar blixtsnabbt, med högre success rate och utan någon molnserver eller vendor lock-in.
-Detaljerad beskrivning – vad den faktiskt är
-AetherAgent är inte en vanlig headless browser (som Playwright eller Puppeteer).
-AetherAgent är inte en cloud-tjänst (som Browserbase eller Hyperbrowser).
-AetherAgent är inte en färdig agent (som Claude Computer Use).
-Den är istället själva motorn – rendering + perception + action-lager – som du embeddar i din egen agent.
-Den är byggd i Rust → kompilerad till WASM (med Servo-core/html5ever som bas), och körs helt lokalt eller på edge.
-Kärnan som gör den unik:
+# AetherAgent
 
-Zero network latency – allt händer i samma process som din LLM-agent.
-Semantic Perception Layer – motorn översätter varje sida till strukturerad JSON med hierarki, roller, labels, states och en inbyggd “goal-relevance-score” (t.ex. “den här knappen är 98 % relevant för ‘köp billigaste flyg’”).
-Intent-aware API – istället för råa klick på koordinater får agenten metoder som find_and_click("logga in med Google") eller extract_prices("hotell i Paris under 1500 kr").
-Valfri multimodal – default är 100 % text-only (perfekt för Claude 3.5 Sonnet eller Llama), men du kan aktivera hybrid vision på begäran utan att byta motor.
-Minimal footprint – ~2–6 MB per instans, startup på 10–100 ms, kan köra 500–1000 parallella agenter på en vanlig laptop.
+> **The world's first embeddable, serverless, LLM-native browser engine** – built exclusively for AI agents, not humans.
 
-1. Vad du behöver – 100 % komplett checklista
-Kunskaper (måste kunna eller lära dig inom 1 vecka):
+[![CI](https://github.com/robinandreeklund-collab/AetherAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/robinandreeklund-collab/AetherAgent/actions)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
+[![WASM](https://img.shields.io/badge/target-wasm32--wasi-blue.svg)](https://webassembly.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Rust intermediate+ (ownership, async, traits, macros)
-WASM basics (wasm-bindgen + WASI)
-HTML/DOM + Accessibility Tree (ARIA, role, label, state)
-Grundläggande LLM-agent loop (ReAct eller LangGraph)
+```
+Chrome is built for humans.
+AetherAgent is built for Claude, GPT-4o, Llama – any LLM.
+10–50× faster. 10–30× less memory. Built-in intelligence.
+```
 
-Hårdvara:
+---
 
-Laptop med minst 16 GB RAM (build tar ~10–20 min första gången)
+## What is AetherAgent?
 
-OS:
+AetherAgent is **not** a headless browser (like Playwright or Puppeteer).  
+AetherAgent is **not** a cloud service (like Browserbase or Hyperbrowser).  
+AetherAgent is **not** a finished agent (like Claude Computer Use).
 
-macOS eller Linux (rekommenderas). Windows funkar men mer jobb med WASI.
+It is the **engine** – a perception + action layer – that you embed directly inside your own agent. Written in Rust, compiled to WebAssembly, it runs in the same process as your LLM with zero network latency.
 
-Tid & kostnad:
+Instead of handing your agent raw HTML or screenshots, AetherAgent delivers a **semantic accessibility tree** with goal-aware JSON – the page already understood, filtered, and ranked by relevance to your agent's current goal.
 
-Solo: 4–6 veckor till fungerande MVP
-Kostnad: 0 kr (allt open source)
+```python
+# Without AetherAgent – LLM receives 50,000 tokens of raw HTML
+html = requests.get(url).text
+llm.send(html)  # slow, expensive, unreliable
 
-Verktyg att installera NU (kopiera-pasta):
-Bash# Rust
+# With AetherAgent – LLM receives 200 tokens of semantic JSON
+tree = agent.parse_to_semantic_tree(html, goal="buy cheapest flight", url=url)
+llm.send(tree)  # fast, cheap, goal-aware
+```
+
+---
+
+## Core Features
+
+### Semantic Perception Layer
+Every page is translated into structured JSON with roles, labels, states, and a built-in **goal-relevance score** (e.g. `"this button is 98% relevant to 'buy cheapest flight'"`). Your LLM only sees what matters.
+
+```json
+{
+  "url": "https://example.com/shop",
+  "goal": "add to cart",
+  "nodes": [
+    {
+      "id": 42,
+      "role": "button",
+      "label": "Add to cart – 199 kr",
+      "action": "click",
+      "relevance": 0.97,
+      "trust": "Untrusted"
+    },
+    {
+      "id": 17,
+      "role": "textbox",
+      "label": "Search products...",
+      "action": "type",
+      "relevance": 0.31,
+      "trust": "Untrusted"
+    }
+  ],
+  "injection_warnings": [],
+  "parse_time_ms": 14
+}
+```
+
+### Trust Shield – Prompt Injection Protection
+AetherAgent filters prompt injection **at the perception layer**, not as an afterthought. All web content is marked `Untrusted`, wrapped in content-boundary markers before reaching the LLM, and scanned for 20+ known injection patterns including zero-width character attacks.
+
+```
+[UNTRUSTED_WEB_CONTENT]
+  ... page content here ...
+[/UNTRUSTED_WEB_CONTENT]
+```
+
+> Research from Anthropic (2025): Prompt injection is the #1 security risk for browser agents. AetherAgent's architecture makes it structural, not optional.
+
+### Intent-Aware API
+Instead of raw coordinate clicks, agents call goal-oriented methods:
+
+```python
+agent.find_and_click("log in with Google")
+agent.extract_prices("hotels in Paris under 1500 kr")
+agent.fill_form({"email": "user@example.com", "password": "..."})
+```
+
+### Minimal Footprint
+| Metric | AetherAgent | Playwright + Chrome |
+|--------|------------|---------------------|
+| Binary size | ~2–6 MB | ~300 MB |
+| Startup time | 10–100 ms | 1,000–3,000 ms |
+| Memory per instance | ~15 MB | ~150 MB |
+| Parallel agents (laptop) | 500–1,000 | 5–10 |
+
+### Runs Everywhere
+Compiles to WebAssembly and runs in Python, Node.js, Cloudflare Workers, WasmEdge, and browser PWAs – with zero vendor lock-in.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              LLM Agent (Claude / GPT-4o / Llama)        │
+│         Receives semantic JSON → plans → acts           │
+└────────────────────────┬────────────────────────────────┘
+                         │ goal-aware JSON
+┌────────────────────────▼────────────────────────────────┐
+│                  AetherAgent Core (Rust → WASM)         │
+│  ┌─────────────┐  ┌──────────────────┐  ┌───────────┐  │
+│  │ HTML Parser │  │  Semantic Layer  │  │Intent API │  │
+│  │ html5ever   │  │  A11y tree +     │  │find_click │  │
+│  │ rcdom       │  │  goal scoring +  │  │fill_form  │  │
+│  │ 10–50ms     │  │  trust shield    │  │extract    │  │
+│  └─────────────┘  └──────────────────┘  └───────────┘  │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│           Runtime (your choice, zero lock-in)           │
+│  Python (wasmtime)  │  Node.js  │  Cloudflare Workers   │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+```bash
+# Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup default stable
 rustup target add wasm32-unknown-unknown wasm32-wasi
 
-# WASM & test tools
+# WASM tools
 cargo install wasm-pack
-cargo install wasmtime-cli
 
-# Python för att köra WASM direkt (primär agent-runtime)
-pip install wasmtime pyo3 maturin
+# Python runtime
+pip install wasmtime requests
+```
 
-# Extra (valfritt men rekommenderas)
-npm install -g serve  # för att testa i webbläsare
-2. Exakt Tech Stack (minimal & extremt snabb)
+### Build
 
-Rendering/Parser core: html5ever + markup5ever-rcdom (från Servo – redan WASM-vänlig)
-Semantic layer: Custom Rust tree walker + goal-aware heuristics (senare ONNX-light)
-WASM runtime: wasm-bindgen + wasm32-wasi (körs i Python, Node, Cloudflare Workers, WasmEdge, Spin)
-Network: reqwest + wasi-http (för headless fetch)
-Serialization: serde + serde_json
-Agent integration: Python (wasmtime) eller Node (wasm-bindgen)
-Benchmark: Lightpanda + Playwright för jämförelse
+```bash
+git clone https://github.com/robinandreeklund-collab/AetherAgent.git
+cd AetherAgent
 
-Varför detta slår allt: < 5 MB WASM-binär, 50–100 ms startup, direkt semantic JSON → LLM success rate +25–40 % vs rå DOM.
-3. Exakt repo-struktur (skapa nu)
-Bashaether-agent/
-├── Cargo.toml
-├── Cargo.lock
+# Build WASM binary
+wasm-pack build --target wasi --release
+
+# Run tests
+cargo test
+```
+
+### Python Example
+
+```bash
+python examples/python_test.py
+```
+
+```python
+import json
+from wasmtime import Store, Module, Instance, Linker, WasiConfig
+
+# Load the WASM module
+store = Store()
+# ... (see examples/python_test.py for full setup)
+
+# Parse a page with a goal
+result = agent.parse_to_semantic_tree(html, "buy cheapest flight", url)
+tree = json.loads(result)
+
+# Top node is the most relevant action
+best = tree["nodes"][0]
+print(f"Best action: {best['action']}({best['label']}) – relevance {best['relevance']}")
+# → Best action: click(Book now – 1,299 kr) – relevance 0.94
+```
+
+---
+
+## Project Structure
+
+```
+AetherAgent/
 ├── src/
-│   ├── lib.rs              # WASM entrypoint + public API
-│   ├── parser.rs           # html5ever + DOM
-│   ├── semantic.rs         # Accessibility Tree → JSON
-│   ├── fetch.rs            # reqwest + wasi
-│   └── types.rs            # Structs för semantic tree
+│   ├── lib.rs          # WASM entrypoint – public API
+│   ├── parser.rs       # html5ever + rcdom DOM builder
+│   ├── semantic.rs     # Accessibility tree → semantic JSON
+│   ├── trust.rs        # Trust shield – prompt injection filter
+│   └── types.rs        # Core data structures
 ├── examples/
-│   └── python_test.py      # Hur agenten använder WASM-modulen
+│   └── python_test.py  # Complete Python agent loop demo
 ├── tests/
-│   └── webarena_test.rs
-├── wasm-bindgen.toml      # (om behövs)
-├── README.md
-└── .github/workflows/     # CI för WASM-build
-4. Hur vi börjar – Dag-för-dag (gör detta imorgon)
-Dag 1: Skapa projektet (30 min)
-Bashcargo new aether-agent --lib
-cd aether-agent
-Exakt Cargo.toml (kopiera hela):
-toml[package]
-name = "aether-agent"
-version = "0.1.0"
-edition = "2021"
+│   └── integration_test.rs  # WebArena-inspired integration tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml      # CI: build, test, WASM size check, security audit
+└── Cargo.toml
+```
 
-[lib]
-crate-type = ["cdylib", "rlib"]  # cdylib = WASM
+---
 
-[dependencies]
-wasm-bindgen = "0.2"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-html5ever = "0.27"
-markup5ever-rcdom = "0.3"
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
-wasi = "0.14"  # för WASI-http
+## Development Roadmap
 
-[profile.release]
-opt-level = "z"  # minimal storlek
-lto = true
-codegen-units = 1
-Dag 1 – första kod (src/lib.rs):
-Rustuse wasm_bindgen::prelude::*;
+### MVP – 6 Weeks
 
-#[wasm_bindgen]
-pub fn greet(name: &str) -> String {
-    format!("AetherAgent redo för {}!", name)
-}
-Bygg & testa:
-Bashwasm-pack build --target web --release
-wasmtime run target/wasm32-unknown-unknown/release/aether_agent.wasm --invoke greet "test"
-Dag 2–4: Lägg till HTML-parser (core)
+| Phase | Weeks | Status | Description |
+|-------|-------|--------|-------------|
+| **Fas 1** – Grund & säkerhet | 1–2 | ✅ Done | HTML parser, semantic layer, trust shield, WASM build |
+| **Fas 2** – Intent API & minne | 3–4 | 🔲 Next | find_and_click, fill_form, extract_data, workflow memory |
+| **Fas 3** – Runtime & integration | 5–6 | 🔲 Planned | Python + Node bindings, benchmarks, 20 real-site tests |
 
-Kopiera in parser.rs med html5ever + rcdom (jag kan ge hela filen om du vill).
-Lägg till funktion:
+### Post-MVP
 
-Rust#[wasm_bindgen]
-pub fn parse_to_semantic_tree(html: &str, goal: &str) -> String {
-    // parse → DOM → Accessibility Tree → semantic JSON med goal-filter
-    // Returnera JSON-string direkt
-}
-Dag 5–7: Semantic layer (det som gör oss unika)
+| Phase | Description |
+|-------|-------------|
+| **Fas 4** | CDP fallback for JavaScript-heavy SPAs (React, Next.js, Vue) |
+| **Fas 5** | Hybrid vision fallback (Gemini 2.5 Pro bounding boxes for unlabeled elements) |
+| **Fas 6** | Open source launch, WebArena benchmarks, community |
 
-I semantic.rs: Traverse rcdom och skapa struct med role, label, state, goal_relevance_score (enkel heuristik baserat på text + goal).
-Exempel output:
+### Design Principles
 
-JSON{
-  "nodes": [
-    { "id": 42, "role": "button", "label": "Köp nu för 199 kr", "action": "click", "relevance": 0.98 }
-  ]
-}
-Vecka 2: Lägg till fetch + Python-integration
+**Security first.** Trust shield is Fas 1, not Fas 5. Every byte from the web is `Untrusted` by default.
 
-examples/python_test.py:
+**Goal-native perception.** The LLM receives an answer to "what's relevant to my goal right now?" – not a browser view to interpret.
 
-Pythonimport wasmtime
-# Ladda WASM-modul
-# agent.call("parse_to_semantic_tree", url_or_html, "köp billigaste flyg")
-Vecka 3–4: Lägg till CSS (lightningcss) + multimodal snapshot (html2canvas i WASM eller enkel base64).
-5. Roadmap efter MVP (6 faser – exakt)
+**No JavaScript required for MVP.** AetherAgent targets static HTML and SSR pages first (~30–40% of the web, including the entire high-value data extraction niche). CDP fallback for SPAs comes in Fas 4.
 
-Perception Engine v0.1 (färdig vecka 2) – semantic JSON
-Intent-aware actions (click/fill med goal) – vecka 4
-Full WASM-headless med WebGPU (Servo Stylo) – vecka 6
-Agent Protocol (CDP-kompatibel + ny semantic API)
-Trust shield (prompt-injection filter i perception)
-Open source + benchmarks (WebArena > 90 % success)
+**Embedded, not remote.** Zero network latency because the engine runs in the same process as the agent.
+
+---
+
+## Benchmark Goals
+
+| Metric | Target | Comparison |
+|--------|--------|------------|
+| WebArena success rate | >65% | SOTA: 61.7% (IBM CUGA, 2025) |
+| Parse time (median page) | <50ms | Playwright: ~800ms |
+| Memory per agent | <20MB | Chrome headless: ~150MB |
+| WASM binary size | <5MB | — |
+| Parallel agents (8GB RAM) | >200 | Playwright: ~5 |
+
+---
+
+## Security
+
+AetherAgent takes prompt injection seriously as a structural design constraint, not a feature.
+
+- All web content is marked `TrustLevel::Untrusted` at the type level
+- Content-boundary markers wrap all web output before LLM delivery
+- 20+ injection patterns scanned at parse time (EN + SV)
+- Zero-width character detection (invisible text attacks)
+- Sanitization replaces matched patterns with `[FILTERED]`
+
+See [`src/trust.rs`](src/trust.rs) for implementation.
+
+> "Prompt injection, much like scams and social engineering on the web, is unlikely to ever be fully 'solved'." – OpenAI, December 2025
+
+AetherAgent's approach: make it structural, not probabilistic.
+
+---
+
+## Contributing
+
+Issues and PRs welcome. The project is in active MVP development – see the roadmap above for what's coming next.
+
+```bash
+# Run all tests
+cargo test
+
+# Check formatting
+cargo fmt --check
+
+# Lint
+cargo clippy -- -D warnings
+
+# Security audit
+cargo audit
+```
+
+---
+
+## License
+
+MIT © 2026 robinandreeklund-collab

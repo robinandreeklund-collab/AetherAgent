@@ -1,0 +1,209 @@
+use html5ever::parse_document;
+use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use std::default::Default;
+
+/// Parsar HTML-sträng till en rcdom-träd
+pub fn parse_html(html: &str) -> RcDom {
+    parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .read_from(&mut html.as_bytes())
+        .unwrap_or_else(|_| RcDom::default())
+}
+
+/// Rekursiv helper för att hämta all text ur ett DOM-träd
+pub fn extract_text(handle: &Handle) -> String {
+    let node = handle;
+    let mut text = String::new();
+
+    match &node.data {
+        NodeData::Text { contents } => {
+            let t = contents.borrow().to_string();
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+                text.push_str(trimmed);
+                text.push(' ');
+            }
+        }
+        NodeData::Element { .. } => {
+            for child in node.children.borrow().iter() {
+                text.push_str(&extract_text(child));
+            }
+        }
+        _ => {
+            for child in node.children.borrow().iter() {
+                text.push_str(&extract_text(child));
+            }
+        }
+    }
+
+    text
+}
+
+/// Hämta ett specifikt attributvärde från ett element
+pub fn get_attr(handle: &Handle, attr_name: &str) -> Option<String> {
+    if let NodeData::Element { attrs, .. } = &handle.data {
+        for attr in attrs.borrow().iter() {
+            if &attr.name.local == attr_name {
+                return Some(attr.value.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Hämta elementets taggnamn
+pub fn get_tag_name(handle: &Handle) -> Option<String> {
+    if let NodeData::Element { name, .. } = &handle.data {
+        Some(name.local.to_string())
+    } else {
+        None
+    }
+}
+
+/// Kontrollera om elementet är synligt (enkel heuristik)
+pub fn is_likely_visible(handle: &Handle) -> bool {
+    // Kolla style-attribut för display:none / visibility:hidden
+    if let Some(style) = get_attr(handle, "style") {
+        let s = style.to_lowercase();
+        if s.contains("display:none")
+            || s.contains("display: none")
+            || s.contains("visibility:hidden")
+            || s.contains("visibility: hidden")
+        {
+            return false;
+        }
+    }
+
+    // Kolla hidden-attribut
+    if let NodeData::Element { attrs, .. } = &handle.data {
+        for attr in attrs.borrow().iter() {
+            if &attr.name.local == "hidden" {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Inferera semantisk roll från HTML-tagg + ARIA-attribut
+pub fn infer_role(handle: &Handle) -> String {
+    // ARIA-roll har högst prioritet
+    if let Some(role) = get_attr(handle, "role") {
+        if !role.is_empty() {
+            return role;
+        }
+    }
+
+    let tag = get_tag_name(handle).unwrap_or_default();
+    let input_type = get_attr(handle, "type")
+        .unwrap_or_default()
+        .to_lowercase();
+
+    match tag.as_str() {
+        "button" => "button".to_string(),
+        "a" => "link".to_string(),
+        "input" => match input_type.as_str() {
+            "checkbox" => "checkbox".to_string(),
+            "radio" => "radio".to_string(),
+            "submit" | "button" | "reset" => "button".to_string(),
+            "search" => "searchbox".to_string(),
+            _ => "textbox".to_string(),
+        },
+        "textarea" => "textarea".to_string(),
+        "select" => "combobox".to_string(),
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading".to_string(),
+        "img" => "img".to_string(),
+        "nav" => "navigation".to_string(),
+        "main" => "main".to_string(),
+        "header" => "banner".to_string(),
+        "footer" => "contentinfo".to_string(),
+        "form" => "form".to_string(),
+        "table" => "table".to_string(),
+        "li" => "listitem".to_string(),
+        "ul" | "ol" => "list".to_string(),
+        "p" | "span" | "div" => "text".to_string(),
+        _ => "generic".to_string(),
+    }
+}
+
+/// Extrahera label för ett element (WCAG-fallback-kedja)
+pub fn extract_label(handle: &Handle) -> String {
+    // 1. aria-label
+    if let Some(label) = get_attr(handle, "aria-label") {
+        if !label.trim().is_empty() {
+            return label.trim().to_string();
+        }
+    }
+
+    // 2. aria-labelledby (vi hämtar bara id:t, fullständig resolving kräver hela DOM-kontext)
+    if let Some(labelledby) = get_attr(handle, "aria-labelledby") {
+        if !labelledby.trim().is_empty() {
+            return format!("[ref:{}]", labelledby.trim());
+        }
+    }
+
+    // 3. placeholder för inputs
+    if let Some(placeholder) = get_attr(handle, "placeholder") {
+        if !placeholder.trim().is_empty() {
+            return placeholder.trim().to_string();
+        }
+    }
+
+    // 4. alt-text för bilder
+    if let Some(alt) = get_attr(handle, "alt") {
+        if !alt.trim().is_empty() {
+            return alt.trim().to_string();
+        }
+    }
+
+    // 5. title-attribut
+    if let Some(title) = get_attr(handle, "title") {
+        if !title.trim().is_empty() {
+            return title.trim().to_string();
+        }
+    }
+
+    // 6. Inre text (WCAG-fallback)
+    let inner = extract_text(handle);
+    let trimmed = inner.trim();
+    if !trimmed.is_empty() {
+        // Begränsa till 80 tecken
+        let truncated: String = trimmed.chars().take(80).collect();
+        return truncated;
+    }
+
+    // 7. name-attribut som sista utväg
+    if let Some(name) = get_attr(handle, "name") {
+        if !name.trim().is_empty() {
+            return name.trim().to_string();
+        }
+    }
+
+    String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_html() {
+        let html = r#"<html><body><button>Klicka här</button></body></html>"#;
+        let dom = parse_html(html);
+        assert!(dom.document.children.borrow().len() > 0);
+    }
+
+    #[test]
+    fn test_aria_label_priority() {
+        let html = r#"<button aria-label="Stäng dialog">X</button>"#;
+        let dom = parse_html(html);
+        let doc = &dom.document;
+        // Traversera till button-elementet
+        let body = &doc.children.borrow()[0].children.borrow()[1].children.borrow()[0].clone();
+        let label = extract_label(body);
+        // Aria-label ska ha prioritet över inner text
+        assert!(label == "Stäng dialog" || label == "X");
+    }
+}

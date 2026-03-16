@@ -1,0 +1,13 @@
+/target
+/pkg
+/node_modules
+*.wasm
+!examples/**/*.wasm
+Cargo.lock
+.env
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+dist/
