@@ -135,7 +135,7 @@ Compiles to WebAssembly and runs in Python, Node.js, Cloudflare Workers, WasmEdg
 ```bash
 # Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown wasm32-wasi
+rustup target add wasm32-unknown-unknown
 
 # WASM tools
 cargo install wasm-pack
@@ -151,7 +151,7 @@ git clone https://github.com/robinandreeklund-collab/AetherAgent.git
 cd AetherAgent
 
 # Build WASM binary
-wasm-pack build --target wasi --release
+wasm-pack build --target web --release
 
 # Run tests
 cargo test

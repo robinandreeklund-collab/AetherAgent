@@ -2,7 +2,6 @@
 ///
 /// Traverserar rcdom-trädet och bygger ett semantiskt träd
 /// med goal-relevance scoring och trust shield integration.
-
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -26,7 +25,6 @@ const STRUCTURAL_TAGS: &[&str] = &[
 pub struct SemanticBuilder {
     pub warnings: Vec<InjectionWarning>,
     goal: String,
-    node_count: u32,
 }
 
 impl SemanticBuilder {
@@ -35,7 +33,6 @@ impl SemanticBuilder {
         SemanticBuilder {
             warnings: vec![],
             goal: goal.to_lowercase(),
-            node_count: 0,
         }
     }
 
@@ -136,9 +133,9 @@ impl SemanticBuilder {
                 || get_attr(handle, "aria-disabled")
                     .map(|v| v == "true")
                     .unwrap_or(false),
-            checked: get_attr(handle, "aria-checked").map(|v| v == "true").or_else(|| {
-                get_attr(handle, "checked").map(|_| true)
-            }),
+            checked: get_attr(handle, "aria-checked")
+                .map(|v| v == "true")
+                .or_else(|| get_attr(handle, "checked").map(|_| true)),
             expanded: get_attr(handle, "aria-expanded").map(|v| v == "true"),
             focused: get_attr(handle, "aria-selected")
                 .map(|v| v == "true")
@@ -149,8 +146,7 @@ impl SemanticBuilder {
         let action = SemanticNode::infer_action(&role);
 
         // Hämta value för inputs
-        let value = get_attr(handle, "value")
-            .or_else(|| get_attr(handle, "aria-valuenow"));
+        let value = get_attr(handle, "value").or_else(|| get_attr(handle, "aria-valuenow"));
 
         // Traversera barn
         let mut children = vec![];
@@ -268,7 +264,10 @@ mod tests {
 
         assert!(!buttons.is_empty(), "Borde hitta minst en button");
         let btn = &buttons[0];
-        assert!(btn.relevance > 0.7, "Button med matchande text borde ha hög relevans");
+        assert!(
+            btn.relevance > 0.7,
+            "Button med matchande text borde ha hög relevans"
+        );
     }
 
     #[test]

@@ -97,9 +97,7 @@ pub fn infer_role(handle: &Handle) -> String {
     }
 
     let tag = get_tag_name(handle).unwrap_or_default();
-    let input_type = get_attr(handle, "type")
-        .unwrap_or_default()
-        .to_lowercase();
+    let input_type = get_attr(handle, "type").unwrap_or_default().to_lowercase();
 
     match tag.as_str() {
         "button" => "button".to_string(),
@@ -201,7 +199,10 @@ mod tests {
         let dom = parse_html(html);
         let doc = &dom.document;
         // Traversera till button-elementet
-        let body = &doc.children.borrow()[0].children.borrow()[1].children.borrow()[0].clone();
+        let body = &doc.children.borrow()[0].children.borrow()[1]
+            .children
+            .borrow()[0]
+            .clone();
         let label = extract_label(body);
         // Aria-label ska ha prioritet över inner text
         assert!(label == "Stäng dialog" || label == "X");

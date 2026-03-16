@@ -21,8 +21,9 @@ jobs:
       - name: Installera Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown,wasm32-wasi
-      
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -31,7 +32,9 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
       - name: Kör tester (native)
         run: cargo test --lib --verbose
       
@@ -51,7 +54,7 @@ jobs:
       - name: Installera Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown,wasm32-wasi
+          targets: wasm32-unknown-unknown
       
       - name: Cache cargo
         uses: actions/cache@v4

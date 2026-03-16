@@ -1,7 +1,6 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
-
 mod parser;
 mod semantic;
 mod trust;
@@ -70,7 +69,11 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     all_nodes.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap());
 
     // Ta topp-N
-    let top: Vec<_> = all_nodes.into_iter().take(top_n as usize).cloned().collect();
+    let top: Vec<_> = all_nodes
+        .into_iter()
+        .take(top_n as usize)
+        .cloned()
+        .collect();
 
     // Bygg ett förenklat svar
     let result = serde_json::json!({
@@ -95,6 +98,12 @@ pub fn check_injection(text: &str) -> String {
     } else {
         r#"{"safe": true}"#.to_string()
     }
+}
+
+/// Wrappa text i content-boundary markers för säker LLM-konsumption
+#[wasm_bindgen]
+pub fn wrap_untrusted(content: &str) -> String {
+    trust::wrap_untrusted(content)
 }
 
 /// Sanitetskontroll – verifiera att WASM-modulen laddats korrekt
