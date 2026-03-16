@@ -37,7 +37,7 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
 
     // Sortera noder efter relevance (högst först) för LLM-effektivitet
     tree.nodes
-        .sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap());
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
     match serde_json::to_string_pretty(&tree) {
         Ok(json) => json,
@@ -66,7 +66,7 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
 
     // Samla alla noder platt och sortera
     let mut all_nodes = collect_all_nodes(&tree.nodes);
-    all_nodes.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap());
+    all_nodes.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
     // Ta topp-N
     let top: Vec<_> = all_nodes

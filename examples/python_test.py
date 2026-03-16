@@ -4,7 +4,7 @@ Kör: python examples/python_test.py
 
 Kräver:
     pip install wasmtime requests
-    wasm-pack build --target wasi --release
+    wasm-pack build --target web --release
 """
 
 import json
@@ -27,11 +27,11 @@ def load_aether_agent():
         store.set_wasi(wasi)
         
         # Hitta WASM-binären
-        wasm_path = Path(__file__).parent.parent / "target" / "wasm32-wasi" / "release" / "aether_agent.wasm"
-        
+        wasm_path = Path(__file__).parent.parent / "pkg" / "aether_agent_bg.wasm"
+
         if not wasm_path.exists():
             print(f"WASM-fil saknas: {wasm_path}")
-            print("Bygg först med: wasm-pack build --target wasi --release")
+            print("Bygg först med: wasm-pack build --target web --release")
             return None
         
         linker = Linker(store.engine)
@@ -258,7 +258,7 @@ def run_agent_demo():
     
     print("\n" + "=" * 60)
     print("  Demo klar! Bygg WASM för riktig prestanda:")
-    print("  wasm-pack build --target wasi --release")
+    print("  wasm-pack build --target web --release")
     print("=" * 60)
 
 

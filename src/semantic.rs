@@ -3,14 +3,10 @@
 /// Traverserar rcdom-trädet och bygger ett semantiskt träd
 /// med goal-relevance scoring och trust shield integration.
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::parser::{extract_label, get_attr, get_tag_name, infer_role, is_likely_visible};
 use crate::trust::{analyze_text, sanitize_text};
-use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree, TrustLevel};
-
-/// Global nod-ID räknare
-static NODE_COUNTER: AtomicU32 = AtomicU32::new(0);
+use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
 /// Taggar att hoppa över helt (inga semantiska barn)
 const SKIP_TAGS: &[&str] = &[
@@ -25,15 +21,22 @@ const STRUCTURAL_TAGS: &[&str] = &[
 pub struct SemanticBuilder {
     pub warnings: Vec<InjectionWarning>,
     goal: String,
+    next_id: u32,
 }
 
 impl SemanticBuilder {
     pub fn new(goal: &str) -> Self {
-        NODE_COUNTER.store(0, Ordering::SeqCst);
         SemanticBuilder {
             warnings: vec![],
             goal: goal.to_lowercase(),
+            next_id: 0,
         }
+    }
+
+    fn next_node_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
     }
 
     /// Huvud-entry: bygg ett SemanticTree från en parsad DOM
@@ -80,28 +83,24 @@ impl SemanticBuilder {
     fn process_element(&mut self, handle: &Handle, depth: u32) -> Option<SemanticNode> {
         let tag = get_tag_name(handle).unwrap_or_default();
 
-        // Skippa kända icke-semantiska taggar
-        if SKIP_TAGS.contains(&tag.as_str()) {
-            return None;
-        }
-
         // Skippa osynliga element
         if !is_likely_visible(handle) {
             return None;
         }
 
-        let id = NODE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let id = self.next_node_id();
         let role = infer_role(handle);
         let raw_label = extract_label(handle);
 
         // Trust shield – analysera label-texten
         let (trust, warning) = analyze_text(id, &raw_label);
+        let has_warning = warning.is_some();
         if let Some(w) = warning {
             self.warnings.push(w);
         }
 
-        // Sanitera label om det behövs
-        let label = if trust == TrustLevel::Untrusted && !self.warnings.is_empty() {
+        // Sanitera label bara om denna nod triggade en varning
+        let label = if has_warning {
             sanitize_text(&raw_label)
         } else {
             raw_label

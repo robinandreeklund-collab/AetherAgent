@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/robinandreeklund-collab/AetherAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/robinandreeklund-collab/AetherAgent/actions)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
-[![WASM](https://img.shields.io/badge/target-wasm32--wasi-blue.svg)](https://webassembly.org)
+[![WASM](https://img.shields.io/badge/target-wasm32--unknown--unknown-blue.svg)](https://webassembly.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ```
@@ -73,9 +73,9 @@ Every page is translated into structured JSON with roles, labels, states, and a 
 AetherAgent filters prompt injection **at the perception layer**, not as an afterthought. All web content is marked `Untrusted`, wrapped in content-boundary markers before reaching the LLM, and scanned for 20+ known injection patterns including zero-width character attacks.
 
 ```
-[UNTRUSTED_WEB_CONTENT]
+<UNTRUSTED_WEB_CONTENT>
   ... page content here ...
-[/UNTRUSTED_WEB_CONTENT]
+</UNTRUSTED_WEB_CONTENT>
 ```
 
 > Research from Anthropic (2025): Prompt injection is the #1 security risk for browser agents. AetherAgent's architecture makes it structural, not optional.

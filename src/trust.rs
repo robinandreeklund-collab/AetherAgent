@@ -111,18 +111,26 @@ pub fn wrap_untrusted(content: &str) -> String {
 }
 
 /// Filtrera ut injection-patterns från text (ersätt med placeholder)
+///
+/// Hanterar alla förekomster av varje mönster, case-insensitive.
+/// Alla mönster är ASCII, men omgivande text kan innehålla UTF-8 (svenska tecken).
 pub fn sanitize_text(text: &str) -> String {
     let mut result = text.to_string();
 
     for pattern in HIGH_RISK_PATTERNS.iter().chain(MEDIUM_RISK_PATTERNS) {
-        // Case-insensitive replacement using lowercase comparison
-        let lower = result.to_lowercase();
-        if let Some(start) = lower.find(pattern) {
-            // Find the matching byte range in the original string
-            // Since the pattern is ASCII-only, byte lengths match
-            let end = start + pattern.len();
-            if result.is_char_boundary(start) && result.is_char_boundary(end) {
-                result.replace_range(start..end, "[FILTERED]");
+        // Ersätt alla förekomster genom att loopa tills inga fler finns
+        loop {
+            let lower = result.to_lowercase();
+            if let Some(start) = lower.find(pattern) {
+                let end = start + pattern.len();
+                // Alla patterns är ASCII, men verifiera char boundaries för säkerhet
+                if result.is_char_boundary(start) && result.is_char_boundary(end) {
+                    result.replace_range(start..end, "[FILTERED]");
+                } else {
+                    break;
+                }
+            } else {
+                break;
             }
         }
     }

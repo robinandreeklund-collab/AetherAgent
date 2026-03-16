@@ -1,9 +1,8 @@
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::default::Default;
 
-/// Parsar HTML-sträng till en rcdom-träd
+/// Parsar HTML-sträng till ett rcdom-träd
 pub fn parse_html(html: &str) -> RcDom {
     parse_document(RcDom::default(), Default::default())
         .from_utf8()
@@ -13,10 +12,9 @@ pub fn parse_html(html: &str) -> RcDom {
 
 /// Rekursiv helper för att hämta all text ur ett DOM-träd
 pub fn extract_text(handle: &Handle) -> String {
-    let node = handle;
     let mut text = String::new();
 
-    match &node.data {
+    match &handle.data {
         NodeData::Text { contents } => {
             let t = contents.borrow().to_string();
             let trimmed = t.trim();
@@ -25,13 +23,8 @@ pub fn extract_text(handle: &Handle) -> String {
                 text.push(' ');
             }
         }
-        NodeData::Element { .. } => {
-            for child in node.children.borrow().iter() {
-                text.push_str(&extract_text(child));
-            }
-        }
         _ => {
-            for child in node.children.borrow().iter() {
+            for child in handle.children.borrow().iter() {
                 text.push_str(&extract_text(child));
             }
         }
@@ -65,12 +58,12 @@ pub fn get_tag_name(handle: &Handle) -> Option<String> {
 pub fn is_likely_visible(handle: &Handle) -> bool {
     // Kolla style-attribut för display:none / visibility:hidden
     if let Some(style) = get_attr(handle, "style") {
-        let s = style.to_lowercase();
-        if s.contains("display:none")
-            || s.contains("display: none")
-            || s.contains("visibility:hidden")
-            || s.contains("visibility: hidden")
-        {
+        let normalized: String = style
+            .to_lowercase()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        if normalized.contains("display:none") || normalized.contains("visibility:hidden") {
             return false;
         }
     }
@@ -195,16 +188,29 @@ mod tests {
 
     #[test]
     fn test_aria_label_priority() {
-        let html = r#"<button aria-label="Stäng dialog">X</button>"#;
+        let html = r#"<html><body><button aria-label="Stäng dialog">X</button></body></html>"#;
         let dom = parse_html(html);
-        let doc = &dom.document;
-        // Traversera till button-elementet
-        let body = &doc.children.borrow()[0].children.borrow()[1]
-            .children
-            .borrow()[0]
-            .clone();
-        let label = extract_label(body);
-        // Aria-label ska ha prioritet över inner text
-        assert!(label == "Stäng dialog" || label == "X");
+
+        // Hitta button-elementet via rekursiv sökning
+        fn find_button(handle: &Handle) -> Option<Handle> {
+            if let Some(tag) = get_tag_name(handle) {
+                if tag == "button" {
+                    return Some(handle.clone());
+                }
+            }
+            for child in handle.children.borrow().iter() {
+                if let Some(found) = find_button(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let button = find_button(&dom.document).expect("Borde hitta button");
+        let label = extract_label(&button);
+        assert_eq!(
+            label, "Stäng dialog",
+            "aria-label ska ha prioritet över inner text"
+        );
     }
 }

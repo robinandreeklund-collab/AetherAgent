@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Installera Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,12 +35,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Kör tester (native)
-        run: cargo test --lib --verbose
-      
+      - name: Kör alla tester (unit + integration)
+        run: cargo test --verbose
+
       - name: Kör clippy (linting)
         run: cargo clippy -- -D warnings
-      
+
       - name: Formatcheck
         run: cargo fmt --check
 
@@ -50,12 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Installera Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -64,13 +64,15 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
-      
+          restore-keys: |
+            ${{ runner.os }}-wasm-
+
       - name: Installera wasm-pack
         run: cargo install wasm-pack --locked
-      
+
       - name: Bygg WASM (wasm32-unknown-unknown)
         run: wasm-pack build --target web --release
-      
+
       - name: Kontrollera binärstorlek (max 6MB)
         run: |
           WASM_FILE=$(find pkg -name "*.wasm" | head -1)
@@ -85,8 +87,8 @@ jobs:
             echo "WASM-fil för stor! Max 6MB."
             exit 1
           fi
-          echo "✓ Storlek OK: ${SIZE_MB}MB"
-      
+          echo "Storlek OK: ${SIZE_MB}MB"
+
       - name: Ladda upp WASM-artefakt
         uses: actions/upload-artifact@v4
         with:
@@ -100,12 +102,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Sätt upp Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Kör Python mock-test (utan WASM)
         run: python examples/python_test.py
 
@@ -115,9 +117,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Installera Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Installera cargo-audit
         run: cargo install cargo-audit --locked
-      
+
       - name: Kör säkerhetsaudit
         run: cargo audit
