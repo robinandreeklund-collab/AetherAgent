@@ -145,7 +145,7 @@ def _detect_gpu_arch():
             return None
         name = torch.cuda.get_device_name(0)
         props = torch.cuda.get_device_properties(0)
-        mem = props.total_mem / (1024**3)
+        mem = props.total_memory / (1024**3)
         sm = f"sm_{props.major}{props.minor}"
         return name, sm, mem
     except Exception:
@@ -222,7 +222,7 @@ def check_gpu():
 
     name = torch.cuda.get_device_name(0)
     props = torch.cuda.get_device_properties(0)
-    mem = props.total_mem / (1024**3)
+    mem = props.total_memory / (1024**3)
     sm = f"sm_{props.major}{props.minor}"
 
     log(f"GPU: {name} ({mem:.1f} GB VRAM, {sm})", "OK")

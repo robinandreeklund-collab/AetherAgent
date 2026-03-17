@@ -379,18 +379,24 @@ train() {
 
     local gpu_check
     gpu_check=$("$PYTHON" -c "
-import torch
+import torch, sys
 if not torch.cuda.is_available():
-    print('no_cuda:0')
-else:
-    try:
-        t = torch.zeros(1, device='cuda')
-        del t
-        mem = int(torch.cuda.get_device_properties(0).total_mem / (1024**3))
-        print(f'ok:{mem}')
-    except RuntimeError:
-        print('incompatible:0')
-" 2>/dev/null || echo "no_cuda:0")
+    print('no_cuda:0', flush=True)
+    sys.exit(0)
+try:
+    t = torch.zeros(1, device='cuda')
+    del t
+    mem = int(torch.cuda.get_device_properties(0).total_memory / (1024**3))
+    print(f'ok:{mem}', flush=True)
+except RuntimeError as e:
+    print(f'incompatible:0', flush=True)
+" 2>/dev/null | head -1)
+    # Fallback om Python-kommandot misslyckas helt
+    if [[ -z "$gpu_check" ]]; then
+        gpu_check="no_cuda:0"
+        warn "GPU-detektering gav inget resultat — faller tillbaka till CPU"
+    fi
+    log "GPU-detektering: $gpu_check"
 
     local gpu_status="${gpu_check%%:*}"
     local gpu_mem="${gpu_check##*:}"
