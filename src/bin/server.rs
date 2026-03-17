@@ -418,6 +418,277 @@ struct ErrorResponse {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 async fn root() -> impl IntoResponse {
+    let html = r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherAgent — LLM-native browser engine</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#0a0e14;
+    color:#b3b1ad;
+    font-family:'JetBrains Mono',monospace;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:2rem 1rem;
+    overflow-x:hidden;
+  }
+  .scanline{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    pointer-events:none;z-index:10;
+    background:repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.03) 0px,
+      rgba(0,0,0,0.03) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+  }
+  .glow{
+    position:fixed;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    width:600px;height:600px;
+    background:radial-gradient(circle,rgba(255,180,50,0.04) 0%,transparent 70%);
+    pointer-events:none;z-index:0;
+  }
+  .terminal{
+    position:relative;z-index:1;
+    max-width:820px;width:100%;
+    border:1px solid #1d2433;
+    border-radius:8px;
+    background:#0d1117;
+    box-shadow:0 0 40px rgba(0,0,0,0.5),0 0 80px rgba(255,180,50,0.03);
+  }
+  .titlebar{
+    display:flex;align-items:center;gap:8px;
+    padding:12px 16px;
+    background:#161b22;
+    border-bottom:1px solid #1d2433;
+    border-radius:8px 8px 0 0;
+  }
+  .dot{width:12px;height:12px;border-radius:50%}
+  .dot.r{background:#ff5f57}
+  .dot.y{background:#ffbd2e}
+  .dot.g{background:#28c840}
+  .titlebar-text{
+    flex:1;text-align:center;
+    color:#484f58;font-size:13px;
+  }
+  .content{padding:24px 28px 32px;line-height:1.5}
+  .mascot{
+    color:#e6e1cf;
+    font-size:10px;
+    line-height:1.15;
+    letter-spacing:0.5px;
+    text-align:center;
+    margin-bottom:16px;
+    white-space:pre;
+  }
+  .mascot .hair{color:#8b949e}
+  .mascot .visor{color:#58a6ff}
+  .mascot .eyes{color:#1a1e24}
+  .mascot .bolt{color:#ffbd2e}
+  .mascot .wing{color:#c9d1d9}
+  .mascot .body{color:#e6e1cf}
+  .title-art{
+    text-align:center;
+    margin-bottom:8px;
+    white-space:pre;
+    line-height:1.1;
+  }
+  .title-art span{
+    background:linear-gradient(135deg,#ffbd2e 0%,#ff8c00 50%,#ffbd2e 100%);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+    background-clip:text;
+    font-size:11px;
+    font-weight:700;
+  }
+  .subtitle{
+    text-align:center;
+    color:#ffbd2e;
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:2px;
+    margin-bottom:20px;
+  }
+  .tagline{
+    text-align:center;
+    color:#8b949e;
+    font-size:13px;
+    max-width:560px;
+    margin:0 auto 28px;
+    line-height:1.6;
+  }
+  .tagline em{color:#c9d1d9;font-style:normal}
+  .prompt{color:#484f58;margin-bottom:4px;font-size:13px}
+  .prompt .path{color:#58a6ff}
+  .prompt .sym{color:#ffbd2e}
+  .cmd{color:#c9d1d9}
+  .response{color:#7ee787;margin-bottom:16px;font-size:13px}
+  .endpoints{
+    margin-top:20px;
+    border-top:1px solid #1d2433;
+    padding-top:20px;
+  }
+  .endpoints h3{
+    color:#484f58;font-size:12px;
+    text-transform:uppercase;letter-spacing:2px;
+    margin-bottom:12px;
+  }
+  .ep-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    gap:6px;
+  }
+  .ep{font-size:12px;display:flex;gap:8px}
+  .ep .method{
+    color:#1a1e24;
+    background:#7ee787;
+    padding:1px 5px;
+    border-radius:3px;
+    font-size:10px;
+    font-weight:700;
+    flex-shrink:0;
+    min-width:36px;
+    text-align:center;
+  }
+  .ep .method.post{background:#da8ee7;color:#1a1e24}
+  .ep .route{color:#58a6ff}
+  .ep .desc{color:#484f58}
+  .footer{
+    text-align:center;
+    margin-top:24px;
+    padding-top:16px;
+    border-top:1px solid #1d2433;
+  }
+  .footer a{
+    color:#58a6ff;text-decoration:none;font-size:13px;
+  }
+  .footer a:hover{text-decoration:underline}
+  .cursor{
+    display:inline-block;
+    width:8px;height:16px;
+    background:#ffbd2e;
+    animation:blink 1s step-end infinite;
+    vertical-align:middle;
+    margin-left:4px;
+  }
+  @keyframes blink{50%{opacity:0}}
+  @keyframes flicker{
+    0%,100%{opacity:1}
+    92%{opacity:1}
+    93%{opacity:0.8}
+    94%{opacity:1}
+  }
+  .terminal{animation:flicker 8s infinite}
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="glow"></div>
+<div class="terminal">
+  <div class="titlebar">
+    <div class="dot r"></div>
+    <div class="dot y"></div>
+    <div class="dot g"></div>
+    <div class="titlebar-text">aether@agent ~ /engine</div>
+  </div>
+  <div class="content">
+
+<div class="mascot"><span class="hair">              ,  ~  ,
+           ( ~  @@  ~ )
+            ' ,_@@_. '</span>
+        <span class="visor"> ┌──[<span class="eyes">●●●</span>]──┐</span>
+        <span class="visor"> │          │</span>
+        <span class="visor"> └────┬─────┘</span>
+        <span class="body">      │ <span class="eyes">●</span>  <span class="eyes">●</span> │</span>
+        <span class="body">      │  __  │</span>
+        <span class="body">      └──┬───┘</span>
+  <span class="wing">  ╱╲</span><span class="body">    ┌─┴─┐</span>
+  <span class="wing"> ╱  ╲</span><span class="body">   │ <span class="bolt">⚡</span> │</span>
+  <span class="wing">╱    ╲</span><span class="body">  │   │</span>
+  <span class="wing"> ╲  ╱</span><span class="body">   ├───┤</span>
+  <span class="wing">  ╲╱</span><span class="body">    │   │</span>
+        <span class="body">   ╱╲  ╱╲</span>
+        <span class="body">  ╱  ╲╱  ╲</span>
+        <span class="body">  ▔▔   ▔▔</span></div>
+
+<div class="title-art"><span>
+ █████╗ ███████╗████████╗██╗  ██╗███████╗██████╗
+██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔════╝██╔══██╗
+███████║█████╗     ██║   ███████║█████╗  ██████╔╝
+██╔══██║██╔══╝     ██║   ██╔══██║██╔══╝  ██╔══██╗
+██║  ██║███████╗   ██║   ██║  ██║███████╗██║  ██║
+╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+ █████╗  ██████╗ ███████╗███╗   ██╗████████╗
+██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║
+██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║
+██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝</span></div>
+
+<div class="subtitle">The LLM-native browser engine.</div>
+
+<div class="tagline">
+  <em>Semantic perception</em>, <em>goal-aware intelligence</em>, and
+  <em>prompt injection protection</em> — in a single embeddable
+  Rust/WASM library.
+</div>
+
+<div>
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span> <span class="cmd">curl -X POST /api/parse -d '{"html": "&lt;button&gt;Buy&lt;/button&gt;", "goal": "buy"}'</span></div>
+  <div class="response">{"nodes": [{"role": "button", "label": "Buy", "relevance": 0.95, "trust": "safe"}]}</div>
+
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span> <span class="cmd">curl /api/endpoints</span></div>
+  <div class="response">{"status": "ok", "count": 50, "docs": "/api/endpoints"}</div>
+
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span><span class="cursor"></span></div>
+</div>
+
+<div class="endpoints">
+  <h3>// API Surface — 50+ endpoints</h3>
+  <div class="ep-grid">
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/parse</span><span class="desc"> — semantic tree</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/click</span><span class="desc"> — find element</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/extract</span><span class="desc"> — structured data</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fill-form</span><span class="desc"> — map fields</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/diff</span><span class="desc"> — semantic diff</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/compile</span><span class="desc"> — goal → plan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/parse</span><span class="desc"> — fetch + parse</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/plan</span><span class="desc"> — fetch + plan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/firewall/classify</span><span class="desc"> — L1/L2/L3</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/detect-xhr</span><span class="desc"> — XHR scan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/parse-screenshot</span><span class="desc"> — vision</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/mcp</span><span class="desc"> — MCP endpoint</span></div>
+    <div class="ep"><span class="method">GET</span><span class="route">/health</span><span class="desc"> — health check</span></div>
+    <div class="ep"><span class="method">GET</span><span class="route">/api/endpoints</span><span class="desc"> — full API list</span></div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="https://github.com/robinandreeklund-collab/AetherAgent">github.com/robinandreeklund-collab/AetherAgent</a>
+</div>
+
+  </div>
+</div>
+</body>
+</html>"##;
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+/// JSON API endpoint listing (moved from root)
+async fn api_endpoints() -> impl IntoResponse {
     let body = serde_json::json!({
         "engine": "AetherAgent",
         "version": "0.2.0",
@@ -1886,6 +2157,7 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         // Root & Health
         .route("/", get(root))
+        .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
