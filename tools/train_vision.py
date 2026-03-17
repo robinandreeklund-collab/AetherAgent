@@ -45,6 +45,29 @@ UI_CLASSES = [
     "image", "checkbox", "radio", "select", "heading",
 ]
 
+# Utökade agentsemantiska klasser — aktiveras med --extended-classes
+# Dessa ger modellen förmågan att skilja på t.ex. pris vs vanlig text,
+# CTA-knapp vs generell knapp, produktbild vs dekorationsbild.
+# Kräver om-träning om man byter — kan inte blandas med standard 10-klassmodell.
+UI_CLASSES_EXTENDED = [
+    "button",          # 0  - generell knapp
+    "input",           # 1  - textfält
+    "link",            # 2  - klickbar länk
+    "icon",            # 3  - ikon
+    "text",            # 4  - generell text
+    "image",           # 5  - generell bild
+    "checkbox",        # 6  - checkbox
+    "radio",           # 7  - radioknapp
+    "select",          # 8  - dropdown
+    "heading",         # 9  - rubrik
+    "price",           # 10 - pristext (valuta, siffror)
+    "cta",             # 11 - call-to-action (köp, lägg i kundvagn)
+    "product_card",    # 12 - produktkort (bild + text + pris)
+    "nav",             # 13 - navigering (meny, tabs, breadcrumb)
+    "search",          # 14 - sökfält
+    "form",            # 15 - formulärgrupp
+]
+
 # RTX 5090 optimized defaults (24 GB VRAM)
 DEFAULT_EPOCHS = 150
 DEFAULT_BATCH = 32
@@ -359,6 +382,63 @@ _RICO_CLASS_MAP = {
     "Upper Tab Bar": 2,  # link
 }
 
+# Rico viewType-mappning (det andra vanliga formatet med "views" array)
+_RICO_VIEWTYPE_MAP = {
+    "android.widget.Button": 0,          # button
+    "android.widget.ImageButton": 0,     # button
+    "android.widget.EditText": 1,        # input
+    "android.widget.AutoCompleteTextView": 1,
+    "android.widget.TextView": 4,        # text (heuristik avgör vidare)
+    "android.widget.ImageView": 5,       # image
+    "android.widget.CheckBox": 6,        # checkbox
+    "android.widget.RadioButton": 7,     # radio
+    "android.widget.Spinner": 8,         # select
+    "android.widget.Switch": 6,          # checkbox
+    "android.widget.ToggleButton": 6,    # checkbox
+    "android.widget.SeekBar": 1,         # input
+    "android.widget.ProgressBar": 4,     # text (visuellt)
+    "android.widget.RatingBar": 4,       # text
+    # Förkortade classnamn (utan full package path)
+    "Button": 0,
+    "ImageButton": 0,
+    "EditText": 1,
+    "TextView": 4,
+    "ImageView": 5,
+    "CheckBox": 6,
+    "RadioButton": 7,
+    "Spinner": 8,
+    "Switch": 6,
+    "ToggleButton": 6,
+}
+
+# Utökad Rico-mappning för --extended-classes
+_RICO_CLASS_MAP_EXTENDED = {
+    **_RICO_CLASS_MAP,
+    "Bottom Navigation": 13,  # nav
+    "Upper Tab Bar": 13,      # nav
+    "Multi-Tab": 13,          # nav
+    "Drawer": 13,             # nav
+    "Card": 12,               # product_card (heuristik kan förbättra)
+    "Input": 1,               # input
+}
+
+_RICO_VIEWTYPE_MAP_EXTENDED = {
+    **_RICO_VIEWTYPE_MAP,
+    "android.widget.SearchView": 14,     # search
+}
+
+# Valuta- och CTA-heuristik-mönster
+_CURRENCY_PATTERNS = [
+    "kr", "$", "€", "£", "¥", "sek", "usd", "eur", "gbp",
+    "price", "pris", "cost", "total", "sum",
+]
+_CTA_PATTERNS = [
+    "buy", "köp", "add to cart", "lägg i kundvagn", "checkout",
+    "sign up", "registrera", "subscribe", "prenumerera", "get started",
+    "book", "boka", "order", "beställ", "continue", "next", "submit",
+    "download", "ladda ner", "install", "try free", "start",
+]
+
 _WEBUI_CLASS_MAP = {
     "button": 0,
     "btn": 0,
@@ -392,24 +472,29 @@ _WEBUI_CLASS_MAP = {
 }
 
 
-def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
+def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = False) -> Path:
     """Konverterar Rico-dataset (JSON + screenshots) till YOLO-format.
 
-    Rico-format:
-        rico_dir/
-            combined/           ← JSON-filer med komponenthierarki
-                0.json, 1.json, ...
-            screenshot/         ← PNG-screenshots (1440×2560 typiskt)
-                0.jpg, 1.jpg, ...
+    Stödjer tre Rico-format:
 
-    Alternativt stödjer vi Rico Semantic Annotations:
-        rico_dir/
-            semantic_annotations/
-                0.json, ...
-            screenshots/
-                0.jpg, ...
+    Format A — combined (componentLabel + bounds):
+        rico_dir/combined/0.json  +  rico_dir/screenshot/0.jpg
+
+    Format B — semantic_annotations:
+        rico_dir/semantic_annotations/0.json  +  rico_dir/screenshots/0.jpg
+
+    Format C — views[] med viewType (det format Rico-verktygen genererar):
+        {"screenshot": "0.png", "screen_width": 1440, "screen_height": 2560,
+         "views": [{"viewType": "Button", "bounds": [x,y,w,h], "text": "Buy"}, ...]}
     """
     log("Konverterar Rico-dataset till YOLO-format...", "STEP")
+    if extended:
+        log("Utökade agentklasser aktiverade (16 klasser)", "INFO")
+
+    # Välj klassmappningar baserat på extended-flagga
+    class_map = _RICO_CLASS_MAP_EXTENDED if extended else _RICO_CLASS_MAP
+    viewtype_map = _RICO_VIEWTYPE_MAP_EXTENDED if extended else _RICO_VIEWTYPE_MAP
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
 
     # Hitta var bilderna och JSON-filerna ligger
     combined_dir = rico_dir / "combined"
@@ -420,6 +505,11 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
         combined_dir = rico_dir / "semantic_annotations"
     if not screenshot_dir.exists():
         screenshot_dir = rico_dir / "screenshots"
+    # Rico "jsons" + "images" layout (vanligt i tutorials)
+    if not combined_dir.exists() and (rico_dir / "jsons").exists():
+        combined_dir = rico_dir / "jsons"
+    if not screenshot_dir.exists() and (rico_dir / "images").exists():
+        screenshot_dir = rico_dir / "images"
     if not screenshot_dir.exists():
         # Platt struktur: JSON och bilder i samma mapp
         screenshot_dir = rico_dir
@@ -438,26 +528,96 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
 
     converted = 0
     skipped = 0
+    heuristic_upgrades = {"price": 0, "cta": 0, "heading": 0}
 
     for json_path in json_files:
         screen_id = json_path.stem
 
-        # Hitta bildfil
-        img_path = None
-        for ext in [".jpg", ".png", ".jpeg"]:
-            candidate = screenshot_dir / f"{screen_id}{ext}"
-            if candidate.exists():
-                img_path = candidate
-                break
+        with open(json_path) as f:
+            data = json.load(f)
 
+        # --- Format C: views[] array med viewType ---
+        if "views" in data:
+            img_name = data.get("screenshot", f"{screen_id}.png")
+            if "/" in img_name:
+                img_name = img_name.split("/")[-1]
+            img_path = _find_image(screenshot_dir, Path(img_name).stem)
+            if img_path is None:
+                img_path = _find_image(rico_dir, Path(img_name).stem)
+            if img_path is None:
+                skipped += 1
+                continue
+
+            img_w = data.get("screen_width", 1440)
+            img_h = data.get("screen_height", 2560)
+
+            labels = []
+            for view in data["views"]:
+                view_type = view.get("viewType", view.get("class", ""))
+                view_text = view.get("text", "")
+                bounds = view.get("bounds", [])
+                if len(bounds) != 4:
+                    continue
+
+                # Mappa viewType → klass-index
+                class_idx = viewtype_map.get(view_type)
+                if class_idx is None:
+                    class_idx = class_map.get(view_type)
+                if class_idx is None:
+                    continue
+
+                # --- Textheuristik: uppgradera klass baserat på textinnehåll ---
+                class_idx, upgrade = _apply_text_heuristics(
+                    class_idx, view_text, extended
+                )
+                if upgrade:
+                    heuristic_upgrades[upgrade] = heuristic_upgrades.get(upgrade, 0) + 1
+
+                # Rico views: bounds kan vara [x, y, w, h] ELLER [x1, y1, x2, y2]
+                # Heuristik: om tredje/fjärde värdet > halva skärmen → troligen x2,y2
+                bx, by, bz, bw_val = [float(v) for v in bounds]
+                if bz > img_w * 0.5 or bw_val > img_h * 0.5:
+                    # [x1, y1, x2, y2] format
+                    x1, y1, x2, y2 = bx, by, bz, bw_val
+                    w = x2 - x1
+                    h = y2 - y1
+                else:
+                    # [x, y, w, h] format
+                    x1, y1, w, h = bx, by, bz, bw_val
+
+                if w <= 0 or h <= 0:
+                    continue
+
+                cx = (x1 + w / 2) / img_w
+                cy = (y1 + h / 2) / img_h
+                nw = w / img_w
+                nh = h / img_h
+
+                # Filtrera orimliga bboxar
+                if nw > 0.95 and nh > 0.95:
+                    continue
+                if nw < 0.005 or nh < 0.005:
+                    continue
+
+                labels.append(f"{class_idx} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}")
+
+            if not labels:
+                skipped += 1
+                continue
+
+            shutil.copy2(img_path, output_dir / "images" / img_path.name)
+            label_file = output_dir / "labels" / f"{screen_id}.txt"
+            with open(label_file, "w") as f:
+                f.write("\n".join(labels) + "\n")
+            converted += 1
+            continue
+
+        # --- Format A/B: combined/semantic med componentLabel + rekursiv tree ---
+        img_path = _find_image(screenshot_dir, screen_id)
         if img_path is None:
             skipped += 1
             continue
 
-        with open(json_path) as f:
-            data = json.load(f)
-
-        # Rico har "activity" → "root" → "children" (combined) eller "bounds" direkt
         try:
             from PIL import Image
             img = Image.open(img_path)
@@ -471,9 +631,17 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
 
         for node in nodes:
             class_name = node.get("componentLabel", node.get("class", ""))
-            class_idx = _RICO_CLASS_MAP.get(class_name)
+            class_idx = class_map.get(class_name)
             if class_idx is None:
                 continue
+
+            # Textheuristik på combined-noder
+            node_text = node.get("text", node.get("content-desc", ""))
+            class_idx, upgrade = _apply_text_heuristics(
+                class_idx, node_text, extended
+            )
+            if upgrade:
+                heuristic_upgrades[upgrade] = heuristic_upgrades.get(upgrade, 0) + 1
 
             bounds = node.get("bounds", [])
             if len(bounds) != 4:
@@ -483,17 +651,15 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            # Normalisera till 0-1
             cx = ((x1 + x2) / 2) / img_w
             cy = ((y1 + y2) / 2) / img_h
             bw = (x2 - x1) / img_w
             bh = (y2 - y1) / img_h
 
-            # Filtrera orimliga bboxar
             if bw > 0.95 and bh > 0.95:
-                continue  # Hela skärmen
+                continue
             if bw < 0.005 or bh < 0.005:
-                continue  # Osynligt litet
+                continue
 
             labels.append(f"{class_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
 
@@ -501,7 +667,6 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
             skipped += 1
             continue
 
-        # Kopiera bild och skriv label
         shutil.copy2(img_path, output_dir / "images" / img_path.name)
         label_file = output_dir / "labels" / f"{screen_id}.txt"
         with open(label_file, "w") as f:
@@ -511,11 +676,86 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
 
     log(f"Rico → YOLO: {converted} bilder konverterade, {skipped} hoppades över", "OK")
 
+    # Rapportera heuristikuppgraderingar
+    upgrades_total = sum(heuristic_upgrades.values())
+    if upgrades_total > 0:
+        log(f"Textheuristik: {upgrades_total} uppgraderingar "
+            f"(price={heuristic_upgrades.get('price', 0)}, "
+            f"cta={heuristic_upgrades.get('cta', 0)}, "
+            f"heading={heuristic_upgrades.get('heading', 0)})", "OK")
+
     # Auto-splitta
     auto_split_dataset(output_dir)
-    create_data_yaml(output_dir, output_dir / "data.yaml")
+    _create_data_yaml_for_classes(output_dir, active_classes)
 
     return output_dir
+
+
+def _apply_text_heuristics(
+    class_idx: int, text: str, extended: bool
+) -> tuple:
+    """Uppgraderar klass baserat på textinnehåll.
+
+    Returnerar (ny_klass_idx, upgrade_typ_eller_None).
+    I standard-läge (10 klasser) behåller vi button/text men loggar.
+    I extended-läge (16 klasser) mappas till price/cta.
+    """
+    if not text:
+        return class_idx, None
+
+    text_lower = text.lower().strip()
+
+    # Prisdetektering: text som innehåller valutasymboler/ord
+    if class_idx == 4:  # text
+        import re
+        # Matcha mönster som "129 kr", "$19.99", "€ 5,00" etc.
+        has_currency = any(p in text_lower for p in _CURRENCY_PATTERNS)
+        has_number = bool(re.search(r'\d+[.,]?\d*', text_lower))
+        if has_currency and has_number:
+            if extended:
+                return 10, "price"  # price-klass i extended
+            return 4, "price"  # behåll som text men logga
+
+    # CTA-detektering: knappar/text med köp-/action-fraser
+    if class_idx in (0, 4):  # button eller text
+        if any(p in text_lower for p in _CTA_PATTERNS):
+            if extended:
+                return 11, "cta"  # cta-klass i extended
+            if class_idx == 4:
+                return 0, "cta"  # uppgradera text → button i standard
+
+    # Rubrikdetektering: kort text i stora element → heading
+    if class_idx == 4 and len(text_lower) < 40:
+        # Kort text som ser ut som en rubrik (stor bokstav, inga meningar)
+        if text and text[0].isupper() and "." not in text_lower:
+            if len(text_lower.split()) <= 5:
+                return 9, "heading"
+
+    return class_idx, None
+
+
+def _create_data_yaml_for_classes(dataset_dir: Path, classes: list):
+    """Skapar data.yaml med given klasslista (standard eller extended)."""
+    import yaml
+
+    train_imgs = dataset_dir / "images" / "train"
+    val_imgs = dataset_dir / "images" / "val"
+    test_imgs = dataset_dir / "images" / "test"
+
+    data = {
+        "path": str(dataset_dir.resolve()),
+        "train": "images/train",
+        "val": "images/val" if val_imgs.exists() else "images/train",
+        "test": "images/test" if test_imgs.exists() else "",
+        "nc": len(classes),
+        "names": {i: name for i, name in enumerate(classes)},
+    }
+
+    yaml_path = dataset_dir / "data.yaml"
+    with open(yaml_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+    log(f"data.yaml: {len(classes)} klasser", "OK")
 
 
 def _extract_rico_nodes(data: dict) -> list:
@@ -541,7 +781,8 @@ def _extract_rico_nodes(data: dict) -> list:
     return nodes
 
 
-def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Path) -> Path:
+def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Path,
+                         extended: bool = False) -> Path:
     """Konverterar COCO-format (annotations JSON + bilder) till YOLO-format.
 
     COCO-format:
@@ -550,6 +791,7 @@ def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Pat
             img001.jpg, ...
     """
     log("Konverterar COCO-dataset till YOLO-format...", "STEP")
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
 
     with open(coco_json_path) as f:
         coco = json.load(f)
@@ -558,14 +800,14 @@ def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Pat
     coco_categories = {}
     for cat in coco.get("categories", []):
         cat_name = cat["name"].lower().strip()
-        yolo_idx = _match_class_name(cat_name)
+        yolo_idx = _match_class_name(cat_name, extended)
         if yolo_idx is not None:
             coco_categories[cat["id"]] = yolo_idx
 
     if not coco_categories:
         log("Inga COCO-kategorier matchade UI_CLASSES. Mappar alla till index 0-N.", "WARN")
         for i, cat in enumerate(coco.get("categories", [])):
-            if i < len(UI_CLASSES):
+            if i < len(active_classes):
                 coco_categories[cat["id"]] = i
 
     log(f"Mappade {len(coco_categories)} av {len(coco.get('categories', []))} COCO-kategorier", "INFO")
@@ -641,12 +883,12 @@ def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Pat
     log(f"COCO → YOLO: {converted} bilder konverterade", "OK")
 
     auto_split_dataset(output_dir)
-    create_data_yaml(output_dir, output_dir / "data.yaml")
+    _create_data_yaml_for_classes(output_dir, active_classes)
 
     return output_dir
 
 
-def convert_webui_to_yolo(webui_dir: Path, output_dir: Path) -> Path:
+def convert_webui_to_yolo(webui_dir: Path, output_dir: Path, extended: bool = False) -> Path:
     """Konverterar WebUI-dataset till YOLO-format.
 
     Stödjer flera vanliga WebUI-format:
@@ -694,8 +936,9 @@ def convert_webui_to_yolo(webui_dir: Path, output_dir: Path) -> Path:
 
     log(f"WebUI → YOLO: {converted} bilder konverterade", "OK")
 
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
     auto_split_dataset(output_dir)
-    create_data_yaml(output_dir, output_dir / "data.yaml")
+    _create_data_yaml_for_classes(output_dir, active_classes)
 
     return output_dir
 
@@ -859,20 +1102,34 @@ def _extract_webui_labels(data: dict, img_w: int, img_h: int) -> list:
     return labels
 
 
-def _match_class_name(name: str) -> int:
-    """Fuzzy-matchar ett klassnamn mot UI_CLASSES."""
+def _match_class_name(name: str, extended: bool = False) -> int:
+    """Fuzzy-matchar ett klassnamn mot UI_CLASSES (eller extended)."""
     name = name.lower().strip()
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
 
     # Exakt match
-    if name in UI_CLASSES:
-        return UI_CLASSES.index(name)
+    if name in active_classes:
+        return active_classes.index(name)
 
     # WebUI-map
     if name in _WEBUI_CLASS_MAP:
         return _WEBUI_CLASS_MAP[name]
 
+    # Extended-specifika mappningar
+    if extended:
+        extended_map = {
+            "price": 10, "pris": 10, "cost": 10, "currency": 10,
+            "cta": 11, "call_to_action": 11, "buy_button": 11,
+            "product_card": 12, "product": 12, "card": 12,
+            "nav": 13, "navigation": 13, "breadcrumb": 13, "tabs": 13,
+            "search": 14, "searchbar": 14, "search_field": 14,
+            "form": 15, "form_group": 15,
+        }
+        if name in extended_map:
+            return extended_map[name]
+
     # Delsträngs-match
-    for i, cls in enumerate(UI_CLASSES):
+    for i, cls in enumerate(active_classes):
         if cls in name or name in cls:
             return i
 
@@ -888,13 +1145,15 @@ def _find_image(images_dir: Path, stem: str) -> Path:
     return None
 
 
-def convert_dataset(source_path: Path, output_dir: Path, fmt: str) -> Path:
+def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
+                    extended: bool = False) -> Path:
     """Huvudfunktion: konverterar dataset från givet format till YOLO.
 
     Args:
         source_path: Sökväg till källdataset
         output_dir: Sökväg till YOLO-output
         fmt: Format — "rico", "coco", "webui", "yolo" (passthrough)
+        extended: Använd utökade agentklasser (16 st)
 
     Returns:
         Sökväg till YOLO-dataset
@@ -906,7 +1165,7 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str) -> Path:
         return source_path
 
     if fmt == "rico":
-        return convert_rico_to_yolo(source_path, output_dir)
+        return convert_rico_to_yolo(source_path, output_dir, extended=extended)
 
     if fmt == "coco":
         # COCO: förväntar sig annotations JSON + images/
@@ -938,10 +1197,10 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str) -> Path:
         if not images_dir.exists():
             images_dir = source_path  # Bilder i root
 
-        return convert_coco_to_yolo(coco_json, images_dir, output_dir)
+        return convert_coco_to_yolo(coco_json, images_dir, output_dir, extended=extended)
 
     if fmt == "webui":
-        return convert_webui_to_yolo(source_path, output_dir)
+        return convert_webui_to_yolo(source_path, output_dir, extended=extended)
 
     log(f"Okänt format: {fmt}. Stödda format: rico, coco, webui, yolo", "ERR")
     sys.exit(1)
@@ -1378,6 +1637,9 @@ Examples:
     parser.add_argument("--format", type=str, default="yolo",
                         choices=["yolo", "rico", "coco", "webui"],
                         help="Dataset format (default: yolo). Converts to YOLO automatically.")
+    parser.add_argument("--extended-classes", action="store_true",
+                        help="Use 16 agent-semantic classes (price, cta, product_card, nav, search, form) "
+                             "instead of standard 10. Enables text heuristics for class upgrades.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
@@ -1442,7 +1704,8 @@ Examples:
         if args.format != "yolo":
             converted_dir = Path("dataset") / f"{args.format}_converted"
             log(f"Konverterar {args.format} → YOLO...", "STEP")
-            dataset_path = convert_dataset(args.dataset, converted_dir, args.format)
+            dataset_path = convert_dataset(args.dataset, converted_dir, args.format,
+                                           extended=args.extended_classes)
 
         run_pipeline(
             dataset_dir=dataset_path,

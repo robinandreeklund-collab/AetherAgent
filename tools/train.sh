@@ -35,6 +35,7 @@ SKIP_VERIFY=false
 INTERACTIVE=false
 DOWNLOAD_STARTER=false
 DATASET_FORMAT="yolo"
+EXTENDED_CLASSES=false
 SERVER_URL="http://localhost:3000"
 DEPLOY_DIR="$PROJECT_DIR/models"
 
@@ -81,6 +82,7 @@ usage() {
     echo "  --server URL           AetherAgent server URL (default: http://localhost:3000)"
     echo "  --skip-verify          Skip API verification"
     echo "  --format FORMAT        Dataset format: yolo, rico, coco, webui (default: yolo)"
+    echo "  --extended-classes     Use 16 agent-semantic classes (price, cta, product_card, ...)"
     echo "  --interactive          Interactive wizard mode"
     echo "  --help                 Show this help"
     echo ""
@@ -90,6 +92,7 @@ usage() {
     echo "  $0 --dataset ./rico-data --format rico     # Convert Rico → YOLO + train"
     echo "  $0 --dataset ./coco-data --format coco     # Convert COCO → YOLO + train"
     echo "  $0 --dataset ./webui-data --format webui   # Convert WebUI → YOLO + train"
+    echo "  $0 --dataset ./rico --format rico --extended-classes  # 16 agent-semantic classes"
     echo "  $0 --epochs 300 --batch 64                 # Custom training config"
 }
 
@@ -105,6 +108,7 @@ while [[ $# -gt 0 ]]; do
         --verify-only)   VERIFY_ONLY="$2"; shift 2 ;;
         --server)        SERVER_URL="$2"; shift 2 ;;
         --format)        DATASET_FORMAT="$2"; shift 2 ;;
+        --extended-classes) EXTENDED_CLASSES=true; shift ;;
         --skip-verify)   SKIP_VERIFY=true; shift ;;
         --interactive)   INTERACTIVE=true; shift ;;
         --help)          usage; exit 0 ;;
@@ -262,12 +266,14 @@ prepare_dataset() {
         if [[ "$DATASET_FORMAT" != "yolo" ]]; then
             local converted_dir="$PROJECT_DIR/dataset/${DATASET_FORMAT}_converted"
             log "Konverterar $DATASET_FORMAT → YOLO..."
+            local ext_flag="False"
+            if $EXTENDED_CLASSES; then ext_flag="True"; fi
             "$PYTHON" -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR')
 from train_vision import convert_dataset
 from pathlib import Path
-convert_dataset(Path('$DATASET_DIR'), Path('$converted_dir'), '$DATASET_FORMAT')
+convert_dataset(Path('$DATASET_DIR'), Path('$converted_dir'), '$DATASET_FORMAT', extended=$ext_flag)
 "
             DATASET_DIR="$converted_dir"
             ok "Dataset konverterat till YOLO: $DATASET_DIR"
