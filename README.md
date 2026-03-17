@@ -25,6 +25,8 @@ AetherAgent is **not** a finished agent (like Claude Computer Use).
 
 It is the **engine** – a perception + action layer – that you embed directly inside your own agent. Written in Rust, compiled to WebAssembly, it runs in the same process as your LLM with zero network latency.
 
+> **Important:** AetherAgent is a **perception layer**, not a standalone browser. It does not fetch pages, handle cookies, manage sessions, or execute full JavaScript runtimes. Your agent (or a simple HTTP client like `requests`/`fetch`) provides the HTML; AetherAgent provides the intelligence. Think of it as the "eyes and brain" that sit between your HTTP client and your LLM.
+
 Instead of handing your agent raw HTML or screenshots, AetherAgent delivers a **semantic accessibility tree** with goal-aware JSON – the page already understood, filtered, and ranked by relevance to your agent's current goal.
 
 ```python
@@ -99,6 +101,35 @@ agent.fill_form({"email": "user@example.com", "password": "..."})
 | Memory per instance | ~9.5 MB | ~19 MB | ~150 MB |
 | 100 parallel tasks | 182 ms | 1,300 ms | N/A |
 | Throughput | ~550 req/s | ~77 req/s | ~5 req/s |
+
+### Honest Comparison: AetherAgent vs Lightpanda vs Playwright
+
+AetherAgent is **not** a browser replacement. It occupies a different niche. Here's an honest feature comparison:
+
+| Capability | AetherAgent | Lightpanda | Playwright + Chrome |
+|-----------|------------|-----------|---------------------|
+| **Category** | Perception layer | Headless browser | Full browser automation |
+| Fetches pages (HTTP) | No (you provide HTML) | Yes (libcurl) | Yes (Chrome DevTools) |
+| Full JavaScript (V8/SpiderMonkey) | No (Boa sandbox only) | Yes (V8) | Yes (V8) |
+| CSS rendering / layout | No | Partial | Yes |
+| Cookies / sessions | No | Yes | Yes |
+| CDP protocol | No | Yes | Yes |
+| Playwright/Puppeteer compatible | No | Yes | Yes (native) |
+| Semantic tree with goal scoring | **Yes** | No | No |
+| Prompt injection detection | **Yes** | No | No |
+| Semantic diff (token savings) | **Yes** | No | No |
+| Temporal adversarial detection | **Yes** | No | No |
+| Intent compiler (goal → plan) | **Yes** | No | No |
+| Embeddable in WASM | **Yes** | No | No |
+| Startup time | <1 ms | ~250 ms | 1,000–3,000 ms |
+| Memory per instance | ~9.5 MB | ~19 MB | ~150 MB |
+| License | MIT | AGPL-3.0 | Apache-2.0 |
+
+**When to use AetherAgent:** Your agent already fetches HTML (via `requests`, `httpx`, `fetch`, or any HTTP client) and needs fast, goal-aware semantic understanding with built-in security. Perfect for data extraction, form filling, navigation planning – anywhere you need perception, not rendering.
+
+**When to use Lightpanda/Playwright:** You need a full browser: JavaScript-heavy SPAs, sites behind authentication flows, visual rendering, or CDP-based automation.
+
+**Best of both worlds:** Use AetherAgent as the perception layer on top of a browser's HTML output. Fetch with Lightpanda/Playwright, perceive with AetherAgent.
 
 ### Runs Everywhere
 Compiles to WebAssembly and runs in Python, Node.js, Cloudflare Workers, WasmEdge, and browser PWAs – with zero vendor lock-in.
@@ -623,6 +654,8 @@ injection: malicious text                           14         13
 
 Tested locally on the same machine (4 CPU, 16 GB RAM) with identical HTML fixtures. AetherAgent runs as an HTTP server; Lightpanda runs as a CLI process per request (`--dump semantic_tree`).
 
+> **Methodology disclaimer:** This comparison is partially unfair. AetherAgent runs as a persistent server with connection pooling (warm). Lightpanda spawns a new CLI process per request (cold startup + HTTP fetch + parse). Even adjusted for this, AetherAgent is extremely lightweight – but the 100–400x speedup numbers reflect this asymmetry. See "Fair Mode" benchmark below for cold-start adjusted measurements. Additionally, AetherAgent is a perception layer (you provide HTML) while Lightpanda is a full browser (it fetches pages itself) – they serve different purposes.
+
 Run: `python3 benches/bench_vs_lightpanda.py`
 
 **Parse Speed (median, 20 iterations):**
@@ -702,7 +735,7 @@ Run: `python3 benches/bench_vs_lightpanda.py`
 | E-commerce | +2% | — | — |
 | Complex (50 products) | +6% | — | — |
 
-> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, JS sandbox, intent API, temporal memory, intent compiler) that Lightpanda does not offer. The JS sandbox adds only 2–6% overhead. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and adds temporal adversarial modeling (Fas 5) and goal decomposition (Fas 6).
+> **Summary:** AetherAgent is **100–400x faster** for semantic parsing (with the caveat that AetherAgent runs as a warm server while Lightpanda spawns per request – see methodology note above). It uses **half the memory** and includes AI-native features (goal scoring, injection protection, semantic diff, JS sandbox, intent API, temporal adversarial modeling, intent compiler) that Lightpanda does not offer. Lightpanda's advantage is full V8 JavaScript execution, HTTP fetching, cookies, CDP protocol, and Playwright compatibility – it is a complete browser. AetherAgent is a specialized perception layer designed to work alongside (not replace) HTTP clients or browsers. The benchmark suite covers all 6 phases (Fas 1–6) including WebArena-inspired multi-step scenarios.
 
 ---
 

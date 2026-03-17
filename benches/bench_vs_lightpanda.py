@@ -3,11 +3,18 @@
 AetherAgent vs Lightpanda – Head-to-Head Benchmark
 ===================================================
 
-Measures:
+Measures (all phases, Fas 1–6):
   1. Token savings: raw tree vs Fas 4a delta across multi-step loops
   2. Parallel throughput: 25/50/100 concurrent parses, total wall-clock time
   3. Memory (RSS): per-instance peak resident memory
   4. Lightpanda comparison: same fixtures, same metrics, head-to-head
+  5. Output quality: semantic tree comparison
+  6. JS sandbox: detection + sandboxed evaluation (Fas 4b)
+  7. Selective execution: detect → eval → apply pipeline (Fas 4c)
+  8. Temporal memory: snapshot tracking, adversarial detection (Fas 5)
+  9. Intent compiler: goal compilation, plan execution (Fas 6)
+ 10. WebArena scenarios: real-world multi-step agent tasks
+ 11. Fair mode: cold-start measurement (no warm server advantage)
 
 Run:
   python3 benches/bench_vs_lightpanda.py
@@ -17,6 +24,15 @@ Requirements:
     OR use the live deployment URL
   - Lightpanda binary at /tmp/lightpanda (or set LIGHTPANDA_BIN env var)
   - python3 with requests (pip install requests)
+
+Methodology note:
+  AetherAgent runs as a persistent HTTP server (in-process, warm). Lightpanda
+  runs as a CLI subprocess per request (cold start + fetch + parse each time).
+  Benchmark 11 ("Fair Mode") measures AetherAgent with a fresh HTTP connection
+  per request (no connection pooling) to reduce the warm-server advantage.
+  Even in fair mode, the comparison is not perfectly apples-to-apples:
+  AetherAgent is a perception layer (you provide HTML), while Lightpanda is
+  a full browser (it fetches pages itself). See README for honest positioning.
 """
 
 import json
@@ -1037,6 +1053,363 @@ def bench_intent_compiler(client):
     return results
 
 
+# ─── WebArena Scenario Fixtures ──────────────────────────────────────────────
+
+WEBARENA_SCENARIOS = {
+    "shopping_buy_product": {
+        "name": "WebArena: Buy cheapest product",
+        "description": "Navigate product listing, find cheapest, add to cart, go to checkout",
+        "steps": [
+            {
+                "html": '<html><head><title>Products</title></head><body>'
+                        '<h1>All Products</h1>'
+                        '<div class="product"><h3>Widget A</h3><p class="price">$29.99</p>'
+                        '<a href="/product/a">View</a></div>'
+                        '<div class="product"><h3>Widget B</h3><p class="price">$14.99</p>'
+                        '<a href="/product/b">View</a></div>'
+                        '<div class="product"><h3>Widget C</h3><p class="price">$49.99</p>'
+                        '<a href="/product/c">View</a></div>'
+                        '<a href="/cart">Cart (0)</a></body></html>',
+                "goal": "buy cheapest product",
+                "url": "https://shop.example.com/products",
+            },
+            {
+                "html": '<html><head><title>Widget B</title></head><body>'
+                        '<h1>Widget B</h1><p class="price">$14.99</p>'
+                        '<p>The most affordable widget in our collection.</p>'
+                        '<select name="qty"><option>1</option><option>2</option></select>'
+                        '<button id="add-to-cart">Add to Cart</button>'
+                        '<a href="/products">Back to products</a>'
+                        '<a href="/cart">Cart (0)</a></body></html>',
+                "goal": "buy cheapest product",
+                "url": "https://shop.example.com/product/b",
+            },
+            {
+                "html": '<html><head><title>Widget B</title></head><body>'
+                        '<h1>Widget B</h1><p class="price">$14.99</p>'
+                        '<p>Added to cart!</p>'
+                        '<button id="add-to-cart" disabled>In Cart</button>'
+                        '<a href="/products">Continue Shopping</a>'
+                        '<a href="/checkout">Proceed to Checkout</a>'
+                        '<a href="/cart">Cart (1)</a></body></html>',
+                "goal": "buy cheapest product",
+                "url": "https://shop.example.com/product/b",
+            },
+        ],
+    },
+    "reddit_post_comment": {
+        "name": "WebArena: Post a comment on Reddit",
+        "description": "Navigate to post, open comment form, type and submit",
+        "steps": [
+            {
+                "html": '<html><head><title>r/AskReddit</title></head><body>'
+                        '<h1>r/AskReddit</h1>'
+                        '<div class="post"><h2>What is the meaning of life?</h2>'
+                        '<p>Posted by u/curious_user</p>'
+                        '<a href="/post/123">42 comments</a>'
+                        '<button>Upvote</button><button>Downvote</button></div>'
+                        '<div class="post"><h2>Best programming language?</h2>'
+                        '<a href="/post/456">128 comments</a></div>'
+                        '</body></html>',
+                "goal": "post a comment on the top post",
+                "url": "https://reddit.example.com/r/AskReddit",
+            },
+            {
+                "html": '<html><head><title>What is the meaning of life?</title></head><body>'
+                        '<h1>What is the meaning of life?</h1>'
+                        '<p>Posted by u/curious_user - 42 comments</p>'
+                        '<div class="comment"><p>It is 42 obviously</p></div>'
+                        '<div class="comment"><p>Love and kindness</p></div>'
+                        '<form id="comment-form">'
+                        '<textarea name="comment" placeholder="What are your thoughts?"></textarea>'
+                        '<button type="submit">Comment</button>'
+                        '</form></body></html>',
+                "goal": "post a comment on the top post",
+                "url": "https://reddit.example.com/post/123",
+            },
+        ],
+    },
+    "gitlab_create_issue": {
+        "name": "WebArena: Create GitLab issue",
+        "description": "Navigate to issues, fill form, submit",
+        "steps": [
+            {
+                "html": '<html><head><title>Issues - MyProject</title></head><body>'
+                        '<h1>MyProject Issues</h1>'
+                        '<a href="/new-issue" class="btn">New Issue</a>'
+                        '<div class="issue"><a href="/issue/1">Bug: login broken</a> <span>Open</span></div>'
+                        '<div class="issue"><a href="/issue/2">Feature: dark mode</a> <span>Open</span></div>'
+                        '</body></html>',
+                "goal": "create a new issue about performance",
+                "url": "https://gitlab.example.com/project/issues",
+            },
+            {
+                "html": '<html><head><title>New Issue - MyProject</title></head><body>'
+                        '<h1>New Issue</h1>'
+                        '<form id="issue-form">'
+                        '<input type="text" name="title" placeholder="Title" />'
+                        '<textarea name="description" placeholder="Description"></textarea>'
+                        '<select name="label"><option>Bug</option><option>Feature</option><option>Performance</option></select>'
+                        '<select name="assignee"><option>Unassigned</option><option>Alice</option><option>Bob</option></select>'
+                        '<button type="submit">Submit Issue</button>'
+                        '</form></body></html>',
+                "goal": "create a new issue about performance",
+                "url": "https://gitlab.example.com/project/issues/new",
+            },
+        ],
+    },
+    "map_search_directions": {
+        "name": "WebArena: Search for directions on map",
+        "description": "Search location, get directions",
+        "steps": [
+            {
+                "html": '<html><head><title>Maps</title></head><body>'
+                        '<h1>Maps</h1>'
+                        '<input type="text" id="search" placeholder="Search for a place" />'
+                        '<button id="search-btn">Search</button>'
+                        '<div id="map-canvas">Map loads here</div>'
+                        '<a href="/directions">Directions</a>'
+                        '<a href="/saved">Saved places</a>'
+                        '</body></html>',
+                "goal": "find directions to Central Station",
+                "url": "https://maps.example.com",
+            },
+            {
+                "html": '<html><head><title>Central Station - Maps</title></head><body>'
+                        '<h1>Central Station</h1>'
+                        '<p>123 Main Street, Stockholm</p>'
+                        '<div class="rating">4.5 stars (2,341 reviews)</div>'
+                        '<button id="directions-btn">Get Directions</button>'
+                        '<button id="save-btn">Save</button>'
+                        '<button id="share-btn">Share</button>'
+                        '<a href="/">Back to map</a>'
+                        '</body></html>',
+                "goal": "find directions to Central Station",
+                "url": "https://maps.example.com/place/central-station",
+            },
+        ],
+    },
+    "cms_edit_page": {
+        "name": "WebArena: Edit CMS page content",
+        "description": "Navigate to page, edit content, save",
+        "steps": [
+            {
+                "html": '<html><head><title>Pages - CMS</title></head><body>'
+                        '<h1>All Pages</h1>'
+                        '<a href="/page/about/edit" class="edit-btn">Edit About</a>'
+                        '<a href="/page/contact/edit" class="edit-btn">Edit Contact</a>'
+                        '<a href="/page/faq/edit" class="edit-btn">Edit FAQ</a>'
+                        '<a href="/new-page">Create New Page</a>'
+                        '</body></html>',
+                "goal": "edit the About page content",
+                "url": "https://cms.example.com/pages",
+            },
+            {
+                "html": '<html><head><title>Edit: About - CMS</title></head><body>'
+                        '<h1>Edit: About</h1>'
+                        '<form id="edit-form">'
+                        '<input type="text" name="title" value="About Us" />'
+                        '<textarea name="content">We are a great company.</textarea>'
+                        '<input type="text" name="slug" value="about" />'
+                        '<select name="status"><option selected>Published</option><option>Draft</option></select>'
+                        '<button type="submit">Save Changes</button>'
+                        '<a href="/pages">Cancel</a>'
+                        '</form></body></html>',
+                "goal": "edit the About page content",
+                "url": "https://cms.example.com/page/about/edit",
+            },
+        ],
+    },
+}
+
+
+# ─── Benchmark 10: WebArena Scenarios ────────────────────────────────────────
+
+def bench_webarena(client):
+    """Benchmark WebArena-inspired real-world multi-step agent scenarios."""
+    print("\n" + "=" * 72)
+    print("BENCHMARK 10: WebArena Scenarios – Multi-Step Agent Tasks")
+    print("=" * 72)
+    print(f"  {'Scenario':<40} {'Steps':>6} {'Total':>10} {'Avg/step':>10} {'Tokens':>10}")
+    print("  " + "-" * 78)
+
+    results = {}
+
+    for scenario_key, scenario in WEBARENA_SCENARIOS.items():
+        steps = scenario["steps"]
+
+        # Full pipeline per scenario: compile goal → parse each step → diff → execute plan
+        pipeline_times = []
+        total_tokens_list = []
+
+        for _ in range(ITERATIONS):
+            t0 = time.monotonic()
+            total_tokens = 0
+            prev_tree_json = None
+
+            # Compile the goal into a plan
+            plan_json = client.compile_goal(steps[0]["goal"])
+
+            for step_idx, step in enumerate(steps):
+                # Parse the page
+                tree_json = client.parse(step)
+                tokens = count_tokens(tree_json)
+
+                # Use diff if not first step
+                if prev_tree_json is not None:
+                    delta_json = client.diff(prev_tree_json, tree_json)
+                    total_tokens += count_tokens(delta_json)
+                else:
+                    total_tokens += tokens
+
+                # Execute plan against current state
+                client.execute_plan(plan_json, step["html"], step["goal"], step["url"],
+                                    list(range(step_idx)))
+
+                prev_tree_json = tree_json
+
+            elapsed = (time.monotonic() - t0) * 1_000_000
+            pipeline_times.append(elapsed)
+            total_tokens_list.append(total_tokens)
+
+        med_time = statistics.median(pipeline_times)
+        avg_tokens = int(statistics.mean(total_tokens_list))
+        per_step = med_time / len(steps)
+        n_steps = len(steps)
+
+        print(f"  {scenario['name']:<40} {n_steps:>6} {fmt_us(med_time):>10} {fmt_us(per_step):>10} {avg_tokens:>10,}")
+        results[scenario_key] = {
+            "steps": n_steps,
+            "total_us": med_time,
+            "per_step_us": per_step,
+            "total_tokens": avg_tokens,
+        }
+
+    # Temporal analysis across a multi-step scenario
+    print(f"\n  {'Temporal analysis (shopping scenario):'}")
+    shopping = WEBARENA_SCENARIOS["shopping_buy_product"]
+    mem_json = client.create_temporal_memory()
+    for step_idx, step in enumerate(shopping["steps"]):
+        mem_json = client.add_temporal_snapshot(
+            mem_json, step["html"], step["goal"], step["url"], step_idx * 2000
+        )
+
+    analysis = json.loads(client.analyze_temporal(mem_json))
+    prediction = json.loads(client.predict_temporal(mem_json))
+    print(f"    Risk score:        {analysis.get('risk_score', 0):.3f}")
+    print(f"    Patterns found:    {len(analysis.get('adversarial_patterns', []))}")
+    print(f"    Prediction conf:   {prediction.get('confidence', 0):.2f}")
+    results["temporal_shopping"] = {
+        "risk": analysis.get("risk_score", 0),
+        "patterns": len(analysis.get("adversarial_patterns", [])),
+        "confidence": prediction.get("confidence", 0),
+    }
+
+    return results
+
+
+# ─── Benchmark 11: Fair Mode (Cold-Start) ───────────────────────────────────
+
+def bench_fair_mode(base_url):
+    """Measure AetherAgent WITHOUT connection pooling (fresh connection per request).
+
+    This is a fairer comparison to Lightpanda which spawns a new process per
+    request. We still can't eliminate the server-is-already-warm advantage, but
+    we remove HTTP keep-alive / connection reuse benefits.
+    """
+    print("\n" + "=" * 72)
+    print("BENCHMARK 11: Fair Mode – Fresh Connection Per Request (No Pooling)")
+    print("=" * 72)
+    print()
+    print("  NOTE: AetherAgent server is still warm (persistent process).")
+    print("  This benchmark removes HTTP connection pooling to reduce the")
+    print("  advantage vs Lightpanda's cold subprocess spawns.")
+    print()
+    print(f"  {'Fixture':<20} {'Pooled (warm)':>14} {'No-pool (fair)':>16} {'Overhead':>10}")
+    print("  " + "-" * 64)
+
+    results = {}
+
+    for name in ["simple", "ecommerce", "login", "complex_50", "complex_100"]:
+        fixture = FIXTURES[name]
+
+        # Warm: reuse session (like normal AetherClient)
+        warm_session = requests.Session()
+        warm_times = []
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = warm_session.post(
+                f"{base_url}/api/parse",
+                json={"html": fixture["html"], "goal": fixture["goal"], "url": fixture["url"]},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            warm_times.append((time.monotonic() - start) * 1_000_000)
+        warm_med = statistics.median(warm_times)
+
+        # Fair: no session, new connection each request
+        fair_times = []
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = requests.post(
+                f"{base_url}/api/parse",
+                json={"html": fixture["html"], "goal": fixture["goal"], "url": fixture["url"]},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            fair_times.append((time.monotonic() - start) * 1_000_000)
+        fair_med = statistics.median(fair_times)
+
+        overhead = ((fair_med / max(1, warm_med)) - 1) * 100
+        print(f"  {name:<20} {fmt_us(warm_med):>12} {fmt_us(fair_med):>14} {overhead:>+9.0f}%")
+        results[name] = {
+            "warm_us": warm_med,
+            "fair_us": fair_med,
+            "overhead_pct": overhead,
+        }
+
+    # Also measure compile + execute in fair mode
+    print(f"\n  {'Pipeline (Fas 6)':<20} {'Pooled (warm)':>14} {'No-pool (fair)':>16} {'Overhead':>10}")
+    print("  " + "-" * 64)
+
+    fixture = FIXTURES["ecommerce"]
+    warm_session = requests.Session()
+
+    warm_times = []
+    for _ in range(ITERATIONS):
+        start = time.monotonic()
+        plan_resp = warm_session.post(f"{base_url}/api/compile", json={"goal": "köp produkt"}, timeout=30)
+        plan_resp.raise_for_status()
+        warm_session.post(
+            f"{base_url}/api/execute-plan",
+            json={"plan_json": plan_resp.text, "html": fixture["html"],
+                  "goal": "köp produkt", "url": fixture["url"], "completed_steps": []},
+            timeout=30,
+        )
+        warm_times.append((time.monotonic() - start) * 1_000_000)
+    warm_med = statistics.median(warm_times)
+
+    fair_times = []
+    for _ in range(ITERATIONS):
+        start = time.monotonic()
+        plan_resp = requests.post(f"{base_url}/api/compile", json={"goal": "köp produkt"}, timeout=30)
+        plan_resp.raise_for_status()
+        requests.post(
+            f"{base_url}/api/execute-plan",
+            json={"plan_json": plan_resp.text, "html": fixture["html"],
+                  "goal": "köp produkt", "url": fixture["url"], "completed_steps": []},
+            timeout=30,
+        )
+        fair_times.append((time.monotonic() - start) * 1_000_000)
+    fair_med = statistics.median(fair_times)
+
+    overhead = ((fair_med / max(1, warm_med)) - 1) * 100
+    print(f"  {'compile+execute':<20} {fmt_us(warm_med):>12} {fmt_us(fair_med):>14} {overhead:>+9.0f}%")
+    results["pipeline"] = {"warm_us": warm_med, "fair_us": fair_med, "overhead_pct": overhead}
+
+    return results
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1090,17 +1463,21 @@ def main():
     all_results["selective_exec"] = bench_selective_exec(client)
     all_results["temporal_memory"] = bench_temporal_memory(client)
     all_results["intent_compiler"] = bench_intent_compiler(client)
+    all_results["webarena"] = bench_webarena(client)
+    all_results["fair_mode"] = bench_fair_mode(AETHER_URL)
 
     # Summary
     print("\n" + "=" * 72)
-    print("  SUMMARY")
+    print("  SUMMARY (All Phases: Fas 1–6)")
     print("=" * 72)
+
+    print("\n  ── Fas 1–3: Core Engine ──")
 
     h2h = all_results.get("head_to_head", {})
     if h2h:
         speedups = [v["speedup"] for v in h2h.values()]
         avg_speedup = statistics.mean(speedups)
-        print(f"\n  Parse speed advantage (median across fixtures): {avg_speedup:.1f}x faster")
+        print(f"  Parse speed advantage (median across fixtures): {avg_speedup:.1f}x faster")
 
     tokens = all_results.get("tokens", {})
     if tokens:
@@ -1123,6 +1500,8 @@ def main():
         if ae_mb and lp_mb:
             print(f"  Memory: AetherAgent server {ae_mb:.1f} MB vs Lightpanda {lp_mb:.1f} MB/instance")
 
+    print("\n  ── Fas 4: JS & Diffing ──")
+
     js = all_results.get("js_sandbox", {})
     if js:
         eval_times = [v["avg_us"] for k, v in js.items() if k.startswith("eval_")]
@@ -1135,19 +1514,52 @@ def main():
         if overhead is not None:
             print(f"  Selective exec overhead (Fas 4c, ecommerce):   {overhead:+.0f}%")
 
+    print("\n  ── Fas 5: Temporal Memory ──")
+
     tmp = all_results.get("temporal_memory", {})
     if tmp:
         snap_us = tmp.get("snapshot_per_step_us", 0)
         analyze_us = tmp.get("analyze_5step_us", 0)
-        print(f"  Temporal snapshot (Fas 5, per step):           {fmt_us(snap_us)}")
-        print(f"  Temporal analysis (Fas 5, 5 snapshots):        {fmt_us(analyze_us)}")
+        print(f"  Temporal snapshot (per step):                  {fmt_us(snap_us)}")
+        print(f"  Temporal analysis (5 snapshots):               {fmt_us(analyze_us)}")
+        adv = tmp.get("adversarial_patterns", 0)
+        print(f"  Adversarial patterns detected:                 {adv}")
+
+    print("\n  ── Fas 6: Intent Compiler ──")
 
     comp = all_results.get("intent_compiler", {})
     if comp:
         buy_us = comp.get("compile_buy_us", 0)
         pipeline_us = comp.get("full_pipeline_us", 0)
-        print(f"  Goal compile 'buy' (Fas 6):                    {fmt_us(buy_us)}")
-        print(f"  Full pipeline compile+execute (Fas 6):         {fmt_us(pipeline_us)}")
+        print(f"  Goal compile 'buy':                            {fmt_us(buy_us)}")
+        print(f"  Full pipeline compile+execute:                 {fmt_us(pipeline_us)}")
+
+    print("\n  ── WebArena Scenarios ──")
+
+    wa = all_results.get("webarena", {})
+    if wa:
+        scenario_times = [v["total_us"] for k, v in wa.items() if k != "temporal_shopping"]
+        if scenario_times:
+            avg_wa = statistics.mean(scenario_times)
+            print(f"  Avg scenario time (compile+parse+diff+exec):  {fmt_us(avg_wa)}")
+        for k, v in wa.items():
+            if k != "temporal_shopping" and "steps" in v:
+                print(f"    {k:<38} {v['steps']} steps, {fmt_us(v['total_us']):>10}, {v['total_tokens']:>6} tokens")
+
+    print("\n  ── Fair Mode (No Connection Pooling) ──")
+
+    fair = all_results.get("fair_mode", {})
+    if fair:
+        overheads = [v["overhead_pct"] for v in fair.values() if "overhead_pct" in v]
+        if overheads:
+            avg_overhead = statistics.mean(overheads)
+            print(f"  Avg overhead without pooling:                  {avg_overhead:+.0f}%")
+            print(f"  (Connection pooling advantage is {abs(avg_overhead):.0f}%, not engine speed)")
+
+    print("\n  ── Methodology Note ──")
+    print("  AetherAgent: persistent HTTP server (warm, pooled connections)")
+    print("  Lightpanda:  CLI subprocess per request (cold start + fetch)")
+    print("  Fair mode measures AetherAgent with fresh TCP connection per request.")
 
     # Save raw results
     results_path = Path(__file__).parent / "benchmark_results.json"
