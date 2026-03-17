@@ -481,6 +481,23 @@ Semantic Diff (Fas 4a)
 | Token savings (20 nodes, 1 change) | ✅ | 86% token savings |
 | Invalid JSON → error | ✅ | Returns descriptive error message |
 
+**JS Sandbox verification results (live – Fas 4b):**
+
+| Test | Result | Detail |
+|------|--------|--------|
+| Detect: inline script + handlers | ✅ | 1 script, 2 event handlers found |
+| Detect: static page → 0 JS | ✅ | No scripts, no handlers, no framework |
+| Detect: Next.js framework | ✅ | `framework_hint: "Next.js"` |
+| Detect: affects_content (innerHTML) | ✅ | DOM-modifying scripts flagged |
+| Eval: `29.99 * 2` | ✅ | `"59.98"` |
+| Eval: template literal | ✅ | `"Pris: 248.75 kr"` |
+| Eval: array.map.join | ✅ | `"2,4,6"` |
+| Eval: JSON.stringify | ✅ | `{"price":199,"currency":"SEK"}` |
+| Eval: fetch → BLOCKED | ✅ | `"Blocked: 'fetch' is not allowed"` |
+| Eval: document.cookie → BLOCKED | ✅ | `"Blocked: 'cookie' is not allowed"` |
+| Eval: batch (3 expressions) | ✅ | `["2", "ab", "3.14"]` |
+| Eval: ternary operator | ✅ | `"I lager"` |
+
 ### Local Benchmarks (no network overhead)
 
 Run `cargo run --bin aether-bench` for pure engine performance:
