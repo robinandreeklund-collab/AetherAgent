@@ -1,0 +1,88 @@
+{
+  "tokens": {
+    "total_raw_tokens": 68287,
+    "total_delta_tokens": 34727,
+    "loop_raw": 17505,
+    "loop_delta": 6605,
+    "loop_savings_pct": 62.26792345044273
+  },
+  "head_to_head": {
+    "simple": {
+      "ae_us": 725.4994998220354,
+      "lp_us": 294794.2599994349,
+      "ae_tokens": 495,
+      "lp_tokens": 330,
+      "speedup": 406.3328232090411
+    },
+    "ecommerce": {
+      "ae_us": 835.3209996130317,
+      "lp_us": 289220.073499564,
+      "ae_tokens": 1678,
+      "lp_tokens": 931,
+      "speedup": 346.2382409080428
+    },
+    "login": {
+      "ae_us": 784.8249997550738,
+      "lp_us": 272700.5355009169,
+      "ae_tokens": 1231,
+      "lp_tokens": 618,
+      "speedup": 347.46667803143447
+    },
+    "complex_50": {
+      "ae_us": 2580.800500254554,
+      "lp_us": 257703.30200066383,
+      "ae_tokens": 31898,
+      "lp_tokens": 20999,
+      "speedup": 99.85401892755584
+    },
+    "complex_100": {
+      "ae_us": 4313.307500524388,
+      "lp_us": 286892.2184998155,
+      "ae_tokens": 63696,
+      "lp_tokens": 41954,
+      "speedup": 66.51327744774439
+    }
+  },
+  "parallel": {
+    "aether_25": {
+      "wall_ms": 57.38171299890382,
+      "avg_ms": 20.304870160034625,
+      "throughput": 435.6788721256471
+    },
+    "lp_25": {
+      "wall_ms": 487.2263669985841,
+      "avg_ms": 328.27199379993544,
+      "throughput": 51.31085198447942
+    },
+    "aether_50": {
+      "wall_ms": 90.86430800016387,
+      "avg_ms": 22.68017713991867,
+      "throughput": 550.2710701314077
+    },
+    "lp_50": {
+      "wall_ms": 1294.1081159988244,
+      "avg_ms": 512.9425052601437,
+      "throughput": 38.63664819180025
+    },
+    "aether_100": {
+      "wall_ms": 182.4989540000388,
+      "avg_ms": 35.69639630002712,
+      "throughput": 547.9483460490341
+    },
+    "lp_100": {
+      "wall_ms": 1300.447373998395,
+      "avg_ms": 439.770563619968,
+      "throughput": 76.89661419557252
+    }
+  },
+  "memory": {
+    "aether_idle_kb": 9624,
+    "aether_loaded_kb": 9712
+  },
+  "quality": {
+    "ae_nodes": 12,
+    "lp_nodes": 21,
+    "ae_size": 6715,
+    "lp_size": 3724
+  }
+}

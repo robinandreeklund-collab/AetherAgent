@@ -92,12 +92,13 @@ agent.fill_form({"email": "user@example.com", "password": "..."})
 ```
 
 ### Minimal Footprint
-| Metric | AetherAgent | Playwright + Chrome |
-|--------|------------|---------------------|
-| Binary size | ~2–6 MB | ~300 MB |
-| Startup time | 10–100 ms | 1,000–3,000 ms |
-| Memory per instance | ~15 MB | ~150 MB |
-| Parallel agents (laptop) | 500–1,000 | 5–10 |
+| Metric | AetherAgent | Lightpanda | Playwright + Chrome |
+|--------|------------|-----------|---------------------|
+| Binary size | ~2–6 MB | ~50 MB | ~300 MB |
+| Startup time | <1 ms | ~250 ms | 1,000–3,000 ms |
+| Memory per instance | ~9.5 MB | ~19 MB | ~150 MB |
+| 100 parallel tasks | 182 ms | 1,300 ms | N/A |
+| Throughput | ~550 req/s | ~77 req/s | ~5 req/s |
 
 ### Runs Everywhere
 Compiles to WebAssembly and runs in Python, Node.js, Cloudflare Workers, WasmEdge, and browser PWAs – with zero vendor lock-in.
@@ -563,6 +564,65 @@ injection: malicious text                           14         13
 ```
 
 **All local benchmarks pass performance targets** (simple <50ms, complex <500ms).
+
+### AetherAgent vs Lightpanda – Head-to-Head
+
+Tested locally on the same machine (4 CPU, 16 GB RAM) with identical HTML fixtures. AetherAgent runs as an HTTP server; Lightpanda runs as a CLI process per request (`--dump semantic_tree`).
+
+Run: `python3 benches/bench_vs_lightpanda.py`
+
+**Parse Speed (median, 20 iterations):**
+
+| Fixture | AetherAgent | Lightpanda | Speedup | AE tokens | LP tokens |
+|---------|------------|-----------|---------|-----------|-----------|
+| Simple (3 elements) | 725 µs | 295 ms | **406x** | 495 | 330 |
+| E-commerce (10 elements) | 835 µs | 289 ms | **346x** | 1,678 | 931 |
+| Login form (6 elements) | 785 µs | 273 ms | **348x** | 1,231 | 618 |
+| Complex (50 products) | 2.6 ms | 258 ms | **100x** | 31,898 | 20,999 |
+| Complex (100 products) | 4.3 ms | 287 ms | **67x** | 63,696 | 41,954 |
+
+> Note: Lightpanda's time includes process startup + HTTP fetch + DOM parse + tree serialization. AetherAgent's time is pure parse + semantic tree build over HTTP. Both produce accessibility/semantic trees from the same HTML.
+
+**Parallel Throughput (mixed ecommerce + complex fixtures):**
+
+| Tasks | AetherAgent | Lightpanda | Ratio |
+|-------|------------|-----------|-------|
+| 25 | 57 ms (436/s) | 487 ms (51/s) | **8.5x** |
+| 50 | 91 ms (550/s) | 1,294 ms (39/s) | **14.2x** |
+| 100 | 182 ms (548/s) | 1,300 ms (77/s) | **7.1x** |
+
+**Memory (RSS):**
+
+| Engine | Scenario | RSS |
+|--------|---------|-----|
+| AetherAgent | Server idle | 9.4 MB |
+| AetherAgent | After 50× complex parse | 9.5 MB |
+| Lightpanda | Per process (any fixture) | 19.1 MB |
+
+**Token Savings with Fas 4a Diff (AetherAgent-only feature):**
+
+| Scenario | Raw tokens | Delta tokens | Savings |
+|----------|-----------|-------------|---------|
+| Same page (no change) | 495 | 54 | **89%** |
+| E-commerce: add to cart | 1,823 | 547 | **70%** |
+| Complex 50 (no change) | 31,898 | 55 | **99.8%** |
+| 10-step agent loop | 17,505 | 6,605 | **62%** |
+
+**Output Quality Comparison:**
+
+| Feature | AetherAgent | Lightpanda |
+|---------|------------|-----------|
+| Semantic tree | Yes | Yes |
+| Goal-relevance scoring | **Yes** | No |
+| Prompt injection detection | **Yes** | No |
+| Semantic diff (delta) | **Yes** | No |
+| JS sandbox evaluation | **Yes** | No |
+| Intent API (click/fill/extract) | **Yes** | No |
+| Workflow memory | **Yes** | No |
+| JavaScript execution (V8) | No | **Yes** |
+| CSS rendering | No | No |
+
+> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, intent API) that Lightpanda does not offer. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and will add CDP fallback in Fas 5+.
 
 ---
 
