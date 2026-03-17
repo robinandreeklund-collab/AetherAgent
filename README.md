@@ -58,11 +58,11 @@ Every AI browser agent today faces the same trade-off:
 
 AetherAgent is the first engine built to occupy that empty quadrant: **fast *and* smart**.
 
-No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly, parsing HTML into a semantic accessibility tree with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 millisecond startup and ~9.5 MB RAM.
+No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly — fetching pages, parsing HTML into semantic accessibility trees with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 millisecond startup and ~12 MB RAM. Built-in HTTP fetch with cookies, redirects, robots.txt compliance, and SSRF protection means AetherAgent works end-to-end: URL in, semantic tree out.
 
 ### Honest Positioning
 
-AetherAgent is **not** a browser replacement. It does not execute full JavaScript runtimes or render CSS. For JS-heavy SPAs, pair it with a headless browser. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works standalone end-to-end.
+AetherAgent is **not** a Chrome replacement. It fetches pages and builds semantic trees, but does not execute full JavaScript runtimes (V8) or render CSS. For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works fully standalone: URL in, semantic tree out.
 
 | Capability | AetherAgent | Playwright | Browser Use | Scrapy |
 |-----------|:-----------:|:----------:|:-----------:|:------:|
@@ -77,11 +77,11 @@ AetherAgent is **not** a browser replacement. It does not execute full JavaScrip
 | MCP server built-in | **Yes** | No | No | No |
 | License | MIT | Apache-2.0 | MIT | BSD |
 
-**When to use AetherAgent:** Your agent needs fast, goal-aware semantic understanding of HTML with built-in security. Data extraction, form filling, navigation planning — perception, not rendering.
+**When to use AetherAgent:** Your agent needs a fast, end-to-end browser engine — fetch pages, build semantic trees, plan actions, and detect injection — with no browser overhead. Works standalone for static/SSR pages (~40% of the web), or as a perception layer on top of browser-rendered HTML.
 
-**When to use Playwright/Browser Use:** You need a full browser: JavaScript-heavy SPAs, visual rendering, or CDP automation.
+**When to use Playwright/Browser Use:** You need full JavaScript execution: SPAs, visual rendering, or CDP automation.
 
-**Best of both worlds:** Fetch with a browser, perceive with AetherAgent.
+**Best of both worlds:** For JS-heavy SPAs, fetch with a browser, perceive with AetherAgent.
 
 ---
 
@@ -94,8 +94,8 @@ Instead of handing your LLM 50,000 tokens of raw HTML, AetherAgent delivers ~200
 html = requests.get(url).text
 llm.send(html)  # 50,000 tokens, slow, expensive, no structure
 
-# With AetherAgent — semantic perception
-tree = agent.parse(html, goal="buy cheapest flight", url=url)
+# With AetherAgent — one call: fetch + semantic parse
+tree = agent.fetch_parse(url, goal="buy cheapest flight")
 llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 ```
 
@@ -745,7 +745,7 @@ safety = agent.check_injection(page_text)
 
 ### Current Status
 
-AetherAgent is a fully functional semantic perception engine with:
+AetherAgent is a fully functional AI browser engine with:
 
 - **18 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, workflow memory, core types
 - **35 WASM-exported functions** — complete API surface for any WASM host
