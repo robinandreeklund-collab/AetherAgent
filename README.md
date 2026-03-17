@@ -231,6 +231,9 @@ curl -X POST https://your-app.onrender.com/api/diff \
 | POST | `/api/fill-form` | Map form fields to key/value pairs |
 | POST | `/api/extract` | Extract structured data by keys |
 | POST | `/api/diff` | Semantic diff between two trees (token savings) |
+| POST | `/api/detect-js` | Detect JavaScript snippets in HTML |
+| POST | `/api/eval-js` | Evaluate JS expression in sandbox |
+| POST | `/api/eval-js-batch` | Evaluate multiple JS expressions |
 | POST | `/api/check-injection` | Check text for prompt injection |
 | POST | `/api/wrap-untrusted` | Wrap content in trust markers |
 | POST | `/api/memory/create` | Create workflow memory |
@@ -261,6 +264,7 @@ AetherAgent/
 │   ├── trust.rs        # Trust shield – prompt injection filter
 │   ├── intent.rs       # Intent API – find_and_click, fill_form, extract_data
 │   ├── diff.rs         # Semantic DOM Diffing – minimal delta between trees
+│   ├── js_eval.rs      # JS Sandbox – Boa engine for safe snippet evaluation
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
@@ -301,7 +305,7 @@ AetherAgent/
 | Phase | Status | Description |
 |-------|--------|-------------|
 | **Fas 4a** – Semantic DOM Diffing | ✅ Done | Compare two trees → minimal delta, 80–95% token savings for multi-step flows |
-| **Fas 4b** – QuickJS Sandbox | 🔜 Next | Embedded JS runtime (QuickJS/Boa) for evaluating critical client-side logic |
+| **Fas 4b** – JS Sandbox (Boa) | ✅ Done | Embedded Boa JS engine for evaluating inline scripts, event handlers, expressions |
 | **Fas 4c** – Selective Execution | Planned | Smart detection of JS-dependent content, targeted eval instead of full browser |
 | **Fas 5** – Temporal Memory & Adversarial Modeling | Planned | Time-series page change tracking, predictive injection defense |
 | **Fas 6** – Intent Compiler | Planned | Multi-step goal → optimized action plan with speculative prefetch |
@@ -356,6 +360,47 @@ llm.send(delta)  # Delta: ~20 tokens (90% savings)
   "summary": "2 changes (1 modified, 1 added), 87% token savings"
 }
 ```
+
+### JavaScript Sandbox (Fas 4b)
+
+Many modern pages use inline JavaScript for pricing, dynamic text, and conditional rendering. AetherAgent embeds the **Boa** JavaScript engine (pure Rust, no C dependencies) in a sandboxed environment to evaluate these snippets safely.
+
+**Detection** – scan HTML for inline scripts, event handlers, and framework markers:
+
+```python
+detection = agent.detect_js(html)
+# → {"total_inline_scripts": 2, "total_event_handlers": 3,
+#    "has_framework": true, "framework_hint": "React",
+#    "snippets": [{"snippet_type": "InlineScript", "affects_content": true, ...}]}
+```
+
+**Evaluation** – run safe JS expressions in a sandbox (no DOM, no fetch, no timers):
+
+```python
+result = agent.eval_js("29.99 * 2")
+# → {"value": "59.98", "error": null, "timed_out": false}
+
+result = agent.eval_js("`Total: ${(199 * 1.25).toFixed(2)} kr`")
+# → {"value": "Total: 248.75 kr", "error": null}
+
+# Dangerous operations are blocked
+result = agent.eval_js("fetch('https://evil.com')")
+# → {"value": null, "error": "Blocked: 'fetch' is not allowed in sandbox"}
+```
+
+**Batch evaluation** for multiple snippets:
+
+```python
+results = agent.eval_js_batch(["1+1", "'a'+'b'", "Math.PI.toFixed(2)"])
+# → {"results": [{"value": "2"}, {"value": "ab"}, {"value": "3.14"}]}
+```
+
+**Security model:**
+- No DOM access (`document.*`, `window.*` blocked)
+- No network (`fetch`, `XMLHttpRequest` blocked)
+- No timers (`setTimeout`, `setInterval` blocked)
+- No module system (`import`, `require`, `eval` blocked)
+- Pure computation only: math, strings, arrays, objects, template literals
 
 ### Future Work
 

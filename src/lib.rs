@@ -3,6 +3,7 @@
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 mod diff;
 mod intent;
+mod js_eval;
 mod memory;
 mod parser;
 mod semantic;
@@ -313,6 +314,64 @@ pub fn diff_semantic_trees(old_tree_json: &str, new_tree_json: &str) -> String {
     }
 }
 
+// ─── Fas 4b: JS Sandbox ─────────────────────────────────────────────────────
+
+/// Detect JavaScript snippets in HTML that may affect page content
+///
+/// Scans for inline scripts, event handlers, and framework markers.
+/// Use this to determine if a page needs JS evaluation for complete parsing.
+///
+/// # Returns
+/// JSON with JsDetectionResult: snippets, has_framework, framework_hint
+#[wasm_bindgen]
+pub fn detect_js(html: &str) -> String {
+    let result = js_eval::detect_js_snippets(html);
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Evaluate a JavaScript expression in a sandboxed environment
+///
+/// Supports: math, strings, arrays, objects, ternary, template literals.
+/// Blocks: DOM access, fetch, timers, eval, import, require.
+///
+/// # Arguments
+/// * `code` - JavaScript expression to evaluate
+///
+/// # Returns
+/// JSON with JsEvalResult: value, error, timed_out, eval_time_us
+#[wasm_bindgen]
+pub fn eval_js(code: &str) -> String {
+    let result = js_eval::eval_js(code);
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Evaluate multiple JavaScript expressions in sequence
+///
+/// # Arguments
+/// * `snippets_json` - JSON array of code strings: ["1+1", "'a'+'b'"]
+///
+/// # Returns
+/// JSON with JsBatchResult: results[], total_eval_time_us
+#[wasm_bindgen]
+pub fn eval_js_batch(snippets_json: &str) -> String {
+    let snippets: Vec<String> = match serde_json::from_str(snippets_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "Invalid snippets_json: {}"}}"#, e),
+    };
+
+    let result = js_eval::eval_js_batch(&snippets);
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -495,5 +554,57 @@ mod tests {
             0,
             "Identiska träd borde ge 0 förändringar"
         );
+    }
+
+    // ─── Fas 4b: JS Sandbox smoke tests ───────────────────────────────
+
+    #[test]
+    fn test_detect_js_returns_valid_json() {
+        let html = r#"<html><body>
+            <script>document.getElementById('x').textContent = 'hi';</script>
+            <button onclick="alert('clicked')">Click</button>
+        </body></html>"#;
+
+        let result = detect_js(html);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["snippets"].is_array(), "Borde ha snippets-array");
+        assert_eq!(parsed["total_inline_scripts"], 1);
+        assert_eq!(parsed["total_event_handlers"], 1);
+    }
+
+    #[test]
+    fn test_detect_js_no_scripts() {
+        let html = r#"<html><body><p>Statisk sida</p></body></html>"#;
+        let result = detect_js(html);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["total_inline_scripts"], 0);
+        assert_eq!(parsed["total_event_handlers"], 0);
+        assert_eq!(parsed["has_framework"], false);
+    }
+
+    #[test]
+    fn test_eval_js_returns_valid_json() {
+        let result = eval_js("1 + 1");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        // Med js-eval feature: value = "2"
+        // Utan: error = "JS evaluation not available..."
+        assert!(
+            parsed["value"].is_string() || parsed["error"].is_string(),
+            "Borde ha antingen value eller error"
+        );
+    }
+
+    #[test]
+    fn test_eval_js_batch_returns_valid_json() {
+        let result = eval_js_batch(r#"["1+1", "'a'+'b'"]"#);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["results"].is_array(), "Borde ha results-array");
+        assert_eq!(parsed["results"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_eval_js_batch_invalid_json() {
+        let result = eval_js_batch("not json");
+        assert!(result.contains("error"));
     }
 }

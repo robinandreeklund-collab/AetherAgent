@@ -630,6 +630,99 @@ fn test_diff_performance() {
     );
 }
 
+// ─── Fas 4b: JS Sandbox – Integration ────────────────────────────────────────
+
+#[test]
+fn test_detect_js_ecommerce_with_scripts() {
+    let html = r##"<html><body>
+        <script>
+            document.getElementById('total').textContent = '$' + (29.99 * 2).toFixed(2);
+        </script>
+        <h1>Produkt</h1>
+        <p id="total"></p>
+        <button onclick="addToCart(this)">Lägg i varukorg</button>
+        <button onchange="updateQty()">Antal</button>
+    </body></html>"##;
+
+    let result = detect_js(html);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(
+        parsed["total_inline_scripts"], 1,
+        "Borde hitta 1 inline script"
+    );
+    assert_eq!(
+        parsed["total_event_handlers"], 2,
+        "Borde hitta 2 event handlers"
+    );
+
+    let snippets = parsed["snippets"].as_array().unwrap();
+    let inline = snippets
+        .iter()
+        .find(|s| s["snippet_type"] == "InlineScript");
+    assert!(inline.is_some(), "Borde ha InlineScript snippet");
+    assert_eq!(
+        inline.unwrap()["affects_content"],
+        true,
+        "Script med textContent borde markeras som affects_content"
+    );
+}
+
+#[test]
+fn test_detect_js_react_app() {
+    let html = r#"<html><body>
+        <div id="__next"><div data-reactroot="">Loading...</div></div>
+        <script src="/_next/static/chunks/main.js"></script>
+        <script>__NEXT_DATA__ = {"page": "/shop"};</script>
+    </body></html>"#;
+
+    let result = detect_js(html);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(parsed["has_framework"], true, "Borde detektera framework");
+    assert_eq!(parsed["framework_hint"], "Next.js");
+    // Extern script (src=) borde ignoreras, bara inline räknas
+    assert_eq!(parsed["total_inline_scripts"], 1);
+}
+
+#[test]
+fn test_detect_js_static_page_no_js() {
+    let html = r#"<html><body>
+        <h1>Statisk sida</h1>
+        <p>Ingen JavaScript här.</p>
+        <button>Köp nu</button>
+    </body></html>"#;
+
+    let result = detect_js(html);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(parsed["total_inline_scripts"], 0);
+    assert_eq!(parsed["total_event_handlers"], 0);
+    assert_eq!(parsed["has_framework"], false);
+    assert_eq!(parsed["snippets"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_eval_js_returns_result_or_error() {
+    // Oavsett om js-eval-featuren är aktiv, borde vi få valid JSON
+    let result = eval_js("1 + 1");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert!(
+        parsed["value"].is_string() || parsed["error"].is_string(),
+        "Borde ha antingen value eller error"
+    );
+}
+
+#[test]
+fn test_eval_js_batch_multiple() {
+    let result = eval_js_batch(r#"["1+1", "'hello'"]"#);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let results = parsed["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "Borde ha 2 resultat");
+}
+
 // ─── Fas 1: Prestandatester ──────────────────────────────────────────────────
 
 #[test]

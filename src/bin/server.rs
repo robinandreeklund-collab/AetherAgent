@@ -95,6 +95,21 @@ struct DiffRequest {
     new_tree_json: String,
 }
 
+#[derive(Deserialize)]
+struct DetectJsRequest {
+    html: String,
+}
+
+#[derive(Deserialize)]
+struct EvalJsRequest {
+    code: String,
+}
+
+#[derive(Deserialize)]
+struct EvalJsBatchRequest {
+    snippets: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -115,6 +130,9 @@ async fn root() -> impl IntoResponse {
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
             "POST /api/diff": "Semantic diff between two trees (token savings)",
+            "POST /api/detect-js": "Detect JavaScript snippets in HTML",
+            "POST /api/eval-js": "Evaluate JS expression in sandbox",
+            "POST /api/eval-js-batch": "Evaluate multiple JS expressions",
             "POST /api/check-injection": "Check text for prompt injection",
             "POST /api/wrap-untrusted": "Wrap content in trust markers",
             "POST /api/memory/create": "Create workflow memory",
@@ -203,6 +221,33 @@ async fn diff(Json(req): Json<DiffRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn detect_js(Json(req): Json<DetectJsRequest>) -> impl IntoResponse {
+    let result = aether_agent::detect_js(&req.html);
+    (StatusCode::OK, result)
+}
+
+async fn eval_js_handler(Json(req): Json<EvalJsRequest>) -> impl IntoResponse {
+    let result = aether_agent::eval_js(&req.code);
+    (StatusCode::OK, result)
+}
+
+async fn eval_js_batch_handler(Json(req): Json<EvalJsBatchRequest>) -> impl IntoResponse {
+    let snippets_json = match serde_json::to_string(&req.snippets) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                serde_json::to_string(&ErrorResponse {
+                    error: format!("Invalid snippets: {}", e),
+                })
+                .unwrap_or_default(),
+            )
+        }
+    };
+    let result = aether_agent::eval_js_batch(&snippets_json);
+    (StatusCode::OK, result)
+}
+
 async fn create_memory() -> impl IntoResponse {
     let result = aether_agent::create_workflow_memory();
     (StatusCode::OK, result)
@@ -248,6 +293,10 @@ fn build_router() -> Router {
         .route("/api/wrap-untrusted", post(wrap_untrusted))
         // Fas 4a: Semantic diff
         .route("/api/diff", post(diff))
+        // Fas 4b: JS sandbox
+        .route("/api/detect-js", post(detect_js))
+        .route("/api/eval-js", post(eval_js_handler))
+        .route("/api/eval-js-batch", post(eval_js_batch_handler))
         // Fas 2: Intent API
         .route("/api/click", post(click))
         .route("/api/fill-form", post(fill_form))
@@ -279,6 +328,9 @@ async fn main() {
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");
     println!("  POST /api/diff            – Semantic diff between trees");
+    println!("  POST /api/detect-js       – Detect JS snippets in HTML");
+    println!("  POST /api/eval-js         – Evaluate JS in sandbox");
+    println!("  POST /api/eval-js-batch   – Batch JS evaluation");
     println!("  POST /api/check-injection – Check text for injection");
     println!("  POST /api/wrap-untrusted  – Wrap content in trust markers");
     println!("  POST /api/memory/*        – Workflow memory operations");

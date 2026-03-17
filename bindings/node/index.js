@@ -81,6 +81,21 @@ class AetherAgent {
     return JSON.parse(this.wasm.diff_semantic_trees(oldJson, newJson));
   }
 
+  /** Detect JavaScript snippets in HTML that may affect page content */
+  detectJs(html) {
+    return JSON.parse(this.wasm.detect_js(html));
+  }
+
+  /** Evaluate a JavaScript expression in a sandboxed environment */
+  evalJs(code) {
+    return JSON.parse(this.wasm.eval_js(code));
+  }
+
+  /** Evaluate multiple JS expressions in sequence */
+  evalJsBatch(snippets) {
+    return JSON.parse(this.wasm.eval_js_batch(JSON.stringify(snippets)));
+  }
+
   /** Wrap content in untrusted content markers for LLM safety */
   wrapUntrusted(content) {
     return this.wasm.wrap_untrusted(content);

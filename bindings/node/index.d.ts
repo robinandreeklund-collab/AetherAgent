@@ -143,6 +143,33 @@ export interface SemanticDelta {
   diff_time_ms: number;
 }
 
+export interface JsEvalResult {
+  value?: string;
+  error?: string;
+  timed_out: boolean;
+  eval_time_us: number;
+}
+
+export interface JsBatchResult {
+  results: JsEvalResult[];
+  total_eval_time_us: number;
+}
+
+export interface DetectedSnippet {
+  snippet_type: "InlineScript" | "EventHandler" | "TemplateExpression" | "ValueExpression";
+  code: string;
+  source: string;
+  affects_content: boolean;
+}
+
+export interface JsDetectionResult {
+  snippets: DetectedSnippet[];
+  has_framework: boolean;
+  framework_hint?: string;
+  total_inline_scripts: number;
+  total_event_handlers: number;
+}
+
 export declare class AetherAgent {
   constructor();
   health(): HealthResult;
@@ -152,6 +179,9 @@ export declare class AetherAgent {
   fillForm(html: string, goal: string, url: string, fields: Record<string, string>): FillFormResult;
   extractData(html: string, goal: string, url: string, keys: string[]): ExtractDataResult;
   diffTrees(oldTreeJson: string | SemanticTree, newTreeJson: string | SemanticTree): SemanticDelta;
+  detectJs(html: string): JsDetectionResult;
+  evalJs(code: string): JsEvalResult;
+  evalJsBatch(snippets: string[]): JsBatchResult;
   checkInjection(text: string): InjectionCheckResult;
   wrapUntrusted(content: string): string;
   createMemory(): WorkflowMemory;

@@ -76,6 +76,18 @@ class AetherAgent:
         new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
         return self._post("/api/diff", {"old_tree_json": old_json, "new_tree_json": new_json})
 
+    def detect_js(self, html: str) -> dict:
+        """Detect JavaScript snippets in HTML that may affect content."""
+        return self._post("/api/detect-js", {"html": html})
+
+    def eval_js(self, code: str) -> dict:
+        """Evaluate a JavaScript expression in sandbox."""
+        return self._post("/api/eval-js", {"code": code})
+
+    def eval_js_batch(self, snippets: list) -> dict:
+        """Evaluate multiple JS expressions in sequence."""
+        return self._post("/api/eval-js-batch", {"snippets": snippets})
+
     def check_injection(self, text: str) -> dict:
         """Check text for prompt injection patterns."""
         return self._post("/api/check-injection", {"text": text})
@@ -175,6 +187,15 @@ class AetherAgentWasm:
         old_json = json.dumps(old_tree) if isinstance(old_tree, dict) else old_tree
         new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
         return json.loads(self._call("diff_semantic_trees", old_json, new_json))
+
+    def detect_js(self, html: str) -> dict:
+        return json.loads(self._call("detect_js", html))
+
+    def eval_js(self, code: str) -> dict:
+        return json.loads(self._call("eval_js", code))
+
+    def eval_js_batch(self, snippets: list) -> dict:
+        return json.loads(self._call("eval_js_batch", json.dumps(snippets)))
 
     def check_injection(self, text: str) -> dict:
         return json.loads(self._call("check_injection", text))

@@ -157,7 +157,7 @@ Types:
 
 **Fas 4a (Complete)**: Semantic DOM Diffing — `diff_semantic_trees`, minimal delta between trees, 80–95% token savings.
 
-**Fas 4b (Next)**: QuickJS Sandbox — embedded JS runtime for evaluating critical client-side logic.
+**Fas 4b (Complete)**: JS Sandbox (Boa) — embedded Boa JS engine for evaluating inline scripts, event handlers, expressions. Sandboxed: no DOM/fetch/timers.
 
 **Fas 4c (Planned)**: Selective Execution — smart detection of JS-dependent content, targeted eval.
 
