@@ -68,6 +68,93 @@ impl Default for InterceptConfig {
     }
 }
 
+/// Cached XHR response for temporal diff-based monitoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct XhrCachedResponse {
+    /// URL som cachades
+    pub url: String,
+    /// Svarskropp
+    pub body: String,
+    /// Tidsstämpel när svaret cachades (ms)
+    pub cached_at_ms: u64,
+    /// Semantisk nod skapad från svaret
+    pub node: SemanticNode,
+    /// TTL i millisekunder (None = ingen expiry)
+    pub ttl_ms: Option<u64>,
+}
+
+/// XHR Response Cache – cachar API-svar över temporal snapshots
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct XhrResponseCache {
+    /// Cachade svar, keyed på URL
+    pub entries: HashMap<String, XhrCachedResponse>,
+}
+
+impl XhrResponseCache {
+    /// Skapa tom cache
+    pub fn new() -> Self {
+        XhrResponseCache {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Hämta cachat svar om det finns och inte expirerat
+    pub fn get(&self, url: &str, now_ms: u64) -> Option<&XhrCachedResponse> {
+        self.entries.get(url).filter(|entry| {
+            entry
+                .ttl_ms
+                .is_none_or(|ttl| now_ms - entry.cached_at_ms < ttl)
+        })
+    }
+
+    /// Cacha ett svar
+    pub fn put(
+        &mut self,
+        url: &str,
+        body: &str,
+        node: SemanticNode,
+        now_ms: u64,
+        ttl_ms: Option<u64>,
+    ) {
+        self.entries.insert(
+            url.to_string(),
+            XhrCachedResponse {
+                url: url.to_string(),
+                body: body.to_string(),
+                cached_at_ms: now_ms,
+                node,
+                ttl_ms,
+            },
+        );
+    }
+
+    /// Ta bort expirerade entries
+    pub fn evict_expired(&mut self, now_ms: u64) {
+        self.entries.retain(|_, entry| {
+            entry
+                .ttl_ms
+                .is_none_or(|ttl| now_ms - entry.cached_at_ms < ttl)
+        });
+    }
+
+    /// Jämför cachat svar med nytt svar, returnera true om det ändrats
+    pub fn has_changed(&self, url: &str, new_body: &str) -> bool {
+        self.entries
+            .get(url)
+            .is_none_or(|entry| entry.body != new_body)
+    }
+
+    /// Serialisera till JSON
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Deserialisera från JSON
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        serde_json::from_str(json).map_err(|e| format!("Invalid XHR cache: {}", e))
+    }
+}
+
 // ─── Prisfält att söka i JSON ───────────────────────────────────────────────
 
 /// Fältnamn som kan innehålla prisinformation
@@ -415,6 +502,90 @@ mod tests {
         let truncated = truncate_body(&text, 100);
         assert!(truncated.ends_with("..."), "Borde sluta med ...");
         // Borde inte panika på char boundary
+    }
+
+    #[test]
+    fn test_xhr_cache_put_and_get() {
+        let mut cache = XhrResponseCache::new();
+        let node = SemanticNode::new(10_000, "price", "$99");
+        cache.put(
+            "https://api.shop.se/price",
+            r#"{"price":"$99"}"#,
+            node,
+            1000,
+            Some(30_000),
+        );
+        let entry = cache.get("https://api.shop.se/price", 1500);
+        assert!(entry.is_some(), "Borde hitta cachat svar");
+        assert_eq!(entry.unwrap().body, r#"{"price":"$99"}"#);
+    }
+
+    #[test]
+    fn test_xhr_cache_expired() {
+        let mut cache = XhrResponseCache::new();
+        let node = SemanticNode::new(10_000, "price", "$99");
+        cache.put("https://api.shop.se/price", "{}", node, 1000, Some(5000));
+        let entry = cache.get("https://api.shop.se/price", 7000);
+        assert!(entry.is_none(), "Expirerat svar borde inte returneras");
+    }
+
+    #[test]
+    fn test_xhr_cache_has_changed() {
+        let mut cache = XhrResponseCache::new();
+        let node = SemanticNode::new(10_000, "price", "$99");
+        cache.put(
+            "https://api.shop.se/price",
+            r#"{"price":"$99"}"#,
+            node,
+            1000,
+            None,
+        );
+        assert!(
+            !cache.has_changed("https://api.shop.se/price", r#"{"price":"$99"}"#),
+            "Samma body borde inte vara ändrad"
+        );
+        assert!(
+            cache.has_changed("https://api.shop.se/price", r#"{"price":"$149"}"#),
+            "Annan body borde vara ändrad"
+        );
+    }
+
+    #[test]
+    fn test_xhr_cache_evict_expired() {
+        let mut cache = XhrResponseCache::new();
+        let node1 = SemanticNode::new(10_000, "price", "$99");
+        let node2 = SemanticNode::new(10_001, "data", "info");
+        cache.put("https://api.shop.se/a", "{}", node1, 1000, Some(5000));
+        cache.put("https://api.shop.se/b", "{}", node2, 1000, None);
+        cache.evict_expired(7000);
+        assert!(
+            cache.entries.get("https://api.shop.se/a").is_none(),
+            "Expirerad entry borde tas bort"
+        );
+        assert!(
+            cache.entries.get("https://api.shop.se/b").is_some(),
+            "Entry utan TTL borde finnas kvar"
+        );
+    }
+
+    #[test]
+    fn test_xhr_cache_serde_roundtrip() {
+        let mut cache = XhrResponseCache::new();
+        let node = SemanticNode::new(10_000, "price", "$99");
+        cache.put(
+            "https://api.shop.se/price",
+            r#"{"price":"$99"}"#,
+            node,
+            1000,
+            Some(30_000),
+        );
+        let json = cache.to_json();
+        let restored = XhrResponseCache::from_json(&json).expect("Borde kunna deserialisera");
+        assert_eq!(
+            restored.entries.len(),
+            1,
+            "Borde ha en entry efter roundtrip"
+        );
     }
 
     #[test]

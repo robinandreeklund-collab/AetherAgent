@@ -1,6 +1,8 @@
 // Fas 11: Inbyggd YOLOv8-inferens via rten
 // Screenshot -> objektdetektering -> bounding boxes -> semantiskt trad
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::grounding::compute_iou;
@@ -39,6 +41,9 @@ pub struct VisionResult {
     pub preprocess_time_ms: u64,
     /// Antal detektioner fore NMS-filtrering
     pub raw_detection_count: u32,
+    /// Modellversion som användes
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model_version: String,
 }
 
 /// Configuration for the vision pipeline
@@ -56,6 +61,18 @@ pub struct VisionConfig {
     /// Max antal detektioner att returnera (default 100)
     #[serde(default = "default_max_detections")]
     pub max_detections: usize,
+    /// Per-klass konfidenströsklar (override global threshold)
+    #[serde(default)]
+    pub class_thresholds: HashMap<String, f32>,
+    /// Dynamiska klassetiketter (override UI_CLASSES om icke-tom)
+    #[serde(default)]
+    pub class_labels: Vec<String>,
+    /// Modellversion för spårbarhet
+    #[serde(default)]
+    pub model_version: String,
+    /// Minsta detektionsarea i pixels² (filtrera bort artefakter)
+    #[serde(default)]
+    pub min_detection_area: f32,
 }
 
 fn default_confidence_threshold() -> f32 {
@@ -81,6 +98,45 @@ impl Default for VisionConfig {
             nms_threshold: default_nms_threshold(),
             input_size: default_input_size(),
             max_detections: default_max_detections(),
+            class_thresholds: HashMap::new(),
+            class_labels: Vec::new(),
+            model_version: String::new(),
+            min_detection_area: 0.0,
+        }
+    }
+}
+
+impl VisionConfig {
+    /// Hämta konfidenströskel för en specifik klass
+    ///
+    /// Returnerar per-klass-tröskeln om den finns, annars global threshold.
+    pub fn threshold_for_class(&self, class: &str) -> f32 {
+        self.class_thresholds
+            .get(class)
+            .copied()
+            .unwrap_or(self.confidence_threshold)
+    }
+
+    /// Hämta klassetikett för ett index
+    ///
+    /// Returnerar dynamisk etikett om class_labels är satt, annars UI_CLASSES.
+    pub fn class_name(&self, index: usize) -> &str {
+        if !self.class_labels.is_empty() {
+            self.class_labels
+                .get(index)
+                .map(|s| s.as_str())
+                .unwrap_or("unknown")
+        } else {
+            UI_CLASSES.get(index).copied().unwrap_or("unknown")
+        }
+    }
+
+    /// Antal klasser
+    pub fn num_classes(&self) -> usize {
+        if !self.class_labels.is_empty() {
+            self.class_labels.len()
+        } else {
+            UI_CLASSES.len()
         }
     }
 }
@@ -291,7 +347,7 @@ pub fn run_inference(
 
     let num_attrs = shape[1]; // 4 + num_classes
     let num_preds = shape[2];
-    let num_classes = num_attrs.saturating_sub(4).min(UI_CLASSES.len());
+    let num_classes = num_attrs.saturating_sub(4).min(config.num_classes());
 
     if num_classes == 0 {
         return Err("Modellen har inga klasser".to_string());
@@ -313,7 +369,10 @@ pub fn run_inference(
             }
         }
 
-        if best_conf < config.confidence_threshold {
+        // Per-klass konfidenströskel
+        let class_name = config.class_name(best_class);
+        let threshold = config.threshold_for_class(class_name);
+        if best_conf < threshold {
             continue;
         }
 
@@ -323,10 +382,13 @@ pub fn run_inference(
         let w = data[2 * num_preds + pred_idx];
         let h = data[3 * num_preds + pred_idx];
 
+        // Filtrera för liten area
+        if config.min_detection_area > 0.0 && w * h < config.min_detection_area {
+            continue;
+        }
+
         let x = cx - w / 2.0;
         let y = cy - h / 2.0;
-
-        let class_name = UI_CLASSES.get(best_class).unwrap_or(&"unknown");
 
         detections.push(UiDetection {
             class: class_name.to_string(),
@@ -383,6 +445,7 @@ pub fn detect_ui_elements(
         inference_time_ms,
         preprocess_time_ms,
         raw_detection_count,
+        model_version: config.model_version.clone(),
     })
 }
 
@@ -653,6 +716,97 @@ mod tests {
         let config = VisionConfig::default();
         let result = detect_ui_elements(&[], &[], "goal", &config);
         assert!(result.is_err(), "Tom modell borde ge fel");
+    }
+
+    #[test]
+    fn test_per_class_threshold() {
+        let mut config = VisionConfig::default();
+        config.class_thresholds.insert("button".to_string(), 0.5);
+        config.class_thresholds.insert("text".to_string(), 0.8);
+        assert!(
+            (config.threshold_for_class("button") - 0.5).abs() < 0.01,
+            "Button borde ha per-klass-tröskel 0.5"
+        );
+        assert!(
+            (config.threshold_for_class("text") - 0.8).abs() < 0.01,
+            "Text borde ha per-klass-tröskel 0.8"
+        );
+        assert!(
+            (config.threshold_for_class("input") - 0.25).abs() < 0.01,
+            "Input utan override borde falla tillbaka till global 0.25"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_class_labels() {
+        let mut config = VisionConfig::default();
+        config.class_labels = vec![
+            "btn".to_string(),
+            "textfield".to_string(),
+            "hyperlink".to_string(),
+        ];
+        assert_eq!(
+            config.class_name(0),
+            "btn",
+            "Dynamisk klass 0 borde vara 'btn'"
+        );
+        assert_eq!(
+            config.class_name(2),
+            "hyperlink",
+            "Dynamisk klass 2 borde vara 'hyperlink'"
+        );
+        assert_eq!(
+            config.class_name(99),
+            "unknown",
+            "Index utanför range borde ge 'unknown'"
+        );
+        assert_eq!(config.num_classes(), 3, "Borde ha 3 dynamiska klasser");
+    }
+
+    #[test]
+    fn test_default_class_labels_uses_ui_classes() {
+        let config = VisionConfig::default();
+        assert_eq!(
+            config.class_name(0),
+            "button",
+            "Default klass 0 borde vara 'button'"
+        );
+        assert_eq!(
+            config.num_classes(),
+            UI_CLASSES.len(),
+            "Default borde använda UI_CLASSES"
+        );
+    }
+
+    #[test]
+    fn test_model_version() {
+        let mut config = VisionConfig::default();
+        config.model_version = "v2.1-ui-detector".to_string();
+        let json = serde_json::to_string(&config).expect("Borde serialisera");
+        assert!(
+            json.contains("v2.1-ui-detector"),
+            "Modellversion borde finnas i serialiserad config"
+        );
+    }
+
+    #[test]
+    fn test_vision_config_extended_serde() {
+        // Testa att nya fält har korrekta defaults vid deserialisering av gammal JSON
+        let old_json = r#"{"confidence_threshold":0.3,"nms_threshold":0.5,"input_size":640,"max_detections":50}"#;
+        let config: VisionConfig = serde_json::from_str(old_json).expect("Borde deserialisera");
+        assert!(
+            config.class_thresholds.is_empty(),
+            "Borde ha tom class_thresholds"
+        );
+        assert!(config.class_labels.is_empty(), "Borde ha tom class_labels");
+        assert!(
+            config.model_version.is_empty(),
+            "Borde ha tom model_version"
+        );
+        assert!(
+            (config.min_detection_area - 0.0).abs() < 0.001,
+            "Borde ha 0 min_detection_area"
+        );
     }
 
     #[cfg(not(feature = "vision"))]

@@ -16,6 +16,7 @@ mod js_eval;
 mod memory;
 mod parser;
 mod semantic;
+mod streaming;
 mod temporal;
 mod trust;
 pub mod types;
@@ -119,6 +120,36 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     });
 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Parse HTML with streaming and early-stopping
+///
+/// Builds semantic nodes incrementally and stops when max_nodes is reached.
+/// More memory-efficient than full parse for large pages (1000+ elements).
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `max_nodes` - Maximum number of semantic nodes to build (0 = default 300)
+#[wasm_bindgen]
+pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> String {
+    let start = now_ms();
+    let limit = if max_nodes == 0 {
+        300
+    } else {
+        max_nodes as usize
+    };
+    let mut tree = streaming::stream_parse_limited(html, goal, url, limit);
+    tree.parse_time_ms = now_ms() - start;
+
+    tree.nodes
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    match serde_json::to_string(&tree) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
 }
 
 /// Analysera ett textstycke för prompt injection

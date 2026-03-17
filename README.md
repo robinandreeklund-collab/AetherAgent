@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **20 Rust modules**, **40 WASM-exported functions**, **44 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **21 Rust modules**, **41 WASM-exported functions**, **44 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -617,15 +617,15 @@ const click = await agent.findAndClick(html, 'buy', url, 'Add to cart');
 
 ## Tests
 
-**280 tests** across 4 levels. All must pass on every commit.
+**296 tests** across 4 levels. All must pass on every commit.
 
 ```bash
-cargo test              # Run all 280 tests
+cargo test              # Run all 296 tests
 cargo clippy -- -D warnings  # Zero warnings required
 cargo fmt --check       # Zero diffs required
 ```
 
-### Unit Tests (201 tests)
+### Unit Tests (217 tests)
 
 Every module has tests at the bottom of the source file:
 
@@ -634,9 +634,10 @@ Every module has tests at the bottom of the source file:
 | `lib.rs` | 41 | All 40 WASM bindings + smoke tests |
 | `js_eval.rs` | 16 | Detection, evaluation, safety blocking, fetch URL extraction |
 | `firewall.rs` | 16 | L1/L2/L3 filtering, batch, MIME types, whitelisting |
-| `intercept.rs` | 15 | Price extraction, node normalization, merging, config |
+| `intercept.rs` | 20 | Price extraction, node normalization, merging, config, XHR response caching |
 | `causal.rs` | 13 | Graph building, prediction, safest path, serialization |
-| `vision.rs` | 13 | Config defaults, NMS, detections-to-tree, preprocessing |
+| `vision.rs` | 18 | Config defaults, NMS, detections-to-tree, preprocessing, per-class thresholds, dynamic labels |
+| `streaming.rs` | 6 | Streaming parse, early-stopping, depth limit, relevance filter, injection detection |
 | `js_bridge.rs` | 12 | Selective execution, DOM targeting, XHR extraction |
 | `intent.rs` | 11 | Click, fill_form, extract_data edge cases |
 | `collab.rs` | 10 | Store operations, agent registration, versioning |
@@ -831,7 +832,7 @@ End-to-end tests against real production websites, running on the deployed Rende
 │  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │                                                                   │
-│              20 modules · 40 WASM functions                       │
+│              21 modules · 41 WASM functions                       │
 │              44 HTTP endpoints · 22 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
@@ -863,7 +864,8 @@ AetherAgent/
 │   ├── webmcp.rs         # WebMCP tool discovery
 │   ├── grounding.rs      # Multimodal grounding, IoU matching
 │   ├── collab.rs         # Cross-agent semantic diff store
-│   ├── intercept.rs      # XHR network interception, price extraction
+│   ├── intercept.rs      # XHR network interception, price extraction, response caching
+│   ├── streaming.rs      # Streaming parse with early-stopping, depth/relevance limits
 │   ├── vision.rs         # YOLOv8-nano inference via rten (feature: vision)
 │   ├── memory.rs         # Workflow memory persistence
 │   ├── types.rs          # Core data structures
@@ -968,10 +970,10 @@ safety = agent.check_injection(page_text)
 AetherAgent is a fully functional AI browser engine with:
 
 - **20 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, workflow memory, core types
-- **40 WASM-exported functions** — complete API surface for any WASM host
+- **41 WASM-exported functions** — complete API surface for any WASM host
 - **42 HTTP REST endpoints** — deployable Axum server with CORS
 - **22 MCP tools** — Claude Desktop, Cursor, VS Code compatible
-- **280 tests** — 201 unit + 30 fixture + 49 integration, all passing
+- **296 tests** — 217 unit + 30 fixture + 49 integration, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)
@@ -1032,9 +1034,9 @@ image = "0.25"              # PNG/JPEG decoding (feature: vision)
 ### Future Work
 
 - **Full JS execution bridge** — Pair with headless browser (Playwright/Puppeteer) for SPA rendering, feeding rendered HTML back to AetherAgent for semantic analysis
-- **Vision model training** — Fine-tune YOLOv8-nano on real UI datasets (Common Crawl screenshots, WebUI-7K) for production-grade detection accuracy beyond the current stub
-- **XHR response caching** — Cache intercepted API responses across temporal snapshots for diff-based monitoring of hidden data endpoints
-- **Streaming parse** — Incremental semantic tree building for large pages without buffering full HTML
+- **Vision model training** — The inference pipeline now supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. Next step: train YOLOv8-nano on real UI datasets (Common Crawl screenshots, WebUI-7K) with Ultralytics, export to ONNX, and deploy with the rten runtime
+- ~~**XHR response caching**~~ ✓ Implemented — `XhrResponseCache` with TTL-based expiry, change detection (`has_changed`), and integration into `TemporalMemory` for diff-based monitoring across snapshots
+- ~~**Streaming parse**~~ ✓ Implemented — `streaming.rs` module with `StreamingParser`: early-stopping at `max_nodes`, depth limiting (`max_depth`), relevance filtering (`min_relevance`), and `parse_streaming` WASM API
 - **Multi-page workflow orchestration** — Today each page is an isolated request. `compile_goal` generates a plan but the client must manually hold state between steps. The goal is a stateful workflow engine inside AetherAgent: automatic navigation after `find_and_click` returns a link (fetch next page, continue the plan), rollback/retry on form validation failures, and cross-page temporal memory + semantic diff that spans navigations instead of just same-page snapshots. The difference between "one tool per page" and "run the entire flow and report back".
 - **OAuth / session management** — Currently `fetch.rs` sends requests with a simple cookie jar but cannot log in. The goal: persistent session cookies across `fetch_parse` calls, OAuth 2.0 redirect chain handling (authorize → callback → token), automatic login form submission via `fill_form` + `fetch`, and transparent token refresh on expiry. Prerequisite for multi-page orchestration on authenticated sites (e.g. "log in to my bank and show balances" requires both auth and orchestration).
 
