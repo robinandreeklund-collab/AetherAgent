@@ -134,6 +134,45 @@ class AetherAgent:
             "memory_json": memory_json, "key": key,
         })
 
+    # ─── Fas 5: Temporal Memory ──────────────────────────────────────────
+
+    def create_temporal_memory(self) -> dict:
+        """Create a new empty temporal memory."""
+        return self._post("/api/temporal/create", {})
+
+    def add_temporal_snapshot(self, memory: dict, html: str, goal: str, url: str, timestamp_ms: int) -> dict:
+        """Add a snapshot to temporal memory."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/snapshot", {
+            "memory_json": memory_json, "html": html,
+            "goal": goal, "url": url, "timestamp_ms": timestamp_ms,
+        })
+
+    def analyze_temporal(self, memory: dict) -> dict:
+        """Analyze temporal memory for adversarial patterns."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/analyze", {"memory_json": memory_json})
+
+    def predict_temporal(self, memory: dict) -> dict:
+        """Predict next page state based on temporal history."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/predict", {"memory_json": memory_json})
+
+    # ─── Fas 6: Intent Compiler ──────────────────────────────────────────
+
+    def compile_goal(self, goal: str) -> dict:
+        """Compile a goal into an optimized action plan."""
+        return self._post("/api/compile", {"goal": goal})
+
+    def execute_plan(self, plan: dict, html: str, goal: str, url: str, completed_steps: list = None) -> dict:
+        """Execute plan against current page state."""
+        plan_json = json.dumps(plan) if isinstance(plan, dict) else plan
+        return self._post("/api/execute-plan", {
+            "plan_json": plan_json, "html": html,
+            "goal": goal, "url": url,
+            "completed_steps": completed_steps or [],
+        })
+
 
 class AetherAgentWasm:
     """Direct WASM runtime via wasmtime (no server needed)."""
@@ -209,6 +248,35 @@ class AetherAgentWasm:
 
     def wrap_untrusted(self, content: str) -> str:
         return self._call("wrap_untrusted", content)
+
+    # ─── Fas 5: Temporal Memory ──────────────────────────────────────────
+
+    def create_temporal_memory(self) -> dict:
+        return json.loads(self._call("create_temporal_memory"))
+
+    def add_temporal_snapshot(self, memory: dict, html: str, goal: str, url: str, timestamp_ms: int) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("add_temporal_snapshot", memory_json, html, goal, url, timestamp_ms))
+
+    def analyze_temporal(self, memory: dict) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("analyze_temporal", memory_json))
+
+    def predict_temporal(self, memory: dict) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("predict_temporal", memory_json))
+
+    # ─── Fas 6: Intent Compiler ──────────────────────────────────────────
+
+    def compile_goal(self, goal: str) -> dict:
+        return json.loads(self._call("compile_goal", goal))
+
+    def execute_plan(self, plan: dict, html: str, goal: str, url: str, completed_steps: list = None) -> dict:
+        plan_json = json.dumps(plan) if isinstance(plan, dict) else plan
+        return json.loads(self._call(
+            "execute_plan", plan_json, html, goal, url,
+            json.dumps(completed_steps or [])
+        ))
 
 
 if __name__ == "__main__":

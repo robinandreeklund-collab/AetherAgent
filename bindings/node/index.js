@@ -106,6 +106,46 @@ class AetherAgent {
     return this.wasm.wrap_untrusted(content);
   }
 
+  // ─── Fas 5: Temporal Memory ─────────────────────────────────────────
+
+  /** Create a new empty temporal memory for tracking page state over time */
+  createTemporalMemory() {
+    return JSON.parse(this.wasm.create_temporal_memory());
+  }
+
+  /** Add a snapshot of the current page state to temporal memory */
+  addTemporalSnapshot(memoryJson, html, goal, url, timestampMs) {
+    const mem = typeof memoryJson === "string" ? memoryJson : JSON.stringify(memoryJson);
+    return JSON.parse(this.wasm.add_temporal_snapshot(mem, html, goal, url, timestampMs));
+  }
+
+  /** Analyze temporal memory for adversarial patterns and volatility */
+  analyzeTemporal(memoryJson) {
+    const mem = typeof memoryJson === "string" ? memoryJson : JSON.stringify(memoryJson);
+    return JSON.parse(this.wasm.analyze_temporal(mem));
+  }
+
+  /** Predict next page state based on temporal history */
+  predictTemporal(memoryJson) {
+    const mem = typeof memoryJson === "string" ? memoryJson : JSON.stringify(memoryJson);
+    return JSON.parse(this.wasm.predict_temporal(mem));
+  }
+
+  // ─── Fas 6: Intent Compiler ─────────────────────────────────────────
+
+  /** Compile a goal into an optimized action plan */
+  compileGoal(goal) {
+    return JSON.parse(this.wasm.compile_goal(goal));
+  }
+
+  /** Execute an action plan against current page state */
+  executePlan(planJson, html, goal, url, completedSteps = []) {
+    const plan = typeof planJson === "string" ? planJson : JSON.stringify(planJson);
+    return JSON.parse(
+      this.wasm.execute_plan(plan, html, goal, url, JSON.stringify(completedSteps))
+    );
+  }
+
   /** Create a new empty workflow memory */
   createMemory() {
     return JSON.parse(this.wasm.create_workflow_memory());

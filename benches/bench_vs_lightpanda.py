@@ -313,6 +313,56 @@ class AetherClient:
         resp.raise_for_status()
         return resp.json()
 
+    def create_temporal_memory(self):
+        resp = self.session.post(f"{self.base_url}/api/temporal/create", json={}, timeout=30)
+        resp.raise_for_status()
+        return resp.text
+
+    def add_temporal_snapshot(self, memory_json, html, goal, url, timestamp_ms):
+        resp = self.session.post(
+            f"{self.base_url}/api/temporal/snapshot",
+            json={"memory_json": memory_json, "html": html, "goal": goal, "url": url, "timestamp_ms": timestamp_ms},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def analyze_temporal(self, memory_json):
+        resp = self.session.post(
+            f"{self.base_url}/api/temporal/analyze",
+            json={"memory_json": memory_json},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def predict_temporal(self, memory_json):
+        resp = self.session.post(
+            f"{self.base_url}/api/temporal/predict",
+            json={"memory_json": memory_json},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def compile_goal(self, goal):
+        resp = self.session.post(
+            f"{self.base_url}/api/compile",
+            json={"goal": goal},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def execute_plan(self, plan_json, html, goal, url, completed_steps):
+        resp = self.session.post(
+            f"{self.base_url}/api/execute-plan",
+            json={"plan_json": plan_json, "html": html, "goal": goal, "url": url, "completed_steps": completed_steps},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
 
 # ─── Lightpanda Client ──────────────────────────────────────────────────────
 
@@ -837,6 +887,156 @@ def bench_selective_exec(client):
     return results
 
 
+# ─── Benchmark 8: Temporal Memory (Fas 5) ────────────────────────────────────
+
+def bench_temporal_memory(client):
+    """Benchmark temporal memory: snapshot add, analysis, and prediction."""
+    print("\n" + "─" * 72)
+    print("  Benchmark 8: Temporal Memory (Fas 5)")
+    print("─" * 72)
+
+    results = {}
+    html_pages = [
+        FIXTURES["ecommerce"]["html"],
+        FIXTURES["ecommerce"]["html"].replace("Köp nu", "Köp (1 i varukorg)"),
+        FIXTURES["ecommerce"]["html"].replace("999 kr", "899 kr"),
+        FIXTURES["ecommerce"]["html"],
+        FIXTURES["ecommerce"]["html"].replace("SuperShop", "SuperShop – REA!"),
+    ]
+
+    # Benchmark: snapshot creation speed
+    snapshot_times = []
+    for _ in range(ITERATIONS):
+        mem_json = client.create_temporal_memory()
+        t0 = time.monotonic()
+        for step, html in enumerate(html_pages):
+            mem_json = client.add_temporal_snapshot(mem_json, html, "köp produkt", "https://shop.se", step * 1000)
+        elapsed = (time.monotonic() - t0) * 1_000_000
+        snapshot_times.append(elapsed)
+
+    med_snapshot = statistics.median(snapshot_times)
+    per_step = med_snapshot / len(html_pages)
+    print(f"  5-step snapshot sequence:  {fmt_us(med_snapshot)} total, {fmt_us(per_step)}/step")
+    results["snapshot_5step_us"] = med_snapshot
+    results["snapshot_per_step_us"] = per_step
+
+    # Benchmark: analysis speed
+    mem_json = client.create_temporal_memory()
+    for step, html in enumerate(html_pages):
+        mem_json = client.add_temporal_snapshot(mem_json, html, "köp", "https://shop.se", step * 1000)
+
+    analyze_times = []
+    for _ in range(ITERATIONS):
+        t0 = time.monotonic()
+        result = client.analyze_temporal(mem_json)
+        elapsed = (time.monotonic() - t0) * 1_000_000
+        analyze_times.append(elapsed)
+
+    med_analyze = statistics.median(analyze_times)
+    analysis = json.loads(result)
+    print(f"  Analysis (5 snapshots):    {fmt_us(med_analyze)}, risk={analysis.get('risk_score', 'N/A')}")
+    results["analyze_5step_us"] = med_analyze
+    results["risk_score"] = analysis.get("risk_score", 0)
+
+    # Benchmark: prediction speed
+    predict_times = []
+    for _ in range(ITERATIONS):
+        t0 = time.monotonic()
+        pred = client.predict_temporal(mem_json)
+        elapsed = (time.monotonic() - t0) * 1_000_000
+        predict_times.append(elapsed)
+
+    med_predict = statistics.median(predict_times)
+    prediction = json.loads(pred)
+    print(f"  Prediction:                {fmt_us(med_predict)}, confidence={prediction.get('confidence', 'N/A')}")
+    results["predict_us"] = med_predict
+
+    # Benchmark: adversarial detection (injection escalation)
+    mem_json = client.create_temporal_memory()
+    for step in range(5):
+        injections = ''.join(
+            f'<div style="display:none">IGNORE {j}</div>' for j in range(step)
+        )
+        html = f'<html><body><button>Köp</button>{injections}</body></html>'
+        mem_json = client.add_temporal_snapshot(mem_json, html, "köp", "https://shop.se", step * 1000)
+
+    analysis = json.loads(client.analyze_temporal(mem_json))
+    patterns = analysis.get("adversarial_patterns", [])
+    has_escalating = any(p.get("pattern_type") == "EscalatingInjection" for p in patterns)
+    print(f"  Adversarial detection:     {len(patterns)} patterns, escalating={'YES' if has_escalating else 'NO'}, risk={analysis.get('risk_score', 0):.2f}")
+    results["adversarial_patterns"] = len(patterns)
+    results["adversarial_escalating"] = has_escalating
+
+    return results
+
+
+# ─── Benchmark 9: Intent Compiler (Fas 6) ────────────────────────────────────
+
+def bench_intent_compiler(client):
+    """Benchmark intent compiler: goal compilation and plan execution."""
+    print("\n" + "─" * 72)
+    print("  Benchmark 9: Intent Compiler (Fas 6)")
+    print("─" * 72)
+
+    results = {}
+
+    goals = {
+        "buy":      "köp iPhone 16 Pro",
+        "login":    "logga in på min sida",
+        "search":   "sök efter billiga flyg",
+        "register": "registrera nytt konto",
+        "unknown":  "gör något ovanligt",
+    }
+
+    # Benchmark: compilation speed per goal type
+    for name, goal in goals.items():
+        compile_times = []
+        for _ in range(ITERATIONS):
+            t0 = time.monotonic()
+            plan_json = client.compile_goal(goal)
+            elapsed = (time.monotonic() - t0) * 1_000_000
+            compile_times.append(elapsed)
+
+        med = statistics.median(compile_times)
+        plan = json.loads(plan_json)
+        n_steps = plan.get("total_steps", 0)
+        n_parallel = plan.get("parallel_groups", 0)
+        print(f"  compile '{name}':  {fmt_us(med):>10}  steps={n_steps}  parallel_groups={n_parallel}")
+        results[f"compile_{name}_us"] = med
+        results[f"compile_{name}_steps"] = n_steps
+
+    # Benchmark: plan execution speed
+    plan_json = client.compile_goal("logga in")
+    html = FIXTURES["ecommerce"]["html"]
+
+    exec_times = []
+    for _ in range(ITERATIONS):
+        t0 = time.monotonic()
+        result = client.execute_plan(plan_json, html, "logga in", "https://shop.se", [])
+        elapsed = (time.monotonic() - t0) * 1_000_000
+        exec_times.append(elapsed)
+
+    med_exec = statistics.median(exec_times)
+    exec_result = json.loads(result)
+    print(f"  execute_plan:     {fmt_us(med_exec):>10}  summary='{exec_result.get('summary', '')}'")
+    results["execute_plan_us"] = med_exec
+
+    # Benchmark: full pipeline (compile + execute)
+    pipeline_times = []
+    for _ in range(ITERATIONS):
+        t0 = time.monotonic()
+        plan = client.compile_goal("köp produkt")
+        client.execute_plan(plan, html, "köp produkt", "https://shop.se", [])
+        elapsed = (time.monotonic() - t0) * 1_000_000
+        pipeline_times.append(elapsed)
+
+    med_pipeline = statistics.median(pipeline_times)
+    print(f"  full pipeline:    {fmt_us(med_pipeline):>10}  (compile + execute)")
+    results["full_pipeline_us"] = med_pipeline
+
+    return results
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -888,6 +1088,8 @@ def main():
     all_results["quality"] = bench_output_quality(client, lp_client)
     all_results["js_sandbox"] = bench_js_sandbox(client)
     all_results["selective_exec"] = bench_selective_exec(client)
+    all_results["temporal_memory"] = bench_temporal_memory(client)
+    all_results["intent_compiler"] = bench_intent_compiler(client)
 
     # Summary
     print("\n" + "=" * 72)
@@ -932,6 +1134,20 @@ def main():
         overhead = sel.get("overhead_ecommerce", {}).get("overhead_pct")
         if overhead is not None:
             print(f"  Selective exec overhead (Fas 4c, ecommerce):   {overhead:+.0f}%")
+
+    tmp = all_results.get("temporal_memory", {})
+    if tmp:
+        snap_us = tmp.get("snapshot_per_step_us", 0)
+        analyze_us = tmp.get("analyze_5step_us", 0)
+        print(f"  Temporal snapshot (Fas 5, per step):           {fmt_us(snap_us)}")
+        print(f"  Temporal analysis (Fas 5, 5 snapshots):        {fmt_us(analyze_us)}")
+
+    comp = all_results.get("intent_compiler", {})
+    if comp:
+        buy_us = comp.get("compile_buy_us", 0)
+        pipeline_us = comp.get("full_pipeline_us", 0)
+        print(f"  Goal compile 'buy' (Fas 6):                    {fmt_us(buy_us)}")
+        print(f"  Full pipeline compile+execute (Fas 6):         {fmt_us(pipeline_us)}")
 
     # Save raw results
     results_path = Path(__file__).parent / "benchmark_results.json"

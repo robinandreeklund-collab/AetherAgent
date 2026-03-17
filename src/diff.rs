@@ -256,6 +256,15 @@ pub fn diff_trees(old: &SemanticTree, new: &SemanticTree) -> SemanticDelta {
     }
 }
 
+/// Beräkna delta från två JSON-strängar (för temporal.rs)
+pub fn compute_delta(old_json: &str, new_json: &str) -> Result<SemanticDelta, String> {
+    let old: SemanticTree =
+        serde_json::from_str(old_json).map_err(|e| format!("Invalid old tree: {}", e))?;
+    let new: SemanticTree =
+        serde_json::from_str(new_json).map_err(|e| format!("Invalid new tree: {}", e))?;
+    Ok(diff_trees(&old, &new))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

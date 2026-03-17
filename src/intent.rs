@@ -26,6 +26,11 @@ const INPUT_ROLES: &[&str] = &[
 
 // ─── Hjälpfunktioner ─────────────────────────────────────────────────────────
 
+/// Publik version av flatten_nodes för andra moduler (compiler.rs)
+pub fn flatten_nodes_pub(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
+    flatten_nodes(nodes)
+}
+
 /// Samla alla noder platt från ett trädstruktur (rekursivt)
 fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
     let mut result = vec![];

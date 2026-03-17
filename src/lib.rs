@@ -1,6 +1,7 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod compiler;
 mod diff;
 mod intent;
 mod js_bridge;
@@ -8,6 +9,7 @@ mod js_eval;
 mod memory;
 mod parser;
 mod semantic;
+mod temporal;
 mod trust;
 mod types;
 
@@ -403,6 +405,162 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
     }
 }
 
+// ─── Fas 5: Temporal Memory & Adversarial Modeling ──────────────────────────
+
+/// Create a new empty temporal memory
+///
+/// # Returns
+/// JSON string with empty TemporalMemory
+#[wasm_bindgen]
+pub fn create_temporal_memory() -> String {
+    temporal::TemporalMemory::new().to_json()
+}
+
+/// Add a snapshot to temporal memory (track page state over time)
+///
+/// # Arguments
+/// * `memory_json` - Existing temporal memory JSON
+/// * `html` - Raw HTML of the current page
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `timestamp_ms` - Current timestamp in milliseconds
+///
+/// # Returns
+/// Updated temporal memory JSON
+#[wasm_bindgen]
+pub fn add_temporal_snapshot(
+    memory_json: &str,
+    html: &str,
+    goal: &str,
+    url: &str,
+    timestamp_ms: u64,
+) -> String {
+    let mut mem = match temporal::TemporalMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let tree = build_tree(html, goal, url);
+    let tree_json = match serde_json::to_string(&tree) {
+        Ok(j) => j,
+        Err(e) => return format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    };
+
+    mem.add_snapshot(&tree, &tree_json, timestamp_ms);
+    mem.to_json()
+}
+
+/// Analyze temporal memory for adversarial patterns and volatility
+///
+/// # Arguments
+/// * `memory_json` - Temporal memory JSON with at least 1 snapshot
+///
+/// # Returns
+/// JSON with TemporalAnalysis: snapshots, volatility, adversarial patterns, risk score
+#[wasm_bindgen]
+pub fn analyze_temporal(memory_json: &str) -> String {
+    let start = now_ms();
+
+    let mem = match temporal::TemporalMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let mut analysis = mem.analyze();
+    analysis.analysis_time_ms = now_ms() - start;
+
+    match serde_json::to_string_pretty(&analysis) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Predict next page state based on temporal history
+///
+/// # Arguments
+/// * `memory_json` - Temporal memory JSON
+///
+/// # Returns
+/// JSON with PredictedState: expected_node_count, expected_warning_count, likely_changed_nodes
+#[wasm_bindgen]
+pub fn predict_temporal(memory_json: &str) -> String {
+    let mem = match temporal::TemporalMemory::from_json(memory_json) {
+        Ok(m) => m,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let prediction = temporal::predict_next_state(&mem);
+    match serde_json::to_string_pretty(&prediction) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+// ─── Fas 6: Intent Compiler ─────────────────────────────────────────────────
+
+/// Compile a goal into an optimized action plan
+///
+/// Decomposes complex goals into sub-goals with dependencies,
+/// computes execution order with parallel groups, and estimates cost.
+///
+/// # Arguments
+/// * `goal` - The agent's goal (e.g. "buy iPhone 16 Pro", "logga in")
+///
+/// # Returns
+/// JSON with ActionPlan: sub_goals, execution_order, estimated_cost
+#[wasm_bindgen]
+pub fn compile_goal(goal: &str) -> String {
+    let start = now_ms();
+    let mut plan = compiler::compile_goal(goal);
+    plan.compile_time_ms = now_ms() - start;
+
+    match serde_json::to_string_pretty(&plan) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Execute an action plan against current page state
+///
+/// Determines which steps are ready, recommends the next action,
+/// and generates prefetch suggestions.
+///
+/// # Arguments
+/// * `plan_json` - ActionPlan JSON (from compile_goal)
+/// * `html` - Current page HTML
+/// * `goal` - The agent's goal
+/// * `url` - Current page URL
+/// * `completed_steps_json` - JSON array of completed step indices: [0, 1]
+///
+/// # Returns
+/// JSON with PlanExecutionResult: next_action, prefetch_suggestions, summary
+#[wasm_bindgen]
+pub fn execute_plan(
+    plan_json: &str,
+    html: &str,
+    goal: &str,
+    url: &str,
+    completed_steps_json: &str,
+) -> String {
+    let plan: compiler::ActionPlan = match serde_json::from_str(plan_json) {
+        Ok(p) => p,
+        Err(e) => return format!(r#"{{"error": "Invalid plan_json: {}"}}"#, e),
+    };
+
+    let completed: Vec<u32> = match serde_json::from_str(completed_steps_json) {
+        Ok(c) => c,
+        Err(e) => return format!(r#"{{"error": "Invalid completed_steps_json: {}"}}"#, e),
+    };
+
+    let tree = build_tree(html, goal, url);
+    let result = compiler::execute_plan(&plan, &tree, &completed);
+
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -668,5 +826,104 @@ mod tests {
 
         assert_eq!(parsed["total_evals"], 0);
         assert_eq!(parsed["js_bindings"].as_array().unwrap().len(), 0);
+    }
+
+    // ─── Fas 5: Temporal Memory smoke tests ─────────────────────────────
+
+    #[test]
+    fn test_create_temporal_memory_returns_valid_json() {
+        let json = create_temporal_memory();
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("Valid JSON");
+        assert!(parsed["snapshots"].is_array());
+        assert_eq!(parsed["snapshots"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_add_temporal_snapshot_returns_updated_memory() {
+        let mem = create_temporal_memory();
+        let html = r#"<html><body><button>Köp</button></body></html>"#;
+        let updated = add_temporal_snapshot(&mem, html, "köp", "https://shop.se", 1000);
+        let parsed: serde_json::Value = serde_json::from_str(&updated).expect("Valid JSON");
+        assert_eq!(parsed["snapshots"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_add_temporal_snapshot_invalid_memory() {
+        let html = r#"<html><body></body></html>"#;
+        let result = add_temporal_snapshot("bad json", html, "test", "url", 0);
+        assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_analyze_temporal_returns_valid_json() {
+        let mem = create_temporal_memory();
+        let html = r#"<html><body><button>Köp</button></body></html>"#;
+        let updated = add_temporal_snapshot(&mem, html, "köp", "https://shop.se", 1000);
+
+        let result = analyze_temporal(&updated);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["snapshots"].is_array(), "Borde ha snapshots");
+        assert!(parsed["risk_score"].is_number(), "Borde ha risk_score");
+        assert!(parsed["summary"].is_string(), "Borde ha summary");
+    }
+
+    #[test]
+    fn test_predict_temporal_returns_valid_json() {
+        let mem = create_temporal_memory();
+        let html = r#"<html><body><button>Köp</button></body></html>"#;
+        let updated = add_temporal_snapshot(&mem, html, "köp", "https://shop.se", 1000);
+
+        let result = predict_temporal(&updated);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["expected_node_count"].is_number(),
+            "Borde ha expected_node_count"
+        );
+        assert!(parsed["confidence"].is_number(), "Borde ha confidence");
+    }
+
+    // ─── Fas 6: Intent Compiler smoke tests ─────────────────────────────
+
+    #[test]
+    fn test_compile_goal_returns_valid_json() {
+        let result = compile_goal("köp iPhone 16 Pro");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["sub_goals"].is_array(), "Borde ha sub_goals");
+        assert!(
+            parsed["execution_order"].is_array(),
+            "Borde ha execution_order"
+        );
+        assert_eq!(parsed["goal"], "köp iPhone 16 Pro");
+    }
+
+    #[test]
+    fn test_compile_goal_unknown() {
+        let result = compile_goal("gör något konstigt");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["sub_goals"].as_array().unwrap().len() >= 3,
+            "Generisk plan borde ha minst 3 steg"
+        );
+    }
+
+    #[test]
+    fn test_execute_plan_returns_valid_json() {
+        let plan_json = compile_goal("logga in");
+        let html = r##"<html><body>
+            <input placeholder="E-post" />
+            <input type="password" placeholder="Lösenord" />
+            <button>Logga in</button>
+        </body></html>"##;
+
+        let result = execute_plan(&plan_json, html, "logga in", "https://test.com", "[]");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["plan"].is_object(), "Borde ha plan");
+        assert!(parsed["summary"].is_string(), "Borde ha summary");
+    }
+
+    #[test]
+    fn test_execute_plan_invalid_json() {
+        let result = execute_plan("bad", "<html></html>", "test", "url", "[]");
+        assert!(result.contains("error"));
     }
 }

@@ -242,6 +242,12 @@ curl -X POST https://your-app.onrender.com/api/diff \
 | POST | `/api/memory/step` | Add workflow step |
 | POST | `/api/memory/context/set` | Set context key/value |
 | POST | `/api/memory/context/get` | Get context value |
+| POST | `/api/temporal/create` | Create temporal memory |
+| POST | `/api/temporal/snapshot` | Add temporal snapshot |
+| POST | `/api/temporal/analyze` | Analyze temporal patterns & adversarial detection |
+| POST | `/api/temporal/predict` | Predict next page state |
+| POST | `/api/compile` | Compile goal to action plan |
+| POST | `/api/execute-plan` | Execute plan against current page state |
 
 ### Python SDK (connects to deployed server)
 
@@ -268,6 +274,8 @@ AetherAgent/
 │   ├── diff.rs         # Semantic DOM Diffing – minimal delta between trees
 │   ├── js_eval.rs      # JS Sandbox – Boa engine for safe snippet evaluation
 │   ├── js_bridge.rs    # Selective Execution – detect, eval, apply JS to tree
+│   ├── temporal.rs     # Temporal Memory – time-series tracking, adversarial detection
+│   ├── compiler.rs     # Intent Compiler – goal decomposition, action plan optimization
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
@@ -310,8 +318,8 @@ AetherAgent/
 | **Fas 4a** – Semantic DOM Diffing | ✅ Done | Compare two trees → minimal delta, 80–95% token savings for multi-step flows |
 | **Fas 4b** – JS Sandbox (Boa) | ✅ Done | Embedded Boa JS engine for evaluating inline scripts, event handlers, expressions |
 | **Fas 4c** – Selective Execution | ✅ Done | Smart detection of JS-dependent content, targeted eval instead of full browser |
-| **Fas 5** – Temporal Memory & Adversarial Modeling | Planned | Time-series page change tracking, predictive injection defense |
-| **Fas 6** – Intent Compiler | Planned | Multi-step goal → optimized action plan with speculative prefetch |
+| **Fas 5** – Temporal Memory & Adversarial Modeling | ✅ Done | Time-series page change tracking, predictive injection defense |
+| **Fas 6** – Intent Compiler | ✅ Done | Multi-step goal → optimized action plan with speculative prefetch |
 
 ### Design Principles
 
@@ -438,13 +446,59 @@ print(result["bindings"])
 - Server-rendered pages with client-side hydration scripts
 - Any page where key content is set via inline JavaScript
 
+### Temporal Memory & Adversarial Modeling (Fas 5)
+
+AetherAgent tracks page state over time, detecting adversarial patterns that single-snapshot analysis misses:
+
+```python
+agent = AetherAgent("https://your-url.onrender.com")
+
+# Track page state across multiple visits
+mem = agent.create_temporal_memory()
+for step, html in enumerate(page_snapshots):
+    mem = agent.add_temporal_snapshot(mem, html, "köp produkt", url, step * 1000)
+
+# Analyze for adversarial patterns
+analysis = agent.analyze_temporal(mem)
+print(f"Risk: {analysis['risk_score']}")           # 0.0–1.0
+print(f"Patterns: {analysis['adversarial_patterns']}")  # EscalatingInjection, etc.
+
+# Predict next page state
+prediction = agent.predict_temporal(mem)
+print(f"Expected nodes: {prediction['expected_node_count']}")
+print(f"Confidence: {prediction['confidence']}")
+```
+
+**Adversarial detection types:**
+- `EscalatingInjection` – Injection warnings increase monotonically across steps
+- `GradualInjection` – Clean nodes gradually acquire injection patterns
+- `SuspiciousVolatility` – Text nodes change too frequently (>70% of observations)
+- `StructuralManipulation` – >50% of nodes change in a single step
+
+### Intent Compiler (Fas 6)
+
+Compile complex goals into optimized action plans with dependency tracking and parallel execution:
+
+```python
+# Compile a goal into sub-goals with dependencies
+plan = agent.compile_goal("köp iPhone 16 Pro")
+print(f"Steps: {plan['total_steps']}")         # 7 (navigate→click→fill→verify)
+print(f"Parallel groups: {plan['parallel_groups']}")  # 5 (some steps can run in parallel)
+
+# Execute plan against current page state
+result = agent.execute_plan(plan, html, "köp produkt", url, completed_steps=[0])
+print(f"Next action: {result['next_action']}")  # {action_type: "Click", target_label: "Lägg i varukorg"}
+print(f"Prefetch: {result['prefetch_suggestions']}")  # URLs to pre-parse
+```
+
+**Supported goal templates:** `buy/purchase`, `login/sign in`, `search/find`, `register/sign up`, `extract/scrape`. Unknown goals get a generic 3-step plan (Navigate → Act → Verify).
+
 ### Future Work
 
 Ideas under evaluation for future phases:
 
 - **Causal Action Graph** – Model page state transitions as a directed graph, enabling the agent to reason about action consequences before executing them.
 - **Cross-Agent Semantic Diffing** – Share semantic deltas between multiple agents working on the same site, reducing redundant parsing.
-- **Goal Decomposition Engine** – Automatically break complex goals into sub-goals with dependency tracking and parallel execution paths.
 - **Multimodal Grounding** – Combine semantic tree data with vision model bounding boxes for elements that lack accessible labels.
 
 ---
@@ -648,7 +702,7 @@ Run: `python3 benches/bench_vs_lightpanda.py`
 | E-commerce | +2% | — | — |
 | Complex (50 products) | +6% | — | — |
 
-> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, JS sandbox, intent API) that Lightpanda does not offer. The JS sandbox adds only 2–6% overhead. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and will add CDP fallback in Fas 5+.
+> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, JS sandbox, intent API, temporal memory, intent compiler) that Lightpanda does not offer. The JS sandbox adds only 2–6% overhead. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and adds temporal adversarial modeling (Fas 5) and goal decomposition (Fas 6).
 
 ---
 

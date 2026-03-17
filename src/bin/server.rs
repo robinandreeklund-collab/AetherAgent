@@ -110,6 +110,43 @@ struct EvalJsBatchRequest {
     snippets: Vec<String>,
 }
 
+// ─── Fas 5: Temporal Memory request types ────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TemporalSnapshotRequest {
+    memory_json: String,
+    html: String,
+    goal: String,
+    url: String,
+    timestamp_ms: u64,
+}
+
+#[derive(Deserialize)]
+struct TemporalAnalyzeRequest {
+    memory_json: String,
+}
+
+#[derive(Deserialize)]
+struct TemporalPredictRequest {
+    memory_json: String,
+}
+
+// ─── Fas 6: Compiler request types ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CompileGoalRequest {
+    goal: String,
+}
+
+#[derive(Deserialize)]
+struct ExecutePlanRequest {
+    plan_json: String,
+    html: String,
+    goal: String,
+    url: String,
+    completed_steps: Vec<u32>,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -139,7 +176,13 @@ async fn root() -> impl IntoResponse {
             "POST /api/memory/create": "Create workflow memory",
             "POST /api/memory/step": "Add workflow step",
             "POST /api/memory/context/set": "Set context key/value",
-            "POST /api/memory/context/get": "Get context value"
+            "POST /api/memory/context/get": "Get context value",
+            "POST /api/temporal/create": "Create temporal memory",
+            "POST /api/temporal/snapshot": "Add temporal snapshot",
+            "POST /api/temporal/analyze": "Analyze temporal patterns",
+            "POST /api/temporal/predict": "Predict next page state",
+            "POST /api/compile": "Compile goal to action plan",
+            "POST /api/execute-plan": "Execute plan against page state"
         },
         "example": {
             "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
@@ -280,6 +323,64 @@ async fn get_context(Json(req): Json<ContextGetRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+// ─── Fas 5: Temporal Memory handlers ─────────────────────────────────────────
+
+async fn create_temporal_memory() -> impl IntoResponse {
+    let result = aether_agent::create_temporal_memory();
+    (StatusCode::OK, result)
+}
+
+async fn add_temporal_snapshot(Json(req): Json<TemporalSnapshotRequest>) -> impl IntoResponse {
+    let result = aether_agent::add_temporal_snapshot(
+        &req.memory_json,
+        &req.html,
+        &req.goal,
+        &req.url,
+        req.timestamp_ms,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn analyze_temporal(Json(req): Json<TemporalAnalyzeRequest>) -> impl IntoResponse {
+    let result = aether_agent::analyze_temporal(&req.memory_json);
+    (StatusCode::OK, result)
+}
+
+async fn predict_temporal(Json(req): Json<TemporalPredictRequest>) -> impl IntoResponse {
+    let result = aether_agent::predict_temporal(&req.memory_json);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 6: Compiler handlers ───────────────────────────────────────────────
+
+async fn compile_goal_handler(Json(req): Json<CompileGoalRequest>) -> impl IntoResponse {
+    let result = aether_agent::compile_goal(&req.goal);
+    (StatusCode::OK, result)
+}
+
+async fn execute_plan_handler(Json(req): Json<ExecutePlanRequest>) -> impl IntoResponse {
+    let completed_json = match serde_json::to_string(&req.completed_steps) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                serde_json::to_string(&ErrorResponse {
+                    error: format!("Invalid completed_steps: {}", e),
+                })
+                .unwrap_or_default(),
+            )
+        }
+    };
+    let result = aether_agent::execute_plan(
+        &req.plan_json,
+        &req.html,
+        &req.goal,
+        &req.url,
+        &completed_json,
+    );
+    (StatusCode::OK, result)
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 fn build_router() -> Router {
@@ -314,6 +415,14 @@ fn build_router() -> Router {
         .route("/api/memory/step", post(add_step))
         .route("/api/memory/context/set", post(set_context))
         .route("/api/memory/context/get", post(get_context))
+        // Fas 5: Temporal Memory
+        .route("/api/temporal/create", post(create_temporal_memory))
+        .route("/api/temporal/snapshot", post(add_temporal_snapshot))
+        .route("/api/temporal/analyze", post(analyze_temporal))
+        .route("/api/temporal/predict", post(predict_temporal))
+        // Fas 6: Intent Compiler
+        .route("/api/compile", post(compile_goal_handler))
+        .route("/api/execute-plan", post(execute_plan_handler))
         .layer(cors)
 }
 
@@ -343,6 +452,9 @@ async fn main() {
     println!("  POST /api/check-injection – Check text for injection");
     println!("  POST /api/wrap-untrusted  – Wrap content in trust markers");
     println!("  POST /api/memory/*        – Workflow memory operations");
+    println!("  POST /api/temporal/*      – Temporal memory & adversarial modeling");
+    println!("  POST /api/compile         – Compile goal to action plan");
+    println!("  POST /api/execute-plan    – Execute plan against page state");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

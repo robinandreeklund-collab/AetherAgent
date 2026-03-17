@@ -195,6 +195,104 @@ export interface SelectiveExecResult {
   exec_time_ms: number;
 }
 
+// ─── Fas 5: Temporal Memory types ─────────────────────────────────────────
+
+export interface TemporalSnapshot {
+  step: number;
+  timestamp_ms: number;
+  url: string;
+  node_count: number;
+  warning_count: number;
+  delta?: SemanticDelta;
+}
+
+export interface NodeVolatility {
+  node_id: number;
+  role: string;
+  label: string;
+  change_count: number;
+  observation_count: number;
+  volatility: number;
+}
+
+export interface AdversarialPattern {
+  pattern_type: "EscalatingInjection" | "GradualInjection" | "SuspiciousVolatility" | "TrustLevelShift" | "StructuralManipulation";
+  description: string;
+  confidence: number;
+  affected_steps: number[];
+  affected_node_ids: number[];
+}
+
+export interface TemporalAnalysis {
+  snapshots: TemporalSnapshot[];
+  node_volatility: NodeVolatility[];
+  adversarial_patterns: AdversarialPattern[];
+  risk_score: number;
+  summary: string;
+  analysis_time_ms: number;
+}
+
+export interface TemporalMemory {
+  snapshots: TemporalSnapshot[];
+  last_tree_json?: string;
+  warning_history: Record<string, number>;
+  change_history: Record<string, number>;
+  observation_history: Record<string, number>;
+  node_labels: Record<string, [string, string]>;
+}
+
+export interface PredictedState {
+  expected_node_count: number;
+  expected_warning_count: number;
+  likely_changed_nodes: number[];
+  confidence: number;
+}
+
+// ─── Fas 6: Intent Compiler types ─────────────────────────────────────────
+
+export interface SubGoal {
+  index: number;
+  description: string;
+  action_type: "Navigate" | "Click" | "Fill" | "Extract" | "Wait" | "Verify";
+  depends_on: number[];
+  estimated_cost: number;
+  status: "Pending" | "Ready" | "InProgress" | "Completed" | "Failed";
+}
+
+export interface ActionPlan {
+  goal: string;
+  sub_goals: SubGoal[];
+  execution_order: number[][];
+  total_steps: number;
+  parallel_groups: number;
+  estimated_total_cost: number;
+  compile_time_ms: number;
+}
+
+export interface RecommendedAction {
+  sub_goal_index: number;
+  action_type: "Navigate" | "Click" | "Fill" | "Extract" | "Wait" | "Verify";
+  description: string;
+  target_label?: string;
+  fill_fields?: Record<string, string>;
+  extract_keys?: string[];
+  confidence: number;
+}
+
+export interface PrefetchEntry {
+  expected_url: string;
+  probability: number;
+  precomputed_tree?: SemanticTree;
+}
+
+export interface PlanExecutionResult {
+  plan: ActionPlan;
+  current_step: number;
+  next_action?: RecommendedAction;
+  prefetch_suggestions: PrefetchEntry[];
+  summary: string;
+}
+
 export declare class AetherAgent {
   constructor();
   health(): HealthResult;
@@ -210,6 +308,12 @@ export declare class AetherAgent {
   parseWithJs(html: string, goal: string, url: string): SelectiveExecResult;
   checkInjection(text: string): InjectionCheckResult;
   wrapUntrusted(content: string): string;
+  createTemporalMemory(): TemporalMemory;
+  addTemporalSnapshot(memoryJson: string | TemporalMemory, html: string, goal: string, url: string, timestampMs: number): TemporalMemory;
+  analyzeTemporal(memoryJson: string | TemporalMemory): TemporalAnalysis;
+  predictTemporal(memoryJson: string | TemporalMemory): PredictedState;
+  compileGoal(goal: string): ActionPlan;
+  executePlan(planJson: string | ActionPlan, html: string, goal: string, url: string, completedSteps?: number[]): PlanExecutionResult;
   createMemory(): WorkflowMemory;
   addStep(memoryJson: string | WorkflowMemory, action: string, url: string, goal: string, summary: string): WorkflowMemory;
   setContext(memoryJson: string | WorkflowMemory, key: string, value: string): WorkflowMemory;

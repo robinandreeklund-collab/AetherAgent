@@ -161,6 +161,6 @@ Types:
 
 **Fas 4c (Complete)**: Selective Execution — `parse_with_js` pipeline: detect JS → extract DOM targets → evaluate in sandbox → apply to semantic tree. Handles `getElementById`/`querySelector` patterns.
 
-**Fas 5 (Planned)**: Temporal Memory & Adversarial Modeling.
+**Fas 5 (Complete)**: Temporal Memory & Adversarial Modeling — time-series page state tracking, node volatility, adversarial pattern detection (escalating/gradual injection, suspicious volatility, structural manipulation), predictive state estimation.
 
-**Fas 6 (Planned)**: Intent Compiler — multi-step goal optimization.
+**Fas 6 (Complete)**: Intent Compiler — goal decomposition via keyword-matched templates, topological sort with parallel group detection, action plan with sub-goals/dependencies, plan execution with recommended next action, prefetch suggestions.
