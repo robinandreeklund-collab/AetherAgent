@@ -324,6 +324,630 @@ def download_starter_dataset(output_dir: Path):
 
 
 # ---------------------------------------------------------------------------
+# Dataset Format Converters (Rico / COCO / WebUI → YOLO)
+# ---------------------------------------------------------------------------
+
+# Mappning från externa klassnamn till våra UI_CLASSES-index
+# Klasser som inte matchar ignoreras
+_RICO_CLASS_MAP = {
+    "Text Button": 0,    # button
+    "Icon": 3,           # icon
+    "Text": 4,           # text
+    "Image": 5,          # image
+    "Input": 1,          # input
+    "Web View": 4,       # text (fallback)
+    "List Item": 4,      # text
+    "Card": 4,           # text
+    "Radio Button": 7,   # radio
+    "Checkbox": 6,       # checkbox
+    "Switch": 6,         # checkbox (nära nog)
+    "Spinner": 8,        # select
+    "Toolbar": 9,        # heading
+    "Multi-Tab": 2,      # link
+    "Slider": 1,         # input (fallback)
+    "Advertisement": 5,  # image
+    "Pager Indicator": 3,  # icon
+    "Modal": 4,          # text
+    "Button Bar": 0,     # button
+    "Number Stepper": 1, # input
+    "Map View": 5,       # image
+    "Video": 5,          # image
+    "Date Picker": 8,    # select
+    "On/Off Switch": 6,  # checkbox
+    "Drawer": 2,         # link
+    "Bottom Navigation": 2,  # link
+    "Upper Tab Bar": 2,  # link
+}
+
+_WEBUI_CLASS_MAP = {
+    "button": 0,
+    "btn": 0,
+    "input": 1,
+    "textbox": 1,
+    "textarea": 1,
+    "link": 2,
+    "anchor": 2,
+    "a": 2,
+    "icon": 3,
+    "img": 5,
+    "image": 5,
+    "text": 4,
+    "paragraph": 4,
+    "p": 4,
+    "span": 4,
+    "label": 4,
+    "checkbox": 6,
+    "radio": 7,
+    "select": 8,
+    "dropdown": 8,
+    "heading": 9,
+    "h1": 9,
+    "h2": 9,
+    "h3": 9,
+    "h4": 9,
+    "title": 9,
+    "nav": 2,
+    "menu": 2,
+    "search": 1,
+}
+
+
+def convert_rico_to_yolo(rico_dir: Path, output_dir: Path) -> Path:
+    """Konverterar Rico-dataset (JSON + screenshots) till YOLO-format.
+
+    Rico-format:
+        rico_dir/
+            combined/           ← JSON-filer med komponenthierarki
+                0.json, 1.json, ...
+            screenshot/         ← PNG-screenshots (1440×2560 typiskt)
+                0.jpg, 1.jpg, ...
+
+    Alternativt stödjer vi Rico Semantic Annotations:
+        rico_dir/
+            semantic_annotations/
+                0.json, ...
+            screenshots/
+                0.jpg, ...
+    """
+    log("Konverterar Rico-dataset till YOLO-format...", "STEP")
+
+    # Hitta var bilderna och JSON-filerna ligger
+    combined_dir = rico_dir / "combined"
+    screenshot_dir = rico_dir / "screenshot"
+
+    # Alternativa sökvägar
+    if not combined_dir.exists():
+        combined_dir = rico_dir / "semantic_annotations"
+    if not screenshot_dir.exists():
+        screenshot_dir = rico_dir / "screenshots"
+    if not screenshot_dir.exists():
+        # Platt struktur: JSON och bilder i samma mapp
+        screenshot_dir = rico_dir
+        combined_dir = rico_dir
+
+    json_files = sorted(combined_dir.glob("*.json"))
+    if not json_files:
+        log(f"Inga JSON-filer hittades i {combined_dir}", "ERR")
+        sys.exit(1)
+
+    log(f"Hittade {len(json_files)} Rico JSON-filer", "INFO")
+
+    # Skapa output-struktur
+    for split in ["images", "labels"]:
+        (output_dir / split).mkdir(parents=True, exist_ok=True)
+
+    converted = 0
+    skipped = 0
+
+    for json_path in json_files:
+        screen_id = json_path.stem
+
+        # Hitta bildfil
+        img_path = None
+        for ext in [".jpg", ".png", ".jpeg"]:
+            candidate = screenshot_dir / f"{screen_id}{ext}"
+            if candidate.exists():
+                img_path = candidate
+                break
+
+        if img_path is None:
+            skipped += 1
+            continue
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        # Rico har "activity" → "root" → "children" (combined) eller "bounds" direkt
+        try:
+            from PIL import Image
+            img = Image.open(img_path)
+            img_w, img_h = img.size
+        except Exception:
+            skipped += 1
+            continue
+
+        labels = []
+        nodes = _extract_rico_nodes(data)
+
+        for node in nodes:
+            class_name = node.get("componentLabel", node.get("class", ""))
+            class_idx = _RICO_CLASS_MAP.get(class_name)
+            if class_idx is None:
+                continue
+
+            bounds = node.get("bounds", [])
+            if len(bounds) != 4:
+                continue
+
+            x1, y1, x2, y2 = bounds
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            # Normalisera till 0-1
+            cx = ((x1 + x2) / 2) / img_w
+            cy = ((y1 + y2) / 2) / img_h
+            bw = (x2 - x1) / img_w
+            bh = (y2 - y1) / img_h
+
+            # Filtrera orimliga bboxar
+            if bw > 0.95 and bh > 0.95:
+                continue  # Hela skärmen
+            if bw < 0.005 or bh < 0.005:
+                continue  # Osynligt litet
+
+            labels.append(f"{class_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+
+        if not labels:
+            skipped += 1
+            continue
+
+        # Kopiera bild och skriv label
+        shutil.copy2(img_path, output_dir / "images" / img_path.name)
+        label_file = output_dir / "labels" / f"{screen_id}.txt"
+        with open(label_file, "w") as f:
+            f.write("\n".join(labels) + "\n")
+
+        converted += 1
+
+    log(f"Rico → YOLO: {converted} bilder konverterade, {skipped} hoppades över", "OK")
+
+    # Auto-splitta
+    auto_split_dataset(output_dir)
+    create_data_yaml(output_dir, output_dir / "data.yaml")
+
+    return output_dir
+
+
+def _extract_rico_nodes(data: dict) -> list:
+    """Extraherar alla leaf-noder med bounds från Rico JSON (rekursivt)."""
+    nodes = []
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        # Samla noder med componentLabel eller class + bounds
+        if ("componentLabel" in node or "class" in node) and "bounds" in node:
+            nodes.append(node)
+        for child in node.get("children", []):
+            _walk(child)
+
+    # Rico combined format: {"activity": {"root": {...}}}
+    if "activity" in data:
+        root = data["activity"].get("root", data.get("activity", {}))
+        _walk(root)
+    else:
+        _walk(data)
+
+    return nodes
+
+
+def convert_coco_to_yolo(coco_json_path: Path, images_dir: Path, output_dir: Path) -> Path:
+    """Konverterar COCO-format (annotations JSON + bilder) till YOLO-format.
+
+    COCO-format:
+        annotations.json  ← {"images": [...], "annotations": [...], "categories": [...]}
+        images/
+            img001.jpg, ...
+    """
+    log("Konverterar COCO-dataset till YOLO-format...", "STEP")
+
+    with open(coco_json_path) as f:
+        coco = json.load(f)
+
+    # Bygg kategori-mappning
+    coco_categories = {}
+    for cat in coco.get("categories", []):
+        cat_name = cat["name"].lower().strip()
+        yolo_idx = _match_class_name(cat_name)
+        if yolo_idx is not None:
+            coco_categories[cat["id"]] = yolo_idx
+
+    if not coco_categories:
+        log("Inga COCO-kategorier matchade UI_CLASSES. Mappar alla till index 0-N.", "WARN")
+        for i, cat in enumerate(coco.get("categories", [])):
+            if i < len(UI_CLASSES):
+                coco_categories[cat["id"]] = i
+
+    log(f"Mappade {len(coco_categories)} av {len(coco.get('categories', []))} COCO-kategorier", "INFO")
+
+    # Bygg bild-ID → filnamn + dimensioner
+    img_info = {}
+    for img in coco.get("images", []):
+        img_info[img["id"]] = {
+            "file_name": img["file_name"],
+            "width": img["width"],
+            "height": img["height"],
+        }
+
+    # Gruppera annotationer per bild
+    img_annotations = {}
+    for ann in coco.get("annotations", []):
+        img_id = ann["image_id"]
+        cat_id = ann["category_id"]
+        if cat_id not in coco_categories:
+            continue
+        if img_id not in img_annotations:
+            img_annotations[img_id] = []
+        img_annotations[img_id].append(ann)
+
+    # Skapa output
+    for split in ["images", "labels"]:
+        (output_dir / split).mkdir(parents=True, exist_ok=True)
+
+    converted = 0
+    for img_id, anns in img_annotations.items():
+        if img_id not in img_info:
+            continue
+
+        info = img_info[img_id]
+        img_w = info["width"]
+        img_h = info["height"]
+        file_name = info["file_name"]
+
+        # Kopiera bild
+        src_img = images_dir / file_name
+        if not src_img.exists():
+            continue
+
+        labels = []
+        for ann in anns:
+            class_idx = coco_categories[ann["category_id"]]
+            bbox = ann.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            # COCO bbox: [x, y, width, height] (pixel, top-left)
+            x, y, w, h = bbox
+            if w <= 0 or h <= 0:
+                continue
+
+            cx = (x + w / 2) / img_w
+            cy = (y + h / 2) / img_h
+            nw = w / img_w
+            nh = h / img_h
+
+            labels.append(f"{class_idx} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}")
+
+        if not labels:
+            continue
+
+        shutil.copy2(src_img, output_dir / "images" / file_name)
+        stem = Path(file_name).stem
+        with open(output_dir / "labels" / f"{stem}.txt", "w") as f:
+            f.write("\n".join(labels) + "\n")
+
+        converted += 1
+
+    log(f"COCO → YOLO: {converted} bilder konverterade", "OK")
+
+    auto_split_dataset(output_dir)
+    create_data_yaml(output_dir, output_dir / "data.yaml")
+
+    return output_dir
+
+
+def convert_webui_to_yolo(webui_dir: Path, output_dir: Path) -> Path:
+    """Konverterar WebUI-dataset till YOLO-format.
+
+    Stödjer flera vanliga WebUI-format:
+
+    Format A (JSON annotations per bild):
+        webui_dir/
+            images/
+                page_001.png, ...
+            annotations/
+                page_001.json  ← {"elements": [{"type": "button", "bbox": [x1,y1,x2,y2]}, ...]}
+
+    Format B (En stor JSON-fil):
+        webui_dir/
+            images/
+                page_001.png, ...
+            annotations.json  ← [{"image": "page_001.png", "elements": [...]}, ...]
+
+    Format C (JSONL per rad):
+        webui_dir/
+            images/
+                page_001.png, ...
+            annotations.jsonl  ← en JSON per rad
+    """
+    log("Konverterar WebUI-dataset till YOLO-format...", "STEP")
+
+    for split in ["images", "labels"]:
+        (output_dir / split).mkdir(parents=True, exist_ok=True)
+
+    converted = 0
+
+    # Detektera format
+    annotations_dir = webui_dir / "annotations"
+    annotations_json = webui_dir / "annotations.json"
+    annotations_jsonl = webui_dir / "annotations.jsonl"
+
+    if annotations_dir.exists() and annotations_dir.is_dir():
+        converted = _convert_webui_per_file(webui_dir, annotations_dir, output_dir)
+    elif annotations_json.exists():
+        converted = _convert_webui_single_json(webui_dir, annotations_json, output_dir)
+    elif annotations_jsonl.exists():
+        converted = _convert_webui_jsonl(webui_dir, annotations_jsonl, output_dir)
+    else:
+        log("Okänt WebUI-format. Förväntade annotations/ mapp, annotations.json eller annotations.jsonl", "ERR")
+        sys.exit(1)
+
+    log(f"WebUI → YOLO: {converted} bilder konverterade", "OK")
+
+    auto_split_dataset(output_dir)
+    create_data_yaml(output_dir, output_dir / "data.yaml")
+
+    return output_dir
+
+
+def _convert_webui_per_file(webui_dir: Path, annotations_dir: Path, output_dir: Path) -> int:
+    """Konverterar WebUI med en JSON-fil per bild."""
+    images_dir = webui_dir / "images"
+    converted = 0
+
+    for ann_file in sorted(annotations_dir.glob("*.json")):
+        with open(ann_file) as f:
+            data = json.load(f)
+
+        stem = ann_file.stem
+        img_path = _find_image(images_dir, stem)
+        if img_path is None:
+            continue
+
+        try:
+            from PIL import Image
+            img = Image.open(img_path)
+            img_w, img_h = img.size
+        except Exception:
+            continue
+
+        labels = _extract_webui_labels(data, img_w, img_h)
+        if not labels:
+            continue
+
+        shutil.copy2(img_path, output_dir / "images" / img_path.name)
+        with open(output_dir / "labels" / f"{stem}.txt", "w") as f:
+            f.write("\n".join(labels) + "\n")
+        converted += 1
+
+    return converted
+
+
+def _convert_webui_single_json(webui_dir: Path, json_path: Path, output_dir: Path) -> int:
+    """Konverterar WebUI med en stor JSON-fil."""
+    images_dir = webui_dir / "images"
+
+    with open(json_path) as f:
+        data = json.load(f)
+
+    entries = data if isinstance(data, list) else data.get("pages", data.get("images", []))
+    converted = 0
+
+    for entry in entries:
+        img_name = entry.get("image", entry.get("file_name", entry.get("screenshot", "")))
+        if not img_name:
+            continue
+
+        img_path = images_dir / img_name
+        if not img_path.exists():
+            continue
+
+        try:
+            from PIL import Image
+            img = Image.open(img_path)
+            img_w, img_h = img.size
+        except Exception:
+            continue
+
+        labels = _extract_webui_labels(entry, img_w, img_h)
+        if not labels:
+            continue
+
+        shutil.copy2(img_path, output_dir / "images" / img_path.name)
+        stem = Path(img_name).stem
+        with open(output_dir / "labels" / f"{stem}.txt", "w") as f:
+            f.write("\n".join(labels) + "\n")
+        converted += 1
+
+    return converted
+
+
+def _convert_webui_jsonl(webui_dir: Path, jsonl_path: Path, output_dir: Path) -> int:
+    """Konverterar WebUI med JSONL-format (en JSON per rad)."""
+    images_dir = webui_dir / "images"
+    converted = 0
+
+    with open(jsonl_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+
+            img_name = entry.get("image", entry.get("file_name", entry.get("screenshot", "")))
+            if not img_name:
+                continue
+
+            img_path = images_dir / img_name
+            if not img_path.exists():
+                continue
+
+            try:
+                from PIL import Image
+                img = Image.open(img_path)
+                img_w, img_h = img.size
+            except Exception:
+                continue
+
+            labels = _extract_webui_labels(entry, img_w, img_h)
+            if not labels:
+                continue
+
+            shutil.copy2(img_path, output_dir / "images" / img_path.name)
+            stem = Path(img_name).stem
+            with open(output_dir / "labels" / f"{stem}.txt", "w") as f:
+                f.write("\n".join(labels) + "\n")
+            converted += 1
+
+    return converted
+
+
+def _extract_webui_labels(data: dict, img_w: int, img_h: int) -> list:
+    """Extraherar YOLO-labels från en WebUI annotation-post."""
+    labels = []
+    elements = data.get("elements", data.get("annotations", data.get("components", [])))
+
+    for elem in elements:
+        # Hämta klassnamn
+        class_name = elem.get("type", elem.get("class", elem.get("label", elem.get("category", "")))).lower().strip()
+        class_idx = _WEBUI_CLASS_MAP.get(class_name)
+        if class_idx is None:
+            class_idx = _match_class_name(class_name)
+        if class_idx is None:
+            continue
+
+        # Hämta bbox — stödjer [x1,y1,x2,y2], {"x","y","width","height"}, och "bounds"
+        bbox = elem.get("bbox", elem.get("bounds", elem.get("bounding_box", None)))
+        if bbox is None and all(k in elem for k in ["x", "y", "width", "height"]):
+            x, y, w, h = elem["x"], elem["y"], elem["width"], elem["height"]
+            bbox = [x, y, x + w, y + h]
+
+        if bbox is None or len(bbox) != 4:
+            continue
+
+        x1, y1, x2, y2 = [float(v) for v in bbox]
+
+        # Autodetektera om koordinaterna är normaliserade (0-1) eller pixlar
+        if max(x1, y1, x2, y2) <= 1.0:
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            bw = x2 - x1
+            bh = y2 - y1
+        else:
+            if x2 <= x1 or y2 <= y1:
+                continue
+            cx = ((x1 + x2) / 2) / img_w
+            cy = ((y1 + y2) / 2) / img_h
+            bw = (x2 - x1) / img_w
+            bh = (y2 - y1) / img_h
+
+        if bw <= 0 or bh <= 0 or bw > 1 or bh > 1:
+            continue
+
+        labels.append(f"{class_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+
+    return labels
+
+
+def _match_class_name(name: str) -> int:
+    """Fuzzy-matchar ett klassnamn mot UI_CLASSES."""
+    name = name.lower().strip()
+
+    # Exakt match
+    if name in UI_CLASSES:
+        return UI_CLASSES.index(name)
+
+    # WebUI-map
+    if name in _WEBUI_CLASS_MAP:
+        return _WEBUI_CLASS_MAP[name]
+
+    # Delsträngs-match
+    for i, cls in enumerate(UI_CLASSES):
+        if cls in name or name in cls:
+            return i
+
+    return None
+
+
+def _find_image(images_dir: Path, stem: str) -> Path:
+    """Hittar en bildfil med givet filnamn (utan extension)."""
+    for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        candidate = images_dir / f"{stem}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def convert_dataset(source_path: Path, output_dir: Path, fmt: str) -> Path:
+    """Huvudfunktion: konverterar dataset från givet format till YOLO.
+
+    Args:
+        source_path: Sökväg till källdataset
+        output_dir: Sökväg till YOLO-output
+        fmt: Format — "rico", "coco", "webui", "yolo" (passthrough)
+
+    Returns:
+        Sökväg till YOLO-dataset
+    """
+    fmt = fmt.lower().strip()
+
+    if fmt == "yolo":
+        log("Dataset är redan YOLO-format, ingen konvertering behövs", "OK")
+        return source_path
+
+    if fmt == "rico":
+        return convert_rico_to_yolo(source_path, output_dir)
+
+    if fmt == "coco":
+        # COCO: förväntar sig annotations JSON + images/
+        coco_json = source_path / "annotations.json"
+        if not coco_json.exists():
+            # Sök efter andra vanliga namn
+            for name in ["instances_train.json", "instances_default.json", "_annotations.coco.json"]:
+                candidate = source_path / name
+                if candidate.exists():
+                    coco_json = candidate
+                    break
+            else:
+                # Sök i annotations/ mapp
+                ann_dir = source_path / "annotations"
+                if ann_dir.exists():
+                    jsons = list(ann_dir.glob("*.json"))
+                    if jsons:
+                        coco_json = jsons[0]
+                    else:
+                        log(f"Hittade ingen COCO JSON i {source_path}", "ERR")
+                        sys.exit(1)
+                else:
+                    log(f"Hittade ingen COCO annotations-fil i {source_path}", "ERR")
+                    sys.exit(1)
+
+        images_dir = source_path / "images"
+        if not images_dir.exists():
+            images_dir = source_path / "train"
+        if not images_dir.exists():
+            images_dir = source_path  # Bilder i root
+
+        return convert_coco_to_yolo(coco_json, images_dir, output_dir)
+
+    if fmt == "webui":
+        return convert_webui_to_yolo(source_path, output_dir)
+
+    log(f"Okänt format: {fmt}. Stödda format: rico, coco, webui, yolo", "ERR")
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Step 2: Training
 # ---------------------------------------------------------------------------
 
@@ -751,6 +1375,9 @@ Examples:
     )
 
     parser.add_argument("--dataset", type=Path, help="Path to labeled dataset directory")
+    parser.add_argument("--format", type=str, default="yolo",
+                        choices=["yolo", "rico", "coco", "webui"],
+                        help="Dataset format (default: yolo). Converts to YOLO automatically.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
@@ -809,8 +1436,16 @@ Examples:
         if not args.dataset.exists():
             log(f"Dataset path not found: {args.dataset}", "ERR")
             sys.exit(1)
+
+        # Konvertera om formatet inte redan är YOLO
+        dataset_path = args.dataset
+        if args.format != "yolo":
+            converted_dir = Path("dataset") / f"{args.format}_converted"
+            log(f"Konverterar {args.format} → YOLO...", "STEP")
+            dataset_path = convert_dataset(args.dataset, converted_dir, args.format)
+
         run_pipeline(
-            dataset_dir=args.dataset,
+            dataset_dir=dataset_path,
             epochs=args.epochs,
             batch=args.batch,
             imgsz=args.imgsz,

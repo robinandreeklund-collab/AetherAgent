@@ -34,6 +34,7 @@ VERIFY_ONLY=""
 SKIP_VERIFY=false
 INTERACTIVE=false
 DOWNLOAD_STARTER=false
+DATASET_FORMAT="yolo"
 SERVER_URL="http://localhost:3000"
 DEPLOY_DIR="$PROJECT_DIR/models"
 
@@ -79,13 +80,17 @@ usage() {
     echo "  --verify-only PATH     Only verify ONNX against API"
     echo "  --server URL           AetherAgent server URL (default: http://localhost:3000)"
     echo "  --skip-verify          Skip API verification"
+    echo "  --format FORMAT        Dataset format: yolo, rico, coco, webui (default: yolo)"
     echo "  --interactive          Interactive wizard mode"
     echo "  --help                 Show this help"
     echo ""
     echo "Examples:"
-    echo "  $0                          # Starter dataset + full pipeline"
-    echo "  $0 --dataset ./my-data      # Your dataset + full pipeline"
-    echo "  $0 --epochs 300 --batch 64  # Custom training config"
+    echo "  $0                                         # Starter dataset + full pipeline"
+    echo "  $0 --dataset ./my-data                     # Your dataset (YOLO format)"
+    echo "  $0 --dataset ./rico-data --format rico     # Convert Rico → YOLO + train"
+    echo "  $0 --dataset ./coco-data --format coco     # Convert COCO → YOLO + train"
+    echo "  $0 --dataset ./webui-data --format webui   # Convert WebUI → YOLO + train"
+    echo "  $0 --epochs 300 --batch 64                 # Custom training config"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -99,6 +104,7 @@ while [[ $# -gt 0 ]]; do
         --export-only)   EXPORT_ONLY="$2"; shift 2 ;;
         --verify-only)   VERIFY_ONLY="$2"; shift 2 ;;
         --server)        SERVER_URL="$2"; shift 2 ;;
+        --format)        DATASET_FORMAT="$2"; shift 2 ;;
         --skip-verify)   SKIP_VERIFY=true; shift ;;
         --interactive)   INTERACTIVE=true; shift ;;
         --help)          usage; exit 0 ;;
@@ -251,7 +257,23 @@ prepare_dataset() {
             err "Dataset-sökväg finns inte: $DATASET_DIR"
             exit 1
         fi
-        ok "Använder dataset: $DATASET_DIR"
+
+        # Konvertera om formatet inte är YOLO
+        if [[ "$DATASET_FORMAT" != "yolo" ]]; then
+            local converted_dir="$PROJECT_DIR/dataset/${DATASET_FORMAT}_converted"
+            log "Konverterar $DATASET_FORMAT → YOLO..."
+            "$PYTHON" -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from train_vision import convert_dataset
+from pathlib import Path
+convert_dataset(Path('$DATASET_DIR'), Path('$converted_dir'), '$DATASET_FORMAT')
+"
+            DATASET_DIR="$converted_dir"
+            ok "Dataset konverterat till YOLO: $DATASET_DIR"
+        else
+            ok "Använder dataset: $DATASET_DIR"
+        fi
         return
     fi
 
