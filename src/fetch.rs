@@ -98,13 +98,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         .send()
         .await
         .map_err(|e| {
-            let mut msg = format!("Fetch misslyckades: {e}");
-            let mut source = e.source();
-            while let Some(cause) = source {
-                msg.push_str(&format!(" -> {cause}"));
-                source = cause.source();
-            }
-            msg
+            format!(
+                "Fetch misslyckades: {e:?} [is_connect={}, is_timeout={}, is_builder={}, is_request={}, is_redirect={}]",
+                e.is_connect(),
+                e.is_timeout(),
+                e.is_builder(),
+                e.is_request(),
+                e.is_redirect(),
+            )
         })?;
 
     let status_code = response.status().as_u16();
