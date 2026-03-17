@@ -96,6 +96,37 @@ struct ErrorResponse {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
+async fn root() -> impl IntoResponse {
+    let body = serde_json::json!({
+        "engine": "AetherAgent",
+        "version": "0.2.0",
+        "description": "LLM-native browser engine – semantic perception layer for AI agents",
+        "endpoints": {
+            "GET /health": "Health check",
+            "POST /api/parse": "Parse HTML to semantic tree",
+            "POST /api/parse/top": "Parse top-N relevant nodes",
+            "POST /api/click": "Find best clickable element",
+            "POST /api/fill-form": "Map form fields",
+            "POST /api/extract": "Extract structured data",
+            "POST /api/check-injection": "Check text for prompt injection",
+            "POST /api/wrap-untrusted": "Wrap content in trust markers",
+            "POST /api/memory/create": "Create workflow memory",
+            "POST /api/memory/step": "Add workflow step",
+            "POST /api/memory/context/set": "Set context key/value",
+            "POST /api/memory/context/get": "Get context value"
+        },
+        "example": {
+            "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
+        },
+        "source": "https://github.com/robinandreeklund-collab/AetherAgent"
+    });
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    )
+}
+
 async fn health() -> impl IntoResponse {
     let result = aether_agent::health_check();
     (StatusCode::OK, result)
@@ -195,7 +226,8 @@ fn build_router() -> Router {
         .allow_headers(Any);
 
     Router::new()
-        // Health
+        // Root & Health
+        .route("/", get(root))
         .route("/health", get(health))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
