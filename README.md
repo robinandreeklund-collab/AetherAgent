@@ -944,6 +944,42 @@ rmcp = "1.2"                # MCP protocol (feature: mcp)
 | **JS sandbox** | No DOM, no fetch, no timers, no modules — pure computation only |
 | **Causal reasoning** | Risk-weighted path finding avoids high-risk actions |
 
+### Future Work
+
+#### Inbyggd YOLOv8-inferens via rten (screenshot-only path)
+
+Fas 9c (Multimodal Grounding) tar idag emot bounding boxes från externa källor — `getBoundingClientRect()` eller vision-modeller som körs utanför AetherAgent. Ett naturligt nästa steg är att baka in objektdetektering direkt i WASM-binären så att agenten kan arbeta från enbart en screenshot, utan tillgång till DOM.
+
+**Vad det ger:**
+- **Screenshot-only agenter** — ingen DOM behövs, bara en PNG
+- **Verifiering** — jämför visuella element mot semantiskt träd för att upptäcka dolda/osynliga noder
+- **Fallback** — fungerar även på canvas-renderade appar, PDF-viewers, Flash-liknande content
+
+**Arkitekturskiss:**
+```
+PNG-bytes → vision.rs (rten + YOLOv8-nano ONNX) → bboxes → grounding.rs → annoterat semantiskt träd
+```
+
+**Nya komponenter:**
+| Komponent | Beskrivning |
+|-----------|------------|
+| `src/vision.rs` | Bildavkodning → tensor → rten-inferens → bbox-lista |
+| `yolov8n-ui.onnx` | YOLOv8-nano ONNX-modell (~6 MB) fintrimmad för UI-element |
+| `parse_screenshot()` | Ny WASM-export: `(png_bytes, goal) → JSON` |
+| Feature flag `vision` | Gated bakom `--features vision` för att hålla core lightweight |
+
+**Dependencies:**
+```toml
+# Optional (feature: vision)
+rten = "0.15"              # Rust ONNX runtime (WASM-kompatibel)
+image = "0.25"             # PNG/JPEG-avkodning
+```
+
+**Avvägningar:**
+- WASM-binär ökar med ~10-15 MB (modell + runtime)
+- Feature-gated — påverkar inte befintliga användare
+- Alternativ: behåll extern pipeline och skicka bboxes till `ground_semantic_tree()`
+
 ---
 
 ## Contributing
