@@ -7,7 +7,6 @@
 
 use crate::types::{FetchConfig, FetchResult};
 use std::collections::HashMap;
-use std::error::Error as StdError;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -97,17 +96,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
     let response = request
         .send()
         .await
-        .map_err(|e| {
-            let debug = format!("{e:?}");
-            format!(
-                "FETCH_DEBUG: {debug} | connect={} timeout={} builder={} request={} redirect={}",
-                e.is_connect(),
-                e.is_timeout(),
-                e.is_builder(),
-                e.is_request(),
-                e.is_redirect(),
-            )
-        })?;
+        .map_err(|e| format!("Fetch misslyckades: {e}"))?;
 
     let status_code = response.status().as_u16();
     let final_url = response.url().to_string();
