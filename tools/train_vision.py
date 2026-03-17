@@ -73,7 +73,7 @@ DEFAULT_EPOCHS = 150
 DEFAULT_BATCH = 32
 DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolov8n.pt"  # nano — keeps ONNX < 6 MB
-DEFAULT_PROJECT = "runs/detect"
+DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
 DEFAULT_NAME = "aether-ui"
 
 BANNER = r"""
@@ -1372,8 +1372,16 @@ def train_model(
 
     best_pt = Path(project) / name / "weights" / "best.pt"
     if not best_pt.exists():
-        log(f"Training finished but best.pt not found at {best_pt}", "ERR")
-        sys.exit(1)
+        # Fallback: YOLO sparar ibland i results.save_dir
+        save_dir = getattr(results, "save_dir", None)
+        if save_dir:
+            fallback = Path(save_dir) / "weights" / "best.pt"
+            if fallback.exists():
+                log(f"best.pt hittades via save_dir: {fallback}", "WARN")
+                best_pt = fallback
+        if not best_pt.exists():
+            log(f"best.pt hittades inte efter träning! Förväntad: {best_pt}", "ERR")
+            sys.exit(1)
 
     # Print key metrics
     log(f"Training complete! Best model: {best_pt}", "OK")
