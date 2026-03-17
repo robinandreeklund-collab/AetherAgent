@@ -1,11 +1,14 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod causal;
+mod collab;
 mod compiler;
 mod diff;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
+mod grounding;
 mod intent;
 mod js_bridge;
 mod js_eval;
@@ -15,6 +18,7 @@ mod semantic;
 mod temporal;
 mod trust;
 pub mod types;
+mod webmcp;
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -592,6 +596,323 @@ pub fn classify_request_batch(urls_json: &str, goal: &str, config_json: &str) ->
         .unwrap_or_else(|e| format!(r#"{{"error": "Serialization failed: {e}"}}"#))
 }
 
+// ─── Fas 9a: Causal Action Graph ─────────────────────────────────────────────
+
+/// Build a causal graph from navigation history
+///
+/// Models page state transitions as a directed graph.
+/// The agent can reason about action consequences before executing them.
+///
+/// # Arguments
+/// * `snapshots_json` - JSON array of [url, node_count, warning_count, key_elements]
+/// * `actions_json` - JSON array of action strings between snapshots
+///
+/// # Returns
+/// JSON with CausalGraph: states, edges, current_state_id
+#[wasm_bindgen]
+pub fn build_causal_graph(snapshots_json: &str, actions_json: &str) -> String {
+    let snapshots: Vec<(String, u32, u32, Vec<String>)> = match serde_json::from_str(snapshots_json)
+    {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "Invalid snapshots_json: {}"}}"#, e),
+    };
+
+    let actions: Vec<String> = match serde_json::from_str(actions_json) {
+        Ok(a) => a,
+        Err(e) => return format!(r#"{{"error": "Invalid actions_json: {}"}}"#, e),
+    };
+
+    let graph = causal::CausalGraph::build_from_history(&snapshots, &actions);
+    graph.to_json()
+}
+
+/// Predict the outcome of an action from current state
+///
+/// # Arguments
+/// * `graph_json` - CausalGraph JSON
+/// * `action` - Action to predict (e.g. "click: Buy")
+///
+/// # Returns
+/// JSON with PredictedOutcome: outcomes, aggregate_risk, recommendation
+#[wasm_bindgen]
+pub fn predict_action_outcome(graph_json: &str, action: &str) -> String {
+    let graph = match causal::CausalGraph::from_json(graph_json) {
+        Ok(g) => g,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let prediction = graph.predict_outcome(action, None);
+    match serde_json::to_string_pretty(&prediction) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Find the safest path to a goal in the causal graph
+///
+/// # Arguments
+/// * `graph_json` - CausalGraph JSON
+/// * `goal` - Target goal description
+///
+/// # Returns
+/// JSON with SafePath: path, actions, total_risk, success_probability
+#[wasm_bindgen]
+pub fn find_safest_path(graph_json: &str, goal: &str) -> String {
+    let graph = match causal::CausalGraph::from_json(graph_json) {
+        Ok(g) => g,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let path = graph.find_safest_path(goal, 20);
+    match serde_json::to_string_pretty(&path) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+// ─── Fas 9b: WebMCP Discovery ───────────────────────────────────────────────
+
+/// Discover WebMCP tools registered on a web page
+///
+/// Scans inline scripts for navigator.modelContext.registerTool() calls
+/// and extracts tool definitions (name, description, inputSchema).
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `url` - The page URL
+///
+/// # Returns
+/// JSON with WebMcpDiscoveryResult: tools, has_webmcp, scripts_scanned
+#[wasm_bindgen]
+pub fn discover_webmcp(html: &str, url: &str) -> String {
+    let start = now_ms();
+    let mut result = webmcp::discover_webmcp_tools(html, url);
+    result.scan_time_ms = now_ms() - start;
+
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+// ─── Fas 9c: Multimodal Grounding ───────────────────────────────────────────
+
+/// Ground a semantic tree with bounding box annotations
+///
+/// Enriches SemanticNode with spatial data from getBoundingClientRect()
+/// or vision model predictions. Generates Set-of-Mark annotations.
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's goal
+/// * `url` - The page URL
+/// * `annotations_json` - JSON array of BboxAnnotation objects
+///
+/// # Returns
+/// JSON with GroundingResult: grounded tree, matched/unmatched counts, set_of_marks
+#[wasm_bindgen]
+pub fn ground_semantic_tree(html: &str, goal: &str, url: &str, annotations_json: &str) -> String {
+    let start = now_ms();
+    let tree = build_tree(html, goal, url);
+
+    let annotations: Vec<grounding::BboxAnnotation> = match serde_json::from_str(annotations_json) {
+        Ok(a) => a,
+        Err(e) => return format!(r#"{{"error": "Invalid annotations_json: {}"}}"#, e),
+    };
+
+    let mut result = grounding::ground_tree(&tree, &annotations);
+    result.grounding_time_ms = now_ms() - start;
+
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Match a predicted bounding box against grounded nodes using IoU
+///
+/// # Arguments
+/// * `tree_json` - SemanticTree JSON (with bbox data from ground_semantic_tree)
+/// * `bbox_json` - Predicted BoundingBox JSON: {"x": 100, "y": 200, "width": 80, "height": 30}
+///
+/// # Returns
+/// JSON array of IoUMatch objects sorted by IoU (highest first)
+#[wasm_bindgen]
+pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
+    let tree: types::SemanticTree = match serde_json::from_str(tree_json) {
+        Ok(t) => t,
+        Err(e) => return format!(r#"{{"error": "Invalid tree_json: {}"}}"#, e),
+    };
+
+    let bbox: types::BoundingBox = match serde_json::from_str(bbox_json) {
+        Ok(b) => b,
+        Err(e) => return format!(r#"{{"error": "Invalid bbox_json: {}"}}"#, e),
+    };
+
+    let matches = grounding::match_by_iou(&tree.nodes, &bbox);
+    match serde_json::to_string_pretty(&matches) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+// ─── Fas 9d: Cross-Agent Semantic Diffing ───────────────────────────────────
+
+/// Create a new shared diff store for cross-agent collaboration
+///
+/// # Returns
+/// JSON with empty SharedDiffStore
+#[wasm_bindgen]
+pub fn create_collab_store() -> String {
+    collab::SharedDiffStore::new().to_json()
+}
+
+/// Register an agent in the collaboration store
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+/// * `agent_id` - Unique agent identifier
+/// * `goal` - The agent's goal
+/// * `timestamp_ms` - Current timestamp
+///
+/// # Returns
+/// Updated SharedDiffStore JSON
+#[wasm_bindgen]
+pub fn register_collab_agent(
+    store_json: &str,
+    agent_id: &str,
+    goal: &str,
+    timestamp_ms: u64,
+) -> String {
+    let mut store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    store.register_agent(agent_id, goal, timestamp_ms);
+    store.to_json()
+}
+
+/// Publish a semantic delta to the collaboration store
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+/// * `agent_id` - Publishing agent's ID
+/// * `url` - URL the delta applies to
+/// * `delta_json` - SemanticDelta JSON (from diff_semantic_trees)
+/// * `timestamp_ms` - Current timestamp
+///
+/// # Returns
+/// Updated SharedDiffStore JSON
+#[wasm_bindgen]
+pub fn publish_collab_delta(
+    store_json: &str,
+    agent_id: &str,
+    url: &str,
+    delta_json: &str,
+    timestamp_ms: u64,
+) -> String {
+    let mut store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    let delta: types::SemanticDelta = match serde_json::from_str(delta_json) {
+        Ok(d) => d,
+        Err(e) => return format!(r#"{{"error": "Invalid delta_json: {}"}}"#, e),
+    };
+    store.publish_delta(agent_id, url, delta, timestamp_ms);
+    store.to_json()
+}
+
+/// Get collaboration store statistics
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+///
+/// # Returns
+/// JSON with CollabStats: active_agents, cached_deltas, total_publishes, total_consumes
+#[wasm_bindgen]
+pub fn collab_stats(store_json: &str) -> String {
+    let store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    let stats = store.stats();
+    match serde_json::to_string_pretty(&stats) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Clean up inactive agents from the collaboration store
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+/// * `now_ms` - Current timestamp in milliseconds
+/// * `max_age_ms` - Max inactivity before removal (milliseconds)
+///
+/// # Returns
+/// Updated SharedDiffStore JSON
+#[wasm_bindgen]
+pub fn cleanup_collab_store(store_json: &str, now_ms: u64, max_age_ms: u64) -> String {
+    let mut store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    store.cleanup_inactive(now_ms, max_age_ms);
+    store.to_json()
+}
+
+/// Get the cached delta for a specific URL
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+/// * `url` - URL to look up
+///
+/// # Returns
+/// JSON with CachedDelta or {"found": false}
+#[wasm_bindgen]
+pub fn get_collab_delta_for_url(store_json: &str, url: &str) -> String {
+    let store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+    match store.get_delta_for_url(url) {
+        Some(delta) => match serde_json::to_string_pretty(delta) {
+            Ok(json) => json,
+            Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        },
+        None => r#"{"found": false}"#.to_string(),
+    }
+}
+
+/// Fetch new deltas from other agents
+///
+/// # Arguments
+/// * `store_json` - SharedDiffStore JSON
+/// * `agent_id` - Requesting agent's ID
+///
+/// # Returns
+/// JSON with DeltaFetchResult: deltas, saved_parse_count, summary
+/// Also returns updated store (consumed deltas are tracked)
+#[wasm_bindgen]
+pub fn fetch_collab_deltas(store_json: &str, agent_id: &str) -> String {
+    let mut store = match collab::SharedDiffStore::from_json(store_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let result = store.fetch_deltas(agent_id);
+    let response = serde_json::json!({
+        "result": result,
+        "store": store,
+    });
+
+    match serde_json::to_string_pretty(&response) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -956,5 +1277,151 @@ mod tests {
     fn test_execute_plan_invalid_json() {
         let result = execute_plan("bad", "<html></html>", "test", "url", "[]");
         assert!(result.contains("error"));
+    }
+
+    // ─── Fas 9a: Causal Action Graph smoke tests ──────────────────────
+
+    #[test]
+    fn test_build_causal_graph_returns_valid_json() {
+        let snapshots = r#"[
+            ["https://shop.se", 5, 0, ["button:Köp"]],
+            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+        ]"#;
+        let actions = r#"["click: Köp"]"#;
+
+        let result = build_causal_graph(snapshots, actions);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["states"].is_array(), "Borde ha states");
+        assert!(parsed["edges"].is_array(), "Borde ha edges");
+    }
+
+    #[test]
+    fn test_predict_action_outcome_returns_valid_json() {
+        let snapshots = r#"[
+            ["https://shop.se", 5, 0, ["button:Köp"]],
+            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+        ]"#;
+        let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
+
+        let result = predict_action_outcome(&graph_json, "click: Köp");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["recommendation"].is_string(),
+            "Borde ha recommendation"
+        );
+    }
+
+    #[test]
+    fn test_find_safest_path_returns_valid_json() {
+        let snapshots = r#"[
+            ["https://shop.se", 5, 0, ["button:Köp"]],
+            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+        ]"#;
+        let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
+
+        let result = find_safest_path(&graph_json, "kassa");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["path"].is_array(), "Borde ha path");
+        assert!(parsed["summary"].is_string(), "Borde ha summary");
+    }
+
+    // ─── Fas 9b: WebMCP smoke tests ─────────────────────────────────
+
+    #[test]
+    fn test_discover_webmcp_no_tools() {
+        let html = r#"<html><body><p>Normal sida</p></body></html>"#;
+        let result = discover_webmcp(html, "https://test.com");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["has_webmcp"], false);
+        assert!(parsed["tools"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_discover_webmcp_with_tools() {
+        let html = r##"<html><body>
+        <script>
+            navigator.modelContext.registerTool({
+                name: "search",
+                description: "Search products"
+            });
+        </script>
+        </body></html>"##;
+        let result = discover_webmcp(html, "https://shop.com");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["has_webmcp"], true);
+        assert_eq!(parsed["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["tools"][0]["name"], "search");
+    }
+
+    // ─── Fas 9c: Multimodal Grounding smoke tests ───────────────────
+
+    #[test]
+    fn test_ground_semantic_tree_returns_valid_json() {
+        let html = r#"<html><body><button id="buy">Köp</button></body></html>"#;
+        let annotations =
+            r#"[{"html_id": "buy", "bbox": {"x": 10, "y": 20, "width": 80, "height": 30}}]"#;
+        let result = ground_semantic_tree(html, "köp", "https://test.com", annotations);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["matched_count"].is_number(),
+            "Borde ha matched_count"
+        );
+        assert!(parsed["set_of_marks"].is_array(), "Borde ha set_of_marks");
+    }
+
+    #[test]
+    fn test_match_bbox_iou_returns_valid_json() {
+        let html = r#"<html><body><button id="buy">Köp</button></body></html>"#;
+        let annotations =
+            r#"[{"html_id": "buy", "bbox": {"x": 10, "y": 20, "width": 80, "height": 30}}]"#;
+        let grounded = ground_semantic_tree(html, "köp", "https://test.com", annotations);
+        let parsed: serde_json::Value = serde_json::from_str(&grounded).expect("Valid JSON");
+        let tree_json = serde_json::to_string(&parsed["tree"]).unwrap_or_default();
+
+        let bbox = r#"{"x": 15, "y": 25, "width": 70, "height": 25}"#;
+        let result = match_bbox_iou(&tree_json, bbox);
+        // Should parse without error
+        let _: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    }
+
+    // ─── Fas 9d: Cross-Agent Diffing smoke tests ────────────────────
+
+    #[test]
+    fn test_create_collab_store_returns_valid_json() {
+        let json = create_collab_store();
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("Valid JSON");
+        assert!(parsed["agents"].is_array());
+        assert!(parsed["agents"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_register_collab_agent_returns_updated_store() {
+        let store = create_collab_store();
+        let updated = register_collab_agent(&store, "agent-1", "buy shoes", 1000);
+        let parsed: serde_json::Value = serde_json::from_str(&updated).expect("Valid JSON");
+        assert_eq!(parsed["agents"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["agents"][0]["agent_id"], "agent-1");
+    }
+
+    #[test]
+    fn test_collab_publish_and_fetch() {
+        let store = create_collab_store();
+        let store = register_collab_agent(&store, "a", "test", 1000);
+        let store = register_collab_agent(&store, "b", "test", 1000);
+
+        // Skapa en enkel delta
+        let html1 = r#"<html><body><button>Köp</button></body></html>"#;
+        let html2 = r#"<html><body><button>Köp nu</button></body></html>"#;
+        let tree1 = parse_to_semantic_tree(html1, "köp", "https://shop.se");
+        let tree2 = parse_to_semantic_tree(html2, "köp", "https://shop.se");
+        let delta = diff_semantic_trees(&tree1, &tree2);
+
+        let store = publish_collab_delta(&store, "a", "https://shop.se", &delta, 2000);
+        let result = fetch_collab_deltas(&store, "b");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["result"]["deltas"].is_array(),
+            "Borde ha deltas i result"
+        );
     }
 }
