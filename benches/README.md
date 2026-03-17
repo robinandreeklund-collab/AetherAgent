@@ -28,7 +28,7 @@ Head-to-head performance comparison between **AetherAgent** (Rust/WASM semantic 
 
 ## 1. Parse Speed (Head-to-Head)
 
-Same HTML fixtures, same machine. AetherAgent receives HTML via HTTP POST, Lightpanda fetches from a local HTTP server.
+Same HTML fixtures, same machine. Both engines receive HTML from the same local HTTP server. AetherAgent also has built-in HTTP fetch (Fas 7) with cookies, redirects, robots.txt compliance, and SSRF protection -- but for fair benchmarking, both are given the same pre-fetched HTML.
 
 | Fixture | AetherAgent | Lightpanda | AE tokens | LP tokens | Speedup |
 |---------|-------------|------------|-----------|-----------|---------|
@@ -243,30 +243,32 @@ Even without connection pooling, AetherAgent is **60-200x faster** than Lightpan
 - Fair mode removes HTTP connection pooling advantage
 
 ### What is NOT apples-to-apples
-- **AetherAgent is a perception layer**: you provide HTML, it returns a semantic tree. It does not fetch pages or execute full JavaScript.
+- **AetherAgent is a semantic browser engine**: it fetches pages (Fas 7: reqwest with cookies, redirects, gzip/brotli, robots.txt, SSRF protection) and builds goal-aware semantic trees. It does not execute full JavaScript beyond its Boa sandbox.
 - **Lightpanda is a headless browser**: it fetches pages, executes JS via V8, handles CSS, and builds a DOM. Its ~250 ms per request includes process startup + HTTP fetch + full browser initialization.
 - **Lightpanda's constant overhead**: the ~250 ms is dominated by process cold start, not parsing. A persistent Lightpanda server (CDP mode) would be faster for sequential requests.
-- **JS execution**: AetherAgent's Boa sandbox handles simple inline scripts. Lightpanda runs full V8 -- it can handle SPAs, React, Angular, etc. that AetherAgent cannot.
+- **JS execution**: AetherAgent's Boa sandbox handles simple inline scripts (getElementById, querySelector patterns). Lightpanda runs full V8 -- it can handle SPAs, React, Angular, etc. that AetherAgent cannot.
 
 ### When to use which
-- **AetherAgent**: When you have HTML (from your own fetch, from a proxy, from a crawl pipeline) and need fast semantic understanding with AI safety features. Ideal for LLM agent perception, multi-agent coordination, and high-throughput scenarios.
-- **Lightpanda**: When you need a full browser that fetches pages, executes arbitrary JavaScript, and renders SPAs. Better for sites that require full JS execution to display content.
+- **AetherAgent**: When you need an end-to-end AI agent browser engine -- fetch pages, build semantic trees with goal-relevance, detect prompt injection, track state over time, plan actions, and coordinate across agents. Built for LLM-native workflows with built-in safety.
+- **Lightpanda**: When you need full JavaScript execution for SPAs and dynamic sites that require V8 to render content. Better for sites where the DOM is entirely JS-generated.
 
 ### The real comparison
-AetherAgent is not trying to replace Lightpanda. They serve different purposes:
+AetherAgent is not trying to replace Lightpanda. They serve different roles:
 
 ```
-Lightpanda: Full browser (fetch + JS + DOM)  -->  raw accessibility tree
-AetherAgent: Perception layer (HTML in)      -->  goal-aware semantic tree
+Lightpanda: Full browser (fetch + V8 + DOM)  -->  raw accessibility tree
+AetherAgent: AI browser engine               -->  fetch + parse
+                                                  + goal-aware semantic tree
                                                   + trust scoring
                                                   + injection detection
                                                   + semantic diff
                                                   + intent compiler
                                                   + causal reasoning
+                                                  + semantic firewall
                                                   + multi-agent collab
 ```
 
-In a production stack, they can be complementary: Lightpanda fetches and renders, AetherAgent provides the AI perception layer on top.
+In a production stack, they can be complementary: Lightpanda handles JS-heavy SPAs, AetherAgent handles everything else with AI-native perception and safety.
 
 ---
 
