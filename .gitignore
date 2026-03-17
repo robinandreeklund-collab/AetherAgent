@@ -11,3 +11,7 @@ __pycache__/
 .pytest_cache/
 dist/
 .venv/
+.venv-vision/
+runs/
+dataset/
+models/
