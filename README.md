@@ -960,6 +960,9 @@ AetherAgent/
 ├── bindings/
 │   ├── python/               # Python SDK
 │   └── node/                 # Node.js SDK + TypeScript types
+├── tools/
+│   ├── train.sh              # Fully automated training bootstrap (WSL)
+│   └── train_vision.py       # Training pipeline Python module
 ├── examples/
 │   └── python_test.py        # Complete agent loop demo
 ├── .github/workflows/
@@ -1112,7 +1115,58 @@ image = "0.25"              # PNG/JPEG decoding (feature: vision)
 
 ### Vision Model Training Guide
 
-AetherAgent's vision pipeline uses YOLOv8-nano for UI element detection from screenshots. The inference runtime (`rten`) is built in — you just need to train and export a model. This section covers the full workflow from dataset preparation to deployment.
+AetherAgent's vision pipeline uses YOLOv8-nano for UI element detection from screenshots. The inference runtime (`rten`) is built in — you just need to train and export a model.
+
+#### Quick Start — Automated Pipeline
+
+The fastest way to train is the fully automated bootstrap script. One command handles everything: venv creation, CUDA PyTorch installation, base model download, dataset generation, training, ONNX export, and deployment.
+
+```bash
+# WSL / Linux — run from project root:
+./tools/train.sh
+
+# With your own labeled dataset:
+./tools/train.sh --dataset /mnt/c/Users/you/labels/my-dataset
+
+# Custom config:
+./tools/train.sh --epochs 300 --batch 64 --version v2
+
+# Just export an existing .pt model:
+./tools/train.sh --export-only runs/detect/aether-ui-v1/weights/best.pt
+```
+
+**What it does (8 steps):**
+
+| Step | What |
+|------|------|
+| 0 | Installs system deps (`python3-venv`, `libgl1`, etc.) via `apt` |
+| 1 | Creates `.venv-vision/` (isolated Python environment) |
+| 2 | Installs PyTorch CUDA 12.4 + Ultralytics + ONNX tools |
+| 3 | Downloads YOLOv8n base model (~6 MB) |
+| 4 | Generates synthetic UI dataset (or uses `--dataset`) |
+| 5 | Trains with RTX 5090 optimizations (AMP, batch=32, RAM cache) |
+| 6 | Validates → mAP, precision, recall |
+| 7 | Exports ONNX → `models/aether-ui-v1.onnx` |
+| 8 | Verifies against AetherAgent `/api/parse-screenshot` |
+
+**Output:** `models/aether-ui-v1.onnx` ready to pass to `parse_screenshot()`.
+
+Or use the Python module directly for more control:
+
+```bash
+# Activate the venv created by train.sh:
+source .venv-vision/bin/activate
+
+# Interactive wizard:
+python tools/train_vision.py --interactive
+
+# Verify model against running server:
+python tools/train_vision.py --verify-only models/aether-ui-v1.onnx
+```
+
+#### Manual Training (step-by-step)
+
+The sections below describe each step manually, for full control or custom setups.
 
 #### 1. Dataset Preparation
 
