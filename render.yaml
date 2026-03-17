@@ -7,4 +7,6 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: AETHER_MODEL_URL
+        sync: false  # Sätt manuellt i Render Dashboard efter modell-upload
     healthCheckPath: /health

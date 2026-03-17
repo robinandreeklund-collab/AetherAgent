@@ -16,7 +16,15 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
+
+/// Delat server-state för förladdat vision-modell
+#[derive(Clone)]
+struct AppState {
+    vision_model: Arc<RwLock<Option<Vec<u8>>>>,
+}
 
 // ─── Request/Response types ──────────────────────────────────────────────────
 
@@ -290,6 +298,12 @@ struct DetectXhrRequest {
 struct ParseScreenshotRequest {
     png_base64: String,
     model_base64: String,
+    goal: String,
+}
+
+#[derive(Deserialize)]
+struct ParseScreenshotServerModelRequest {
+    png_base64: String,
     goal: String,
 }
 
@@ -1023,6 +1037,81 @@ async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> im
     };
     let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
     (StatusCode::OK, result)
+}
+
+/// Screenshot-analys med serverns förladdade modell (kräver AETHER_MODEL_URL/PATH)
+async fn parse_screenshot_server_model(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<ParseScreenshotServerModelRequest>,
+) -> impl IntoResponse {
+    let model_guard = state.vision_model.read().await;
+    let model_bytes = match model_guard.as_ref() {
+        Some(b) => b.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Ingen vision-modell laddad. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH."}"#
+                    .to_string(),
+            )
+        }
+    };
+    drop(model_guard);
+
+    let png_bytes = match B64.decode(&req.png_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid PNG base64: {e}"}}"#),
+            )
+        }
+    };
+    let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    (StatusCode::OK, result)
+}
+
+/// Ladda vision-modell från URL eller filsökväg vid serverstart
+async fn load_vision_model() -> Option<Vec<u8>> {
+    // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
+    if let Ok(url) = std::env::var("AETHER_MODEL_URL") {
+        println!("Laddar vision-modell från URL: {url}");
+        match reqwest::get(&url).await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            println!(
+                                "Vision-modell laddad: {:.1} MB",
+                                bytes.len() as f64 / (1024.0 * 1024.0)
+                            );
+                            return Some(bytes.to_vec());
+                        }
+                        Err(e) => eprintln!("Kunde inte läsa modell-bytes: {e}"),
+                    }
+                } else {
+                    eprintln!("Modell-URL returnerade {}", resp.status());
+                }
+            }
+            Err(e) => eprintln!("Kunde inte hämta modell från URL: {e}"),
+        }
+    }
+
+    if let Ok(path) = std::env::var("AETHER_MODEL_PATH") {
+        println!("Laddar vision-modell från fil: {path}");
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                println!(
+                    "Vision-modell laddad: {:.1} MB",
+                    bytes.len() as f64 / (1024.0 * 1024.0)
+                );
+                return Some(bytes);
+            }
+            Err(e) => eprintln!("Kunde inte läsa modell-fil: {e}"),
+        }
+    }
+
+    println!("Ingen vision-modell konfigurerad (AETHER_MODEL_URL/AETHER_MODEL_PATH ej satta)");
+    None
 }
 
 // ─── MCP Streamable HTTP (spec 2025-03-26) ───────────────────────────────────
@@ -1788,7 +1877,7 @@ async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl
     (StatusCode::OK, result)
 }
 
-fn build_router() -> Router {
+fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -1858,6 +1947,7 @@ fn build_router() -> Router {
         .route("/api/detect-xhr", post(detect_xhr))
         // Fas 11: Vision
         .route("/api/parse-screenshot", post(parse_screenshot_handler))
+        .route("/api/vision/parse", post(parse_screenshot_server_model))
         // Fas 13: Session Management
         .route("/api/session/create", post(session_create))
         .route("/api/session/cookies/add", post(session_add_cookies))
@@ -1887,6 +1977,7 @@ fn build_router() -> Router {
         .route("/api/workflow/status", post(workflow_status_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
+        .with_state(state)
         .layer(cors)
 }
 
@@ -1898,6 +1989,12 @@ async fn main() {
         .unwrap_or(3000);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    // Ladda vision-modell vid startup (om konfigurerad)
+    let model_bytes = load_vision_model().await;
+    let state = AppState {
+        vision_model: Arc::new(RwLock::new(model_bytes)),
+    };
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
@@ -1938,7 +2035,10 @@ async fn main() {
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
     println!();
     println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
-    println!("  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision");
+    println!(
+        "  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision (client model)"
+    );
+    println!("  POST /api/vision/parse           – Analyze screenshot with server-loaded model");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
@@ -1948,7 +2048,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind");
-    axum::serve(listener, build_router())
+    axum::serve(listener, build_router(state))
         .await
         .expect("Server error");
 }

@@ -75,6 +75,7 @@ DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolov8n.pt"  # nano — keeps ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
 DEFAULT_NAME = "aether-ui"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 BANNER = r"""
  ╔═══════════════════════════════════════════════════════════════╗
@@ -93,6 +94,27 @@ def log(msg: str, level: str = "INFO"):
     reset = "\033[0m"
     color = colors.get(level, "")
     print(f"{color}[{level}]{reset} {msg}")
+
+
+def _find_latest_model() -> Path | None:
+    """Hitta senaste best.pt i runs/detect/ för auto-chaining.
+
+    Söker igenom alla aether-ui-*/weights/best.pt och returnerar
+    den med senaste mtime (= senaste avslutade träning).
+    """
+    project_dir = Path(DEFAULT_PROJECT)
+    if not project_dir.exists():
+        return None
+
+    candidates = sorted(
+        project_dir.glob(f"{DEFAULT_NAME}-*/weights/best.pt"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if candidates:
+        return candidates[0]
+    return None
 
 
 def run(cmd: str, check: bool = True, capture: bool = False):
@@ -1880,6 +1902,7 @@ def run_pipeline(
     deploy_dir: Path = None,
     skip_verify: bool = False,
     device: str = None,
+    fresh: bool = False,
 ):
     """Run the full training pipeline."""
     print(BANNER)
@@ -1905,6 +1928,15 @@ def run_pipeline(
     # Step 1: Dataset
     log("Step 1/6: Preparing dataset...", "STEP")
     data_yaml = create_data_yaml(dataset_dir, dataset_dir / "data.yaml")
+
+    # Auto-chain: om ingen explicit --model-base angavs, leta efter senaste best.pt
+    if not fresh and model_base == DEFAULT_MODEL_BASE:
+        latest_pt = _find_latest_model()
+        if latest_pt:
+            log(f"Auto-chain: bygger vidare på {latest_pt}", "OK")
+            model_base = str(latest_pt)
+        else:
+            log(f"Ingen tidigare modell hittades — startar från {model_base}", "INFO")
 
     # Step 2: Train
     log("Step 2/6: Training YOLOv8-nano...", "STEP")
@@ -2001,6 +2033,8 @@ Examples:
     parser.add_argument("--device", type=str, default=None,
                         help="Training device: 'cuda', 'cpu', or device ID. "
                              "Auto-detects and installs correct PyTorch if needed.")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Start training from scratch (yolov8n.pt) instead of auto-chaining from latest model")
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
@@ -2065,6 +2099,7 @@ Examples:
             deploy_dir=args.deploy_dir,
             skip_verify=args.skip_verify,
             device=args.device,
+            fresh=args.fresh,
         )
         return
 
@@ -2084,6 +2119,7 @@ Examples:
             deploy_dir=args.deploy_dir,
             skip_verify=args.skip_verify,
             device=args.device,
+            fresh=args.fresh,
         )
         return
 
@@ -2112,6 +2148,7 @@ Examples:
             deploy_dir=args.deploy_dir,
             skip_verify=args.skip_verify,
             device=args.device,
+            fresh=args.fresh,
         )
         return
 
