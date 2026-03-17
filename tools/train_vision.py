@@ -436,26 +436,41 @@ def _download_rico(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
     # Rico-konverteraren förväntar sig: rico_dir/semantic_annotations/ + rico_dir/screenshots/
     # Kontrollera att strukturen stämmer
     # Ibland packas Rico upp med extra wrapper-mapp
-    for subdir in extract_dir.iterdir():
-        if subdir.is_dir() and (subdir / "semantic_annotations").exists():
-            return subdir
-        if subdir.is_dir() and subdir.name == "combined":
+    known_dirs = ("semantic_annotations", "combined", "jsons")
+
+    # Kontrollera direkt i extract_dir
+    for name in known_dirs:
+        if (extract_dir / name).exists():
             return extract_dir
 
-    # Kontrollera direkt
-    if (extract_dir / "semantic_annotations").exists():
-        return extract_dir
-    if (extract_dir / "combined").exists():
-        return extract_dir
-
-    # Sök en nivå djupare
+    # Sök en nivå ner (wrapper-mappar från arkivet)
     for child in extract_dir.iterdir():
         if child.is_dir():
-            if (child / "semantic_annotations").exists() or (child / "combined").exists():
-                return child
+            for name in known_dirs:
+                if (child / name).exists():
+                    return child
+            # Mappen själv kan vara combined/ eller semantic_annotations/
+            if child.name in known_dirs:
+                return extract_dir
+
+    # Sök två nivåer ner (dubbla wrappers, t.ex. rico_dataset_v0.1/data/combined/)
+    for child in extract_dir.iterdir():
+        if child.is_dir():
+            for grandchild in child.iterdir():
+                if grandchild.is_dir():
+                    for name in known_dirs:
+                        if (grandchild / name).exists():
+                            return grandchild
+                    if grandchild.name in known_dirs:
+                        return child
+
+    # Kontrollera om det finns JSON-filer direkt (platt struktur)
+    if any(extract_dir.glob("*.json")):
+        return extract_dir
 
     log(f"Rico-dataset uppackat till {extract_dir} men kunde inte hitta förväntad struktur", "WARN")
     log("Förväntad: semantic_annotations/ + screenshots/ ELLER combined/ + screenshot/", "WARN")
+    log(f"Innehåll: {[p.name for p in list(extract_dir.iterdir())[:20]]}", "INFO")
     return extract_dir
 
 
@@ -854,24 +869,32 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
     combined_dir = rico_dir / "combined"
     screenshot_dir = rico_dir / "screenshot"
 
-    # Alternativa sökvägar
+    # Alternativa sökvägar för JSON-filer
     if not combined_dir.exists():
         combined_dir = rico_dir / "semantic_annotations"
-    if not screenshot_dir.exists():
-        screenshot_dir = rico_dir / "screenshots"
-    # Rico "jsons" + "images" layout (vanligt i tutorials)
     if not combined_dir.exists() and (rico_dir / "jsons").exists():
         combined_dir = rico_dir / "jsons"
+    if not combined_dir.exists():
+        # Platt struktur: JSON-filer i root
+        combined_dir = rico_dir
+
+    # Alternativa sökvägar för screenshots (separat från JSON-sökning)
+    if not screenshot_dir.exists():
+        screenshot_dir = rico_dir / "screenshots"
     if not screenshot_dir.exists() and (rico_dir / "images").exists():
         screenshot_dir = rico_dir / "images"
     if not screenshot_dir.exists():
-        # Platt struktur: JSON och bilder i samma mapp
         screenshot_dir = rico_dir
-        combined_dir = rico_dir
 
+    # Sök JSON-filer — prova platt först, sedan rekursivt
     json_files = sorted(combined_dir.glob("*.json"))
     if not json_files:
-        log(f"Inga JSON-filer hittades i {combined_dir}", "ERR")
+        json_files = sorted(combined_dir.glob("**/*.json"))
+    if not json_files:
+        # Sista utväg: sök rekursivt från rico_dir
+        json_files = sorted(rico_dir.glob("**/*.json"))
+    if not json_files:
+        log(f"Inga JSON-filer hittades i {rico_dir}", "ERR")
         sys.exit(1)
 
     log(f"Hittade {len(json_files)} Rico JSON-filer", "INFO")
