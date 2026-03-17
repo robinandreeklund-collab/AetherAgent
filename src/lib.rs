@@ -3,6 +3,7 @@
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 mod diff;
 mod intent;
+mod js_bridge;
 mod js_eval;
 mod memory;
 mod parser;
@@ -372,6 +373,36 @@ pub fn eval_js_batch(snippets_json: &str) -> String {
     }
 }
 
+// ─── Fas 4c: Selective JS Execution ──────────────────────────────────────────
+
+/// Parse HTML with automatic JS evaluation for dynamic content
+///
+/// Combines the full pipeline: HTML parsing → JS detection → sandbox eval →
+/// enhanced semantic tree. Use this instead of parse_to_semantic_tree when
+/// you suspect the page has JavaScript-computed content (prices, totals, etc.)
+///
+/// # Arguments
+/// * `html` - Raw HTML string (including inline scripts)
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+///
+/// # Returns
+/// JSON with SelectiveExecResult: enhanced tree, JS bindings, analysis
+#[wasm_bindgen]
+pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
+    let start = now_ms();
+    let tree = build_tree(html, goal, url);
+
+    let mut result = js_bridge::selective_exec(&tree, html);
+    result.exec_time_ms = now_ms() - start;
+    result.tree.parse_time_ms = result.exec_time_ms;
+
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -606,5 +637,36 @@ mod tests {
     fn test_eval_js_batch_invalid_json() {
         let result = eval_js_batch("not json");
         assert!(result.contains("error"));
+    }
+
+    // ─── Fas 4c: Selective Execution smoke tests ──────────────────────
+
+    #[test]
+    fn test_parse_with_js_returns_valid_json() {
+        let html = r#"<html><body>
+            <script>document.getElementById('price').textContent = (29.99 * 2).toFixed(2);</script>
+            <p id="price"></p>
+            <button>Köp</button>
+        </body></html>"#;
+
+        let result = parse_with_js(html, "köp", "https://shop.se");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+        assert!(parsed["tree"].is_object(), "Borde ha tree-objekt");
+        assert!(
+            parsed["js_bindings"].is_array(),
+            "Borde ha js_bindings-array"
+        );
+        assert!(parsed["js_analysis"].is_object(), "Borde ha js_analysis");
+    }
+
+    #[test]
+    fn test_parse_with_js_static_page() {
+        let html = r#"<html><body><p>Statisk</p><button>Köp</button></body></html>"#;
+        let result = parse_with_js(html, "köp", "https://shop.se");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+        assert_eq!(parsed["total_evals"], 0);
+        assert_eq!(parsed["js_bindings"].as_array().unwrap().len(), 0);
     }
 }

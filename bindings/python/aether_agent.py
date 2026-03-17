@@ -88,6 +88,10 @@ class AetherAgent:
         """Evaluate multiple JS expressions in sequence."""
         return self._post("/api/eval-js-batch", {"snippets": snippets})
 
+    def parse_with_js(self, html: str, goal: str, url: str) -> dict:
+        """Parse HTML with automatic JS detection, evaluation, and application."""
+        return self._post("/api/parse-js", {"html": html, "goal": goal, "url": url})
+
     def check_injection(self, text: str) -> dict:
         """Check text for prompt injection patterns."""
         return self._post("/api/check-injection", {"text": text})
@@ -196,6 +200,9 @@ class AetherAgentWasm:
 
     def eval_js_batch(self, snippets: list) -> dict:
         return json.loads(self._call("eval_js_batch", json.dumps(snippets)))
+
+    def parse_with_js(self, html: str, goal: str, url: str) -> dict:
+        return json.loads(self._call("parse_with_js", html, goal, url))
 
     def check_injection(self, text: str) -> dict:
         return json.loads(self._call("check_injection", text))

@@ -170,6 +170,31 @@ export interface JsDetectionResult {
   total_event_handlers: number;
 }
 
+export interface JsNodeBinding {
+  node_id: number;
+  target_selector: string;
+  target_property: string;
+  expression: string;
+  computed_value?: string;
+  applied: boolean;
+}
+
+export interface JsAnalysisSummary {
+  total_snippets: number;
+  evaluable_expressions: number;
+  dom_targeted_expressions: number;
+  successful_bindings: number;
+  failed_evaluations: number;
+  frameworks_detected: string[];
+}
+
+export interface SelectiveExecResult {
+  tree: SemanticTree;
+  bindings: JsNodeBinding[];
+  analysis: JsAnalysisSummary;
+  exec_time_ms: number;
+}
+
 export declare class AetherAgent {
   constructor();
   health(): HealthResult;
@@ -182,6 +207,7 @@ export declare class AetherAgent {
   detectJs(html: string): JsDetectionResult;
   evalJs(code: string): JsEvalResult;
   evalJsBatch(snippets: string[]): JsBatchResult;
+  parseWithJs(html: string, goal: string, url: string): SelectiveExecResult;
   checkInjection(text: string): InjectionCheckResult;
   wrapUntrusted(content: string): string;
   createMemory(): WorkflowMemory;

@@ -723,6 +723,69 @@ fn test_eval_js_batch_multiple() {
     assert_eq!(results.len(), 2, "Borde ha 2 resultat");
 }
 
+// ─── Fas 4c: Selective Execution – Integration ───────────────────────────────
+
+#[test]
+fn test_parse_with_js_ecommerce() {
+    let html = r#"<html><body>
+        <script>document.getElementById('price').textContent = (199 * 3).toString() + ' kr';</script>
+        <h1>Produktpaket</h1>
+        <p id="price"></p>
+        <button id="buy">Köp nu</button>
+    </body></html>"#;
+
+    let result = parse_with_js(html, "köp", "https://shop.se");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert!(parsed["tree"].is_object(), "Borde ha enhanced tree");
+    assert!(
+        parsed["js_analysis"]["total_inline_scripts"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "Borde detektera inline script"
+    );
+}
+
+#[test]
+fn test_parse_with_js_static_no_overhead() {
+    let html = r#"<html><body>
+        <h1>Statisk sida</h1>
+        <p>Inget JS</p>
+        <button>Köp</button>
+    </body></html>"#;
+
+    let result = parse_with_js(html, "köp", "https://shop.se");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(
+        parsed["total_evals"], 0,
+        "Statisk sida borde inte trigga evalueringar"
+    );
+    assert_eq!(
+        parsed["js_bindings"].as_array().unwrap().len(),
+        0,
+        "Inga JS-bindningar"
+    );
+}
+
+#[test]
+fn test_parse_with_js_framework_detection() {
+    let html = r#"<html><body>
+        <div id="__next"><div data-reactroot="">Loading...</div></div>
+        <script>__NEXT_DATA__ = {"page": "/shop", "props": {}};</script>
+    </body></html>"#;
+
+    let result = parse_with_js(html, "köp", "https://shop.se");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(
+        parsed["js_analysis"]["has_framework"], true,
+        "Borde detektera framework"
+    );
+    assert_eq!(parsed["js_analysis"]["framework_hint"], "Next.js");
+}
+
 // ─── Fas 1: Prestandatester ──────────────────────────────────────────────────
 
 #[test]

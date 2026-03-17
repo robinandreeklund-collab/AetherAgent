@@ -130,6 +130,7 @@ async fn root() -> impl IntoResponse {
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
             "POST /api/diff": "Semantic diff between two trees (token savings)",
+            "POST /api/parse-js": "Parse HTML with automatic JS evaluation",
             "POST /api/detect-js": "Detect JavaScript snippets in HTML",
             "POST /api/eval-js": "Evaluate JS expression in sandbox",
             "POST /api/eval-js-batch": "Evaluate multiple JS expressions",
@@ -221,6 +222,11 @@ async fn diff(Json(req): Json<DiffRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn parse_with_js(Json(req): Json<ParseRequest>) -> impl IntoResponse {
+    let result = aether_agent::parse_with_js(&req.html, &req.goal, &req.url);
+    (StatusCode::OK, result)
+}
+
 async fn detect_js(Json(req): Json<DetectJsRequest>) -> impl IntoResponse {
     let result = aether_agent::detect_js(&req.html);
     (StatusCode::OK, result)
@@ -293,6 +299,8 @@ fn build_router() -> Router {
         .route("/api/wrap-untrusted", post(wrap_untrusted))
         // Fas 4a: Semantic diff
         .route("/api/diff", post(diff))
+        // Fas 4c: Selective execution
+        .route("/api/parse-js", post(parse_with_js))
         // Fas 4b: JS sandbox
         .route("/api/detect-js", post(detect_js))
         .route("/api/eval-js", post(eval_js_handler))
@@ -328,6 +336,7 @@ async fn main() {
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");
     println!("  POST /api/diff            – Semantic diff between trees");
+    println!("  POST /api/parse-js        – Parse with JS evaluation");
     println!("  POST /api/detect-js       – Detect JS snippets in HTML");
     println!("  POST /api/eval-js         – Evaluate JS in sandbox");
     println!("  POST /api/eval-js-batch   – Batch JS evaluation");

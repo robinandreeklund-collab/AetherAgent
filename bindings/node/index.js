@@ -96,6 +96,11 @@ class AetherAgent {
     return JSON.parse(this.wasm.eval_js_batch(JSON.stringify(snippets)));
   }
 
+  /** Parse HTML with automatic JS detection, evaluation, and application to semantic tree */
+  parseWithJs(html, goal, url) {
+    return JSON.parse(this.wasm.parse_with_js(html, goal, url));
+  }
+
   /** Wrap content in untrusted content markers for LLM safety */
   wrapUntrusted(content) {
     return this.wasm.wrap_untrusted(content);

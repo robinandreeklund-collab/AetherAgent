@@ -159,7 +159,7 @@ Types:
 
 **Fas 4b (Complete)**: JS Sandbox (Boa) — embedded Boa JS engine for evaluating inline scripts, event handlers, expressions. Sandboxed: no DOM/fetch/timers.
 
-**Fas 4c (Planned)**: Selective Execution — smart detection of JS-dependent content, targeted eval.
+**Fas 4c (Complete)**: Selective Execution — `parse_with_js` pipeline: detect JS → extract DOM targets → evaluate in sandbox → apply to semantic tree. Handles `getElementById`/`querySelector` patterns.
 
 **Fas 5 (Planned)**: Temporal Memory & Adversarial Modeling.
 

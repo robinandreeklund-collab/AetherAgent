@@ -234,6 +234,7 @@ curl -X POST https://your-app.onrender.com/api/diff \
 | POST | `/api/detect-js` | Detect JavaScript snippets in HTML |
 | POST | `/api/eval-js` | Evaluate JS expression in sandbox |
 | POST | `/api/eval-js-batch` | Evaluate multiple JS expressions |
+| POST | `/api/parse-js` | Parse HTML with automatic JS detection and evaluation |
 | POST | `/api/check-injection` | Check text for prompt injection |
 | POST | `/api/wrap-untrusted` | Wrap content in trust markers |
 | POST | `/api/memory/create` | Create workflow memory |
@@ -265,6 +266,7 @@ AetherAgent/
 │   ├── intent.rs       # Intent API – find_and_click, fill_form, extract_data
 │   ├── diff.rs         # Semantic DOM Diffing – minimal delta between trees
 │   ├── js_eval.rs      # JS Sandbox – Boa engine for safe snippet evaluation
+│   ├── js_bridge.rs    # Selective Execution – detect, eval, apply JS to tree
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
@@ -306,7 +308,7 @@ AetherAgent/
 |-------|--------|-------------|
 | **Fas 4a** – Semantic DOM Diffing | ✅ Done | Compare two trees → minimal delta, 80–95% token savings for multi-step flows |
 | **Fas 4b** – JS Sandbox (Boa) | ✅ Done | Embedded Boa JS engine for evaluating inline scripts, event handlers, expressions |
-| **Fas 4c** – Selective Execution | Planned | Smart detection of JS-dependent content, targeted eval instead of full browser |
+| **Fas 4c** – Selective Execution | ✅ Done | Smart detection of JS-dependent content, targeted eval instead of full browser |
 | **Fas 5** – Temporal Memory & Adversarial Modeling | Planned | Time-series page change tracking, predictive injection defense |
 | **Fas 6** – Intent Compiler | Planned | Multi-step goal → optimized action plan with speculative prefetch |
 
@@ -401,6 +403,39 @@ results = agent.eval_js_batch(["1+1", "'a'+'b'", "Math.PI.toFixed(2)"])
 - No timers (`setTimeout`, `setInterval` blocked)
 - No module system (`import`, `require`, `eval` blocked)
 - Pure computation only: math, strings, arrays, objects, template literals
+
+### Selective Execution (Fas 4c)
+
+The selective execution pipeline combines detection (Fas 4b) with targeted evaluation and application back to the semantic tree. Instead of running a full headless browser, AetherAgent intelligently identifies JS-dependent content and evaluates only the relevant expressions.
+
+```python
+# One-call pipeline: detect JS → extract expressions → evaluate → apply to tree
+result = agent.parse_with_js(html, goal="buy product", url="https://shop.se")
+
+# Result includes the enhanced tree + metadata about what JS was processed
+print(result["analysis"])
+# → {"total_snippets": 3, "evaluable_expressions": 2,
+#    "dom_targeted_expressions": 1, "successful_bindings": 1,
+#    "failed_evaluations": 0, "frameworks_detected": ["React"]}
+
+print(result["bindings"])
+# → [{"node_id": 5, "target_selector": "#price",
+#     "target_property": "textContent", "expression": "199 * 0.8",
+#     "computed_value": "159.2", "applied": true}]
+```
+
+**How it works:**
+
+1. **Detect** – Scan HTML for inline scripts, event handlers, and framework markers
+2. **Extract** – Parse `getElementById('id').textContent = expr` and `querySelector('sel').property = expr` patterns
+3. **Match** – Map DOM targets (IDs, selectors) to semantic tree nodes
+4. **Evaluate** – Run extracted expressions in the Boa sandbox (Fas 4b)
+5. **Apply** – Update matched node labels/values with computed results
+
+**When to use:**
+- Pages with dynamic pricing (`document.getElementById('price').textContent = basePrice * discount`)
+- Server-rendered pages with client-side hydration scripts
+- Any page where key content is set via inline JavaScript
 
 ### Future Work
 
