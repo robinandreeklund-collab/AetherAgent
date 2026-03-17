@@ -1031,6 +1031,13 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
         for node in nodes:
             class_name = node.get("componentLabel", node.get("class", ""))
             class_idx = class_map.get(class_name)
+            # Fallback: pröva viewtype-mappning (android.widget.* klassnamn)
+            if class_idx is None:
+                class_idx = viewtype_map.get(class_name)
+            # Sista utväg: pröva kort klassnamn (t.ex. "Button" från "android.widget.Button")
+            if class_idx is None and "." in class_name:
+                short_name = class_name.rsplit(".", 1)[-1]
+                class_idx = viewtype_map.get(short_name)
             if class_idx is None:
                 continue
 
