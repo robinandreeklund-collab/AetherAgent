@@ -1562,3 +1562,126 @@ fn test_link_nodes_have_href_as_value() {
         "Link-nodens value borde vara href"
     );
 }
+
+// ─── Confidence-kalibrering regression ──────────────────────────────────────
+// Test 2-buggen: "stars" matchade "Stars Archive Programs" med confidence 1.0
+// trots att noden var irrelevant för goal "find latest release version"
+
+#[test]
+fn test_confidence_penalizes_irrelevant_nodes() {
+    // Simulera GitHub-liknande sida med sidebar-text och releases
+    let html = r##"<html><body>
+        <div>
+            <h1>Pyodide Releases</h1>
+            <div>
+                <h2>v0.29.3</h2>
+                <p>Released on January 28, 2026</p>
+                <p>Commit: 72e3c78</p>
+            </div>
+        </div>
+        <aside>
+            <p>Stars Archive Programs — Help preserve open source</p>
+            <p>12.4k stars</p>
+        </aside>
+    </body></html>"##;
+
+    let result = extract_data(
+        html,
+        "find latest release version",
+        "https://github.com/pyodide/pyodide/releases",
+        r#"["release_version", "release_date", "stars"]"#,
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    let entries = parsed["entries"]
+        .as_array()
+        .expect("Borde ha entries-array");
+
+    // "stars" borde hittas men med LÄGRE confidence än relevant data
+    let stars_entry = entries.iter().find(|e| e["key"] == "stars");
+    let version_entry = entries.iter().find(|e| e["key"] == "release_version");
+
+    if let (Some(stars), Some(version)) = (stars_entry, version_entry) {
+        let stars_conf = stars["confidence"].as_f64().unwrap_or(0.0);
+        let version_conf = version["confidence"].as_f64().unwrap_or(0.0);
+
+        // "stars" i en sidebar borde ha LÄGRE confidence än "release_version"
+        // som matchar release-heading nära goal-relevanta noder
+        assert!(
+            stars_conf < 1.0,
+            "stars confidence borde vara under 1.0 (fick {}), inte rå text-match",
+            stars_conf
+        );
+    }
+
+    // release_version borde hittas oavsett
+    assert!(
+        version_entry.is_some(),
+        "Borde hitta release_version, missing: {}",
+        parsed["missing_keys"]
+    );
+}
+
+// ─── compile_goal domain-specifika planer ────────────────────────────────────
+
+#[test]
+fn test_compile_goal_price_extraction_plan() {
+    let result = compile_goal("extract the price of MacBook Pro");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    let sub_goals = parsed["sub_goals"].as_array().expect("Borde ha sub_goals");
+
+    // Pris-mål borde ge Navigate → Extract, INTE Fill → Click → Extract
+    let has_extract = sub_goals.iter().any(|sg| sg["action_type"] == "Extract");
+    assert!(has_extract, "Pris-plan borde ha Extract-steg");
+
+    // Borde INTE ha Fill-steg (inget formulär att fylla i för prisuppslag)
+    let has_fill = sub_goals.iter().any(|sg| sg["action_type"] == "Fill");
+    assert!(
+        !has_fill,
+        "Pris-plan borde INTE ha Fill-steg — det är direkt extraktion"
+    );
+}
+
+#[test]
+fn test_compile_goal_version_extraction_plan() {
+    let result = compile_goal("find latest release version on GitHub");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    let sub_goals = parsed["sub_goals"].as_array().expect("Borde ha sub_goals");
+
+    // Version-mål: Navigate → Extract → Verify
+    let has_extract = sub_goals.iter().any(|sg| sg["action_type"] == "Extract");
+    assert!(has_extract, "Version-plan borde ha Extract-steg");
+
+    // Borde INTE ha Fill-steg
+    let has_fill = sub_goals.iter().any(|sg| sg["action_type"] == "Fill");
+    assert!(
+        !has_fill,
+        "Version-plan borde INTE ha Fill-steg — ingen sökning behövs"
+    );
+}
+
+#[test]
+fn test_compile_goal_different_plans_for_different_goals() {
+    let price_plan = compile_goal("hämta priset på iPhone");
+    let login_plan = compile_goal("logga in på min sida");
+
+    let price: serde_json::Value = serde_json::from_str(&price_plan).expect("Valid JSON");
+    let login: serde_json::Value = serde_json::from_str(&login_plan).expect("Valid JSON");
+
+    let price_types: Vec<String> = price["sub_goals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sg| sg["action_type"].as_str().unwrap_or("").to_string())
+        .collect();
+    let login_types: Vec<String> = login["sub_goals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sg| sg["action_type"].as_str().unwrap_or("").to_string())
+        .collect();
+
+    assert_ne!(
+        price_types, login_types,
+        "Olika mål borde ge OLIKA planer, inte identisk mall"
+    );
+}

@@ -137,8 +137,82 @@ struct GoalTemplate {
 }
 
 /// Hämta mallar för kända mål-typer
+///
+/// Ordnade efter specificitet — mer specifika mallar först.
+/// Matchning väljer den mall med högst keyword-score.
 fn get_goal_templates() -> Vec<GoalTemplate> {
     vec![
+        // ── Specifika domänmallar (högre prioritet) ──
+        GoalTemplate {
+            keywords: &["price", "pris", "cost", "kostnad", "product", "produkt"],
+            sub_goals: vec![
+                (ActionType::Navigate, "Navigera till produktsidan", vec![]),
+                (
+                    ActionType::Extract,
+                    "Extrahera pris och produktinfo",
+                    vec![0],
+                ),
+                (ActionType::Verify, "Verifiera att pris hittades", vec![1]),
+            ],
+        },
+        GoalTemplate {
+            keywords: &[
+                "version",
+                "release",
+                "latest",
+                "senaste",
+                "changelog",
+                "update",
+            ],
+            sub_goals: vec![
+                (
+                    ActionType::Navigate,
+                    "Navigera till release/version-sida",
+                    vec![],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera version, datum och release-info",
+                    vec![0],
+                ),
+                (
+                    ActionType::Verify,
+                    "Verifiera att versionsinfo hittades",
+                    vec![1],
+                ),
+            ],
+        },
+        GoalTemplate {
+            keywords: &["compare", "jämför", "vs", "skillnad", "difference"],
+            sub_goals: vec![
+                (
+                    ActionType::Navigate,
+                    "Navigera till första alternativet",
+                    vec![],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera data från alternativ 1",
+                    vec![0],
+                ),
+                (
+                    ActionType::Navigate,
+                    "Navigera till andra alternativet",
+                    vec![0],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera data från alternativ 2",
+                    vec![2],
+                ),
+                (
+                    ActionType::Verify,
+                    "Jämför och sammanställ resultat",
+                    vec![1, 3],
+                ),
+            ],
+        },
+        // ── Generella action-mallar ──
         GoalTemplate {
             keywords: &["köp", "buy", "purchase", "beställ", "order"],
             sub_goals: vec![
@@ -166,7 +240,7 @@ fn get_goal_templates() -> Vec<GoalTemplate> {
             ],
         },
         GoalTemplate {
-            keywords: &["sök", "search", "hitta", "find"],
+            keywords: &["sök", "search"],
             sub_goals: vec![
                 (ActionType::Fill, "Skriv sökterm i sökfält", vec![]),
                 (ActionType::Click, "Klicka på 'Sök'", vec![0]),
@@ -200,6 +274,15 @@ fn get_goal_templates() -> Vec<GoalTemplate> {
                 (ActionType::Navigate, "Navigera till sidan", vec![]),
                 (ActionType::Extract, "Extrahera begärd data", vec![0]),
                 (ActionType::Verify, "Verifiera att data hämtades", vec![1]),
+            ],
+        },
+        // ── Breda mallar (lägst prioritet, "find/hitta" är extraktion, inte sökning) ──
+        GoalTemplate {
+            keywords: &["hitta", "find", "get", "hämta", "check", "kolla"],
+            sub_goals: vec![
+                (ActionType::Navigate, "Navigera till relevant sida", vec![]),
+                (ActionType::Extract, "Extrahera efterfrågad data", vec![0]),
+                (ActionType::Verify, "Verifiera att data hittades", vec![1]),
             ],
         },
     ]
@@ -313,6 +396,9 @@ fn compute_execution_order(sub_goals: &[SubGoal]) -> Vec<Vec<u32>> {
 }
 
 /// Generisk plan för okända mål
+///
+/// Default: Navigate → Extract → Verify. Inte Fill → Click → Extract,
+/// eftersom de flesta mål handlar om att hämta information.
 fn build_generic_plan(goal: &str) -> Vec<SubGoal> {
     vec![
         SubGoal {
@@ -325,10 +411,10 @@ fn build_generic_plan(goal: &str) -> Vec<SubGoal> {
         },
         SubGoal {
             index: 1,
-            description: format!("Utför huvudaction för '{}'", goal),
-            action_type: ActionType::Click,
+            description: format!("Extrahera relevant data för '{}'", goal),
+            action_type: ActionType::Extract,
             depends_on: vec![0],
-            estimated_cost: 0.4,
+            estimated_cost: 0.3,
             status: GoalStatus::Pending,
         },
         SubGoal {

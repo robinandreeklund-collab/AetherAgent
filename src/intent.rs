@@ -302,8 +302,15 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
             }
         }
 
-        if let Some((node, confidence)) = best_match {
+        if let Some((node, raw_score)) = best_match {
             found_keys.push(key.clone());
+
+            // Kalibrerad confidence: textuell matchning viktad med goal-relevans.
+            // Noder som matchar text men är irrelevanta för goal får lägre confidence.
+            // Formel: raw_score * (0.4 + 0.6 * goal_relevance)
+            // Ex: text_match=1.0, relevance=0.1 → 1.0 * 0.46 = 0.46 (inte 1.0!)
+            // Ex: text_match=1.0, relevance=0.8 → 1.0 * 0.88 = 0.88
+            let calibrated_confidence = raw_score * (0.4 + 0.6 * node.relevance);
 
             // Hämta värdet: för URL-keys på links, returnera value (href)
             let value = if role_boost
@@ -326,7 +333,7 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 key: key.clone(),
                 value,
                 source_node_id: node.id,
-                confidence: confidence.clamp(0.0, 1.0),
+                confidence: calibrated_confidence.clamp(0.0, 1.0),
             });
         }
     }
