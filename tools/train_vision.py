@@ -946,6 +946,10 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
             for view in data["views"]:
                 view_type = view.get("viewType", view.get("class", ""))
                 view_text = view.get("text", "")
+                if isinstance(view_text, list):
+                    view_text = " ".join(str(t) for t in view_text)
+                elif not isinstance(view_text, str):
+                    view_text = str(view_text) if view_text else ""
                 bounds = view.get("bounds", [])
                 if len(bounds) != 4:
                     continue
@@ -1043,6 +1047,10 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
 
             # Textheuristik på combined-noder
             node_text = node.get("text", node.get("content-desc", ""))
+            if isinstance(node_text, list):
+                node_text = " ".join(str(t) for t in node_text)
+            elif not isinstance(node_text, str):
+                node_text = str(node_text) if node_text else ""
             class_idx, upgrade = _apply_text_heuristics(
                 class_idx, node_text, extended
             )
