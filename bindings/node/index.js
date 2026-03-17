@@ -179,4 +179,87 @@ class AetherAgent {
   }
 }
 
-module.exports = { AetherAgent };
+/**
+ * AetherAgent HTTP Client – connects to deployed server.
+ * Supports all endpoints including Fas 7 fetch operations.
+ *
+ * @example
+ * const { AetherAgentHTTP } = require('@aether-agent/node');
+ * const agent = new AetherAgentHTTP('https://your-url.onrender.com');
+ * const result = await agent.fetchParse('https://example.com', 'buy product');
+ */
+class AetherAgentHTTP {
+  constructor(baseUrl = "http://localhost:3000") {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+  }
+
+  async _post(path, data) {
+    const resp = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    return resp.json();
+  }
+
+  async health() {
+    const resp = await fetch(`${this.baseUrl}/health`);
+    return resp.json();
+  }
+
+  async parse(html, goal, url) {
+    return this._post("/api/parse", { html, goal, url });
+  }
+
+  async findAndClick(html, goal, url, targetLabel) {
+    return this._post("/api/click", {
+      html, goal, url, target_label: targetLabel,
+    });
+  }
+
+  async compileGoal(goal) {
+    return this._post("/api/compile", { goal });
+  }
+
+  async executePlan(planJson, html, goal, url, completedSteps = []) {
+    const plan = typeof planJson === "string" ? planJson : JSON.stringify(planJson);
+    return this._post("/api/execute-plan", {
+      plan_json: plan, html, goal, url, completed_steps: completedSteps,
+    });
+  }
+
+  // ─── Fas 7: HTTP Fetch ──────────────────────────────────────────
+
+  async fetchRaw(url, config) {
+    const data = { url };
+    if (config) data.config = config;
+    return this._post("/api/fetch", data);
+  }
+
+  async fetchParse(url, goal, config) {
+    const data = { url, goal };
+    if (config) data.config = config;
+    return this._post("/api/fetch/parse", data);
+  }
+
+  async fetchClick(url, goal, targetLabel, config) {
+    const data = { url, goal, target_label: targetLabel };
+    if (config) data.config = config;
+    return this._post("/api/fetch/click", data);
+  }
+
+  async fetchExtract(url, goal, keys, config) {
+    const data = { url, goal, keys };
+    if (config) data.config = config;
+    return this._post("/api/fetch/extract", data);
+  }
+
+  async fetchPlan(url, goal, completedSteps = [], config) {
+    const data = { url, goal, completed_steps: completedSteps };
+    if (config) data.config = config;
+    return this._post("/api/fetch/plan", data);
+  }
+}
+
+module.exports = { AetherAgent, AetherAgentHTTP };

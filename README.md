@@ -25,7 +25,7 @@ AetherAgent is **not** a finished agent (like Claude Computer Use).
 
 It is the **engine** – a perception + action layer – that you embed directly inside your own agent. Written in Rust, compiled to WebAssembly, it runs in the same process as your LLM with zero network latency.
 
-> **Important:** AetherAgent is a **perception layer**, not a standalone browser. It does not fetch pages, handle cookies, manage sessions, or execute full JavaScript runtimes. Your agent (or a simple HTTP client like `requests`/`fetch`) provides the HTML; AetherAgent provides the intelligence. Think of it as the "eyes and brain" that sit between your HTTP client and your LLM.
+> **Important:** AetherAgent is a **perception + fetch layer**, not a full browser. Since Fas 7, it can fetch pages itself (with cookies, redirects, SSRF protection), but it does not execute full JavaScript runtimes or render CSS. For JS-heavy SPAs, pair AetherAgent with a headless browser. For static/SSR pages, AetherAgent works standalone end-to-end.
 
 Instead of handing your agent raw HTML or screenshots, AetherAgent delivers a **semantic accessibility tree** with goal-aware JSON – the page already understood, filtered, and ranked by relevance to your agent's current goal.
 
@@ -109,7 +109,7 @@ AetherAgent is **not** a browser replacement. It occupies a different niche. Her
 | Capability | AetherAgent | Lightpanda | Playwright + Chrome |
 |-----------|------------|-----------|---------------------|
 | **Category** | Perception layer | Headless browser | Full browser automation |
-| Fetches pages (HTTP) | No (you provide HTML) | Yes (libcurl) | Yes (Chrome DevTools) |
+| Fetches pages (HTTP) | **Yes** (reqwest, Fas 7) | Yes (libcurl) | Yes (Chrome DevTools) |
 | Full JavaScript (V8/SpiderMonkey) | No (Boa sandbox only) | Yes (V8) | Yes (V8) |
 | CSS rendering / layout | No | Partial | Yes |
 | Cookies / sessions | No | Yes | Yes |
@@ -279,6 +279,11 @@ curl -X POST https://your-app.onrender.com/api/diff \
 | POST | `/api/temporal/predict` | Predict next page state |
 | POST | `/api/compile` | Compile goal to action plan |
 | POST | `/api/execute-plan` | Execute plan against current page state |
+| POST | `/api/fetch` | Fetch URL → return HTML + metadata |
+| POST | `/api/fetch/parse` | Fetch URL → semantic tree (one call) |
+| POST | `/api/fetch/click` | Fetch URL → find clickable element |
+| POST | `/api/fetch/extract` | Fetch URL → extract structured data |
+| POST | `/api/fetch/plan` | Fetch URL → compile goal → execute plan |
 
 ### Python SDK (connects to deployed server)
 
@@ -307,6 +312,7 @@ AetherAgent/
 │   ├── js_bridge.rs    # Selective Execution – detect, eval, apply JS to tree
 │   ├── temporal.rs     # Temporal Memory – time-series tracking, adversarial detection
 │   ├── compiler.rs     # Intent Compiler – goal decomposition, action plan optimization
+│   ├── fetch.rs        # HTTP Fetch – reqwest-based page fetching with SSRF protection
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
@@ -351,6 +357,7 @@ AetherAgent/
 | **Fas 4c** – Selective Execution | ✅ Done | Smart detection of JS-dependent content, targeted eval instead of full browser |
 | **Fas 5** – Temporal Memory & Adversarial Modeling | ✅ Done | Time-series page change tracking, predictive injection defense |
 | **Fas 6** – Intent Compiler | ✅ Done | Multi-step goal → optimized action plan with speculative prefetch |
+| **Fas 7** – HTTP Fetch Integration | ✅ Done | Built-in URL fetching with cookies, redirects, robots.txt, SSRF protection |
 
 ### Design Principles
 
@@ -523,6 +530,51 @@ print(f"Prefetch: {result['prefetch_suggestions']}")  # URLs to pre-parse
 ```
 
 **Supported goal templates:** `buy/purchase`, `login/sign in`, `search/find`, `register/sign up`, `extract/scrape`. Unknown goals get a generic 3-step plan (Navigate → Act → Verify).
+
+### HTTP Fetch Integration (Fas 7)
+
+AetherAgent can now fetch pages itself – no external HTTP client needed. The fetch layer includes cookie storage, redirect following, gzip/brotli decompression, robots.txt respect, and SSRF protection (blocks localhost, private IPs, non-HTTP schemes).
+
+```python
+agent = AetherAgent("https://your-url.onrender.com")
+
+# One-call: fetch URL → parse to semantic tree
+result = agent.fetch_parse("https://shop.se/products", goal="buy cheapest product")
+print(f"Fetched {result['fetch']['body_size_bytes']} bytes in {result['fetch']['fetch_time_ms']}ms")
+print(f"Found {len(result['tree']['nodes'])} semantic nodes")
+
+# One-call: fetch URL → find clickable element
+click = agent.fetch_click("https://shop.se/product/42", goal="buy", target_label="Add to cart")
+print(f"Best match: {click['click']['label']} (relevance: {click['click']['relevance']})")
+
+# One-call: fetch URL → extract structured data
+data = agent.fetch_extract("https://shop.se/product/42", goal="get price", keys=["price", "name"])
+print(f"Extracted: {data['extract']['entries']}")
+
+# One-call: fetch URL → compile goal → execute plan
+plan = agent.fetch_plan("https://shop.se", goal="köp iPhone 16 Pro")
+print(f"Next action: {plan['execution_json']}")
+
+# Custom config: robots.txt, custom headers, timeout
+config = {"respect_robots_txt": True, "timeout_ms": 5000, "extra_headers": {"Authorization": "Bearer ..."}}
+result = agent.fetch_parse("https://api.example.com/products", goal="extract data", config=config)
+```
+
+**Security features:**
+- SSRF protection: blocks `localhost`, `127.0.0.1`, `10.x.x.x`, `192.168.x.x`, `172.16.x.x`, non-HTTP schemes
+- Optional robots.txt compliance
+- Configurable timeouts and redirect limits
+- Cookie jar with automatic session management
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/fetch` | Fetch URL → return HTML + metadata |
+| POST | `/api/fetch/parse` | Fetch URL → semantic tree |
+| POST | `/api/fetch/click` | Fetch URL → find clickable element |
+| POST | `/api/fetch/extract` | Fetch URL → extract structured data |
+| POST | `/api/fetch/plan` | Fetch URL → compile goal → execute plan |
 
 ### Future Work
 

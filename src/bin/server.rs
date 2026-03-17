@@ -147,6 +147,51 @@ struct ExecutePlanRequest {
     completed_steps: Vec<u32>,
 }
 
+// ─── Fas 7: Fetch request types ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct FetchParseRequest {
+    url: String,
+    goal: String,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct FetchClickRequest {
+    url: String,
+    goal: String,
+    target_label: String,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct FetchExtractRequest {
+    url: String,
+    goal: String,
+    keys: Vec<String>,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct FetchPlanRequest {
+    url: String,
+    goal: String,
+    #[serde(default)]
+    completed_steps: Vec<u32>,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct FetchRawRequest {
+    url: String,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -182,7 +227,12 @@ async fn root() -> impl IntoResponse {
             "POST /api/temporal/analyze": "Analyze temporal patterns",
             "POST /api/temporal/predict": "Predict next page state",
             "POST /api/compile": "Compile goal to action plan",
-            "POST /api/execute-plan": "Execute plan against page state"
+            "POST /api/execute-plan": "Execute plan against page state",
+            "POST /api/fetch": "Fetch URL and return HTML + metadata",
+            "POST /api/fetch/parse": "Fetch URL → parse to semantic tree",
+            "POST /api/fetch/click": "Fetch URL → find clickable element",
+            "POST /api/fetch/extract": "Fetch URL → extract structured data",
+            "POST /api/fetch/plan": "Fetch URL → compile goal → execute plan"
         },
         "example": {
             "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
@@ -381,6 +431,231 @@ async fn execute_plan_handler(Json(req): Json<ExecutePlanRequest>) -> impl IntoR
     (StatusCode::OK, result)
 }
 
+// ─── Fas 7: Fetch handlers ──────────────────────────────────────────────────
+
+async fn fetch_raw(Json(req): Json<FetchRawRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(result) => (
+            StatusCode::OK,
+            serde_json::to_string(&result).unwrap_or_default(),
+        ),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        ),
+    }
+}
+
+async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let total_start = std::time::Instant::now();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let tree_json = aether_agent::parse_to_semantic_tree(
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+    );
+    let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    let result = aether_agent::types::FetchAndParseResult {
+        fetch: fetch_result,
+        tree: serde_json::from_str(&tree_json).unwrap_or_else(|_| {
+            aether_agent::types::SemanticTree {
+                url: String::new(),
+                title: String::new(),
+                goal: req.goal.clone(),
+                nodes: vec![],
+                injection_warnings: vec![],
+                parse_time_ms: 0,
+            }
+        }),
+        total_time_ms,
+    };
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
+async fn fetch_click(Json(req): Json<FetchClickRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let total_start = std::time::Instant::now();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let click_json = aether_agent::find_and_click(
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+        &req.target_label,
+    );
+    let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    let result = aether_agent::types::FetchAndClickResult {
+        fetch: fetch_result,
+        click: serde_json::from_str(&click_json)
+            .unwrap_or_else(|_| aether_agent::types::ClickResult::not_found(vec![], 0)),
+        total_time_ms,
+    };
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
+async fn fetch_extract(Json(req): Json<FetchExtractRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let total_start = std::time::Instant::now();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let keys_json = match serde_json::to_string(&req.keys) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                serde_json::to_string(&ErrorResponse {
+                    error: format!("Invalid keys: {e}"),
+                })
+                .unwrap_or_default(),
+            )
+        }
+    };
+
+    let extract_json = aether_agent::extract_data(
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+        &keys_json,
+    );
+    let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    let result = aether_agent::types::FetchAndExtractResult {
+        fetch: fetch_result,
+        extract: serde_json::from_str(&extract_json).unwrap_or_else(|_| {
+            aether_agent::types::ExtractDataResult {
+                entries: vec![],
+                missing_keys: req.keys.clone(),
+                injection_warnings: vec![],
+                parse_time_ms: 0,
+            }
+        }),
+        total_time_ms,
+    };
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
+async fn fetch_plan(Json(req): Json<FetchPlanRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let total_start = std::time::Instant::now();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let plan_json = aether_agent::compile_goal(&req.goal);
+    let completed_json = serde_json::to_string(&req.completed_steps).unwrap_or_default();
+    let execution_json = aether_agent::execute_plan(
+        &plan_json,
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+        &completed_json,
+    );
+    let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    let result = aether_agent::types::FetchAndPlanResult {
+        fetch: fetch_result,
+        plan_json,
+        execution_json,
+        total_time_ms,
+    };
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 fn build_router() -> Router {
@@ -423,6 +698,12 @@ fn build_router() -> Router {
         // Fas 6: Intent Compiler
         .route("/api/compile", post(compile_goal_handler))
         .route("/api/execute-plan", post(execute_plan_handler))
+        // Fas 7: HTTP Fetch
+        .route("/api/fetch", post(fetch_raw))
+        .route("/api/fetch/parse", post(fetch_parse))
+        .route("/api/fetch/click", post(fetch_click))
+        .route("/api/fetch/extract", post(fetch_extract))
+        .route("/api/fetch/plan", post(fetch_plan))
         .layer(cors)
 }
 
@@ -455,6 +736,11 @@ async fn main() {
     println!("  POST /api/temporal/*      – Temporal memory & adversarial modeling");
     println!("  POST /api/compile         – Compile goal to action plan");
     println!("  POST /api/execute-plan    – Execute plan against page state");
+    println!("  POST /api/fetch           – Fetch URL → HTML + metadata");
+    println!("  POST /api/fetch/parse     – Fetch URL → semantic tree");
+    println!("  POST /api/fetch/click     – Fetch URL → find element");
+    println!("  POST /api/fetch/extract   – Fetch URL → extract data");
+    println!("  POST /api/fetch/plan      – Fetch URL → compile + execute plan");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

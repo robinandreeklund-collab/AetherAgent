@@ -3,6 +3,8 @@
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 mod compiler;
 mod diff;
+#[cfg(feature = "fetch")]
+pub mod fetch;
 mod intent;
 mod js_bridge;
 mod js_eval;
@@ -11,7 +13,7 @@ mod parser;
 mod semantic;
 mod temporal;
 mod trust;
-mod types;
+pub mod types;
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};

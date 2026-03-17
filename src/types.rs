@@ -131,7 +131,7 @@ pub struct ExtractDataResult {
 // ─── Workflow Memory Types (Fas 2) ───────────────────────────────────────────
 
 /// In-memory kontext mellan agent-steg (stateless över WASM-gränsen)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkflowMemory {
     pub steps: Vec<WorkflowStep>,
     pub context: HashMap<String, String>,
@@ -192,6 +192,90 @@ pub struct SemanticDelta {
     /// Sammanfattning av förändringarna
     pub summary: String,
     pub diff_time_ms: u64,
+}
+
+// ─── HTTP Fetch Types (Fas 7) ────────────────────────────────────────────────
+
+/// Konfiguration för HTTP-fetch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchConfig {
+    /// User-Agent-sträng
+    #[serde(default = "FetchConfig::default_user_agent")]
+    pub user_agent: String,
+    /// Timeout i millisekunder
+    #[serde(default = "FetchConfig::default_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Max antal redirects att följa
+    #[serde(default = "FetchConfig::default_max_redirects")]
+    pub max_redirects: u32,
+    /// Respektera robots.txt
+    #[serde(default)]
+    pub respect_robots_txt: bool,
+    /// Extra headers (key → value)
+    #[serde(default)]
+    pub extra_headers: HashMap<String, String>,
+}
+
+/// Resultat av en HTTP-fetch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchResult {
+    /// Slutgiltig URL (efter redirects)
+    pub final_url: String,
+    /// HTTP-statuskod
+    pub status_code: u16,
+    /// Content-Type-header
+    pub content_type: String,
+    /// HTML-body (om text/html)
+    pub body: String,
+    /// Kedja av redirects [url1 → url2 → ...]
+    pub redirect_chain: Vec<String>,
+    /// Fetch-tid i millisekunder
+    pub fetch_time_ms: u64,
+    /// Responsens storlek i bytes
+    pub body_size_bytes: usize,
+}
+
+/// Kombinerat fetch + parse-resultat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchAndParseResult {
+    /// Fetch-metadata
+    pub fetch: FetchResult,
+    /// Semantiskt träd (samma som /api/parse)
+    pub tree: SemanticTree,
+    /// Total tid (fetch + parse) i millisekunder
+    pub total_time_ms: u64,
+}
+
+/// Kombinerat fetch + click-resultat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchAndClickResult {
+    /// Fetch-metadata
+    pub fetch: FetchResult,
+    /// Click-resultat (samma som /api/click)
+    pub click: ClickResult,
+    pub total_time_ms: u64,
+}
+
+/// Kombinerat fetch + extract-resultat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchAndExtractResult {
+    /// Fetch-metadata
+    pub fetch: FetchResult,
+    /// Extraherad data
+    pub extract: ExtractDataResult,
+    pub total_time_ms: u64,
+}
+
+/// Kombinerat fetch + full pipeline (compile + parse + execute)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchAndPlanResult {
+    /// Fetch-metadata
+    pub fetch: FetchResult,
+    /// Kompilerad plan
+    pub plan_json: String,
+    /// Exekveringsresultat
+    pub execution_json: String,
+    pub total_time_ms: u64,
 }
 
 // ─── Implementations ─────────────────────────────────────────────────────────
@@ -267,9 +351,32 @@ impl ClickResult {
 
 impl WorkflowMemory {
     pub fn new() -> Self {
-        WorkflowMemory {
-            steps: vec![],
-            context: HashMap::new(),
+        Self::default()
+    }
+}
+
+impl FetchConfig {
+    fn default_user_agent() -> String {
+        "AetherAgent/0.1 (LLM-native browser engine)".to_string()
+    }
+
+    fn default_timeout_ms() -> u64 {
+        10_000
+    }
+
+    fn default_max_redirects() -> u32 {
+        10
+    }
+}
+
+impl Default for FetchConfig {
+    fn default() -> Self {
+        FetchConfig {
+            user_agent: Self::default_user_agent(),
+            timeout_ms: Self::default_timeout_ms(),
+            max_redirects: Self::default_max_redirects(),
+            respect_robots_txt: false,
+            extra_headers: HashMap::new(),
         }
     }
 }

@@ -173,6 +173,43 @@ class AetherAgent:
             "completed_steps": completed_steps or [],
         })
 
+    # ─── Fas 7: HTTP Fetch ────────────────────────────────────────────────
+
+    def fetch(self, url: str, config: dict = None) -> dict:
+        """Fetch URL and return HTML + metadata."""
+        data = {"url": url}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch", data)
+
+    def fetch_parse(self, url: str, goal: str, config: dict = None) -> dict:
+        """Fetch URL → parse to semantic tree."""
+        data = {"url": url, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/parse", data)
+
+    def fetch_click(self, url: str, goal: str, target_label: str, config: dict = None) -> dict:
+        """Fetch URL → find best clickable element."""
+        data = {"url": url, "goal": goal, "target_label": target_label}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/click", data)
+
+    def fetch_extract(self, url: str, goal: str, keys: list, config: dict = None) -> dict:
+        """Fetch URL → extract structured data."""
+        data = {"url": url, "goal": goal, "keys": keys}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/extract", data)
+
+    def fetch_plan(self, url: str, goal: str, completed_steps: list = None, config: dict = None) -> dict:
+        """Fetch URL → compile goal → execute plan."""
+        data = {"url": url, "goal": goal, "completed_steps": completed_steps or []}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/plan", data)
+
 
 class AetherAgentWasm:
     """Direct WASM runtime via wasmtime (no server needed)."""

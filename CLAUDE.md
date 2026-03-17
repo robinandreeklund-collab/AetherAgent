@@ -32,6 +32,7 @@ It provides a semantic perception layer for AI agents with built-in prompt injec
   - `semantic.rs` — Accessibility tree building, goal-relevance scoring
   - `trust.rs` — Prompt injection detection, sanitization, content wrapping
   - `types.rs` — Data structures and their inherent methods
+  - `fetch.rs` — HTTP page fetching, cookies, redirects, robots.txt, SSRF protection
   - `lib.rs` — WASM API surface, orchestration, serialization
 - **No feature creep**: Only implement what the current Fas (phase) requires. Do not add speculative abstractions, unused helpers, or future-proofing code.
 
@@ -164,3 +165,5 @@ Types:
 **Fas 5 (Complete)**: Temporal Memory & Adversarial Modeling — time-series page state tracking, node volatility, adversarial pattern detection (escalating/gradual injection, suspicious volatility, structural manipulation), predictive state estimation.
 
 **Fas 6 (Complete)**: Intent Compiler — goal decomposition via keyword-matched templates, topological sort with parallel group detection, action plan with sub-goals/dependencies, plan execution with recommended next action, prefetch suggestions.
+
+**Fas 7 (Complete)**: HTTP Fetch Integration — reqwest-based page fetching with cookie jar, redirect following, gzip/brotli decompression, robots.txt compliance, SSRF protection. Combined endpoints: `fetch_parse`, `fetch_click`, `fetch_extract`, `fetch_plan`.

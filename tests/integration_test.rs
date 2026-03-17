@@ -1077,3 +1077,190 @@ fn test_execute_plan_next_action_finds_button() {
         "Borde ha positiv konfidens"
     );
 }
+
+// ─── Fas 7: Fetch integration tests ──────────────────────────────────────
+
+#[cfg(feature = "fetch")]
+mod fetch_tests {
+    use aether_agent::fetch::validate_url;
+    use aether_agent::types::FetchConfig;
+
+    #[test]
+    fn test_fetch_url_validation_valid() {
+        assert!(
+            validate_url("https://example.com").is_ok(),
+            "HTTPS URL borde vara giltig"
+        );
+        assert!(
+            validate_url("http://example.com/path?q=test").is_ok(),
+            "HTTP URL med path borde vara giltig"
+        );
+        assert!(
+            validate_url("https://shop.se/produkt/42").is_ok(),
+            "Svensk URL borde vara giltig"
+        );
+    }
+
+    #[test]
+    fn test_fetch_url_validation_blocks_localhost() {
+        assert!(
+            validate_url("http://localhost:3000").is_err(),
+            "Ska blockera localhost (SSRF-skydd)"
+        );
+        assert!(
+            validate_url("http://127.0.0.1/admin").is_err(),
+            "Ska blockera 127.0.0.1"
+        );
+        assert!(
+            validate_url("http://0.0.0.0").is_err(),
+            "Ska blockera 0.0.0.0"
+        );
+    }
+
+    #[test]
+    fn test_fetch_url_validation_blocks_private_networks() {
+        assert!(
+            validate_url("http://10.0.0.1/secret").is_err(),
+            "Ska blockera 10.x.x.x (SSRF-skydd)"
+        );
+        assert!(
+            validate_url("http://192.168.1.1/router").is_err(),
+            "Ska blockera 192.168.x.x"
+        );
+        assert!(
+            validate_url("http://172.16.0.1/internal").is_err(),
+            "Ska blockera 172.16.x.x"
+        );
+    }
+
+    #[test]
+    fn test_fetch_url_validation_blocks_bad_schemes() {
+        assert!(
+            validate_url("ftp://example.com").is_err(),
+            "Ska blockera FTP"
+        );
+        assert!(
+            validate_url("file:///etc/passwd").is_err(),
+            "Ska blockera file://"
+        );
+        assert!(
+            validate_url("javascript:alert(1)").is_err(),
+            "Ska blockera javascript:"
+        );
+    }
+
+    #[test]
+    fn test_fetch_url_validation_blocks_invalid() {
+        assert!(
+            validate_url("not-a-url").is_err(),
+            "Ska avvisa ogiltiga URL:er"
+        );
+        assert!(validate_url("").is_err(), "Ska avvisa tom sträng");
+    }
+
+    #[test]
+    fn test_fetch_config_defaults() {
+        let config = FetchConfig::default();
+        assert_eq!(config.timeout_ms, 10_000, "Default timeout ska vara 10s");
+        assert_eq!(
+            config.max_redirects, 10,
+            "Default max redirects ska vara 10"
+        );
+        assert!(
+            !config.respect_robots_txt,
+            "robots.txt ska vara av som standard"
+        );
+        assert!(
+            config.user_agent.contains("AetherAgent"),
+            "User-Agent ska innehålla AetherAgent"
+        );
+        assert!(
+            config.extra_headers.is_empty(),
+            "Ska inte ha extra headers som standard"
+        );
+    }
+
+    #[test]
+    fn test_fetch_config_custom() {
+        let config = FetchConfig {
+            user_agent: "CustomBot/1.0".to_string(),
+            timeout_ms: 5000,
+            max_redirects: 3,
+            respect_robots_txt: true,
+            extra_headers: std::collections::HashMap::from([(
+                "Authorization".to_string(),
+                "Bearer token123".to_string(),
+            )]),
+        };
+        assert_eq!(config.user_agent, "CustomBot/1.0");
+        assert_eq!(config.timeout_ms, 5000);
+        assert!(config.respect_robots_txt);
+        assert_eq!(config.extra_headers.len(), 1);
+    }
+
+    #[test]
+    fn test_fetch_types_serialize_roundtrip() {
+        let config = FetchConfig::default();
+        let json = serde_json::to_string(&config).expect("Ska kunna serialisera FetchConfig");
+        let parsed: FetchConfig =
+            serde_json::from_str(&json).expect("Ska kunna deserialisera FetchConfig");
+        assert_eq!(parsed.timeout_ms, config.timeout_ms);
+        assert_eq!(parsed.max_redirects, config.max_redirects);
+    }
+
+    #[test]
+    fn test_fetch_result_types() {
+        use aether_agent::types::FetchResult;
+
+        let result = FetchResult {
+            final_url: "https://example.com".to_string(),
+            status_code: 200,
+            content_type: "text/html".to_string(),
+            body: "<html><body>Hello</body></html>".to_string(),
+            redirect_chain: vec![],
+            fetch_time_ms: 150,
+            body_size_bytes: 30,
+        };
+
+        let json = serde_json::to_string(&result).expect("Ska serialisera FetchResult");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["status_code"], 200);
+        assert_eq!(parsed["final_url"], "https://example.com");
+        assert_eq!(parsed["fetch_time_ms"], 150);
+    }
+
+    #[test]
+    fn test_fetch_and_parse_result_types() {
+        use aether_agent::types::{FetchAndParseResult, FetchResult, SemanticTree};
+
+        let result = FetchAndParseResult {
+            fetch: FetchResult {
+                final_url: "https://example.com".to_string(),
+                status_code: 200,
+                content_type: "text/html".to_string(),
+                body: "<html><body><button>Köp</button></body></html>".to_string(),
+                redirect_chain: vec![],
+                fetch_time_ms: 100,
+                body_size_bytes: 47,
+            },
+            tree: SemanticTree {
+                url: "https://example.com".to_string(),
+                title: "Test".to_string(),
+                goal: "köp produkt".to_string(),
+                nodes: vec![],
+                injection_warnings: vec![],
+                parse_time_ms: 5,
+            },
+            total_time_ms: 105,
+        };
+
+        let json = serde_json::to_string(&result).expect("Ska serialisera FetchAndParseResult");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["total_time_ms"], 105);
+        assert!(
+            parsed["fetch"]["final_url"].is_string(),
+            "Ska ha fetch-metadata"
+        );
+        assert!(parsed["tree"]["goal"].is_string(), "Ska ha semantic tree");
+    }
+}

@@ -293,6 +293,53 @@ export interface PlanExecutionResult {
   summary: string;
 }
 
+// ─── Fas 7: HTTP Fetch Types ──────────────────────────────────────────────
+
+export interface FetchConfig {
+  user_agent?: string;
+  timeout_ms?: number;
+  max_redirects?: number;
+  respect_robots_txt?: boolean;
+  extra_headers?: Record<string, string>;
+}
+
+export interface FetchResult {
+  final_url: string;
+  status_code: number;
+  content_type: string;
+  body: string;
+  redirect_chain: string[];
+  fetch_time_ms: number;
+  body_size_bytes: number;
+}
+
+export interface FetchAndParseResult {
+  fetch: FetchResult;
+  tree: SemanticTree;
+  total_time_ms: number;
+}
+
+export interface FetchAndClickResult {
+  fetch: FetchResult;
+  click: ClickResult;
+  total_time_ms: number;
+}
+
+export interface FetchAndExtractResult {
+  fetch: FetchResult;
+  extract: ExtractDataResult;
+  total_time_ms: number;
+}
+
+export interface FetchAndPlanResult {
+  fetch: FetchResult;
+  plan_json: string;
+  execution_json: string;
+  total_time_ms: number;
+}
+
+// ─── WASM Agent (local, no network) ──────────────────────────────────────
+
 export declare class AetherAgent {
   constructor();
   health(): HealthResult;
@@ -318,4 +365,20 @@ export declare class AetherAgent {
   addStep(memoryJson: string | WorkflowMemory, action: string, url: string, goal: string, summary: string): WorkflowMemory;
   setContext(memoryJson: string | WorkflowMemory, key: string, value: string): WorkflowMemory;
   getContext(memoryJson: string | WorkflowMemory, key: string): { value: string | null };
+}
+
+// ─── HTTP Client (connects to deployed server, supports fetch) ─────────
+
+export declare class AetherAgentHTTP {
+  constructor(baseUrl?: string);
+  health(): Promise<HealthResult>;
+  parse(html: string, goal: string, url: string): Promise<SemanticTree>;
+  findAndClick(html: string, goal: string, url: string, targetLabel: string): Promise<ClickResult>;
+  compileGoal(goal: string): Promise<ActionPlan>;
+  executePlan(planJson: string | ActionPlan, html: string, goal: string, url: string, completedSteps?: number[]): Promise<PlanExecutionResult>;
+  fetchRaw(url: string, config?: FetchConfig): Promise<FetchResult>;
+  fetchParse(url: string, goal: string, config?: FetchConfig): Promise<FetchAndParseResult>;
+  fetchClick(url: string, goal: string, targetLabel: string, config?: FetchConfig): Promise<FetchAndClickResult>;
+  fetchExtract(url: string, goal: string, keys: string[], config?: FetchConfig): Promise<FetchAndExtractResult>;
+  fetchPlan(url: string, goal: string, completedSteps?: number[], config?: FetchConfig): Promise<FetchAndPlanResult>;
 }
