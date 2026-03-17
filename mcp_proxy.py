@@ -37,7 +37,7 @@ except ImportError:
     sys.stderr.write("Error: pip install requests\n")
     sys.exit(1)
 
-AETHER_URL = os.environ.get("AETHER_URL", "http://127.0.0.1:3000").rstrip("/")
+AETHER_URL = os.environ.get("AETHER_URL", "https://aether-agent-api.onrender.com").rstrip("/")
 
 # ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -195,6 +195,147 @@ TOOLS = [
             "required": ["url", "goal", "target_label"],
         },
     },
+    # ─── Fas 4c: JS Evaluation ───────────────────────────────────────────────
+    {
+        "name": "parse_with_js",
+        "description": "Parse HTML with automatic JS evaluation. Detects inline scripts, evaluates them in a sandboxed Boa engine, and applies DOM mutations to the semantic tree.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "html": {"type": "string", "description": "Raw HTML string"},
+                "goal": {"type": "string", "description": "The agent's current goal"},
+                "url": {"type": "string", "description": "The page URL"},
+            },
+            "required": ["html", "goal", "url"],
+        },
+    },
+    # ─── Fas 9a: Causal Action Graph ────────────────────────────────────────
+    {
+        "name": "build_causal_graph",
+        "description": "Build a causal action graph from temporal page snapshots and actions. Enables outcome prediction and safe path planning.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "snapshots_json": {"type": "string", "description": "JSON array of temporal page snapshots"},
+                "actions_json": {"type": "string", "description": "JSON array of actions taken between snapshots"},
+            },
+            "required": ["snapshots_json", "actions_json"],
+        },
+    },
+    {
+        "name": "predict_action_outcome",
+        "description": "Predict the outcome of an action using the causal graph. Returns expected state changes and confidence.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "graph_json": {"type": "string", "description": "Causal graph JSON (from build_causal_graph)"},
+                "action": {"type": "string", "description": "Action to predict outcome for"},
+            },
+            "required": ["graph_json", "action"],
+        },
+    },
+    {
+        "name": "find_safest_path",
+        "description": "Find the safest path to a goal state through the causal graph. Avoids high-risk or irreversible actions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "graph_json": {"type": "string", "description": "Causal graph JSON (from build_causal_graph)"},
+                "goal": {"type": "string", "description": "Target goal state"},
+            },
+            "required": ["graph_json", "goal"],
+        },
+    },
+    # ─── Fas 9b: WebMCP Discovery ───────────────────────────────────────────
+    {
+        "name": "discover_webmcp",
+        "description": "Discover WebMCP tool definitions embedded in an HTML page. Returns structured tool schemas for any MCP-compatible widgets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "html": {"type": "string", "description": "Raw HTML string"},
+                "url": {"type": "string", "description": "The page URL"},
+            },
+            "required": ["html", "url"],
+        },
+    },
+    # ─── Fas 9c: Multimodal Grounding ───────────────────────────────────────
+    {
+        "name": "ground_semantic_tree",
+        "description": "Ground a semantic tree with visual bounding box annotations. Maps accessibility nodes to screen coordinates for visual agents.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "html": {"type": "string", "description": "Raw HTML string"},
+                "goal": {"type": "string", "description": "The agent's current goal"},
+                "url": {"type": "string", "description": "The page URL"},
+                "annotations": {"type": "array", "description": "Array of bounding box annotations [{x, y, width, height, label}]"},
+            },
+            "required": ["html", "goal", "url", "annotations"],
+        },
+    },
+    {
+        "name": "match_bbox_iou",
+        "description": "Match a bounding box against semantic tree nodes using IoU (Intersection over Union). Returns best matching node.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tree_json": {"type": "string", "description": "Semantic tree JSON"},
+                "bbox": {"type": "object", "description": "Bounding box {x, y, width, height}", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number"}, "height": {"type": "number"}}},
+            },
+            "required": ["tree_json", "bbox"],
+        },
+    },
+    # ─── Fas 9d: Cross-Agent Collaboration ──────────────────────────────────
+    {
+        "name": "create_collab_store",
+        "description": "Create a shared diff store for cross-agent collaboration. Multiple agents can publish and subscribe to semantic deltas.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "register_collab_agent",
+        "description": "Register an agent in a collaboration store. Required before publishing or fetching deltas.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "store_json": {"type": "string", "description": "Collab store JSON (from create_collab_store)"},
+                "agent_id": {"type": "string", "description": "Unique agent identifier"},
+                "goal": {"type": "string", "description": "The agent's current goal"},
+                "timestamp_ms": {"type": "integer", "description": "Current timestamp in milliseconds"},
+            },
+            "required": ["store_json", "agent_id", "goal", "timestamp_ms"],
+        },
+    },
+    {
+        "name": "publish_collab_delta",
+        "description": "Publish a semantic delta to the collaboration store for other agents to consume.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "store_json": {"type": "string", "description": "Collab store JSON"},
+                "agent_id": {"type": "string", "description": "Publishing agent's ID"},
+                "url": {"type": "string", "description": "URL the delta applies to"},
+                "delta_json": {"type": "string", "description": "Semantic delta JSON (from diff_trees)"},
+                "timestamp_ms": {"type": "integer", "description": "Current timestamp in milliseconds"},
+            },
+            "required": ["store_json", "agent_id", "url", "delta_json", "timestamp_ms"],
+        },
+    },
+    {
+        "name": "fetch_collab_deltas",
+        "description": "Fetch new semantic deltas from the collaboration store since this agent's last fetch.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "store_json": {"type": "string", "description": "Collab store JSON"},
+                "agent_id": {"type": "string", "description": "Fetching agent's ID"},
+            },
+            "required": ["store_json", "agent_id"],
+        },
+    },
 ]
 
 # Map tool names to HTTP API endpoints and parameter transforms
@@ -211,6 +352,22 @@ TOOL_ROUTES = {
     "diff_trees":       ("POST", "/api/diff",             lambda p: p),
     "fetch_extract":    ("POST", "/api/fetch/extract",    lambda p: {"url": p["url"], "goal": p["goal"], "keys_json": json.dumps(p["keys"])}),
     "fetch_click":      ("POST", "/api/fetch/click",      lambda p: p),
+    # Fas 4c
+    "parse_with_js":    ("POST", "/api/parse-js",         lambda p: p),
+    # Fas 9a
+    "build_causal_graph":      ("POST", "/api/causal/build",        lambda p: p),
+    "predict_action_outcome":  ("POST", "/api/causal/predict",      lambda p: p),
+    "find_safest_path":        ("POST", "/api/causal/safest-path",  lambda p: p),
+    # Fas 9b
+    "discover_webmcp":         ("POST", "/api/webmcp/discover",     lambda p: p),
+    # Fas 9c
+    "ground_semantic_tree":    ("POST", "/api/ground",              lambda p: p),
+    "match_bbox_iou":          ("POST", "/api/ground/match-bbox",   lambda p: p),
+    # Fas 9d
+    "create_collab_store":     ("POST", "/api/collab/create",       lambda p: p),
+    "register_collab_agent":   ("POST", "/api/collab/register",     lambda p: p),
+    "publish_collab_delta":    ("POST", "/api/collab/publish",      lambda p: p),
+    "fetch_collab_deltas":     ("POST", "/api/collab/fetch",        lambda p: p),
 }
 
 # ─── MCP Protocol (JSON-RPC over stdio) ───────────────────────────────────────
@@ -239,7 +396,7 @@ def handle_initialize(id: Any, _params: dict) -> None:
         "capabilities": {"tools": {"listChanged": False}},
         "serverInfo": {
             "name": "aether-agent",
-            "version": "0.2.0",
+            "version": "0.3.0",
         },
     })
 
