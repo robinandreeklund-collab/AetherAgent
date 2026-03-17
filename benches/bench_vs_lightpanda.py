@@ -124,6 +124,87 @@ FIXTURES["complex_100"] = {
     "url": "https://shop.se/alla",
 }
 
+# ─── JS Fixtures (Fas 4b + 4c) ──────────────────────────────────────────────
+
+JS_FIXTURES = {
+    "detect_static": {
+        "html": '<html><body><h1>Statisk sida</h1><button>Köp</button></body></html>',
+        "goal": "köp",
+        "url": "https://shop.se",
+    },
+    "detect_inline": {
+        "html": '<html><body>'
+                '<script>document.getElementById("price").textContent = (29.99 * 2).toFixed(2);</script>'
+                '<h1>Produkter</h1>'
+                '<button onclick="addToCart()">Köp</button>'
+                '<a onmouseover="showTooltip()" href="#">Info</a>'
+                '</body></html>',
+        "goal": "köp",
+        "url": "https://shop.se",
+    },
+    "detect_framework": {
+        "html": '<html><body><div id="__next"><button>Buy</button></div>'
+                '<script>window.__NEXT_DATA__={}</script></body></html>',
+        "goal": "buy",
+        "url": "https://shop.se",
+    },
+    "detect_heavy": {
+        "html": '<html><body>'
+                + ''.join(
+                    f'<script>document.getElementById("item-{i}").textContent = ({100+i} * 1.25).toFixed(2);</script>'
+                    for i in range(20)
+                )
+                + ''.join(
+                    f'<button id="item-{i}" onclick="buy({i})">Köp {i}</button>'
+                    for i in range(20)
+                )
+                + '</body></html>',
+        "goal": "köp",
+        "url": "https://shop.se",
+    },
+    "selective_ecommerce": {
+        "html": '<html><head><title>Shop</title></head><body>'
+                '<h1>Produkter</h1>'
+                '<script>document.getElementById("buy").textContent = "Köp: " + (29.99 * 2).toFixed(2) + " kr";</script>'
+                '<a id="buy" href="#">Köp nu</a>'
+                '</body></html>',
+        "goal": "köp produkt",
+        "url": "https://shop.se",
+    },
+    "selective_multi": {
+        "html": '<html><head><title>Kassa</title></head><body>'
+                '<h1>Betalning</h1>'
+                '<script>'
+                'document.getElementById("pay-btn").textContent = "Betala " + (199 * 3).toString() + " kr";\n'
+                'document.getElementById("cart-link").textContent = (199 * 3 * 0.25).toFixed(2) + " kr moms";'
+                '</script>'
+                '<button id="pay-btn">Betala</button>'
+                '<a id="cart-link" href="#">Kundvagn</a>'
+                '</body></html>',
+        "goal": "betala",
+        "url": "https://shop.se",
+    },
+}
+
+JS_EVAL_EXPRESSIONS = [
+    "29.99 * 2",
+    "(199 * 1.25).toFixed(2)",
+    "`Pris: ${(199 * 1.25).toFixed(2)} kr`",
+    "[1,2,3].map(x => x * 2).join(',')",
+    "JSON.stringify({price: 199, currency: 'SEK'})",
+    "Math.PI.toFixed(5)",
+    "'hello'.toUpperCase() + ' WORLD'",
+    "Array.from({length: 10}, (_, i) => i * i).reduce((a, b) => a + b, 0)",
+]
+
+JS_BLOCKED_EXPRESSIONS = [
+    "fetch('https://evil.com')",
+    "document.cookie",
+    "window.location.href",
+    "eval('1+1')",
+    "setTimeout(() => {}, 100)",
+]
+
 
 # ─── Utility ─────────────────────────────────────────────────────────────────
 
@@ -191,6 +272,42 @@ class AetherClient:
         resp.raise_for_status()
         return resp.text
 
+    def detect_js(self, html):
+        resp = self.session.post(
+            f"{self.base_url}/api/detect-js",
+            json={"html": html},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def eval_js(self, code):
+        resp = self.session.post(
+            f"{self.base_url}/api/eval-js",
+            json={"code": code},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def eval_js_batch(self, snippets):
+        resp = self.session.post(
+            f"{self.base_url}/api/eval-js-batch",
+            json={"snippets": snippets},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def parse_with_js(self, fixture):
+        resp = self.session.post(
+            f"{self.base_url}/api/parse-js",
+            json={"html": fixture["html"], "goal": fixture["goal"], "url": fixture["url"]},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.text
+
     def health(self):
         resp = self.session.get(f"{self.base_url}/health", timeout=10)
         resp.raise_for_status()
@@ -235,6 +352,8 @@ def start_fixture_server(port):
     fixture_dir.mkdir(exist_ok=True)
 
     for name, fixture in FIXTURES.items():
+        (fixture_dir / f"{name}.html").write_text(fixture["html"])
+    for name, fixture in JS_FIXTURES.items():
         (fixture_dir / f"{name}.html").write_text(fixture["html"])
 
     handler = http.server.SimpleHTTPRequestHandler
@@ -548,6 +667,176 @@ def bench_output_quality(client, lp_client):
     }
 
 
+# ─── Benchmark 6: JS Sandbox (Fas 4b) ────────────────────────────────────
+
+def bench_js_sandbox(client):
+    """Benchmark JS detection and sandboxed evaluation (Fas 4b)."""
+    print("\n" + "=" * 72)
+    print("BENCHMARK 6: JS Sandbox – Detection & Evaluation (Fas 4b)")
+    print("=" * 72)
+
+    results = {}
+
+    # ─── Detection benchmarks ────────────────────────────────────────────
+    print(f"\n  {'Detection':<40} {'Avg':>10} {'Min':>10} {'Scripts':>8} {'Handlers':>10}")
+    print("  " + "-" * 80)
+
+    for name, fixture in [
+        ("Static page (no JS)", JS_FIXTURES["detect_static"]),
+        ("Inline script + handlers", JS_FIXTURES["detect_inline"]),
+        ("Next.js framework", JS_FIXTURES["detect_framework"]),
+        ("Heavy (20 scripts + handlers)", JS_FIXTURES["detect_heavy"]),
+    ]:
+        times = []
+        last_result = None
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = client.detect_js(fixture["html"])
+            times.append((time.monotonic() - start) * 1_000_000)
+            last_result = json.loads(resp)
+
+        avg = statistics.median(times)
+        mn = min(times)
+        scripts = last_result.get("total_inline_scripts", 0)
+        handlers = last_result.get("total_event_handlers", 0)
+        fw = last_result.get("framework_hint", "")
+        label = f"{name}" + (f" [{fw}]" if fw else "")
+
+        print(f"  {label:<40} {fmt_us(avg):>10} {fmt_us(mn):>10} {scripts:>8} {handlers:>10}")
+        results[f"detect_{name}"] = {"avg_us": avg, "min_us": mn, "scripts": scripts, "handlers": handlers}
+
+    # ─── Eval benchmarks ─────────────────────────────────────────────────
+    print(f"\n  {'Eval Expression':<45} {'Avg':>10} {'Min':>10} {'Result':>20}")
+    print("  " + "-" * 88)
+
+    for expr in JS_EVAL_EXPRESSIONS:
+        times = []
+        last_result = None
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = client.eval_js(expr)
+            times.append((time.monotonic() - start) * 1_000_000)
+            last_result = json.loads(resp)
+
+        avg = statistics.median(times)
+        mn = min(times)
+        val = last_result.get("value", "")
+        if len(val) > 18:
+            val = val[:15] + "..."
+
+        print(f"  {expr:<45} {fmt_us(avg):>10} {fmt_us(mn):>10} {val:>20}")
+        results[f"eval_{expr[:30]}"] = {"avg_us": avg, "value": last_result.get("value", "")}
+
+    # ─── Blocked expressions ─────────────────────────────────────────────
+    print(f"\n  {'Blocked Expression':<45} {'Avg':>10} {'Error':>30}")
+    print("  " + "-" * 88)
+
+    for expr in JS_BLOCKED_EXPRESSIONS:
+        times = []
+        last_result = None
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = client.eval_js(expr)
+            times.append((time.monotonic() - start) * 1_000_000)
+            last_result = json.loads(resp)
+
+        avg = statistics.median(times)
+        err = last_result.get("error", "")
+        if len(err) > 28:
+            err = err[:25] + "..."
+
+        print(f"  {expr:<45} {fmt_us(avg):>10} {err:>30}")
+        results[f"blocked_{expr[:30]}"] = {"avg_us": avg, "blocked": True}
+
+    # ─── Batch eval ──────────────────────────────────────────────────────
+    print(f"\n  {'Batch Eval':<45} {'Avg':>10} {'Min':>10} {'Items':>8}")
+    print("  " + "-" * 75)
+
+    for batch_size in [3, 8, 20]:
+        snippets = [f"{i} + {i * 2}" for i in range(batch_size)]
+        times = []
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            client.eval_js_batch(snippets)
+            times.append((time.monotonic() - start) * 1_000_000)
+
+        avg = statistics.median(times)
+        mn = min(times)
+        print(f"  Batch ({batch_size} expressions){'':<24} {fmt_us(avg):>10} {fmt_us(mn):>10} {batch_size:>8}")
+        results[f"batch_{batch_size}"] = {"avg_us": avg, "min_us": mn}
+
+    return results
+
+
+# ─── Benchmark 7: Selective Execution (Fas 4c) ──────────────────────────────
+
+def bench_selective_exec(client):
+    """Benchmark the full selective execution pipeline (Fas 4c)."""
+    print("\n" + "=" * 72)
+    print("BENCHMARK 7: Selective Execution Pipeline (Fas 4c)")
+    print("=" * 72)
+    print(f"  {'Scenario':<35} {'Avg':>10} {'Min':>10} {'Bindings':>10} {'Evals':>8} {'Applied':>9}")
+    print("  " + "-" * 85)
+
+    results = {}
+
+    scenarios = [
+        ("Static page (no JS)", JS_FIXTURES["detect_static"]),
+        ("Single DOM target", JS_FIXTURES["selective_ecommerce"]),
+        ("Multiple DOM targets", JS_FIXTURES["selective_multi"]),
+        ("Heavy (20 scripts)", JS_FIXTURES["detect_heavy"]),
+    ]
+
+    for name, fixture in scenarios:
+        times = []
+        last_result = None
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            resp = client.parse_with_js(fixture)
+            times.append((time.monotonic() - start) * 1_000_000)
+            last_result = json.loads(resp)
+
+        avg = statistics.median(times)
+        mn = min(times)
+        bindings = len(last_result.get("js_bindings", []))
+        evals = last_result.get("total_evals", 0)
+        successful = last_result.get("successful_evals", 0)
+
+        print(f"  {name:<35} {fmt_us(avg):>10} {fmt_us(mn):>10} {bindings:>10} {evals:>8} {successful:>9}")
+        results[name] = {
+            "avg_us": avg, "min_us": mn,
+            "bindings": bindings, "evals": evals, "successful": successful,
+        }
+
+    # Compare parse vs parse_with_js overhead
+    print(f"\n  {'Overhead: parse vs parse_with_js':<35}")
+    print("  " + "-" * 60)
+
+    for name, fixture in [("ecommerce", FIXTURES["ecommerce"]), ("complex_50", FIXTURES["complex_50"])]:
+        # Regular parse
+        parse_times = []
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            client.parse(fixture)
+            parse_times.append((time.monotonic() - start) * 1_000_000)
+
+        # parse_with_js
+        js_times = []
+        for _ in range(ITERATIONS):
+            start = time.monotonic()
+            client.parse_with_js(fixture)
+            js_times.append((time.monotonic() - start) * 1_000_000)
+
+        parse_med = statistics.median(parse_times)
+        js_med = statistics.median(js_times)
+        overhead = ((js_med / max(1, parse_med)) - 1) * 100
+
+        print(f"  {name:<20} parse: {fmt_us(parse_med):>10}  parse_with_js: {fmt_us(js_med):>10}  overhead: {overhead:>+.0f}%")
+        results[f"overhead_{name}"] = {"parse_us": parse_med, "parse_js_us": js_med, "overhead_pct": overhead}
+
+    return results
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -597,6 +886,8 @@ def main():
     all_results["parallel"] = bench_parallel(client, lp_client)
     all_results["memory"] = bench_memory(client, lp_client)
     all_results["quality"] = bench_output_quality(client, lp_client)
+    all_results["js_sandbox"] = bench_js_sandbox(client)
+    all_results["selective_exec"] = bench_selective_exec(client)
 
     # Summary
     print("\n" + "=" * 72)
@@ -629,6 +920,18 @@ def main():
         lp_mb = mem.get("lp_complex_50_kb", 0) / 1024
         if ae_mb and lp_mb:
             print(f"  Memory: AetherAgent server {ae_mb:.1f} MB vs Lightpanda {lp_mb:.1f} MB/instance")
+
+    js = all_results.get("js_sandbox", {})
+    if js:
+        eval_times = [v["avg_us"] for k, v in js.items() if k.startswith("eval_")]
+        if eval_times:
+            print(f"  JS eval median (Fas 4b):                      {fmt_us(statistics.median(eval_times))}")
+
+    sel = all_results.get("selective_exec", {})
+    if sel:
+        overhead = sel.get("overhead_ecommerce", {}).get("overhead_pct")
+        if overhead is not None:
+            print(f"  Selective exec overhead (Fas 4c, ecommerce):   {overhead:+.0f}%")
 
     # Save raw results
     results_path = Path(__file__).parent / "benchmark_results.json"

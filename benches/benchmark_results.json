@@ -8,81 +8,211 @@
   },
   "head_to_head": {
     "simple": {
-      "ae_us": 725.4994998220354,
-      "lp_us": 294794.2599994349,
+      "ae_us": 776.723500166554,
+      "lp_us": 295912.79049964214,
       "ae_tokens": 495,
       "lp_tokens": 330,
-      "speedup": 406.3328232090411
+      "speedup": 380.9757145704863
     },
     "ecommerce": {
-      "ae_us": 835.3209996130317,
-      "lp_us": 289220.073499564,
+      "ae_us": 864.1285003250232,
+      "lp_us": 283774.4880007449,
       "ae_tokens": 1678,
       "lp_tokens": 931,
-      "speedup": 346.2382409080428
+      "speedup": 328.3938533377956
     },
     "login": {
-      "ae_us": 784.8249997550738,
-      "lp_us": 272700.5355009169,
+      "ae_us": 798.7639992279583,
+      "lp_us": 288853.30649973184,
       "ae_tokens": 1231,
       "lp_tokens": 618,
-      "speedup": 347.46667803143447
+      "speedup": 361.62534463110717
     },
     "complex_50": {
-      "ae_us": 2580.800500254554,
-      "lp_us": 257703.30200066383,
+      "ae_us": 2984.3010006516124,
+      "lp_us": 257705.26900032564,
       "ae_tokens": 31898,
       "lp_tokens": 20999,
-      "speedup": 99.85401892755584
+      "speedup": 86.35364493864947
     },
     "complex_100": {
-      "ae_us": 4313.307500524388,
-      "lp_us": 286892.2184998155,
+      "ae_us": 4497.467999499349,
+      "lp_us": 255286.72600012214,
       "ae_tokens": 63696,
       "lp_tokens": 41954,
-      "speedup": 66.51327744774439
+      "speedup": 56.762321828313226
     }
   },
   "parallel": {
     "aether_25": {
-      "wall_ms": 57.38171299890382,
-      "avg_ms": 20.304870160034625,
-      "throughput": 435.6788721256471
+      "wall_ms": 61.55240100088122,
+      "avg_ms": 20.50537743998575,
+      "throughput": 406.15799860743186
     },
     "lp_25": {
-      "wall_ms": 487.2263669985841,
-      "avg_ms": 328.27199379993544,
-      "throughput": 51.31085198447942
+      "wall_ms": 597.556345999692,
+      "avg_ms": 309.21556920009607,
+      "throughput": 41.837058826939284
     },
     "aether_50": {
-      "wall_ms": 90.86430800016387,
-      "avg_ms": 22.68017713991867,
-      "throughput": 550.2710701314077
+      "wall_ms": 111.48483000033593,
+      "avg_ms": 32.05320135988586,
+      "throughput": 448.49151225193003
     },
     "lp_50": {
-      "wall_ms": 1294.1081159988244,
-      "avg_ms": 512.9425052601437,
-      "throughput": 38.63664819180025
+      "wall_ms": 1238.3101569994324,
+      "avg_ms": 438.7341433599795,
+      "throughput": 40.37760630273415
     },
     "aether_100": {
-      "wall_ms": 182.4989540000388,
-      "avg_ms": 35.69639630002712,
-      "throughput": 547.9483460490341
+      "wall_ms": 204.88393899904622,
+      "avg_ms": 36.656979309937014,
+      "throughput": 488.08120582094784
     },
     "lp_100": {
-      "wall_ms": 1300.447373998395,
-      "avg_ms": 439.770563619968,
-      "throughput": 76.89661419557252
+      "wall_ms": 1329.8523310004384,
+      "avg_ms": 440.8063011799095,
+      "throughput": 75.19631892119233
     }
   },
   "memory": {
-    "aether_idle_kb": 9624,
-    "aether_loaded_kb": 9712
+    "aether_idle_kb": 9600,
+    "aether_loaded_kb": 9852
   },
   "quality": {
     "ae_nodes": 12,
     "lp_nodes": 21,
     "ae_size": 6715,
     "lp_size": 3724
+  },
+  "js_sandbox": {
+    "detect_Static page (no JS)": {
+      "avg_us": 722.0280003821244,
+      "min_us": 644.4640002882807,
+      "scripts": 0,
+      "handlers": 0
+    },
+    "detect_Inline script + handlers": {
+      "avg_us": 717.6669996624696,
+      "min_us": 669.6109994663857,
+      "scripts": 1,
+      "handlers": 2
+    },
+    "detect_Next.js framework": {
+      "avg_us": 720.6335012597265,
+      "min_us": 666.7789984931005,
+      "scripts": 1,
+      "handlers": 0
+    },
+    "detect_Heavy (20 scripts + handlers)": {
+      "avg_us": 846.7155012112926,
+      "min_us": 793.4549994388362,
+      "scripts": 20,
+      "handlers": 20
+    },
+    "eval_29.99 * 2": {
+      "avg_us": 1273.8600007651257,
+      "value": "59.98"
+    },
+    "eval_(199 * 1.25).toFixed(2)": {
+      "avg_us": 1053.2899996178458,
+      "value": "248.75"
+    },
+    "eval_`Pris: ${(199 * 1.25).toFixed(": {
+      "avg_us": 1093.8260002149036,
+      "value": "Pris: 248.75 kr"
+    },
+    "eval_[1,2,3].map(x => x * 2).join('": {
+      "avg_us": 1272.013500056346,
+      "value": "2,4,6"
+    },
+    "eval_JSON.stringify({price: 199, cu": {
+      "avg_us": 1107.8774996349239,
+      "value": "{\"price\":199,\"currency\":\"SEK\"}"
+    },
+    "eval_Math.PI.toFixed(5)": {
+      "avg_us": 1056.3864989308058,
+      "value": "3.14159"
+    },
+    "eval_'hello'.toUpperCase() + ' WORL": {
+      "avg_us": 1037.0154996053316,
+      "value": "HELLO WORLD"
+    },
+    "eval_Array.from({length: 10}, (_, i": {
+      "avg_us": 1139.2785008865758,
+      "value": "285"
+    },
+    "blocked_fetch('https://evil.com')": {
+      "avg_us": 711.466000211658,
+      "blocked": true
+    },
+    "blocked_document.cookie": {
+      "avg_us": 695.1895002202946,
+      "blocked": true
+    },
+    "blocked_window.location.href": {
+      "avg_us": 700.9725004536449,
+      "blocked": true
+    },
+    "blocked_eval('1+1')": {
+      "avg_us": 705.1040010992438,
+      "blocked": true
+    },
+    "blocked_setTimeout(() => {}, 100)": {
+      "avg_us": 699.3509996391367,
+      "blocked": true
+    },
+    "batch_3": {
+      "avg_us": 1575.4654987176764,
+      "min_us": 1445.6030003202613
+    },
+    "batch_8": {
+      "avg_us": 3920.110999388271,
+      "min_us": 2563.818001362961
+    },
+    "batch_20": {
+      "avg_us": 8046.369000112463,
+      "min_us": 8000.068000910687
+    }
+  },
+  "selective_exec": {
+    "Static page (no JS)": {
+      "avg_us": 757.0419993498945,
+      "min_us": 729.5939994946821,
+      "bindings": 0,
+      "evals": 0,
+      "successful": 0
+    },
+    "Single DOM target": {
+      "avg_us": 1162.8134998318274,
+      "min_us": 1082.5389999808976,
+      "bindings": 1,
+      "evals": 1,
+      "successful": 1
+    },
+    "Multiple DOM targets": {
+      "avg_us": 1415.6410006762599,
+      "min_us": 1344.9880007101456,
+      "bindings": 2,
+      "evals": 2,
+      "successful": 2
+    },
+    "Heavy (20 scripts)": {
+      "avg_us": 8924.947499508562,
+      "min_us": 8828.742000332568,
+      "bindings": 20,
+      "evals": 20,
+      "successful": 20
+    },
+    "overhead_ecommerce": {
+      "parse_us": 873.7629996176111,
+      "parse_js_us": 894.9230004873243,
+      "overhead_pct": 2.4217094199426636
+    },
+    "overhead_complex_50": {
+      "parse_us": 2658.8649989207624,
+      "parse_js_us": 2817.6020005048485,
+      "overhead_pct": 5.970103846886454
+    }
   }
 }

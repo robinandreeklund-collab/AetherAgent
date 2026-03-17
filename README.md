@@ -622,7 +622,33 @@ Run: `python3 benches/bench_vs_lightpanda.py`
 | JavaScript execution (V8) | No | **Yes** |
 | CSS rendering | No | No |
 
-> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, intent API) that Lightpanda does not offer. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and will add CDP fallback in Fas 5+.
+**JS Sandbox Performance (Fas 4b – AetherAgent-only):**
+
+| Operation | Median | Detail |
+|-----------|--------|--------|
+| Detect: static page | 722 µs | 0 scripts, 0 handlers |
+| Detect: inline + handlers | 718 µs | 1 script, 2 handlers |
+| Detect: heavy (20 scripts) | 847 µs | 20 scripts, 20 handlers |
+| Eval: math expression | 1.1 ms | `29.99 * 2` → `59.98` |
+| Eval: template literal | 1.1 ms | `` `Pris: ${(199*1.25).toFixed(2)} kr` `` |
+| Eval: JSON.stringify | 1.1 ms | `{"price":199,"currency":"SEK"}` |
+| Blocked: fetch/eval/document | 700 µs | Rejected before execution |
+| Batch: 3 expressions | 1.6 ms | 0.5 ms/expr |
+| Batch: 20 expressions | 8.0 ms | 0.4 ms/expr |
+
+**Selective Execution Performance (Fas 4c – AetherAgent-only):**
+
+| Scenario | Median | Bindings | Applied |
+|----------|--------|----------|---------|
+| Static page (no JS) | 757 µs | 0 | 0 |
+| Single DOM target | 1.2 ms | 1 | 1 |
+| Multiple DOM targets | 1.4 ms | 2 | 2 |
+| Heavy (20 scripts) | 8.9 ms | 20 | 20 |
+| **Overhead vs plain parse** | | | |
+| E-commerce | +2% | — | — |
+| Complex (50 products) | +6% | — | — |
+
+> **Summary:** AetherAgent is **100–400x faster** for semantic parsing, uses **half the memory**, and includes AI-native features (goal scoring, injection protection, diff, JS sandbox, intent API) that Lightpanda does not offer. The JS sandbox adds only 2–6% overhead. Lightpanda's advantage is full V8 JavaScript execution for JS-heavy SPAs – AetherAgent covers this partially with its Boa sandbox (Fas 4b/4c) and will add CDP fallback in Fas 5+.
 
 ---
 
