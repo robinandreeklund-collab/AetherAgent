@@ -104,7 +104,7 @@ async fn root() -> impl IntoResponse {
         "endpoints": {
             "GET /health": "Health check",
             "POST /api/parse": "Parse HTML to semantic tree",
-            "POST /api/parse/top": "Parse top-N relevant nodes",
+            "POST /api/parse-top": "Parse top-N relevant nodes",
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
@@ -231,7 +231,7 @@ fn build_router() -> Router {
         .route("/health", get(health))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
-        .route("/api/parse/top", post(parse_top))
+        .route("/api/parse-top", post(parse_top))
         .route("/api/check-injection", post(check_injection))
         .route("/api/wrap-untrusted", post(wrap_untrusted))
         // Fas 2: Intent API
@@ -258,8 +258,9 @@ async fn main() {
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
     println!("  GET  /health              – Health check");
+    println!("  GET  /                    – API documentation");
     println!("  POST /api/parse           – Parse HTML to semantic tree");
-    println!("  POST /api/parse/top       – Parse top-N relevant nodes");
+    println!("  POST /api/parse-top       – Parse top-N relevant nodes");
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");

@@ -221,7 +221,7 @@ curl -X POST https://your-app.onrender.com/api/check-injection \
 |--------|------|-------------|
 | GET | `/health` | Health check |
 | POST | `/api/parse` | Parse HTML to full semantic tree |
-| POST | `/api/parse/top` | Parse top-N relevant nodes |
+| POST | `/api/parse-top` | Parse top-N relevant nodes |
 | POST | `/api/click` | Find best clickable element |
 | POST | `/api/fill-form` | Map form fields to key/value pairs |
 | POST | `/api/extract` | Extract structured data by keys |
