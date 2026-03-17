@@ -458,7 +458,7 @@ results = model.train(
     epochs=$EPOCHS,
     imgsz=$IMGSZ,
     batch=$effective_batch,
-    project='runs/detect',
+    project='$PROJECT_DIR/runs/detect',
     name='$run_name',
     exist_ok=True,
     $device_param
