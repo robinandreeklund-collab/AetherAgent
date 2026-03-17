@@ -7,7 +7,7 @@
 /// Run: cargo run --features server --bin aether-server
 use axum::{
     extract::Json,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -332,7 +332,8 @@ async fn root() -> impl IntoResponse {
             "POST /api/collab/create": "Create shared diff store for cross-agent collaboration",
             "POST /api/collab/register": "Register agent in collab store",
             "POST /api/collab/publish": "Publish semantic delta to collab store",
-            "POST /api/collab/fetch": "Fetch new deltas for agent"
+            "POST /api/collab/fetch": "Fetch new deltas for agent",
+            "POST /mcp": "MCP Streamable HTTP endpoint (JSON-RPC, spec 2025-03-26)"
         },
         "example": {
             "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
@@ -853,6 +854,599 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
     (StatusCode::OK, result)
 }
 
+// ─── MCP Streamable HTTP (spec 2025-03-26) ───────────────────────────────────
+
+/// Tool schema som exponeras via MCP tools/list
+fn mcp_tool_definitions() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "name": "parse",
+            "description": "Parse HTML to a semantic accessibility tree with goal-relevance scoring.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"}
+                },
+                "required": ["html", "goal", "url"]
+            }
+        },
+        {
+            "name": "parse_top",
+            "description": "Parse HTML and return only the top-N most relevant nodes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "top_n": {"type": "integer", "description": "Max nodes to return"}
+                },
+                "required": ["html", "goal", "url", "top_n"]
+            }
+        },
+        {
+            "name": "fetch_parse",
+            "description": "Fetch a URL and parse it into a semantic tree in one call.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal"}
+                },
+                "required": ["url", "goal"]
+            }
+        },
+        {
+            "name": "find_and_click",
+            "description": "Find the best clickable element matching a target label.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "target_label": {"type": "string", "description": "What to click"}
+                },
+                "required": ["html", "goal", "url", "target_label"]
+            }
+        },
+        {
+            "name": "fill_form",
+            "description": "Map form fields to provided key/value pairs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "fields": {"type": "object", "description": "Form fields as key-value map", "additionalProperties": {"type": "string"}}
+                },
+                "required": ["html", "goal", "url", "fields"]
+            }
+        },
+        {
+            "name": "extract_data",
+            "description": "Extract structured data from a page by semantic keys.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Keys to extract"}
+                },
+                "required": ["html", "goal", "url", "keys"]
+            }
+        },
+        {
+            "name": "check_injection",
+            "description": "Check text for prompt injection patterns.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to check"}
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "compile_goal",
+            "description": "Compile a complex goal into an optimized action plan.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "The agent's goal"}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "classify_request",
+            "description": "Classify URL against semantic firewall (L1/L2/L3).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to classify"},
+                    "goal": {"type": "string", "description": "The agent's current goal"}
+                },
+                "required": ["url", "goal"]
+            }
+        },
+        {
+            "name": "diff_trees",
+            "description": "Compare two semantic trees and return only the delta. 70-99% token savings.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "old_tree_json": {"type": "string", "description": "Previous semantic tree JSON"},
+                    "new_tree_json": {"type": "string", "description": "Current semantic tree JSON"}
+                },
+                "required": ["old_tree_json", "new_tree_json"]
+            }
+        },
+        {
+            "name": "fetch_extract",
+            "description": "Fetch a URL and extract structured data in one call.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Keys to extract"}
+                },
+                "required": ["url", "goal", "keys"]
+            }
+        },
+        {
+            "name": "fetch_click",
+            "description": "Fetch a URL and find a clickable element in one call.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "target_label": {"type": "string", "description": "What to click"}
+                },
+                "required": ["url", "goal", "target_label"]
+            }
+        },
+        {
+            "name": "parse_with_js",
+            "description": "Parse HTML with automatic JS evaluation in sandboxed Boa engine.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"}
+                },
+                "required": ["html", "goal", "url"]
+            }
+        },
+        {
+            "name": "build_causal_graph",
+            "description": "Build a causal action graph from temporal page snapshots and actions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshots_json": {"type": "string", "description": "JSON array of temporal snapshots"},
+                    "actions_json": {"type": "string", "description": "JSON array of actions"}
+                },
+                "required": ["snapshots_json", "actions_json"]
+            }
+        },
+        {
+            "name": "predict_action_outcome",
+            "description": "Predict the outcome of an action using the causal graph.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "graph_json": {"type": "string", "description": "Causal graph JSON"},
+                    "action": {"type": "string", "description": "Action to predict"}
+                },
+                "required": ["graph_json", "action"]
+            }
+        },
+        {
+            "name": "find_safest_path",
+            "description": "Find the safest path to a goal state through the causal graph.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "graph_json": {"type": "string", "description": "Causal graph JSON"},
+                    "goal": {"type": "string", "description": "Target goal state"}
+                },
+                "required": ["graph_json", "goal"]
+            }
+        },
+        {
+            "name": "discover_webmcp",
+            "description": "Discover WebMCP tool definitions embedded in an HTML page.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "url": {"type": "string", "description": "The page URL"}
+                },
+                "required": ["html", "url"]
+            }
+        },
+        {
+            "name": "ground_semantic_tree",
+            "description": "Ground semantic tree with visual bounding box annotations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "annotations": {"type": "array", "description": "Bounding box annotations"}
+                },
+                "required": ["html", "goal", "url", "annotations"]
+            }
+        },
+        {
+            "name": "match_bbox_iou",
+            "description": "Match a bounding box against semantic tree nodes using IoU.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tree_json": {"type": "string", "description": "Semantic tree JSON"},
+                    "bbox": {"type": "object", "description": "Bounding box {x, y, width, height}"}
+                },
+                "required": ["tree_json", "bbox"]
+            }
+        },
+        {
+            "name": "create_collab_store",
+            "description": "Create a shared diff store for cross-agent collaboration.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "register_collab_agent",
+            "description": "Register an agent in a collaboration store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "store_json": {"type": "string", "description": "Collab store JSON"},
+                    "agent_id": {"type": "string", "description": "Unique agent identifier"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms"}
+                },
+                "required": ["store_json", "agent_id", "goal", "timestamp_ms"]
+            }
+        },
+        {
+            "name": "publish_collab_delta",
+            "description": "Publish a semantic delta to the collaboration store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "store_json": {"type": "string", "description": "Collab store JSON"},
+                    "agent_id": {"type": "string", "description": "Publishing agent's ID"},
+                    "url": {"type": "string", "description": "URL the delta applies to"},
+                    "delta_json": {"type": "string", "description": "Semantic delta JSON"},
+                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms"}
+                },
+                "required": ["store_json", "agent_id", "url", "delta_json", "timestamp_ms"]
+            }
+        },
+        {
+            "name": "fetch_collab_deltas",
+            "description": "Fetch new semantic deltas from the collaboration store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "store_json": {"type": "string", "description": "Collab store JSON"},
+                    "agent_id": {"type": "string", "description": "Fetching agent's ID"}
+                },
+                "required": ["store_json", "agent_id"]
+            }
+        }
+    ])
+}
+
+/// Dispatcha MCP tools/call till rätt aether_agent-funktion
+async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<String, String> {
+    match name {
+        "parse" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            Ok(aether_agent::parse_to_semantic_tree(html, goal, url))
+        }
+        "parse_top" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
+            Ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
+        }
+        "fetch_parse" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            aether_agent::fetch::validate_url(url)?;
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(url, &config).await {
+                Ok(r) => {
+                    let tree = aether_agent::parse_to_semantic_tree(&r.body, goal, &r.final_url);
+                    Ok(tree)
+                }
+                Err(e) => Err(e),
+            }
+        }
+        "find_and_click" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let target = args["target_label"].as_str().unwrap_or("");
+            Ok(aether_agent::find_and_click(html, goal, url, target))
+        }
+        "fill_form" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let fields_json = serde_json::to_string(&args["fields"]).unwrap_or_default();
+            Ok(aether_agent::fill_form(html, goal, url, &fields_json))
+        }
+        "extract_data" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let keys_json = serde_json::to_string(&args["keys"]).unwrap_or_default();
+            Ok(aether_agent::extract_data(html, goal, url, &keys_json))
+        }
+        "check_injection" => {
+            let text = args["text"].as_str().unwrap_or("");
+            Ok(aether_agent::check_injection(text))
+        }
+        "compile_goal" => {
+            let goal = args["goal"].as_str().unwrap_or("");
+            Ok(aether_agent::compile_goal(goal))
+        }
+        "classify_request" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let config = aether_agent::firewall::FirewallConfig::default();
+            let verdict = aether_agent::firewall::classify_request(url, goal, &config);
+            serde_json::to_string(&verdict).map_err(|e| e.to_string())
+        }
+        "diff_trees" => {
+            let old = args["old_tree_json"].as_str().unwrap_or("");
+            let new = args["new_tree_json"].as_str().unwrap_or("");
+            Ok(aether_agent::diff_semantic_trees(old, new))
+        }
+        "fetch_extract" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let keys_json = serde_json::to_string(&args["keys"]).unwrap_or_default();
+            aether_agent::fetch::validate_url(url)?;
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(url, &config).await {
+                Ok(r) => Ok(aether_agent::extract_data(
+                    &r.body,
+                    goal,
+                    &r.final_url,
+                    &keys_json,
+                )),
+                Err(e) => Err(e),
+            }
+        }
+        "fetch_click" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let target = args["target_label"].as_str().unwrap_or("");
+            aether_agent::fetch::validate_url(url)?;
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(url, &config).await {
+                Ok(r) => Ok(aether_agent::find_and_click(
+                    &r.body,
+                    goal,
+                    &r.final_url,
+                    target,
+                )),
+                Err(e) => Err(e),
+            }
+        }
+        "parse_with_js" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            Ok(aether_agent::parse_with_js(html, goal, url))
+        }
+        "build_causal_graph" => {
+            let snapshots = args["snapshots_json"].as_str().unwrap_or("");
+            let actions = args["actions_json"].as_str().unwrap_or("");
+            Ok(aether_agent::build_causal_graph(snapshots, actions))
+        }
+        "predict_action_outcome" => {
+            let graph = args["graph_json"].as_str().unwrap_or("");
+            let action = args["action"].as_str().unwrap_or("");
+            Ok(aether_agent::predict_action_outcome(graph, action))
+        }
+        "find_safest_path" => {
+            let graph = args["graph_json"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            Ok(aether_agent::find_safest_path(graph, goal))
+        }
+        "discover_webmcp" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            Ok(aether_agent::discover_webmcp(html, url))
+        }
+        "ground_semantic_tree" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let ann_json = serde_json::to_string(&args["annotations"]).unwrap_or_default();
+            Ok(aether_agent::ground_semantic_tree(
+                html, goal, url, &ann_json,
+            ))
+        }
+        "match_bbox_iou" => {
+            let tree = args["tree_json"].as_str().unwrap_or("");
+            let bbox_json = serde_json::to_string(&args["bbox"]).unwrap_or_default();
+            Ok(aether_agent::match_bbox_iou(tree, &bbox_json))
+        }
+        "create_collab_store" => Ok(aether_agent::create_collab_store()),
+        "register_collab_agent" => {
+            let store = args["store_json"].as_str().unwrap_or("");
+            let agent_id = args["agent_id"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
+            Ok(aether_agent::register_collab_agent(
+                store, agent_id, goal, ts,
+            ))
+        }
+        "publish_collab_delta" => {
+            let store = args["store_json"].as_str().unwrap_or("");
+            let agent_id = args["agent_id"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let delta = args["delta_json"].as_str().unwrap_or("");
+            let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
+            Ok(aether_agent::publish_collab_delta(
+                store, agent_id, url, delta, ts,
+            ))
+        }
+        "fetch_collab_deltas" => {
+            let store = args["store_json"].as_str().unwrap_or("");
+            let agent_id = args["agent_id"].as_str().unwrap_or("");
+            Ok(aether_agent::fetch_collab_deltas(store, agent_id))
+        }
+        _ => Err(format!("Unknown tool: {name}")),
+    }
+}
+
+/// Skapa JSON-RPC-svar
+fn jsonrpc_result(id: &serde_json::Value, result: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    })
+}
+
+fn jsonrpc_error(id: &serde_json::Value, code: i32, message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {"code": code, "message": message}
+    })
+}
+
+/// MCP Streamable HTTP POST handler
+/// Hanterar initialize, tools/list, tools/call, notifications, och ping
+async fn mcp_post(headers: HeaderMap, Json(msg): Json<serde_json::Value>) -> impl IntoResponse {
+    let method = msg["method"].as_str().unwrap_or("");
+    let id = &msg["id"];
+    let params = &msg["params"];
+
+    // Notification (inget id) — acceptera tyst
+    if id.is_null() {
+        return (StatusCode::ACCEPTED, HeaderMap::new(), String::new());
+    }
+
+    let response = match method {
+        "initialize" => {
+            let session_id = format!(
+                "aether-{:016x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let result = jsonrpc_result(
+                id,
+                serde_json::json!({
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {
+                        "tools": {"listChanged": false}
+                    },
+                    "serverInfo": {
+                        "name": "aether-agent",
+                        "version": "0.3.0"
+                    }
+                }),
+            );
+            let body = serde_json::to_string(&result).unwrap_or_default();
+            let mut resp_headers = HeaderMap::new();
+            resp_headers.insert(
+                "content-type",
+                "application/json"
+                    .parse()
+                    .unwrap_or_else(|_| "application/json".parse().unwrap()),
+            );
+            if let Ok(v) = session_id.parse() {
+                resp_headers.insert("mcp-session-id", v);
+            }
+            return (StatusCode::OK, resp_headers, body);
+        }
+        "tools/list" => jsonrpc_result(
+            id,
+            serde_json::json!({
+                "tools": mcp_tool_definitions()
+            }),
+        ),
+        "tools/call" => {
+            let tool_name = params["name"].as_str().unwrap_or("");
+            let arguments = &params["arguments"];
+            match mcp_dispatch_tool(tool_name, arguments).await {
+                Ok(result_text) => jsonrpc_result(
+                    id,
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": result_text}]
+                    }),
+                ),
+                Err(e) => jsonrpc_result(
+                    id,
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": format!("Error: {e}")}],
+                        "isError": true
+                    }),
+                ),
+            }
+        }
+        "ping" => jsonrpc_result(id, serde_json::json!({})),
+        _ => jsonrpc_error(id, -32601, &format!("Method not found: {method}")),
+    };
+
+    // Vidarebefordra session-id från klienten
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(
+        "content-type",
+        "application/json"
+            .parse()
+            .unwrap_or_else(|_| "application/json".parse().unwrap()),
+    );
+    if let Some(session) = headers.get("mcp-session-id") {
+        resp_headers.insert("mcp-session-id", session.clone());
+    }
+    (
+        StatusCode::OK,
+        resp_headers,
+        serde_json::to_string(&response).unwrap_or_default(),
+    )
+}
+
+/// MCP Streamable HTTP GET handler — SSE stream (returnerar tom 405 för nu)
+async fn mcp_get() -> impl IntoResponse {
+    // Server-initiated notifications behövs inte ännu
+    (
+        StatusCode::METHOD_NOT_ALLOWED,
+        "SSE stream not implemented — use POST",
+    )
+}
+
+/// MCP Streamable HTTP DELETE handler — avsluta session
+async fn mcp_delete() -> impl IntoResponse {
+    (StatusCode::OK, "Session terminated")
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 fn build_router() -> Router {
@@ -921,6 +1515,8 @@ fn build_router() -> Router {
         .route("/api/collab/register", post(collab_register))
         .route("/api/collab/publish", post(collab_publish))
         .route("/api/collab/fetch", post(collab_fetch))
+        // MCP Streamable HTTP (spec 2025-03-26)
+        .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .layer(cors)
 }
 
@@ -970,6 +1566,10 @@ async fn main() {
     println!("  POST /api/collab/register        – Register agent in collab");
     println!("  POST /api/collab/publish         – Publish delta to collab store");
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
+    println!();
+    println!("  POST /mcp                        – MCP Streamable HTTP endpoint");
+    println!("  GET  /mcp                        – MCP SSE stream (not yet implemented)");
+    println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
