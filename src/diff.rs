@@ -31,7 +31,11 @@ fn node_key(node: &SemanticNode) -> String {
     }
     // Tertiärt: roll + label (trunkerad för stabilitet)
     let label_key = if node.label.len() > 60 {
-        &node.label[..node.label.floor_char_boundary(60)]
+        let mut end = 60;
+        while end > 0 && !node.label.is_char_boundary(end) {
+            end -= 1;
+        }
+        &node.label[..end]
     } else {
         &node.label
     };
