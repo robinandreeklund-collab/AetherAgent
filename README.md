@@ -1035,8 +1035,8 @@ image = "0.25"              # PNG/JPEG decoding (feature: vision)
 - **Vision model training** — Fine-tune YOLOv8-nano on real UI datasets (Common Crawl screenshots, WebUI-7K) for production-grade detection accuracy beyond the current stub
 - **XHR response caching** — Cache intercepted API responses across temporal snapshots for diff-based monitoring of hidden data endpoints
 - **Streaming parse** — Incremental semantic tree building for large pages without buffering full HTML
-- **Multi-page workflow orchestration** — Stateful agent loops that span multiple pages with automatic state persistence between navigations
-- **OAuth / session management** — Transparent cookie-based login flows for authenticated page access during agent workflows
+- **Multi-page workflow orchestration** — Today each page is an isolated request. `compile_goal` generates a plan but the client must manually hold state between steps. The goal is a stateful workflow engine inside AetherAgent: automatic navigation after `find_and_click` returns a link (fetch next page, continue the plan), rollback/retry on form validation failures, and cross-page temporal memory + semantic diff that spans navigations instead of just same-page snapshots. The difference between "one tool per page" and "run the entire flow and report back".
+- **OAuth / session management** — Currently `fetch.rs` sends requests with a simple cookie jar but cannot log in. The goal: persistent session cookies across `fetch_parse` calls, OAuth 2.0 redirect chain handling (authorize → callback → token), automatic login form submission via `fill_form` + `fetch`, and transparent token refresh on expiry. Prerequisite for multi-page orchestration on authenticated sites (e.g. "log in to my bank and show balances" requires both auth and orchestration).
 
 ---
 
