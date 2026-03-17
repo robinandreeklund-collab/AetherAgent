@@ -3,6 +3,7 @@ FROM rust:1.82-slim as builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
+COPY benches/ benches/
 
 # Build the server binary with release optimizations
 RUN cargo build --release --features server --bin aether-server
