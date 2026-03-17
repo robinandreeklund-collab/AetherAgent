@@ -15,6 +15,7 @@ Head-to-head performance comparison between **AetherAgent** (Rust/WASM AI browse
 | Metric | AetherAgent | Lightpanda | Advantage |
 |--------|-------------|------------|-----------|
 | Campfire Commerce (100 loads) | **139 ms** total | 29,630 ms total | **213x faster** |
+| Amiibo crawl (932 pages) | **835 ms** total | 243,500 ms total | **292x faster** |
 | Parse speed (simple page) | **653 us** | 288 ms | **442x faster** |
 | Parse speed (100 elements) | **3.5 ms** | 265 ms | **77x faster** |
 | 100 concurrent parses | **176 ms** wall | 1,236 ms wall | **7x faster** |
@@ -56,12 +57,32 @@ Lightpanda's [published benchmark](https://github.com/lightpanda-io/demo/blob/ma
 | 25 | 47 ms | 1,070 ms | **23x** |
 | 100 | 176 ms | 1,380 ms | **8x** |
 
-### Amiibo Page (Lightpanda's 933-page crawler benchmark)
+### Amiibo Full Crawl (Lightpanda's 933-page crawler benchmark)
 
-| Engine | Total (100 runs) | Avg/run | Speedup |
-|--------|-----------------|---------|---------|
-| **AetherAgent** | **95 ms** | **1.0 ms** | -- |
-| Lightpanda | 25,390 ms | 254 ms | **266x slower** |
+Lightpanda's second official benchmark crawls all 933 amiibo character pages. We downloaded all 932 rendered pages and benchmarked both engines locally.
+
+**Lightpanda's published results (AWS m5.large):**
+
+| Engine | Total (933 pages) | Avg/page |
+|--------|-------------------|----------|
+| Chrome | 1:22.83 | 88 ms |
+| Lightpanda (1 proc) | 51.68s | 55 ms |
+
+**Our local results (932 pages, same machine):**
+
+| Engine | Total (932 pages) | Avg/page | Median |
+|--------|-------------------|----------|--------|
+| **AetherAgent** | **835 ms** | **0.9 ms** | **0.9 ms** |
+| Lightpanda | 243,500 ms | 261 ms | 248 ms |
+
+**AetherAgent is 292x faster than Lightpanda on the full 933-page amiibo crawl.**
+
+Parallel crawl (25 concurrent, first 100 pages):
+
+| Engine | Wall time | Ratio |
+|--------|-----------|-------|
+| **AetherAgent** | **138 ms** | -- |
+| Lightpanda | 1,213 ms | **8.8x slower** |
 
 ### AetherAgent-Only Features (Lightpanda cannot do these)
 

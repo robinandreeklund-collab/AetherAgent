@@ -433,45 +433,100 @@ def main():
         print(f"  {n_concurrent:>3} concurrent:  AE {fmt_ms(ae_wall):>10}  LP {fmt_ms(lp_wall):>10}  ({ratio:.1f}x)")
         results[f"parallel_{n_concurrent}"] = {"ae_ms": ae_wall, "lp_ms": lp_wall, "ratio": ratio}
 
-    # ─── Benchmark 3: Amiibo page (simulating their 933-page crawl) ──────
+    # ─── Benchmark 3: Amiibo full crawl (932 pages) ──────────────────────
     print("\n" + "=" * 78)
-    print("  BENCHMARK 3: Amiibo Page – 100 Sequential Loads")
-    print("  (Lightpanda's crawler benchmark uses 933 amiibo pages)")
+    print("  BENCHMARK 3: Amiibo Full Crawl – 932 Pages")
+    print("  (Lightpanda's official 933-page crawler benchmark)")
     print("=" * 78)
 
-    amiibo_url = f"http://127.0.0.1:{FIXTURE_PORT}/amiibo.html"
+    amiibo_dir = Path("/tmp/amiibo_pages")
+    amiibo_files = sorted(amiibo_dir.glob("*.html")) if amiibo_dir.exists() else []
 
-    ae_times2 = []
-    for _ in range(RUNS):
-        start = time.monotonic()
-        resp = session.post(
-            f"{AETHER_URL}/api/parse",
-            json={"html": AMIIBO_HTML, "goal": "find amiibo character info", "url": "https://demo.lightpanda.io/amiibo/Sandy/"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        ae_times2.append((time.monotonic() - start) * 1000)
+    if amiibo_files:
+        # Load all pages into memory
+        amiibo_pages = [f.read_text(errors="replace") for f in amiibo_files]
+        n_amiibo = len(amiibo_pages)
+        print(f"  Loaded {n_amiibo} amiibo pages (avg {sum(len(p) for p in amiibo_pages)//n_amiibo} bytes)")
 
-    lp_times2 = []
-    for _ in range(RUNS):
-        start = time.monotonic()
-        subprocess.run(
-            [LIGHTPANDA_BIN, "fetch", "--dump", "semantic_tree", amiibo_url],
-            capture_output=True, text=True, timeout=30,
-        )
-        lp_times2.append((time.monotonic() - start) * 1000)
+        # AetherAgent: parse all pages sequentially
+        ae_times2 = []
+        ae_start = time.monotonic()
+        for i, html in enumerate(amiibo_pages):
+            start = time.monotonic()
+            resp = session.post(
+                f"{AETHER_URL}/api/parse",
+                json={"html": html, "goal": "find amiibo info", "url": f"http://localhost/amiibo/{i}"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            ae_times2.append((time.monotonic() - start) * 1000)
+        ae_total2 = (time.monotonic() - ae_start) * 1000
 
-    ae_total2 = sum(ae_times2)
-    lp_total2 = sum(lp_times2)
-    speedup2 = lp_total2 / max(1, ae_total2)
+        # Lightpanda: fetch all pages sequentially (via local HTTP server on port 8888)
+        lp_fixture_port = 8888
+        lp_times2 = []
+        lp_start = time.monotonic()
+        for i, f in enumerate(amiibo_files):
+            lp_url = f"http://127.0.0.1:{lp_fixture_port}/{f.name}"
+            start = time.monotonic()
+            subprocess.run(
+                [LIGHTPANDA_BIN, "fetch", "--dump", "semantic_tree", lp_url],
+                capture_output=True, text=True, timeout=30,
+            )
+            lp_times2.append((time.monotonic() - start) * 1000)
+            if i % 200 == 0:
+                print(f"    Lightpanda: {i}/{n_amiibo}...")
+        lp_total2 = (time.monotonic() - lp_start) * 1000
 
-    print(f"  AetherAgent:  {fmt_ms(ae_total2)} total, {fmt_ms(statistics.mean(ae_times2))} avg")
-    print(f"  Lightpanda:   {fmt_ms(lp_total2)} total, {fmt_ms(statistics.mean(lp_times2))} avg")
-    print(f"  Speedup:      {speedup2:.1f}x")
+        speedup2 = lp_total2 / max(1, ae_total2)
 
-    results["amiibo"] = {
-        "ae_total_ms": ae_total2, "lp_total_ms": lp_total2, "speedup": speedup2,
-    }
+        print(f"\n  AetherAgent ({n_amiibo} pages):  {fmt_ms(ae_total2)} total, {fmt_ms(statistics.mean(ae_times2))} avg")
+        print(f"  Lightpanda  ({n_amiibo} pages):  {fmt_ms(lp_total2)} total, {fmt_ms(statistics.mean(lp_times2))} avg")
+        print(f"  Speedup:      {speedup2:.0f}x")
+
+        results["amiibo_crawl"] = {
+            "pages": n_amiibo,
+            "ae_total_ms": ae_total2, "ae_avg_ms": statistics.mean(ae_times2),
+            "ae_median_ms": statistics.median(ae_times2),
+            "lp_total_ms": lp_total2, "lp_avg_ms": statistics.mean(lp_times2),
+            "lp_median_ms": statistics.median(lp_times2),
+            "speedup": speedup2,
+        }
+    else:
+        # Fallback: single amiibo page × 100
+        print("  (amiibo pages not found, using single page × 100)")
+        amiibo_url = f"http://127.0.0.1:{FIXTURE_PORT}/amiibo.html"
+        ae_times2 = []
+        for _ in range(RUNS):
+            start = time.monotonic()
+            resp = session.post(
+                f"{AETHER_URL}/api/parse",
+                json={"html": AMIIBO_HTML, "goal": "find amiibo character info", "url": "https://demo.lightpanda.io/amiibo/Sandy/"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            ae_times2.append((time.monotonic() - start) * 1000)
+
+        lp_times2 = []
+        for _ in range(RUNS):
+            start = time.monotonic()
+            subprocess.run(
+                [LIGHTPANDA_BIN, "fetch", "--dump", "semantic_tree", amiibo_url],
+                capture_output=True, text=True, timeout=30,
+            )
+            lp_times2.append((time.monotonic() - start) * 1000)
+
+        ae_total2 = sum(ae_times2)
+        lp_total2 = sum(lp_times2)
+        speedup2 = lp_total2 / max(1, ae_total2)
+
+        print(f"  AetherAgent:  {fmt_ms(ae_total2)} total, {fmt_ms(statistics.mean(ae_times2))} avg")
+        print(f"  Lightpanda:   {fmt_ms(lp_total2)} total, {fmt_ms(statistics.mean(lp_times2))} avg")
+        print(f"  Speedup:      {speedup2:.1f}x")
+
+        results["amiibo"] = {
+            "ae_total_ms": ae_total2, "lp_total_ms": lp_total2, "speedup": speedup2,
+        }
 
     # ─── Benchmark 4: AetherAgent-only features ─────────────────────────
     print("\n" + "=" * 78)
