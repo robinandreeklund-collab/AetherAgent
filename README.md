@@ -1031,10 +1031,264 @@ image = "0.25"              # PNG/JPEG decoding (feature: vision)
 | **JS sandbox** | No DOM, no fetch, no timers, no modules — pure computation only |
 | **Causal reasoning** | Risk-weighted path finding avoids high-risk actions |
 
+### Vision Model Training Guide
+
+AetherAgent's vision pipeline uses YOLOv8-nano for UI element detection from screenshots. The inference runtime (`rten`) is built in — you just need to train and export a model. This section covers the full workflow from dataset preparation to deployment.
+
+#### 1. Dataset Preparation
+
+**Recommended datasets:**
+
+| Dataset | Description | Size |
+|---------|-------------|------|
+| [WebUI-7K](https://huggingface.co/datasets) | Annotated web UI screenshots | ~7,000 images |
+| [Common Crawl Screenshots](https://commoncrawl.org/) | Rendered pages from Common Crawl | Millions (sample as needed) |
+| [RICO](https://interactionmining.org/rico) | Mobile UI screenshots with bounding boxes | ~66,000 screens |
+| Custom screenshots | Your own application screenshots | As needed |
+
+**Label format:** YOLOv8 expects one `.txt` file per image with bounding boxes in normalized `class_id cx cy w h` format:
+
+```
+0 0.45 0.32 0.12 0.04    # button at (cx=45%, cy=32%, w=12%, h=4%)
+1 0.20 0.55 0.35 0.03    # input at (cx=20%, cy=55%, w=35%, h=3%)
+4 0.50 0.10 0.80 0.02    # text at (cx=50%, cy=10%, w=80%, h=2%)
+```
+
+**Default class mapping (10 classes):**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| 0 | `button` | Clickable buttons, submit controls |
+| 1 | `input` | Text inputs, textareas, search fields |
+| 2 | `link` | Hyperlinks, anchor elements |
+| 3 | `icon` | Icons, small graphical elements |
+| 4 | `text` | Paragraphs, labels, static text |
+| 5 | `image` | Photos, illustrations, banners |
+| 6 | `checkbox` | Checkboxes, toggle switches |
+| 7 | `radio` | Radio buttons |
+| 8 | `select` | Dropdowns, combo boxes |
+| 9 | `heading` | Headings (h1–h6), titles |
+
+**Labeling tools:** [Label Studio](https://labelstud.io/), [CVAT](https://www.cvat.ai/), or [Roboflow](https://roboflow.com/) can export directly to YOLOv8 format.
+
+**Directory structure:**
+
+```
+dataset/
+├── images/
+│   ├── train/          # ~80% of images
+│   ├── val/            # ~15% of images
+│   └── test/           # ~5% of images
+├── labels/
+│   ├── train/          # Matching .txt files
+│   ├── val/
+│   └── test/
+└── data.yaml           # Dataset config
+```
+
+**`data.yaml`:**
+
+```yaml
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: button
+  1: input
+  2: link
+  3: icon
+  4: text
+  5: image
+  6: checkbox
+  7: radio
+  8: select
+  9: heading
+```
+
+#### 2. Training with Ultralytics
+
+Install Ultralytics and train YOLOv8-nano:
+
+```bash
+pip install ultralytics
+
+# Train from scratch (or fine-tune from COCO pretrained)
+yolo detect train \
+  model=yolov8n.pt \
+  data=dataset/data.yaml \
+  epochs=100 \
+  imgsz=640 \
+  batch=16 \
+  name=aether-ui-v1
+
+# Resume interrupted training
+yolo detect train \
+  model=runs/detect/aether-ui-v1/weights/last.pt \
+  resume=True
+```
+
+**Recommended hyperparameters for UI detection:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `model` | `yolov8n.pt` | Nano variant — fast inference, small model size (~6 MB ONNX) |
+| `imgsz` | `640` | Matches AetherAgent's default `input_size` |
+| `epochs` | `100–300` | UI datasets are smaller than COCO, more epochs help |
+| `batch` | `16–32` | Depends on GPU memory |
+| `lr0` | `0.01` | Default works well for fine-tuning |
+| `augment` | `True` | Default augmentation is sufficient for UI |
+| `mosaic` | `0.5` | Reduce mosaic for UI (less useful than natural images) |
+
+**Validation:**
+
+```bash
+# Validate on test set
+yolo detect val \
+  model=runs/detect/aether-ui-v1/weights/best.pt \
+  data=dataset/data.yaml \
+  split=test
+
+# Expected: mAP50 > 0.7 for a well-labeled UI dataset
+```
+
+#### 3. ONNX Export
+
+Export the trained model to ONNX format compatible with the `rten` runtime:
+
+```bash
+yolo export \
+  model=runs/detect/aether-ui-v1/weights/best.pt \
+  format=onnx \
+  imgsz=640 \
+  opset=17 \
+  simplify=True
+
+# Output: runs/detect/aether-ui-v1/weights/best.onnx (~6 MB for nano)
+```
+
+**Convert ONNX to rten format** (optional — rten can load ONNX directly, but `.rten` is faster to load):
+
+```bash
+pip install rten-convert
+rten-convert runs/detect/aether-ui-v1/weights/best.onnx aether-ui-v1.rten
+```
+
+**Verify the model:**
+
+```bash
+# Check ONNX model structure
+python -c "
+import onnx
+model = onnx.load('best.onnx')
+print('Inputs:', [(i.name, [d.dim_value for d in i.type.tensor_type.shape.dim]) for i in model.graph.input])
+print('Outputs:', [(o.name, [d.dim_value for d in o.type.tensor_type.shape.dim]) for o in model.graph.output])
+"
+# Expected output shape: [1, 14, 8400] (14 = 4 bbox coords + 10 classes, 8400 predictions)
+```
+
+#### 4. Deploying in AetherAgent
+
+**Load and run the model via the WASM/HTTP API:**
+
+```python
+import requests
+
+# Read model and screenshot
+with open("aether-ui-v1.onnx", "rb") as f:
+    model_bytes = f.read()
+with open("screenshot.png", "rb") as f:
+    png_bytes = f.read()
+
+# Call the vision endpoint
+response = requests.post("http://localhost:3000/api/parse-screenshot", json={
+    "png_base64": base64.b64encode(png_bytes).decode(),
+    "model_base64": base64.b64encode(model_bytes).decode(),
+    "goal": "find the login button",
+    "config": {
+        "confidence_threshold": 0.25,
+        "nms_threshold": 0.45,
+        "input_size": 640,
+        "model_version": "aether-ui-v1.0"
+    }
+})
+```
+
+**Custom class labels:** If your model uses different classes than the default 10, pass `class_labels`:
+
+```json
+{
+    "config": {
+        "class_labels": ["btn", "textfield", "hyperlink", "icon", "paragraph",
+                         "photo", "toggle", "radio", "dropdown", "title"],
+        "model_version": "custom-ui-v2.0"
+    }
+}
+```
+
+**Per-class confidence thresholds:** Tune per class to reduce false positives for noisy classes (e.g., `text`) while keeping sensitivity for rare classes (e.g., `radio`):
+
+```json
+{
+    "config": {
+        "confidence_threshold": 0.25,
+        "class_thresholds": {
+            "button": 0.3,
+            "text": 0.6,
+            "icon": 0.4,
+            "radio": 0.15,
+            "checkbox": 0.15
+        },
+        "min_detection_area": 100.0
+    }
+}
+```
+
+**Minimum detection area:** Set `min_detection_area` (in pixels²) to filter out tiny artifact detections that are likely noise:
+
+```json
+{
+    "config": {
+        "min_detection_area": 50.0
+    }
+}
+```
+
+#### 5. Model Versioning
+
+Track which model produced each result via the `model_version` field:
+
+```json
+// VisionConfig
+{ "model_version": "aether-ui-v1.2-webui7k" }
+
+// VisionResult includes model_version in output
+{
+    "detections": [...],
+    "model_version": "aether-ui-v1.2-webui7k",
+    "inference_time_ms": 45,
+    "raw_detection_count": 23
+}
+```
+
+**Versioning convention:** `<model-name>-v<major>.<minor>-<dataset>`, e.g. `aether-ui-v1.0-webui7k`, `aether-ui-v2.1-custom-ecommerce`.
+
+#### 6. Tips for Better UI Detection
+
+- **Screenshot resolution:** Capture at 1280×720 or 1920×1080, then let the pipeline resize to 640×640. Higher resolution source images yield better small-element detection.
+- **Diverse training data:** Include screenshots from different sites, themes (light/dark), and viewport sizes. UI elements look very different across sites.
+- **Class imbalance:** UI screenshots typically have many `text` elements and fewer `radio`/`checkbox`. Use Ultralytics' built-in class weighting or oversample rare classes.
+- **Negative mining:** Include screenshots of non-UI content (images, charts, maps) with empty label files to reduce false positives.
+- **Iterative refinement:** Start with a small labeled set (~500 images), train, run inference on unlabeled screenshots, manually correct predictions, and add to the training set. Repeat.
+- **A/B testing:** Use `model_version` to run two models side-by-side and compare detection quality on the same pages.
+
+---
+
 ### Future Work
 
 - **Full JS execution bridge** — Pair with headless browser (Playwright/Puppeteer) for SPA rendering, feeding rendered HTML back to AetherAgent for semantic analysis
-- **Vision model training** — The inference pipeline now supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. Next step: train YOLOv8-nano on real UI datasets (Common Crawl screenshots, WebUI-7K) with Ultralytics, export to ONNX, and deploy with the rten runtime
+- ~~**Vision model training**~~ ✓ Training guide documented — The inference pipeline supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. See [Vision Model Training Guide](#vision-model-training-guide) above
 - ~~**XHR response caching**~~ ✓ Implemented — `XhrResponseCache` with TTL-based expiry, change detection (`has_changed`), and integration into `TemporalMemory` for diff-based monitoring across snapshots
 - ~~**Streaming parse**~~ ✓ Implemented — `streaming.rs` module with `StreamingParser`: early-stopping at `max_nodes`, depth limiting (`max_depth`), relevance filtering (`min_relevance`), and `parse_streaming` WASM API
 - **Multi-page workflow orchestration** — Today each page is an isolated request. `compile_goal` generates a plan but the client must manually hold state between steps. The goal is a stateful workflow engine inside AetherAgent: automatic navigation after `find_and_click` returns a link (fetch next page, continue the plan), rollback/retry on form validation failures, and cross-page temporal memory + semantic diff that spans navigations instead of just same-page snapshots. The difference between "one tool per page" and "run the entire flow and report back".
