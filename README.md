@@ -74,6 +74,8 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | CSS rendering | No | Yes | Yes | No |
 | Embeddable in WASM | **Yes** | No | No | No |
 | Semantic diff (token savings) | **Yes** | No | No | No |
+| XHR/fetch endpoint discovery | **Yes** | No | No | No |
+| Built-in vision (YOLOv8) | **Yes** (opt) | No | Partial | No |
 | MCP server built-in | **Yes** | No | No | No |
 | License | MIT | Apache-2.0 | MIT | BSD |
 
@@ -119,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **18 Rust modules**, **35 WASM-exported functions**, **41 HTTP endpoints**, and **20 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **20 Rust modules**, **40 WASM-exported functions**, **42 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -310,6 +312,37 @@ Shared diff store for multiple agents working on the same site. Reduces redundan
 | `collab_stats` | Active agents, cached deltas, publish/consume counts |
 | `cleanup_collab_store` | Remove inactive agents |
 
+### 14. XHR Network Interception
+
+**Module:** `intercept.rs`, `js_eval.rs`, `js_bridge.rs`
+
+Scans inline scripts and event handlers for `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` calls. Extracts target URLs and methods so agents can discover hidden API endpoints that load data dynamically (prices, inventory, search results).
+
+| Function | What it does |
+|----------|-------------|
+| `detect_xhr_urls` | Scan HTML for XHR/fetch calls → JSON array of `{url, method, headers}` |
+| `intercept_xhr` | Filter captures through firewall, fetch allowed URLs, run trust analysis |
+| `normalize_xhr_to_node` | Convert XHR response to SemanticNode (role: "price" or "data") |
+| `merge_xhr_nodes` | Append XHR-derived nodes to an existing SemanticTree |
+| `extract_price_from_json` | Recursive JSON search for price/amount/cost fields |
+
+### 15. Vision — YOLOv8 Screenshot Analysis
+
+**Module:** `vision.rs`
+
+Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detects UI elements directly from screenshots — no DOM required. Feature-gated behind `--features vision`.
+
+| Function | What it does |
+|----------|-------------|
+| `parse_screenshot` | PNG + ONNX model → detections + semantic tree (full pipeline) |
+| `detect_ui_elements` | Core detection: preprocess → inference → NMS → tree |
+| `preprocess_image` | PNG bytes → normalized float32 tensor |
+| `run_inference` | ONNX model inference via rten |
+| `nms` | Non-max suppression on overlapping detections |
+| `detections_to_tree` | Convert detections to SemanticTree with goal-relevance |
+
+**Detected UI classes:** button, input, link, icon, text, image, checkbox, radio, select, heading.
+
 ---
 
 ## API Reference
@@ -424,7 +457,7 @@ Run the server: `cargo run --features server --bin aether-server`
 | POST | `/api/collab/publish` | Publish delta |
 | POST | `/api/collab/fetch` | Fetch new deltas |
 
-### MCP Server (20 tools)
+### MCP Server (22 tools)
 
 Run: `cargo run --features mcp --bin aether-mcp`
 
@@ -452,6 +485,8 @@ Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 | `register_collab_agent` | Register agent for collaboration |
 | `publish_collab_delta` | Publish semantic delta |
 | `fetch_collab_deltas` | Fetch new deltas |
+| `detect_xhr_urls` | Scan HTML for hidden XHR/fetch/AJAX endpoints |
+| `parse_screenshot` | Analyze screenshot with YOLOv8 vision model |
 
 ### Claude Desktop Setup
 
@@ -506,7 +541,7 @@ cargo build --features mcp --bin aether-mcp --release
 
 #### What to try in Claude Desktop
 
-Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
+Once connected, Claude gets access to 22 AetherAgent tools. Try these prompts:
 
 **Parse a live page:**
 > "Use aether-agent to fetch and parse https://news.ycombinator.com with the goal 'find top stories'. Show me the most relevant nodes."
@@ -531,11 +566,11 @@ Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
 
 #### Available MCP Tools
 
+See the full [MCP Server (22 tools)](#mcp-server-22-tools) table above for the complete list. Key tools for getting started:
+
 | Tool | What it does |
 |------|-------------|
-| `parse` | HTML → semantic tree with goal-relevance scoring |
-| `parse_top` | HTML → top-N most relevant nodes |
-| `fetch_parse` | URL → fetch + semantic tree (one call) |
+| `parse` / `parse_top` | HTML → semantic tree (full or top-N) |
 | `find_and_click` | Find best clickable element by label |
 | `fill_form` | Map form fields to key/value pairs |
 | `extract_data` | Extract structured data by semantic keys |
@@ -543,8 +578,8 @@ Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
 | `compile_goal` | Compile goal into action plan with steps |
 | `classify_request` | Semantic firewall: is URL relevant to goal? |
 | `diff_trees` | Compare two trees, return only changes |
-| `fetch_extract` | URL → fetch + extract data (one call) |
-| `fetch_click` | URL → fetch + find clickable element (one call) |
+| `detect_xhr_urls` | Discover hidden API endpoints in page scripts |
+| `parse_screenshot` | Analyze screenshot with YOLOv8 object detection |
 
 ### Python SDK
 
@@ -571,32 +606,34 @@ const click = await agent.findAndClick(html, 'buy', url, 'Add to cart');
 
 ## Tests
 
-**232 tests** across 4 levels. All must pass on every commit.
+**280 tests** across 4 levels. All must pass on every commit.
 
 ```bash
-cargo test              # Run all 232 tests
+cargo test              # Run all 280 tests
 cargo clippy -- -D warnings  # Zero warnings required
 cargo fmt --check       # Zero diffs required
 ```
 
-### Unit Tests (162 tests)
+### Unit Tests (201 tests)
 
 Every module has tests at the bottom of the source file:
 
 | Module | Tests | Coverage |
 |--------|------:|----------|
-| `lib.rs` | 41 | All 35 WASM bindings + smoke tests |
-| `js_eval.rs` | 10 | Detection, evaluation, safety blocking |
-| `compiler.rs` | 9 | Goal compilation, plan execution, serialization |
-| `causal.rs` | 13 | Graph building, prediction, safest path, serialization |
-| `collab.rs` | 10 | Store operations, agent registration, versioning |
-| `diff.rs` | 9 | Tree comparison, change detection, token savings |
+| `lib.rs` | 41 | All 40 WASM bindings + smoke tests |
+| `js_eval.rs` | 16 | Detection, evaluation, safety blocking, fetch URL extraction |
 | `firewall.rs` | 16 | L1/L2/L3 filtering, batch, MIME types, whitelisting |
+| `intercept.rs` | 15 | Price extraction, node normalization, merging, config |
+| `causal.rs` | 13 | Graph building, prediction, safest path, serialization |
+| `vision.rs` | 13 | Config defaults, NMS, detections-to-tree, preprocessing |
+| `js_bridge.rs` | 12 | Selective execution, DOM targeting, XHR extraction |
 | `intent.rs` | 11 | Click, fill_form, extract_data edge cases |
-| `js_bridge.rs` | 7 | Selective execution, DOM targeting, variable extraction |
-| `temporal.rs` | 7 | Memory, adversarial detection, prediction, volatility |
+| `collab.rs` | 10 | Store operations, agent registration, versioning |
+| `compiler.rs` | 9 | Goal compilation, plan execution, serialization |
+| `diff.rs` | 9 | Tree comparison, change detection, token savings |
 | `grounding.rs` | 9 | Tree grounding, IoU computation, Set-of-Marks |
 | `webmcp.rs` | 8 | Tool discovery, schema extraction, polyfill detection |
+| `temporal.rs` | 7 | Memory, adversarial detection, prediction, volatility |
 | `trust.rs` | 4 | Injection detection, zero-width chars, boundary wrapping |
 | `memory.rs` | 4 | Serialization, context operations, invalid JSON |
 | `parser.rs` | 2 | HTML parsing, aria-label priority |
@@ -630,7 +667,7 @@ Every module has tests at the bottom of the source file:
 | 20 | Large catalog (performance) | 2 (parse, top-N) |
 | — | Injection pattern library | 2 (safe + dangerous texts) |
 
-### Integration Tests (40 tests)
+### Integration Tests (49 tests)
 
 End-to-end tests exercising the full pipeline (HTML → parse → tree → JSON):
 
@@ -643,6 +680,7 @@ End-to-end tests exercising the full pipeline (HTML → parse → tree → JSON)
 - Temporal memory (ecommerce flow, adversarial escalation, prediction, safe pages)
 - Intent compiler (buy, login, search, plan execution, ecommerce flow)
 - Workflow memory (end-to-end with context)
+- Parse screenshot (vision stub without feature flag)
 
 ### Benchmarks (13 scenarios)
 
@@ -753,11 +791,14 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 │  │ cookies  │ │ goal-aware│ │ Graph    │ │ Set-of-Mark      │   │
 │  │ SSRF prot│ │ filtering │ │          │ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
-│  ┌──────────┐ ┌───────────┐                                     │
-│  │ WebMCP   │ │ Collab    │    18 modules · 35 WASM functions   │
-│  │ Discovery│ │ Cross-    │    41 HTTP endpoints · 20 MCP tools │
-│  │          │ │ Agent     │                                     │
-│  └──────────┘ └───────────┘                                     │
+│  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
+│  │ WebMCP   │ │ Collab    │ │ XHR      │ │   Vision         │   │
+│  │ Discovery│ │ Cross-    │ │ Intercept│ │ YOLOv8-nano      │   │
+│  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
+│  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
+│                                                                   │
+│              20 modules · 40 WASM functions                       │
+│              42 HTTP endpoints · 22 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -772,14 +813,14 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 ```
 AetherAgent/
 ├── src/
-│   ├── lib.rs            # WASM API surface — 35 public functions
+│   ├── lib.rs            # WASM API surface — 40 public functions
 │   ├── parser.rs         # html5ever + rcdom DOM builder
 │   ├── semantic.rs       # Accessibility tree, goal-relevance scoring
 │   ├── trust.rs          # Prompt injection detection (20+ patterns)
 │   ├── intent.rs         # find_and_click, fill_form, extract_data
 │   ├── diff.rs           # Semantic DOM diffing, delta computation
-│   ├── js_eval.rs        # Boa JS sandbox, detection, evaluation
-│   ├── js_bridge.rs      # Selective execution, DOM targeting
+│   ├── js_eval.rs        # Boa JS sandbox, detection, evaluation, fetch URL extraction
+│   ├── js_bridge.rs      # Selective execution, DOM targeting, XHR extraction
 │   ├── temporal.rs       # Time-series memory, adversarial detection
 │   ├── compiler.rs       # Intent compiler, goal decomposition
 │   ├── fetch.rs          # HTTP fetching, SSRF, robots.txt, rate limiting
@@ -788,11 +829,13 @@ AetherAgent/
 │   ├── webmcp.rs         # WebMCP tool discovery
 │   ├── grounding.rs      # Multimodal grounding, IoU matching
 │   ├── collab.rs         # Cross-agent semantic diff store
+│   ├── intercept.rs      # XHR network interception, price extraction
+│   ├── vision.rs         # YOLOv8-nano inference via rten (feature: vision)
 │   ├── memory.rs         # Workflow memory persistence
 │   ├── types.rs          # Core data structures
 │   └── bin/
-│       ├── server.rs     # Axum HTTP API (41 endpoints)
-│       └── mcp_server.rs # MCP server (20 tools, stdio transport)
+│       ├── server.rs     # Axum HTTP API (42 endpoints)
+│       └── mcp_server.rs # MCP server (22 tools, stdio transport)
 ├── tests/
 │   ├── integration_test.rs   # 40 end-to-end tests
 │   ├── fixture_tests.rs      # 30 fixture-based scenario tests
@@ -839,6 +882,9 @@ cargo run --features server --bin aether-server
 
 # Run MCP server
 cargo run --features mcp --bin aether-mcp
+
+# Build with vision (YOLOv8 screenshot analysis)
+cargo build --features vision
 ```
 
 ### Deploy to Render
@@ -887,11 +933,11 @@ safety = agent.check_injection(page_text)
 
 AetherAgent is a fully functional AI browser engine with:
 
-- **18 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, workflow memory, core types
-- **35 WASM-exported functions** — complete API surface for any WASM host
-- **41 HTTP REST endpoints** — deployable Axum server with CORS
-- **20 MCP tools** — Claude Desktop, Cursor, VS Code compatible
-- **232 tests** — 162 unit + 30 fixture + 40 integration, all passing
+- **20 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, workflow memory, core types
+- **40 WASM-exported functions** — complete API surface for any WASM host
+- **42 HTTP REST endpoints** — deployable Axum server with CORS
+- **22 MCP tools** — Claude Desktop, Cursor, VS Code compatible
+- **280 tests** — 201 unit + 30 fixture + 49 integration, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)
@@ -916,6 +962,11 @@ axum = "0.7"                # HTTP server (feature: server)
 tokio = "1"                 # Async runtime (feature: server)
 tower-http = "0.5"          # CORS middleware (feature: server)
 rmcp = "1.2"                # MCP protocol (feature: mcp)
+base64 = "0.22"             # Base64 encoding for MCP (feature: mcp)
+rten = "0.15"               # ONNX runtime for YOLOv8 (feature: vision)
+rten-imageproc = "0.15"     # Image processing for rten (feature: vision)
+rten-tensor = "0.15"        # Tensor operations (feature: vision)
+image = "0.25"              # PNG/JPEG decoding (feature: vision)
 ```
 
 ### Design Principles
@@ -946,39 +997,10 @@ rmcp = "1.2"                # MCP protocol (feature: mcp)
 
 ### Future Work
 
-#### Inbyggd YOLOv8-inferens via rten (screenshot-only path)
-
-Fas 9c (Multimodal Grounding) tar idag emot bounding boxes från externa källor — `getBoundingClientRect()` eller vision-modeller som körs utanför AetherAgent. Ett naturligt nästa steg är att baka in objektdetektering direkt i WASM-binären så att agenten kan arbeta från enbart en screenshot, utan tillgång till DOM.
-
-**Vad det ger:**
-- **Screenshot-only agenter** — ingen DOM behövs, bara en PNG
-- **Verifiering** — jämför visuella element mot semantiskt träd för att upptäcka dolda/osynliga noder
-- **Fallback** — fungerar även på canvas-renderade appar, PDF-viewers, Flash-liknande content
-
-**Arkitekturskiss:**
-```
-PNG-bytes → vision.rs (rten + YOLOv8-nano ONNX) → bboxes → grounding.rs → annoterat semantiskt träd
-```
-
-**Nya komponenter:**
-| Komponent | Beskrivning |
-|-----------|------------|
-| `src/vision.rs` | Bildavkodning → tensor → rten-inferens → bbox-lista |
-| `yolov8n-ui.onnx` | YOLOv8-nano ONNX-modell (~6 MB) fintrimmad för UI-element |
-| `parse_screenshot()` | Ny WASM-export: `(png_bytes, goal) → JSON` |
-| Feature flag `vision` | Gated bakom `--features vision` för att hålla core lightweight |
-
-**Dependencies:**
-```toml
-# Optional (feature: vision)
-rten = "0.15"              # Rust ONNX runtime (WASM-kompatibel)
-image = "0.25"             # PNG/JPEG-avkodning
-```
-
-**Avvägningar:**
-- WASM-binär ökar med ~10-15 MB (modell + runtime)
-- Feature-gated — påverkar inte befintliga användare
-- Alternativ: behåll extern pipeline och skicka bboxes till `ground_semantic_tree()`
+- **Full JS execution bridge** — Pair with headless browser for SPA rendering, feeding rendered HTML back to AetherAgent
+- **Vision model training** — Fine-tune YOLOv8-nano on real UI datasets for production-grade detection accuracy
+- **XHR response caching** — Cache intercepted API responses across temporal snapshots for diff-based monitoring
+- **Streaming parse** — Incremental semantic tree building for large pages without buffering full HTML
 
 ---
 
