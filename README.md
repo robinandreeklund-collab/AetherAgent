@@ -533,6 +533,17 @@ Semantic Diff (Fas 4a)
 | Eval: batch (3 expressions) | ✅ | `["2", "ab", "3.14"]` |
 | Eval: ternary operator | ✅ | `"I lager"` |
 
+**Selective Execution verification results (live – Fas 4c):**
+
+| Test | Result | Detail |
+|------|--------|--------|
+| parse-js: inline script + DOM target | ✅ | `getElementById('buy')` → `"Köp: 59.98 kr"` applied to node |
+| parse-js: static page (no JS) | ✅ | 0 bindings, 0 evals, 0ms overhead |
+| parse-js: multiple DOM targets | ✅ | 2 bindings, 2 successful: `"Betala 597 kr"`, `"149.25 kr moms"` |
+| parse-js: framework detection | ✅ | `has_framework: true`, `framework_hint: "Next.js"` |
+| parse-js: blocked fetch in sandbox | ✅ | `"Blocked: 'fetch' is not allowed in sandbox"` |
+| parse-js: performance (10 elements) | ✅ | <1ms exec time, binding correctly applied |
+
 ### Local Benchmarks (no network overhead)
 
 Run `cargo run --bin aether-bench` for pure engine performance:
