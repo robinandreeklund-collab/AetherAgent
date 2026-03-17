@@ -429,6 +429,30 @@ fn apply_to_node(
     }
 }
 
+// ─── Fas 10: XHR-extraktion från HTML-snippets ──────────────────────────────
+
+/// Extract all fetch/XHR URLs from detected JS snippets in HTML (Fas 10)
+///
+/// Scans inline scripts and event handlers for fetch()/XHR/jQuery AJAX calls
+/// and returns them as XhrCapture structs ready for interception.
+pub fn extract_xhr_from_snippets(html: &str) -> Vec<crate::intercept::XhrCapture> {
+    let detection = js_eval::detect_js_snippets(html);
+    let mut captures = Vec::new();
+
+    for snippet in &detection.snippets {
+        let urls = js_eval::extract_fetch_urls(&snippet.code);
+        for url in urls {
+            captures.push(crate::intercept::XhrCapture {
+                url,
+                method: "GET".to_string(),
+                headers: std::collections::HashMap::new(),
+            });
+        }
+    }
+
+    captures
+}
+
 // ─── Tester ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -644,5 +668,58 @@ mod tests {
             "Borde ha minst 2 lyckade evalueringar, fick {}",
             result.successful_evals
         );
+    }
+
+    // ─── Fas 10: XHR-extraktionstester ──────────────────────────────────
+
+    #[test]
+    fn test_extract_xhr_from_snippets_with_fetch() {
+        let html = r#"<html><body>
+            <script>
+                fetch('https://api.shop.se/prices');
+            </script>
+        </body></html>"#;
+
+        let captures = extract_xhr_from_snippets(html);
+        assert_eq!(captures.len(), 1, "Borde hitta en XHR-capture");
+        assert_eq!(captures[0].url, "https://api.shop.se/prices");
+        assert_eq!(captures[0].method, "GET");
+    }
+
+    #[test]
+    fn test_extract_xhr_from_snippets_no_fetch() {
+        let html = r#"<html><body>
+            <script>var x = 1 + 2;</script>
+        </body></html>"#;
+
+        let captures = extract_xhr_from_snippets(html);
+        assert!(
+            captures.is_empty(),
+            "Borde inte hitta XHR-captures utan fetch-anrop"
+        );
+    }
+
+    #[test]
+    fn test_extract_xhr_from_snippets_multiple() {
+        let html = r#"<html><body>
+            <script>
+                fetch('https://api.shop.se/price');
+                fetch('https://api.shop.se/stock');
+            </script>
+        </body></html>"#;
+
+        let captures = extract_xhr_from_snippets(html);
+        assert_eq!(captures.len(), 2, "Borde hitta 2 XHR-captures");
+    }
+
+    #[test]
+    fn test_extract_xhr_from_event_handler() {
+        let html = r##"<html><body>
+            <button onclick="fetch('https://api.shop.se/add-to-cart')">Köp</button>
+        </body></html>"##;
+
+        let captures = extract_xhr_from_snippets(html);
+        assert_eq!(captures.len(), 1, "Borde hitta fetch i event handler");
+        assert_eq!(captures[0].url, "https://api.shop.se/add-to-cart");
     }
 }

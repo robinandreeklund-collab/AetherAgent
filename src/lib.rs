@@ -10,6 +10,7 @@ pub mod fetch;
 pub mod firewall;
 mod grounding;
 mod intent;
+pub mod intercept;
 mod js_bridge;
 mod js_eval;
 mod memory;
@@ -18,6 +19,7 @@ mod semantic;
 mod temporal;
 mod trust;
 pub mod types;
+pub mod vision;
 mod webmcp;
 
 use std::collections::HashMap;
@@ -412,6 +414,27 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
     }
 }
 
+// ─── Fas 10: XHR Network Interception ────────────────────────────────────────
+
+/// Detect fetch()/XHR URLs in HTML page's JavaScript
+///
+/// Scans inline scripts and event handlers for network calls.
+/// Returns JSON array of XhrCapture objects.
+///
+/// # Arguments
+/// * `html` - HTML source to scan
+///
+/// # Returns
+/// JSON string with array of `{url, method, headers}` objects
+#[wasm_bindgen]
+pub fn detect_xhr_urls(html: &str) -> String {
+    let captures = js_bridge::extract_xhr_from_snippets(html);
+    match serde_json::to_string_pretty(&captures) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Fas 5: Temporal Memory & Adversarial Modeling ──────────────────────────
 
 /// Create a new empty temporal memory
@@ -753,6 +776,22 @@ pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
     match serde_json::to_string_pretty(&matches) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+// ─── Fas 11: Vision – YOLOv8 inference ──────────────────────────────────────
+
+/// Parse a screenshot into a semantic tree using YOLOv8-nano vision model
+///
+/// Requires the `vision` feature flag. Input: PNG bytes + ONNX model bytes + goal string.
+#[wasm_bindgen]
+pub fn parse_screenshot(png_bytes: &[u8], model_bytes: &[u8], goal: &str) -> String {
+    let config = vision::VisionConfig::default();
+    match vision::detect_ui_elements(png_bytes, model_bytes, goal, &config) {
+        Ok(result) => {
+            serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
+        }
+        Err(e) => format!(r#"{{"error":"{}"}}"#, e),
     }
 }
 

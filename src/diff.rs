@@ -475,6 +475,8 @@ mod tests {
             nodes: vec![],
             injection_warnings: vec![],
             parse_time_ms: 0,
+            xhr_intercepted: 0,
+            xhr_blocked: 0,
         };
         let tree2 = tree1.clone();
         let delta = diff_trees(&tree1, &tree2);

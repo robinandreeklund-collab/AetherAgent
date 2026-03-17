@@ -619,6 +619,8 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
                 nodes: vec![],
                 injection_warnings: vec![],
                 parse_time_ms: 0,
+                xhr_intercepted: 0,
+                xhr_blocked: 0,
             }
         }),
         total_time_ms,

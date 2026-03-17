@@ -249,6 +249,8 @@ mod tests {
             nodes,
             injection_warnings: vec![],
             parse_time_ms: 0,
+            xhr_intercepted: 0,
+            xhr_blocked: 0,
         }
     }
 

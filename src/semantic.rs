@@ -54,6 +54,8 @@ impl SemanticBuilder {
             nodes,
             injection_warnings: self.warnings.clone(),
             parse_time_ms: 0, // sätts av lib.rs
+            xhr_intercepted: 0,
+            xhr_blocked: 0,
         }
     }
 

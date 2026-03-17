@@ -36,6 +36,12 @@ governor = { version = "0.10", optional = true }
 rmcp = { version = "1.2", features = ["server", "transport-io", "macros"], optional = true }
 schemars = { version = "0.8", optional = true }
 
+# Fas 11: Vision – YOLOv8 inference via rten (optional, feature-gated)
+rten = { version = "0.15", optional = true }
+rten-imageproc = { version = "0.15", optional = true }
+rten-tensor = { version = "0.15", optional = true }
+image = { version = "0.25", optional = true }
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
@@ -45,6 +51,7 @@ server = ["axum", "tokio", "tower-http", "js-eval", "fetch"]
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars"]
+vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 
 [[bin]]
 name = "aether-server"

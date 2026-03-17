@@ -328,6 +328,131 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     }
 }
 
+// ─── Fas 10: Fetch URL-extraktion ────────────────────────────────────────────
+
+/// Extract fetch()/XHR URLs from JavaScript code (Fas 10)
+///
+/// Detects patterns like:
+/// - `fetch('url')` or `fetch("url")`
+/// - `new XMLHttpRequest()` followed by `.open('GET', 'url')`
+/// - `$.ajax({url: 'url'})` or `$.get('url')`
+pub fn extract_fetch_urls(code: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+
+    // Mönster 1: fetch('url') eller fetch("url")
+    extract_fetch_pattern(code, &mut urls);
+
+    // Mönster 2: .open('METHOD', 'url')
+    extract_xhr_open_pattern(code, &mut urls);
+
+    // Mönster 3: $.ajax({url: 'url'}) eller $.get('url') / $.post('url')
+    extract_jquery_pattern(code, &mut urls);
+
+    urls
+}
+
+/// Hitta fetch('url') och fetch("url") mönster
+fn extract_fetch_pattern(code: &str, urls: &mut Vec<String>) {
+    let lower = code.to_lowercase();
+    let mut pos = 0;
+
+    while let Some(idx) = lower[pos..].find("fetch(") {
+        let abs_start = pos + idx + 6; // efter "fetch("
+                                       // Hoppa över whitespace
+        let rest = &code[abs_start..];
+        let trimmed = rest.trim_start();
+        let offset = rest.len() - trimmed.len();
+
+        if let Some(url) = extract_url_from_quote(trimmed) {
+            urls.push(url);
+        }
+        pos = abs_start + offset + 1;
+    }
+}
+
+/// Hitta .open('METHOD', 'url') mönster (XMLHttpRequest)
+fn extract_xhr_open_pattern(code: &str, urls: &mut Vec<String>) {
+    let lower = code.to_lowercase();
+    let mut pos = 0;
+
+    while let Some(idx) = lower[pos..].find(".open(") {
+        let abs_start = pos + idx + 6; // efter ".open("
+        let rest = &code[abs_start..];
+
+        // Förvänta: 'METHOD', 'URL' eller "METHOD", "URL"
+        // Hoppa över första argumentet (metoden)
+        if let Some((_, after_method)) = extract_quoted_value(rest.trim_start()) {
+            let after_comma =
+                rest[rest.len() - rest.trim_start().len() + after_method..].trim_start();
+            if let Some(stripped) = after_comma.strip_prefix(',') {
+                let url_part = stripped.trim_start();
+                if let Some(url) = extract_url_from_quote(url_part) {
+                    urls.push(url);
+                }
+            }
+        }
+        pos = abs_start + 1;
+    }
+}
+
+/// Hitta $.ajax({url: 'url'}), $.get('url'), $.post('url') mönster
+fn extract_jquery_pattern(code: &str, urls: &mut Vec<String>) {
+    let lower = code.to_lowercase();
+
+    // $.get('url') och $.post('url')
+    for pattern in &["$.get(", "$.post("] {
+        let mut pos = 0;
+        while let Some(idx) = lower[pos..].find(pattern) {
+            let abs_start = pos + idx + pattern.len();
+            let rest = &code[abs_start..];
+            if let Some(url) = extract_url_from_quote(rest.trim_start()) {
+                urls.push(url);
+            }
+            pos = abs_start + 1;
+        }
+    }
+
+    // $.ajax({url: 'url'})
+    let mut pos = 0;
+    while let Some(idx) = lower[pos..].find("$.ajax(") {
+        let abs_start = pos + idx + 7;
+        let rest = &code[abs_start..];
+        // Sök efter url: 'value' eller url: "value" inuti {...}
+        if let Some(brace_end) = rest.find('}') {
+            let block = &rest[..brace_end];
+            let block_lower = block.to_lowercase();
+            if let Some(url_idx) = block_lower.find("url:") {
+                let after_url = &block[url_idx + 4..].trim_start();
+                if let Some(url) = extract_url_from_quote(after_url) {
+                    urls.push(url);
+                }
+            }
+        }
+        pos = abs_start + 1;
+    }
+}
+
+/// Extrahera URL från första quote-omslutna strängen
+fn extract_url_from_quote(s: &str) -> Option<String> {
+    let (val, _) = extract_quoted_value(s)?;
+    // Validera att det ser ut som en URL (inte tomt, inte JS-kod)
+    if val.is_empty() || val.contains('{') || val.contains('}') {
+        return None;
+    }
+    Some(val)
+}
+
+/// Extrahera ett quote-omslutet värde, returnera (värde, position efter slut-quote)
+fn extract_quoted_value(s: &str) -> Option<(String, usize)> {
+    let first_char = s.chars().next()?;
+    if first_char != '\'' && first_char != '"' {
+        return None;
+    }
+    let inner = &s[1..];
+    let end = inner.find(first_char)?;
+    Some((inner[..end].to_string(), 1 + end + 1))
+}
+
 // ─── Tester ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -531,6 +656,85 @@ mod tests {
         assert!(
             result.error.unwrap().contains("not available"),
             "Borde indikera att featuren saknas"
+        );
+    }
+
+    // ─── Fas 10: Fetch URL-extraktionstester ────────────────────────────
+
+    #[test]
+    fn test_extract_fetch_urls_single() {
+        let code = "fetch('https://api.example.com/price')";
+        let urls = extract_fetch_urls(code);
+        assert_eq!(
+            urls,
+            vec!["https://api.example.com/price"],
+            "Borde hitta en fetch-URL"
+        );
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_double_quotes() {
+        let code = r#"fetch("https://api.shop.se/products/42")"#;
+        let urls = extract_fetch_urls(code);
+        assert_eq!(
+            urls,
+            vec!["https://api.shop.se/products/42"],
+            "Borde hitta fetch-URL med double quotes"
+        );
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_none() {
+        let code = "var x = 1 + 2; console.log(x);";
+        let urls = extract_fetch_urls(code);
+        assert!(
+            urls.is_empty(),
+            "Borde inte hitta fetch-URL:er i kod utan fetch"
+        );
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_multiple() {
+        let code = r#"
+            fetch('https://api.shop.se/price');
+            fetch("https://api.shop.se/stock");
+        "#;
+        let urls = extract_fetch_urls(code);
+        assert_eq!(urls.len(), 2, "Borde hitta 2 fetch-URL:er");
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_xhr_open() {
+        let code = r#"
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'https://api.shop.se/data');
+        "#;
+        let urls = extract_fetch_urls(code);
+        assert!(
+            urls.contains(&"https://api.shop.se/data".to_string()),
+            "Borde hitta XHR .open() URL"
+        );
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_jquery_get() {
+        let code = "$.get('https://api.shop.se/info')";
+        let urls = extract_fetch_urls(code);
+        assert_eq!(
+            urls,
+            vec!["https://api.shop.se/info"],
+            "Borde hitta $.get URL"
+        );
+    }
+
+    #[test]
+    fn test_extract_fetch_urls_jquery_ajax() {
+        let code = r#"$.ajax({url: 'https://api.shop.se/cart', method: 'POST'})"#;
+        let urls = extract_fetch_urls(code);
+        assert_eq!(
+            urls,
+            vec!["https://api.shop.se/cart"],
+            "Borde hitta $.ajax URL"
         );
     }
 }
