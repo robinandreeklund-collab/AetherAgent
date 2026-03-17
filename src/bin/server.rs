@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 /// AetherAgent HTTP API Server
 ///
 /// Lightweight REST wrapper around the AetherAgent engine.
@@ -210,6 +211,75 @@ struct FetchRawRequest {
     config: Option<aether_agent::types::FetchConfig>,
 }
 
+// ─── Fas 9a: Causal Action Graph request types ──────────────────────────────
+
+#[derive(Deserialize)]
+struct BuildCausalGraphRequest {
+    snapshots_json: String,
+    actions_json: String,
+}
+
+#[derive(Deserialize)]
+struct PredictOutcomeRequest {
+    graph_json: String,
+    action: String,
+}
+
+#[derive(Deserialize)]
+struct SafestPathRequest {
+    graph_json: String,
+    goal: String,
+}
+
+// ─── Fas 9b: WebMCP Discovery request types ─────────────────────────────────
+
+#[derive(Deserialize)]
+struct WebMcpDiscoverRequest {
+    html: String,
+    url: String,
+}
+
+// ─── Fas 9c: Multimodal Grounding request types ─────────────────────────────
+
+#[derive(Deserialize)]
+struct GroundTreeRequest {
+    html: String,
+    goal: String,
+    url: String,
+    annotations: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct MatchBboxRequest {
+    tree_json: String,
+    bbox: serde_json::Value,
+}
+
+// ─── Fas 9d: Cross-Agent Diffing request types ──────────────────────────────
+
+#[derive(Deserialize)]
+struct CollabRegisterRequest {
+    store_json: String,
+    agent_id: String,
+    goal: String,
+    timestamp_ms: u64,
+}
+
+#[derive(Deserialize)]
+struct CollabPublishRequest {
+    store_json: String,
+    agent_id: String,
+    url: String,
+    delta_json: String,
+    timestamp_ms: u64,
+}
+
+#[derive(Deserialize)]
+struct CollabFetchRequest {
+    store_json: String,
+    agent_id: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -252,7 +322,17 @@ async fn root() -> impl IntoResponse {
             "POST /api/fetch/extract": "Fetch URL → extract structured data",
             "POST /api/fetch/plan": "Fetch URL → compile goal → execute plan",
             "POST /api/firewall/classify": "Classify URL against semantic firewall (L1/L2/L3)",
-            "POST /api/firewall/classify-batch": "Classify batch of URLs against firewall"
+            "POST /api/firewall/classify-batch": "Classify batch of URLs against firewall",
+            "POST /api/causal/build": "Build causal action graph from temporal history",
+            "POST /api/causal/predict": "Predict outcome of an action",
+            "POST /api/causal/safest-path": "Find safest path to goal state",
+            "POST /api/webmcp/discover": "Discover WebMCP tools in HTML page",
+            "POST /api/ground": "Ground semantic tree with bounding boxes",
+            "POST /api/ground/match-bbox": "Match bounding box via IoU against tree nodes",
+            "POST /api/collab/create": "Create shared diff store for cross-agent collaboration",
+            "POST /api/collab/register": "Register agent in collab store",
+            "POST /api/collab/publish": "Publish semantic delta to collab store",
+            "POST /api/collab/fetch": "Fetch new deltas for agent"
         },
         "example": {
             "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
@@ -700,6 +780,79 @@ async fn fetch_plan(Json(req): Json<FetchPlanRequest>) -> impl IntoResponse {
     )
 }
 
+// ─── Fas 9a: Causal Action Graph handlers ────────────────────────────────────
+
+async fn build_causal_graph(Json(req): Json<BuildCausalGraphRequest>) -> impl IntoResponse {
+    let result = aether_agent::build_causal_graph(&req.snapshots_json, &req.actions_json);
+    (StatusCode::OK, result)
+}
+
+async fn predict_outcome(Json(req): Json<PredictOutcomeRequest>) -> impl IntoResponse {
+    let result = aether_agent::predict_action_outcome(&req.graph_json, &req.action);
+    (StatusCode::OK, result)
+}
+
+async fn safest_path(Json(req): Json<SafestPathRequest>) -> impl IntoResponse {
+    let result = aether_agent::find_safest_path(&req.graph_json, &req.goal);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 9b: WebMCP Discovery handlers ──────────────────────────────────────
+
+async fn webmcp_discover(Json(req): Json<WebMcpDiscoverRequest>) -> impl IntoResponse {
+    let result = aether_agent::discover_webmcp(&req.html, &req.url);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 9c: Multimodal Grounding handlers ──────────────────────────────────
+
+async fn ground_tree(Json(req): Json<GroundTreeRequest>) -> impl IntoResponse {
+    let annotations_json =
+        serde_json::to_string(&req.annotations).unwrap_or_else(|_| "[]".to_string());
+    let result =
+        aether_agent::ground_semantic_tree(&req.html, &req.goal, &req.url, &annotations_json);
+    (StatusCode::OK, result)
+}
+
+async fn match_bbox(Json(req): Json<MatchBboxRequest>) -> impl IntoResponse {
+    let bbox_json = serde_json::to_string(&req.bbox).unwrap_or_else(|_| "{}".to_string());
+    let result = aether_agent::match_bbox_iou(&req.tree_json, &bbox_json);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 9d: Cross-Agent Diffing handlers ───────────────────────────────────
+
+async fn collab_create() -> impl IntoResponse {
+    let result = aether_agent::create_collab_store();
+    (StatusCode::OK, result)
+}
+
+async fn collab_register(Json(req): Json<CollabRegisterRequest>) -> impl IntoResponse {
+    let result = aether_agent::register_collab_agent(
+        &req.store_json,
+        &req.agent_id,
+        &req.goal,
+        req.timestamp_ms,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn collab_publish(Json(req): Json<CollabPublishRequest>) -> impl IntoResponse {
+    let result = aether_agent::publish_collab_delta(
+        &req.store_json,
+        &req.agent_id,
+        &req.url,
+        &req.delta_json,
+        req.timestamp_ms,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse {
+    let result = aether_agent::fetch_collab_deltas(&req.store_json, &req.agent_id);
+    (StatusCode::OK, result)
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 fn build_router() -> Router {
@@ -754,6 +907,20 @@ fn build_router() -> Router {
         .route("/api/fetch/click", post(fetch_click))
         .route("/api/fetch/extract", post(fetch_extract))
         .route("/api/fetch/plan", post(fetch_plan))
+        // Fas 9a: Causal Action Graph
+        .route("/api/causal/build", post(build_causal_graph))
+        .route("/api/causal/predict", post(predict_outcome))
+        .route("/api/causal/safest-path", post(safest_path))
+        // Fas 9b: WebMCP Discovery
+        .route("/api/webmcp/discover", post(webmcp_discover))
+        // Fas 9c: Multimodal Grounding
+        .route("/api/ground", post(ground_tree))
+        .route("/api/ground/match-bbox", post(match_bbox))
+        // Fas 9d: Cross-Agent Diffing
+        .route("/api/collab/create", post(collab_create))
+        .route("/api/collab/register", post(collab_register))
+        .route("/api/collab/publish", post(collab_publish))
+        .route("/api/collab/fetch", post(collab_fetch))
         .layer(cors)
 }
 
@@ -793,6 +960,16 @@ async fn main() {
     println!("  POST /api/fetch/plan      – Fetch URL → compile + execute plan");
     println!("  POST /api/firewall/classify      – Classify URL against firewall");
     println!("  POST /api/firewall/classify-batch – Classify batch of URLs");
+    println!("  POST /api/causal/build           – Build causal action graph");
+    println!("  POST /api/causal/predict         – Predict action outcome");
+    println!("  POST /api/causal/safest-path     – Find safest path to goal");
+    println!("  POST /api/webmcp/discover        – Discover WebMCP tools in HTML");
+    println!("  POST /api/ground                 – Ground tree with bounding boxes");
+    println!("  POST /api/ground/match-bbox      – Match bbox via IoU");
+    println!("  POST /api/collab/create          – Create collab diff store");
+    println!("  POST /api/collab/register        – Register agent in collab");
+    println!("  POST /api/collab/publish         – Publish delta to collab store");
+    println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

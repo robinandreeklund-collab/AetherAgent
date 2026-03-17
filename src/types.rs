@@ -21,6 +21,22 @@ pub struct SemanticNode {
     /// Originalt HTML name-attribut, för formulärmatchning
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bounding box (Fas 9c: Multimodal Grounding)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bbox: Option<BoundingBox>,
+}
+
+/// Bounding box – spatial position för multimodal grounding (Fas 9c)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BoundingBox {
+    /// X-koordinat (vänster kant, pixlar)
+    pub x: f32,
+    /// Y-koordinat (övre kant, pixlar)
+    pub y: f32,
+    /// Bredd (pixlar)
+    pub width: f32,
+    /// Höjd (pixlar)
+    pub height: f32,
 }
 
 /// Elementets interaktionstillstånd
@@ -303,6 +319,7 @@ impl SemanticNode {
             children: vec![],
             html_id: None,
             name: None,
+            bbox: None,
         }
     }
 

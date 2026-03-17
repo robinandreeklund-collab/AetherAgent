@@ -104,6 +104,97 @@ struct DiffParams {
     new_tree_json: String,
 }
 
+// ─── Fas 9 parameter types ──────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct BuildCausalGraphParams {
+    /// JSON array of temporal snapshots (from temporal memory)
+    snapshots_json: String,
+    /// JSON array of action labels between snapshots
+    actions_json: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct PredictOutcomeParams {
+    /// Causal graph JSON (from build_causal_graph)
+    graph_json: String,
+    /// Action to predict outcome for
+    action: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct SafestPathParams {
+    /// Causal graph JSON (from build_causal_graph)
+    graph_json: String,
+    /// Target goal state label
+    goal: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct WebMcpDiscoverParams {
+    /// Raw HTML string from the web page
+    html: String,
+    /// The page URL
+    url: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct GroundTreeParams {
+    /// Raw HTML string
+    html: String,
+    /// The agent's current goal
+    goal: String,
+    /// The page URL
+    url: String,
+    /// JSON array of bbox annotations to match against nodes
+    annotations_json: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct MatchBboxParams {
+    /// Semantic tree JSON (from parse)
+    tree_json: String,
+    /// Bounding box JSON ({x, y, width, height})
+    bbox_json: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CollabCreateParams {}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CollabRegisterParams {
+    /// Collab store JSON
+    store_json: String,
+    /// Unique agent ID
+    agent_id: String,
+    /// Agent's goal
+    goal: String,
+    /// Timestamp in milliseconds since epoch
+    timestamp_ms: u64,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CollabPublishParams {
+    /// Collab store JSON
+    store_json: String,
+    /// Publishing agent's ID
+    agent_id: String,
+    /// URL the delta applies to
+    url: String,
+    /// Semantic delta JSON (from diff_trees)
+    delta_json: String,
+    /// Timestamp in milliseconds since epoch
+    timestamp_ms: u64,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CollabFetchParams {
+    /// Collab store JSON
+    store_json: String,
+    /// Requesting agent's ID
+    agent_id: String,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -207,6 +298,116 @@ impl AetherMcpServer {
     fn parse_with_js(&self, Parameters(params): Parameters<ParseParams>) -> String {
         aether_agent::parse_with_js(&params.html, &params.goal, &params.url)
     }
+
+    // ─── Fas 9a: Causal Action Graph ─────────────────────────────────────────
+
+    #[tool(
+        name = "build_causal_graph",
+        description = "Build a causal action graph from temporal snapshots. Models page state transitions as a directed graph with probabilities and risk scores."
+    )]
+    fn build_causal_graph(&self, Parameters(params): Parameters<BuildCausalGraphParams>) -> String {
+        aether_agent::build_causal_graph(&params.snapshots_json, &params.actions_json)
+    }
+
+    #[tool(
+        name = "predict_action_outcome",
+        description = "Predict the outcome of an action using the causal graph. Returns probability, risk, and expected state changes."
+    )]
+    fn predict_action_outcome(
+        &self,
+        Parameters(params): Parameters<PredictOutcomeParams>,
+    ) -> String {
+        aether_agent::predict_action_outcome(&params.graph_json, &params.action)
+    }
+
+    #[tool(
+        name = "find_safest_path",
+        description = "Find the safest path to a goal state in the causal graph. Uses BFS with risk-weighting."
+    )]
+    fn find_safest_path(&self, Parameters(params): Parameters<SafestPathParams>) -> String {
+        aether_agent::find_safest_path(&params.graph_json, &params.goal)
+    }
+
+    // ─── Fas 9b: WebMCP Discovery ───────────────────────────────────────────
+
+    #[tool(
+        name = "discover_webmcp",
+        description = "Discover WebMCP tools registered on a web page via navigator.modelContext.registerTool(). Returns tool names, descriptions, and input schemas."
+    )]
+    fn discover_webmcp(&self, Parameters(params): Parameters<WebMcpDiscoverParams>) -> String {
+        aether_agent::discover_webmcp(&params.html, &params.url)
+    }
+
+    // ─── Fas 9c: Multimodal Grounding ───────────────────────────────────────
+
+    #[tool(
+        name = "ground_semantic_tree",
+        description = "Ground a semantic tree with bounding box annotations. Matches visual coordinates to DOM elements and generates Set-of-Mark annotations."
+    )]
+    fn ground_semantic_tree(&self, Parameters(params): Parameters<GroundTreeParams>) -> String {
+        aether_agent::ground_semantic_tree(
+            &params.html,
+            &params.goal,
+            &params.url,
+            &params.annotations_json,
+        )
+    }
+
+    #[tool(
+        name = "match_bbox_iou",
+        description = "Match a predicted bounding box against all nodes in a semantic tree using IoU (Intersection over Union)."
+    )]
+    fn match_bbox_iou(&self, Parameters(params): Parameters<MatchBboxParams>) -> String {
+        aether_agent::match_bbox_iou(&params.tree_json, &params.bbox_json)
+    }
+
+    // ─── Fas 9d: Cross-Agent Diffing ────────────────────────────────────────
+
+    #[tool(
+        name = "create_collab_store",
+        description = "Create an empty shared diff store for cross-agent collaboration."
+    )]
+    fn create_collab_store(&self, Parameters(_params): Parameters<CollabCreateParams>) -> String {
+        aether_agent::create_collab_store()
+    }
+
+    #[tool(
+        name = "register_collab_agent",
+        description = "Register an agent in the collab store. Agents can then publish and consume semantic deltas."
+    )]
+    fn register_collab_agent(
+        &self,
+        Parameters(params): Parameters<CollabRegisterParams>,
+    ) -> String {
+        aether_agent::register_collab_agent(
+            &params.store_json,
+            &params.agent_id,
+            &params.goal,
+            params.timestamp_ms,
+        )
+    }
+
+    #[tool(
+        name = "publish_collab_delta",
+        description = "Publish a semantic delta to the collab store for other agents to consume."
+    )]
+    fn publish_collab_delta(&self, Parameters(params): Parameters<CollabPublishParams>) -> String {
+        aether_agent::publish_collab_delta(
+            &params.store_json,
+            &params.agent_id,
+            &params.url,
+            &params.delta_json,
+            params.timestamp_ms,
+        )
+    }
+
+    #[tool(
+        name = "fetch_collab_deltas",
+        description = "Fetch new semantic deltas for an agent from the collab store. Returns only deltas not yet consumed."
+    )]
+    fn fetch_collab_deltas(&self, Parameters(params): Parameters<CollabFetchParams>) -> String {
+        aether_agent::fetch_collab_deltas(&params.store_json, &params.agent_id)
+    }
 }
 
 impl ServerHandler for AetherMcpServer {
@@ -228,7 +429,12 @@ impl ServerHandler for AetherMcpServer {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("AetherAgent MCP Server starting on stdio...");
     eprintln!("Tools: parse, parse_top, find_and_click, fill_form, extract_data,");
-    eprintln!("        check_injection, compile_goal, classify_request, diff_trees, parse_with_js");
+    eprintln!(
+        "        check_injection, compile_goal, classify_request, diff_trees, parse_with_js,"
+    );
+    eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
+    eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
+    eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas");
 
     let server = AetherMcpServer::new();
 

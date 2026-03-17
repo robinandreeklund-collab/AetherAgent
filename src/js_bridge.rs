@@ -521,6 +521,7 @@ mod tests {
                 children: vec![],
                 html_id: Some("price".to_string()),
                 name: None,
+                bbox: None,
             },
             SemanticNode {
                 id: 2,
@@ -540,6 +541,7 @@ mod tests {
                 children: vec![],
                 html_id: Some("buy-btn".to_string()),
                 name: None,
+                bbox: None,
             },
         ];
 
