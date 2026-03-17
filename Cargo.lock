@@ -13,6 +13,7 @@ name = "aether-agent"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "boa_engine",
  "governor",
  "html5ever",
