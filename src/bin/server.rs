@@ -1383,15 +1383,15 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "publish_collab_delta",
-            "description": "Publish a semantic delta to the collaboration store.",
+            "description": "Publish a semantic delta to the collaboration store. Pass the FULL output from diff_trees as delta_json.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "store_json": {"type": "string", "description": "Collab store JSON"},
-                    "agent_id": {"type": "string", "description": "Publishing agent's ID"},
+                    "store_json": {"type": "string", "description": "Collab store JSON (from create_collab_store)"},
+                    "agent_id": {"type": "string", "description": "Publishing agent's ID (from register_collab_agent)"},
                     "url": {"type": "string", "description": "URL the delta applies to"},
-                    "delta_json": {"type": "string", "description": "Semantic delta JSON"},
-                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms"}
+                    "delta_json": {"type": "string", "description": "FULL diff_trees output JSON containing: token_savings_ratio, total_nodes_before, total_nodes_after, changes[]"},
+                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms (e.g. Date.now())"}
                 },
                 "required": ["store_json", "agent_id", "url", "delta_json", "timestamp_ms"]
             }

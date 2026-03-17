@@ -343,7 +343,11 @@ pub fn compile_goal(goal: &str) -> ActionPlan {
 
     let execution_order = compute_execution_order(&sub_goals);
     let total_steps = sub_goals.len() as u32;
-    let parallel_groups = execution_order.len() as u32;
+    let parallel_groups = execution_order
+        .iter()
+        .map(|g| g.len() as u32)
+        .max()
+        .unwrap_or(1);
     let estimated_total_cost: f32 = sub_goals.iter().map(|sg| sg.estimated_cost).sum();
 
     ActionPlan {

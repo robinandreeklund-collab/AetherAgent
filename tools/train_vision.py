@@ -338,20 +338,43 @@ def _download_file(url: str, dest: Path, desc: str = ""):
 
 
 def _extract_archive(archive: Path, dest: Path):
-    """Packa upp .tar.gz eller .zip."""
+    """Packa upp .tar.gz eller .zip med progress-indikator."""
     import tarfile
     import zipfile
 
     dest.mkdir(parents=True, exist_ok=True)
 
+    # WSL-varning: /mnt/c/ är extremt långsam för många filer
+    if "/mnt/c" in str(dest) or "/mnt/d" in str(dest):
+        proc_version = Path("/proc/version")
+        if proc_version.exists() and "microsoft" in proc_version.read_text().lower():
+            log("WSL detekterat: /mnt/c/ är ~10x långsammare för filoperationer", "WARN")
+            log("Rekommendation: kör från ~/AetherAgent istället (native WSL-filsystem)", "WARN")
+
     log(f"Packar upp {archive.name} → {dest}...", "STEP")
 
     if archive.name.endswith(".tar.gz") or archive.name.endswith(".tgz"):
         with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(path=dest)
+            members = tar.getmembers()
+            total = len(members)
+            log(f"Extraherar {total} filer...", "INFO")
+            for i, member in enumerate(members, 1):
+                tar.extract(member, path=dest, filter="data")
+                if i % 1000 == 0 or i == total:
+                    pct = i * 100 // total
+                    print(f"\r  [{pct:3d}%] {i}/{total} filer extraherade", end="", flush=True)
+            print()  # Ny rad efter progress
     elif archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive, "r") as z:
-            z.extractall(path=dest)
+            members = z.namelist()
+            total = len(members)
+            log(f"Extraherar {total} filer...", "INFO")
+            for i, name in enumerate(members, 1):
+                z.extract(name, path=dest)
+                if i % 1000 == 0 or i == total:
+                    pct = i * 100 // total
+                    print(f"\r  [{pct:3d}%] {i}/{total} filer extraherade", end="", flush=True)
+            print()
     else:
         log(f"Okänt arkivformat: {archive.name}", "ERR")
         sys.exit(1)

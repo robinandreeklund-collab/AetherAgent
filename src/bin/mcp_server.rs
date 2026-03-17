@@ -175,15 +175,17 @@ struct CollabRegisterParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabPublishParams {
-    /// Collab store JSON
+    /// Collab store JSON (from create_collab_store)
     store_json: String,
-    /// Publishing agent's ID
+    /// Publishing agent's ID (from register_collab_agent)
     agent_id: String,
     /// URL the delta applies to
     url: String,
-    /// Semantic delta JSON (from diff_trees)
+    /// Semantic delta JSON — pass the FULL output from diff_trees directly.
+    /// Required fields: token_savings_ratio (f32), total_nodes_before (u32),
+    /// total_nodes_after (u32), changes (array of {change_type, role, label}).
     delta_json: String,
-    /// Timestamp in milliseconds since epoch
+    /// Timestamp in milliseconds since epoch (e.g. Date.now())
     timestamp_ms: u64,
 }
 
@@ -409,7 +411,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "publish_collab_delta",
-        description = "Share a page change (semantic delta) with other agents via the collab store. USE THIS TOOL WHEN: your agent detected changes on a page (via diff_trees) and wants to notify other collaborating agents about what changed. Pass the delta JSON from diff_trees along with the URL it applies to. Other agents will receive this delta when they call fetch_collab_deltas. Use this to avoid redundant page fetches — if one agent already checked a page, others can consume the delta instead."
+        description = "Share a page change (semantic delta) with other agents via the collab store. USE THIS TOOL WHEN: your agent detected changes on a page (via diff_trees) and wants to notify other collaborating agents about what changed. IMPORTANT: Pass the FULL JSON output from diff_trees as delta_json — it must contain: token_savings_ratio (f32), total_nodes_before (u32), total_nodes_after (u32), changes (array of objects with change_type/role/label). Other agents will receive this delta when they call fetch_collab_deltas."
     )]
     fn publish_collab_delta(&self, Parameters(params): Parameters<CollabPublishParams>) -> String {
         aether_agent::publish_collab_delta(
