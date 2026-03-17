@@ -977,7 +977,25 @@ AetherAgent/
 
 ## Quick Start
 
-### Build & Test
+### One-command WSL/Linux bootstrap
+
+Installerar **allt** automatiskt (systempaket, Rust, wasm-pack, bygger server + MCP + WASM, Python-venv, Node.js):
+
+```bash
+git clone https://github.com/robinandreeklund-collab/AetherAgent.git
+cd AetherAgent
+chmod +x tools/bootstrap_wsl.sh && ./tools/bootstrap_wsl.sh
+```
+
+Med vision-träning inkluderat:
+
+```bash
+./tools/bootstrap_wsl.sh --with-vision
+```
+
+Se `./tools/bootstrap_wsl.sh --help` för alla flaggor (`--skip-node`, `--skip-python`, `--skip-wasm`, `--skip-tests`).
+
+### Manual Build & Test
 
 ```bash
 # Prerequisites
