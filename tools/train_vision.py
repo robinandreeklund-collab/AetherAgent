@@ -251,6 +251,213 @@ def ensure_deps():
 
 
 # ---------------------------------------------------------------------------
+# Dataset Downloads
+# ---------------------------------------------------------------------------
+
+# Kända dataset-URL:er och metadata
+_DATASET_REGISTRY = {
+    "rico": {
+        "name": "Rico UI Screenshots",
+        "url": "https://storage.googleapis.com/crowdstf-rico-uiuc-4540/rico_dataset_v0.1/unique_uis.tar.gz",
+        "annotations_url": "https://storage.googleapis.com/crowdstf-rico-uiuc-4540/rico_dataset_v0.1/semantic_annotations.zip",
+        "size_hint": "~6 GB (screenshots) + ~300 MB (annotations)",
+        "description": "66K Android UI screenshots med semantiska annotations",
+    },
+    "coco": {
+        "name": "Common Objects in Context (COCO) 2017 — Val",
+        "url": "http://images.cocodataset.org/zips/val2017.zip",
+        "annotations_url": "http://images.cocodataset.org/annotations/annotations_trainval2017.zip",
+        "size_hint": "~1 GB (val images) + ~250 MB (annotations)",
+        "description": "COCO 2017 validation set — generella objekt, mappas till UI-klasser",
+    },
+    "webui": {
+        "name": "WebUI — web element screenshots",
+        "url": "https://huggingface.co/datasets/poni-ai/webui-7k/resolve/main/data.zip",
+        "size_hint": "~2 GB",
+        "description": "7K web UI screenshots med element-annotations",
+    },
+}
+
+
+def _download_file(url: str, dest: Path, desc: str = ""):
+    """Ladda ner en fil med progress-visning."""
+    import urllib.request
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists():
+        log(f"Redan nedladdat: {dest}", "OK")
+        return
+
+    log(f"Laddar ner {desc or dest.name}...", "STEP")
+    log(f"  URL: {url}", "INFO")
+
+    try:
+        from tqdm import tqdm
+
+        class _TqdmHook:
+            def __init__(self):
+                self.pbar = None
+
+            def __call__(self, block_num, block_size, total_size):
+                if self.pbar is None:
+                    self.pbar = tqdm(total=total_size, unit="B", unit_scale=True, desc=dest.name)
+                downloaded = block_num * block_size
+                self.pbar.update(block_size)
+                if downloaded >= total_size and self.pbar:
+                    self.pbar.close()
+
+        urllib.request.urlretrieve(url, str(dest), _TqdmHook())
+    except ImportError:
+        # tqdm saknas — enkel nedladdning utan progress
+        urllib.request.urlretrieve(url, str(dest))
+
+    log(f"Nedladdat: {dest} ({dest.stat().st_size / (1024**2):.0f} MB)", "OK")
+
+
+def _extract_archive(archive: Path, dest: Path):
+    """Packa upp .tar.gz eller .zip."""
+    import tarfile
+    import zipfile
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    log(f"Packar upp {archive.name} → {dest}...", "STEP")
+
+    if archive.name.endswith(".tar.gz") or archive.name.endswith(".tgz"):
+        with tarfile.open(archive, "r:gz") as tar:
+            tar.extractall(path=dest)
+    elif archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive, "r") as z:
+            z.extractall(path=dest)
+    else:
+        log(f"Okänt arkivformat: {archive.name}", "ERR")
+        sys.exit(1)
+
+    log(f"Uppackat till {dest}", "OK")
+
+
+def download_dataset(fmt: str, output_dir: Path) -> Path:
+    """Ladda ner ett dataset baserat på format.
+
+    Args:
+        fmt: "rico", "coco", eller "webui"
+        output_dir: Rotkatalog för nedladdning (t.ex. dataset/downloads/)
+
+    Returns:
+        Sökväg till det uppackade datasetet (redo för konvertering)
+    """
+    if fmt not in _DATASET_REGISTRY:
+        log(f"Inget känt dataset för format '{fmt}'", "ERR")
+        log(f"Kända format: {', '.join(_DATASET_REGISTRY.keys())}", "INFO")
+        sys.exit(1)
+
+    info = _DATASET_REGISTRY[fmt]
+    dl_dir = output_dir / "downloads"
+    extract_dir = output_dir / f"{fmt}_raw"
+
+    log(f"Dataset: {info['name']}", "STEP")
+    log(f"  Beskrivning: {info['description']}", "INFO")
+    log(f"  Storlek: {info['size_hint']}", "INFO")
+
+    if fmt == "rico":
+        return _download_rico(info, dl_dir, extract_dir)
+    elif fmt == "coco":
+        return _download_coco(info, dl_dir, extract_dir)
+    elif fmt == "webui":
+        return _download_webui(info, dl_dir, extract_dir)
+
+    log(f"Nedladdning ej implementerad för {fmt}", "ERR")
+    sys.exit(1)
+
+
+def _download_rico(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
+    """Ladda ner Rico-dataset (screenshots + semantic annotations)."""
+    screenshots_archive = dl_dir / "rico_unique_uis.tar.gz"
+    annotations_archive = dl_dir / "rico_semantic_annotations.zip"
+
+    _download_file(info["url"], screenshots_archive, "Rico screenshots")
+    _download_file(info["annotations_url"], annotations_archive, "Rico annotations")
+
+    # Packa upp
+    screenshots_dir = extract_dir / "screenshots"
+    annotations_dir = extract_dir / "semantic_annotations"
+
+    if not screenshots_dir.exists():
+        _extract_archive(screenshots_archive, extract_dir)
+    if not annotations_dir.exists():
+        _extract_archive(annotations_archive, extract_dir)
+
+    # Rico-konverteraren förväntar sig: rico_dir/semantic_annotations/ + rico_dir/screenshots/
+    # Kontrollera att strukturen stämmer
+    # Ibland packas Rico upp med extra wrapper-mapp
+    for subdir in extract_dir.iterdir():
+        if subdir.is_dir() and (subdir / "semantic_annotations").exists():
+            return subdir
+        if subdir.is_dir() and subdir.name == "combined":
+            return extract_dir
+
+    # Kontrollera direkt
+    if (extract_dir / "semantic_annotations").exists():
+        return extract_dir
+    if (extract_dir / "combined").exists():
+        return extract_dir
+
+    # Sök en nivå djupare
+    for child in extract_dir.iterdir():
+        if child.is_dir():
+            if (child / "semantic_annotations").exists() or (child / "combined").exists():
+                return child
+
+    log(f"Rico-dataset uppackat till {extract_dir} men kunde inte hitta förväntad struktur", "WARN")
+    log("Förväntad: semantic_annotations/ + screenshots/ ELLER combined/ + screenshot/", "WARN")
+    return extract_dir
+
+
+def _download_coco(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
+    """Ladda ner COCO val2017 (bilder + annotations)."""
+    images_archive = dl_dir / "val2017.zip"
+    annotations_archive = dl_dir / "annotations_trainval2017.zip"
+
+    _download_file(info["url"], images_archive, "COCO val2017 images")
+    _download_file(info["annotations_url"], annotations_archive, "COCO annotations")
+
+    images_dir = extract_dir / "images"
+    if not images_dir.exists() and not (extract_dir / "val2017").exists():
+        _extract_archive(images_archive, extract_dir)
+    if not (extract_dir / "annotations").exists():
+        _extract_archive(annotations_archive, extract_dir)
+
+    # COCO packar upp till val2017/ — rename till images/ om det behövs
+    val_dir = extract_dir / "val2017"
+    if val_dir.exists() and not images_dir.exists():
+        val_dir.rename(images_dir)
+        log("Döpte om val2017/ → images/", "INFO")
+
+    return extract_dir
+
+
+def _download_webui(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
+    """Ladda ner WebUI-dataset."""
+    archive = dl_dir / "webui_data.zip"
+
+    _download_file(info["url"], archive, "WebUI dataset")
+
+    if not extract_dir.exists() or not any(extract_dir.iterdir()):
+        _extract_archive(archive, extract_dir)
+
+    # WebUI kan ha en extra wrapper-mapp
+    children = [c for c in extract_dir.iterdir() if c.is_dir()]
+    if len(children) == 1:
+        child = children[0]
+        # Om det bara finns en undermapp och den innehåller data, använd den
+        if any(child.glob("*.json")) or any(child.glob("*.jsonl")) or (child / "annotations").exists():
+            return child
+
+    return extract_dir
+
+
+# ---------------------------------------------------------------------------
 # Step 1: Dataset Preparation
 # ---------------------------------------------------------------------------
 
@@ -1748,7 +1955,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full pipeline with your dataset:
+  # Download Rico dataset, convert to YOLO, and train:
+  python tools/train_vision.py --download --format rico --version v2
+
+  # Download WebUI dataset, convert only (no training):
+  python tools/train_vision.py --download-only --format webui
+
+  # Download COCO, convert, fine-tune from existing model:
+  python tools/train_vision.py --download --format coco --model-base runs/detect/aether-ui-v1/weights/best.pt --version v2
+
+  # Full pipeline with your own local dataset:
   python tools/train_vision.py --dataset ./my-labeled-data
 
   # Generate synthetic starter dataset + train:
@@ -1769,6 +1985,11 @@ Examples:
     parser.add_argument("--extended-classes", action="store_true",
                         help="Use 16 agent-semantic classes (price, cta, product_card, nav, search, form) "
                              "instead of standard 10. Enables text heuristics for class upgrades.")
+    parser.add_argument("--download", action="store_true",
+                        help="Download dataset for the specified --format (rico, coco, webui), "
+                             "convert to YOLO, and train. Combines download + convert + train in one step.")
+    parser.add_argument("--download-only", action="store_true",
+                        help="Download and convert dataset without training. Use with --format.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
@@ -1805,6 +2026,46 @@ Examples:
     if args.verify_only:
         ensure_deps()
         verify_with_server(args.verify_only, args.server)
+        return
+
+    # Mode: Download dataset + convert + (optionally) train
+    if args.download or args.download_only:
+        if args.format == "yolo":
+            log("--download kräver --format (rico, coco, eller webui)", "ERR")
+            log("YOLO-format har inget standarddataset att ladda ner.", "ERR")
+            log("Använd --download-starter för syntetiskt testdata, eller --dataset för lokalt YOLO-dataset.", "INFO")
+            sys.exit(1)
+
+        ensure_deps()
+
+        base_dir = Path("dataset")
+        log(f"Laddar ner {args.format}-dataset...", "STEP")
+        raw_dir = download_dataset(args.format, base_dir)
+
+        log(f"Konverterar {args.format} → YOLO...", "STEP")
+        converted_dir = base_dir / f"{args.format}_converted"
+        dataset_path = convert_dataset(raw_dir, converted_dir, args.format,
+                                       extended=args.extended_classes)
+
+        log(f"Dataset klart: {dataset_path}", "OK")
+
+        if args.download_only:
+            log("--download-only: hoppar över träning", "INFO")
+            log(f"Kör manuellt: python tools/train_vision.py --dataset {dataset_path} --version v2", "INFO")
+            return
+
+        run_pipeline(
+            dataset_dir=dataset_path,
+            epochs=args.epochs,
+            batch=args.batch,
+            imgsz=args.imgsz,
+            model_base=args.model_base,
+            version=args.version,
+            server_url=args.server,
+            deploy_dir=args.deploy_dir,
+            skip_verify=args.skip_verify,
+            device=args.device,
+        )
         return
 
     # Mode: Download starter + train
@@ -1857,8 +2118,10 @@ Examples:
     # No mode specified
     parser.print_help()
     print("\nQuick start:")
-    print("  python tools/train_vision.py --download-starter   # synthetic data + train")
-    print("  python tools/train_vision.py --interactive         # step-by-step wizard")
+    print("  python tools/train_vision.py --download --format rico   # download Rico + train")
+    print("  python tools/train_vision.py --download --format webui  # download WebUI + train")
+    print("  python tools/train_vision.py --download-starter         # synthetic data + train")
+    print("  python tools/train_vision.py --interactive              # step-by-step wizard")
 
 
 if __name__ == "__main__":
