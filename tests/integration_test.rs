@@ -1604,7 +1604,7 @@ fn test_confidence_penalizes_irrelevant_nodes() {
 
     if let (Some(stars), Some(version)) = (stars_entry, version_entry) {
         let stars_conf = stars["confidence"].as_f64().unwrap_or(0.0);
-        let version_conf = version["confidence"].as_f64().unwrap_or(0.0);
+        let _version_conf = version["confidence"].as_f64().unwrap_or(0.0);
 
         // "stars" i en sidebar borde ha LÄGRE confidence än "release_version"
         // som matchar release-heading nära goal-relevanta noder
