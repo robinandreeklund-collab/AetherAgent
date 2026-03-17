@@ -240,6 +240,7 @@ pub struct NodeChange {
 /// Resultatet av en semantic diff mellan två träd
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticDelta {
+    #[serde(default)]
     pub url: String,
     pub goal: String,
     pub total_nodes_before: u32,

@@ -660,17 +660,21 @@ pub fn classify_request_batch(urls_json: &str, goal: &str, config_json: &str) ->
 /// The agent can reason about action consequences before executing them.
 ///
 /// # Arguments
-/// * `snapshots_json` - JSON array of [url, node_count, warning_count, key_elements]
+/// * `snapshots_json` - JSON array of snapshot objects: `[{"url": "...", "node_count": 5, "warning_count": 0, "key_elements": ["button:Buy"]}]`
 /// * `actions_json` - JSON array of action strings between snapshots
 ///
 /// # Returns
 /// JSON with CausalGraph: states, edges, current_state_id
 #[wasm_bindgen]
 pub fn build_causal_graph(snapshots_json: &str, actions_json: &str) -> String {
-    let snapshots: Vec<(String, u32, u32, Vec<String>)> = match serde_json::from_str(snapshots_json)
-    {
+    let snapshots: Vec<causal::CausalSnapshotInput> = match serde_json::from_str(snapshots_json) {
         Ok(s) => s,
-        Err(e) => return format!(r#"{{"error": "Invalid snapshots_json: {}"}}"#, e),
+        Err(e) => {
+            return format!(
+                r#"{{"error": "Invalid snapshots_json: {}. Expected format: [{{\"url\": \"...\", \"node_count\": 5, \"warning_count\": 0, \"key_elements\": [\"button:Buy\"]}}]"}}"#,
+                e
+            );
+        }
     };
 
     let actions: Vec<String> = match serde_json::from_str(actions_json) {
@@ -887,10 +891,14 @@ pub fn publish_collab_delta(
         Ok(s) => s,
         Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
     };
-    let delta: types::SemanticDelta = match serde_json::from_str(delta_json) {
+    let mut delta: types::SemanticDelta = match serde_json::from_str(delta_json) {
         Ok(d) => d,
         Err(e) => return format!(r#"{{"error": "Invalid delta_json: {}"}}"#, e),
     };
+    // Fyll i url från yttre parameter om den saknas i delta
+    if delta.url.is_empty() {
+        delta.url = url.to_string();
+    }
     store.publish_delta(agent_id, url, delta, timestamp_ms);
     store.to_json()
 }
@@ -1725,8 +1733,8 @@ mod tests {
     #[test]
     fn test_build_causal_graph_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let actions = r#"["click: Köp"]"#;
 
@@ -1737,10 +1745,29 @@ mod tests {
     }
 
     #[test]
+    fn test_build_causal_graph_minimal_fields() {
+        // Endast url krävs — övriga fält har defaults
+        let snapshots = r#"[{"url": "https://example.com"}, {"url": "https://example.com/page2"}]"#;
+        let actions = r#"["click: Link"]"#;
+
+        let result = build_causal_graph(snapshots, actions);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["states"].is_array(),
+            "Borde ha states med minimal input"
+        );
+        assert_eq!(
+            parsed["states"].as_array().unwrap().len(),
+            2,
+            "Borde ha 2 states"
+        );
+    }
+
+    #[test]
     fn test_predict_action_outcome_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
 
@@ -1755,8 +1782,8 @@ mod tests {
     #[test]
     fn test_find_safest_path_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
 

@@ -1202,7 +1202,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "snapshots_json": {"type": "string", "description": "JSON array of temporal snapshots"},
+                    "snapshots_json": {"type": "string", "description": "JSON array of snapshot objects: [{\"url\": \"...\", \"node_count\": 5, \"warning_count\": 0, \"key_elements\": [\"button:Buy\"]}]. Only url is required."},
                     "actions_json": {"type": "string", "description": "JSON array of actions"}
                 },
                 "required": ["snapshots_json", "actions_json"]

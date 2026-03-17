@@ -108,7 +108,7 @@ struct DiffParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct BuildCausalGraphParams {
-    /// JSON array of temporal snapshots (from temporal memory)
+    /// JSON array of snapshot objects: [{"url": "...", "node_count": 5, "warning_count": 0, "key_elements": ["button:Buy"]}]. Only "url" is required.
     snapshots_json: String,
     /// JSON array of action labels between snapshots
     actions_json: String,

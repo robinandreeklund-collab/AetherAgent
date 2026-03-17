@@ -16,6 +16,18 @@ use crate::semantic::text_similarity;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+/// Input-format för snapshot vid build_causal_graph (accepterar JSON-objekt)
+#[derive(Debug, Clone, Deserialize)]
+pub struct CausalSnapshotInput {
+    pub url: String,
+    #[serde(default)]
+    pub node_count: u32,
+    #[serde(default)]
+    pub warning_count: u32,
+    #[serde(default)]
+    pub key_elements: Vec<String>,
+}
+
 /// Ett tillstånd i den kausala grafen
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CausalState {
@@ -368,16 +380,18 @@ impl CausalGraph {
     }
 
     /// Bygg graf från temporal snapshots + actions
-    pub fn build_from_history(
-        snapshots: &[(String, u32, u32, Vec<String>)], // (url, node_count, warning_count, key_elements)
-        actions: &[String],
-    ) -> Self {
+    pub fn build_from_history(snapshots: &[CausalSnapshotInput], actions: &[String]) -> Self {
         let mut graph = CausalGraph::new();
 
         let mut prev_state_id: Option<u32> = None;
 
-        for (i, (url, node_count, warning_count, key_elements)) in snapshots.iter().enumerate() {
-            let state_id = graph.add_state(url, *node_count, *warning_count, key_elements.clone());
+        for (i, snap) in snapshots.iter().enumerate() {
+            let state_id = graph.add_state(
+                &snap.url,
+                snap.node_count,
+                snap.warning_count,
+                snap.key_elements.clone(),
+            );
 
             if let Some(prev) = prev_state_id {
                 let action = actions
@@ -567,18 +581,18 @@ mod tests {
     #[test]
     fn test_build_from_history() {
         let snapshots = vec![
-            (
-                "https://shop.se".to_string(),
-                5u32,
-                0u32,
-                vec!["button:Köp".to_string()],
-            ),
-            (
-                "https://shop.se/kassa".to_string(),
-                8u32,
-                0u32,
-                vec!["button:Betala".to_string()],
-            ),
+            CausalSnapshotInput {
+                url: "https://shop.se".to_string(),
+                node_count: 5,
+                warning_count: 0,
+                key_elements: vec!["button:Köp".to_string()],
+            },
+            CausalSnapshotInput {
+                url: "https://shop.se/kassa".to_string(),
+                node_count: 8,
+                warning_count: 0,
+                key_elements: vec!["button:Betala".to_string()],
+            },
         ];
         let actions = vec!["click: Köp".to_string()];
 
