@@ -122,6 +122,12 @@ pub struct TemporalMemory {
 
 // ─── Implementation ─────────────────────────────────────────────────────────
 
+impl Default for TemporalMemory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TemporalMemory {
     /// Skapa nytt tomt temporal memory
     pub fn new() -> Self {

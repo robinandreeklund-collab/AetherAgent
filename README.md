@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **21 Rust modules**, **41 WASM-exported functions**, **44 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **23 Rust modules**, **58 WASM-exported functions**, **63 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -326,7 +326,53 @@ Scans inline scripts and event handlers for `fetch()`, `XMLHttpRequest.open()`, 
 | `merge_xhr_nodes` | Append XHR-derived nodes to an existing SemanticTree |
 | `extract_price_from_json` | Recursive JSON search for price/amount/cost fields |
 
-### 15. Vision — YOLOv8 Screenshot Analysis
+### 15. Session Management
+
+**Module:** `session.rs`
+
+Persistent session cookies, OAuth 2.0 flow handling, and login form detection. All state is serializable JSON — the host owns and passes it between calls (WASM-compatible, no global mutable state).
+
+| Function | What it does |
+|----------|-------------|
+| `create_session` | Create empty session manager |
+| `session_add_cookies` | Parse `Set-Cookie` headers and store cookies |
+| `session_get_cookies` | Build `Cookie:` header for a given domain/path |
+| `session_set_token` | Store OAuth access/refresh token |
+| `session_oauth_authorize` | Build OAuth 2.0 authorize URL with PKCE state |
+| `session_prepare_token_exchange` | Prepare token exchange POST body from auth code |
+| `session_prepare_refresh` | Prepare token refresh POST body |
+| `detect_login_form` | Heuristic detection of username/password/submit fields |
+| `session_status` | Current auth state + token validity |
+| `session_evict_expired` | Remove expired cookies |
+| `session_mark_logged_in` | Transition auth state to LoggedIn |
+
+**OAuth flow:** `build_authorize_url` → host navigates → callback with `code` → `prepare_token_exchange` → host POSTs to token endpoint → `set_oauth_token`. Transparent refresh via `prepare_token_refresh` when token expires.
+
+### 16. Multi-page Workflow Orchestration
+
+**Module:** `orchestrator.rs`
+
+Stateful workflow engine that combines `ActionPlan` + `TemporalMemory` + `SessionManager` + `WorkflowMemory` into a single serializable state machine. Drives multi-page agent flows end-to-end.
+
+| Function | What it does |
+|----------|-------------|
+| `create_workflow` | Initialize workflow with goal, start URL, and config |
+| `workflow_provide_page` | Feed fetched HTML into the engine, get next action |
+| `workflow_report_click` | Report click result, auto-navigate if link returned |
+| `workflow_report_fill` | Report form fill result, retry on validation failure |
+| `workflow_report_extract` | Report extracted data, store in workflow state |
+| `workflow_complete_step` | Mark a step as completed |
+| `workflow_rollback_step` | Rollback a failed step for retry |
+| `workflow_status` | Current status, progress, extracted data |
+
+**Capabilities:**
+- **Auto-navigation** — `find_and_click` returns a link → automatically fetches next page and continues the plan
+- **Rollback/retry** — configurable `max_retries` per step with failure tracking
+- **Cross-page temporal memory** — semantic diffs span navigations, not just same-page snapshots
+- **Session integration** — cookies and auth headers automatically attached to every action
+- **Max pages protection** — prevents infinite navigation loops (default: 20 pages)
+
+### 17. Vision — YOLOv8 Screenshot Analysis
 
 **Module:** `vision.rs`
 
@@ -347,7 +393,7 @@ Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detec
 
 ## API Reference
 
-### HTTP Endpoints (41 routes)
+### HTTP Endpoints (63 routes)
 
 Run the server: `cargo run --features server --bin aether-server`
 
@@ -456,6 +502,35 @@ Run the server: `cargo run --features server --bin aether-server`
 | POST | `/api/collab/register` | Register agent |
 | POST | `/api/collab/publish` | Publish delta |
 | POST | `/api/collab/fetch` | Fetch new deltas |
+
+#### Session Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/session/create` | Create empty session manager |
+| POST | `/api/session/cookies/add` | Parse Set-Cookie headers |
+| POST | `/api/session/cookies/get` | Build Cookie header for domain/path |
+| POST | `/api/session/token/set` | Store OAuth access/refresh token |
+| POST | `/api/session/oauth/authorize` | Build OAuth 2.0 authorize URL |
+| POST | `/api/session/oauth/exchange` | Prepare token exchange body |
+| POST | `/api/session/status` | Auth state + token validity |
+| POST | `/api/session/login/detect` | Detect login form in HTML |
+| POST | `/api/session/evict` | Evict expired cookies |
+| POST | `/api/session/login/mark` | Mark session as logged in |
+| POST | `/api/session/token/refresh` | Prepare token refresh body |
+
+#### Workflow Orchestration
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/workflow/create` | Create workflow with goal + start URL |
+| POST | `/api/workflow/page` | Provide fetched HTML page |
+| POST | `/api/workflow/report/click` | Report click action result |
+| POST | `/api/workflow/report/fill` | Report form fill result |
+| POST | `/api/workflow/report/extract` | Report data extraction result |
+| POST | `/api/workflow/complete` | Mark step as completed |
+| POST | `/api/workflow/rollback` | Rollback step for retry |
+| POST | `/api/workflow/status` | Workflow status + progress |
 
 ### MCP Server (22 tools)
 
@@ -617,21 +692,21 @@ const click = await agent.findAndClick(html, 'buy', url, 'Add to cart');
 
 ## Tests
 
-**296 tests** across 4 levels. All must pass on every commit.
+**352 tests** across 4 levels. All must pass on every commit.
 
 ```bash
-cargo test              # Run all 296 tests
+cargo test              # Run all 352 tests
 cargo clippy -- -D warnings  # Zero warnings required
 cargo fmt --check       # Zero diffs required
 ```
 
-### Unit Tests (217 tests)
+### Unit Tests (256 tests)
 
 Every module has tests at the bottom of the source file:
 
 | Module | Tests | Coverage |
 |--------|------:|----------|
-| `lib.rs` | 41 | All 40 WASM bindings + smoke tests |
+| `lib.rs` | 53 | All 58 WASM bindings + smoke tests |
 | `js_eval.rs` | 16 | Detection, evaluation, safety blocking, fetch URL extraction |
 | `firewall.rs` | 16 | L1/L2/L3 filtering, batch, MIME types, whitelisting |
 | `intercept.rs` | 20 | Price extraction, node normalization, merging, config, XHR response caching |
@@ -645,6 +720,8 @@ Every module has tests at the bottom of the source file:
 | `diff.rs` | 9 | Tree comparison, change detection, token savings |
 | `grounding.rs` | 9 | Tree grounding, IoU computation, Set-of-Marks |
 | `webmcp.rs` | 8 | Tool discovery, schema extraction, polyfill detection |
+| `session.rs` | 22 | Cookie parsing, OAuth flow, login detection, token refresh |
+| `orchestrator.rs` | 17 | Workflow engine, auto-nav, rollback/retry, cross-page memory |
 | `temporal.rs` | 7 | Memory, adversarial detection, prediction, volatility |
 | `trust.rs` | 4 | Injection detection, zero-width chars, boundary wrapping |
 | `memory.rs` | 4 | Serialization, context operations, invalid JSON |
@@ -832,8 +909,8 @@ End-to-end tests against real production websites, running on the deployed Rende
 │  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │                                                                   │
-│              21 modules · 41 WASM functions                       │
-│              44 HTTP endpoints · 22 MCP tools                     │
+│              23 modules · 58 WASM functions                       │
+│              63 HTTP endpoints · 22 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -848,7 +925,7 @@ End-to-end tests against real production websites, running on the deployed Rende
 ```
 AetherAgent/
 ├── src/
-│   ├── lib.rs            # WASM API surface — 40 public functions
+│   ├── lib.rs            # WASM API surface — 58 public functions
 │   ├── parser.rs         # html5ever + rcdom DOM builder
 │   ├── semantic.rs       # Accessibility tree, goal-relevance scoring
 │   ├── trust.rs          # Prompt injection detection (20+ patterns)
@@ -867,10 +944,12 @@ AetherAgent/
 │   ├── intercept.rs      # XHR network interception, price extraction, response caching
 │   ├── streaming.rs      # Streaming parse with early-stopping, depth/relevance limits
 │   ├── vision.rs         # YOLOv8-nano inference via rten (feature: vision)
+│   ├── session.rs        # Session cookies, OAuth 2.0, login detection
+│   ├── orchestrator.rs   # Multi-page workflow engine, auto-nav, rollback/retry
 │   ├── memory.rs         # Workflow memory persistence
 │   ├── types.rs          # Core data structures
 │   └── bin/
-│       ├── server.rs     # Axum HTTP API (42 endpoints)
+│       ├── server.rs     # Axum HTTP API (63 endpoints)
 │       └── mcp_server.rs # MCP server (22 tools, stdio transport)
 ├── tests/
 │   ├── integration_test.rs   # 49 end-to-end tests
@@ -969,11 +1048,11 @@ safety = agent.check_injection(page_text)
 
 AetherAgent is a fully functional AI browser engine with:
 
-- **20 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, workflow memory, core types
-- **41 WASM-exported functions** — complete API surface for any WASM host
-- **42 HTTP REST endpoints** — deployable Axum server with CORS
+- **22 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, session management, workflow orchestration, workflow memory, core types
+- **58 WASM-exported functions** — complete API surface for any WASM host
+- **63 HTTP REST endpoints** — deployable Axum server with CORS
 - **22 MCP tools** — Claude Desktop, Cursor, VS Code compatible
-- **296 tests** — 217 unit + 30 fixture + 49 integration, all passing
+- **352 tests** — 256 unit + 30 fixture + 49 integration + 17 orchestrator, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)
@@ -1291,8 +1370,8 @@ Track which model produced each result via the `model_version` field:
 - ~~**Vision model training**~~ ✓ Training guide documented — The inference pipeline supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. See [Vision Model Training Guide](#vision-model-training-guide) above
 - ~~**XHR response caching**~~ ✓ Implemented — `XhrResponseCache` with TTL-based expiry, change detection (`has_changed`), and integration into `TemporalMemory` for diff-based monitoring across snapshots
 - ~~**Streaming parse**~~ ✓ Implemented — `streaming.rs` module with `StreamingParser`: early-stopping at `max_nodes`, depth limiting (`max_depth`), relevance filtering (`min_relevance`), and `parse_streaming` WASM API
-- **Multi-page workflow orchestration** — Today each page is an isolated request. `compile_goal` generates a plan but the client must manually hold state between steps. The goal is a stateful workflow engine inside AetherAgent: automatic navigation after `find_and_click` returns a link (fetch next page, continue the plan), rollback/retry on form validation failures, and cross-page temporal memory + semantic diff that spans navigations instead of just same-page snapshots. The difference between "one tool per page" and "run the entire flow and report back".
-- **OAuth / session management** — Currently `fetch.rs` sends requests with a simple cookie jar but cannot log in. The goal: persistent session cookies across `fetch_parse` calls, OAuth 2.0 redirect chain handling (authorize → callback → token), automatic login form submission via `fill_form` + `fetch`, and transparent token refresh on expiry. Prerequisite for multi-page orchestration on authenticated sites (e.g. "log in to my bank and show balances" requires both auth and orchestration).
+- ~~**Multi-page workflow orchestration**~~ ✓ Implemented — `orchestrator.rs` module with `WorkflowOrchestrator`: stateful engine combining ActionPlan + TemporalMemory + SessionManager + WorkflowMemory. Auto-navigation after clicks return links, configurable rollback/retry, cross-page temporal memory + semantic diff spanning navigations, max-pages protection. 8 WASM functions + 8 HTTP endpoints.
+- ~~**OAuth / session management**~~ ✓ Implemented — `session.rs` module with `SessionManager`: persistent cookies with path matching and expiry, OAuth 2.0 authorize/token/refresh flow, login form heuristic detection, auth state machine (Unauthenticated → OAuthPending → OAuthAuthenticated / LoggedIn → TokenExpired). 11 WASM functions + 11 HTTP endpoints.
 
 ---
 

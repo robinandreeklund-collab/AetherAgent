@@ -293,6 +293,109 @@ struct ParseScreenshotRequest {
     goal: String,
 }
 
+// ─── Fas 13: Session Management request types ──────────────────────────────
+
+#[derive(Deserialize)]
+struct SessionAddCookiesRequest {
+    session_json: String,
+    domain: String,
+    cookies: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SessionGetCookiesRequest {
+    session_json: String,
+    domain: String,
+    #[serde(default = "default_path")]
+    path: String,
+}
+
+fn default_path() -> String {
+    "/".to_string()
+}
+
+#[derive(Deserialize)]
+struct SessionSetTokenRequest {
+    session_json: String,
+    access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    expires_in_secs: u64,
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SessionOAuthRequest {
+    session_json: String,
+    config: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct SessionTokenExchangeRequest {
+    session_json: String,
+    config: serde_json::Value,
+    authorization_code: String,
+}
+
+#[derive(Deserialize)]
+struct SessionStatusRequest {
+    session_json: String,
+}
+
+#[derive(Deserialize)]
+struct DetectLoginFormRequest {
+    html: String,
+    goal: String,
+    url: String,
+}
+
+// ─── Fas 14: Workflow Orchestration request types ───────────────────────────
+
+#[derive(Deserialize)]
+struct CreateWorkflowRequest {
+    goal: String,
+    start_url: String,
+    #[serde(default)]
+    config: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowProvidePageRequest {
+    orchestrator_json: String,
+    html: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportClickRequest {
+    orchestrator_json: String,
+    click_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportFillRequest {
+    orchestrator_json: String,
+    fill_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportExtractRequest {
+    orchestrator_json: String,
+    extract_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowStepRequest {
+    orchestrator_json: String,
+    step_index: u32,
+}
+
+#[derive(Deserialize)]
+struct WorkflowStatusRequest {
+    orchestrator_json: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -348,6 +451,25 @@ async fn root() -> impl IntoResponse {
             "POST /api/collab/fetch": "Fetch new deltas for agent",
             "POST /api/detect-xhr": "Scan HTML for XHR/fetch/AJAX endpoints in scripts",
             "POST /api/parse-screenshot": "Analyze screenshot with YOLOv8-nano vision model",
+            "POST /api/session/create": "Create empty session manager",
+            "POST /api/session/cookies/add": "Add cookies from Set-Cookie headers",
+            "POST /api/session/cookies/get": "Get Cookie header for domain/path",
+            "POST /api/session/token/set": "Set OAuth access token",
+            "POST /api/session/oauth/authorize": "Build OAuth 2.0 authorize URL",
+            "POST /api/session/oauth/exchange": "Prepare token exchange parameters",
+            "POST /api/session/status": "Check session auth status",
+            "POST /api/session/login/detect": "Detect login form in HTML",
+            "POST /api/session/evict": "Evict expired cookies/tokens",
+            "POST /api/session/login/mark": "Mark session as logged in",
+            "POST /api/session/token/refresh": "Prepare token refresh parameters",
+            "POST /api/workflow/create": "Create workflow orchestrator from goal",
+            "POST /api/workflow/page": "Provide fetched page to orchestrator",
+            "POST /api/workflow/report/click": "Report click result to orchestrator",
+            "POST /api/workflow/report/fill": "Report fill form result",
+            "POST /api/workflow/report/extract": "Report extract result",
+            "POST /api/workflow/complete": "Mark step as manually completed",
+            "POST /api/workflow/rollback": "Rollback a completed step",
+            "POST /api/workflow/status": "Get workflow status summary",
             "POST /mcp": "MCP Streamable HTTP endpoint (JSON-RPC, spec 2025-03-26)"
         },
         "example": {
@@ -1544,6 +1666,128 @@ async fn mcp_delete() -> impl IntoResponse {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
+// ─── Fas 13: Session Management handlers ────────────────────────────────────
+
+async fn session_create() -> impl IntoResponse {
+    let result = aether_agent::create_session();
+    (StatusCode::OK, result)
+}
+
+async fn session_add_cookies(Json(req): Json<SessionAddCookiesRequest>) -> impl IntoResponse {
+    let cookies_json = serde_json::to_string(&req.cookies).unwrap_or_default();
+    let result = aether_agent::session_add_cookies(&req.session_json, &req.domain, &cookies_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_get_cookies(Json(req): Json<SessionGetCookiesRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_get_cookies(&req.session_json, &req.domain, &req.path);
+    (StatusCode::OK, result)
+}
+
+async fn session_set_token(Json(req): Json<SessionSetTokenRequest>) -> impl IntoResponse {
+    let scopes_json = serde_json::to_string(&req.scopes).unwrap_or_default();
+    let result = aether_agent::session_set_token(
+        &req.session_json,
+        &req.access_token,
+        &req.refresh_token,
+        req.expires_in_secs,
+        &scopes_json,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn session_oauth_authorize(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_oauth_authorize(&req.session_json, &config_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_token_exchange(Json(req): Json<SessionTokenExchangeRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_prepare_token_exchange(
+        &req.session_json,
+        &config_json,
+        &req.authorization_code,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn session_status_handler(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_status(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_detect_login(Json(req): Json<DetectLoginFormRequest>) -> impl IntoResponse {
+    let result = aether_agent::detect_login_form(&req.html, &req.goal, &req.url);
+    (StatusCode::OK, result)
+}
+
+async fn session_evict(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_evict_expired(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_mark_login(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_mark_logged_in(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_token_refresh(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_prepare_refresh(&req.session_json, &config_json);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 14: Workflow Orchestration handlers ────────────────────────────────
+
+async fn workflow_create(Json(req): Json<CreateWorkflowRequest>) -> impl IntoResponse {
+    let config_json = req
+        .config
+        .map(|c| serde_json::to_string(&c).unwrap_or_default())
+        .unwrap_or_else(|| "{}".to_string());
+    let result = aether_agent::create_workflow(&req.goal, &req.start_url, &config_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_page(Json(req): Json<WorkflowProvidePageRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_provide_page(&req.orchestrator_json, &req.html, &req.url);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_click(Json(req): Json<WorkflowReportClickRequest>) -> impl IntoResponse {
+    let result =
+        aether_agent::workflow_report_click(&req.orchestrator_json, &req.click_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_fill(Json(req): Json<WorkflowReportFillRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_report_fill(&req.orchestrator_json, &req.fill_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_extract(
+    Json(req): Json<WorkflowReportExtractRequest>,
+) -> impl IntoResponse {
+    let result =
+        aether_agent::workflow_report_extract(&req.orchestrator_json, &req.extract_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_complete(Json(req): Json<WorkflowStepRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_complete_step(&req.orchestrator_json, req.step_index);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_rollback(Json(req): Json<WorkflowStepRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_rollback_step(&req.orchestrator_json, req.step_index);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_status(&req.orchestrator_json);
+    (StatusCode::OK, result)
+}
+
 fn build_router() -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -1614,6 +1858,33 @@ fn build_router() -> Router {
         .route("/api/detect-xhr", post(detect_xhr))
         // Fas 11: Vision
         .route("/api/parse-screenshot", post(parse_screenshot_handler))
+        // Fas 13: Session Management
+        .route("/api/session/create", post(session_create))
+        .route("/api/session/cookies/add", post(session_add_cookies))
+        .route("/api/session/cookies/get", post(session_get_cookies))
+        .route("/api/session/token/set", post(session_set_token))
+        .route(
+            "/api/session/oauth/authorize",
+            post(session_oauth_authorize),
+        )
+        .route("/api/session/oauth/exchange", post(session_token_exchange))
+        .route("/api/session/status", post(session_status_handler))
+        .route("/api/session/login/detect", post(session_detect_login))
+        .route("/api/session/evict", post(session_evict))
+        .route("/api/session/login/mark", post(session_mark_login))
+        .route("/api/session/token/refresh", post(session_token_refresh))
+        // Fas 14: Workflow Orchestration
+        .route("/api/workflow/create", post(workflow_create))
+        .route("/api/workflow/page", post(workflow_page))
+        .route("/api/workflow/report/click", post(workflow_report_click))
+        .route("/api/workflow/report/fill", post(workflow_report_fill))
+        .route(
+            "/api/workflow/report/extract",
+            post(workflow_report_extract),
+        )
+        .route("/api/workflow/complete", post(workflow_complete))
+        .route("/api/workflow/rollback", post(workflow_rollback))
+        .route("/api/workflow/status", post(workflow_status_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .layer(cors)
@@ -1668,6 +1939,8 @@ async fn main() {
     println!();
     println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
     println!("  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision");
+    println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
+    println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
     println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications, returns 405 — use POST)");
     println!("  DELETE /mcp                      – Terminate MCP session");
