@@ -1395,3 +1395,170 @@ mod fetch_tests {
         );
     }
 }
+
+// ─── HN-stil regressionstester ──────────────────────────────────────────────
+// Testar de tre problemen som identifierades i Claude Sonnet 4.6-testet:
+// 1. extract_data hittar keys i generic-noder med sammanslagna labels
+// 2. Trädstorlek hålls rimlig via goal-aware pruning
+// 3. Compound keys (story_title, story_url) matchas korrekt
+
+#[test]
+fn test_hn_style_extract_story_title() {
+    // Simulera HN-liknande struktur med stories i wrapper-noder
+    let html = r##"<html><body>
+        <h1>Hacker News</h1>
+        <table>
+            <tr><td><a href="https://example.com/ai-agent">
+                Leanstral: Open-source agent for trustworthy coding
+            </a></td></tr>
+            <tr><td><a href="https://example.com/llm-bench">
+                New LLM benchmark shows surprising results
+            </a></td></tr>
+            <tr><td><a href="https://example.com/rust-wasm">
+                Building WASM apps with Rust in 2026
+            </a></td></tr>
+        </table>
+    </body></html>"##;
+
+    let result = extract_data(
+        html,
+        "find the most relevant AI links",
+        "https://news.ycombinator.com",
+        r#"["story_title", "story_url"]"#,
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    let entries = parsed["entries"]
+        .as_array()
+        .expect("Borde ha entries-array");
+
+    // "story_title" borde hittas via compound split: "title" → heading boost
+    let title_entry = entries.iter().find(|e| e["key"] == "story_title");
+    assert!(
+        title_entry.is_some(),
+        "Borde hitta 'story_title' via compound key + heading boost, missing: {}",
+        parsed["missing_keys"]
+    );
+
+    // "story_url" borde hitta en URL via compound key split och role-boost
+    let url_entry = entries.iter().find(|e| e["key"] == "story_url");
+    assert!(
+        url_entry.is_some(),
+        "Borde hitta 'story_url' via compound key split, missing_keys: {}",
+        parsed["missing_keys"]
+    );
+    // URL-värdet borde vara en href, inte label-text
+    let url_value = url_entry.unwrap()["value"].as_str().unwrap_or("");
+    assert!(
+        url_value.starts_with("http"),
+        "story_url borde returnera href, inte label. Fick: {}",
+        url_value
+    );
+}
+
+#[test]
+fn test_hn_style_tree_size_is_reasonable() {
+    // Generera en HN-liknande sida med 30 stories (typisk HN-framsida)
+    let mut html = String::from("<html><body><table>");
+    for i in 0..30 {
+        html.push_str(&format!(
+            r##"<tr><td class="title"><a href="https://example.com/story-{}">
+                Story number {} about various tech topics and AI developments
+            </a></td></tr>
+            <tr><td class="subtext">
+                <span>{} points</span> by user{} | <a href="item?id={}">42 comments</a>
+            </td></tr>"##,
+            i,
+            i,
+            100 + i,
+            i,
+            1000 + i
+        ));
+    }
+    html.push_str("</table></body></html>");
+
+    let result = parse_to_semantic_tree(
+        &html,
+        "find the 5 most relevant links about AI",
+        "https://news.ycombinator.com",
+    );
+
+    // Trädets JSON borde vara MYCKET mindre än 666KB
+    let json_size = result.len();
+    assert!(
+        json_size < 100_000,
+        "Träd-JSON borde vara under 100KB med pruning, fick {} bytes",
+        json_size
+    );
+
+    // Validera att det fortfarande är giltig JSON med noder
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    assert!(
+        parsed["nodes"].is_array(),
+        "Borde fortfarande ha nodes-array"
+    );
+}
+
+#[test]
+fn test_compound_key_matching() {
+    let html = r##"<html><body>
+        <h1>Produktsida</h1>
+        <span class="price">13 990 kr</span>
+        <a href="https://shop.se/product/123">Visa produkt</a>
+        <img alt="Produkt-bild" src="img.png" />
+    </body></html>"##;
+
+    let result = extract_data(
+        html,
+        "hämta produktinfo",
+        "https://shop.se",
+        r#"["product_title", "product_url", "product_image"]"#,
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    let entries = parsed["entries"]
+        .as_array()
+        .expect("Borde ha entries-array");
+
+    // product_title → borde matcha heading via compound split (title)
+    assert!(
+        entries.iter().any(|e| e["key"] == "product_title"),
+        "Borde hitta 'product_title' via compound key, missing: {}",
+        parsed["missing_keys"]
+    );
+
+    // product_url → borde matcha link via role-boost (url → link)
+    let url_entry = entries.iter().find(|e| e["key"] == "product_url");
+    assert!(
+        url_entry.is_some(),
+        "Borde hitta 'product_url' via role-boost, missing: {}",
+        parsed["missing_keys"]
+    );
+
+    // product_image → borde matcha img via role-boost (image → img)
+    assert!(
+        entries.iter().any(|e| e["key"] == "product_image"),
+        "Borde hitta 'product_image' via role-boost, missing: {}",
+        parsed["missing_keys"]
+    );
+}
+
+#[test]
+fn test_link_nodes_have_href_as_value() {
+    let html = r##"<html><body>
+        <a href="https://example.com/page">Klicka här</a>
+    </body></html>"##;
+
+    let result = parse_to_semantic_tree(html, "navigate", "https://test.com");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+    // Hitta link-noden
+    let nodes = parsed["nodes"].as_array().expect("Borde ha nodes");
+    let link = find_node_recursive(nodes, &|n| n["role"] == "link");
+    assert!(link.is_some(), "Borde hitta en link-nod");
+
+    let link = link.unwrap();
+    assert_eq!(
+        link["value"].as_str().unwrap_or(""),
+        "https://example.com/page",
+        "Link-nodens value borde vara href"
+    );
+}

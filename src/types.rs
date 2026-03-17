@@ -10,10 +10,13 @@ pub struct SemanticNode {
     pub role: String,
     pub label: String,
     pub value: Option<String>,
+    #[serde(default = "NodeState::default_state")]
     pub state: NodeState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
     pub relevance: f32,
     pub trust: TrustLevel,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<SemanticNode>,
     /// Originalt HTML id-attribut, för selector hints
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,11 +45,40 @@ pub struct BoundingBox {
 /// Elementets interaktionstillstånd
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NodeState {
+    #[serde(default, skip_serializing_if = "is_false")]
     pub disabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded: Option<bool>,
+    #[serde(default, skip_serializing_if = "is_false")]
     pub focused: bool,
+    #[serde(default = "default_visible", skip_serializing_if = "is_true")]
     pub visible: bool,
+}
+
+fn default_visible() -> bool {
+    true
+}
+
+impl NodeState {
+    pub fn default_state() -> Self {
+        NodeState {
+            disabled: false,
+            checked: None,
+            expanded: None,
+            focused: false,
+            visible: true,
+        }
+    }
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 /// Säkerhetsnivå för innehåll – kärnan i trust shield

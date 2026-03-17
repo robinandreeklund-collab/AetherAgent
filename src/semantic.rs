@@ -44,6 +44,9 @@ impl SemanticBuilder {
         let mut nodes = vec![];
         self.traverse(&dom.document, &mut nodes, 0);
 
+        // Beskär trädet om det överstiger max-gränsen
+        prune_to_limit(&mut nodes, MAX_TREE_NODES);
+
         SemanticTree {
             url: url.to_string(),
             title: title.to_string(),
@@ -148,8 +151,12 @@ impl SemanticBuilder {
         let html_id = get_attr(handle, "id").filter(|v| !v.is_empty());
         let name = get_attr(handle, "name").filter(|v| !v.is_empty());
 
-        // Hämta value för inputs
-        let value = get_attr(handle, "value").or_else(|| get_attr(handle, "aria-valuenow"));
+        // Hämta value: href för länkar, value/aria-valuenow för inputs
+        let value = if role == "link" {
+            get_attr(handle, "href").or_else(|| get_attr(handle, "value"))
+        } else {
+            get_attr(handle, "value").or_else(|| get_attr(handle, "aria-valuenow"))
+        };
 
         // Traversera barn
         let mut children = vec![];
@@ -157,11 +164,20 @@ impl SemanticBuilder {
             self.traverse(child, &mut children, depth + 1);
         }
 
-        // Filtrera barn med 0-relevans om de inte är interaktiva och saknar egna barn
+        // Filtrera barn med låg relevans om de inte är interaktiva
         let filtered_children: Vec<SemanticNode> = children
             .into_iter()
-            .filter(|c| c.relevance > 0.05 || c.action.is_some() || !c.children.is_empty())
+            .filter(|c| {
+                c.relevance > 0.15
+                    || c.action.is_some()
+                    || !c.children.is_empty()
+                    || c.role == "heading"
+                    || c.role == "link"
+            })
             .collect();
+
+        // Kollapsa enkelbarns-wrapprar: generic nod med tomt label och ett barn → lyft barnet
+        let filtered_children = collapse_single_child_wrappers(filtered_children);
 
         let mut node = SemanticNode::new(id, &role, &label);
         node.value = value;
@@ -198,24 +214,106 @@ impl SemanticBuilder {
     }
 }
 
+/// Kollapsa enkelbarns strukturella wrapprar
+///
+/// Om en nod har tomt label, ingen action, och exakt ett barn → ersätt med barnet.
+/// Minskar träddjup och JSON-storlek avsevärt.
+fn collapse_single_child_wrappers(children: Vec<SemanticNode>) -> Vec<SemanticNode> {
+    children
+        .into_iter()
+        .map(|node| {
+            if node.label.is_empty()
+                && node.action.is_none()
+                && node.children.len() == 1
+                && node.html_id.is_none()
+            {
+                // Lyft enda barnet direkt och skippa wrapper-noden
+                let mut kids = node.children;
+                if let Some(child) = kids.pop() {
+                    child
+                } else {
+                    SemanticNode::new(node.id, &node.role, &node.label)
+                }
+            } else {
+                node
+            }
+        })
+        .collect()
+}
+
+/// Max antal noder i ett fullständigt träd (begränsa output-storlek)
+const MAX_TREE_NODES: usize = 300;
+
+/// Räkna totalt antal noder i ett träd (rekursivt)
+fn count_nodes(nodes: &[SemanticNode]) -> usize {
+    nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
+}
+
+/// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
+fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
+    if count_nodes(nodes) <= max {
+        return;
+    }
+
+    // Iterativt höj tröskeln och beskär löv
+    let mut threshold = 0.2_f32;
+    while count_nodes(nodes) > max && threshold < 0.8 {
+        prune_leaves_below(nodes, threshold);
+        threshold += 0.05;
+    }
+}
+
+/// Ta bort löv-noder under en viss relevans-tröskel
+fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
+    // Rekursivt beskär barnens löv först
+    for node in nodes.iter_mut() {
+        prune_leaves_below(&mut node.children, threshold);
+    }
+
+    // Ta bort löv-noder (utan barn och utan action) under tröskeln
+    // Behåll alltid headings och links — de är strukturellt viktiga
+    nodes.retain(|n| {
+        !n.children.is_empty()
+            || n.action.is_some()
+            || n.relevance >= threshold
+            || n.role == "heading"
+            || n.role == "link"
+    });
+}
+
 /// Beräkna textlikhet mellan query och candidate (normaliserad word overlap)
 ///
 /// Returnerar 0.0–1.0. Bonus för exakt substring-match.
+/// Hanterar compound keys (underscore/bindestreck) genom att splitta och matcha delar.
 pub fn text_similarity(query: &str, candidate: &str) -> f32 {
     let query_lower = query.to_lowercase();
     let candidate_lower = candidate.to_lowercase();
 
-    let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+    // Splitta på whitespace, underscore och bindestreck för compound keys
+    let query_words: Vec<&str> = query_lower
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|s| !s.is_empty())
+        .collect();
     if query_words.is_empty() {
         return 0.0;
     }
 
-    // Exakt substring-match ger full poäng
+    // Exakt substring-match ger full poäng (kolla originalformatet)
     if candidate_lower.contains(&query_lower) {
         return 1.0;
     }
 
-    // Word overlap
+    // Kolla även utan separatorer: "story_title" → "storytitle"
+    let query_joined: String = query_words.iter().copied().collect();
+    let candidate_no_sep: String = candidate_lower
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .collect();
+    if candidate_no_sep.contains(&query_joined) {
+        return 1.0;
+    }
+
+    // Word overlap — varje del av compound key matchas separat
     let matches = query_words
         .iter()
         .filter(|w| candidate_lower.contains(*w))

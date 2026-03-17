@@ -77,7 +77,7 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    match serde_json::to_string_pretty(&tree) {
+    match serde_json::to_string(&tree) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -116,7 +116,7 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
         "parse_time_ms": tree.parse_time_ms,
     });
 
-    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Analysera ett textstycke för prompt injection

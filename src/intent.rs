@@ -219,7 +219,30 @@ pub fn map_form_fields(tree: &SemanticTree, fields: &HashMap<String, String>) ->
 
 // ─── extract_data ────────────────────────────────────────────────────────────
 
+/// Roll-preferenser för semantisk extraktion: nyckelord i key → föredragen roll
+fn role_boost_for_key(key: &str) -> Option<(&'static str, f32)> {
+    let key_lower = key.to_lowercase();
+    let key_parts: Vec<&str> = key_lower
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    for part in &key_parts {
+        match *part {
+            "url" | "href" | "link" | "src" => return Some(("link", 0.3)),
+            "title" | "heading" | "headline" | "rubrik" => return Some(("heading", 0.2)),
+            "button" | "action" | "cta" => return Some(("button", 0.2)),
+            "image" | "img" | "photo" | "bild" => return Some(("img", 0.2)),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Extrahera strukturerad data baserat på angivna nycklar
+///
+/// Förbättrad matchning: hanterar compound keys (story_title → title),
+/// roll-aware boosting (url-keys → föredra links), och söker i value-fält.
 pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResult {
     let all_nodes = flatten_nodes(&tree.nodes);
     let mut entries = Vec::new();
@@ -227,6 +250,7 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
 
     for key in keys {
         let mut best_match: Option<(&SemanticNode, f32)> = None;
+        let role_boost = role_boost_for_key(key);
 
         for node in &all_nodes {
             // Skippa tomma noder
@@ -250,7 +274,24 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 .map(|id| text_similarity(key, id))
                 .unwrap_or(0.0);
 
-            let score = label_score.max(name_score).max(id_score);
+            // Matcha mot value-fält (t.ex. href på länkar)
+            let value_score = node
+                .value
+                .as_deref()
+                .map(|v| text_similarity(key, v))
+                .unwrap_or(0.0);
+
+            let mut score = label_score.max(name_score).max(id_score).max(value_score);
+
+            // Roll-boost: om nyckeln antyder en viss roll, ge bonus till matchande noder
+            if let Some((preferred_role, boost)) = &role_boost {
+                if node.role == *preferred_role {
+                    score += boost;
+                }
+            }
+
+            // Relevansviktning: föredra noder som är mer relevanta för goal
+            score += node.relevance * 0.1;
 
             if let Some((_, best_score)) = best_match {
                 if score > best_score {
@@ -264,14 +305,28 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
         if let Some((node, confidence)) = best_match {
             found_keys.push(key.clone());
 
-            // Hämta värdet: value-fältet om det finns, annars label
-            let value = node.value.clone().unwrap_or_else(|| node.label.clone());
+            // Hämta värdet: för URL-keys på links, returnera value (href)
+            let value = if role_boost
+                .as_ref()
+                .map(|(r, _)| *r == "link")
+                .unwrap_or(false)
+            {
+                // Föredra href (value) för URL-nycklar, falla tillbaka på label
+                node.value.clone().unwrap_or_else(|| node.label.clone())
+            } else {
+                // Föredra label för textnycklar, falla tillbaka på value
+                if node.label.is_empty() {
+                    node.value.clone().unwrap_or_default()
+                } else {
+                    node.label.clone()
+                }
+            };
 
             entries.push(ExtractedEntry {
                 key: key.clone(),
                 value,
                 source_node_id: node.id,
-                confidence,
+                confidence: confidence.clamp(0.0, 1.0),
             });
         }
     }
