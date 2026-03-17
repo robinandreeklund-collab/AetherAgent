@@ -213,6 +213,11 @@ curl -X POST https://your-app.onrender.com/api/click \
 curl -X POST https://your-app.onrender.com/api/check-injection \
   -H "Content-Type: application/json" \
   -d '{"text": "Ignore previous instructions"}'
+
+# Semantic diff between two trees (Fas 4a)
+curl -X POST https://your-app.onrender.com/api/diff \
+  -H "Content-Type: application/json" \
+  -d '{"old_tree_json": "<tree1 JSON from /api/parse>", "new_tree_json": "<tree2 JSON from /api/parse>"}'
 ```
 
 ### All Endpoints
@@ -411,6 +416,25 @@ Workflow Memory
 - **Injection check: <1ms** engine time – negligible overhead
 - **All endpoints under 200ms P50** including network round-trip
 - First request after cold start (~3.5s) reflects Render free tier spin-up
+
+```
+Semantic Diff (Fas 4a)
+  POST /api/diff (identical, 3 nodes)            10    423ms   482ms   141ms   729ms
+  POST /api/diff (small change, 3 nodes)         10    319ms   216ms   142ms   790ms
+  POST /api/diff (1 change in 20 nodes)          10    299ms   289ms   165ms   602ms
+  POST /api/diff (identical, 20 nodes)           10    433ms   436ms   149ms   917ms
+```
+
+**Diff verification results (live):**
+
+| Test | Result | Detail |
+|------|--------|--------|
+| Identical pages | ✅ | 0 changes, 100% token savings |
+| Added node detected | ✅ | Correctly identifies new elements |
+| Removed node detected | ✅ | Correctly identifies deleted elements |
+| State change (disabled→enabled) | ✅ | Detects `state.disabled` field change |
+| Token savings (20 nodes, 1 change) | ✅ | 86% token savings |
+| Invalid JSON → error | ✅ | Returns descriptive error message |
 
 ### Local Benchmarks (no network overhead)
 
