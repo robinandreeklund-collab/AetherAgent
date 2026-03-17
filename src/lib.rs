@@ -1,6 +1,7 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod diff;
 mod intent;
 mod memory;
 mod parser;
@@ -275,6 +276,43 @@ pub fn get_workflow_context(memory_json: &str, key: &str) -> String {
     }
 }
 
+// ─── Fas 4a: Semantic Diff ───────────────────────────────────────────────────
+
+/// Compare two semantic trees and return only the changes (delta)
+///
+/// This dramatically reduces token usage for multi-step agent flows.
+/// Instead of sending the full tree after every action, the agent sends
+/// the initial tree once and then only the delta for subsequent steps.
+///
+/// # Arguments
+/// * `old_tree_json` - Previous SemanticTree JSON (from parse_to_semantic_tree)
+/// * `new_tree_json` - Current SemanticTree JSON (from parse_to_semantic_tree)
+///
+/// # Returns
+/// JSON with SemanticDelta: changes, token_savings_ratio, summary
+#[wasm_bindgen]
+pub fn diff_semantic_trees(old_tree_json: &str, new_tree_json: &str) -> String {
+    let start = now_ms();
+
+    let old_tree: SemanticTree = match serde_json::from_str(old_tree_json) {
+        Ok(t) => t,
+        Err(e) => return format!(r#"{{"error": "Invalid old_tree_json: {}"}}"#, e),
+    };
+
+    let new_tree: SemanticTree = match serde_json::from_str(new_tree_json) {
+        Ok(t) => t,
+        Err(e) => return format!(r#"{{"error": "Invalid new_tree_json: {}"}}"#, e),
+    };
+
+    let mut delta = diff::diff_trees(&old_tree, &new_tree);
+    delta.diff_time_ms = now_ms() - start;
+
+    match serde_json::to_string_pretty(&delta) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -412,5 +450,50 @@ mod tests {
         let value = get_workflow_context(&updated, "user_email");
         let val_parsed: serde_json::Value = serde_json::from_str(&value).expect("Valid JSON");
         assert_eq!(val_parsed["value"], "test@test.se");
+    }
+
+    // ─── Fas 4a: Semantic Diff smoke tests ────────────────────────────────
+
+    #[test]
+    fn test_diff_semantic_trees_returns_valid_json() {
+        let html1 = r#"<html><body><button>Köp</button></body></html>"#;
+        let html2 = r#"<html><body><button>Köp</button><a href="/ny">Ny länk</a></body></html>"#;
+
+        let tree1 = parse_to_semantic_tree(html1, "köp", "https://test.com");
+        let tree2 = parse_to_semantic_tree(html2, "köp", "https://test.com");
+
+        let result = diff_semantic_trees(&tree1, &tree2);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+        assert!(parsed["changes"].is_array(), "Borde ha changes-array");
+        assert!(parsed["summary"].is_string(), "Borde ha summary");
+        assert!(
+            parsed["token_savings_ratio"].is_number(),
+            "Borde ha token_savings_ratio"
+        );
+    }
+
+    #[test]
+    fn test_diff_semantic_trees_invalid_json() {
+        let result = diff_semantic_trees("bad json", "{}");
+        assert!(
+            result.contains("error"),
+            "Borde returnera error vid ogiltig JSON"
+        );
+    }
+
+    #[test]
+    fn test_diff_identical_trees_zero_changes() {
+        let html = r#"<html><body><button>Köp</button></body></html>"#;
+        let tree = parse_to_semantic_tree(html, "köp", "https://test.com");
+
+        let result = diff_semantic_trees(&tree, &tree);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+        assert_eq!(
+            parsed["changes"].as_array().unwrap().len(),
+            0,
+            "Identiska träd borde ge 0 förändringar"
+        );
     }
 }

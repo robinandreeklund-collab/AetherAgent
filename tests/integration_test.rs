@@ -449,6 +449,187 @@ fn test_intent_api_performance() {
     assert!(parsed["parse_time_ms"].as_u64().unwrap_or(9999) < 500);
 }
 
+// ─── Fas 4a: Semantic Diff – Integration ─────────────────────────────────────
+
+#[test]
+fn test_diff_ecommerce_product_to_checkout() {
+    let product_html = r##"<html><body>
+        <h1>Nike Air Max</h1>
+        <p>1 299 kr</p>
+        <button id="add-cart">Lägg i varukorg</button>
+        <a href="/checkout">Gå till kassan</a>
+    </body></html>"##;
+    let checkout_html = r##"<html><body>
+        <h1>Kassa</h1>
+        <p>1 artikel – 1 299 kr</p>
+        <input id="email" name="email" placeholder="E-post" />
+        <input id="address" name="address" placeholder="Adress" />
+        <button id="pay-btn">Betala 1 299 kr</button>
+    </body></html>"##;
+
+    let tree1 = parse_to_semantic_tree(product_html, "köp skor", "https://shop.se");
+    let tree2 = parse_to_semantic_tree(checkout_html, "köp skor", "https://shop.se");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert!(
+        delta["changes"].as_array().unwrap().len() > 0,
+        "Sidnavigering borde ge förändringar"
+    );
+    assert!(
+        delta["token_savings_ratio"].as_f64().unwrap_or(0.0) >= 0.0,
+        "Token savings borde vara icke-negativt"
+    );
+    assert!(
+        delta["summary"].as_str().unwrap().contains("changes"),
+        "Sammanfattning borde beskriva ändringarna"
+    );
+}
+
+#[test]
+fn test_diff_identical_pages_zero_changes() {
+    let html = r##"<html><body>
+        <button id="buy">Köp nu</button>
+        <a href="/info">Mer info</a>
+    </body></html>"##;
+
+    let tree = parse_to_semantic_tree(html, "köp", "https://shop.se");
+    let result = diff_semantic_trees(&tree, &tree);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    assert_eq!(
+        delta["changes"].as_array().unwrap().len(),
+        0,
+        "Identiska sidor borde ge 0 förändringar"
+    );
+    assert_eq!(delta["summary"], "No changes detected");
+}
+
+#[test]
+fn test_diff_detects_added_elements() {
+    let html1 = r#"<html><body><button id="buy">Köp</button></body></html>"#;
+    let html2 = r#"<html><body><button id="buy">Köp</button><button id="save">Spara</button></body></html>"#;
+
+    let tree1 = parse_to_semantic_tree(html1, "köp", "https://shop.se");
+    let tree2 = parse_to_semantic_tree(html2, "köp", "https://shop.se");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let added: Vec<_> = delta["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["change_type"] == "Added")
+        .collect();
+    assert!(!added.is_empty(), "Borde detektera tillagd nod");
+}
+
+#[test]
+fn test_diff_detects_removed_elements() {
+    let html1 = r#"<html><body><button id="buy">Köp</button><button id="old">Gammal</button></body></html>"#;
+    let html2 = r#"<html><body><button id="buy">Köp</button></body></html>"#;
+
+    let tree1 = parse_to_semantic_tree(html1, "köp", "https://shop.se");
+    let tree2 = parse_to_semantic_tree(html2, "köp", "https://shop.se");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let removed: Vec<_> = delta["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["change_type"] == "Removed")
+        .collect();
+    assert!(!removed.is_empty(), "Borde detektera borttagen nod");
+}
+
+#[test]
+fn test_diff_detects_label_change() {
+    let html1 = r#"<html><body><button id="cart">0 varor</button></body></html>"#;
+    let html2 = r#"<html><body><button id="cart">3 varor</button></body></html>"#;
+
+    let tree1 = parse_to_semantic_tree(html1, "köp", "https://shop.se");
+    let tree2 = parse_to_semantic_tree(html2, "köp", "https://shop.se");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let modified: Vec<_> = delta["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["change_type"] == "Modified")
+        .collect();
+    assert!(!modified.is_empty(), "Borde detektera ändrad label");
+
+    let label_change = modified[0]["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["field"] == "label");
+    assert!(label_change.is_some(), "Borde ha label-förändring");
+    assert_eq!(label_change.unwrap()["before"], "0 varor");
+    assert_eq!(label_change.unwrap()["after"], "3 varor");
+}
+
+#[test]
+fn test_diff_large_page_token_savings() {
+    // Stort träd med en liten ändring → hög token savings
+    let mut html1 = String::from("<html><body>");
+    let mut html2 = String::from("<html><body>");
+    for i in 0..50 {
+        html1.push_str(&format!(r#"<button id="b{}">Knapp {}</button>"#, i, i));
+        if i == 0 {
+            html2.push_str(&format!(
+                r#"<button id="b{}">Knapp {} (ändrad)</button>"#,
+                i, i
+            ));
+        } else {
+            html2.push_str(&format!(r#"<button id="b{}">Knapp {}</button>"#, i, i));
+        }
+    }
+    html1.push_str("</body></html>");
+    html2.push_str("</body></html>");
+
+    let tree1 = parse_to_semantic_tree(&html1, "test", "https://test.com");
+    let tree2 = parse_to_semantic_tree(&html2, "test", "https://test.com");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let savings = delta["token_savings_ratio"].as_f64().unwrap_or(0.0);
+    assert!(
+        savings > 0.8,
+        "50 noder med 1 ändring borde ge >80% besparing, fick {:.1}%",
+        savings * 100.0
+    );
+}
+
+#[test]
+fn test_diff_performance() {
+    // Generera stora sidor
+    let mut html1 = String::from("<html><body>");
+    let mut html2 = String::from("<html><body>");
+    for i in 0..100 {
+        html1.push_str(&format!(r#"<button id="b{}">Knapp {}</button>"#, i, i));
+        html2.push_str(&format!(r#"<button id="b{}">Knapp {}</button>"#, i, i));
+    }
+    // Lägg till en ny knapp i html2
+    html2.push_str(r#"<button id="new">Ny knapp</button>"#);
+    html1.push_str("</body></html>");
+    html2.push_str("</body></html>");
+
+    let tree1 = parse_to_semantic_tree(&html1, "test", "https://test.com");
+    let tree2 = parse_to_semantic_tree(&html2, "test", "https://test.com");
+    let result = diff_semantic_trees(&tree1, &tree2);
+    let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    let diff_time = delta["diff_time_ms"].as_u64().unwrap_or(9999);
+    assert!(
+        diff_time < 500,
+        "Diff borde klara 100 noder under 500ms, tog {}ms",
+        diff_time
+    );
+}
+
 // ─── Fas 1: Prestandatester ──────────────────────────────────────────────────
 
 #[test]

@@ -155,4 +155,12 @@ Types:
 
 **Fas 3 (Complete)**: Runtime & integration — HTTP API server, Python + Node bindings, benchmarks, 20 real-site tests.
 
-**Fas 4 (Next)**: CDP fallback for JavaScript-heavy SPAs (React, Next.js, Vue).
+**Fas 4a (Complete)**: Semantic DOM Diffing — `diff_semantic_trees`, minimal delta between trees, 80–95% token savings.
+
+**Fas 4b (Next)**: QuickJS Sandbox — embedded JS runtime for evaluating critical client-side logic.
+
+**Fas 4c (Planned)**: Selective Execution — smart detection of JS-dependent content, targeted eval.
+
+**Fas 5 (Planned)**: Temporal Memory & Adversarial Modeling.
+
+**Fas 6 (Planned)**: Intent Compiler — multi-step goal optimization.

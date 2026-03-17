@@ -56,7 +56,7 @@ class AetherAgent:
 
     def parse_top(self, html: str, goal: str, url: str, top_n: int = 10) -> dict:
         """Parse and return only the top-N most relevant nodes."""
-        return self._post("/api/parse/top", {"html": html, "goal": goal, "url": url, "top_n": top_n})
+        return self._post("/api/parse-top", {"html": html, "goal": goal, "url": url, "top_n": top_n})
 
     def find_and_click(self, html: str, goal: str, url: str, target_label: str) -> dict:
         """Find the best clickable element matching a target label."""
@@ -69,6 +69,12 @@ class AetherAgent:
     def extract_data(self, html: str, goal: str, url: str, keys: list) -> dict:
         """Extract structured data by semantic keys."""
         return self._post("/api/extract", {"html": html, "goal": goal, "url": url, "keys": keys})
+
+    def diff_trees(self, old_tree: dict, new_tree: dict) -> dict:
+        """Compare two semantic trees and return only the changes (delta)."""
+        old_json = json.dumps(old_tree) if isinstance(old_tree, dict) else old_tree
+        new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
+        return self._post("/api/diff", {"old_tree_json": old_json, "new_tree_json": new_json})
 
     def check_injection(self, text: str) -> dict:
         """Check text for prompt injection patterns."""
@@ -164,6 +170,11 @@ class AetherAgentWasm:
 
     def extract_data(self, html: str, goal: str, url: str, keys: list) -> dict:
         return json.loads(self._call("extract_data", html, goal, url, json.dumps(keys)))
+
+    def diff_trees(self, old_tree: dict, new_tree: dict) -> dict:
+        old_json = json.dumps(old_tree) if isinstance(old_tree, dict) else old_tree
+        new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
+        return json.loads(self._call("diff_semantic_trees", old_json, new_json))
 
     def check_injection(self, text: str) -> dict:
         return json.loads(self._call("check_injection", text))

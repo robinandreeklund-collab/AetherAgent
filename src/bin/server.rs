@@ -89,6 +89,12 @@ struct ContextGetRequest {
     key: String,
 }
 
+#[derive(Deserialize)]
+struct DiffRequest {
+    old_tree_json: String,
+    new_tree_json: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -108,6 +114,7 @@ async fn root() -> impl IntoResponse {
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
+            "POST /api/diff": "Semantic diff between two trees (token savings)",
             "POST /api/check-injection": "Check text for prompt injection",
             "POST /api/wrap-untrusted": "Wrap content in trust markers",
             "POST /api/memory/create": "Create workflow memory",
@@ -191,6 +198,11 @@ async fn wrap_untrusted(Json(req): Json<WrapRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn diff(Json(req): Json<DiffRequest>) -> impl IntoResponse {
+    let result = aether_agent::diff_semantic_trees(&req.old_tree_json, &req.new_tree_json);
+    (StatusCode::OK, result)
+}
+
 async fn create_memory() -> impl IntoResponse {
     let result = aether_agent::create_workflow_memory();
     (StatusCode::OK, result)
@@ -234,6 +246,8 @@ fn build_router() -> Router {
         .route("/api/parse-top", post(parse_top))
         .route("/api/check-injection", post(check_injection))
         .route("/api/wrap-untrusted", post(wrap_untrusted))
+        // Fas 4a: Semantic diff
+        .route("/api/diff", post(diff))
         // Fas 2: Intent API
         .route("/api/click", post(click))
         .route("/api/fill-form", post(fill_form))
@@ -264,6 +278,7 @@ async fn main() {
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");
+    println!("  POST /api/diff            – Semantic diff between trees");
     println!("  POST /api/check-injection – Check text for injection");
     println!("  POST /api/wrap-untrusted  – Wrap content in trust markers");
     println!("  POST /api/memory/*        – Workflow memory operations");

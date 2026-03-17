@@ -118,6 +118,31 @@ export interface InjectionCheckResult {
   raw_text?: string;
 }
 
+export interface FieldChange {
+  field: string;
+  before: string;
+  after: string;
+}
+
+export interface NodeChange {
+  node_id: number;
+  change_type: "Added" | "Removed" | "Modified";
+  role: string;
+  label: string;
+  changes: FieldChange[];
+}
+
+export interface SemanticDelta {
+  url: string;
+  goal: string;
+  total_nodes_before: number;
+  total_nodes_after: number;
+  changes: NodeChange[];
+  token_savings_ratio: number;
+  summary: string;
+  diff_time_ms: number;
+}
+
 export declare class AetherAgent {
   constructor();
   health(): HealthResult;
@@ -126,6 +151,7 @@ export declare class AetherAgent {
   findAndClick(html: string, goal: string, url: string, targetLabel: string): ClickResult;
   fillForm(html: string, goal: string, url: string, fields: Record<string, string>): FillFormResult;
   extractData(html: string, goal: string, url: string, keys: string[]): ExtractDataResult;
+  diffTrees(oldTreeJson: string | SemanticTree, newTreeJson: string | SemanticTree): SemanticDelta;
   checkInjection(text: string): InjectionCheckResult;
   wrapUntrusted(content: string): string;
   createMemory(): WorkflowMemory;

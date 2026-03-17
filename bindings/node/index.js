@@ -74,6 +74,13 @@ class AetherAgent {
     return JSON.parse(this.wasm.check_injection(text));
   }
 
+  /** Compare two semantic trees and return only the changes (delta) */
+  diffTrees(oldTreeJson, newTreeJson) {
+    const oldJson = typeof oldTreeJson === "string" ? oldTreeJson : JSON.stringify(oldTreeJson);
+    const newJson = typeof newTreeJson === "string" ? newTreeJson : JSON.stringify(newTreeJson);
+    return JSON.parse(this.wasm.diff_semantic_trees(oldJson, newJson));
+  }
+
   /** Wrap content in untrusted content markers for LLM safety */
   wrapUntrusted(content) {
     return this.wasm.wrap_untrusted(content);

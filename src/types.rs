@@ -24,7 +24,7 @@ pub struct SemanticNode {
 }
 
 /// Elementets interaktionstillstånd
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NodeState {
     pub disabled: bool,
     pub checked: Option<bool>,
@@ -146,6 +146,52 @@ pub struct WorkflowStep {
     pub goal: String,
     pub summary: String,
     pub timestamp_ms: u64,
+}
+
+// ─── Semantic Diff Types (Fas 4a) ────────────────────────────────────────
+
+/// Typ av förändring i en nod
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ChangeType {
+    /// Nod lades till (finns i new, inte i old)
+    Added,
+    /// Nod togs bort (finns i old, inte i new)
+    Removed,
+    /// Nodens egenskaper förändrades
+    Modified,
+}
+
+/// En enskild fältförändring i en nod
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldChange {
+    pub field: String,
+    pub before: String,
+    pub after: String,
+}
+
+/// En förändring i det semantiska trädet
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeChange {
+    pub node_id: u32,
+    pub change_type: ChangeType,
+    pub role: String,
+    pub label: String,
+    pub changes: Vec<FieldChange>,
+}
+
+/// Resultatet av en semantic diff mellan två träd
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticDelta {
+    pub url: String,
+    pub goal: String,
+    pub total_nodes_before: u32,
+    pub total_nodes_after: u32,
+    pub changes: Vec<NodeChange>,
+    /// Hur mycket token-besparing denna delta ger (0.0–1.0)
+    pub token_savings_ratio: f32,
+    /// Sammanfattning av förändringarna
+    pub summary: String,
+    pub diff_time_ms: u64,
 }
 
 // ─── Implementations ─────────────────────────────────────────────────────────

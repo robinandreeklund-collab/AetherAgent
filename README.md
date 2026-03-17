@@ -225,6 +225,7 @@ curl -X POST https://your-app.onrender.com/api/check-injection \
 | POST | `/api/click` | Find best clickable element |
 | POST | `/api/fill-form` | Map form fields to key/value pairs |
 | POST | `/api/extract` | Extract structured data by keys |
+| POST | `/api/diff` | Semantic diff between two trees (token savings) |
 | POST | `/api/check-injection` | Check text for prompt injection |
 | POST | `/api/wrap-untrusted` | Wrap content in trust markers |
 | POST | `/api/memory/create` | Create workflow memory |
@@ -254,6 +255,7 @@ AetherAgent/
 │   ├── semantic.rs     # Accessibility tree → semantic JSON
 │   ├── trust.rs        # Trust shield – prompt injection filter
 │   ├── intent.rs       # Intent API – find_and_click, fill_form, extract_data
+│   ├── diff.rs         # Semantic DOM Diffing – minimal delta between trees
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
@@ -291,11 +293,13 @@ AetherAgent/
 
 ### Post-MVP
 
-| Phase | Description |
-|-------|-------------|
-| **Fas 4** | CDP fallback for JavaScript-heavy SPAs (React, Next.js, Vue) |
-| **Fas 5** | Hybrid vision fallback (Gemini 2.5 Pro bounding boxes for unlabeled elements) |
-| **Fas 6** | Open source launch, WebArena benchmarks, community |
+| Phase | Status | Description |
+|-------|--------|-------------|
+| **Fas 4a** – Semantic DOM Diffing | ✅ Done | Compare two trees → minimal delta, 80–95% token savings for multi-step flows |
+| **Fas 4b** – QuickJS Sandbox | 🔜 Next | Embedded JS runtime (QuickJS/Boa) for evaluating critical client-side logic |
+| **Fas 4c** – Selective Execution | Planned | Smart detection of JS-dependent content, targeted eval instead of full browser |
+| **Fas 5** – Temporal Memory & Adversarial Modeling | Planned | Time-series page change tracking, predictive injection defense |
+| **Fas 6** – Intent Compiler | Planned | Multi-step goal → optimized action plan with speculative prefetch |
 
 ### Design Principles
 
@@ -306,6 +310,56 @@ AetherAgent/
 **No JavaScript required for MVP.** AetherAgent targets static HTML and SSR pages first (~30–40% of the web, including the entire high-value data extraction niche). CDP fallback for SPAs comes in Fas 4.
 
 **Embedded, not remote.** Zero network latency because the engine runs in the same process as the agent.
+
+### Semantic DOM Diffing (Fas 4a)
+
+Instead of sending the full semantic tree after every agent action, AetherAgent can now compute a minimal **delta** between two trees. This reduces token usage by 80–95% for multi-step agent flows.
+
+```python
+# Step 1: Parse the initial page
+tree1 = agent.parse(html1, goal="buy product", url="https://shop.se")
+llm.send(tree1)  # Full tree: ~200 tokens
+
+# Step 2: After clicking "Add to cart", parse the updated page
+tree2 = agent.parse(html2, goal="buy product", url="https://shop.se")
+delta = agent.diff_trees(tree1, tree2)
+llm.send(delta)  # Delta: ~20 tokens (90% savings)
+```
+
+```json
+{
+  "total_nodes_before": 15,
+  "total_nodes_after": 16,
+  "changes": [
+    {
+      "node_id": 42,
+      "change_type": "Modified",
+      "role": "button",
+      "label": "1 i varukorg",
+      "changes": [
+        {"field": "label", "before": "0 i varukorg", "after": "1 i varukorg"}
+      ]
+    },
+    {
+      "node_id": 99,
+      "change_type": "Added",
+      "role": "link",
+      "label": "Gå till kassan"
+    }
+  ],
+  "token_savings_ratio": 0.87,
+  "summary": "2 changes (1 modified, 1 added), 87% token savings"
+}
+```
+
+### Future Work
+
+Ideas under evaluation for future phases:
+
+- **Causal Action Graph** – Model page state transitions as a directed graph, enabling the agent to reason about action consequences before executing them.
+- **Cross-Agent Semantic Diffing** – Share semantic deltas between multiple agents working on the same site, reducing redundant parsing.
+- **Goal Decomposition Engine** – Automatically break complex goals into sub-goals with dependency tracking and parallel execution paths.
+- **Multimodal Grounding** – Combine semantic tree data with vision model bounding boxes for elements that lack accessible labels.
 
 ---
 
