@@ -883,6 +883,9 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
         screenshot_dir = rico_dir / "screenshots"
     if not screenshot_dir.exists() and (rico_dir / "images").exists():
         screenshot_dir = rico_dir / "images"
+    # unique_uis.tar.gz lägger ofta bilder i combined/ tillsammans med JSON
+    if not screenshot_dir.exists() and (rico_dir / "combined").exists():
+        screenshot_dir = rico_dir / "combined"
     if not screenshot_dir.exists():
         screenshot_dir = rico_dir
 
@@ -905,7 +908,12 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
 
     converted = 0
     skipped = 0
+    skipped_no_img = 0
     heuristic_upgrades = {"price": 0, "cta": 0, "heading": 0}
+
+    # Diagnostik: logga sökvägar
+    log(f"JSON-källa: {combined_dir}", "INFO")
+    log(f"Bild-källa: {screenshot_dir}", "INFO")
 
     for json_path in json_files:
         screen_id = json_path.stem
@@ -918,10 +926,16 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
             img_name = data.get("screenshot", f"{screen_id}.png")
             if "/" in img_name:
                 img_name = img_name.split("/")[-1]
-            img_path = _find_image(screenshot_dir, Path(img_name).stem)
+            img_stem = Path(img_name).stem
+            img_path = _find_image(screenshot_dir, img_stem)
+            if img_path is None and screenshot_dir != rico_dir:
+                img_path = _find_image(rico_dir, img_stem)
             if img_path is None:
-                img_path = _find_image(rico_dir, Path(img_name).stem)
+                img_path = _find_image(json_path.parent, img_stem)
             if img_path is None:
+                skipped_no_img += 1
+                if skipped_no_img == 1:
+                    log(f"Första saknade bild: {img_stem}.png/jpg i {screenshot_dir}", "WARN")
                 skipped += 1
                 continue
 
@@ -991,7 +1005,15 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
 
         # --- Format A/B: combined/semantic med componentLabel + rekursiv tree ---
         img_path = _find_image(screenshot_dir, screen_id)
+        # Fallback: sök i rico_dir och JSON-filens egen katalog
+        if img_path is None and screenshot_dir != rico_dir:
+            img_path = _find_image(rico_dir, screen_id)
         if img_path is None:
+            img_path = _find_image(json_path.parent, screen_id)
+        if img_path is None:
+            skipped_no_img += 1
+            if skipped_no_img == 1:
+                log(f"Första saknade bild: {screen_id}.png/jpg i {screenshot_dir}", "WARN")
             skipped += 1
             continue
 
@@ -1052,6 +1074,17 @@ def convert_rico_to_yolo(rico_dir: Path, output_dir: Path, extended: bool = Fals
         converted += 1
 
     log(f"Rico → YOLO: {converted} bilder konverterade, {skipped} hoppades över", "OK")
+    if skipped_no_img > 0:
+        log(f"{skipped_no_img} JSON-filer saknade matchande bild", "WARN")
+        # Hjälp användaren: lista kataloger med bildfiler
+        img_dirs = set()
+        for ext in ("*.jpg", "*.png", "*.jpeg"):
+            for p in rico_dir.glob(f"**/{ext}"):
+                img_dirs.add(str(p.parent))
+                if len(img_dirs) >= 5:
+                    break
+        if img_dirs:
+            log(f"Bilder hittades i: {sorted(img_dirs)[:5]}", "INFO")
 
     # Rapportera heuristikuppgraderingar
     upgrades_total = sum(heuristic_upgrades.values())
