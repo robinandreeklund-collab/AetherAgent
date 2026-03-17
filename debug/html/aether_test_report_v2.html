@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AetherAgent – Full Tool Test Report v2</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #06080a;
+    --panel: #0d1014;
+    --panel2: #131820;
+    --border: rgba(255,255,255,0.07);
+    --border-hi: rgba(255,255,255,0.15);
+    --text: #dde3ec;
+    --muted: #6b7585;
+    --dim: #3a4050;
+
+    --green: #22d98a;
+    --green-bg: rgba(34,217,138,0.08);
+    --green-border: rgba(34,217,138,0.25);
+
+    --red: #f05a5a;
+    --red-bg: rgba(240,90,90,0.08);
+    --red-border: rgba(240,90,90,0.25);
+
+    --amber: #f0a030;
+    --amber-bg: rgba(240,160,48,0.08);
+    --amber-border: rgba(240,160,48,0.25);
+
+    --blue: #4da8f7;
+    --blue-bg: rgba(77,168,247,0.08);
+    --blue-border: rgba(77,168,247,0.25);
+
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.65;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* ─── HEADER ─── */
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 40px 48px 32px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: end;
+  }
+
+  .header-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--green);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .header-badge::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    color: #fff;
+  }
+
+  h1 em {
+    font-style: normal;
+    color: var(--green);
+  }
+
+  .header-sub {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 300;
+  }
+
+  .scoreboard {
+    display: flex;
+    gap: 2px;
+  }
+
+  .score-cell {
+    padding: 16px 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    text-align: center;
+    min-width: 80px;
+  }
+
+  .score-cell:first-child { border-radius: 8px 0 0 8px; }
+  .score-cell:last-child  { border-radius: 0 8px 8px 0; }
+  .score-cell.hi { background: var(--green-bg); border-color: var(--green-border); }
+
+  .score-n {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 700;
+    display: block;
+    line-height: 1;
+  }
+
+  .score-n.g { color: var(--green); }
+  .score-n.r { color: var(--red); }
+  .score-n.a { color: var(--amber); }
+
+  .score-l {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* ─── LAYOUT ─── */
+  .body-wrap {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: calc(100vh - 160px);
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 160px);
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    margin-bottom: 24px;
+  }
+
+  .sidebar-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    padding: 0 8px;
+  }
+
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--muted);
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+
+  .sidebar-link:hover { background: var(--panel2); color: var(--text); }
+  .sidebar-link.active { background: var(--green-bg); color: var(--green); }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .dot-green  { background: var(--green); }
+  .dot-red    { background: var(--red); }
+  .dot-amber  { background: var(--amber); }
+
+  /* ─── MAIN ─── */
+  .main {
+    padding: 32px 48px;
+    max-width: 900px;
+  }
+
+  /* ─── SCENARIO CARD ─── */
+  .scenario {
+    margin-bottom: 40px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .scenario-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .scenario-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 28px;
+  }
+
+  .scenario-title {
+    font-weight: 600;
+    font-size: 14px;
+    flex: 1;
+  }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+    border: 1px solid;
+  }
+
+  .tag-green  { color: var(--green); background: var(--green-bg); border-color: var(--green-border); }
+  .tag-red    { color: var(--red);   background: var(--red-bg);   border-color: var(--red-border); }
+  .tag-amber  { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-border); }
+  .tag-blue   { color: var(--blue);  background: var(--blue-bg);  border-color: var(--blue-border); }
+
+  .scenario-body { padding: 20px; }
+
+  /* Tool row */
+  .tool-row {
+    display: grid;
+    grid-template-columns: 180px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    margin-bottom: 6px;
+    transition: border-color 0.15s;
+  }
+
+  .tool-row:hover { border-color: var(--border-hi); }
+
+  .tool-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--amber);
+  }
+
+  .tool-desc {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .tool-result {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .res-ok   { color: var(--green); }
+  .res-fail { color: var(--red); }
+  .res-warn { color: var(--amber); }
+
+  /* Finding block */
+  .finding {
+    margin-top: 14px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.7;
+    border-left: 3px solid;
+  }
+
+  .finding-ok   { background: var(--green-bg); border-color: var(--green); color: #b8f5db; }
+  .finding-bug  { background: var(--red-bg);   border-color: var(--red);   color: #f8c0c0; }
+  .finding-note { background: var(--amber-bg); border-color: var(--amber); color: #f8dcb0; }
+  .finding-info { background: var(--blue-bg);  border-color: var(--blue);  color: #b8d8f8; }
+
+  .finding strong { font-weight: 600; display: block; margin-bottom: 3px; }
+
+  /* Data table */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 12px;
+  }
+
+  .data-table th {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .data-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: var(--panel2); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--amber);
+  }
+
+  /* Summary section */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .sum-box {
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .sum-box-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  .sum-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 3px 0;
+    color: var(--text);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 32px 0;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 20px 48px;
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-badge">AetherAgent MCP · Testrapport v2 · 2026-03-17</div>
+    <h1>Full Tool Coverage<br><em>Test Session 2</em></h1>
+    <p class="header-sub">15 scenarier · 23 verktyg · live anrop mot riktiga sajter</p>
+  </div>
+  <div class="scoreboard">
+    <div class="score-cell hi">
+      <span class="score-n g">16</span>
+      <span class="score-l">Fungerar</span>
+    </div>
+    <div class="score-cell">
+      <span class="score-n a">3</span>
+      <span class="score-l">Varningar</span>
+    </div>
+    <div class="score-cell">
+      <span class="score-n r">4</span>
+      <span class="score-l">Buggar</span>
+    </div>
+    <div class="score-cell">
+      <span class="score-n" style="color:var(--muted)">23</span>
+      <span class="score-l">Totalt</span>
+    </div>
+  </div>
+</div>
+
+<div class="body-wrap">
+
+  <nav class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Session 1</div>
+      <a class="sidebar-link" href="#s1"><span class="status-dot dot-green"></span>Semantic Firewall</a>
+      <a class="sidebar-link" href="#s2"><span class="status-dot dot-green"></span>Trust Shield</a>
+      <a class="sidebar-link" href="#s3"><span class="status-dot dot-green"></span>find_and_click</a>
+      <a class="sidebar-link" href="#s4"><span class="status-dot dot-green"></span>fill_form (hotel)</a>
+      <a class="sidebar-link" href="#s5"><span class="status-dot dot-amber"></span>parse_top</a>
+      <a class="sidebar-link" href="#s6"><span class="status-dot dot-green"></span>Kausal reasoning</a>
+      <a class="sidebar-link" href="#s7"><span class="status-dot dot-green"></span>diff_trees (news)</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Session 2</div>
+      <a class="sidebar-link" href="#s8"><span class="status-dot dot-red"></span>fetch_extract (live)</a>
+      <a class="sidebar-link" href="#s9"><span class="status-dot dot-amber"></span>compile_goal</a>
+      <a class="sidebar-link" href="#s10"><span class="status-dot dot-amber"></span>fetch_click (live)</a>
+      <a class="sidebar-link" href="#s11"><span class="status-dot dot-green"></span>Multi-agent collab</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Buggar</div>
+      <a class="sidebar-link" style="color:var(--red)" href="#bugs">4 öppna buggar →</a>
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- S8 -->
+    <div class="scenario" id="s8">
+      <div class="scenario-header">
+        <span class="scenario-num">08</span>
+        <span class="scenario-title">fetch_extract på riktiga sajter – prisinformation</span>
+        <span class="tag tag-red">BUG</span>
+      </div>
+      <div class="scenario-body">
+        <div class="tool-row">
+          <span class="tool-name">fetch_extract</span>
+          <span class="tool-desc">netlify.com/pricing – plan_name, price, features</span>
+          <span class="tool-result res-warn">Partiell match</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">fetch_extract</span>
+          <span class="tool-desc">fly.io/plans – plan_name, price, features</span>
+          <span class="tool-result res-fail">price=missing</span>
+        </div>
+
+        <div class="finding finding-bug">
+          <strong>BUG #5 – fetch_extract kontamineras av script-innehåll</strong>
+          plan_name returnerar <code>"function OptanonWrapper() {} Pricing..."</code> – cookie-scriptets källkod läcker in som textblock. Confidence 0.22 avslöjar att scoringen är låg men extraktionen körs ändå. Regex-fallback på prisformat (£/$/€\d+) saknas. JS-renderade prissidor missar <code>price</code> konsekvent.
+        </div>
+        <div class="finding finding-note">
+          <strong>Notering: confidence-tröskelvärde saknas</strong>
+          Ingen min_confidence-parameter – verktyget returnerar gissningar med confidence 0.20 lika tyst som säkra träffar med 0.95. Konsumenten kan inte filtrera.
+        </div>
+      </div>
+    </div>
+
+    <!-- S9 -->
+    <div class="scenario" id="s9">
+      <div class="scenario-header">
+        <span class="scenario-num">09</span>
+        <span class="scenario-title">compile_goal – tre komplexitetsnivåer</span>
+        <span class="tag tag-amber">Varning</span>
+      </div>
+      <div class="scenario-body">
+        <table class="data-table">
+          <thead>
+            <tr><th>Mål</th><th>Steg</th><th>Parallella grupper</th><th>Bedömning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Köp billigaste flyg STK→TYO</td><td>7</td><td>7 (fel)</td><td style="color:var(--red)">Generiskt e-handelsflöde</td></tr>
+            <tr><td>Jämför RTX 5090 pris × 3 butiker</td><td>5</td><td>4 (rätt)</td><td style="color:var(--green)">Identifierar parallellism</td></tr>
+            <tr><td>Logga in</td><td>5</td><td>5 (fel)</td><td style="color:var(--amber)">Korrekt men sekventiellt</td></tr>
+          </tbody>
+        </table>
+
+        <div class="finding finding-bug">
+          <strong>BUG #6 – compile_goal ignorerar målkontext</strong>
+          Flyg-sökmålet genererar "Lägg i varukorg / leveransinformation" – ett generiskt köpflöde. Jämförelsemålet fungerar bättre och identifierar parallella extractions. Modellen bakom <code>compile_goal</code> verkar använda en mall snarare än att resonera om det faktiska målet.
+        </div>
+        <div class="finding finding-note">
+          <strong>parallel_groups räknas alltid = total_steps</strong>
+          Flyg: 7 steg → 7 parallella grupper (borde vara 1, alla seriella). "Logga in": 5 steg → 5 grupper. Räknaren är troligen <code>steps.len()</code> istället för faktisk grupp-räkning.
+        </div>
+      </div>
+    </div>
+
+    <!-- S10 -->
+    <div class="scenario" id="s10">
+      <div class="scenario-header">
+        <span class="scenario-num">10</span>
+        <span class="scenario-title">fetch_click live – rust-lang.org</span>
+        <span class="tag tag-amber">Varning</span>
+      </div>
+      <div class="scenario-body">
+        <div class="tool-row">
+          <span class="tool-name">fetch_click</span>
+          <span class="tool-desc">"Learn Rust" → hittar Learn, relevance 0.56</span>
+          <span class="tool-result res-ok">✓ selector OK</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">fetch_click</span>
+          <span class="tool-desc">"Cargo" → tom label, selector "a"</span>
+          <span class="tool-result res-fail">✗ oanvändbar</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">fetch_click</span>
+          <span class="tool-desc">"Tools" → Tools, relevance 0.96</span>
+          <span class="tool-result res-ok">✓ perfekt match</span>
+        </div>
+
+        <div class="finding finding-info">
+          <strong>Mönster: aria-label avgör kvaliteten</strong>
+          2/3 anrop fungerade perfekt (aria-label present). "Cargo" saknar aria-label – motorn faller tillbaka på generisk <code>"a"</code>-selector, omöjlig att använda i praktiken. Relevance-skillnaden är dramatisk: 0.96 (aria) vs 0.16 (ingen aria).
+        </div>
+        <div class="finding finding-note">
+          <strong>Förbättringsförslag</strong>
+          Fallback-chain: aria-label → text-content exakt → text-content partial → href-suffix. Nuvarande fallback stannar vid första elementet som matchar något.
+        </div>
+      </div>
+    </div>
+
+    <!-- S11 -->
+    <div class="scenario" id="s11">
+      <div class="scenario-header">
+        <span class="scenario-num">11</span>
+        <span class="scenario-title">Multi-agent prisjakt – 3 agenter, 2 butiker</span>
+        <span class="tag tag-green">✓ Fungerar</span>
+      </div>
+      <div class="scenario-body">
+        <div class="tool-row">
+          <span class="tool-name">create_collab_store</span>
+          <span class="tool-desc">Skapar delad store</span>
+          <span class="tool-result res-ok">✓</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">register_collab_agent × 3</span>
+          <span class="tool-desc">price-SE, price-DE, aggregator</span>
+          <span class="tool-result res-ok">✓ alla registrerade</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">publish_collab_delta</span>
+          <span class="tool-desc">4 försök, rätt schema till slut</span>
+          <span class="tool-result res-warn">Schema odokumenterat</span>
+        </div>
+        <div class="tool-row">
+          <span class="tool-name">fetch_collab_deltas</span>
+          <span class="tool-desc">aggregator hämtar båda deltana</span>
+          <span class="tool-result res-ok">saved_parse_count: 2</span>
+        </div>
+
+        <div class="finding finding-ok">
+          <strong>Multi-agent pipeline fungerar end-to-end</strong>
+          agent-aggregator fick båda pris-deltana (Webhallen 22 990 SEK, Amazon.de €1 849) utan att parsa en enda sida själv. consumption_log loggat korrekt. 2 saved parses = direkt token-besparing i praktiken.
+        </div>
+        <div class="finding finding-bug">
+          <strong>BUG #7 – publish_collab_delta kräver odokumenterat diff_trees-schema</strong>
+          delta_json måste innehålla <code>token_savings_ratio</code>, <code>total_nodes_before</code>, <code>total_nodes_after</code>, <code>changes[]</code> – exakt samma format som <code>diff_trees</code> returnerar. 4 försök krävdes. Dokumentationen nämner inte detta. Verktyget borde acceptera godtycklig payload eller dokumentera kontraktet tydligt.
+        </div>
+      </div>
+    </div>
+
+    <div class="divider" id="bugs"></div>
+
+    <!-- BUG SUMMARY -->
+    <div class="scenario">
+      <div class="scenario-header">
+        <span class="scenario-num">—</span>
+        <span class="scenario-title">Sammanställning – alla öppna buggar</span>
+        <span class="tag tag-red">4 buggar</span>
+      </div>
+      <div class="scenario-body">
+        <table class="data-table">
+          <thead>
+            <tr><th>#</th><th>Verktyg</th><th>Beskrivning</th><th>Prioritet</th><th>Fix</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BUG-1</code></td>
+              <td><code>build_causal_graph</code></td>
+              <td>timestamp u32 overflow (Unix-ms är 13 siffror)</td>
+              <td style="color:var(--red)">KRITISK</td>
+              <td>u32 → u64 i TemporalSnapshot</td>
+            </tr>
+            <tr>
+              <td><code>BUG-2</code></td>
+              <td><code>publish_collab_delta</code></td>
+              <td>Nested url-validering misslyckas</td>
+              <td style="color:var(--amber)">MEDIUM</td>
+              <td>url Optional i nested delta</td>
+            </tr>
+            <tr>
+              <td><code>BUG-5</code></td>
+              <td><code>fetch_extract</code></td>
+              <td>Script-innehåll läcker in i extraktion, price missar JS-rendered</td>
+              <td style="color:var(--amber)">MEDIUM</td>
+              <td>Script-node-filter + regex-fallback £/$/€</td>
+            </tr>
+            <tr>
+              <td><code>BUG-6</code></td>
+              <td><code>compile_goal</code></td>
+              <td>Ignorerar målkontext, generisk mall, parallel_groups = total_steps</td>
+              <td style="color:var(--amber)">MEDIUM</td>
+              <td>Goal-aware planning, fix gruppräknare</td>
+            </tr>
+            <tr>
+              <td><code>BUG-7</code></td>
+              <td><code>publish_collab_delta</code></td>
+              <td>Kräver odokumenterat diff_trees-schema</td>
+              <td style="color:var(--amber)">MEDIUM</td>
+              <td>Acceptera fri payload ELLER dokumentera</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="summary-grid">
+          <div class="sum-box">
+            <div class="sum-box-title">✓ Fungerar korrekt (16/23)</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>fetch_parse, fetch_click, fetch_extract (partiell)</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>parse, parse_top (med caveat)</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>fill_form, find_and_click</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>diff_trees, check_injection, classify_request</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>build_causal_graph ✓ (format löst)</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>find_safest_path, predict_action_outcome</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>ground_semantic_tree, match_bbox_iou</div>
+            <div class="sum-item"><span class="status-dot dot-green"></span>collab store full pipeline</div>
+          </div>
+          <div class="sum-box">
+            <div class="sum-box-title">⚠ Öppna buggar / varningar (7)</div>
+            <div class="sum-item"><span class="status-dot dot-red"></span>BUG-1: build_causal_graph timestamp u32</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>BUG-2: publish_collab_delta nested url</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>BUG-5: fetch_extract script-kontaminering</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>BUG-6: compile_goal generisk mall</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>BUG-7: publish schema odokumenterat</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>WARN: fetch_click degraderar utan aria-label</div>
+            <div class="sum-item"><span class="status-dot dot-amber"></span>WARN: parse_top inkluderar hela trädet som nod 4+</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="footer">
+  <span>AetherAgent · MCP Tool Coverage Report v2 · 2026-03-17</span>
+  <span>23 verktyg · 15 scenarier · <span style="color:var(--green)">69% ✓</span> · <span style="color:var(--red)">31% buggar/varningar</span></span>
+</div>
+
+<script>
+  // Sidebar active state
+  const links = document.querySelectorAll('.sidebar-link[href^="#"]');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const match = document.querySelector(`.sidebar-link[href="#${e.target.id}"]`);
+        if (match) match.classList.add('active');
+      }
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll('.scenario[id]').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
