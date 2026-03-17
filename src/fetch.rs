@@ -98,8 +98,9 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         .send()
         .await
         .map_err(|e| {
+            let debug = format!("{e:?}");
             format!(
-                "Fetch misslyckades: {e:?} [is_connect={}, is_timeout={}, is_builder={}, is_request={}, is_redirect={}]",
+                "FETCH_DEBUG: {debug} | connect={} timeout={} builder={} request={} redirect={}",
                 e.is_connect(),
                 e.is_timeout(),
                 e.is_builder(),
