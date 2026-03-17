@@ -319,6 +319,65 @@ AetherAgent/
 | WASM binary size | <5MB | — |
 | Parallel agents (8GB RAM) | >200 | Playwright: ~5 |
 
+### Live Benchmarks (Render Free Tier)
+
+Tested against the live deployment at `aether-agent-api.onrender.com`. Network baseline (TTFB) is ~110ms; engine processing time is the remainder.
+
+```
+Benchmark                                        N      Avg     P50     Min     Max
+─────────────────────────────────────────────────────────────────────────────────────
+Health & Parse
+  GET /health                                   20    457ms   152ms   106ms  3474ms
+  POST /api/parse (simple, 3 elements)          20    175ms   142ms   101ms   379ms
+  POST /api/parse (ecommerce, 10 elements)      20    143ms   132ms    92ms   357ms
+  POST /api/parse (login form)                  20    134ms   117ms    90ms   298ms
+  POST /api/parse (medium, 10 products)         15    126ms   114ms    92ms   245ms
+  POST /api/parse (large, 50 products)          10    181ms   176ms   110ms   303ms
+
+Intent API
+  POST /api/click (find button)                 20    124ms   108ms    89ms   281ms
+  POST /api/fill-form (3 fields)                20    119ms   111ms    93ms   218ms
+  POST /api/extract (2 keys)                    20    115ms   108ms    88ms   294ms
+
+Trust Shield
+  POST /api/check-injection (safe text)         20    114ms   111ms   101ms   147ms
+  POST /api/check-injection (malicious text)    20    109ms   109ms    90ms   138ms
+
+Workflow Memory
+  POST /api/memory/create                       20    125ms   114ms    88ms   351ms
+  POST /api/memory/step                         20    124ms   112ms    89ms   267ms
+  POST /api/memory/context/set                  20    120ms   114ms    90ms   281ms
+  POST /api/memory/context/get                  20    130ms   112ms    93ms   391ms
+```
+
+**Key takeaways:**
+
+- **Engine processing: ~1–70ms** (total latency minus ~110ms network baseline)
+- **50-product page parsed in ~70ms** engine time – well under 500ms target
+- **Injection check: <1ms** engine time – negligible overhead
+- **All endpoints under 200ms P50** including network round-trip
+- First request after cold start (~3.5s) reflects Render free tier spin-up
+
+### Local Benchmarks (no network overhead)
+
+Run `cargo run --bin aether-bench` for pure engine performance:
+
+```
+Benchmark                                     Avg (µs)   Min (µs)
+──────────────────────────────────────────────────────────────────
+parse: simple page (3 elements)                    284        261
+parse: ecommerce (12 elements)                   1 211      1 151
+parse: login form (6 elements)                     603        556
+parse: complex page (100 products)              26 106     25 141
+click: ecommerce find button                       937        888
+fill_form: login (2 fields)                        501        476
+extract: ecommerce price                           961        915
+injection: safe text                                13         13
+injection: malicious text                           14         13
+```
+
+**All local benchmarks pass performance targets** (simple <50ms, complex <500ms).
+
 ---
 
 ## Security
