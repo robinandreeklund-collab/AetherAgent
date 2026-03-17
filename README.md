@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **20 Rust modules**, **40 WASM-exported functions**, **42 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **20 Rust modules**, **40 WASM-exported functions**, **44 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -832,7 +832,7 @@ End-to-end tests against real production websites, running on the deployed Rende
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │                                                                   │
 │              20 modules · 40 WASM functions                       │
-│              42 HTTP endpoints · 22 MCP tools                     │
+│              44 HTTP endpoints · 22 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐

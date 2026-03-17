@@ -12,6 +12,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -280,6 +281,18 @@ struct CollabFetchRequest {
     agent_id: String,
 }
 
+#[derive(Deserialize)]
+struct DetectXhrRequest {
+    html: String,
+}
+
+#[derive(Deserialize)]
+struct ParseScreenshotRequest {
+    png_base64: String,
+    model_base64: String,
+    goal: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -333,6 +346,8 @@ async fn root() -> impl IntoResponse {
             "POST /api/collab/register": "Register agent in collab store",
             "POST /api/collab/publish": "Publish semantic delta to collab store",
             "POST /api/collab/fetch": "Fetch new deltas for agent",
+            "POST /api/detect-xhr": "Scan HTML for XHR/fetch/AJAX endpoints in scripts",
+            "POST /api/parse-screenshot": "Analyze screenshot with YOLOv8-nano vision model",
             "POST /mcp": "MCP Streamable HTTP endpoint (JSON-RPC, spec 2025-03-26)"
         },
         "example": {
@@ -856,6 +871,38 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
     (StatusCode::OK, result)
 }
 
+// ─── Fas 10: XHR Interception ────────────────────────────────────────────────
+
+async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
+    let result = aether_agent::detect_xhr_urls(&req.html);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 11: Vision ─────────────────────────────────────────────────────────
+
+async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> impl IntoResponse {
+    let png_bytes = match B64.decode(&req.png_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid PNG base64: {e}"}}"#),
+            )
+        }
+    };
+    let model_bytes = match B64.decode(&req.model_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid model base64: {e}"}}"#),
+            )
+        }
+    };
+    let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    (StatusCode::OK, result)
+}
+
 // ─── MCP Streamable HTTP (spec 2025-03-26) ───────────────────────────────────
 
 /// Tool schema som exponeras via MCP tools/list
@@ -1149,8 +1196,38 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["store_json", "agent_id"]
             }
+        },
+        {
+            "name": "detect_xhr_urls",
+            "description": "Scan HTML for hidden XHR/fetch/AJAX network calls in inline scripts and event handlers. Discovers fetch(), XMLHttpRequest.open(), $.ajax(), $.get(), $.post() patterns. Returns array of {url, method, headers} objects.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string to scan for XHR/fetch calls"}
+                },
+                "required": ["html"]
+            }
+        },
+        {
+            "name": "parse_screenshot",
+            "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "png_base64": {"type": "string", "description": "PNG screenshot as base64 string"},
+                    "model_base64": {"type": "string", "description": "YOLOv8-nano ONNX model as base64 string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"}
+                },
+                "required": ["png_base64", "model_base64", "goal"]
+            }
         }
     ])
+}
+
+/// Avkoda base64-sträng till bytes
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    B64.decode(input)
+        .map_err(|e| format!("Base64 decode error: {e}"))
 }
 
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
@@ -1319,6 +1396,22 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             let store = args["store_json"].as_str().unwrap_or("");
             let agent_id = args["agent_id"].as_str().unwrap_or("");
             Ok(aether_agent::fetch_collab_deltas(store, agent_id))
+        }
+        "detect_xhr_urls" => {
+            let html = args["html"].as_str().unwrap_or("");
+            Ok(aether_agent::detect_xhr_urls(html))
+        }
+        "parse_screenshot" => {
+            let png_b64 = args["png_base64"].as_str().unwrap_or("");
+            let model_b64 = args["model_base64"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let png_bytes = base64_decode(png_b64)?;
+            let model_bytes = base64_decode(model_b64)?;
+            Ok(aether_agent::parse_screenshot(
+                &png_bytes,
+                &model_bytes,
+                goal,
+            ))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -1517,6 +1610,10 @@ fn build_router() -> Router {
         .route("/api/collab/register", post(collab_register))
         .route("/api/collab/publish", post(collab_publish))
         .route("/api/collab/fetch", post(collab_fetch))
+        // Fas 10: XHR Interception
+        .route("/api/detect-xhr", post(detect_xhr))
+        // Fas 11: Vision
+        .route("/api/parse-screenshot", post(parse_screenshot_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .layer(cors)
@@ -1569,8 +1666,10 @@ async fn main() {
     println!("  POST /api/collab/publish         – Publish delta to collab store");
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
     println!();
-    println!("  POST /mcp                        – MCP Streamable HTTP endpoint");
-    println!("  GET  /mcp                        – MCP SSE stream (not yet implemented)");
+    println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
+    println!("  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision");
+    println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
+    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications, returns 405 — use POST)");
     println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)

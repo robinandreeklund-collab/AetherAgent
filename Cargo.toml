@@ -48,7 +48,7 @@ wasm-bindgen-test = "0.3"
 
 [features]
 default = []
-server = ["axum", "tokio", "tower-http", "js-eval", "fetch"]
+server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64"]
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64"]
