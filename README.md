@@ -463,30 +463,38 @@ Run: `cargo run --features mcp --bin aether-mcp`
 
 Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 
-| Tool | Description |
-|------|-------------|
-| `parse` | Parse HTML to semantic tree |
-| `parse_top` | Top-N most relevant nodes |
-| `parse_with_js` | Parse with JS evaluation |
-| `find_and_click` | Find clickable element |
-| `fill_form` | Map form fields |
-| `extract_data` | Extract structured data |
-| `check_injection` | Check for prompt injection |
-| `compile_goal` | Compile goal to action plan |
-| `classify_request` | Classify URL against firewall |
-| `diff_trees` | Semantic diff (70-99% token savings) |
-| `build_causal_graph` | Build causal action graph |
-| `predict_action_outcome` | Predict action consequences |
-| `find_safest_path` | Safest path to goal state |
-| `discover_webmcp` | Discover WebMCP tools |
-| `ground_semantic_tree` | Ground tree with bounding boxes |
-| `match_bbox_iou` | Match bbox via IoU |
-| `create_collab_store` | Create collaboration store |
-| `register_collab_agent` | Register agent for collaboration |
-| `publish_collab_delta` | Publish semantic delta |
-| `fetch_collab_deltas` | Fetch new deltas |
-| `detect_xhr_urls` | Scan HTML for hidden XHR/fetch/AJAX endpoints |
-| `parse_screenshot` | Analyze screenshot with YOLOv8 vision model |
+| Tool | Description | Use when… |
+|------|-------------|-----------|
+| **Core Parsing** | | |
+| `parse` | Parse HTML into a goal-aware semantic accessibility tree with roles, labels, actions, trust level, and relevance scoring | You need a full semantic view of a page |
+| `parse_top` | Return only the N most goal-relevant nodes, ranked by score | You want to save tokens on large pages (set top_n 5–20) |
+| `parse_with_js` | Parse HTML and evaluate inline JS (getElementById, querySelector, style changes) before building the tree | Page has dynamic DOM manipulation in inline scripts |
+| **Intent & Interaction** | | |
+| `find_and_click` | Find the best-matching clickable element by visible text or aria-label. Returns CSS selector, confidence, action metadata | You need to click "Add to cart", "Sign in", "Next page", etc. |
+| `fill_form` | Semantically map your key/value pairs to form fields by label/name/placeholder. Returns selectors | You need to fill login, checkout, registration, or search forms |
+| `extract_data` | Extract structured data by semantic keys (e.g. `["price", "title", "stock"]`). Returns key→value JSON | You need specific data points without parsing the full tree |
+| **Security** | | |
+| `check_injection` | Scan text for 20+ prompt injection patterns (EN+SV), zero-width chars, role-hijacking. Returns severity + matched patterns | Before passing any web content to an LLM |
+| `classify_request` | 3-level semantic firewall: L1 URL blocklist, L2 MIME/extension, L3 semantic relevance scoring | Before fetching a URL — blocks tracking, ads, irrelevant resources |
+| **Planning & Reasoning** | | |
+| `compile_goal` | Decompose a high-level goal into ordered sub-goals with dependencies and parallelizable steps | You need an action plan: "buy cheapest laptop", "book a flight" |
+| `diff_trees` | Compare two semantic trees and return only added/removed/modified nodes (80–95% token savings) | You parsed the same page twice and want to see what changed |
+| `build_causal_graph` | Build a directed graph of state transitions with probabilities and risk scores from page snapshots + actions | You have multi-step interaction history and want to reason about it |
+| `predict_action_outcome` | Predict next state, probability, risk score, and expected changes for a given action | "What happens if I click Submit?" — look-ahead before committing |
+| `find_safest_path` | Find the lowest-risk action sequence to reach a goal state (prefers safety over speed) | Navigating checkout/delete/transfer flows where mistakes are costly |
+| **WebMCP Discovery** | | |
+| `discover_webmcp` | Detect `navigator.modelContext.registerTool()` registrations (W3C WebMCP standard). Returns tool names, descriptions, JSON schemas | Checking if a site exposes its own AI-callable tools |
+| **Multimodal Grounding** | | |
+| `ground_semantic_tree` | Combine semantic tree with visual bounding boxes from a screenshot. Annotates nodes with screen position + Set-of-Mark IDs | Vision-language workflows where you need to click at screen coordinates |
+| `match_bbox_iou` | Find which DOM element best matches a bounding box via IoU overlap | Resolving "what did the user point at?" from vision model output |
+| **Cross-Agent Collaboration** | | |
+| `create_collab_store` | Create an empty shared state store for multi-agent collaboration | Multiple agents need to share observations about the same pages |
+| `register_collab_agent` | Register an agent (with ID + goal) in the collab store | Adding a new agent to a collaborative workflow |
+| `publish_collab_delta` | Share a semantic page delta with other agents | An agent observed a page change and wants to broadcast it |
+| `fetch_collab_deltas` | Get all undelivered deltas from other agents (exactly-once delivery) | Catching up on what other agents observed before taking action |
+| **Network & Vision** | | |
+| `detect_xhr_urls` | Scan inline scripts for `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` patterns. Returns `{url, method, headers}` | Discovering hidden API endpoints in a page's JavaScript |
+| `parse_screenshot` | Analyze a screenshot with YOLOv8-nano object detection. Returns detected UI elements with bounding boxes, confidence, and semantic tree | You have a screenshot but no HTML — visual element detection |
 
 ### Claude Desktop Setup
 
@@ -863,7 +871,7 @@ AetherAgent/
 │       ├── server.rs     # Axum HTTP API (42 endpoints)
 │       └── mcp_server.rs # MCP server (22 tools, stdio transport)
 ├── tests/
-│   ├── integration_test.rs   # 40 end-to-end tests
+│   ├── integration_test.rs   # 49 end-to-end tests
 │   ├── fixture_tests.rs      # 30 fixture-based scenario tests
 │   └── fixtures/             # 20 realistic HTML test pages
 ├── benches/
@@ -1023,10 +1031,12 @@ image = "0.25"              # PNG/JPEG decoding (feature: vision)
 
 ### Future Work
 
-- **Full JS execution bridge** — Pair with headless browser for SPA rendering, feeding rendered HTML back to AetherAgent
-- **Vision model training** — Fine-tune YOLOv8-nano on real UI datasets for production-grade detection accuracy
-- **XHR response caching** — Cache intercepted API responses across temporal snapshots for diff-based monitoring
+- **Full JS execution bridge** — Pair with headless browser (Playwright/Puppeteer) for SPA rendering, feeding rendered HTML back to AetherAgent for semantic analysis
+- **Vision model training** — Fine-tune YOLOv8-nano on real UI datasets (Common Crawl screenshots, WebUI-7K) for production-grade detection accuracy beyond the current stub
+- **XHR response caching** — Cache intercepted API responses across temporal snapshots for diff-based monitoring of hidden data endpoints
 - **Streaming parse** — Incremental semantic tree building for large pages without buffering full HTML
+- **Multi-page workflow orchestration** — Stateful agent loops that span multiple pages with automatic state persistence between navigations
+- **OAuth / session management** — Transparent cookie-based login flows for authenticated page access during agent workflows
 
 ---
 
