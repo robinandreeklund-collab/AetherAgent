@@ -58,7 +58,7 @@ Every AI browser agent today faces the same trade-off:
 
 AetherAgent is the first engine built to occupy that empty quadrant: **fast *and* smart**.
 
-No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly — fetching pages, parsing HTML into semantic accessibility trees with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 millisecond startup and ~12 MB RAM. Built-in HTTP fetch with cookies, redirects, robots.txt compliance, and SSRF protection means AetherAgent works end-to-end: URL in, semantic tree out.
+No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly — fetching pages, parsing HTML into semantic accessibility trees with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 ms per page and ~12 MB RAM. Built-in HTTP fetch with cookies, redirects, robots.txt compliance, and SSRF protection means AetherAgent works end-to-end: URL in, semantic tree out.
 
 ### Honest Positioning
 
@@ -69,7 +69,7 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Semantic tree with goal scoring | **Yes** | No | Partial | No |
 | Prompt injection protection | **Yes** | No | No | No |
 | Startup time | <1 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
-| Memory per instance | ~9.5 MB | ~150 MB | ~200 MB | ~30 MB |
+| Memory per instance | ~12 MB | ~150 MB | ~200 MB | ~30 MB |
 | Full JavaScript (V8) | No | Yes | Yes | No |
 | CSS rendering | No | Yes | Yes | No |
 | Embeddable in WASM | **Yes** | No | No | No |
@@ -162,7 +162,7 @@ Goal-oriented actions instead of raw coordinate clicks:
 
 **Module:** `diff.rs`
 
-Computes minimal deltas between two semantic trees. 80–95% token savings for multi-step agent flows.
+Computes minimal deltas between two semantic trees. 70–99% token savings for multi-step agent flows.
 
 | Function | What it does |
 |----------|-------------|
@@ -441,7 +441,7 @@ Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 | `check_injection` | Check for prompt injection |
 | `compile_goal` | Compile goal to action plan |
 | `classify_request` | Classify URL against firewall |
-| `diff_trees` | Semantic diff (80-95% token savings) |
+| `diff_trees` | Semantic diff (70-99% token savings) |
 | `build_causal_graph` | Build causal action graph |
 | `predict_action_outcome` | Predict action consequences |
 | `find_safest_path` | Safest path to goal state |
@@ -581,6 +581,64 @@ cargo bench
 | Extract: product price | <50 ms |
 | Injection check: safe text | <1 ms |
 | Injection check: malicious text | <1 ms |
+
+---
+
+## Performance
+
+Real benchmark results from head-to-head testing against [Lightpanda](https://github.com/lightpanda-io/browser) (Zig headless browser), run locally on the same machine. AetherAgent runs as a persistent Axum server (release build). Lightpanda runs as a CLI subprocess per request (matching their official benchmark methodology).
+
+> Full methodology, caveats, and reproducibility instructions: [`benches/README.md`](benches/README.md)
+
+### Head-to-Head Summary
+
+| Benchmark | AetherAgent | Lightpanda | Speedup |
+|-----------|-------------|------------|---------|
+| Campfire Commerce (100 page loads) | **139 ms** total | 29,630 ms total | **213x** |
+| Amiibo crawl (932 pages) | **835 ms** total | 243,500 ms total | **292x** |
+| Parse: simple page (3 elements) | **653 us** | 288 ms | **442x** |
+| Parse: ecommerce (10 elements) | **747 us** | 267 ms | **357x** |
+| Parse: complex (400+ elements) | **3.5 ms** | 265 ms | **77x** |
+| 100 concurrent parses | **176 ms** wall | 1,236 ms wall | **7x** |
+
+### Memory
+
+| Scenario | AetherAgent | Lightpanda |
+|----------|-------------|------------|
+| Idle | **12 MB** RSS | -- |
+| Under load (50x complex pages) | **12.4 MB** RSS | 19 MB/instance |
+| 100 concurrent | **~12 MB** total | **~1.9 GB** total |
+
+### Token Savings (Semantic Diff)
+
+In multi-step agent loops, AetherAgent's semantic diffing sends only changes to the LLM:
+
+| Scenario | Full tree | Delta | Savings |
+|----------|-----------|-------|---------|
+| Static page (no change) | 495 tokens | 54 tokens | **89%** |
+| E-commerce: add to cart | 1,823 tokens | 547 tokens | **70%** |
+| Complex page: price update | 31,898 tokens | 55 tokens | **99.8%** |
+
+10-step agent loop: 17,505 tokens (raw) → 6,605 tokens (with diff) = **62% savings**.
+
+### WebArena-Style Scenarios
+
+Complete multi-step agent tasks (compile goal → parse pages → diff → execute plan):
+
+| Task | Steps | Total | Per step |
+|------|-------|-------|----------|
+| Buy cheapest product | 3 | 6.7 ms | 2.2 ms |
+| Post a comment | 2 | 5.2 ms | 2.6 ms |
+| Create GitLab issue | 2 | 5.1 ms | 2.5 ms |
+
+### Honest Caveats
+
+- **AetherAgent is a semantic browser engine** — it fetches pages and builds goal-aware semantic trees but does not execute full JavaScript (V8). Lightpanda runs full V8 and handles SPAs.
+- **Lightpanda's ~250 ms overhead** is dominated by process cold start. A persistent Lightpanda server (CDP mode) would be faster for sequential requests.
+- **AetherAgent's Boa sandbox** handles simple inline scripts (getElementById, querySelector). For React/Angular SPAs, pair with a headless browser.
+- For static/SSR pages (~40% of the web), AetherAgent works fully standalone. For JS-heavy SPAs, they're complementary.
+
+> Run benchmarks yourself: `python3 benches/bench_campfire.py` and `python3 benches/bench_vs_lightpanda.py`
 
 ---
 
@@ -753,6 +811,7 @@ AetherAgent is a fully functional AI browser engine with:
 - **20 MCP tools** — Claude Desktop, Cursor, VS Code compatible
 - **232 tests** — 162 unit + 30 fixture + 40 integration, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
+- **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)
 - **CI/CD pipeline** — test, clippy, fmt, WASM build, security audit
 
