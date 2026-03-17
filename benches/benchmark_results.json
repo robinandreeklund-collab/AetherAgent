@@ -1,0 +1,293 @@
+{
+  "head_to_head": {
+    "simple": {
+      "ae_us": 653.1559999984893,
+      "lp_us": 288425.314499932,
+      "ae_tokens": 495,
+      "lp_tokens": 422,
+      "speedup": 441.58717748990915
+    },
+    "ecommerce": {
+      "ae_us": 746.8515000255138,
+      "lp_us": 266538.5435001326,
+      "ae_tokens": 1678,
+      "lp_tokens": 422,
+      "speedup": 356.88291914929164
+    },
+    "login": {
+      "ae_us": 682.1014999331965,
+      "lp_us": 279597.02600014675,
+      "ae_tokens": 1231,
+      "lp_tokens": 422,
+      "speedup": 409.9053088543712
+    },
+    "complex_50": {
+      "ae_us": 2008.0145000065386,
+      "lp_us": 259178.2345000411,
+      "ae_tokens": 31898,
+      "lp_tokens": 422,
+      "speedup": 129.07189390275676
+    },
+    "complex_100": {
+      "ae_us": 3461.636000110957,
+      "lp_us": 265200.34150007635,
+      "ae_tokens": 63696,
+      "lp_tokens": 422,
+      "speedup": 76.6112732510223
+    },
+    "complex_200": {
+      "ae_us": 5722.708999996939,
+      "lp_us": 250491.8175001194,
+      "ae_tokens": 95179,
+      "lp_tokens": 422,
+      "speedup": 43.77154552157962
+    }
+  },
+  "parallel": {
+    "aether_25": {
+      "wall_ms": 48.55087199985064,
+      "avg_ms": 16.263091240052745,
+      "throughput": 514.923810226867
+    },
+    "lp_25": {
+      "wall_ms": 1093.0916900001648,
+      "avg_ms": 348.4255166799994,
+      "throughput": 22.87090847794866
+    },
+    "aether_50": {
+      "wall_ms": 89.35101700012638,
+      "avg_ms": 21.511175720011124,
+      "throughput": 559.5907207181456
+    },
+    "lp_50": {
+      "wall_ms": 1350.4795280000508,
+      "avg_ms": 418.04959418001545,
+      "throughput": 37.02388593335131
+    },
+    "aether_100": {
+      "wall_ms": 175.87702300011188,
+      "avg_ms": 30.98775579000403,
+      "throughput": 568.5791031380852
+    },
+    "lp_100": {
+      "wall_ms": 1235.9765979999793,
+      "avg_ms": 430.6425013200146,
+      "throughput": 80.90768074558777
+    }
+  },
+  "memory": {
+    "aether_idle_kb": 12168,
+    "aether_loaded_kb": 12424
+  },
+  "quality": {
+    "ae_nodes": 12,
+    "lp_nodes": 11,
+    "ae_size": 6715,
+    "lp_size": 1689
+  },
+  "tokens": {
+    "total_raw_tokens": 68287,
+    "total_delta_tokens": 34727,
+    "loop_raw": 17505,
+    "loop_delta": 6605,
+    "loop_savings_pct": 62.26792345044273
+  },
+  "js_sandbox": {
+    "detect_Static page (no JS)": {
+      "avg_us": 587.4439999615788,
+      "scripts": 0,
+      "handlers": 0
+    },
+    "detect_Inline script + handlers": {
+      "avg_us": 597.766999931082,
+      "scripts": 1,
+      "handlers": 2
+    },
+    "detect_Next.js framework": {
+      "avg_us": 594.9874998805171,
+      "scripts": 1,
+      "handlers": 0
+    },
+    "detect_Heavy (20 scripts + handlers)": {
+      "avg_us": 729.6774998621913,
+      "scripts": 20,
+      "handlers": 20
+    },
+    "eval_29.99 * 2": {
+      "avg_us": 996.286000145119,
+      "value": "59.98"
+    },
+    "eval_(199 * 1.25).toFixed(2)": {
+      "avg_us": 893.2105000667434,
+      "value": "248.75"
+    },
+    "eval_`Pris: ${(199 * 1.25).toFixed(": {
+      "avg_us": 933.716999952594,
+      "value": "Pris: 248.75 kr"
+    },
+    "eval_[1,2,3].map(x => x * 2).join('": {
+      "avg_us": 1019.1564999786351,
+      "value": "2,4,6"
+    },
+    "eval_JSON.stringify({price: 199, cu": {
+      "avg_us": 967.5679999645581,
+      "value": "{\"price\":199,\"currency\":\"SEK\"}"
+    },
+    "eval_Math.PI.toFixed(5)": {
+      "avg_us": 931.0970001479291,
+      "value": "3.14159"
+    },
+    "eval_'hello'.toUpperCase() + ' WORL": {
+      "avg_us": 911.0954999869136,
+      "value": "HELLO WORLD"
+    },
+    "eval_Array.from({length: 10}, (_, i": {
+      "avg_us": 961.7384999955902,
+      "value": "285"
+    },
+    "blocked_fetch('https://evil.com')": {
+      "avg_us": 606.3099999664701,
+      "blocked": true
+    },
+    "blocked_document.cookie": {
+      "avg_us": 581.3684998656754,
+      "blocked": true
+    },
+    "blocked_window.location.href": {
+      "avg_us": 569.1674998615781,
+      "blocked": true
+    },
+    "blocked_eval('1+1')": {
+      "avg_us": 583.4069999082203,
+      "blocked": true
+    },
+    "blocked_setTimeout(() => {}, 100)": {
+      "avg_us": 603.9964999899894,
+      "blocked": true
+    }
+  },
+  "selective_exec": {
+    "Static page (no JS)": {
+      "avg_us": 636.926000083804,
+      "bindings": 0,
+      "evals": 0,
+      "successful": 0
+    },
+    "Single DOM target": {
+      "avg_us": 984.9114999269659,
+      "bindings": 1,
+      "evals": 1,
+      "successful": 1
+    },
+    "Multiple DOM targets": {
+      "avg_us": 1264.532000050167,
+      "bindings": 2,
+      "evals": 2,
+      "successful": 2
+    },
+    "Heavy (20 scripts)": {
+      "avg_us": 7067.092999932356,
+      "bindings": 20,
+      "evals": 20,
+      "successful": 20
+    }
+  },
+  "temporal_memory": {
+    "snapshot_5step_us": 4334.7690000246075,
+    "snapshot_per_step_us": 866.9538000049215,
+    "analyze_5step_us": 751.1124999837193,
+    "predict_us": 680.9180000573178,
+    "adversarial_patterns": 2
+  },
+  "intent_compiler": {
+    "compile_buy_us": 608.3890000354586,
+    "compile_login_us": 600.0389998916944,
+    "compile_search_us": 612.7985000148328,
+    "compile_register_us": 602.8859999105407,
+    "compile_unknown_us": 646.936999942227,
+    "full_pipeline_us": 1557.6284999951895
+  },
+  "firewall": {
+    "Relevant URL": {
+      "us": 715.9250000086104,
+      "allowed": true,
+      "relevance": 0.8
+    },
+    "Irrelevant URL": {
+      "us": 592.1284999885756,
+      "allowed": true,
+      "relevance": 0.3
+    },
+    "Suspicious URL": {
+      "us": 581.4370000507552,
+      "allowed": true,
+      "relevance": 0.3
+    },
+    "batch_20": {
+      "us": 697.1015000090119
+    },
+    "injection_detection": {
+      "us": 592.0819999118976
+    }
+  },
+  "fas9": {
+    "causal_build_us": 595.1074999757111,
+    "causal_predict_us": 602.0130000479185,
+    "webmcp_discover_us": 580.3410000453368,
+    "collab_create_register_us": 1190.605000033429
+  },
+  "webarena": {
+    "shopping_buy_product": {
+      "steps": 3,
+      "total_us": 6691.940999985491,
+      "per_step_us": 2230.6469999951637,
+      "total_tokens": 3015
+    },
+    "reddit_post_comment": {
+      "steps": 2,
+      "total_us": 5202.952999979971,
+      "per_step_us": 2601.4764999899853,
+      "total_tokens": 2551
+    },
+    "gitlab_create_issue": {
+      "steps": 2,
+      "total_us": 5092.288000014378,
+      "per_step_us": 2546.144000007189,
+      "total_tokens": 1825
+    },
+    "map_search_directions": {
+      "steps": 2,
+      "total_us": 4910.195999968892,
+      "per_step_us": 2455.097999984446,
+      "total_tokens": 1547
+    },
+    "cms_edit_page": {
+      "steps": 2,
+      "total_us": 4228.331499916749,
+      "per_step_us": 2114.1657499583744,
+      "total_tokens": 1618
+    }
+  },
+  "fair_mode": {
+    "simple": {
+      "warm_us": 658.9454999357258,
+      "fair_us": 1158.1019999766795,
+      "overhead_pct": 75.75080186292217
+    },
+    "ecommerce": {
+      "warm_us": 771.884500068154,
+      "fair_us": 1279.3995000492941,
+      "overhead_pct": 65.75012193357021
+    },
+    "complex_50": {
+      "warm_us": 2116.40049997186,
+      "fair_us": 2648.3034999955635,
+      "overhead_pct": 25.132435946352103
+    },
+    "complex_100": {
+      "warm_us": 3542.849500036027,
+      "fair_us": 4216.1239999813915,
+      "overhead_pct": 19.003756720078503
+    }
+  }
+}

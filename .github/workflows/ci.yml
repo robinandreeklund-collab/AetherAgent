@@ -17,12 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Installera Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown,wasm32-wasi
-      
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -31,13 +32,15 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
-      - name: Kör tester (native)
-        run: cargo test --lib --verbose
-      
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Kör alla tester (unit + integration)
+        run: cargo test --verbose
+
       - name: Kör clippy (linting)
         run: cargo clippy -- -D warnings
-      
+
       - name: Formatcheck
         run: cargo fmt --check
 
@@ -47,12 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Installera Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown,wasm32-wasi
-      
+          targets: wasm32-unknown-unknown
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -61,13 +64,15 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
-      
+          restore-keys: |
+            ${{ runner.os }}-wasm-
+
       - name: Installera wasm-pack
         run: cargo install wasm-pack --locked
-      
+
       - name: Bygg WASM (wasm32-unknown-unknown)
         run: wasm-pack build --target web --release
-      
+
       - name: Kontrollera binärstorlek (max 6MB)
         run: |
           WASM_FILE=$(find pkg -name "*.wasm" | head -1)
@@ -82,8 +87,8 @@ jobs:
             echo "WASM-fil för stor! Max 6MB."
             exit 1
           fi
-          echo "✓ Storlek OK: ${SIZE_MB}MB"
-      
+          echo "Storlek OK: ${SIZE_MB}MB"
+
       - name: Ladda upp WASM-artefakt
         uses: actions/upload-artifact@v4
         with:
@@ -91,20 +96,59 @@ jobs:
           path: pkg/
           retention-days: 7
 
+  # ─── Server build ──────────────────────────────────────────────────────────
+  server-build:
+    name: HTTP server build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installera Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-server-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-server-
+
+      - name: Bygg HTTP-server
+        run: cargo build --features server --bin aether-server --release
+
   # ─── Python-integration ─────────────────────────────────────────────────────
   python-test:
     name: Python integration test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Sätt upp Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+
       - name: Kör Python mock-test (utan WASM)
         run: python examples/python_test.py
+
+  # ─── Node.js-integration ───────────────────────────────────────────────────
+  node-test:
+    name: Node.js SDK test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sätt upp Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Kör Node.js SDK-test (mock)
+        run: node bindings/node/test.js
 
   # ─── Security audit ─────────────────────────────────────────────────────────
   security:
@@ -112,9 +156,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Installera Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Installera cargo-audit
         run: cargo install cargo-audit --locked
-      
+
       - name: Kör säkerhetsaudit
         run: cargo audit

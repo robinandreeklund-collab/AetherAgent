@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Flyg Stockholm–London – FlyBilligt.se</title></head>
+<body>
+  <main>
+    <h1>Flyg: Stockholm → London</h1>
+    <form id="flight-search">
+      <label for="from">Från</label>
+      <input type="text" id="from" name="from" value="Stockholm (ARN)" />
+      <label for="to">Till</label>
+      <input type="text" id="to" name="to" value="London (LHR)" />
+      <label for="date">Datum</label>
+      <input type="date" id="date" name="date" value="2026-04-15" />
+      <label for="passengers">Passagerare</label>
+      <select id="passengers" name="passengers">
+        <option>1</option><option selected>2</option><option>3</option><option>4</option>
+      </select>
+      <button type="submit">Sök flyg</button>
+    </form>
+    <section>
+      <h2>Resultat: 12 flyg hittade</h2>
+      <article>
+        <h3>SAS SK801 – 08:15 → 10:30</h3>
+        <p>Direkt | 2h 15min</p>
+        <p class="price">1 299 kr/person</p>
+        <button id="book-sas">Boka nu</button>
+      </article>
+      <article>
+        <h3>Ryanair FR1234 – 06:00 → 08:45</h3>
+        <p>Direkt | 2h 45min</p>
+        <p class="price">599 kr/person</p>
+        <button id="book-ryanair">Boka nu</button>
+      </article>
+      <article>
+        <h3>Norwegian DY4501 – 14:30 → 17:00</h3>
+        <p>Direkt | 2h 30min</p>
+        <p class="price">899 kr/person</p>
+        <button id="book-norwegian">Boka nu</button>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

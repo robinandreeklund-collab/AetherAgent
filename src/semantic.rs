@@ -2,16 +2,11 @@
 ///
 /// Traverserar rcdom-trädet och bygger ett semantiskt träd
 /// med goal-relevance scoring och trust shield integration.
-
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::parser::{extract_label, get_attr, get_tag_name, infer_role, is_likely_visible};
 use crate::trust::{analyze_text, sanitize_text};
-use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree, TrustLevel};
-
-/// Global nod-ID räknare
-static NODE_COUNTER: AtomicU32 = AtomicU32::new(0);
+use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
 /// Taggar att hoppa över helt (inga semantiska barn)
 const SKIP_TAGS: &[&str] = &[
@@ -26,23 +21,31 @@ const STRUCTURAL_TAGS: &[&str] = &[
 pub struct SemanticBuilder {
     pub warnings: Vec<InjectionWarning>,
     goal: String,
-    node_count: u32,
+    next_id: u32,
 }
 
 impl SemanticBuilder {
     pub fn new(goal: &str) -> Self {
-        NODE_COUNTER.store(0, Ordering::SeqCst);
         SemanticBuilder {
             warnings: vec![],
             goal: goal.to_lowercase(),
-            node_count: 0,
+            next_id: 0,
         }
+    }
+
+    fn next_node_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
     }
 
     /// Huvud-entry: bygg ett SemanticTree från en parsad DOM
     pub fn build(&mut self, dom: &RcDom, url: &str, title: &str) -> SemanticTree {
         let mut nodes = vec![];
         self.traverse(&dom.document, &mut nodes, 0);
+
+        // Beskär trädet om det överstiger max-gränsen
+        prune_to_limit(&mut nodes, MAX_TREE_NODES);
 
         SemanticTree {
             url: url.to_string(),
@@ -83,28 +86,24 @@ impl SemanticBuilder {
     fn process_element(&mut self, handle: &Handle, depth: u32) -> Option<SemanticNode> {
         let tag = get_tag_name(handle).unwrap_or_default();
 
-        // Skippa kända icke-semantiska taggar
-        if SKIP_TAGS.contains(&tag.as_str()) {
-            return None;
-        }
-
         // Skippa osynliga element
         if !is_likely_visible(handle) {
             return None;
         }
 
-        let id = NODE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let id = self.next_node_id();
         let role = infer_role(handle);
         let raw_label = extract_label(handle);
 
         // Trust shield – analysera label-texten
         let (trust, warning) = analyze_text(id, &raw_label);
+        let has_warning = warning.is_some();
         if let Some(w) = warning {
             self.warnings.push(w);
         }
 
-        // Sanitera label om det behövs
-        let label = if trust == TrustLevel::Untrusted && !self.warnings.is_empty() {
+        // Sanitera label bara om denna nod triggade en varning
+        let label = if has_warning {
             sanitize_text(&raw_label)
         } else {
             raw_label
@@ -136,9 +135,9 @@ impl SemanticBuilder {
                 || get_attr(handle, "aria-disabled")
                     .map(|v| v == "true")
                     .unwrap_or(false),
-            checked: get_attr(handle, "aria-checked").map(|v| v == "true").or_else(|| {
-                get_attr(handle, "checked").map(|_| true)
-            }),
+            checked: get_attr(handle, "aria-checked")
+                .map(|v| v == "true")
+                .or_else(|| get_attr(handle, "checked").map(|_| true)),
             expanded: get_attr(handle, "aria-expanded").map(|v| v == "true"),
             focused: get_attr(handle, "aria-selected")
                 .map(|v| v == "true")
@@ -148,9 +147,16 @@ impl SemanticBuilder {
 
         let action = SemanticNode::infer_action(&role);
 
-        // Hämta value för inputs
-        let value = get_attr(handle, "value")
-            .or_else(|| get_attr(handle, "aria-valuenow"));
+        // Hämta HTML id och name för selector hints / formulärmatchning
+        let html_id = get_attr(handle, "id").filter(|v| !v.is_empty());
+        let name = get_attr(handle, "name").filter(|v| !v.is_empty());
+
+        // Hämta value: href för länkar, value/aria-valuenow för inputs
+        let value = if role == "link" {
+            get_attr(handle, "href").or_else(|| get_attr(handle, "value"))
+        } else {
+            get_attr(handle, "value").or_else(|| get_attr(handle, "aria-valuenow"))
+        };
 
         // Traversera barn
         let mut children = vec![];
@@ -158,11 +164,20 @@ impl SemanticBuilder {
             self.traverse(child, &mut children, depth + 1);
         }
 
-        // Filtrera barn med 0-relevans om de inte är interaktiva
+        // Filtrera barn med låg relevans om de inte är interaktiva
         let filtered_children: Vec<SemanticNode> = children
             .into_iter()
-            .filter(|c| c.relevance > 0.05 || c.action.is_some())
+            .filter(|c| {
+                c.relevance > 0.15
+                    || c.action.is_some()
+                    || !c.children.is_empty()
+                    || c.role == "heading"
+                    || c.role == "link"
+            })
             .collect();
+
+        // Kollapsa enkelbarns-wrapprar: generic nod med tomt label och ett barn → lyft barnet
+        let filtered_children = collapse_single_child_wrappers(filtered_children);
 
         let mut node = SemanticNode::new(id, &role, &label);
         node.value = value;
@@ -171,6 +186,8 @@ impl SemanticBuilder {
         node.relevance = relevance;
         node.trust = trust;
         node.children = filtered_children;
+        node.html_id = html_id;
+        node.name = name;
 
         Some(node)
     }
@@ -180,19 +197,8 @@ impl SemanticBuilder {
     /// 2. ARIA-rollprioritet
     /// 3. Djupberoende (grundare = viktigare)
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
-        let label_lower = label.to_lowercase();
-        let goal_words: Vec<&str> = self.goal.split_whitespace().collect();
-
-        // 1. Textuell likhet – hur många goal-ord finns i label?
-        let text_score = if goal_words.is_empty() {
-            0.0
-        } else {
-            let matches = goal_words
-                .iter()
-                .filter(|w| label_lower.contains(*w))
-                .count();
-            matches as f32 / goal_words.len() as f32
-        };
+        // 1. Textuell likhet
+        let text_score = text_similarity(&self.goal, label);
 
         // 2. Roll-prioritet
         let role_score = SemanticNode::role_priority(role);
@@ -206,6 +212,114 @@ impl SemanticBuilder {
         // Klipp till [0.0, 1.0]
         raw.clamp(0.0, 1.0)
     }
+}
+
+/// Kollapsa enkelbarns strukturella wrapprar
+///
+/// Om en nod har tomt label, ingen action, och exakt ett barn → ersätt med barnet.
+/// Minskar träddjup och JSON-storlek avsevärt.
+fn collapse_single_child_wrappers(children: Vec<SemanticNode>) -> Vec<SemanticNode> {
+    children
+        .into_iter()
+        .map(|node| {
+            if node.label.is_empty()
+                && node.action.is_none()
+                && node.children.len() == 1
+                && node.html_id.is_none()
+            {
+                // Lyft enda barnet direkt och skippa wrapper-noden
+                let mut kids = node.children;
+                if let Some(child) = kids.pop() {
+                    child
+                } else {
+                    SemanticNode::new(node.id, &node.role, &node.label)
+                }
+            } else {
+                node
+            }
+        })
+        .collect()
+}
+
+/// Max antal noder i ett fullständigt träd (begränsa output-storlek)
+const MAX_TREE_NODES: usize = 300;
+
+/// Räkna totalt antal noder i ett träd (rekursivt)
+fn count_nodes(nodes: &[SemanticNode]) -> usize {
+    nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
+}
+
+/// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
+fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
+    if count_nodes(nodes) <= max {
+        return;
+    }
+
+    // Iterativt höj tröskeln och beskär löv
+    let mut threshold = 0.2_f32;
+    while count_nodes(nodes) > max && threshold < 0.8 {
+        prune_leaves_below(nodes, threshold);
+        threshold += 0.05;
+    }
+}
+
+/// Ta bort löv-noder under en viss relevans-tröskel
+fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
+    // Rekursivt beskär barnens löv först
+    for node in nodes.iter_mut() {
+        prune_leaves_below(&mut node.children, threshold);
+    }
+
+    // Ta bort löv-noder (utan barn och utan action) under tröskeln
+    // Behåll alltid headings och links — de är strukturellt viktiga
+    nodes.retain(|n| {
+        !n.children.is_empty()
+            || n.action.is_some()
+            || n.relevance >= threshold
+            || n.role == "heading"
+            || n.role == "link"
+    });
+}
+
+/// Beräkna textlikhet mellan query och candidate (normaliserad word overlap)
+///
+/// Returnerar 0.0–1.0. Bonus för exakt substring-match.
+/// Hanterar compound keys (underscore/bindestreck) genom att splitta och matcha delar.
+pub fn text_similarity(query: &str, candidate: &str) -> f32 {
+    let query_lower = query.to_lowercase();
+    let candidate_lower = candidate.to_lowercase();
+
+    // Splitta på whitespace, underscore och bindestreck för compound keys
+    let query_words: Vec<&str> = query_lower
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|s| !s.is_empty())
+        .collect();
+    if query_words.is_empty() {
+        return 0.0;
+    }
+
+    // Exakt substring-match ger full poäng (kolla originalformatet)
+    if candidate_lower.contains(&query_lower) {
+        return 1.0;
+    }
+
+    // Kolla även utan separatorer: "story_title" → "storytitle"
+    let query_joined: String = query_words.iter().copied().collect();
+    let candidate_no_sep: String = candidate_lower
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .collect();
+    if candidate_no_sep.contains(&query_joined) {
+        return 1.0;
+    }
+
+    // Word overlap — varje del av compound key matchas separat
+    let matches = query_words
+        .iter()
+        .filter(|w| candidate_lower.contains(*w))
+        .count();
+
+    matches as f32 / query_words.len() as f32
 }
 
 /// Extrahera sidtitel ur DOM
@@ -268,7 +382,10 @@ mod tests {
 
         assert!(!buttons.is_empty(), "Borde hitta minst en button");
         let btn = &buttons[0];
-        assert!(btn.relevance > 0.7, "Button med matchande text borde ha hög relevans");
+        assert!(
+            btn.relevance > 0.7,
+            "Button med matchande text borde ha hög relevans"
+        );
     }
 
     #[test]

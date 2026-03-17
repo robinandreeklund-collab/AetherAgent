@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Skapa konto – Streamify</title></head>
+<body>
+  <main>
+    <h1>Skapa ditt konto</h1>
+    <form id="register" action="/api/register" method="POST">
+      <label for="first_name">Förnamn</label>
+      <input type="text" id="first_name" name="first_name" required />
+      <label for="last_name">Efternamn</label>
+      <input type="text" id="last_name" name="last_name" required />
+      <label for="email">E-postadress</label>
+      <input type="email" id="email" name="email" placeholder="namn@example.com" required />
+      <label for="phone">Telefonnummer</label>
+      <input type="tel" id="phone" name="phone" placeholder="070-123 45 67" />
+      <label for="password">Lösenord</label>
+      <input type="password" id="password" name="password" placeholder="Minst 8 tecken" required />
+      <label for="password_confirm">Bekräfta lösenord</label>
+      <input type="password" id="password_confirm" name="password_confirm" required />
+      <label>
+        <input type="checkbox" name="terms" required /> Jag godkänner <a href="/villkor">användarvillkoren</a>
+      </label>
+      <label>
+        <input type="checkbox" name="newsletter" /> Skicka mig nyhetsbrev
+      </label>
+      <button type="submit">Skapa konto</button>
+    </form>
+    <p>Har du redan ett konto? <a href="/login">Logga in</a></p>
+  </main>
+</body>
+</html>

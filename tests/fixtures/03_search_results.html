@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head><title>Sökresultat: hotell stockholm – Resor.se</title></head>
+<body>
+  <header>
+    <form action="/search" method="GET">
+      <input type="search" name="q" value="hotell stockholm" placeholder="Sök hotell, flyg, paket..." />
+      <button type="submit">Sök</button>
+    </form>
+  </header>
+  <main>
+    <h1>23 hotell i Stockholm</h1>
+    <div class="filters">
+      <label><input type="checkbox" name="breakfast" /> Frukost inkluderad</label>
+      <label><input type="checkbox" name="wifi" /> Gratis WiFi</label>
+      <select name="sort">
+        <option>Pris (lägst först)</option>
+        <option>Betyg (högst först)</option>
+        <option>Avstånd (närmast)</option>
+      </select>
+    </div>
+    <article class="result">
+      <h2><a href="/hotel/grand">Grand Hôtel Stockholm</a></h2>
+      <p>5-stjärnigt hotell vid Blasieholmen</p>
+      <p class="price">2 890 kr/natt</p>
+      <p class="rating">4.8/5 (1 204 omdömen)</p>
+      <button>Boka nu</button>
+    </article>
+    <article class="result">
+      <h2><a href="/hotel/radisson">Radisson Blu Waterfront</a></h2>
+      <p>4-stjärnigt konferenshotell vid Centralstationen</p>
+      <p class="price">1 490 kr/natt</p>
+      <p class="rating">4.3/5 (876 omdömen)</p>
+      <button>Boka nu</button>
+    </article>
+    <article class="result">
+      <h2><a href="/hotel/downtown">Downtown Camper by Scandic</a></h2>
+      <p>Boutique-hotell vid Brunkebergstorg</p>
+      <p class="price">1 790 kr/natt</p>
+      <p class="rating">4.5/5 (654 omdömen)</p>
+      <button>Boka nu</button>
+    </article>
+    <nav aria-label="Sidnavigation">
+      <a href="/search?page=1" aria-current="page">1</a>
+      <a href="/search?page=2">2</a>
+      <a href="/search?page=3">3</a>
+      <a href="/search?page=2">Nästa</a>
+    </nav>
+  </main>
+</body>
+</html>

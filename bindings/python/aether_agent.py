@@ -1,0 +1,339 @@
+"""
+AetherAgent Python SDK
+
+Provides both native HTTP client (for deployed server) and WASM runtime.
+
+Usage (HTTP – recommended for production):
+    from aether_agent import AetherAgent
+    agent = AetherAgent(base_url="https://your-render-url.onrender.com")
+    tree = agent.parse(html, goal="buy cheapest flight", url="https://shop.se")
+
+Usage (WASM – local development):
+    from aether_agent import AetherAgentWasm
+    agent = AetherAgentWasm()
+    tree = agent.parse(html, goal="buy cheapest flight", url="https://shop.se")
+"""
+
+import json
+from typing import Optional
+from pathlib import Path
+
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None
+
+
+class AetherAgent:
+    """HTTP client for deployed AetherAgent API server."""
+
+    def __init__(self, base_url: str = "http://localhost:3000"):
+        self.base_url = base_url.rstrip("/")
+        if _requests is None:
+            raise ImportError("requests krävs: pip install requests")
+
+    def _post(self, path: str, data: dict) -> dict:
+        resp = _requests.post(
+            f"{self.base_url}{path}",
+            json=data,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def _get(self, path: str) -> dict:
+        resp = _requests.get(f"{self.base_url}{path}", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def health(self) -> dict:
+        """Health check – verify server is running."""
+        return self._get("/health")
+
+    def parse(self, html: str, goal: str, url: str) -> dict:
+        """Parse HTML to full semantic tree with goal-relevance scoring."""
+        return self._post("/api/parse", {"html": html, "goal": goal, "url": url})
+
+    def parse_top(self, html: str, goal: str, url: str, top_n: int = 10) -> dict:
+        """Parse and return only the top-N most relevant nodes."""
+        return self._post("/api/parse-top", {"html": html, "goal": goal, "url": url, "top_n": top_n})
+
+    def find_and_click(self, html: str, goal: str, url: str, target_label: str) -> dict:
+        """Find the best clickable element matching a target label."""
+        return self._post("/api/click", {"html": html, "goal": goal, "url": url, "target_label": target_label})
+
+    def fill_form(self, html: str, goal: str, url: str, fields: dict) -> dict:
+        """Map form fields to provided key/value pairs."""
+        return self._post("/api/fill-form", {"html": html, "goal": goal, "url": url, "fields": fields})
+
+    def extract_data(self, html: str, goal: str, url: str, keys: list) -> dict:
+        """Extract structured data by semantic keys."""
+        return self._post("/api/extract", {"html": html, "goal": goal, "url": url, "keys": keys})
+
+    def diff_trees(self, old_tree: dict, new_tree: dict) -> dict:
+        """Compare two semantic trees and return only the changes (delta)."""
+        old_json = json.dumps(old_tree) if isinstance(old_tree, dict) else old_tree
+        new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
+        return self._post("/api/diff", {"old_tree_json": old_json, "new_tree_json": new_json})
+
+    def detect_js(self, html: str) -> dict:
+        """Detect JavaScript snippets in HTML that may affect content."""
+        return self._post("/api/detect-js", {"html": html})
+
+    def eval_js(self, code: str) -> dict:
+        """Evaluate a JavaScript expression in sandbox."""
+        return self._post("/api/eval-js", {"code": code})
+
+    def eval_js_batch(self, snippets: list) -> dict:
+        """Evaluate multiple JS expressions in sequence."""
+        return self._post("/api/eval-js-batch", {"snippets": snippets})
+
+    def parse_with_js(self, html: str, goal: str, url: str) -> dict:
+        """Parse HTML with automatic JS detection, evaluation, and application."""
+        return self._post("/api/parse-js", {"html": html, "goal": goal, "url": url})
+
+    def check_injection(self, text: str) -> dict:
+        """Check text for prompt injection patterns."""
+        return self._post("/api/check-injection", {"text": text})
+
+    def wrap_untrusted(self, content: str) -> str:
+        """Wrap content in untrusted content markers."""
+        resp = _requests.post(
+            f"{self.base_url}/api/wrap-untrusted",
+            json={"content": content},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    def create_memory(self) -> dict:
+        """Create a new empty workflow memory."""
+        resp = _requests.post(f"{self.base_url}/api/memory/create", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def add_step(self, memory: dict, action: str, url: str, goal: str, summary: str) -> dict:
+        """Add a step to workflow memory."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/memory/step", {
+            "memory_json": memory_json, "action": action,
+            "url": url, "goal": goal, "summary": summary,
+        })
+
+    def set_context(self, memory: dict, key: str, value: str) -> dict:
+        """Set a context key/value in workflow memory."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/memory/context/set", {
+            "memory_json": memory_json, "key": key, "value": value,
+        })
+
+    def get_context(self, memory: dict, key: str) -> dict:
+        """Get a context value from workflow memory."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/memory/context/get", {
+            "memory_json": memory_json, "key": key,
+        })
+
+    # ─── Fas 5: Temporal Memory ──────────────────────────────────────────
+
+    def create_temporal_memory(self) -> dict:
+        """Create a new empty temporal memory."""
+        return self._post("/api/temporal/create", {})
+
+    def add_temporal_snapshot(self, memory: dict, html: str, goal: str, url: str, timestamp_ms: int) -> dict:
+        """Add a snapshot to temporal memory."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/snapshot", {
+            "memory_json": memory_json, "html": html,
+            "goal": goal, "url": url, "timestamp_ms": timestamp_ms,
+        })
+
+    def analyze_temporal(self, memory: dict) -> dict:
+        """Analyze temporal memory for adversarial patterns."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/analyze", {"memory_json": memory_json})
+
+    def predict_temporal(self, memory: dict) -> dict:
+        """Predict next page state based on temporal history."""
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return self._post("/api/temporal/predict", {"memory_json": memory_json})
+
+    # ─── Fas 6: Intent Compiler ──────────────────────────────────────────
+
+    def compile_goal(self, goal: str) -> dict:
+        """Compile a goal into an optimized action plan."""
+        return self._post("/api/compile", {"goal": goal})
+
+    def execute_plan(self, plan: dict, html: str, goal: str, url: str, completed_steps: list = None) -> dict:
+        """Execute plan against current page state."""
+        plan_json = json.dumps(plan) if isinstance(plan, dict) else plan
+        return self._post("/api/execute-plan", {
+            "plan_json": plan_json, "html": html,
+            "goal": goal, "url": url,
+            "completed_steps": completed_steps or [],
+        })
+
+    # ─── Fas 8: Semantic Firewall ────────────────────────────────────────
+
+    def classify_request(self, url: str, goal: str, config: dict = None) -> dict:
+        """Classify a URL against the semantic firewall (L1/L2/L3)."""
+        data = {"url": url, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/firewall/classify", data)
+
+    def classify_request_batch(self, urls: list, goal: str, config: dict = None) -> dict:
+        """Classify a batch of URLs against the semantic firewall."""
+        data = {"urls": urls, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/firewall/classify-batch", data)
+
+    # ─── Fas 7: HTTP Fetch ────────────────────────────────────────────────
+
+    def fetch(self, url: str, config: dict = None) -> dict:
+        """Fetch URL and return HTML + metadata."""
+        data = {"url": url}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch", data)
+
+    def fetch_parse(self, url: str, goal: str, config: dict = None) -> dict:
+        """Fetch URL → parse to semantic tree."""
+        data = {"url": url, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/parse", data)
+
+    def fetch_click(self, url: str, goal: str, target_label: str, config: dict = None) -> dict:
+        """Fetch URL → find best clickable element."""
+        data = {"url": url, "goal": goal, "target_label": target_label}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/click", data)
+
+    def fetch_extract(self, url: str, goal: str, keys: list, config: dict = None) -> dict:
+        """Fetch URL → extract structured data."""
+        data = {"url": url, "goal": goal, "keys": keys}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/extract", data)
+
+    def fetch_plan(self, url: str, goal: str, completed_steps: list = None, config: dict = None) -> dict:
+        """Fetch URL → compile goal → execute plan."""
+        data = {"url": url, "goal": goal, "completed_steps": completed_steps or []}
+        if config:
+            data["config"] = config
+        return self._post("/api/fetch/plan", data)
+
+
+class AetherAgentWasm:
+    """Direct WASM runtime via wasmtime (no server needed)."""
+
+    def __init__(self, wasm_path: Optional[str] = None):
+        try:
+            from wasmtime import Store, Module, Linker, WasiConfig
+        except ImportError:
+            raise ImportError("wasmtime krävs: pip install wasmtime")
+
+        if wasm_path is None:
+            wasm_path = str(Path(__file__).parent.parent.parent / "pkg" / "aether_agent_bg.wasm")
+
+        if not Path(wasm_path).exists():
+            raise FileNotFoundError(
+                f"WASM-fil saknas: {wasm_path}\n"
+                "Bygg först med: wasm-pack build --target web --release"
+            )
+
+        self.store = Store()
+        wasi = WasiConfig()
+        wasi.inherit_stdout()
+        wasi.inherit_stderr()
+        self.store.set_wasi(wasi)
+
+        linker = Linker(self.store.engine)
+        linker.define_wasi()
+
+        module = Module.from_file(self.store.engine, wasm_path)
+        self.instance = linker.instantiate(self.store, module)
+
+    def _call(self, fn_name: str, *args) -> str:
+        fn = self.instance.exports(self.store)[fn_name]
+        return fn(self.store, *args)
+
+    def health(self) -> dict:
+        return json.loads(self._call("health_check"))
+
+    def parse(self, html: str, goal: str, url: str) -> dict:
+        return json.loads(self._call("parse_to_semantic_tree", html, goal, url))
+
+    def parse_top(self, html: str, goal: str, url: str, top_n: int = 10) -> dict:
+        return json.loads(self._call("parse_top_nodes", html, goal, url, top_n))
+
+    def find_and_click(self, html: str, goal: str, url: str, target_label: str) -> dict:
+        return json.loads(self._call("find_and_click", html, goal, url, target_label))
+
+    def fill_form(self, html: str, goal: str, url: str, fields: dict) -> dict:
+        return json.loads(self._call("fill_form", html, goal, url, json.dumps(fields)))
+
+    def extract_data(self, html: str, goal: str, url: str, keys: list) -> dict:
+        return json.loads(self._call("extract_data", html, goal, url, json.dumps(keys)))
+
+    def diff_trees(self, old_tree: dict, new_tree: dict) -> dict:
+        old_json = json.dumps(old_tree) if isinstance(old_tree, dict) else old_tree
+        new_json = json.dumps(new_tree) if isinstance(new_tree, dict) else new_tree
+        return json.loads(self._call("diff_semantic_trees", old_json, new_json))
+
+    def detect_js(self, html: str) -> dict:
+        return json.loads(self._call("detect_js", html))
+
+    def eval_js(self, code: str) -> dict:
+        return json.loads(self._call("eval_js", code))
+
+    def eval_js_batch(self, snippets: list) -> dict:
+        return json.loads(self._call("eval_js_batch", json.dumps(snippets)))
+
+    def parse_with_js(self, html: str, goal: str, url: str) -> dict:
+        return json.loads(self._call("parse_with_js", html, goal, url))
+
+    def check_injection(self, text: str) -> dict:
+        return json.loads(self._call("check_injection", text))
+
+    def wrap_untrusted(self, content: str) -> str:
+        return self._call("wrap_untrusted", content)
+
+    # ─── Fas 5: Temporal Memory ──────────────────────────────────────────
+
+    def create_temporal_memory(self) -> dict:
+        return json.loads(self._call("create_temporal_memory"))
+
+    def add_temporal_snapshot(self, memory: dict, html: str, goal: str, url: str, timestamp_ms: int) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("add_temporal_snapshot", memory_json, html, goal, url, timestamp_ms))
+
+    def analyze_temporal(self, memory: dict) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("analyze_temporal", memory_json))
+
+    def predict_temporal(self, memory: dict) -> dict:
+        memory_json = json.dumps(memory) if isinstance(memory, dict) else memory
+        return json.loads(self._call("predict_temporal", memory_json))
+
+    # ─── Fas 6: Intent Compiler ──────────────────────────────────────────
+
+    def compile_goal(self, goal: str) -> dict:
+        return json.loads(self._call("compile_goal", goal))
+
+    def execute_plan(self, plan: dict, html: str, goal: str, url: str, completed_steps: list = None) -> dict:
+        plan_json = json.dumps(plan) if isinstance(plan, dict) else plan
+        return json.loads(self._call(
+            "execute_plan", plan_json, html, goal, url,
+            json.dumps(completed_steps or [])
+        ))
+
+
+if __name__ == "__main__":
+    print("AetherAgent Python SDK")
+    print("Usage:")
+    print("  HTTP:  agent = AetherAgent('https://your-url.onrender.com')")
+    print("  WASM:  agent = AetherAgentWasm()")
