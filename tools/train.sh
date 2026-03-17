@@ -182,22 +182,71 @@ setup_venv() {
 install_python_deps() {
     step "Steg 2/8: Installerar PyTorch + CUDA + Ultralytics..."
 
-    # Kolla om torch redan finns med CUDA
-    if "$PYTHON" -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    # Detektera GPU compute capability för att välja rätt CUDA-version
+    local cuda_index="cu124"  # Default: CUDA 12.4 (Ada, Ampere, etc.)
+
+    if command -v nvidia-smi &>/dev/null; then
+        # Kolla om det är en Blackwell-GPU (RTX 5090/5080/5070 = sm_120)
+        local gpu_name
+        gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+        if echo "$gpu_name" | grep -qiE "RTX 50[0-9]{2}|Blackwell"; then
+            log "Blackwell GPU detekterad: $gpu_name"
+            log "Kräver PyTorch med CUDA 12.8+ stöd (sm_120)"
+            cuda_index="cu128"
+        else
+            log "GPU detekterad: $gpu_name"
+        fi
+    fi
+
+    # Kolla om torch redan är installerat OCH kan köra på GPU:n
+    if "$PYTHON" -c "
+import torch
+assert torch.cuda.is_available(), 'no CUDA'
+t = torch.zeros(1, device='cuda')
+del t
+print(f'PyTorch {torch.__version__} med CUDA verifierad på {torch.cuda.get_device_name(0)}')
+" 2>/dev/null; then
         local torch_ver
         torch_ver=$("$PYTHON" -c "import torch; print(torch.__version__)")
-        ok "PyTorch $torch_ver med CUDA redan installerat"
+        ok "PyTorch $torch_ver med GPU-stöd redan installerat"
     else
-        log "Installerar PyTorch med CUDA 12.4 (Blackwell/Ada-kompatibel)..."
-        "$PYTHON" -m pip install --quiet \
-            torch torchvision torchaudio \
-            --index-url https://download.pytorch.org/whl/cu124
+        # Avinstallera gammal inkompatibel torch om den finns
+        if "$PYTHON" -c "import torch" 2>/dev/null; then
+            log "Befintlig PyTorch saknar GPU-stöd — installerar om med $cuda_index..."
+            "$PYTHON" -m pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+        fi
+
+        log "Installerar PyTorch med CUDA ($cuda_index)..."
+
+        if [[ "$cuda_index" == "cu128" ]]; then
+            # Blackwell: försök stable cu128 först, sedan nightly
+            if ! "$PYTHON" -m pip install --quiet \
+                torch torchvision \
+                --index-url "https://download.pytorch.org/whl/$cuda_index" 2>/dev/null; then
+                log "Stable cu128 ej tillgängligt — provar nightly..."
+                "$PYTHON" -m pip install --quiet --pre \
+                    torch torchvision \
+                    --index-url "https://download.pytorch.org/whl/nightly/$cuda_index"
+            fi
+        else
+            "$PYTHON" -m pip install --quiet \
+                torch torchvision torchaudio \
+                --index-url "https://download.pytorch.org/whl/$cuda_index"
+        fi
 
         # Verifiera
-        if "$PYTHON" -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')" 2>/dev/null; then
+        if "$PYTHON" -c "
+import torch
+if torch.cuda.is_available():
+    t = torch.zeros(1, device='cuda')
+    del t
+    print(f'PyTorch {torch.__version__} CUDA verifierad på {torch.cuda.get_device_name(0)}')
+else:
+    print(f'PyTorch {torch.__version__} installerat (CPU-läge)')
+" 2>/dev/null; then
             ok "PyTorch installerat"
         else
-            warn "PyTorch installerat men CUDA inte tillgängligt — kör CPU"
+            warn "PyTorch installerat men GPU-verifiering misslyckades — kör CPU"
         fi
     fi
 
@@ -323,26 +372,71 @@ train() {
     log "Parametrar: epochs=$EPOCHS  batch=$BATCH  imgsz=$IMGSZ  version=$VERSION"
     log "Output: runs/detect/$run_name/"
 
-    # Auto-detektera GPU och justera batch
+    # Auto-detektera GPU och justera batch + device
     local effective_batch=$BATCH
-    local gpu_mem
-    gpu_mem=$("$PYTHON" -c "
-import torch
-if torch.cuda.is_available():
-    props = torch.cuda.get_device_properties(0)
-    print(int(props.total_mem / (1024**3)))
-else:
-    print(0)
-" 2>/dev/null || echo "0")
+    local train_device="auto"
+    local use_amp="True"
 
-    if [[ "$gpu_mem" -eq 0 ]]; then
-        warn "Ingen GPU — sänker batch till 8"
-        effective_batch=8
-    elif [[ "$gpu_mem" -lt 8 ]]; then
-        warn "GPU har bara ${gpu_mem}GB VRAM — sänker batch till 16"
-        effective_batch=16
-    elif [[ "$gpu_mem" -ge 20 ]]; then
-        log "GPU har ${gpu_mem}GB VRAM — kör batch=$effective_batch (RTX 5090 mode)"
+    local gpu_check
+    gpu_check=$("$PYTHON" -c "
+import torch
+if not torch.cuda.is_available():
+    print('no_cuda:0')
+else:
+    try:
+        t = torch.zeros(1, device='cuda')
+        del t
+        mem = int(torch.cuda.get_device_properties(0).total_mem / (1024**3))
+        print(f'ok:{mem}')
+    except RuntimeError:
+        print('incompatible:0')
+" 2>/dev/null || echo "no_cuda:0")
+
+    local gpu_status="${gpu_check%%:*}"
+    local gpu_mem="${gpu_check##*:}"
+
+    case "$gpu_status" in
+        ok)
+            if [[ "$gpu_mem" -lt 8 ]]; then
+                warn "GPU har bara ${gpu_mem}GB VRAM — sänker batch till 16"
+                effective_batch=16
+            elif [[ "$gpu_mem" -ge 20 ]]; then
+                log "GPU har ${gpu_mem}GB VRAM — kör batch=$effective_batch (RTX 5090 mode)"
+            fi
+            ;;
+        incompatible)
+            warn "GPU hittad men PyTorch kan inte köra på den"
+            warn "Kör check_gpu() i train_vision.py för automatisk fix..."
+            # Försök auto-fix via Python
+            "$PYTHON" -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from train_vision import check_gpu
+result = check_gpu()
+print(result)
+" 2>/dev/null
+            # Kolla igen efter fix
+            if "$PYTHON" -c "import torch; t = torch.zeros(1, device='cuda'); del t" 2>/dev/null; then
+                ok "GPU-stöd fixat!"
+            else
+                warn "GPU fortfarande ej kompatibel — faller tillbaka till CPU"
+                train_device="cpu"
+                use_amp="False"
+                effective_batch=8
+            fi
+            ;;
+        *)
+            warn "Ingen GPU — sänker batch till 8"
+            train_device="cpu"
+            use_amp="False"
+            effective_batch=8
+            ;;
+    esac
+
+    # Bygg device-parameter för Ultralytics
+    local device_param=""
+    if [[ "$train_device" != "auto" ]]; then
+        device_param="device='$train_device',"
     fi
 
     "$PYTHON" -c "
@@ -361,9 +455,9 @@ results = model.train(
     project='runs/detect',
     name='$run_name',
     exist_ok=True,
-    # RTX 5090 / Blackwell optimeringar
+    $device_param
     workers=8,
-    amp=True,
+    amp=$use_amp,
     cache='ram',
     # UI-anpassad augmentering
     mosaic=0.5,

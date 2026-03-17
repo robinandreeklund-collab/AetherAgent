@@ -112,21 +112,123 @@ def run(cmd: str, check: bool = True, capture: bool = False):
         return None
 
 
-def check_gpu():
-    """Check CUDA availability and GPU info."""
+def _detect_gpu_arch():
+    """Detektera GPU compute capability utan att krascha.
+
+    Returnerar (namn, sm_sträng, vram_gb) eller None.
+    """
     try:
         import torch
-        if torch.cuda.is_available():
-            name = torch.cuda.get_device_name(0)
-            mem = torch.cuda.get_device_properties(0).total_mem / (1024**3)
-            log(f"GPU: {name} ({mem:.1f} GB VRAM)", "OK")
-            return True
+        if not torch.cuda.is_available():
+            return None
+        name = torch.cuda.get_device_name(0)
+        props = torch.cuda.get_device_properties(0)
+        mem = props.total_mem / (1024**3)
+        sm = f"sm_{props.major}{props.minor}"
+        return name, sm, mem
+    except Exception:
+        return None
+
+
+def _install_pytorch_for_blackwell():
+    """Installerar PyTorch med Blackwell (sm_120) stöd.
+
+    RTX 5090/5080/5070 kräver CUDA 12.8+ kernels.
+    """
+    log("Installerar PyTorch med Blackwell/RTX 5090 stöd...", "STEP")
+    log("Detta kan ta 2-5 minuter (laddar ner ~2 GB)...", "INFO")
+
+    # Avinstallera gammal torch först för att undvika konflikter
+    run(f"{sys.executable} -m pip uninstall -y torch torchvision torchaudio 2>/dev/null",
+        check=False, capture=True)
+
+    # Installera PyTorch med CUDA 12.8 stöd (Blackwell-kompatibel)
+    # Försök stable först, sedan nightly
+    install_cmds = [
+        # Stable med cu128 (om tillgänglig)
+        f"{sys.executable} -m pip install torch torchvision "
+        f"--index-url https://download.pytorch.org/whl/cu128",
+        # Nightly med cu128 (alltid tillgänglig)
+        f"{sys.executable} -m pip install --pre torch torchvision "
+        f"--index-url https://download.pytorch.org/whl/nightly/cu128",
+    ]
+
+    for cmd in install_cmds:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            log("PyTorch med Blackwell-stöd installerat!", "OK")
+            # Verifiera
+            verify = subprocess.run(
+                f'{sys.executable} -c "import torch; print(torch.__version__); '
+                f't = torch.zeros(1, device=\\"cuda\\"); print(\\"GPU OK\\")"',
+                shell=True, capture_output=True, text=True
+            )
+            if verify.returncode == 0:
+                log(f"Verifierat: {verify.stdout.strip()}", "OK")
+                return True
+            log("Installation klar men GPU-verifiering misslyckades, provar nästa...", "WARN")
         else:
-            log("No CUDA GPU detected — training will use CPU (slow!)", "WARN")
-            return False
+            log(f"Kunde inte installera med detta index, provar nästa...", "INFO")
+
+    log("Kunde inte installera Blackwell-kompatibel PyTorch automatiskt", "ERR")
+    log("Manuell installation:", "INFO")
+    log("  pip install --pre torch torchvision --index-url "
+        "https://download.pytorch.org/whl/nightly/cu128", "INFO")
+    return False
+
+
+def check_gpu():
+    """Check CUDA availability and GPU compatibility.
+
+    Returnerar 'cuda' eller 'cpu'.
+    Detekterar RTX 5090 (Blackwell, sm_120) och installerar rätt PyTorch automatiskt.
+    """
+    try:
+        import torch
     except ImportError:
-        log("PyTorch not installed — cannot detect GPU", "WARN")
-        return False
+        log("PyTorch inte installerat — installerar...", "WARN")
+        run(f"{sys.executable} -m pip install torch torchvision", check=False)
+        try:
+            import torch
+        except ImportError:
+            log("Kunde inte installera PyTorch", "ERR")
+            return "cpu"
+
+    if not torch.cuda.is_available():
+        log("Ingen CUDA GPU detekterad — tränar på CPU (långsamt!)", "WARN")
+        return "cpu"
+
+    name = torch.cuda.get_device_name(0)
+    props = torch.cuda.get_device_properties(0)
+    mem = props.total_mem / (1024**3)
+    sm = f"sm_{props.major}{props.minor}"
+
+    log(f"GPU: {name} ({mem:.1f} GB VRAM, {sm})", "OK")
+
+    # Testa om PyTorch faktiskt kan köra på denna GPU
+    try:
+        test_tensor = torch.zeros(1, device="cuda")
+        del test_tensor
+        log("GPU-kompatibilitet verifierad", "OK")
+        return "cuda"
+    except RuntimeError as e:
+        err_str = str(e)
+        if "no kernel image" not in err_str and "not compatible" not in err_str:
+            raise
+
+    # GPU hittad men PyTorch saknar stöd — troligen Blackwell (sm_120)
+    log(f"PyTorch {torch.__version__} saknar stöd för {name} ({sm})", "WARN")
+
+    # Automatisk fix: installera rätt version
+    if _install_pytorch_for_blackwell():
+        # Ladda om torch-modulen efter ny installation
+        import importlib
+        importlib.reload(torch)
+        return "cuda"
+
+    # Om auto-install misslyckades, falla tillbaka till CPU
+    log("Faller tillbaka till CPU-träning", "WARN")
+    return "cpu"
 
 
 def ensure_deps():
@@ -1219,16 +1321,18 @@ def train_model(
     project: str,
     name: str,
     resume: bool = False,
+    device: str = None,
 ) -> Path:
     """Train YOLOv8-nano with Ultralytics."""
     from ultralytics import YOLO
 
-    log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}", "STEP")
+    log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}, device={device or 'auto'}", "STEP")
     log(f"Base model: {model_base}", "INFO")
 
     model = YOLO(model_base)
 
-    results = model.train(
+    # Bygg träningsparametrar
+    train_kwargs = dict(
         data=str(data_yaml),
         epochs=epochs,
         imgsz=imgsz,
@@ -1237,10 +1341,8 @@ def train_model(
         name=name,
         exist_ok=True,
         resume=resume,
-        # RTX 5090 optimizations
         workers=8,
-        amp=True,          # Mixed precision — huge speedup on Ada/Blackwell
-        cache="ram",       # Cache images in RAM (fast with 24GB+ system RAM)
+        cache="ram",
         # Augmentation tuned for UI (less aggressive than natural images)
         mosaic=0.5,
         mixup=0.0,         # Mixup hurts UI element detection
@@ -1252,10 +1354,21 @@ def train_model(
         hsv_v=0.3,
         scale=0.3,
         translate=0.1,
-        # Logging
         verbose=True,
         plots=True,
     )
+
+    # GPU-specifika optimeringar
+    if device == "cpu":
+        train_kwargs["device"] = "cpu"
+        train_kwargs["amp"] = False  # AMP fungerar inte på CPU
+        log("Training on CPU — this will be slow but works", "WARN")
+    else:
+        if device:
+            train_kwargs["device"] = device
+        train_kwargs["amp"] = True  # Mixed precision — speedup på GPU
+
+    results = model.train(**train_kwargs)
 
     best_pt = Path(project) / name / "weights" / "best.pt"
     if not best_pt.exists():
@@ -1551,6 +1664,7 @@ def run_pipeline(
     server_url: str = None,
     deploy_dir: Path = None,
     skip_verify: bool = False,
+    device: str = None,
 ):
     """Run the full training pipeline."""
     print(BANNER)
@@ -1561,11 +1675,17 @@ def run_pipeline(
     # Pre-flight
     log("Pre-flight checks...", "STEP")
     ensure_deps()
-    has_gpu = check_gpu()
 
-    if not has_gpu:
-        log("Reducing batch size to 8 for CPU training", "WARN")
+    # GPU-check: detekterar, installerar rätt PyTorch om nödvändigt
+    detected_device = check_gpu()
+    if device is None:
+        device = detected_device
+
+    if device == "cpu":
+        log("CPU-träning: sänker batch till 8", "WARN")
         batch = min(batch, 8)
+    else:
+        log(f"Tränar på {device}", "OK")
 
     # Step 1: Dataset
     log("Step 1/6: Preparing dataset...", "STEP")
@@ -1581,6 +1701,7 @@ def run_pipeline(
         model_base=model_base,
         project=DEFAULT_PROJECT,
         name=f"{DEFAULT_NAME}-{version}",
+        device=device,
     )
 
     # Step 3: Validate
@@ -1648,6 +1769,9 @@ Examples:
     parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE, help=f"Base model (default: {DEFAULT_MODEL_BASE})")
     parser.add_argument("--deploy-dir", type=Path, default=Path("models"), help="Model deployment directory")
     parser.add_argument("--server", type=str, default="http://localhost:3000", help="AetherAgent server URL for verification")
+    parser.add_argument("--device", type=str, default=None,
+                        help="Training device: 'cuda', 'cpu', or device ID. "
+                             "Auto-detects and installs correct PyTorch if needed.")
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
@@ -1690,6 +1814,7 @@ Examples:
             server_url=args.server,
             deploy_dir=args.deploy_dir,
             skip_verify=args.skip_verify,
+            device=args.device,
         )
         return
 
@@ -1717,6 +1842,7 @@ Examples:
             server_url=args.server,
             deploy_dir=args.deploy_dir,
             skip_verify=args.skip_verify,
+            device=args.device,
         )
         return
 
