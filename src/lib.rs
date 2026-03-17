@@ -5,6 +5,7 @@ mod compiler;
 mod diff;
 #[cfg(feature = "fetch")]
 pub mod fetch;
+pub mod firewall;
 mod intent;
 mod js_bridge;
 mod js_eval;
@@ -561,6 +562,34 @@ pub fn execute_plan(
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
+}
+
+// ─── Fas 8: Semantic Firewall ────────────────────────────────────────────────
+
+/// Klassificera en URL mot firewallens tre nivåer (L1/L2/L3)
+#[wasm_bindgen]
+pub fn classify_request(url: &str, goal: &str, config_json: &str) -> String {
+    let config: firewall::FirewallConfig = serde_json::from_str(config_json).unwrap_or_default();
+    let verdict = firewall::classify_request(url, goal, &config);
+    serde_json::to_string(&verdict)
+        .unwrap_or_else(|e| format!(r#"{{"error": "Serialization failed: {e}"}}"#))
+}
+
+/// Klassificera en batch av URLs mot firewallen
+#[wasm_bindgen]
+pub fn classify_request_batch(urls_json: &str, goal: &str, config_json: &str) -> String {
+    let urls: Vec<String> = match serde_json::from_str(urls_json) {
+        Ok(u) => u,
+        Err(e) => return format!(r#"{{"error": "Invalid urls_json: {e}"}}"#),
+    };
+    let config: firewall::FirewallConfig = serde_json::from_str(config_json).unwrap_or_default();
+    let (verdicts, summary) = firewall::classify_batch(&urls, goal, &config);
+    let result = serde_json::json!({
+        "verdicts": verdicts,
+        "summary": summary,
+    });
+    serde_json::to_string(&result)
+        .unwrap_or_else(|e| format!(r#"{{"error": "Serialization failed: {e}"}}"#))
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────

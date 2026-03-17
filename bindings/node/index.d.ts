@@ -338,6 +338,38 @@ export interface FetchAndPlanResult {
   total_time_ms: number;
 }
 
+// ─── Fas 8: Semantic Firewall Types ──────────────────────────────────────
+
+export interface FirewallVerdict {
+  allowed: boolean;
+  blocked_by?: "L1UrlPattern" | "L2MimeType" | "L3SemanticRelevance";
+  reason: string;
+  relevance_score?: number;
+}
+
+export interface FirewallConfig {
+  enable_l1?: boolean;
+  enable_l2?: boolean;
+  enable_l3?: boolean;
+  min_relevance?: number;
+  extra_blocked_domains?: string[];
+  allowed_domains?: string[];
+}
+
+export interface FirewallSummary {
+  total_requests: number;
+  allowed: number;
+  blocked_l1: number;
+  blocked_l2: number;
+  blocked_l3: number;
+  estimated_bandwidth_saved_pct: number;
+}
+
+export interface FirewallBatchResult {
+  verdicts: FirewallVerdict[];
+  summary: FirewallSummary;
+}
+
 // ─── WASM Agent (local, no network) ──────────────────────────────────────
 
 export declare class AetherAgent {
@@ -355,6 +387,8 @@ export declare class AetherAgent {
   parseWithJs(html: string, goal: string, url: string): SelectiveExecResult;
   checkInjection(text: string): InjectionCheckResult;
   wrapUntrusted(content: string): string;
+  classifyRequest(url: string, goal: string, config?: string | FirewallConfig): FirewallVerdict;
+  classifyRequestBatch(urls: string[], goal: string, config?: string | FirewallConfig): FirewallBatchResult;
   createTemporalMemory(): TemporalMemory;
   addTemporalSnapshot(memoryJson: string | TemporalMemory, html: string, goal: string, url: string, timestampMs: number): TemporalMemory;
   analyzeTemporal(memoryJson: string | TemporalMemory): TemporalAnalysis;
@@ -376,6 +410,8 @@ export declare class AetherAgentHTTP {
   findAndClick(html: string, goal: string, url: string, targetLabel: string): Promise<ClickResult>;
   compileGoal(goal: string): Promise<ActionPlan>;
   executePlan(planJson: string | ActionPlan, html: string, goal: string, url: string, completedSteps?: number[]): Promise<PlanExecutionResult>;
+  classifyRequest(url: string, goal: string, config?: FirewallConfig): Promise<FirewallVerdict>;
+  classifyRequestBatch(urls: string[], goal: string, config?: FirewallConfig): Promise<FirewallBatchResult>;
   fetchRaw(url: string, config?: FetchConfig): Promise<FetchResult>;
   fetchParse(url: string, goal: string, config?: FetchConfig): Promise<FetchAndParseResult>;
   fetchClick(url: string, goal: string, targetLabel: string, config?: FetchConfig): Promise<FetchAndClickResult>;

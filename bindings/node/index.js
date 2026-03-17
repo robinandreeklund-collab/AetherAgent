@@ -106,6 +106,21 @@ class AetherAgent {
     return this.wasm.wrap_untrusted(content);
   }
 
+  // ─── Fas 8: Semantic Firewall ───────────────────────────────────────
+
+  /** Classify a URL against the semantic firewall (L1/L2/L3) */
+  classifyRequest(url, goal, configJson = "{}") {
+    const config = typeof configJson === "string" ? configJson : JSON.stringify(configJson);
+    return JSON.parse(this.wasm.classify_request(url, goal, config));
+  }
+
+  /** Classify a batch of URLs against the semantic firewall */
+  classifyRequestBatch(urls, goal, configJson = "{}") {
+    const urlsJson = JSON.stringify(urls);
+    const config = typeof configJson === "string" ? configJson : JSON.stringify(configJson);
+    return JSON.parse(this.wasm.classify_request_batch(urlsJson, goal, config));
+  }
+
   // ─── Fas 5: Temporal Memory ─────────────────────────────────────────
 
   /** Create a new empty temporal memory for tracking page state over time */
@@ -227,6 +242,20 @@ class AetherAgentHTTP {
     return this._post("/api/execute-plan", {
       plan_json: plan, html, goal, url, completed_steps: completedSteps,
     });
+  }
+
+  // ─── Fas 8: Semantic Firewall ────────────────────────────────────
+
+  async classifyRequest(url, goal, config) {
+    const data = { url, goal };
+    if (config) data.config = config;
+    return this._post("/api/firewall/classify", data);
+  }
+
+  async classifyRequestBatch(urls, goal, config) {
+    const data = { urls, goal };
+    if (config) data.config = config;
+    return this._post("/api/firewall/classify-batch", data);
   }
 
   // ─── Fas 7: HTTP Fetch ──────────────────────────────────────────

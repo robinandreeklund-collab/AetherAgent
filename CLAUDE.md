@@ -33,6 +33,7 @@ It provides a semantic perception layer for AI agents with built-in prompt injec
   - `trust.rs` — Prompt injection detection, sanitization, content wrapping
   - `types.rs` — Data structures and their inherent methods
   - `fetch.rs` — HTTP page fetching, cookies, redirects, robots.txt, SSRF protection
+  - `firewall.rs` — Semantic Firewall: 3-level goal-aware request filtering (L1/L2/L3)
   - `lib.rs` — WASM API surface, orchestration, serialization
 - **No feature creep**: Only implement what the current Fas (phase) requires. Do not add speculative abstractions, unused helpers, or future-proofing code.
 
@@ -167,3 +168,5 @@ Types:
 **Fas 6 (Complete)**: Intent Compiler — goal decomposition via keyword-matched templates, topological sort with parallel group detection, action plan with sub-goals/dependencies, plan execution with recommended next action, prefetch suggestions.
 
 **Fas 7 (Complete)**: HTTP Fetch Integration — reqwest-based page fetching with cookie jar, redirect following, gzip/brotli decompression, robots.txt compliance, SSRF protection. Combined endpoints: `fetch_parse`, `fetch_click`, `fetch_extract`, `fetch_plan`.
+
+**Fas 8 (Complete)**: Semantic Firewall & Ethical Engine & MCP Server — three-level goal-aware request filtering (L1: URL pattern blocklist, L2: MIME/extension filter, L3: semantic relevance scoring), Google's `robotstxt` crate for RFC 9309 compliance, `governor` per-domain rate limiter (GCRA), Retry-After handling, MCP server via `rmcp` crate exposing all tools to Claude/Cursor/VS Code. Modules: `firewall.rs`, `bin/mcp_server.rs`. Endpoints: `/api/firewall/classify`, `/api/firewall/classify-batch`. Binary: `aether-mcp` (stdio MCP).

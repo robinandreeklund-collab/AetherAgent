@@ -208,9 +208,12 @@ pub struct FetchConfig {
     /// Max antal redirects att följa
     #[serde(default = "FetchConfig::default_max_redirects")]
     pub max_redirects: u32,
-    /// Respektera robots.txt
+    /// Respektera robots.txt (Googles parser)
     #[serde(default)]
     pub respect_robots_txt: bool,
+    /// Rate limit: max requests per sekund per domän
+    #[serde(default = "FetchConfig::default_rate_limit_rps")]
+    pub rate_limit_rps: u32,
     /// Extra headers (key → value)
     #[serde(default)]
     pub extra_headers: HashMap<String, String>,
@@ -367,6 +370,10 @@ impl FetchConfig {
     fn default_max_redirects() -> u32 {
         10
     }
+
+    fn default_rate_limit_rps() -> u32 {
+        2
+    }
 }
 
 impl Default for FetchConfig {
@@ -376,6 +383,7 @@ impl Default for FetchConfig {
             timeout_ms: Self::default_timeout_ms(),
             max_redirects: Self::default_max_redirects(),
             respect_robots_txt: false,
+            rate_limit_rps: Self::default_rate_limit_rps(),
             extra_headers: HashMap::new(),
         }
     }

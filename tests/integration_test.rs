@@ -1263,4 +1263,135 @@ mod fetch_tests {
         );
         assert!(parsed["tree"]["goal"].is_string(), "Ska ha semantic tree");
     }
+
+    // ─── Fas 8: Semantic Firewall integration tests ─────────────────────
+
+    #[test]
+    fn test_firewall_blocks_tracking() {
+        let config = aether_agent::firewall::FirewallConfig::default();
+        let verdict = aether_agent::firewall::classify_request(
+            "https://www.google-analytics.com/collect?v=1&t=pageview",
+            "köp produkt",
+            &config,
+        );
+        assert!(!verdict.allowed, "Ska blockera Google Analytics");
+        assert_eq!(
+            verdict.blocked_by,
+            Some(aether_agent::firewall::FirewallLevel::L1UrlPattern)
+        );
+    }
+
+    #[test]
+    fn test_firewall_allows_product_pages() {
+        let config = aether_agent::firewall::FirewallConfig::default();
+        let verdict = aether_agent::firewall::classify_request(
+            "https://shop.se/api/product/42",
+            "köp produkt",
+            &config,
+        );
+        assert!(verdict.allowed, "Ska tillåta produkt-API");
+        assert!(
+            verdict.relevance_score.unwrap_or(0.0) > 0.2,
+            "Produkt-URL borde ha hög relevans"
+        );
+    }
+
+    #[test]
+    fn test_firewall_blocks_images() {
+        let config = aether_agent::firewall::FirewallConfig::default();
+        let verdict = aether_agent::firewall::classify_request(
+            "https://shop.se/assets/hero-banner.jpg",
+            "köp produkt",
+            &config,
+        );
+        assert!(!verdict.allowed, "Ska blockera bildfiler");
+        assert_eq!(
+            verdict.blocked_by,
+            Some(aether_agent::firewall::FirewallLevel::L2MimeType)
+        );
+    }
+
+    #[test]
+    fn test_firewall_batch_ecommerce_scenario() {
+        let urls = vec![
+            "https://shop.se/api/products".to_string(),
+            "https://shop.se/checkout".to_string(),
+            "https://www.google-analytics.com/collect".to_string(),
+            "https://cdn.hotjar.com/script.js".to_string(),
+            "https://shop.se/logo.png".to_string(),
+            "https://shop.se/fonts/roboto.woff2".to_string(),
+            "https://connect.facebook.net/fbevents.js".to_string(),
+            "https://shop.se/api/cart".to_string(),
+        ];
+        let config = aether_agent::firewall::FirewallConfig::default();
+        let (verdicts, summary) =
+            aether_agent::firewall::classify_batch(&urls, "köp produkt", &config);
+
+        assert_eq!(verdicts.len(), 8, "Ska ha 8 verdicts");
+        assert_eq!(summary.total_requests, 8);
+        assert!(
+            summary.blocked_l1 >= 2,
+            "Ska blockera minst 2 tracking-domäner"
+        );
+        assert!(
+            summary.blocked_l2 >= 2,
+            "Ska blockera minst 2 filer (bild + font)"
+        );
+        assert!(
+            summary.estimated_bandwidth_saved_pct > 40.0,
+            "Borde spara >40% bandbredd i e-commerce-scenario"
+        );
+    }
+
+    #[test]
+    fn test_firewall_whitelist_overrides() {
+        let config = aether_agent::firewall::FirewallConfig {
+            allowed_domains: vec!["google-analytics.com".to_string()],
+            ..Default::default()
+        };
+        let verdict = aether_agent::firewall::classify_request(
+            "https://google-analytics.com/collect",
+            "köp produkt",
+            &config,
+        );
+        assert!(verdict.allowed, "Whitelist ska override L1-blockering");
+    }
+
+    #[test]
+    fn test_firewall_wasm_api_classify() {
+        let result =
+            aether_agent::classify_request("https://www.google-analytics.com/collect", "köp", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["allowed"], false, "WASM API ska blockera tracking");
+    }
+
+    #[test]
+    fn test_firewall_wasm_api_batch() {
+        let urls_json =
+            r#"["https://shop.se/products", "https://www.google-analytics.com/collect"]"#;
+        let result = aether_agent::classify_request_batch(urls_json, "köp", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["verdicts"].is_array(), "Ska ha verdicts-array");
+        assert_eq!(parsed["verdicts"].as_array().unwrap().len(), 2);
+        assert!(
+            parsed["summary"]["blocked_l1"].as_u64().unwrap_or(0) >= 1,
+            "Ska blockera tracking"
+        );
+    }
+
+    #[test]
+    fn test_firewall_mime_type_check() {
+        assert!(
+            aether_agent::firewall::check_mime_type("image/png").is_some(),
+            "Ska blockera image/png"
+        );
+        assert!(
+            aether_agent::firewall::check_mime_type("text/html").is_none(),
+            "Ska tillåta text/html"
+        );
+        assert!(
+            aether_agent::firewall::check_mime_type("application/json").is_none(),
+            "Ska tillåta application/json"
+        );
+    }
 }

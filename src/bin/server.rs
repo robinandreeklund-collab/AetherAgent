@@ -147,6 +147,24 @@ struct ExecutePlanRequest {
     completed_steps: Vec<u32>,
 }
 
+// ─── Fas 8: Firewall request types ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct FirewallClassifyRequest {
+    url: String,
+    goal: String,
+    #[serde(default)]
+    config: Option<aether_agent::firewall::FirewallConfig>,
+}
+
+#[derive(Deserialize)]
+struct FirewallBatchRequest {
+    urls: Vec<String>,
+    goal: String,
+    #[serde(default)]
+    config: Option<aether_agent::firewall::FirewallConfig>,
+}
+
 // ─── Fas 7: Fetch request types ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -232,7 +250,9 @@ async fn root() -> impl IntoResponse {
             "POST /api/fetch/parse": "Fetch URL → parse to semantic tree",
             "POST /api/fetch/click": "Fetch URL → find clickable element",
             "POST /api/fetch/extract": "Fetch URL → extract structured data",
-            "POST /api/fetch/plan": "Fetch URL → compile goal → execute plan"
+            "POST /api/fetch/plan": "Fetch URL → compile goal → execute plan",
+            "POST /api/firewall/classify": "Classify URL against semantic firewall (L1/L2/L3)",
+            "POST /api/firewall/classify-batch": "Classify batch of URLs against firewall"
         },
         "example": {
             "curl": "curl -X POST /api/parse -H 'Content-Type: application/json' -d '{\"html\": \"<button>Buy</button>\", \"goal\": \"buy\", \"url\": \"https://shop.com\"}'",
@@ -429,6 +449,30 @@ async fn execute_plan_handler(Json(req): Json<ExecutePlanRequest>) -> impl IntoR
         &completed_json,
     );
     (StatusCode::OK, result)
+}
+
+// ─── Fas 8: Firewall handlers ───────────────────────────────────────────────
+
+async fn firewall_classify(Json(req): Json<FirewallClassifyRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+    let verdict = aether_agent::firewall::classify_request(&req.url, &req.goal, &config);
+    (
+        StatusCode::OK,
+        serde_json::to_string(&verdict).unwrap_or_default(),
+    )
+}
+
+async fn firewall_classify_batch(Json(req): Json<FirewallBatchRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+    let (verdicts, summary) = aether_agent::firewall::classify_batch(&req.urls, &req.goal, &config);
+    let result = serde_json::json!({
+        "verdicts": verdicts,
+        "summary": summary,
+    });
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
 }
 
 // ─── Fas 7: Fetch handlers ──────────────────────────────────────────────────
@@ -698,6 +742,12 @@ fn build_router() -> Router {
         // Fas 6: Intent Compiler
         .route("/api/compile", post(compile_goal_handler))
         .route("/api/execute-plan", post(execute_plan_handler))
+        // Fas 8: Semantic Firewall
+        .route("/api/firewall/classify", post(firewall_classify))
+        .route(
+            "/api/firewall/classify-batch",
+            post(firewall_classify_batch),
+        )
         // Fas 7: HTTP Fetch
         .route("/api/fetch", post(fetch_raw))
         .route("/api/fetch/parse", post(fetch_parse))
@@ -741,6 +791,8 @@ async fn main() {
     println!("  POST /api/fetch/click     – Fetch URL → find element");
     println!("  POST /api/fetch/extract   – Fetch URL → extract data");
     println!("  POST /api/fetch/plan      – Fetch URL → compile + execute plan");
+    println!("  POST /api/firewall/classify      – Classify URL against firewall");
+    println!("  POST /api/firewall/classify-batch – Classify batch of URLs");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

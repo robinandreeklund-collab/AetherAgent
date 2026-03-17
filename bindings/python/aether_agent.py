@@ -173,6 +173,22 @@ class AetherAgent:
             "completed_steps": completed_steps or [],
         })
 
+    # ─── Fas 8: Semantic Firewall ────────────────────────────────────────
+
+    def classify_request(self, url: str, goal: str, config: dict = None) -> dict:
+        """Classify a URL against the semantic firewall (L1/L2/L3)."""
+        data = {"url": url, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/firewall/classify", data)
+
+    def classify_request_batch(self, urls: list, goal: str, config: dict = None) -> dict:
+        """Classify a batch of URLs against the semantic firewall."""
+        data = {"urls": urls, "goal": goal}
+        if config:
+            data["config"] = config
+        return self._post("/api/firewall/classify-batch", data)
+
     # ─── Fas 7: HTTP Fetch ────────────────────────────────────────────────
 
     def fetch(self, url: str, config: dict = None) -> dict:

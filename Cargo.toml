@@ -28,6 +28,14 @@ boa_engine = { version = "0.21", optional = true }
 # HTTP fetch (Fas 7 – optional, for standalone page fetching)
 reqwest = { version = "0.12", features = ["cookies", "gzip", "brotli", "rustls-tls"], optional = true, default-features = false }
 
+# Fas 8: Ethical Engine – robots.txt (Google's parser) + rate limiting
+robotstxt = { version = "0.3", optional = true }
+governor = { version = "0.10", optional = true }
+
+# Fas 8: MCP Server – Model Context Protocol
+rmcp = { version = "1.2", features = ["server", "transport-io", "macros"], optional = true }
+schemars = { version = "0.8", optional = true }
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
@@ -35,12 +43,18 @@ wasm-bindgen-test = "0.3"
 default = []
 server = ["axum", "tokio", "tower-http", "js-eval", "fetch"]
 js-eval = ["boa_engine"]
-fetch = ["reqwest", "tokio"]
+fetch = ["reqwest", "tokio", "robotstxt", "governor"]
+mcp = ["rmcp", "tokio", "schemars"]
 
 [[bin]]
 name = "aether-server"
 path = "src/bin/server.rs"
 required-features = ["server"]
+
+[[bin]]
+name = "aether-mcp"
+path = "src/bin/mcp_server.rs"
+required-features = ["mcp"]
 
 [[bin]]
 name = "aether-bench"

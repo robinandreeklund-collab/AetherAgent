@@ -112,6 +112,7 @@ AetherAgent is **not** a browser replacement. It occupies a different niche. Her
 | Fetches pages (HTTP) | **Yes** (reqwest, Fas 7) | Yes (libcurl) | Yes (Chrome DevTools) |
 | Full JavaScript (V8/SpiderMonkey) | No (Boa sandbox only) | Yes (V8) | Yes (V8) |
 | CSS rendering / layout | No | Partial | Yes |
+| Semantic Firewall (request filtering) | **Yes** | No | No |
 | Cookies / sessions | No | Yes | Yes |
 | CDP protocol | No | Yes | Yes |
 | Playwright/Puppeteer compatible | No | Yes | Yes (native) |
@@ -284,6 +285,8 @@ curl -X POST https://your-app.onrender.com/api/diff \
 | POST | `/api/fetch/click` | Fetch URL → find clickable element |
 | POST | `/api/fetch/extract` | Fetch URL → extract structured data |
 | POST | `/api/fetch/plan` | Fetch URL → compile goal → execute plan |
+| POST | `/api/firewall/classify` | Classify URL against semantic firewall (L1/L2/L3) |
+| POST | `/api/firewall/classify-batch` | Classify batch of URLs against firewall |
 
 ### Python SDK (connects to deployed server)
 
@@ -313,10 +316,12 @@ AetherAgent/
 │   ├── temporal.rs     # Temporal Memory – time-series tracking, adversarial detection
 │   ├── compiler.rs     # Intent Compiler – goal decomposition, action plan optimization
 │   ├── fetch.rs        # HTTP Fetch – reqwest-based page fetching with SSRF protection
+│   ├── firewall.rs     # Semantic Firewall – 3-level goal-aware request filtering
 │   ├── memory.rs       # Workflow memory – stateless context across WASM
 │   ├── types.rs        # Core data structures
 │   └── bin/
-│       └── server.rs   # HTTP API server (axum) for deployment
+│       ├── server.rs     # HTTP API server (axum) for deployment
+│       └── mcp_server.rs # MCP server (rmcp) for Claude/Cursor/VS Code
 ├── bindings/
 │   ├── node/           # Node.js SDK with TypeScript types
 │   └── python/         # Python SDK (HTTP + WASM)
@@ -358,6 +363,7 @@ AetherAgent/
 | **Fas 5** – Temporal Memory & Adversarial Modeling | ✅ Done | Time-series page change tracking, predictive injection defense |
 | **Fas 6** – Intent Compiler | ✅ Done | Multi-step goal → optimized action plan with speculative prefetch |
 | **Fas 7** – HTTP Fetch Integration | ✅ Done | Built-in URL fetching with cookies, redirects, robots.txt, SSRF protection |
+| **Fas 8** – Semantic Firewall & Ethical Engine | ✅ Done | Goal-aware request filtering (L1/L2/L3), Google robots.txt parser, per-domain rate limiting |
 
 ### Design Principles
 
@@ -575,6 +581,97 @@ result = agent.fetch_parse("https://api.example.com/products", goal="extract dat
 | POST | `/api/fetch/click` | Fetch URL → find clickable element |
 | POST | `/api/fetch/extract` | Fetch URL → extract structured data |
 | POST | `/api/fetch/plan` | Fetch URL → compile goal → execute plan |
+
+### Semantic Firewall & Ethical Engine (Fas 8)
+
+AetherAgent now includes a **Semantic Firewall** – a three-level goal-aware request filter that blocks irrelevant subrequests before they waste bandwidth and tokens:
+
+```python
+agent = AetherAgent("https://your-url.onrender.com")
+
+# Classify a single URL against the firewall
+verdict = agent.classify_request(
+    "https://www.google-analytics.com/collect",
+    goal="buy product"
+)
+print(verdict)  # {"allowed": false, "blocked_by": "L1UrlPattern", ...}
+
+# Batch classification for page subrequests
+verdicts = agent.classify_request_batch(
+    urls=["https://shop.se/api/products", "https://cdn.hotjar.com/track.js",
+          "https://shop.se/hero.jpg", "https://shop.se/checkout"],
+    goal="buy product"
+)
+print(verdicts["summary"])  # {"blocked_l1": 1, "blocked_l2": 1, ...}
+```
+
+**Firewall Levels:**
+
+| Level | What it checks | Speed | Coverage |
+|-------|---------------|-------|----------|
+| **L1** | URL pattern – 45+ tracking domains (Google Analytics, Facebook, Hotjar, etc.) | <1μs | Ads, analytics, fingerprinting, chat widgets |
+| **L2** | File extension/MIME – blocks images, fonts, video, archives | <1μs | .jpg, .woff2, .mp4, .pdf, .zip, etc. |
+| **L3** | Semantic relevance – scores URL against agent's current goal | ~1ms | Keyword matching + path segment analysis |
+
+**Ethical Engine:**
+
+- **robots.txt compliance** – Google's official `robotstxt` crate (RFC 9309) for accurate Allow/Disallow parsing
+- **Per-domain rate limiting** – `governor` crate with GCRA algorithm (default 2 req/s per domain)
+- **Retry-After header** – respects 429/503 rate limit responses
+- **SSRF protection** – blocks localhost, private IPs, non-HTTP schemes
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/firewall/classify` | Classify URL against semantic firewall |
+| POST | `/api/firewall/classify-batch` | Classify batch of URLs |
+
+### MCP Server (Model Context Protocol)
+
+AetherAgent exposes all core tools via MCP – the de facto AI agent standard used by Claude, ChatGPT, Gemini, Cursor, and VS Code.
+
+```bash
+# Run the MCP server on stdio
+cargo run --features mcp --bin aether-mcp
+```
+
+**Available MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `parse` | Parse HTML to semantic tree with goal-relevance scoring |
+| `parse_top` | Parse top-N most relevant nodes (token-efficient) |
+| `find_and_click` | Find best clickable element matching a label |
+| `fill_form` | Map form fields to key/value pairs |
+| `extract_data` | Extract structured data by semantic keys |
+| `check_injection` | Check text for prompt injection patterns |
+| `compile_goal` | Compile goal into action plan with dependencies |
+| `classify_request` | Classify URL against semantic firewall |
+| `diff_trees` | Semantic diff between two trees (80-95% token savings) |
+| `parse_with_js` | Parse with automatic JS detection and evaluation |
+
+**Claude Desktop configuration:**
+```json
+{
+  "mcpServers": {
+    "aether-agent": {
+      "command": "/path/to/target/release/aether-mcp"
+    }
+  }
+}
+```
+
+### Architecture Decisions & Research Notes
+
+**Why MCP over CDP (sCDP):**
+The project initially considered implementing a simplified CDP (Chrome DevTools Protocol) layer. After research, we concluded that the market is moving toward **MCP (Model Context Protocol)** – the de facto AI agent standard adopted by Claude, ChatGPT, Gemini, Cursor, and VS Code. Google's **WebMCP** standard (Feb 2026) envisions websites exposing structured tools to AI agents – which maps directly to AetherAgent's semantic tree format. CDP is a browser debugging protocol, not an AI interaction standard. AetherAgent is a perception layer, not a browser, making MCP the natural integration point.
+
+**Why wreq/stealth is deferred:**
+`wreq` (v6.0.0-rc.28) offers JA4 TLS fingerprint emulation for anti-bot evasion. We deferred it because: (1) still in RC, not stable; (2) anti-bot evasion requires more than TLS fingerprints (JS challenges, CAPTCHAs, behavioral analysis); (3) ethically questionable under EU AI Act Art. 52 transparency requirements; (4) AetherAgent targets ethical use cases where robots.txt compliance is preferred over evasion. Will revisit when wreq reaches stable release, as an optional feature.
+
+**JS validation prototype (Gap 3 – why prototype first):**
+The claim that "only 1-5% of JavaScript on web pages actually mutates the DOM" is unsubstantiated. Before investing in a full oxc_parser + rquickjs migration (replacing Boa), we need empirical validation. Our fixture analysis showed 0% of test fixtures contain any JavaScript – by design (they test parser/semantic features). Proper validation requires crawling 1,000+ real websites and measuring DOM-mutation vs. analytics/tracking script ratios. Until validated, we keep Boa (pure Rust, no C deps) as the sandbox engine. A future phase may add oxc_parser for faster AST analysis and rquickjs for better ES2023+ coverage, but only if the DOM-mutation ratio validates the investment.
 
 ### Future Work
 
