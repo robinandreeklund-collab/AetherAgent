@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "vision")]
+use rten_tensor::{AsView, Layout};
 use serde::{Deserialize, Serialize};
 
 use crate::grounding::compute_iou;
@@ -283,9 +285,10 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
         for x in 0..w {
             let pixel = rgb.get_pixel(x as u32, y as u32);
             // CHW-layout: [R-kanal][G-kanal][B-kanal]
-            tensor[0 * h * w + y * w + x] = pixel[0] as f32 / 255.0;
-            tensor[1 * h * w + y * w + x] = pixel[1] as f32 / 255.0;
-            tensor[2 * h * w + y * w + x] = pixel[2] as f32 / 255.0;
+            let channel_stride = h * w;
+            tensor[y * w + x] = pixel[0] as f32 / 255.0;
+            tensor[channel_stride + y * w + x] = pixel[1] as f32 / 255.0;
+            tensor[2 * channel_stride + y * w + x] = pixel[2] as f32 / 255.0;
         }
     }
 
@@ -307,7 +310,8 @@ pub fn run_inference(
     use rten_tensor::NdTensor;
 
     // Ladda modellen fran bytes
-    let model = Model::load(model_bytes).map_err(|e| format!("Kunde inte ladda modell: {}", e))?;
+    let model =
+        Model::load(model_bytes.to_vec()).map_err(|e| format!("Kunde inte ladda modell: {}", e))?;
 
     // Skapa input-tensor med form [1, 3, input_size, input_size]
     let size = input_size as usize;
@@ -326,16 +330,17 @@ pub fn run_inference(
         .ok_or_else(|| "Modellen har inga outputs".to_string())?;
 
     let result = model
-        .run(vec![(input_id, input.into())], vec![output_id], None)
+        .run(vec![(input_id, input.into())], &[output_id], None)
         .map_err(|e| format!("Inferensfel: {}", e))?;
 
     // Hamta output-tensor
     let output = result
         .first()
         .ok_or_else(|| "Inget output fran modellen".to_string())?;
-    let output_tensor = output
-        .as_float()
-        .ok_or_else(|| "Output ar inte float-tensor".to_string())?;
+    let output_tensor = match output {
+        rten::Output::FloatTensor(t) => t,
+        _ => return Err("Output ar inte float-tensor".to_string()),
+    };
 
     // Post-process: YOLOv8 output ar [1, num_classes+4, num_predictions]
     // Forsta 4 rader: cx, cy, w, h
@@ -377,8 +382,8 @@ pub fn run_inference(
         }
 
         // Extrahera bounding box (cx, cy, w, h) -> (x, y, w, h)
-        let cx = data[0 * num_preds + pred_idx];
-        let cy = data[1 * num_preds + pred_idx];
+        let cx = data[pred_idx];
+        let cy = data[num_preds + pred_idx];
         let w = data[2 * num_preds + pred_idx];
         let h = data[3 * num_preds + pred_idx];
 
