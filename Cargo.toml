@@ -35,6 +35,7 @@ governor = { version = "0.10", optional = true }
 # Fas 8: MCP Server – Model Context Protocol
 rmcp = { version = "1.2", features = ["server", "transport-io", "macros"], optional = true }
 schemars = { version = "0.8", optional = true }
+base64 = { version = "0.22", optional = true }
 
 # Fas 11: Vision – YOLOv8 inference via rten (optional, feature-gated)
 rten = { version = "0.15", optional = true }
@@ -50,7 +51,7 @@ default = []
 server = ["axum", "tokio", "tower-http", "js-eval", "fetch"]
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
-mcp = ["rmcp", "tokio", "schemars"]
+mcp = ["rmcp", "tokio", "schemars", "base64"]
 vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 
 [[bin]]

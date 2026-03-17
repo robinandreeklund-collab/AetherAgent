@@ -195,6 +195,26 @@ struct CollabFetchParams {
     agent_id: String,
 }
 
+// ─── Fas 10 parameter types ─────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct DetectXhrParams {
+    /// Raw HTML string to scan for XHR/fetch calls
+    html: String,
+}
+
+// ─── Fas 11 parameter types ─────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ParseScreenshotParams {
+    /// PNG image bytes (base64-encoded)
+    png_base64: String,
+    /// ONNX model bytes (base64-encoded)
+    model_base64: String,
+    /// The agent's current goal
+    goal: String,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -408,6 +428,36 @@ impl AetherMcpServer {
     fn fetch_collab_deltas(&self, Parameters(params): Parameters<CollabFetchParams>) -> String {
         aether_agent::fetch_collab_deltas(&params.store_json, &params.agent_id)
     }
+
+    // ─── Fas 10: XHR Network Interception ─────────────────────────────────────
+
+    #[tool(
+        name = "detect_xhr_urls",
+        description = "Scan HTML for XHR/fetch network calls embedded in inline scripts and event handlers. USE THIS TOOL WHEN: you suspect a page loads data dynamically via JavaScript fetch(), XMLHttpRequest, or jQuery AJAX calls — e.g. prices loaded after page render, infinite scroll endpoints, or API calls triggered by button clicks. Returns a JSON array of {url, method, headers} objects representing detected network targets. Use this to discover hidden API endpoints that are not visible in the static HTML, then fetch those URLs directly for richer data extraction."
+    )]
+    fn detect_xhr_urls(&self, Parameters(params): Parameters<DetectXhrParams>) -> String {
+        aether_agent::detect_xhr_urls(&params.html)
+    }
+
+    // ─── Fas 11: Vision – YOLOv8 Screenshot Analysis ──────────────────────────
+
+    #[tool(
+        name = "parse_screenshot",
+        description = "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings). USE THIS TOOL WHEN: you have a screenshot (PNG) of a web page or app and want to detect interactive elements visually — useful when HTML is unavailable, rendered differently from source, or for canvas/image-based UIs. Provide base64-encoded PNG and ONNX model bytes. Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires the 'vision' feature flag at compile time."
+    )]
+    fn parse_screenshot(&self, Parameters(params): Parameters<ParseScreenshotParams>) -> String {
+        use base64::Engine;
+        let png_bytes = match base64::engine::general_purpose::STANDARD.decode(&params.png_base64) {
+            Ok(b) => b,
+            Err(e) => return format!(r#"{{"error":"Invalid PNG base64: {}"}}"#, e),
+        };
+        let model_bytes =
+            match base64::engine::general_purpose::STANDARD.decode(&params.model_base64) {
+                Ok(b) => b,
+                Err(e) => return format!(r#"{{"error":"Invalid model base64: {}"}}"#, e),
+            };
+        aether_agent::parse_screenshot(&png_bytes, &model_bytes, &params.goal)
+    }
 }
 
 impl ServerHandler for AetherMcpServer {
@@ -429,7 +479,11 @@ impl ServerHandler for AetherMcpServer {
              to track page changes without re-processing the full tree.\n\n\
              ADVANCED: Use causal graph tools (build_causal_graph, predict_action_outcome, \
              find_safest_path) for complex multi-step navigation. Use collab tools for \
-             multi-agent workflows. Use grounding tools for vision-language integration."
+             multi-agent workflows. Use grounding tools for vision-language integration.\n\n\
+             XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
+             in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
+             VISION: Use 'parse_screenshot' to analyze screenshots with YOLOv8 object detection — \
+             finds buttons, inputs, links, and other UI elements visually when HTML is unavailable."
                 .to_string(),
         );
         info
@@ -445,7 +499,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
-    eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas");
+    eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
+    eprintln!("        detect_xhr_urls, parse_screenshot");
 
     let server = AetherMcpServer::new();
 
