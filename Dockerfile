@@ -1,7 +1,7 @@
 FROM rust:1.88-slim as builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev \
+    pkg-config libssl-dev python3-minimal \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
