@@ -1988,37 +1988,45 @@ async fn render_url_to_png(url: &str, width: u32, height: u32) -> Result<Vec<u8>
     let response = aether_agent::fetch::fetch_page(url, &config)
         .await
         .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
-    let html = &response.body;
+    let html = response.body.clone();
+    let base_url = url.to_string();
 
-    // Rendera HTML till pixel-buffer med Blitz (i en blocking task)
-    let html_owned = html.to_string();
-    let png_bytes =
-        tokio::task::spawn_blocking(move || render_html_to_png(&html_owned, width, height))
-            .await
-            .map_err(|e| format!("Blitz render task error: {e}"))??;
-
-    Ok(png_bytes)
+    // Rendera HTML → PNG i spawn_blocking (HtmlDocument är inte Send)
+    // blitz_net::Provider skapar nätverks-tasks via tokio Handle::current()
+    // som fungerar i spawn_blocking-kontext
+    tokio::task::spawn_blocking(move || render_html_to_png(&html, &base_url, width, height))
+        .await
+        .map_err(|e| format!("Blitz render task error: {e}"))?
 }
 
-/// Ren-Rust HTML → PNG rendering med Blitz (synkron, körs i spawn_blocking)
+/// Ren-Rust HTML → PNG rendering med Blitz, med riktig resurs-laddning.
+/// CSS, bilder och fonter hämtas via blitz-net och matas tillbaka till DOM:et.
 #[cfg(feature = "blitz")]
-fn render_html_to_png(html: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+fn render_html_to_png(
+    html: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
     use blitz_html::HtmlDocument;
-    use blitz_traits::net::DummyNetCallback;
     use blitz_traits::shell::{ColorScheme, Viewport};
 
     let scale: f32 = 1.0;
-    let dummy_cb: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-        std::sync::Arc::new(DummyNetCallback);
-    let net = std::sync::Arc::new(blitz_net::Provider::new(dummy_cb));
 
-    // Parsa HTML → DOM
+    // Skapa MpscCallback — samlar resurser via en kanal istället för att kasta bort dem
+    let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+    let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+        std::sync::Arc::new(callback);
+    let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
+
+    // Parsa HTML → DOM med base_url för relativa CSS/font-URLer
     let mut document = HtmlDocument::from_html(
         html,
         DocumentConfig {
             viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+            base_url: Some(base_url.to_string()),
             net_provider: Some(std::sync::Arc::clone(&net)
                 as std::sync::Arc<
                     dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
@@ -2027,12 +2035,24 @@ fn render_html_to_png(html: &str, width: u32, height: u32) -> Result<Vec<u8>, St
         },
     );
 
-    // Resolva styles + layout (loopa tills alla assets är hämtade)
-    for _ in 0..10 {
-        document.resolve(0.0);
+    // Resolva styles + layout — dränera resurser från kanalen och mata tillbaka dem
+    // Async-tasks körs på tokio-runtime i bakgrunden; vi pollar med thread::sleep
+    for _ in 0..20 {
+        // Dränera alla mottagna resurser och applicera på DOM
+        while let Ok((_doc_id, resource)) = rx.try_recv() {
+            document.as_mut().load_resource(resource);
+        }
+        document.as_mut().resolve(0.0);
         if net.is_empty() {
             break;
         }
+        // Ge async-tasks tid att hämta resurser
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // Slutgiltig dränering av resterande resurser
+    while let Ok((_doc_id, resource)) = rx.try_recv() {
+        document.as_mut().load_resource(resource);
     }
     document.as_mut().resolve(0.0);
 

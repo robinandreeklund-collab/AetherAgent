@@ -512,30 +512,38 @@ async fn render_url_to_png_mcp(url: &str, width: u32, height: u32) -> Result<Vec
         .await
         .map_err(|e| format!("Body error: {e}"))?;
 
-    let html_owned = html;
-    tokio::task::spawn_blocking(move || render_html_to_png_mcp(&html_owned, width, height))
+    let base_url = url.to_string();
+    tokio::task::spawn_blocking(move || render_html_to_png_mcp(&html, &base_url, width, height))
         .await
         .map_err(|e| format!("Render task: {e}"))?
 }
 
-/// Ren-Rust HTML → PNG med Blitz (synkron, körs i spawn_blocking)
+/// Ren-Rust HTML → PNG med Blitz, med riktig resurs-laddning via MpscCallback.
 #[cfg(feature = "blitz")]
-fn render_html_to_png_mcp(html: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+fn render_html_to_png_mcp(
+    html: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
     use blitz_html::HtmlDocument;
-    use blitz_traits::net::DummyNetCallback;
     use blitz_traits::shell::{ColorScheme, Viewport};
 
     let scale: f32 = 1.0;
-    let dummy_cb: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-        std::sync::Arc::new(DummyNetCallback);
-    let net = std::sync::Arc::new(blitz_net::Provider::new(dummy_cb));
+
+    // MpscCallback samlar resurser via kanal
+    let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+    let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+        std::sync::Arc::new(callback);
+    let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
 
     let mut document = HtmlDocument::from_html(
         html,
         DocumentConfig {
             viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+            base_url: Some(base_url.to_string()),
             net_provider: Some(std::sync::Arc::clone(&net)
                 as std::sync::Arc<
                     dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
@@ -544,11 +552,21 @@ fn render_html_to_png_mcp(html: &str, width: u32, height: u32) -> Result<Vec<u8>
         },
     );
 
-    for _ in 0..10 {
-        document.resolve(0.0);
+    // Polla resurser och resolva styles+layout
+    for _ in 0..20 {
+        while let Ok((_doc_id, resource)) = rx.try_recv() {
+            document.as_mut().load_resource(resource);
+        }
+        document.as_mut().resolve(0.0);
         if net.is_empty() {
             break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // Dränera resterande resurser
+    while let Ok((_doc_id, resource)) = rx.try_recv() {
+        document.as_mut().load_resource(resource);
     }
     document.as_mut().resolve(0.0);
 
