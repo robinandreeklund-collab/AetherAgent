@@ -271,7 +271,7 @@ struct AetherMcpServer {
 impl AetherMcpServer {
     fn new() -> Self {
         Self {
-            tool_router: ToolRouter::new(),
+            tool_router: Self::tool_router(),
         }
     }
 }
@@ -933,6 +933,18 @@ fn render_annotated_screenshot_mcp(
 }
 
 impl ServerHandler for AetherMcpServer {
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListToolsResult {
+            tools: self.tool_router.list_all(),
+            next_cursor: None,
+            meta: None,
+        })
+    }
+
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
