@@ -493,7 +493,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, take a real browser screenshot with headless Chromium, then analyze it with YOLOv8 vision. Returns: 1) the actual screenshot of the web page as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No screenshots needed from your side. The server handles everything."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
@@ -984,7 +984,7 @@ impl ServerHandler for AetherMcpServer {
              XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
              in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
              VISION: Use 'fetch_vision' to analyze ANY web page visually — just give a URL and goal. \
-             The server takes a real browser screenshot with headless Chromium, runs YOLOv8 detection, \
+             The server renders the page with Blitz (pure Rust browser engine), runs YOLOv8 detection, \
              and returns: the original screenshot, annotated image with bounding boxes, and detection JSON. \
              For pre-captured screenshots, use 'vision_parse' (server model) or 'parse_screenshot' (client model)."
                 .to_string(),

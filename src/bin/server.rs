@@ -1794,7 +1794,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_vision",
-            "description": "ALL-IN-ONE: Fetch a URL, take a real browser screenshot with headless Chromium, then analyze it with YOLOv8 vision. Returns: 1) the actual screenshot of the web page as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No need to take screenshots separately. Requires Chromium on the server (auto-installed via Docker).",
+            "description": "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2381,7 +2381,7 @@ async fn mcp_dispatch_tool(
             // Validera URL
             aether_agent::fetch::validate_url(url)?;
 
-            // Ta screenshot med headless Chromium
+            // Rendera sidan till PNG med Blitz
             let png_bytes = render_url_to_png(url, width, height).await?;
             let png_b64 = B64.encode(&png_bytes);
 
