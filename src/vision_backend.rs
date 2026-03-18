@@ -419,7 +419,7 @@ impl TieredBackend {
 
             // Hämta main frame ID
             let frame_tree = tab
-                .call_method(headless_chrome::protocol::cdp::Page::GetFrameTree {})
+                .call_method(headless_chrome::protocol::cdp::Page::GetFrameTree(None))
                 .map_err(|e| format!("CDP get frame tree: {e}"))?;
             let frame_id = frame_tree.frame_tree.frame.id.clone();
 
