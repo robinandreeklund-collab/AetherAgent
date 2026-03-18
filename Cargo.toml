@@ -87,6 +87,14 @@ lto = true
 codegen-units = 1
 panic = "abort"    # mindre WASM-output
 
+# Server deploy profile: faster builds, still optimized
+# Usage: cargo build --profile server-release --features server,vision
+[profile.server-release]
+inherits = "release"
+opt-level = 2      # snabb kod, inte minsta binär
+lto = "thin"       # ~3x snabbare än full LTO, 95% av vinsten
+codegen-units = 4  # snabbare kompilering, minimal perf-kostnad
+
 [profile.dev]
 opt-level = 0
 debug = true

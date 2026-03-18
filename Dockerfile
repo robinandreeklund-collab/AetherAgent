@@ -8,16 +8,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# ── Dependency cache layer ────────────────────────────────────────────────────
+# Copy only Cargo manifests first, create stub source files, and build deps.
+# This layer is cached as long as Cargo.toml/Cargo.lock don't change.
+# Rebuilds of our code reuse the cached ~300 compiled dependencies.
 COPY Cargo.toml Cargo.lock ./
+
+# Create minimal stubs so cargo can resolve and compile all dependencies
+RUN mkdir -p src/bin && \
+    echo "pub fn stub() {}" > src/lib.rs && \
+    echo "fn main() {}" > src/bin/server.rs && \
+    echo "fn main() {}" > src/bin/mcp_server.rs && \
+    echo "fn main() {}" > benches/bench_main.rs
+
+# Pre-compile all dependencies (this is the slow step, ~10-15 min first time)
+# Subsequent builds reuse this layer if only src/ code changed.
+RUN cargo build --profile server-release --features server,vision --bin aether-server 2>&1 || true && \
+    cargo build --profile server-release --features mcp,vision --bin aether-mcp 2>&1 || true
+
+# Remove the stub artifacts so cargo rebuilds our actual code
+RUN rm -rf src/ benches/ && \
+    rm -f target/server-release/aether-server target/server-release/aether-mcp && \
+    rm -f target/server-release/deps/aether_agent-* && \
+    rm -f target/server-release/deps/libaether_agent-*
+
+# ── Build our code (fast: only our crate, deps are cached) ───────────────────
 COPY src/ src/
 COPY benches/ benches/
 
-# Build both server and MCP binaries with all features
-# server = axum + blitz + js-eval + fetch
-# vision = YOLOv8 inference via rten
-# mcp = MCP stdio server (for local use, also included in image)
-RUN cargo build --release --features server,vision --bin aether-server \
-    && cargo build --release --features mcp,vision --bin aether-mcp
+RUN cargo build --profile server-release --features server,vision --bin aether-server && \
+    cargo build --profile server-release --features mcp,vision --bin aether-mcp
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -38,8 +59,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip3 install --no-cache-dir --break-system-packages rten-convert \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/aether-server /usr/local/bin/aether-server
-COPY --from=builder /app/target/release/aether-mcp /usr/local/bin/aether-mcp
+COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
+COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
 
 ENV PORT=10000
 
