@@ -16,7 +16,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 # Create minimal stubs so cargo can resolve and compile all dependencies
-RUN mkdir -p src/bin && \
+RUN mkdir -p src/bin benches && \
     echo "pub fn stub() {}" > src/lib.rs && \
     echo "fn main() {}" > src/bin/server.rs && \
     echo "fn main() {}" > src/bin/mcp_server.rs && \
