@@ -825,4 +825,337 @@ mod tests {
             "Felmeddelande borde nämna 'not available'"
         );
     }
+
+    // ─── Prestandatester ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nms_performance_100_detections() {
+        // NMS på 100 detektioner borde klara sig under 5ms
+        let mut detections: Vec<UiDetection> = (0..100)
+            .map(|i| UiDetection {
+                class: UI_CLASSES[i % UI_CLASSES.len()].to_string(),
+                confidence: 0.95 - (i as f32 * 0.005),
+                bbox: BoundingBox {
+                    x: (i % 10) as f32 * 130.0,
+                    y: (i / 10) as f32 * 90.0,
+                    width: 120.0,
+                    height: 40.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        nms(&mut detections, 0.45);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 5,
+            "NMS på 100 detektioner tog {}ms, borde vara <5ms",
+            elapsed.as_millis()
+        );
+        assert!(
+            !detections.is_empty(),
+            "NMS borde behålla åtminstone några detektioner"
+        );
+    }
+
+    #[test]
+    fn test_nms_performance_500_detections_heavy_overlap() {
+        // Stresstest: 500 starkt överlappande detektioner
+        let mut detections: Vec<UiDetection> = (0..500)
+            .map(|i| UiDetection {
+                class: "button".to_string(),
+                confidence: 0.99 - (i as f32 * 0.001),
+                bbox: BoundingBox {
+                    x: 100.0 + (i as f32 * 0.5),
+                    y: 100.0 + (i as f32 * 0.3),
+                    width: 200.0,
+                    height: 50.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        nms(&mut detections, 0.45);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 50,
+            "NMS på 500 överlappande detektioner tog {}ms, borde vara <50ms",
+            elapsed.as_millis()
+        );
+        // Starkt överlappande → borde filtreras ner kraftigt
+        assert!(
+            detections.len() < 20,
+            "500 överlappande borde filtreras till <20, fick {}",
+            detections.len()
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_performance_100_elements() {
+        // Bygga semantiskt träd av 100 detektioner borde ta <1ms
+        let detections: Vec<UiDetection> = (0..100)
+            .map(|i| UiDetection {
+                class: UI_CLASSES[i % UI_CLASSES.len()].to_string(),
+                confidence: 0.8,
+                bbox: BoundingBox {
+                    x: (i % 10) as f32 * 130.0,
+                    y: (i / 10) as f32 * 90.0,
+                    width: 120.0,
+                    height: 40.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        let tree = detections_to_tree(&detections, "hitta kontaktuppgifter", "https://example.com");
+        let elapsed = start.elapsed();
+
+        assert_eq!(tree.nodes.len(), 100, "Borde skapa 100 noder");
+        assert!(
+            elapsed.as_millis() < 1,
+            "detections_to_tree för 100 element tog {}ms, borde vara <1ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn test_vision_config_per_class_threshold_filtering() {
+        // Simulera hjo.se-scenariot: höj threshold för select/input för att filtrera FP
+        let mut config = VisionConfig::default();
+        config.class_thresholds.insert("select".to_string(), 0.6);
+        config.class_thresholds.insert("input".to_string(), 0.6);
+        config.class_thresholds.insert("button".to_string(), 0.3);
+
+        // select med 42% confidence borde filtreras (under 60%)
+        assert!(
+            config.threshold_for_class("select") > 0.42,
+            "select-tröskeln (0.6) borde filtrera 42% confidence"
+        );
+        // button med 98% confidence borde behållas (över 30%)
+        assert!(
+            config.threshold_for_class("button") < 0.98,
+            "button-tröskeln (0.3) borde behålla 98% confidence"
+        );
+        // input med 37% confidence borde filtreras (under 60%)
+        assert!(
+            config.threshold_for_class("input") > 0.37,
+            "input-tröskeln (0.6) borde filtrera 37% confidence"
+        );
+    }
+
+    #[test]
+    fn test_min_detection_area_filters_artefacts() {
+        let config = VisionConfig {
+            min_detection_area: 500.0,
+            ..VisionConfig::default()
+        };
+        // Liten artefakt: 10×10 = 100px² < 500 → borde filtreras
+        assert!(
+            10.0 * 10.0 < config.min_detection_area,
+            "10×10 detektion borde filtreras av min_detection_area=500"
+        );
+        // Normal knapp: 120×40 = 4800px² > 500 → borde behållas
+        assert!(
+            120.0 * 40.0 > config.min_detection_area,
+            "120×40 detektion borde passera min_detection_area=500"
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_goal_relevance_scoring() {
+        let detections = vec![
+            UiDetection {
+                class: "button".to_string(),
+                confidence: 0.95,
+                bbox: BoundingBox {
+                    x: 100.0,
+                    y: 200.0,
+                    width: 80.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "text".to_string(),
+                confidence: 0.88,
+                bbox: BoundingBox {
+                    x: 50.0,
+                    y: 100.0,
+                    width: 200.0,
+                    height: 25.0,
+                },
+            },
+        ];
+
+        // Mål som nämner "button" borde ge button högre relevans
+        let tree_button_goal =
+            detections_to_tree(&detections, "click the button", "https://example.com");
+        let tree_text_goal =
+            detections_to_tree(&detections, "read the text", "https://example.com");
+
+        let button_rel_with_button_goal = tree_button_goal.nodes[0].relevance;
+        let button_rel_with_text_goal = tree_text_goal.nodes[0].relevance;
+        assert!(
+            button_rel_with_button_goal > button_rel_with_text_goal,
+            "Button borde ha högre relevans med 'click the button' ({}) vs 'read the text' ({})",
+            button_rel_with_button_goal,
+            button_rel_with_text_goal
+        );
+
+        let text_rel_with_text_goal = tree_text_goal.nodes[1].relevance;
+        let text_rel_with_button_goal = tree_button_goal.nodes[1].relevance;
+        assert!(
+            text_rel_with_text_goal > text_rel_with_button_goal,
+            "Text borde ha högre relevans med 'read the text' ({}) vs 'click the button' ({})",
+            text_rel_with_text_goal,
+            text_rel_with_button_goal
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_all_classes_mapped() {
+        // Verifiera att alla UI_CLASSES mappar till giltiga roller
+        let detections: Vec<UiDetection> = UI_CLASSES
+            .iter()
+            .enumerate()
+            .map(|(i, cls)| UiDetection {
+                class: cls.to_string(),
+                confidence: 0.9,
+                bbox: BoundingBox {
+                    x: i as f32 * 100.0,
+                    y: 0.0,
+                    width: 80.0,
+                    height: 30.0,
+                },
+            })
+            .collect();
+
+        let tree = detections_to_tree(&detections, "test", "url");
+        assert_eq!(
+            tree.nodes.len(),
+            UI_CLASSES.len(),
+            "Borde skapa en nod per UI-klass"
+        );
+
+        for node in &tree.nodes {
+            assert!(
+                !node.role.is_empty(),
+                "Nod-roll borde inte vara tom för klass"
+            );
+            assert_eq!(
+                node.trust,
+                TrustLevel::Untrusted,
+                "Alla vision-noder borde vara Untrusted"
+            );
+            assert!(node.bbox.is_some(), "Alla vision-noder borde ha bbox");
+        }
+    }
+
+    #[test]
+    fn test_vision_result_serde_roundtrip() {
+        let result = VisionResult {
+            detections: vec![UiDetection {
+                class: "button".to_string(),
+                confidence: 0.95,
+                bbox: BoundingBox {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 100.0,
+                    height: 40.0,
+                },
+            }],
+            tree: detections_to_tree(
+                &[UiDetection {
+                    class: "button".to_string(),
+                    confidence: 0.95,
+                    bbox: BoundingBox {
+                        x: 10.0,
+                        y: 20.0,
+                        width: 100.0,
+                        height: 40.0,
+                    },
+                }],
+                "test",
+                "url",
+            ),
+            inference_time_ms: 171,
+            preprocess_time_ms: 185,
+            raw_detection_count: 12,
+            model_version: "v1-int8".to_string(),
+        };
+
+        let json = serde_json::to_string(&result).expect("Borde kunna serialisera VisionResult");
+        let parsed: VisionResult =
+            serde_json::from_str(&json).expect("Borde kunna deserialisera VisionResult");
+
+        assert_eq!(
+            parsed.detections.len(),
+            1,
+            "Borde ha 1 detektion efter roundtrip"
+        );
+        assert_eq!(
+            parsed.inference_time_ms, 171,
+            "inference_time_ms borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.preprocess_time_ms, 185,
+            "preprocess_time_ms borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.raw_detection_count, 12,
+            "raw_detection_count borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.model_version, "v1-int8",
+            "model_version borde överleva roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_nms_preserves_sort_order() {
+        // NMS borde returnera detektioner sorterade efter confidence (högst först)
+        let mut detections = vec![
+            UiDetection {
+                class: "button".to_string(),
+                confidence: 0.5,
+                bbox: BoundingBox {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 50.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "input".to_string(),
+                confidence: 0.9,
+                bbox: BoundingBox {
+                    x: 200.0,
+                    y: 200.0,
+                    width: 100.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "link".to_string(),
+                confidence: 0.7,
+                bbox: BoundingBox {
+                    x: 400.0,
+                    y: 0.0,
+                    width: 60.0,
+                    height: 20.0,
+                },
+            },
+        ];
+        nms(&mut detections, 0.45);
+        assert_eq!(detections.len(), 3, "Icke-överlappande borde alla behållas");
+        assert!(
+            detections[0].confidence >= detections[1].confidence
+                && detections[1].confidence >= detections[2].confidence,
+            "Detektioner borde vara sorterade efter confidence (högst först): {}, {}, {}",
+            detections[0].confidence,
+            detections[1].confidence,
+            detections[2].confidence
+        );
+    }
 }

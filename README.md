@@ -378,7 +378,14 @@ Stateful workflow engine that combines `ActionPlan` + `TemporalMemory` + `Sessio
 
 Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detects UI elements directly from screenshots — no DOM required. Feature-gated behind `--features vision`.
 
-The `fetch_vision` pipeline renders pages to PNG using [Blitz](https://github.com/DioxusLabs/blitz) — a pure Rust browser engine (no headless Chrome/Chromium). Blitz handles HTML/CSS layout, external stylesheets, fonts, and images via an async resource loader. The full pipeline: URL → HTTP fetch → Blitz render → YOLOv8 detection → annotated screenshot + JSON.
+The `fetch_vision` pipeline renders pages to PNG using [Blitz](https://github.com/DioxusLabs/blitz) — a pure Rust browser engine (no headless Chrome/Chromium). Supports two rendering modes via `fast_render` parameter:
+
+| Mode | `fast_render` | Latency | What loads |
+|------|:---:|---|---|
+| **Fast** (default) | `true` | ~50ms release | HTML + inline CSS only — no network I/O |
+| **Full** | `false` | ≤2s (capped) | External CSS, fonts, images (10ms poll, 2s timeout) |
+
+Fast mode is the default for `fetch_vision` — sufficient for YOLOv8 UI element detection since YOLO needs layout positions, not pixel-perfect fonts. Set `fast_render: false` for high-fidelity screenshots.
 
 | Function | What it does |
 |----------|-------------|
@@ -388,8 +395,8 @@ The `fetch_vision` pipeline renders pages to PNG using [Blitz](https://github.co
 | `run_inference` | ONNX model inference via rten |
 | `nms` | Non-max suppression on overlapping detections |
 | `detections_to_tree` | Convert detections to SemanticTree with goal-relevance |
-| `render_url_to_png` | Fetch + render page to PNG via Blitz (server) |
-| `render_url_to_png_mcp` | Same as above for MCP server context |
+| `render_html_to_png` | Render HTML string to PNG via Blitz (library function) |
+| `render_url_to_png` | Fetch URL + render to PNG via Blitz (server) |
 
 **Detected UI classes:** button, input, link, icon, text, image, checkbox, radio, select, heading.
 
@@ -522,6 +529,8 @@ Run the server: `cargo run --features server --bin aether-server`
 1. `screenshot` — base64 PNG of the rendered page
 2. `annotated` — base64 PNG with color-coded bounding boxes drawn on detected elements
 3. `detections` — JSON array of `{class, confidence, bbox}` plus a semantic tree
+
+Optional parameter `fast_render` (default: `true`): skip external resource loading for ~50ms render vs ~2s with full CSS/fonts/images. Fast mode is sufficient for YOLO UI detection.
 
 #### Session Management
 

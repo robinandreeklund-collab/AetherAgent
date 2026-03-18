@@ -527,10 +527,7 @@ async fn render_url_to_png_mcp(
     .map_err(|e| format!("Render task: {e}"))?
 }
 
-/// Ren-Rust HTML → PNG med Blitz.
-///
-/// `fast_render=true`: Skippar externa resurser — ~50ms. Räcker för YOLO-detektering.
-/// `fast_render=false`: Laddar CSS/fonter/bilder med 2s timeout, 10ms poll.
+/// Ren-Rust HTML → PNG med Blitz. Delegerar till lib-funktionen.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_mcp(
     html: &str,
@@ -539,102 +536,7 @@ fn render_html_to_png_mcp(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
-    use anyrender::{ImageRenderer, PaintScene as _};
-    use blitz_dom::DocumentConfig;
-    use blitz_html::HtmlDocument;
-    use blitz_traits::shell::{ColorScheme, Viewport};
-
-    let scale: f32 = 1.0;
-
-    let mut document = if fast_render {
-        // Fast mode: ingen net_provider → inga nätverksresurser
-        HtmlDocument::from_html(
-            html,
-            DocumentConfig {
-                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-                base_url: Some(base_url.to_string()),
-                ..Default::default()
-            },
-        )
-    } else {
-        // Full mode: ladda CSS, fonter, bilder via blitz-net
-        let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
-        let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-            std::sync::Arc::new(callback);
-        let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
-
-        let mut doc = HtmlDocument::from_html(
-            html,
-            DocumentConfig {
-                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-                base_url: Some(base_url.to_string()),
-                net_provider: Some(std::sync::Arc::clone(&net)
-                    as std::sync::Arc<
-                        dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
-                    >),
-                ..Default::default()
-            },
-        );
-
-        // Polla resurser med 10ms intervall, max 2s total timeout
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            while let Ok((_doc_id, resource)) = rx.try_recv() {
-                doc.as_mut().load_resource(resource);
-            }
-            doc.as_mut().resolve(0.0);
-            if net.is_empty() || std::time::Instant::now() >= deadline {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-
-        // Dränera resterande resurser
-        while let Ok((_doc_id, resource)) = rx.try_recv() {
-            doc.as_mut().load_resource(resource);
-        }
-        doc.as_mut().resolve(0.0);
-
-        doc
-    };
-
-    // Fast mode: resolva layout en gång
-    if fast_render {
-        document.as_mut().resolve(0.0);
-    }
-
-    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
-    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
-    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
-    renderer.render_to_vec(
-        |scene| {
-            scene.fill(
-                peniko::Fill::NonZero,
-                peniko::kurbo::Affine::IDENTITY,
-                white,
-                None,
-                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
-            );
-            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
-        },
-        &mut buffer,
-    );
-
-    let mut png_bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| format!("PNG header: {e}"))?;
-        writer
-            .write_image_data(&buffer)
-            .map_err(|e| format!("PNG data: {e}"))?;
-        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
-    }
-
-    Ok(png_bytes)
+    aether_agent::render_html_to_png(html, base_url, width, height, fast_render)
 }
 
 #[cfg(not(feature = "blitz"))]
