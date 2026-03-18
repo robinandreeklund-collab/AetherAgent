@@ -227,6 +227,15 @@ pub fn determine_tier_hint(html: &str, xhr_bodies: &[&str]) -> TierHint {
         }
     }
 
+    // Kolla HTML efter JS chart/canvas-indikatorer (t.ex. inline <script>)
+    for indicator in JS_CHART_INDICATORS {
+        if html.contains(indicator) {
+            return TierHint::RequiresJs {
+                reason: format!("HTML contains JS indicator: {}", indicator),
+            };
+        }
+    }
+
     // Kolla HTML efter SPA-ramverksmarkörer med tom body
     let html_lower = html.to_lowercase();
     let has_spa_marker = SPA_INDICATORS

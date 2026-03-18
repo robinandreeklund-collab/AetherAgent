@@ -27,8 +27,16 @@ pub mod vision_backend;
 mod webmcp;
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wasm_bindgen::prelude::*;
+
+// Global delad TieredBackend så att tier-statistik ackumuleras över anrop
+static GLOBAL_TIERED_BACKEND: OnceLock<vision_backend::TieredBackend> = OnceLock::new();
+
+fn global_tiered_backend() -> &'static vision_backend::TieredBackend {
+    GLOBAL_TIERED_BACKEND.get_or_init(vision_backend::TieredBackend::default)
+}
 
 use parser::parse_html;
 use semantic::{extract_title, SemanticBuilder};
@@ -900,16 +908,33 @@ pub fn render_html_to_png(
             },
         );
 
+        // Vänta kort så att Blitz hinner starta alla resurshämtningar
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut idle_rounds = 0u32;
         loop {
+            let mut loaded_any = false;
             while let Ok((_doc_id, resource)) = rx.try_recv() {
                 doc.as_mut().load_resource(resource);
+                loaded_any = true;
             }
             doc.as_mut().resolve(0.0);
-            if net.is_empty() || std::time::Instant::now() >= deadline {
+
+            // Kräv minst 3 tomma rundor i rad innan vi avslutar
+            if net.is_empty() && !loaded_any {
+                idle_rounds += 1;
+                if idle_rounds >= 3 {
+                    break;
+                }
+            } else {
+                idle_rounds = 0;
+            }
+
+            if std::time::Instant::now() >= deadline {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
 
         while let Ok((_doc_id, resource)) = rx.try_recv() {
@@ -985,7 +1010,7 @@ pub fn tiered_screenshot(
     fast_render: bool,
     xhr_captures_json: &str,
 ) -> String {
-    let backend = vision_backend::TieredBackend::default();
+    let backend = global_tiered_backend();
 
     // Bestäm tier-hint från XHR-captures
     let tier_hint = if xhr_captures_json.is_empty() || xhr_captures_json == "[]" {
@@ -1037,7 +1062,7 @@ pub fn tiered_screenshot(
 ///
 /// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.
 pub fn tier_stats() -> String {
-    let stats = vision_backend::TierStats::default();
+    let stats = global_tiered_backend().stats();
     serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "{}".to_string())
 }
 

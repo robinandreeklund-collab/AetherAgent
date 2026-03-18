@@ -2644,6 +2644,19 @@ fn test_vision_backend_determine_tier_hint_spa() {
 }
 
 #[test]
+fn test_vision_backend_determine_tier_hint_chart_in_html() {
+    use aether_agent::vision_backend::determine_tier_hint;
+    use aether_agent::vision_backend::TierHint;
+
+    let html = r##"<html><body><div id="chart"></div><script>new Chart("myChart", {type: "bar", datasets: [{data: [1,2,3]}]})</script></body></html>"##;
+    let hint = determine_tier_hint(html, &[]);
+    assert!(
+        matches!(hint, TierHint::RequiresJs { .. }),
+        "HTML med Chart.js borde ge RequiresJs"
+    );
+}
+
+#[test]
 fn test_vision_backend_tier_hint_from_xhr() {
     use aether_agent::intercept::{tier_hint_from_captures, XhrCapture};
     use aether_agent::vision_backend::TierHint;
