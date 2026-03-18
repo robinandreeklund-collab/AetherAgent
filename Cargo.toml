@@ -63,10 +63,10 @@ wasm-bindgen-test = "0.3"
 
 [features]
 default = []
-server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64", "blitz"]
+server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision"]
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
-mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest"]
+mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision"]
 vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
 cdp = ["headless_chrome"]

@@ -23,7 +23,10 @@ use tower_http::cors::{Any, CorsLayer};
 /// Delat server-state med förladdad vision-modell (rten::Model istället för bytes)
 #[derive(Clone)]
 struct AppState {
+    #[cfg(feature = "vision")]
     vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>,
+    #[cfg(not(feature = "vision"))]
+    vision_model: Arc<RwLock<Option<()>>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -1332,6 +1335,7 @@ async fn tier_stats_handler() -> impl IntoResponse {
 
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
 
+#[cfg(feature = "vision")]
 async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> impl IntoResponse {
     let png_bytes = match B64.decode(&req.png_base64) {
         Ok(b) => b,
@@ -1356,6 +1360,7 @@ async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> im
 }
 
 /// Screenshot-analys med serverns förladdade modell (kräver AETHER_MODEL_URL/PATH)
+#[cfg(feature = "vision")]
 async fn parse_screenshot_server_model(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(req): Json<ParseScreenshotServerModelRequest>,
@@ -1387,6 +1392,7 @@ async fn parse_screenshot_server_model(
 }
 
 /// Kontrollera om bytes ser ut som ONNX-format (protobuf med ONNX magic)
+#[cfg(feature = "vision")]
 fn is_onnx_format(bytes: &[u8]) -> bool {
     // ONNX-filer börjar med protobuf-header, vanligtvis 0x08 (field 1, varint)
     // rten-filer börjar med FlatBuffer-prefix (vanligtvis 4-byte size prefix)
@@ -1403,6 +1409,7 @@ fn is_onnx_format(bytes: &[u8]) -> bool {
 }
 
 /// Konvertera ONNX-bytes till rten-format via rten-convert subprocess
+#[cfg(feature = "vision")]
 fn convert_onnx_to_rten(onnx_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let tmp_dir = std::env::temp_dir();
     let onnx_path = tmp_dir.join("_aether_model.onnx");
@@ -1445,6 +1452,7 @@ fn convert_onnx_to_rten(onnx_bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Efterbehandla modellbytes: detektera format och konvertera vid behov
+#[cfg(feature = "vision")]
 fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
     if is_onnx_format(&bytes) {
         println!("Detekterade ONNX-format, försöker konvertera till rten...");
@@ -1465,6 +1473,7 @@ fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
 
 /// Ladda vision-modell från URL eller filsökväg vid serverstart.
 /// Returnerar en förladdad rten::Model (Model::load körs en gång här).
+#[cfg(feature = "vision")]
 async fn load_vision_model() -> Option<Arc<rten::Model>> {
     let model_bytes = load_vision_model_bytes().await?;
     println!("Laddar rten::Model (Model::load)...");
@@ -1485,6 +1494,7 @@ async fn load_vision_model() -> Option<Arc<rten::Model>> {
 }
 
 /// Hämta modell-bytes från URL eller fil
+#[cfg(feature = "vision")]
 async fn load_vision_model_bytes() -> Option<Vec<u8>> {
     // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
     if let Ok(url) = std::env::var("AETHER_MODEL_URL") {
@@ -2099,6 +2109,7 @@ async fn render_url_to_png(
 }
 
 /// REST-endpoint: POST /api/fetch-vision — hämta URL, ta screenshot, kör vision
+#[cfg(feature = "vision")]
 async fn fetch_vision_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(req): Json<FetchVisionRequest>,
@@ -2341,70 +2352,93 @@ async fn mcp_dispatch_tool(
             text_ok(aether_agent::detect_xhr_urls(html))
         }
         "parse_screenshot" => {
-            let png_b64 = args["png_base64"].as_str().unwrap_or("");
-            let model_b64 = args["model_base64"].as_str().unwrap_or("");
-            let goal = args["goal"].as_str().unwrap_or("");
-            let png_bytes = base64_decode(png_b64)?;
-            let model_bytes = base64_decode(model_b64)?;
-            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
-            let annotated_b64 =
-                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
-            Ok(serde_json::json!([
-                {"type": "image", "data": png_b64, "mimeType": "image/png"},
-                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
-                {"type": "text", "text": result_json}
-            ]))
+            #[cfg(feature = "vision")]
+            {
+                let png_b64 = args["png_base64"].as_str().unwrap_or("");
+                let model_b64 = args["model_base64"].as_str().unwrap_or("");
+                let goal = args["goal"].as_str().unwrap_or("");
+                let png_bytes = base64_decode(png_b64)?;
+                let model_bytes = base64_decode(model_b64)?;
+                let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+                let annotated_b64 =
+                    render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+                Ok(serde_json::json!([
+                    {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                    {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                    {"type": "text", "text": result_json}
+                ]))
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
+            }
         }
         "vision_parse" => {
-            let png_b64 = args["png_base64"].as_str().unwrap_or("");
-            let goal = args["goal"].as_str().unwrap_or("");
-            let png_bytes = base64_decode(png_b64)?;
-            let model_guard = state.vision_model.read().await;
-            let model = model_guard
-                .as_ref()
-                .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
-                .clone();
-            drop(model_guard);
-            let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
-            let annotated_b64 =
-                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
-            Ok(serde_json::json!([
-                {"type": "image", "data": png_b64, "mimeType": "image/png"},
-                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
-                {"type": "text", "text": result_json}
-            ]))
+            #[cfg(feature = "vision")]
+            {
+                let png_b64 = args["png_base64"].as_str().unwrap_or("");
+                let goal = args["goal"].as_str().unwrap_or("");
+                let png_bytes = base64_decode(png_b64)?;
+                let model_guard = state.vision_model.read().await;
+                let model = model_guard
+                    .as_ref()
+                    .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
+                    .clone();
+                drop(model_guard);
+                let result_json =
+                    aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
+                let annotated_b64 =
+                    render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+                Ok(serde_json::json!([
+                    {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                    {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                    {"type": "text", "text": result_json}
+                ]))
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
+            }
         }
         "fetch_vision" => {
-            let url = args["url"].as_str().unwrap_or("");
-            let goal = args["goal"].as_str().unwrap_or("");
-            let width = args["width"].as_u64().unwrap_or(1280) as u32;
-            let height = args["height"].as_u64().unwrap_or(800) as u32;
+            #[cfg(feature = "vision")]
+            {
+                let url = args["url"].as_str().unwrap_or("");
+                let goal = args["goal"].as_str().unwrap_or("");
+                let width = args["width"].as_u64().unwrap_or(1280) as u32;
+                let height = args["height"].as_u64().unwrap_or(800) as u32;
 
-            // Validera URL
-            aether_agent::fetch::validate_url(url)?;
+                // Validera URL
+                aether_agent::fetch::validate_url(url)?;
 
-            // Rendera sidan till PNG med Blitz (fast mode: skippa externa resurser)
-            let fast_render = args["fast_render"].as_bool().unwrap_or(true);
-            let png_bytes = render_url_to_png(url, width, height, fast_render).await?;
-            let png_b64 = B64.encode(&png_bytes);
+                // Rendera sidan till PNG med Blitz (fast mode: skippa externa resurser)
+                let fast_render = args["fast_render"].as_bool().unwrap_or(true);
+                let png_bytes = render_url_to_png(url, width, height, fast_render).await?;
+                let png_b64 = B64.encode(&png_bytes);
 
-            // Kör vision med förladdad modell
-            let model_guard = state.vision_model.read().await;
-            let model = model_guard
-                .as_ref()
-                .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
-                .clone();
-            drop(model_guard);
+                // Kör vision med förladdad modell
+                let model_guard = state.vision_model.read().await;
+                let model = model_guard
+                    .as_ref()
+                    .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
+                    .clone();
+                drop(model_guard);
 
-            let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
-            let annotated_b64 =
-                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+                let result_json =
+                    aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
+                let annotated_b64 =
+                    render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
 
-            Ok(serde_json::json!([
-                {"type": "image", "data": png_b64, "mimeType": "image/png"},
-                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
-                {"type": "text", "text": result_json}
-            ]))
+                Ok(serde_json::json!([
+                    {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                    {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                    {"type": "text", "text": result_json}
+                ]))
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
+            }
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -2732,10 +2766,52 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
-        // Fas 11: Vision
-        .route("/api/parse-screenshot", post(parse_screenshot_handler))
-        .route("/api/vision/parse", post(parse_screenshot_server_model))
-        .route("/api/fetch-vision", post(fetch_vision_handler))
+        // Fas 11: Vision (kräver --features vision)
+        .route("/api/parse-screenshot", {
+            #[cfg(feature = "vision")]
+            {
+                post(parse_screenshot_handler)
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"Vision feature inte aktiverad"}"#,
+                    )
+                })
+            }
+        })
+        .route("/api/vision/parse", {
+            #[cfg(feature = "vision")]
+            {
+                post(parse_screenshot_server_model)
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"Vision feature inte aktiverad"}"#,
+                    )
+                })
+            }
+        })
+        .route("/api/fetch-vision", {
+            #[cfg(feature = "vision")]
+            {
+                post(fetch_vision_handler)
+            }
+            #[cfg(not(feature = "vision"))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"Vision feature inte aktiverad"}"#,
+                    )
+                })
+            }
+        })
         // Fas 12: TieredBackend
         .route("/api/tiered-screenshot", post(tiered_screenshot_handler))
         .route("/api/tier-stats", get(tier_stats_handler))
@@ -2785,9 +2861,12 @@ async fn main() {
     aether_agent::vision_backend::warmup_cdp_background();
 
     // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
-    let model = load_vision_model().await;
+    #[cfg(feature = "vision")]
+    let vision_model = load_vision_model().await;
+    #[cfg(not(feature = "vision"))]
+    let vision_model: Option<()> = None;
     let state = AppState {
-        vision_model: Arc::new(RwLock::new(model)),
+        vision_model: Arc::new(RwLock::new(vision_model)),
     };
 
     println!("AetherAgent API server starting on http://{}", addr);
