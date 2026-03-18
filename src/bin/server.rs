@@ -1341,6 +1341,83 @@ async fn parse_screenshot_server_model(
     (StatusCode::OK, result)
 }
 
+/// Kontrollera om bytes ser ut som ONNX-format (protobuf med ONNX magic)
+fn is_onnx_format(bytes: &[u8]) -> bool {
+    // ONNX-filer börjar med protobuf-header, vanligtvis 0x08 (field 1, varint)
+    // rten-filer börjar med FlatBuffer-prefix (vanligtvis 4-byte size prefix)
+    // Enklast: leta efter "onnx" eller "pytorch" strängar i första 256 bytes
+    if bytes.len() < 8 {
+        return false;
+    }
+    let header = &bytes[..bytes.len().min(512)];
+    let header_str = String::from_utf8_lossy(header);
+    header_str.contains("onnx")
+        || header_str.contains("pytorch")
+        || header_str.contains("ai.onnx")
+        || header_str.contains("ir_version")
+}
+
+/// Konvertera ONNX-bytes till rten-format via rten-convert subprocess
+fn convert_onnx_to_rten(onnx_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let tmp_dir = std::env::temp_dir();
+    let onnx_path = tmp_dir.join("_aether_model.onnx");
+    let rten_path = tmp_dir.join("_aether_model.rten");
+
+    // Skriv ONNX till temporär fil
+    std::fs::write(&onnx_path, onnx_bytes)
+        .map_err(|e| format!("Kunde inte skriva temp ONNX-fil: {e}"))?;
+
+    // Kör rten-convert
+    println!("Konverterar ONNX → rten via rten-convert...");
+    let output = std::process::Command::new("rten-convert")
+        .arg(onnx_path.to_str().unwrap_or(""))
+        .arg(rten_path.to_str().unwrap_or(""))
+        .output()
+        .map_err(|e| {
+            format!("Kunde inte köra rten-convert: {e}. Installera med: pip install rten-convert")
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Rensa temporära filer
+        let _ = std::fs::remove_file(&onnx_path);
+        return Err(format!("rten-convert misslyckades: {stderr}"));
+    }
+
+    // Läs konverterad rten-fil
+    let rten_bytes = std::fs::read(&rten_path)
+        .map_err(|e| format!("Kunde inte läsa konverterad rten-fil: {e}"))?;
+
+    // Rensa temporära filer
+    let _ = std::fs::remove_file(&onnx_path);
+    let _ = std::fs::remove_file(&rten_path);
+
+    println!(
+        "ONNX → rten konvertering klar: {:.1} MB",
+        rten_bytes.len() as f64 / (1024.0 * 1024.0)
+    );
+    Ok(rten_bytes)
+}
+
+/// Efterbehandla modellbytes: detektera format och konvertera vid behov
+fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if is_onnx_format(&bytes) {
+        println!("Detekterade ONNX-format, försöker konvertera till rten...");
+        match convert_onnx_to_rten(&bytes) {
+            Ok(rten_bytes) => Some(rten_bytes),
+            Err(e) => {
+                eprintln!("ONNX-konvertering misslyckades: {e}");
+                eprintln!("Tips: Använd .rten-format direkt, eller installera rten-convert i Docker-imagen.");
+                // Försök ladda som-det-är (kanske det funkar ändå)
+                Some(bytes)
+            }
+        }
+    } else {
+        // Antar rten-format
+        Some(bytes)
+    }
+}
+
 /// Ladda vision-modell från URL eller filsökväg vid serverstart
 async fn load_vision_model() -> Option<Vec<u8>> {
     // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
@@ -1352,10 +1429,10 @@ async fn load_vision_model() -> Option<Vec<u8>> {
                     match resp.bytes().await {
                         Ok(bytes) => {
                             println!(
-                                "Vision-modell laddad: {:.1} MB",
+                                "Vision-modell nedladdad: {:.1} MB",
                                 bytes.len() as f64 / (1024.0 * 1024.0)
                             );
-                            return Some(bytes.to_vec());
+                            return ensure_rten_format(bytes.to_vec());
                         }
                         Err(e) => eprintln!("Kunde inte läsa modell-bytes: {e}"),
                     }
@@ -1375,7 +1452,7 @@ async fn load_vision_model() -> Option<Vec<u8>> {
                     "Vision-modell laddad: {:.1} MB",
                     bytes.len() as f64 / (1024.0 * 1024.0)
                 );
-                return Some(bytes);
+                return ensure_rten_format(bytes);
             }
             Err(e) => eprintln!("Kunde inte läsa modell-fil: {e}"),
         }

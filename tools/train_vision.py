@@ -1807,6 +1807,15 @@ def copy_to_deploy(onnx_path: Path, deploy_dir: Path, version: str) -> Path:
     shutil.copy2(onnx_path, latest_path)
     log(f"Latest symlink: {latest_path}", "OK")
 
+    # Also deploy .rten version if it exists (preferred by AetherAgent server)
+    rten_path = onnx_path.with_suffix(".rten")
+    if rten_path.exists():
+        rten_deploy = deploy_dir / f"aether-ui-{version}.rten"
+        rten_latest = deploy_dir / "aether-ui-latest.rten"
+        shutil.copy2(rten_path, rten_deploy)
+        shutil.copy2(rten_path, rten_latest)
+        log(f"rten deployed: {rten_deploy} + {rten_latest.name}", "OK")
+
     return deploy_path
 
 
