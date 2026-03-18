@@ -307,10 +307,20 @@ for test in tiered_tests:
         latency = (time.time() - t0) * 1000
         data = safe_json(resp)
 
+        if "error" in data:
+            err_msg = data["error"][:40]
+            print(f"  {test['name']:<22} {'ERROR':>12} {test['expect_tier']:>12} {fmt_ms(latency):>10} {'0B':>10} {err_msg:>20}")
+            results.append({
+                "test": "tiered_screenshot", "scenario": test["name"],
+                "tier_used": "error", "expected_tier": test["expect_tier"],
+                "match": False, "latency_ms": round(latency, 1),
+                "size_bytes": 0, "escalation": err_msg,
+            })
+            continue
+
         tier = data.get("tier_used", "?")
         size = data.get("size_bytes", 0)
         esc = data.get("escalation_reason") or "none"
-        match = "✓" if tier == test["expect_tier"] else "✗"
 
         print(f"  {test['name']:<22} {tier:>12} {test['expect_tier']:>12} {fmt_ms(latency):>10} {fmt_bytes(size):>10} {esc[:20]:>20}")
         results.append({

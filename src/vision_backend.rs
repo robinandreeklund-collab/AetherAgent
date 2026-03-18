@@ -386,7 +386,8 @@ impl TieredBackend {
     /// CDP-rendering (Tier 2) — headless Chrome via headless_chrome crate
     ///
     /// Lazy Chrome-init: browser startas vid första anropet och återanvänds.
-    /// Navigerar till URL, väntar på page load, tar viewport screenshot.
+    /// Om HTML finns i request: sätter Page.setDocumentContent direkt (undviker nätverksnavigering).
+    /// Annars: navigerar till URL och väntar på page load.
     #[cfg(feature = "cdp")]
     fn screenshot_cdp(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
         let start = Instant::now();
@@ -408,13 +409,38 @@ impl TieredBackend {
         })
         .map_err(|e| format!("CDP set bounds: {e}"))?;
 
-        // Navigera till URL
-        tab.navigate_to(&req.url)
-            .map_err(|e| format!("CDP navigate: {e}"))?;
+        if let Some(html) = &req.html {
+            // HTML redan tillgänglig — injicera direkt via Page.setDocumentContent
+            // Navigera först till about:blank för att få ett giltigt frame
+            tab.navigate_to("about:blank")
+                .map_err(|e| format!("CDP navigate blank: {e}"))?;
+            tab.wait_until_navigated()
+                .map_err(|e| format!("CDP wait blank: {e}"))?;
 
-        // Vänta på page load (max 10s)
-        tab.wait_until_navigated()
-            .map_err(|e| format!("CDP wait: {e}"))?;
+            // Hämta main frame ID
+            let frame_tree = tab
+                .call_method(headless_chrome::protocol::cdp::Page::GetFrameTree {})
+                .map_err(|e| format!("CDP get frame tree: {e}"))?;
+            let frame_id = frame_tree.frame_tree.frame.id.clone();
+
+            // Sätt HTML-innehåll direkt
+            tab.call_method(headless_chrome::protocol::cdp::Page::SetDocumentContent {
+                frame_id,
+                html: html.clone(),
+            })
+            .map_err(|e| format!("CDP set document content: {e}"))?;
+
+            // Kort delay så Chrome hinner layouta
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        } else {
+            // Ingen HTML — navigera till URL
+            tab.navigate_to(&req.url)
+                .map_err(|e| format!("CDP navigate: {e}"))?;
+
+            // Vänta på page load (max 10s)
+            tab.wait_until_navigated()
+                .map_err(|e| format!("CDP wait: {e}"))?;
+        }
 
         // Ta viewport screenshot som PNG
         let png_bytes = tab
