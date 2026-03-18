@@ -1801,25 +1801,195 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Base64 decode error: {e}"))
 }
 
+/// Rita bounding boxar med klasslabels på en screenshot och returnera som base64 PNG.
+/// Gör bilden transparent och visuellt tydlig med färgkodade ramar.
+#[cfg(feature = "vision")]
+fn render_annotated_screenshot(png_bytes: &[u8], result_json: &str) -> Result<String, String> {
+    use image::{ImageFormat, Rgba, RgbaImage};
+    use std::io::Cursor;
+
+    // Ladda originalbilden
+    let img =
+        image::load_from_memory(png_bytes).map_err(|e| format!("Kunde inte ladda bild: {e}"))?;
+    let mut canvas: RgbaImage = img.to_rgba8();
+    let (img_w, img_h) = (canvas.width(), canvas.height());
+
+    // Parsa detektioner från JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(result_json).map_err(|e| format!("JSON-parse: {e}"))?;
+    let detections = parsed["detections"].as_array();
+
+    // Färgpalett per klass
+    let class_color = |class: &str| -> Rgba<u8> {
+        match class {
+            "button" => Rgba([0, 200, 0, 255]),     // Grön
+            "input" => Rgba([0, 150, 255, 255]),    // Blå
+            "link" => Rgba([255, 165, 0, 255]),     // Orange
+            "text" => Rgba([200, 200, 200, 180]),   // Grå
+            "heading" => Rgba([255, 255, 0, 255]),  // Gul
+            "image" => Rgba([180, 0, 255, 255]),    // Lila
+            "icon" => Rgba([255, 100, 100, 255]),   // Röd-rosa
+            "checkbox" => Rgba([0, 255, 200, 255]), // Turkos
+            "select" => Rgba([255, 80, 180, 255]),  // Magenta
+            _ => Rgba([255, 255, 255, 255]),        // Vit
+        }
+    };
+
+    if let Some(dets) = detections {
+        for det in dets {
+            let class = det["class"].as_str().unwrap_or("unknown");
+            let conf = det["confidence"].as_f64().unwrap_or(0.0);
+            let bbox = &det["bbox"];
+            let bx = bbox["x"].as_f64().unwrap_or(0.0);
+            let by = bbox["y"].as_f64().unwrap_or(0.0);
+            let bw = bbox["width"].as_f64().unwrap_or(0.0);
+            let bh = bbox["height"].as_f64().unwrap_or(0.0);
+
+            let color = class_color(class);
+
+            // Rita bounding box (3px bred ram)
+            let x1 = (bx.max(0.0) as u32).min(img_w.saturating_sub(1));
+            let y1 = (by.max(0.0) as u32).min(img_h.saturating_sub(1));
+            let x2 = ((bx + bw) as u32).min(img_w.saturating_sub(1));
+            let y2 = ((by + bh) as u32).min(img_h.saturating_sub(1));
+
+            // Horisontella linjer (topp + botten, 3px)
+            for thickness in 0..3u32 {
+                let yt = y1.saturating_add(thickness).min(img_h - 1);
+                let yb = y2.saturating_sub(thickness).max(y1);
+                for x in x1..=x2 {
+                    canvas.put_pixel(x, yt, color);
+                    canvas.put_pixel(x, yb, color);
+                }
+            }
+            // Vertikala linjer (vänster + höger, 3px)
+            for thickness in 0..3u32 {
+                let xl = x1.saturating_add(thickness).min(img_w - 1);
+                let xr = x2.saturating_sub(thickness).max(x1);
+                for y in y1..=y2 {
+                    canvas.put_pixel(xl, y, color);
+                    canvas.put_pixel(xr, y, color);
+                }
+            }
+
+            // Label-bakgrund (fylld rektangel ovanför bbox)
+            let label = format!("{class} {conf:.0}%", conf = conf * 100.0);
+            let label_w = (label.len() as u32 * 7).min(x2.saturating_sub(x1));
+            let label_h = 14u32;
+            let ly = y1.saturating_sub(label_h);
+            for lx in x1..x1.saturating_add(label_w) {
+                for ly_px in ly..y1 {
+                    if lx < img_w && ly_px < img_h {
+                        canvas.put_pixel(lx, ly_px, color);
+                    }
+                }
+            }
+
+            // Enkel textrendering (1-bit font, 5x7 pixlar per tecken)
+            let char_w = 6u32;
+            let text_y = ly + 3;
+            for (ci, ch) in label.chars().enumerate() {
+                let cx = x1 + 2 + ci as u32 * char_w;
+                render_char_5x7(&mut canvas, cx, text_y, ch, Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+
+    // Koda tillbaka till PNG
+    let mut buf = Cursor::new(Vec::new());
+    canvas
+        .write_to(&mut buf, ImageFormat::Png)
+        .map_err(|e| format!("PNG encode: {e}"))?;
+    Ok(B64.encode(buf.into_inner()))
+}
+
+/// Minimal 5x7 pixel-font för annotation-labels
+#[cfg(feature = "vision")]
+fn render_char_5x7(img: &mut image::RgbaImage, x: u32, y: u32, ch: char, color: image::Rgba<u8>) {
+    // Enkel bitmap-font (5 bred x 7 hög)
+    let bitmap: [u8; 7] = match ch {
+        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
+        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        '2' => [0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F],
+        '3' => [0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E],
+        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
+        '5' => [0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E],
+        '6' => [0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E],
+        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
+        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C],
+        'a' | 'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'b' | 'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
+        'c' | 'C' => [0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E],
+        'd' | 'D' => [0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E],
+        'e' | 'E' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
+        'f' | 'F' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10],
+        'g' | 'G' => [0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F],
+        'h' | 'H' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'i' | 'I' => [0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        'j' | 'J' => [0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E],
+        'k' | 'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
+        'l' | 'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
+        'm' | 'M' => [0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11],
+        'n' | 'N' => [0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11],
+        'o' | 'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'p' | 'P' => [0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10],
+        'r' | 'R' => [0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11],
+        's' | 'S' => [0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E],
+        't' | 'T' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+        'u' | 'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'x' | 'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
+        'y' | 'Y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
+        '%' => [0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03],
+        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
+        _ => [0x0E, 0x11, 0x01, 0x06, 0x04, 0x00, 0x04], // ?
+    };
+    let (img_w, img_h) = (img.width(), img.height());
+    for (row, &bits) in bitmap.iter().enumerate() {
+        for col in 0..5u32 {
+            if bits & (0x10 >> col) != 0 {
+                let px = x + col;
+                let py = y + row as u32;
+                if px < img_w && py < img_h {
+                    img.put_pixel(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+/// Fallback-version utan vision feature
+#[cfg(not(feature = "vision"))]
+fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<String, String> {
+    Err("Vision feature inte aktiverad".to_string())
+}
+
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
+/// Returnerar content-array (kan innehålla text + image blocks)
 async fn mcp_dispatch_tool(
     name: &str,
     args: &serde_json::Value,
     state: &AppState,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
+    // Hjälpfunktion: text-only content block
+    let text_ok = |s: String| -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!([{"type": "text", "text": s}]))
+    };
+
     match name {
         "parse" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::parse_to_semantic_tree(html, goal, url))
+            text_ok(aether_agent::parse_to_semantic_tree(html, goal, url))
         }
         "parse_top" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
-            Ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
+            text_ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
         }
         "fetch_parse" => {
             let url = args["url"].as_str().unwrap_or("");
@@ -1829,7 +1999,7 @@ async fn mcp_dispatch_tool(
             match aether_agent::fetch::fetch_page(url, &config).await {
                 Ok(r) => {
                     let tree = aether_agent::parse_to_semantic_tree(&r.body, goal, &r.final_url);
-                    Ok(tree)
+                    text_ok(tree)
                 }
                 Err(e) => Err(e),
             }
@@ -1839,41 +2009,42 @@ async fn mcp_dispatch_tool(
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let target = args["target_label"].as_str().unwrap_or("");
-            Ok(aether_agent::find_and_click(html, goal, url, target))
+            text_ok(aether_agent::find_and_click(html, goal, url, target))
         }
         "fill_form" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let fields_json = serde_json::to_string(&args["fields"]).unwrap_or_default();
-            Ok(aether_agent::fill_form(html, goal, url, &fields_json))
+            text_ok(aether_agent::fill_form(html, goal, url, &fields_json))
         }
         "extract_data" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let keys_json = serde_json::to_string(&args["keys"]).unwrap_or_default();
-            Ok(aether_agent::extract_data(html, goal, url, &keys_json))
+            text_ok(aether_agent::extract_data(html, goal, url, &keys_json))
         }
         "check_injection" => {
             let text = args["text"].as_str().unwrap_or("");
-            Ok(aether_agent::check_injection(text))
+            text_ok(aether_agent::check_injection(text))
         }
         "compile_goal" => {
             let goal = args["goal"].as_str().unwrap_or("");
-            Ok(aether_agent::compile_goal(goal))
+            text_ok(aether_agent::compile_goal(goal))
         }
         "classify_request" => {
             let url = args["url"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let config = aether_agent::firewall::FirewallConfig::default();
             let verdict = aether_agent::firewall::classify_request(url, goal, &config);
-            serde_json::to_string(&verdict).map_err(|e| e.to_string())
+            let s = serde_json::to_string(&verdict).map_err(|e| e.to_string())?;
+            text_ok(s)
         }
         "diff_trees" => {
             let old = args["old_tree_json"].as_str().unwrap_or("");
             let new = args["new_tree_json"].as_str().unwrap_or("");
-            Ok(aether_agent::diff_semantic_trees(old, new))
+            text_ok(aether_agent::diff_semantic_trees(old, new))
         }
         "fetch_extract" => {
             let url = args["url"].as_str().unwrap_or("");
@@ -1882,7 +2053,7 @@ async fn mcp_dispatch_tool(
             aether_agent::fetch::validate_url(url)?;
             let config = aether_agent::types::FetchConfig::default();
             match aether_agent::fetch::fetch_page(url, &config).await {
-                Ok(r) => Ok(aether_agent::extract_data(
+                Ok(r) => text_ok(aether_agent::extract_data(
                     &r.body,
                     goal,
                     &r.final_url,
@@ -1898,7 +2069,7 @@ async fn mcp_dispatch_tool(
             aether_agent::fetch::validate_url(url)?;
             let config = aether_agent::types::FetchConfig::default();
             match aether_agent::fetch::fetch_page(url, &config).await {
-                Ok(r) => Ok(aether_agent::find_and_click(
+                Ok(r) => text_ok(aether_agent::find_and_click(
                     &r.body,
                     goal,
                     &r.final_url,
@@ -1911,49 +2082,49 @@ async fn mcp_dispatch_tool(
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::parse_with_js(html, goal, url))
+            text_ok(aether_agent::parse_with_js(html, goal, url))
         }
         "build_causal_graph" => {
             let snapshots = args["snapshots_json"].as_str().unwrap_or("");
             let actions = args["actions_json"].as_str().unwrap_or("");
-            Ok(aether_agent::build_causal_graph(snapshots, actions))
+            text_ok(aether_agent::build_causal_graph(snapshots, actions))
         }
         "predict_action_outcome" => {
             let graph = args["graph_json"].as_str().unwrap_or("");
             let action = args["action"].as_str().unwrap_or("");
-            Ok(aether_agent::predict_action_outcome(graph, action))
+            text_ok(aether_agent::predict_action_outcome(graph, action))
         }
         "find_safest_path" => {
             let graph = args["graph_json"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
-            Ok(aether_agent::find_safest_path(graph, goal))
+            text_ok(aether_agent::find_safest_path(graph, goal))
         }
         "discover_webmcp" => {
             let html = args["html"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::discover_webmcp(html, url))
+            text_ok(aether_agent::discover_webmcp(html, url))
         }
         "ground_semantic_tree" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let ann_json = serde_json::to_string(&args["annotations"]).unwrap_or_default();
-            Ok(aether_agent::ground_semantic_tree(
+            text_ok(aether_agent::ground_semantic_tree(
                 html, goal, url, &ann_json,
             ))
         }
         "match_bbox_iou" => {
             let tree = args["tree_json"].as_str().unwrap_or("");
             let bbox_json = serde_json::to_string(&args["bbox"]).unwrap_or_default();
-            Ok(aether_agent::match_bbox_iou(tree, &bbox_json))
+            text_ok(aether_agent::match_bbox_iou(tree, &bbox_json))
         }
-        "create_collab_store" => Ok(aether_agent::create_collab_store()),
+        "create_collab_store" => text_ok(aether_agent::create_collab_store()),
         "register_collab_agent" => {
             let store = args["store_json"].as_str().unwrap_or("");
             let agent_id = args["agent_id"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
-            Ok(aether_agent::register_collab_agent(
+            text_ok(aether_agent::register_collab_agent(
                 store, agent_id, goal, ts,
             ))
         }
@@ -1963,18 +2134,18 @@ async fn mcp_dispatch_tool(
             let url = args["url"].as_str().unwrap_or("");
             let delta = args["delta_json"].as_str().unwrap_or("");
             let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
-            Ok(aether_agent::publish_collab_delta(
+            text_ok(aether_agent::publish_collab_delta(
                 store, agent_id, url, delta, ts,
             ))
         }
         "fetch_collab_deltas" => {
             let store = args["store_json"].as_str().unwrap_or("");
             let agent_id = args["agent_id"].as_str().unwrap_or("");
-            Ok(aether_agent::fetch_collab_deltas(store, agent_id))
+            text_ok(aether_agent::fetch_collab_deltas(store, agent_id))
         }
         "detect_xhr_urls" => {
             let html = args["html"].as_str().unwrap_or("");
-            Ok(aether_agent::detect_xhr_urls(html))
+            text_ok(aether_agent::detect_xhr_urls(html))
         }
         "parse_screenshot" => {
             let png_b64 = args["png_base64"].as_str().unwrap_or("");
@@ -1982,11 +2153,14 @@ async fn mcp_dispatch_tool(
             let goal = args["goal"].as_str().unwrap_or("");
             let png_bytes = base64_decode(png_b64)?;
             let model_bytes = base64_decode(model_b64)?;
-            Ok(aether_agent::parse_screenshot(
-                &png_bytes,
-                &model_bytes,
-                goal,
-            ))
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
         }
         "vision_parse" => {
             let png_b64 = args["png_base64"].as_str().unwrap_or("");
@@ -1998,11 +2172,14 @@ async fn mcp_dispatch_tool(
                 .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
                 .clone();
             drop(model_guard);
-            Ok(aether_agent::parse_screenshot(
-                &png_bytes,
-                &model_bytes,
-                goal,
-            ))
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -2086,10 +2263,10 @@ async fn mcp_post(
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
             match mcp_dispatch_tool(tool_name, arguments, &state).await {
-                Ok(result_text) => jsonrpc_result(
+                Ok(content_blocks) => jsonrpc_result(
                     id,
                     serde_json::json!({
-                        "content": [{"type": "text", "text": result_text}]
+                        "content": content_blocks
                     }),
                 ),
                 Err(e) => jsonrpc_result(
