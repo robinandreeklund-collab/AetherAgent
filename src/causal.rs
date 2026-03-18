@@ -285,21 +285,46 @@ impl CausalGraph {
     }
 
     /// Hitta säkraste vägen till ett mål (BFS med risk-viktning)
+    ///
+    /// Använder flernivå semantisk matchning:
+    /// 1. Direkt text_similarity mot URL och nyckel-element
+    /// 2. Ordnivå-matchning: varje ord i goal matchas mot varje element
+    /// 3. Kontextord-mappning: "kontakt" matchar telefon/email-mönster etc.
     pub fn find_safest_path(&self, goal: &str, max_depth: u32) -> SafePath {
         let start = self.current_state_id.unwrap_or(0);
 
-        // Hitta mål-tillstånd (matcha URL eller nyckel-element mot goal)
-        let goal_states: Vec<u32> = self
+        // Hitta mål-tillstånd med flernivå semantisk matchning + scoring
+        let mut scored_states: Vec<(u32, f32)> = self
             .states
             .iter()
-            .filter(|s| {
-                text_similarity(goal, &s.url) > 0.3
-                    || s.key_elements
-                        .iter()
-                        .any(|e| text_similarity(goal, e) > 0.4)
-            })
-            .map(|s| s.state_id)
+            .filter(|s| semantic_goal_match(goal, s))
+            .map(|s| (s.state_id, semantic_goal_score(goal, s)))
             .collect();
+        // Sortera efter poäng (högst först)
+        scored_states.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        // Om start-staten matchar men det finns bättre matchande states,
+        // exkludera start-staten från goal_states (den är inte målet utan startpunkten)
+        let goal_states: Vec<u32> = if scored_states.len() > 1 {
+            let best_score = scored_states[0].1;
+            let start_score = scored_states
+                .iter()
+                .find(|(id, _)| *id == start)
+                .map(|(_, s)| *s)
+                .unwrap_or(0.0);
+            if start_score < best_score {
+                // Det finns bättre mål — exkludera start
+                scored_states
+                    .iter()
+                    .filter(|(id, _)| *id != start)
+                    .map(|(id, _)| *id)
+                    .collect()
+            } else {
+                scored_states.iter().map(|(id, _)| *id).collect()
+            }
+        } else {
+            scored_states.iter().map(|(id, _)| *id).collect()
+        };
 
         if goal_states.is_empty() {
             return SafePath {
@@ -421,6 +446,204 @@ impl CausalGraph {
     pub fn from_json(json: &str) -> Result<Self, String> {
         serde_json::from_str(json).map_err(|e| format!("Invalid causal graph: {}", e))
     }
+}
+
+/// Flernivå semantisk matchning av goal mot ett tillstånd
+///
+/// Tre nivåer:
+/// 1. Direkt likhet (text_similarity) mot URL och key_elements
+/// 2. Ordnivå: varje nyckelord i goal matchas mot varje element
+/// 3. Kontextord: domänspecifika synonymer (kontakt↔telefon, köp↔pris, etc.)
+fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
+    let goal_lower = goal.to_lowercase();
+
+    // Nivå 1: Direkt text_similarity (sänkt tröskel)
+    if text_similarity(&goal_lower, &state.url) > 0.2 {
+        return true;
+    }
+    if state
+        .key_elements
+        .iter()
+        .any(|e| text_similarity(&goal_lower, e) > 0.25)
+    {
+        return true;
+    }
+
+    // Nivå 2: Ordnivå-matchning — splitta goal i ord, matcha mot element
+    let goal_words: Vec<&str> = goal_lower
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-' || c == ':')
+        .filter(|w| w.len() >= 3) // Ignorera korta ord (i, på, för, etc.)
+        .collect();
+
+    // Matcha goal-ord mot URL-segment
+    let url_lower = state.url.to_lowercase();
+    let url_word_matches = goal_words.iter().filter(|w| url_lower.contains(*w)).count();
+    if url_word_matches >= 1 && !goal_words.is_empty() {
+        return true;
+    }
+
+    // Matcha goal-ord mot key_elements
+    // Navigeringselement (link:, button:) kräver striktare matchning
+    // — de pekar på innehåll, de ÄR inte innehållet
+    for element in &state.key_elements {
+        let elem_lower = element.to_lowercase();
+        let is_nav_element = elem_lower.starts_with("link:")
+            || elem_lower.starts_with("button:")
+            || elem_lower.starts_with("menuitem:");
+
+        if is_nav_element {
+            // Navigeringselement: kräv exakt text_similarity > 0.5
+            // (dvs "link:Kontakta oss" matchar "kontakta oss" men inte "kontaktinformation")
+            let label = elem_lower.split(':').nth(1).unwrap_or("");
+            if text_similarity(&goal_lower, label) > 0.5 {
+                return true;
+            }
+        } else {
+            // Innehållselement (text:, heading:, etc.): ordnivå-matchning
+            let element_word_matches = goal_words
+                .iter()
+                .filter(|w| elem_lower.contains(*w))
+                .count();
+            if element_word_matches >= 1 {
+                return true;
+            }
+        }
+    }
+
+    // Nivå 3: Kontextord-mappning — domänspecifika synonymer
+    let context_matches: &[(&[&str], &[&str])] = &[
+        // Goal-ord → element-mönster som indikerar match
+        (
+            &["kontakt", "contact", "telefon", "phone", "ring"],
+            &["0", "tel:", "phone", "mail", "@", "kontakt"],
+        ),
+        (
+            &["epost", "email", "e-post", "mail"],
+            &["@", "mail", "epost", "e-post"],
+        ),
+        (
+            &["adress", "address", "besök"],
+            &["gatan", "vägen", "plats", "torget", "adress"],
+        ),
+        (
+            &["pris", "price", "cost", "kostnad"],
+            &["kr", "sek", ":-", "price", "pris"],
+        ),
+        (
+            &["köp", "buy", "purchase", "beställ"],
+            &["cart", "varukorg", "köp", "buy", "lägg"],
+        ),
+        (
+            &["nyhet", "news", "artikel"],
+            &["nyhet", "news", "artikel", "publicerad"],
+        ),
+        (
+            &["inlogg", "login", "logga"],
+            &["login", "logga", "sign", "lösenord", "password"],
+        ),
+        (&["sök", "search"], &["sök", "search", "hitta", "find"]),
+    ];
+
+    let all_elements_lower: String = state
+        .key_elements
+        .iter()
+        .map(|e| e.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for (goal_patterns, element_patterns) in context_matches {
+        let goal_has_pattern = goal_patterns.iter().any(|p| goal_lower.contains(p));
+        if !goal_has_pattern {
+            continue;
+        }
+        let element_has_pattern = element_patterns
+            .iter()
+            .any(|p| all_elements_lower.contains(p) || url_lower.contains(p));
+        if element_has_pattern {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Beräkna match-poäng för ett goal mot ett tillstånd
+///
+/// Högre poäng = starkare match. Används för att rangordna goal-states
+/// och undvika att start-staten alltid väljs som mål.
+fn semantic_goal_score(goal: &str, state: &CausalState) -> f32 {
+    let goal_lower = goal.to_lowercase();
+    let mut score = 0.0f32;
+
+    // URL-likhet
+    let url_sim = text_similarity(&goal_lower, &state.url);
+    score += url_sim * 0.3;
+
+    // Key-element likhet (summera bästa matchning)
+    let best_elem_sim = state
+        .key_elements
+        .iter()
+        .map(|e| text_similarity(&goal_lower, e))
+        .fold(0.0f32, f32::max);
+    score += best_elem_sim * 0.3;
+
+    // Kontextmatchning ger bonus
+    let goal_words: Vec<&str> = goal_lower
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|w| w.len() >= 3)
+        .collect();
+
+    let all_elements_lower: String = state
+        .key_elements
+        .iter()
+        .map(|e| e.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Kontextord-matchning bonus
+    let context_matches: &[(&[&str], &[&str])] = &[
+        (
+            &["kontakt", "contact", "telefon", "phone"],
+            &["0", "tel:", "phone", "mail", "@", "kontakt"],
+        ),
+        (
+            &["epost", "email", "e-post", "mail"],
+            &["@", "mail", "epost"],
+        ),
+        (
+            &["adress", "address", "besök"],
+            &["gatan", "vägen", "torget", "adress"],
+        ),
+        (
+            &["pris", "price", "cost"],
+            &["kr", "sek", ":-", "price", "pris"],
+        ),
+    ];
+
+    let url_lower = state.url.to_lowercase();
+    for (goal_patterns, element_patterns) in context_matches {
+        let goal_has = goal_patterns.iter().any(|p| goal_lower.contains(p));
+        let elem_has = element_patterns
+            .iter()
+            .any(|p| all_elements_lower.contains(p) || url_lower.contains(p));
+        if goal_has && elem_has {
+            score += 0.4; // Stark kontextbonus
+        }
+    }
+
+    // Innehållselement (text:, heading:) med ord-matchning ger bonus
+    for element in &state.key_elements {
+        let elem_lower = element.to_lowercase();
+        if !elem_lower.starts_with("link:") && !elem_lower.starts_with("button:") {
+            let word_matches = goal_words
+                .iter()
+                .filter(|w| elem_lower.contains(*w))
+                .count();
+            score += word_matches as f32 * 0.1;
+        }
+    }
+
+    score
 }
 
 /// Härleda action-typ från action-sträng
@@ -575,6 +798,113 @@ mod tests {
         assert!(
             path.summary.contains("Inget känt"),
             "Borde rapportera att mål saknas"
+        );
+    }
+
+    #[test]
+    fn test_semantic_goal_match_kontakt() {
+        // BUG-6 regression: "kontaktinformation" borde matcha state med telefonnummer
+        let state = CausalState {
+            state_id: 1,
+            url: "https://www.hjo.se/kontakt".to_string(),
+            node_count: 500,
+            warning_count: 0,
+            key_elements: vec![
+                "text:0503-350 00".to_string(),
+                "text:kommunen@hjo.se".to_string(),
+            ],
+            visit_count: 1,
+        };
+        assert!(
+            semantic_goal_match("Hitta kontaktinformation för Hjo kommun", &state),
+            "Goal med 'kontakt' borde matcha state med telefonnummer och email"
+        );
+    }
+
+    #[test]
+    fn test_semantic_goal_match_url_word() {
+        let state = CausalState {
+            state_id: 0,
+            url: "https://shop.se/checkout".to_string(),
+            node_count: 10,
+            warning_count: 0,
+            key_elements: vec!["button:Betala".to_string()],
+            visit_count: 1,
+        };
+        assert!(
+            semantic_goal_match("gå till checkout", &state),
+            "Goal med 'checkout' borde matcha URL med /checkout"
+        );
+    }
+
+    #[test]
+    fn test_semantic_goal_match_context_email() {
+        let state = CausalState {
+            state_id: 2,
+            url: "https://example.se/about".to_string(),
+            node_count: 50,
+            warning_count: 0,
+            key_elements: vec!["text:info@example.se".to_string()],
+            visit_count: 1,
+        };
+        assert!(
+            semantic_goal_match("hitta epost-adress", &state),
+            "Goal med 'epost' borde matcha state med @-adress"
+        );
+    }
+
+    #[test]
+    fn test_semantic_goal_match_no_false_positive() {
+        let state = CausalState {
+            state_id: 0,
+            url: "https://shop.se".to_string(),
+            node_count: 5,
+            warning_count: 0,
+            key_elements: vec!["button:Köp".to_string()],
+            visit_count: 1,
+        };
+        assert!(
+            !semantic_goal_match("hitta kontaktinformation", &state),
+            "Köp-knapp borde inte matcha kontaktinformation"
+        );
+    }
+
+    #[test]
+    fn test_find_safest_path_semantic_kontakt() {
+        // BUG-6 end-to-end: find_safest_path borde hitta kontakt-state
+        let mut graph = CausalGraph::new();
+        let s0 = graph.add_state(
+            "https://www.hjo.se",
+            2149,
+            0,
+            vec!["link:Kontakt".to_string(), "heading:Nyheter".to_string()],
+        );
+        let s1 = graph.add_state(
+            "https://www.hjo.se/kontakt",
+            500,
+            0,
+            vec![
+                "text:0503-350 00".to_string(),
+                "text:kommunen@hjo.se".to_string(),
+            ],
+        );
+        graph.add_edge(s0, s1, "click link:Kontakt", ActionType::Click);
+        graph.current_state_id = Some(s0);
+
+        let path = graph.find_safest_path("Hitta kontaktinformation för Hjo kommun", 10);
+        assert!(
+            path.path.len() >= 2,
+            "Borde hitta väg till kontakt-state, fick {:?}",
+            path
+        );
+        assert!(
+            path.success_probability > 0.0,
+            "Borde ha positiv sannolikhet"
+        );
+        assert!(
+            path.path.contains(&s1),
+            "Vägen borde inkludera kontakt-state (s1={})",
+            s1
         );
     }
 

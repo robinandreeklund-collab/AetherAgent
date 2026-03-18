@@ -2478,3 +2478,185 @@ fn test_vision_large_scale_detection_performance() {
     );
     assert!(tree.nodes.len() > 0, "Borde ha kvar noder efter NMS");
 }
+
+// ─── BUG-6: Semantic Goal Matching (Regression Tests) ───────────────────────
+
+#[test]
+fn test_bug6_find_safest_path_matches_kontakt_semantically() {
+    // BUG-6: find_safest_path matchar nu semantiskt mot mål
+    // "kontaktinformation" borde matcha state med telefonnummer/email
+    let snapshots = r#"[
+        {"url": "https://www.hjo.se", "node_count": 2149, "warning_count": 0, "key_elements": ["link:Kontakt", "heading:Nyheter"]},
+        {"url": "https://www.hjo.se/kontakt", "node_count": 500, "warning_count": 0, "key_elements": ["text:0503-350 00", "text:kommunen@hjo.se"]}
+    ]"#;
+    let actions = r#"["click link:Kontakt"]"#;
+    let graph_json = build_causal_graph(snapshots, actions);
+    let graph: serde_json::Value = serde_json::from_str(&graph_json).expect("Valid JSON");
+    assert!(
+        graph.get("error").is_none(),
+        "build_causal_graph borde lyckas"
+    );
+
+    let path_json = find_safest_path(&graph_json, "Hitta kontaktinformation för Hjo kommun");
+    let path: serde_json::Value = serde_json::from_str(&path_json).expect("Valid JSON");
+
+    let path_vec = path["path"].as_array().expect("path borde vara array");
+    // Grafen startar vid state 1 (kontakt, sista snapshot).
+    // State 1 borde matcha "kontaktinformation" semantiskt → path = [1]
+    assert!(
+        !path_vec.is_empty(),
+        "BUG-6: find_safest_path borde hitta mål-state, fick path={:?}",
+        path_vec
+    );
+    // Kontrollera att summary INTE säger "Inget känt mål-tillstånd"
+    let summary = path["summary"].as_str().unwrap_or("");
+    assert!(
+        !summary.contains("Inget känt"),
+        "BUG-6: Borde hitta mål-tillstånd, fick summary='{}'",
+        summary
+    );
+    assert!(
+        path["success_probability"].as_f64().unwrap_or(0.0) > 0.0,
+        "BUG-6: success_probability borde vara > 0"
+    );
+}
+
+#[test]
+fn test_bug6_compile_goal_kontakt_template() {
+    // BUG-6: compile_goal borde använda kontakt-specifik mall
+    let result = compile_goal("hitta kontaktinformation för Hjo kommun");
+    let plan: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+    let sub_goals = plan["sub_goals"]
+        .as_array()
+        .expect("sub_goals borde finnas");
+    let has_kontakt_step = sub_goals.iter().any(|sg| {
+        sg["description"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("kontakt")
+    });
+    assert!(
+        has_kontakt_step,
+        "BUG-6: kontakt-mål borde ha kontaktspecifika sub_goals"
+    );
+}
+
+#[test]
+fn test_bug6_compile_goal_analysera_gives_parallel_extraction() {
+    let result = compile_goal("Analysera Hjo kommuns webbplats för kontaktinfo och nyheter");
+    let plan: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+
+    let sub_goals = plan["sub_goals"].as_array().expect("sub_goals");
+    let extract_count = sub_goals
+        .iter()
+        .filter(|sg| sg["action_type"].as_str() == Some("Extract"))
+        .count();
+    assert!(
+        extract_count >= 2,
+        "Analys-mål borde ha minst 2 Extract-steg för bred analys, fick {}",
+        extract_count
+    );
+}
+
+// ─── Tier 2: TieredBackend Integration Tests ────────────────────────────────
+
+#[test]
+fn test_tiered_screenshot_returns_valid_json() {
+    let html = r##"<html><body><h1>Test</h1></body></html>"##;
+    let result = tiered_screenshot(
+        html,
+        "https://example.com",
+        "test goal",
+        1280,
+        800,
+        true,
+        "[]",
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    // Borde returnera tier_used, latency_ms, etc. (eller error om blitz ej kompilerat)
+    assert!(
+        parsed.get("tier_used").is_some() || parsed.get("error").is_some(),
+        "tiered_screenshot borde returnera tier_used eller error"
+    );
+}
+
+#[test]
+fn test_tiered_screenshot_with_xhr_hint() {
+    let html = r##"<html><body><div id="root"></div></body></html>"##;
+    let xhr = r#"[{"url": "https://api.example.com/api/chart", "method": "GET", "headers": {}}]"#;
+    let result = tiered_screenshot(
+        html,
+        "https://example.com",
+        "view chart",
+        1280,
+        800,
+        true,
+        xhr,
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    // Med XHR chart-hint borde den försöka CDP (eller falla tillbaka till error)
+    assert!(
+        parsed.get("tier_used").is_some() || parsed.get("error").is_some(),
+        "tiered_screenshot med XHR borde ge resultat"
+    );
+}
+
+#[test]
+fn test_tier_stats_returns_valid_json() {
+    let result = tier_stats();
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    assert!(
+        parsed.get("blitz_count").is_some(),
+        "tier_stats borde returnera blitz_count"
+    );
+    assert!(
+        parsed.get("cdp_count").is_some(),
+        "tier_stats borde returnera cdp_count"
+    );
+}
+
+#[test]
+fn test_vision_backend_determine_tier_hint_static() {
+    use aether_agent::vision_backend::determine_tier_hint;
+    use aether_agent::vision_backend::TierHint;
+
+    let hint = determine_tier_hint("<html><body><h1>Hello</h1></body></html>", &[]);
+    assert_eq!(
+        hint,
+        TierHint::TryBlitzFirst,
+        "Statisk HTML borde ge TryBlitzFirst"
+    );
+}
+
+#[test]
+fn test_vision_backend_determine_tier_hint_spa() {
+    use aether_agent::vision_backend::determine_tier_hint;
+    use aether_agent::vision_backend::TierHint;
+
+    let html = r#"<html><body><div id="root"></div></body></html>"#;
+    let hint = determine_tier_hint(html, &[]);
+    assert!(
+        matches!(hint, TierHint::RequiresJs { .. }),
+        "SPA med tom body borde ge RequiresJs"
+    );
+}
+
+#[test]
+fn test_vision_backend_tier_hint_from_xhr() {
+    use aether_agent::intercept::{tier_hint_from_captures, XhrCapture};
+    use aether_agent::vision_backend::TierHint;
+    use std::collections::HashMap;
+
+    let captures = vec![XhrCapture {
+        url: "https://api.example.com/api/chart/data".to_string(),
+        method: "GET".to_string(),
+        headers: HashMap::new(),
+    }];
+    let hint = tier_hint_from_captures(&captures);
+    assert!(
+        matches!(hint, TierHint::RequiresJs { .. }),
+        "XHR till /api/chart borde ge RequiresJs"
+    );
+}

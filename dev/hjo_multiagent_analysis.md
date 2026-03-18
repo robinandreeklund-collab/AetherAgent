@@ -222,7 +222,7 @@ p:      0.0 ← Inget känt mål-tillstånd hittades
 | # | Verktyg | Beskrivning | Status | Prioritet |
 |---|---------|-------------|--------|-----------|
 | BUG-5 | fetch_extract | Script-innehåll kontaminerar extraktion | OPEN | MEDIUM |
-| BUG-6 | compile_goal / find_safest_path | Generisk mall, ignorerar målkontext. find_safest_path matchar inte semantiskt. | **BEKRÄFTAD v2** | MEDIUM |
+| BUG-6 | compile_goal / find_safest_path | Generisk mall, ignorerar målkontext. find_safest_path matchar inte semantiskt. | **FIXAD** | MEDIUM |
 | BUG-7 | publish_collab_delta | Kräver odokumenterat diff_trees-schema | OPEN | MEDIUM |
 | WARN-1 | fetch_click | Degraderar till `selector:"a"` utan aria-label | OPEN | LOW |
 | WARN-2 | parse_top | Inkluderar hela trädet som sista nod | OPEN | LOW |
@@ -241,7 +241,7 @@ p:      0.0 ← Inget känt mål-tillstånd hittades
 
 ### Vision — Tier 2: CDP/Chrome (framtida)
 
-**Status:** Planerad, ej implementerad.
+**Status:** Implementerad (Fas 12). Modul: `vision_backend.rs`, feature-flag: `cdp`.
 
 AetherAgents vision-lager använder idag enbart Tier 1 (Blitz — pure Rust headless renderer). För JS-tunga sidor (React/SPA, Chart.js, dynamisk data) behövs Tier 2 med CDP (Chrome DevTools Protocol).
 
@@ -301,13 +301,14 @@ Många agent-sessioner slutar utan att Chrome startats.
 
 | Fas | Beskrivning | Status |
 |-----|-------------|--------|
-| A | Trait + Typer + Mock | Planerad |
-| B | CdpBackend (v2-implementation + `tier_used`) | Planerad |
-| C | TieredBackend med Blitz-placeholder → CDP fallback | Planerad |
-| D | BlitzBackend (blitz-html + vello renderer) | Planerad |
-| E | XHR-integration + `tier_hint` propagering | Planerad |
-| F | Visual Firewall på båda tiers | Planerad |
-| G | Benchmarks, target >60% Blitz-träffrate | Planerad |
+| A | Trait + Typer (`TierHint`, `ScreenshotTier`, `TieredBackend`) | **KLAR** |
+| B | CdpBackend (feature-gated `cdp`, stub med tydligt felmeddelande) | **KLAR** |
+| C | TieredBackend med Blitz → CDP fallback + kvalitetskontroll | **KLAR** |
+| D | BlitzBackend (delegerar till `render_html_to_png`) | **KLAR** |
+| E | XHR-integration + `tier_hint` (`intercept.rs`, `vision_backend.rs`) | **KLAR** |
+| F | MCP-verktyg (`tiered_screenshot`, `tier_stats`) + HTTP-endpoints | **KLAR** |
+| G | SPA-detektion (React, Next.js, Nuxt, Angular) | **KLAR** |
+| H | Benchmarks, target >60% Blitz-träffrate | Pågående (data samlas) |
 
 #### Vad som gör detta unikt
 

@@ -276,6 +276,97 @@ fn get_goal_templates() -> Vec<GoalTemplate> {
                 (ActionType::Verify, "Verifiera att data hämtades", vec![1]),
             ],
         },
+        // ── Domänspecifika mallar (BUG-6 fix: kontextmedvetna templates) ──
+        GoalTemplate {
+            keywords: &[
+                "kontakt", "contact", "telefon", "phone", "epost", "email", "adress", "address",
+            ],
+            sub_goals: vec![
+                (ActionType::Navigate, "Navigera till kontaktsidan", vec![]),
+                (
+                    ActionType::Extract,
+                    "Extrahera kontaktuppgifter (telefon, epost, adress)",
+                    vec![0],
+                ),
+                (
+                    ActionType::Verify,
+                    "Verifiera att kontaktinfo hittades",
+                    vec![1],
+                ),
+            ],
+        },
+        GoalTemplate {
+            keywords: &[
+                "analysera",
+                "analyze",
+                "analyse",
+                "granska",
+                "review",
+                "overview",
+                "överblick",
+            ],
+            sub_goals: vec![
+                (
+                    ActionType::Navigate,
+                    "Navigera till sidan som ska analyseras",
+                    vec![],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera struktur, navigation och nyckelinnehåll",
+                    vec![0],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera detaljerad data (kontakt, nyheter, tjänster)",
+                    vec![0],
+                ),
+                (
+                    ActionType::Verify,
+                    "Sammanställ och verifiera analysresultat",
+                    vec![1, 2],
+                ),
+            ],
+        },
+        GoalTemplate {
+            keywords: &["nyhet", "nyheter", "news", "artikel", "article", "blog"],
+            sub_goals: vec![
+                (ActionType::Navigate, "Navigera till nyhetssidan", vec![]),
+                (
+                    ActionType::Extract,
+                    "Extrahera nyhetsrubriker, datum och sammanfattningar",
+                    vec![0],
+                ),
+                (
+                    ActionType::Verify,
+                    "Verifiera att nyheter hittades",
+                    vec![1],
+                ),
+            ],
+        },
+        GoalTemplate {
+            keywords: &[
+                "navigera", "navigate", "browse", "bläddra", "utforska", "explore",
+            ],
+            sub_goals: vec![
+                (ActionType::Navigate, "Navigera till startsidan", vec![]),
+                (
+                    ActionType::Extract,
+                    "Kartlägg navigationslänkar och sidstruktur",
+                    vec![0],
+                ),
+                (
+                    ActionType::Navigate,
+                    "Navigera till relevant undersida",
+                    vec![1],
+                ),
+                (
+                    ActionType::Extract,
+                    "Extrahera innehåll från undersidan",
+                    vec![2],
+                ),
+            ],
+        },
         // ── Breda mallar (lägst prioritet, "find/hitta" är extraktion, inte sökning) ──
         GoalTemplate {
             keywords: &["hitta", "find", "get", "hämta", "check", "kolla"],
@@ -296,10 +387,14 @@ pub fn compile_goal(goal: &str) -> ActionPlan {
     let templates = get_goal_templates();
 
     // Matcha mot mallar
+    // Score = (bästa keyword-match) + (antal keyword-matcher * 0.1) + specificitet
+    // Mallar listade tidigare (mer specifika) får högre specificitet vid lika poäng
+    let template_count = templates.len();
     let best_template = templates
         .iter()
-        .map(|t| {
-            let score: f32 = t
+        .enumerate()
+        .map(|(idx, t)| {
+            let keyword_scores: Vec<f32> = t
                 .keywords
                 .iter()
                 .map(|kw| {
@@ -309,7 +404,12 @@ pub fn compile_goal(goal: &str) -> ActionPlan {
                         text_similarity(kw, &lower_goal) * 0.5
                     }
                 })
-                .fold(0.0f32, f32::max);
+                .collect();
+            let best = keyword_scores.iter().copied().fold(0.0f32, f32::max);
+            let match_count = keyword_scores.iter().filter(|&&s| s > 0.3).count();
+            // Specificitet: tidigare mallar vinner vid lika poäng
+            let specificity = (template_count - idx) as f32 * 0.001;
+            let score = best + (match_count as f32 * 0.1) + specificity;
             (t, score)
         })
         .max_by(|(_, a), (_, b)| a.total_cmp(b));
@@ -649,6 +749,55 @@ mod tests {
         assert!(
             plan.sub_goals.len() >= 3,
             "Generisk plan borde ha minst 3 steg"
+        );
+    }
+
+    #[test]
+    fn test_compile_kontakt_goal() {
+        // BUG-6 regression: kontakt-mål borde ge specifik kontakt-plan
+        let plan = compile_goal("hitta kontaktinformation för Hjo kommun");
+        let has_kontakt_step = plan
+            .sub_goals
+            .iter()
+            .any(|sg| sg.description.to_lowercase().contains("kontakt"));
+        assert!(
+            has_kontakt_step,
+            "Kontakt-mål borde generera kontaktspecifika steg, fick: {:?}",
+            plan.sub_goals
+                .iter()
+                .map(|sg| &sg.description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_compile_analysera_goal() {
+        let plan = compile_goal("Analysera Hjo kommuns webbplats");
+        assert!(
+            plan.sub_goals.len() >= 3,
+            "Analys-plan borde ha minst 3 steg"
+        );
+        let has_extract = plan
+            .sub_goals
+            .iter()
+            .filter(|sg| sg.action_type == ActionType::Extract)
+            .count();
+        assert!(
+            has_extract >= 2,
+            "Analys-plan borde ha minst 2 extraheringssteg för bred analys"
+        );
+    }
+
+    #[test]
+    fn test_compile_nyheter_goal() {
+        let plan = compile_goal("hitta senaste nyheterna");
+        let has_nyheter_step = plan
+            .sub_goals
+            .iter()
+            .any(|sg| sg.description.to_lowercase().contains("nyhet"));
+        assert!(
+            has_nyheter_step,
+            "Nyhets-mål borde generera nyhetsspecifika steg"
         );
     }
 

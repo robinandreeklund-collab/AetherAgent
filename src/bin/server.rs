@@ -1285,6 +1285,51 @@ async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+// ─── Fas 12: TieredBackend ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TieredScreenshotRequest {
+    html: String,
+    url: String,
+    goal: String,
+    #[serde(default = "default_width")]
+    width: u32,
+    #[serde(default = "default_height")]
+    height: u32,
+    #[serde(default = "default_fast_render")]
+    fast_render: bool,
+    #[serde(default)]
+    xhr_captures_json: String,
+}
+
+fn default_width() -> u32 {
+    1280
+}
+fn default_height() -> u32 {
+    800
+}
+fn default_fast_render() -> bool {
+    true
+}
+
+async fn tiered_screenshot_handler(Json(req): Json<TieredScreenshotRequest>) -> impl IntoResponse {
+    let result = aether_agent::tiered_screenshot(
+        &req.html,
+        &req.url,
+        &req.goal,
+        req.width,
+        req.height,
+        req.fast_render,
+        &req.xhr_captures_json,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn tier_stats_handler() -> impl IntoResponse {
+    let result = aether_agent::tier_stats();
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
 
 async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> impl IntoResponse {
@@ -2690,6 +2735,9 @@ fn build_router(state: AppState) -> Router {
         .route("/api/parse-screenshot", post(parse_screenshot_handler))
         .route("/api/vision/parse", post(parse_screenshot_server_model))
         .route("/api/fetch-vision", post(fetch_vision_handler))
+        // Fas 12: TieredBackend
+        .route("/api/tiered-screenshot", post(tiered_screenshot_handler))
+        .route("/api/tier-stats", get(tier_stats_handler))
         // Fas 13: Session Management
         .route("/api/session/create", post(session_create))
         .route("/api/session/cookies/add", post(session_add_cookies))

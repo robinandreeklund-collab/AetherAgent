@@ -23,6 +23,7 @@ mod temporal;
 mod trust;
 pub mod types;
 pub mod vision;
+pub mod vision_backend;
 mod webmcp;
 
 use std::collections::HashMap;
@@ -954,6 +955,90 @@ pub fn render_html_to_png(
     }
 
     Ok(png_bytes)
+}
+
+// ─── Fas 12: TieredBackend – Blitz/CDP tier-val ─────────────────────────────
+
+/// Screenshot with intelligent tier selection (Blitz → CDP fallback)
+///
+/// Uses TieredBackend to render a page:
+/// - Tier 1 (Blitz): Pure Rust, ~10-50ms, no Chrome needed
+/// - Tier 2 (CDP): Chrome DevTools Protocol, ~60-80ms, JS-capable
+///
+/// # Arguments
+/// * `html` - Page HTML
+/// * `url` - Page URL
+/// * `goal` - Agent's goal
+/// * `width` - Viewport width (default 1280)
+/// * `height` - Viewport height (default 800)
+/// * `fast_render` - Skip external resources (default true)
+/// * `xhr_captures_json` - Optional: XHR captures JSON for tier hint
+///
+/// # Returns
+/// JSON with ScreenshotResult: tier_used, latency_ms, size_bytes
+pub fn tiered_screenshot(
+    html: &str,
+    url: &str,
+    goal: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+    xhr_captures_json: &str,
+) -> String {
+    let backend = vision_backend::TieredBackend::default();
+
+    // Bestäm tier-hint från XHR-captures
+    let tier_hint = if xhr_captures_json.is_empty() || xhr_captures_json == "[]" {
+        // Kolla HTML direkt
+        vision_backend::determine_tier_hint(html, &[])
+    } else {
+        // Parsa XHR-captures och analysera
+        let captures: Vec<intercept::XhrCapture> =
+            serde_json::from_str(xhr_captures_json).unwrap_or_default();
+        let hint = intercept::tier_hint_from_captures(&captures);
+        if matches!(hint, vision_backend::TierHint::TryBlitzFirst) {
+            // Fallback: analysera HTML
+            vision_backend::determine_tier_hint(html, &[])
+        } else {
+            hint
+        }
+    };
+
+    let req = vision_backend::ScreenshotRequest {
+        url: url.to_string(),
+        html: Some(html.to_string()),
+        width,
+        height,
+        fast_render,
+        tier_hint,
+        goal: goal.to_string(),
+    };
+
+    match backend.screenshot(&req) {
+        Ok(result) => {
+            // Returnera metadata (inte PNG-bytes — de hanteras separat)
+            let stats = backend.stats();
+            serde_json::json!({
+                "tier_used": result.tier_used,
+                "latency_ms": result.latency_ms,
+                "size_bytes": result.size_bytes,
+                "width": result.width,
+                "height": result.height,
+                "escalation_reason": result.escalation_reason,
+                "stats": stats,
+            })
+            .to_string()
+        }
+        Err(e) => serde_json::json!({"error": e}).to_string(),
+    }
+}
+
+/// Get tier statistics for monitoring
+///
+/// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.
+pub fn tier_stats() -> String {
+    let stats = vision_backend::TierStats::default();
+    serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ─── Fas 9d: Cross-Agent Semantic Diffing ───────────────────────────────────

@@ -239,6 +239,29 @@ struct FetchVisionParams {
     fast_render: Option<bool>,
 }
 
+// ─── Fas 12 parameter types ─────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct TieredScreenshotParams {
+    /// Raw HTML string from the web page
+    html: String,
+    /// The page URL
+    url: String,
+    /// The agent's current goal
+    goal: String,
+    /// Viewport width in pixels (default: 1280)
+    width: Option<u32>,
+    /// Viewport height in pixels (default: 800)
+    height: Option<u32>,
+    /// Skip external resources for faster rendering (default: true)
+    fast_render: Option<bool>,
+    /// Optional: XHR captures JSON for intelligent tier selection
+    xhr_captures_json: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct TierStatsParams {}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -461,6 +484,36 @@ impl AetherMcpServer {
     )]
     fn detect_xhr_urls(&self, Parameters(params): Parameters<DetectXhrParams>) -> String {
         aether_agent::detect_xhr_urls(&params.html)
+    }
+
+    // ─── Fas 12: TieredBackend – Intelligent Screenshot ────────────────────────
+
+    #[tool(
+        name = "tiered_screenshot",
+        description = "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. USE THIS TOOL WHEN: you need a screenshot and want the system to automatically choose the best rendering engine. Provide HTML + URL. Optionally pass XHR captures JSON for smarter tier selection — if the page uses Chart.js, D3, or other JS visualization libraries, CDP is used directly. Returns: tier_used (Blitz/Cdp), latency_ms, size_bytes, and escalation_reason if tier switching occurred."
+    )]
+    fn tiered_screenshot(&self, Parameters(params): Parameters<TieredScreenshotParams>) -> String {
+        let width = params.width.unwrap_or(1280);
+        let height = params.height.unwrap_or(800);
+        let fast_render = params.fast_render.unwrap_or(true);
+        let xhr_json = params.xhr_captures_json.as_deref().unwrap_or("[]");
+        aether_agent::tiered_screenshot(
+            &params.html,
+            &params.url,
+            &params.goal,
+            width,
+            height,
+            fast_render,
+            xhr_json,
+        )
+    }
+
+    #[tool(
+        name = "tier_stats",
+        description = "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier. USE THIS TOOL WHEN: you want to monitor rendering performance and tier distribution in production."
+    )]
+    fn tier_stats(&self, Parameters(_params): Parameters<TierStatsParams>) -> String {
+        aether_agent::tier_stats()
     }
 
     // ─── Fas 11: Vision – YOLOv8 Screenshot Analysis ──────────────────────────
@@ -949,7 +1002,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
-    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision");
+    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
+    eprintln!("        tiered_screenshot, tier_stats");
 
     let server = AetherMcpServer::new();
 

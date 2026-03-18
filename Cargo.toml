@@ -66,6 +66,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest"]
 vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
+cdp = []
 
 [[bin]]
 name = "aether-server"
