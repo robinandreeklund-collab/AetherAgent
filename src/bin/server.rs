@@ -2781,6 +2781,9 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
+    aether_agent::vision_backend::warmup_cdp_background();
+
     // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
     let model = load_vision_model().await;
     let state = AppState {

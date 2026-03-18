@@ -996,6 +996,10 @@ impl ServerHandler for AetherMcpServer {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("AetherAgent MCP Server starting on stdio...");
+
+    // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
+    aether_agent::vision_backend::warmup_cdp_background();
+
     eprintln!("Tools: parse, parse_top, find_and_click, fill_form, extract_data,");
     eprintln!(
         "        check_injection, compile_goal, classify_request, diff_trees, parse_with_js,"
