@@ -1791,6 +1791,20 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["png_base64", "goal"]
             }
+        },
+        {
+            "name": "fetch_vision",
+            "description": "ALL-IN-ONE: Fetch a URL, take a real browser screenshot with headless Chromium, then analyze it with YOLOv8 vision. Returns: 1) the actual screenshot of the web page as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No need to take screenshots separately. Requires Chromium on the server (auto-installed via Docker).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to screenshot and analyze (e.g. https://www.hjo.se)"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance scoring"},
+                    "width": {"type": "integer", "description": "Viewport width in pixels (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height in pixels (default: 800)", "default": 800}
+                },
+                "required": ["url", "goal"]
+            }
         }
     ])
 }
@@ -1963,6 +1977,110 @@ fn render_char_5x7(img: &mut image::RgbaImage, x: u32, y: u32, ch: char, color: 
 #[cfg(not(feature = "vision"))]
 fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<String, String> {
     Err("Vision feature inte aktiverad".to_string())
+}
+
+/// Ta en headless screenshot av en URL med Chromium.
+/// Returnerar PNG-bytes vid framgång.
+async fn headless_screenshot(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let chromium = std::env::var("CHROMIUM_PATH").unwrap_or_else(|_| "chromium".to_string());
+
+    let tmp_dir = std::env::temp_dir();
+    let screenshot_path = tmp_dir.join(format!("aether_screenshot_{}.png", std::process::id()));
+    let screenshot_str = screenshot_path
+        .to_str()
+        .ok_or("Ogiltig temp-sökväg")?
+        .to_string();
+
+    let output = tokio::process::Command::new(&chromium)
+        .args([
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-software-rasterizer",
+            &format!("--window-size={width},{height}"),
+            &format!("--screenshot={screenshot_str}"),
+            "--hide-scrollbars",
+            // Vänta max 15s på sidan
+            "--timeout=15000",
+            url,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Kunde inte starta Chromium: {e}. Sätt CHROMIUM_PATH."))?;
+
+    if !screenshot_path.exists() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "Chromium skapade ingen screenshot. Exit={}, stderr={}",
+            output.status,
+            &stderr[..stderr.len().min(500)]
+        ));
+    }
+
+    let png_bytes = tokio::fs::read(&screenshot_path)
+        .await
+        .map_err(|e| format!("Kunde inte läsa screenshot: {e}"))?;
+
+    // Städa upp
+    let _ = tokio::fs::remove_file(&screenshot_path).await;
+
+    Ok(png_bytes)
+}
+
+/// REST-endpoint: POST /api/fetch-vision — hämta URL, ta screenshot, kör vision
+async fn fetch_vision_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<FetchVisionRequest>,
+) -> impl IntoResponse {
+    let width = req.width.unwrap_or(1280);
+    let height = req.height.unwrap_or(800);
+
+    // Ta screenshot
+    let png_bytes = match headless_screenshot(&req.url, width, height).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": e}).to_string(),
+            );
+        }
+    };
+
+    // Kör vision
+    let model_guard = state.vision_model.read().await;
+    let model_bytes = match model_guard.as_ref() {
+        Some(b) => b.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": "Ingen vision-modell laddad"}).to_string(),
+            );
+        }
+    };
+    drop(model_guard);
+
+    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    let annotated_b64 = render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+    let original_b64 = B64.encode(&png_bytes);
+
+    let response = serde_json::json!({
+        "original_screenshot": original_b64,
+        "annotated_screenshot": annotated_b64,
+        "detections": serde_json::from_str::<serde_json::Value>(&result_json).unwrap_or_default(),
+        "url": req.url,
+        "viewport": {"width": width, "height": height}
+    });
+
+    (StatusCode::OK, response.to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct FetchVisionRequest {
+    url: String,
+    goal: String,
+    width: Option<u32>,
+    height: Option<u32>,
 }
 
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
@@ -2175,6 +2293,37 @@ async fn mcp_dispatch_tool(
             let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
             let annotated_b64 =
                 render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
+        }
+        "fetch_vision" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+
+            // Validera URL
+            aether_agent::fetch::validate_url(url)?;
+
+            // Ta screenshot med headless Chromium
+            let png_bytes = headless_screenshot(url, width, height).await?;
+            let png_b64 = B64.encode(&png_bytes);
+
+            // Kör vision
+            let model_guard = state.vision_model.read().await;
+            let model_bytes = model_guard
+                .as_ref()
+                .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
+                .clone();
+            drop(model_guard);
+
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+
             Ok(serde_json::json!([
                 {"type": "image", "data": png_b64, "mimeType": "image/png"},
                 {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
@@ -2510,6 +2659,7 @@ fn build_router(state: AppState) -> Router {
         // Fas 11: Vision
         .route("/api/parse-screenshot", post(parse_screenshot_handler))
         .route("/api/vision/parse", post(parse_screenshot_server_model))
+        .route("/api/fetch-vision", post(fetch_vision_handler))
         // Fas 13: Session Management
         .route("/api/session/create", post(session_create))
         .route("/api/session/cookies/add", post(session_add_cookies))
@@ -2601,6 +2751,7 @@ async fn main() {
         "  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision (client model)"
     );
     println!("  POST /api/vision/parse           – Analyze screenshot with server-loaded model");
+    println!("  POST /api/fetch-vision           – URL → screenshot → YOLO vision → images + JSON");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");

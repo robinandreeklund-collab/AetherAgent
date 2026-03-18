@@ -225,6 +225,18 @@ struct VisionParseParams {
     goal: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct FetchVisionParams {
+    /// URL to screenshot and analyze (e.g. "https://www.hjo.se")
+    url: String,
+    /// The agent's current goal for relevance scoring
+    goal: String,
+    /// Viewport width in pixels (default: 1280)
+    width: Option<u32>,
+    /// Viewport height in pixels (default: 800)
+    height: Option<u32>,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -478,6 +490,119 @@ impl AetherMcpServer {
         // Denna funktion kallas aldrig direkt, men behövs för tool-registrering
         params.goal.clone()
     }
+
+    #[tool(
+        name = "fetch_vision",
+        description = "ALL-IN-ONE: Fetch a URL, take a real browser screenshot with headless Chromium, then analyze it with YOLOv8 vision. Returns: 1) the actual screenshot of the web page as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No screenshots needed from your side. The server handles everything."
+    )]
+    fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
+        // Stubba — call_tool override hanterar screenshot + vision + image blocks
+        params.goal.clone()
+    }
+}
+
+/// Hanterar fetch_vision: ta screenshot med Chromium, kör vision, returnera bilder
+async fn handle_fetch_vision(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    use base64::Engine;
+    let b64 = &base64::engine::general_purpose::STANDARD;
+
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
+    let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            "URL krävs".to_string(),
+        )]);
+    }
+
+    // Enkel URL-validering
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            "URL måste börja med http:// eller https://".to_string(),
+        )]);
+    }
+
+    // Ta screenshot med headless Chromium
+    let chromium = std::env::var("CHROMIUM_PATH").unwrap_or_else(|_| "chromium".to_string());
+    let tmp_path = std::env::temp_dir().join(format!("aether_mcp_ss_{}.png", std::process::id()));
+    let tmp_str = tmp_path.to_string_lossy().to_string();
+
+    let output = match tokio::process::Command::new(&chromium)
+        .args([
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-software-rasterizer",
+            &format!("--window-size={width},{height}"),
+            &format!("--screenshot={tmp_str}"),
+            "--hide-scrollbars",
+            "--timeout=15000",
+            url,
+        ])
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Kunde inte starta Chromium: {e}. Sätt CHROMIUM_PATH."
+            ))]);
+        }
+    };
+
+    if !tmp_path.exists() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+            "Screenshot misslyckades: {}",
+            &stderr[..stderr.len().min(500)]
+        ))]);
+    }
+
+    let png_bytes = match tokio::fs::read(&tmp_path).await {
+        Ok(b) => b,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Kunde inte läsa screenshot: {e}"
+            ))]);
+        }
+    };
+    let _ = tokio::fs::remove_file(&tmp_path).await;
+
+    let png_b64 = b64.encode(&png_bytes);
+
+    // Ladda modell
+    let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
+    if model_path.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            "Ingen vision-modell tillgänglig. Sätt AETHER_MODEL_PATH.".to_string(),
+        )]);
+    }
+    let model_bytes = match std::fs::read(&model_path) {
+        Ok(b) => b,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Kunde inte läsa modell: {e}"
+            ))]);
+        }
+    };
+
+    // Kör vision
+    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+    build_vision_result(&png_b64, &png_bytes, &result_json)
 }
 
 /// Hanterar vision-verktyg med image content blocks
@@ -750,6 +875,11 @@ impl ServerHandler for AetherMcpServer {
                 let result = handle_vision_tool(tool_name, args);
                 Ok(result)
             }
+            "fetch_vision" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_vision(args).await;
+                Ok(result)
+            }
             // Alla andra verktyg: delegera till router
             _ => {
                 let ctx = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
@@ -782,9 +912,10 @@ impl ServerHandler for AetherMcpServer {
              multi-agent workflows. Use grounding tools for vision-language integration.\n\n\
              XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
              in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
-             VISION: Use 'vision_parse' (server model) or 'parse_screenshot' (client model) to analyze \
-             screenshots with YOLOv8 object detection — returns the original screenshot, an annotated image \
-             with color-coded bounding boxes, and detection JSON. Perfect for visual reports and debugging."
+             VISION: Use 'fetch_vision' to analyze ANY web page visually — just give a URL and goal. \
+             The server takes a real browser screenshot with headless Chromium, runs YOLOv8 detection, \
+             and returns: the original screenshot, annotated image with bounding boxes, and detection JSON. \
+             For pre-captured screenshots, use 'vision_parse' (server model) or 'parse_screenshot' (client model)."
                 .to_string(),
         );
         info
@@ -801,7 +932,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
-    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse");
+    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision");
 
     let server = AetherMcpServer::new();
 

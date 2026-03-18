@@ -15,8 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     python3-minimal \
     python3-pip \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
     && pip3 install --no-cache-dir --break-system-packages rten-convert \
     && rm -rf /var/lib/apt/lists/*
+
+# Chromium headless för server-side screenshots
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 COPY --from=builder /app/target/release/aether-server /usr/local/bin/aether-server
 
