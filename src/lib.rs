@@ -825,11 +825,29 @@ pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
 pub fn parse_screenshot(png_bytes: &[u8], model_bytes: &[u8], goal: &str) -> String {
     let config = vision::VisionConfig::default();
     match vision::detect_ui_elements(png_bytes, model_bytes, goal, &config) {
-        Ok(result) => {
-            serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
-        }
-        Err(e) => format!(r#"{{"error":"{}"}}"#, e),
+        Ok(result) => serde_json::to_string(&result)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string()),
+        Err(e) => serde_json::json!({"error": e}).to_string(),
     }
+}
+
+/// Parse a screenshot with a pre-loaded rten model (fast path — no model reload).
+///
+/// Use `load_vision_model` to load the model once, then pass it here for each request.
+#[cfg(feature = "vision")]
+pub fn parse_screenshot_with_model(png_bytes: &[u8], model: &rten::Model, goal: &str) -> String {
+    let config = vision::VisionConfig::default();
+    match vision::detect_ui_elements_with_model(png_bytes, model, goal, &config) {
+        Ok(result) => serde_json::to_string(&result)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string()),
+        Err(e) => serde_json::json!({"error": e}).to_string(),
+    }
+}
+
+/// Load an rten vision model from bytes. Call once at startup, reuse for all requests.
+#[cfg(feature = "vision")]
+pub fn load_vision_model(model_bytes: &[u8]) -> Result<rten::Model, String> {
+    vision::load_model(model_bytes)
 }
 
 // ─── Blitz rendering (testbar via library) ──────────────────────────────────

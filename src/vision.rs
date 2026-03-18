@@ -296,22 +296,20 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
 }
 
 #[cfg(feature = "vision")]
-/// Run YOLOv8-nano inference on preprocessed image tensor
-///
-/// Loads the ONNX model, creates the input tensor, runs inference,
-/// and post-processes results with confidence thresholding and NMS.
-pub fn run_inference(
-    model_bytes: &[u8],
+/// Load an rten model from bytes (expensive — call once, reuse the result).
+pub fn load_model(model_bytes: &[u8]) -> Result<rten::Model, String> {
+    rten::Model::load(model_bytes.to_vec()).map_err(|e| format!("Kunde inte ladda modell: {}", e))
+}
+
+#[cfg(feature = "vision")]
+/// Run YOLOv8-nano inference with a pre-loaded model (fast path).
+pub fn run_inference_with_model(
+    model: &rten::Model,
     tensor: &[f32],
     input_size: u32,
     config: &VisionConfig,
 ) -> Result<Vec<UiDetection>, String> {
-    use rten::Model;
     use rten_tensor::NdTensor;
-
-    // Ladda modellen fran bytes
-    let model =
-        Model::load(model_bytes.to_vec()).map_err(|e| format!("Kunde inte ladda modell: {}", e))?;
 
     // Skapa input-tensor med form [1, 3, input_size, input_size]
     let size = input_size as usize;
@@ -417,31 +415,39 @@ pub fn run_inference(
 }
 
 #[cfg(feature = "vision")]
-/// Full pipeline: PNG bytes -> detections -> semantic tree
+/// Run YOLOv8-nano inference on preprocessed image tensor.
 ///
-/// Preprocesses the image, runs YOLOv8-nano inference, applies NMS,
-/// and builds a semantic tree from the detections.
-pub fn detect_ui_elements(
-    png_bytes: &[u8],
+/// Loads the model from bytes each time — use `run_inference_with_model` for
+/// repeated calls to avoid the ~10s model-load overhead.
+pub fn run_inference(
     model_bytes: &[u8],
+    tensor: &[f32],
+    input_size: u32,
+    config: &VisionConfig,
+) -> Result<Vec<UiDetection>, String> {
+    let model = load_model(model_bytes)?;
+    run_inference_with_model(&model, tensor, input_size, config)
+}
+
+#[cfg(feature = "vision")]
+/// Full pipeline with pre-loaded model (fast path — no model reload).
+pub fn detect_ui_elements_with_model(
+    png_bytes: &[u8],
+    model: &rten::Model,
     goal: &str,
     config: &VisionConfig,
 ) -> Result<VisionResult, String> {
     use std::time::Instant;
 
-    // Preprocessing
     let pre_start = Instant::now();
     let tensor = preprocess_image(png_bytes, config.input_size)?;
     let preprocess_time_ms = pre_start.elapsed().as_millis() as u64;
 
-    // Inferens
     let inf_start = Instant::now();
-    let raw_detections = run_inference(model_bytes, &tensor, config.input_size, config)?;
+    let raw_detections = run_inference_with_model(model, &tensor, config.input_size, config)?;
     let inference_time_ms = inf_start.elapsed().as_millis() as u64;
 
     let raw_detection_count = raw_detections.len() as u32;
-
-    // Bygg semantiskt trad
     let tree = detections_to_tree(&raw_detections, goal, "screenshot://local");
 
     Ok(VisionResult {
@@ -452,6 +458,21 @@ pub fn detect_ui_elements(
         raw_detection_count,
         model_version: config.model_version.clone(),
     })
+}
+
+#[cfg(feature = "vision")]
+/// Full pipeline: PNG bytes -> detections -> semantic tree
+///
+/// Loads the model from bytes each time. For server use, prefer
+/// `detect_ui_elements_with_model` with a pre-loaded model.
+pub fn detect_ui_elements(
+    png_bytes: &[u8],
+    model_bytes: &[u8],
+    goal: &str,
+    config: &VisionConfig,
+) -> Result<VisionResult, String> {
+    let model = load_model(model_bytes)?;
+    detect_ui_elements_with_model(png_bytes, &model, goal, config)
 }
 
 // Stub nar vision-feature inte ar aktiverat

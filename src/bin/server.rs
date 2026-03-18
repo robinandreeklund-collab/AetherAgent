@@ -20,10 +20,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
-/// Delat server-state för förladdat vision-modell
+/// Delat server-state med förladdad vision-modell (rten::Model istället för bytes)
 #[derive(Clone)]
 struct AppState {
-    vision_model: Arc<RwLock<Option<Vec<u8>>>>,
+    vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -1316,8 +1316,8 @@ async fn parse_screenshot_server_model(
     Json(req): Json<ParseScreenshotServerModelRequest>,
 ) -> impl IntoResponse {
     let model_guard = state.vision_model.read().await;
-    let model_bytes = match model_guard.as_ref() {
-        Some(b) => b.clone(),
+    let model = match model_guard.as_ref() {
+        Some(m) => m.clone(),
         None => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -1337,7 +1337,7 @@ async fn parse_screenshot_server_model(
             )
         }
     };
-    let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    let result = aether_agent::parse_screenshot_with_model(&png_bytes, &model, &req.goal);
     (StatusCode::OK, result)
 }
 
@@ -1418,8 +1418,29 @@ fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
     }
 }
 
-/// Ladda vision-modell från URL eller filsökväg vid serverstart
-async fn load_vision_model() -> Option<Vec<u8>> {
+/// Ladda vision-modell från URL eller filsökväg vid serverstart.
+/// Returnerar en förladdad rten::Model (Model::load körs en gång här).
+async fn load_vision_model() -> Option<Arc<rten::Model>> {
+    let model_bytes = load_vision_model_bytes().await?;
+    println!("Laddar rten::Model (Model::load)...");
+    let start = std::time::Instant::now();
+    match aether_agent::load_vision_model(&model_bytes) {
+        Ok(model) => {
+            println!(
+                "rten::Model laddad på {:.1}s — alla requests använder förladdad modell",
+                start.elapsed().as_secs_f64()
+            );
+            Some(Arc::new(model))
+        }
+        Err(e) => {
+            eprintln!("Kunde inte ladda rten-modell: {e}");
+            None
+        }
+    }
+}
+
+/// Hämta modell-bytes från URL eller fil
+async fn load_vision_model_bytes() -> Option<Vec<u8>> {
     // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
     if let Ok(url) = std::env::var("AETHER_MODEL_URL") {
         println!("Laddar vision-modell från URL: {url}");
@@ -2053,10 +2074,10 @@ async fn fetch_vision_handler(
         }
     };
 
-    // Kör vision
+    // Kör vision med förladdad modell
     let model_guard = state.vision_model.read().await;
-    let model_bytes = match model_guard.as_ref() {
-        Some(b) => b.clone(),
+    let model = match model_guard.as_ref() {
+        Some(m) => m.clone(),
         None => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2066,7 +2087,7 @@ async fn fetch_vision_handler(
     };
     drop(model_guard);
 
-    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, &req.goal);
     let annotated_b64 = render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
     let original_b64 = B64.encode(&png_bytes);
 
@@ -2293,12 +2314,12 @@ async fn mcp_dispatch_tool(
             let goal = args["goal"].as_str().unwrap_or("");
             let png_bytes = base64_decode(png_b64)?;
             let model_guard = state.vision_model.read().await;
-            let model_bytes = model_guard
+            let model = model_guard
                 .as_ref()
                 .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
                 .clone();
             drop(model_guard);
-            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
             let annotated_b64 =
                 render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
             Ok(serde_json::json!([
@@ -2321,15 +2342,15 @@ async fn mcp_dispatch_tool(
             let png_bytes = render_url_to_png(url, width, height, fast_render).await?;
             let png_b64 = B64.encode(&png_bytes);
 
-            // Kör vision
+            // Kör vision med förladdad modell
             let model_guard = state.vision_model.read().await;
-            let model_bytes = model_guard
+            let model = model_guard
                 .as_ref()
                 .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
                 .clone();
             drop(model_guard);
 
-            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
             let annotated_b64 =
                 render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
 
@@ -2711,10 +2732,10 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // Ladda vision-modell vid startup (om konfigurerad)
-    let model_bytes = load_vision_model().await;
+    // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
+    let model = load_vision_model().await;
     let state = AppState {
-        vision_model: Arc::new(RwLock::new(model_bytes)),
+        vision_model: Arc::new(RwLock::new(model)),
     };
 
     println!("AetherAgent API server starting on http://{}", addr);
