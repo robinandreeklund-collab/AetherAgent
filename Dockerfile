@@ -24,8 +24,8 @@ RUN mkdir -p src/bin benches && \
 
 # Pre-compile all dependencies (this is the slow step, ~10-15 min first time)
 # Subsequent builds reuse this layer if only src/ code changed.
-RUN cargo build --profile server-release --features server,vision --bin aether-server 2>&1 || true && \
-    cargo build --profile server-release --features mcp,vision --bin aether-mcp 2>&1 || true
+RUN cargo build --profile server-release --features server,vision,cdp --bin aether-server 2>&1 || true && \
+    cargo build --profile server-release --features mcp,vision,cdp --bin aether-mcp 2>&1 || true
 
 # Remove the stub artifacts so cargo rebuilds our actual code
 RUN rm -rf src/ benches/ && \
@@ -37,8 +37,8 @@ RUN rm -rf src/ benches/ && \
 COPY src/ src/
 COPY benches/ benches/
 
-RUN cargo build --profile server-release --features server,vision --bin aether-server && \
-    cargo build --profile server-release --features mcp,vision --bin aether-mcp
+RUN cargo build --profile server-release --features server,vision,cdp --bin aether-server && \
+    cargo build --profile server-release --features mcp,vision,cdp --bin aether-mcp
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -55,9 +55,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libfontconfig1 \
     # curl for health checks
     curl \
+    # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
+    chromium \
     # rten-convert for ONNX → rten model conversion at startup
     && pip3 install --no-cache-dir --break-system-packages rten-convert \
     && rm -rf /var/lib/apt/lists/*
+
+# Chromium sökväg för headless_chrome crate
+ENV CHROME_PATH=/usr/bin/chromium
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp

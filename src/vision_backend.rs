@@ -13,6 +13,41 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+// Lazy-initialized global Chrome browser for CDP Tier 2
+#[cfg(feature = "cdp")]
+static CDP_BROWSER: std::sync::OnceLock<std::sync::Mutex<headless_chrome::Browser>> =
+    std::sync::OnceLock::new();
+
+/// Initiera Chrome-browser vid första CDP-anrop (lazy)
+#[cfg(feature = "cdp")]
+fn get_or_init_browser() -> Result<&'static std::sync::Mutex<headless_chrome::Browser>, String> {
+    // Om redan initierad, returnera direkt
+    if let Some(browser) = CDP_BROWSER.get() {
+        return Ok(browser);
+    }
+
+    // Första anropet: starta Chrome
+    use headless_chrome::{Browser, LaunchOptions};
+    let options = LaunchOptions {
+        headless: true,
+        sandbox: false,
+        window_size: Some((1280, 900)),
+        args: vec![
+            std::ffi::OsStr::new("--no-sandbox"),
+            std::ffi::OsStr::new("--disable-gpu"),
+            std::ffi::OsStr::new("--disable-dev-shm-usage"),
+            std::ffi::OsStr::new("--disable-software-rasterizer"),
+            std::ffi::OsStr::new("--disable-extensions"),
+        ],
+        ..LaunchOptions::default()
+    };
+    let browser = Browser::new(options).map_err(|e| format!("Chrome start failed: {e}"))?;
+    let _ = CDP_BROWSER.set(std::sync::Mutex::new(browser));
+    CDP_BROWSER
+        .get()
+        .ok_or_else(|| "CDP browser init race condition".to_string())
+}
+
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
 /// Vilken rendering-nivå som ska användas
@@ -290,20 +325,71 @@ impl TieredBackend {
         Err("Blitz feature inte aktiverad".to_string())
     }
 
-    /// CDP-rendering (Tier 2) — stub som ska implementeras med chromiumoxide
+    /// CDP-rendering (Tier 2) — headless Chrome via headless_chrome crate
     ///
-    /// I framtiden: lazy Chrome-init, warm tab pool, CDP screenshot command.
-    /// Nu: returnerar tydligt fel att CDP ännu inte är implementerad.
+    /// Lazy Chrome-init: browser startas vid första anropet och återanvänds.
+    /// Navigerar till URL, väntar på page load, tar viewport screenshot.
     #[cfg(feature = "cdp")]
     fn screenshot_cdp(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
-        // TODO: Implementera med chromiumoxide
-        // let browser = self.get_or_init_browser().await?;
-        // let page = browser.new_page(&req.url).await?;
-        // let screenshot = page.screenshot(...).await?;
-        let _ = req;
-        Err("CDP (Chrome DevTools Protocol) ännu inte implementerad. \
-             Kompilera med --features cdp och installera Chrome."
-            .to_string())
+        let start = Instant::now();
+
+        let browser_mutex = get_or_init_browser().map_err(|e| format!("CDP browser init: {e}"))?;
+        let browser = browser_mutex
+            .lock()
+            .map_err(|e| format!("CDP browser lock: {e}"))?;
+
+        // Skapa ny tab och navigera
+        let tab = browser.new_tab().map_err(|e| format!("CDP new tab: {e}"))?;
+
+        // Sätt viewport-storlek
+        tab.set_bounds(headless_chrome::types::Bounds::Normal {
+            left: None,
+            top: None,
+            width: Some(req.width as f64),
+            height: Some(req.height as f64),
+        })
+        .map_err(|e| format!("CDP set bounds: {e}"))?;
+
+        // Navigera till URL
+        tab.navigate_to(&req.url)
+            .map_err(|e| format!("CDP navigate: {e}"))?;
+
+        // Vänta på page load (max 10s)
+        tab.wait_until_navigated()
+            .map_err(|e| format!("CDP wait: {e}"))?;
+
+        // Ta viewport screenshot som PNG
+        let png_bytes = tab
+            .capture_screenshot(
+                headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption::Png,
+                None, // quality
+                None, // clip (hela viewport)
+                true, // from_surface
+            )
+            .map_err(|e| format!("CDP screenshot: {e}"))?;
+
+        // Stäng tab för att frigöra resurser
+        let _ = tab.close(true);
+
+        let latency_ms = start.elapsed().as_millis() as u64;
+        let size_bytes = png_bytes.len();
+
+        // Uppdatera CDP-statistik
+        if let Ok(mut s) = self.stats.lock() {
+            let total = s.cdp_count as f64 * s.avg_cdp_latency_ms + latency_ms as f64;
+            s.cdp_count += 1;
+            s.avg_cdp_latency_ms = total / s.cdp_count as f64;
+        }
+
+        Ok(ScreenshotResult {
+            png_bytes,
+            width: req.width,
+            height: req.height,
+            latency_ms,
+            size_bytes,
+            tier_used: ScreenshotTier::Cdp,
+            escalation_reason: None,
+        })
     }
 
     #[cfg(not(feature = "cdp"))]
@@ -354,8 +440,24 @@ impl TieredBackend {
 
 impl Default for TieredBackend {
     fn default() -> Self {
-        // Auto-detect CDP: kolla om Chrome finns i PATH
-        let cdp_available = cfg!(feature = "cdp");
+        // Auto-detect CDP: feature-flagga + kolla att Chrome-binär finns
+        let cdp_available = if cfg!(feature = "cdp") {
+            // Verifiera att Chrome faktiskt finns i PATH
+            std::process::Command::new("chromium")
+                .arg("--version")
+                .output()
+                .is_ok()
+                || std::process::Command::new("chromium-browser")
+                    .arg("--version")
+                    .output()
+                    .is_ok()
+                || std::process::Command::new("google-chrome")
+                    .arg("--version")
+                    .output()
+                    .is_ok()
+        } else {
+            false
+        };
         TieredBackend::new(cdp_available)
     }
 }
