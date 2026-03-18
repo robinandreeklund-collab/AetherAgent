@@ -13,6 +13,10 @@ use crate::types::{
 /// Klickbara roller
 const CLICKABLE_ROLES: &[&str] = &["button", "link", "menuitem"];
 
+/// Minsta confidence för att inkludera ett extraherat värde i resultatet.
+/// Script-kontaminering filtreras primärt via looks_like_script_content().
+const MIN_EXTRACT_CONFIDENCE: f32 = 0.10;
+
 /// Inmatningsbara roller
 const INPUT_ROLES: &[&str] = &[
     "textbox",
@@ -220,6 +224,44 @@ pub fn map_form_fields(tree: &SemanticTree, fields: &HashMap<String, String>) ->
 // ─── extract_data ────────────────────────────────────────────────────────────
 
 /// Roll-preferenser för semantisk extraktion: nyckelord i key → föredragen roll
+/// Detektera om en label ser ut som script/CSS-innehåll (cookie-scripts m.m.)
+fn looks_like_script_content(text: &str) -> bool {
+    if text.len() < 20 {
+        return false;
+    }
+    let lower = text.to_lowercase();
+    // Vanliga JS/CSS-mönster som läcker genom cookie-scripts
+    let script_indicators = [
+        "function(",
+        "function ",
+        "var ",
+        "const ",
+        "let ",
+        "document.",
+        "window.",
+        "optanonwrapper",
+        "adsbygoogle",
+        "gtag(",
+        "dataLayer",
+        "createElement",
+        "addEventListener",
+        "typeof ",
+        "return{",
+        "return {",
+        "({",
+        "});",
+        ".push(",
+        "===",
+        "!==",
+    ];
+    let matches = script_indicators
+        .iter()
+        .filter(|p| lower.contains(*p))
+        .count();
+    // Minst 2 indikatorer → troligtvis script
+    matches >= 2
+}
+
 fn role_boost_for_key(key: &str) -> Option<(&'static str, f32)> {
     let key_lower = key.to_lowercase();
     let key_parts: Vec<&str> = key_lower
@@ -255,6 +297,11 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
         for node in &all_nodes {
             // Skippa tomma noder
             if node.label.is_empty() && node.value.is_none() {
+                continue;
+            }
+
+            // Skippa noder vars label ser ut som script/kod-innehåll
+            if looks_like_script_content(&node.label) {
                 continue;
             }
 
@@ -329,18 +376,23 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 }
             };
 
-            entries.push(ExtractedEntry {
-                key: key.clone(),
-                value,
-                source_node_id: node.id,
-                confidence: calibrated_confidence.clamp(0.0, 1.0),
-            });
+            let clamped = calibrated_confidence.clamp(0.0, 1.0);
+            if clamped >= MIN_EXTRACT_CONFIDENCE {
+                entries.push(ExtractedEntry {
+                    key: key.clone(),
+                    value,
+                    source_node_id: node.id,
+                    confidence: clamped,
+                });
+            }
         }
     }
 
+    // Nycklar som saknas = antingen ej hittade eller filtrerade under MIN_EXTRACT_CONFIDENCE
+    let extracted_keys: Vec<&str> = entries.iter().map(|e| e.key.as_str()).collect();
     let missing_keys: Vec<String> = keys
         .iter()
-        .filter(|k| !found_keys.contains(k))
+        .filter(|k| !extracted_keys.contains(&k.as_str()))
         .cloned()
         .collect();
 

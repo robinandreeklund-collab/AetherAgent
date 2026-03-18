@@ -10,14 +10,19 @@ pub mod fetch;
 pub mod firewall;
 mod grounding;
 mod intent;
+pub mod intercept;
 mod js_bridge;
 mod js_eval;
 mod memory;
+mod orchestrator;
 mod parser;
 mod semantic;
+mod session;
+mod streaming;
 mod temporal;
 mod trust;
 pub mod types;
+pub mod vision;
 mod webmcp;
 
 use std::collections::HashMap;
@@ -117,6 +122,36 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     });
 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Parse HTML with streaming and early-stopping
+///
+/// Builds semantic nodes incrementally and stops when max_nodes is reached.
+/// More memory-efficient than full parse for large pages (1000+ elements).
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `max_nodes` - Maximum number of semantic nodes to build (0 = default 300)
+#[wasm_bindgen]
+pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> String {
+    let start = now_ms();
+    let limit = if max_nodes == 0 {
+        300
+    } else {
+        max_nodes as usize
+    };
+    let mut tree = streaming::stream_parse_limited(html, goal, url, limit);
+    tree.parse_time_ms = now_ms() - start;
+
+    tree.nodes
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    match serde_json::to_string(&tree) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
 }
 
 /// Analysera ett textstycke för prompt injection
@@ -412,6 +447,27 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
     }
 }
 
+// ─── Fas 10: XHR Network Interception ────────────────────────────────────────
+
+/// Detect fetch()/XHR URLs in HTML page's JavaScript
+///
+/// Scans inline scripts and event handlers for network calls.
+/// Returns JSON array of XhrCapture objects.
+///
+/// # Arguments
+/// * `html` - HTML source to scan
+///
+/// # Returns
+/// JSON string with array of `{url, method, headers}` objects
+#[wasm_bindgen]
+pub fn detect_xhr_urls(html: &str) -> String {
+    let captures = js_bridge::extract_xhr_from_snippets(html);
+    match serde_json::to_string_pretty(&captures) {
+        Ok(json) => json,
+        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
 // ─── Fas 5: Temporal Memory & Adversarial Modeling ──────────────────────────
 
 /// Create a new empty temporal memory
@@ -604,17 +660,21 @@ pub fn classify_request_batch(urls_json: &str, goal: &str, config_json: &str) ->
 /// The agent can reason about action consequences before executing them.
 ///
 /// # Arguments
-/// * `snapshots_json` - JSON array of [url, node_count, warning_count, key_elements]
+/// * `snapshots_json` - JSON array of snapshot objects: `[{"url": "...", "node_count": 5, "warning_count": 0, "key_elements": ["button:Buy"]}]`
 /// * `actions_json` - JSON array of action strings between snapshots
 ///
 /// # Returns
 /// JSON with CausalGraph: states, edges, current_state_id
 #[wasm_bindgen]
 pub fn build_causal_graph(snapshots_json: &str, actions_json: &str) -> String {
-    let snapshots: Vec<(String, u32, u32, Vec<String>)> = match serde_json::from_str(snapshots_json)
-    {
+    let snapshots: Vec<causal::CausalSnapshotInput> = match serde_json::from_str(snapshots_json) {
         Ok(s) => s,
-        Err(e) => return format!(r#"{{"error": "Invalid snapshots_json: {}"}}"#, e),
+        Err(e) => {
+            return format!(
+                r#"{{"error": "Invalid snapshots_json: {}. Expected format: [{{\"url\": \"...\", \"node_count\": 5, \"warning_count\": 0, \"key_elements\": [\"button:Buy\"]}}]"}}"#,
+                e
+            );
+        }
     };
 
     let actions: Vec<String> = match serde_json::from_str(actions_json) {
@@ -756,6 +816,22 @@ pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
     }
 }
 
+// ─── Fas 11: Vision – YOLOv8 inference ──────────────────────────────────────
+
+/// Parse a screenshot into a semantic tree using YOLOv8-nano vision model
+///
+/// Requires the `vision` feature flag. Input: PNG bytes + ONNX model bytes + goal string.
+#[wasm_bindgen]
+pub fn parse_screenshot(png_bytes: &[u8], model_bytes: &[u8], goal: &str) -> String {
+    let config = vision::VisionConfig::default();
+    match vision::detect_ui_elements(png_bytes, model_bytes, goal, &config) {
+        Ok(result) => {
+            serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
+        }
+        Err(e) => format!(r#"{{"error":"{}"}}"#, e),
+    }
+}
+
 // ─── Fas 9d: Cross-Agent Semantic Diffing ───────────────────────────────────
 
 /// Create a new shared diff store for cross-agent collaboration
@@ -815,10 +891,14 @@ pub fn publish_collab_delta(
         Ok(s) => s,
         Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
     };
-    let delta: types::SemanticDelta = match serde_json::from_str(delta_json) {
+    let mut delta: types::SemanticDelta = match serde_json::from_str(delta_json) {
         Ok(d) => d,
         Err(e) => return format!(r#"{{"error": "Invalid delta_json: {}"}}"#, e),
     };
+    // Fyll i url från yttre parameter om den saknas i delta
+    if delta.url.is_empty() {
+        delta.url = url.to_string();
+    }
     store.publish_delta(agent_id, url, delta, timestamp_ms);
     store.to_json()
 }
@@ -911,6 +991,375 @@ pub fn fetch_collab_deltas(store_json: &str, agent_id: &str) -> String {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
+}
+
+// ─── Fas 13: Session Management API ─────────────────────────────────────────
+
+/// Create a new empty session manager
+///
+/// Returns JSON with empty cookie jar, no auth state.
+/// Host persists the JSON and sends it back with each request.
+#[wasm_bindgen]
+pub fn create_session() -> String {
+    session::SessionManager::new().to_json()
+}
+
+/// Add cookies from HTTP response Set-Cookie headers
+///
+/// # Arguments
+/// * `session_json` - Current session state
+/// * `domain` - Cookie domain (e.g., "example.com")
+/// * `cookies_json` - JSON array of Set-Cookie header strings
+#[wasm_bindgen]
+pub fn session_add_cookies(session_json: &str, domain: &str, cookies_json: &str) -> String {
+    let mut session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let headers: Vec<String> = match serde_json::from_str(cookies_json) {
+        Ok(h) => h,
+        Err(e) => return format!(r#"{{"error": "Invalid cookies JSON: {}"}}"#, e),
+    };
+
+    session.add_cookies_from_headers(domain, &headers);
+    session.to_json()
+}
+
+/// Get Cookie header string for a URL
+///
+/// Returns JSON with `cookie_header` field (or null if no cookies).
+#[wasm_bindgen]
+pub fn session_get_cookies(session_json: &str, domain: &str, path: &str) -> String {
+    let session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let now = now_ms();
+    let header = session.get_cookie_header(domain, path, now);
+
+    serde_json::to_string(&serde_json::json!({
+        "cookie_header": header,
+    }))
+    .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Set OAuth token on session
+///
+/// # Arguments
+/// * `session_json` - Current session state
+/// * `access_token` - OAuth access token
+/// * `refresh_token` - OAuth refresh token (empty string for none)
+/// * `expires_in_secs` - Token validity in seconds
+/// * `scopes_json` - JSON array of scope strings
+#[wasm_bindgen]
+pub fn session_set_token(
+    session_json: &str,
+    access_token: &str,
+    refresh_token: &str,
+    expires_in_secs: u64,
+    scopes_json: &str,
+) -> String {
+    let mut session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let scopes: Vec<String> = serde_json::from_str(scopes_json).unwrap_or_default();
+    let refresh = if refresh_token.is_empty() {
+        None
+    } else {
+        Some(refresh_token)
+    };
+
+    session.set_oauth_token(access_token, refresh, expires_in_secs, now_ms(), scopes);
+    session.to_json()
+}
+
+/// Build OAuth 2.0 authorize URL
+///
+/// # Arguments
+/// * `session_json` - Current session state
+/// * `config_json` - OAuthConfig JSON
+///
+/// # Returns
+/// JSON with `authorize_url`, `state`, and updated `session_json`
+#[wasm_bindgen]
+pub fn session_oauth_authorize(session_json: &str, config_json: &str) -> String {
+    let mut session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let config: session::OAuthConfig = match serde_json::from_str(config_json) {
+        Ok(c) => c,
+        Err(e) => return format!(r#"{{"error": "Invalid OAuth config: {}"}}"#, e),
+    };
+
+    let result = session.build_authorize_url(&config);
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Prepare OAuth token exchange parameters
+///
+/// Returns JSON map of POST parameters for the token endpoint.
+#[wasm_bindgen]
+pub fn session_prepare_token_exchange(
+    session_json: &str,
+    config_json: &str,
+    authorization_code: &str,
+) -> String {
+    let session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let config: session::OAuthConfig = match serde_json::from_str(config_json) {
+        Ok(c) => c,
+        Err(e) => return format!(r#"{{"error": "Invalid OAuth config: {}"}}"#, e),
+    };
+
+    let params = session.prepare_token_exchange(&config, authorization_code);
+    serde_json::to_string(&params).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Detect login form in HTML
+///
+/// Returns JSON with login form info (username/password/submit node IDs) or null.
+#[wasm_bindgen]
+pub fn detect_login_form(html: &str, goal: &str, url: &str) -> String {
+    let tree = build_tree(html, goal, url);
+    let form = session::SessionManager::detect_login_form(&tree);
+
+    serde_json::to_string(&serde_json::json!({
+        "found": form.is_some(),
+        "form": form,
+    }))
+    .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Check session auth status
+///
+/// Returns JSON with `authenticated`, `auth_state`, `cookie_count`, `needs_refresh`.
+#[wasm_bindgen]
+pub fn session_status(session_json: &str) -> String {
+    let session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let now = now_ms();
+    serde_json::to_string(&serde_json::json!({
+        "authenticated": session.is_authenticated(now),
+        "auth_state": session.auth_state,
+        "cookie_count": session.cookie_count(),
+        "needs_refresh": session.needs_token_refresh(now),
+        "authenticated_requests": session.authenticated_requests,
+    }))
+    .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Evict expired cookies and mark expired tokens
+///
+/// Returns updated session JSON with expired cookies removed.
+#[wasm_bindgen]
+pub fn session_evict_expired(session_json: &str) -> String {
+    let mut session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let now = now_ms();
+    session.evict_expired(now);
+
+    // Kolla om token behöver refresh
+    if session.needs_token_refresh(now) {
+        session.mark_token_expired();
+    }
+
+    session.to_json()
+}
+
+/// Mark session as logged in via form submission
+///
+/// Call this after successful form login (cookies set via session_add_cookies).
+#[wasm_bindgen]
+pub fn session_mark_logged_in(session_json: &str) -> String {
+    let mut session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    session.mark_logged_in();
+    session.record_authenticated_request();
+    session.to_json()
+}
+
+/// Prepare OAuth token refresh parameters
+///
+/// Returns JSON map of POST parameters for the token endpoint,
+/// or null if no refresh token is available.
+#[wasm_bindgen]
+pub fn session_prepare_refresh(session_json: &str, config_json: &str) -> String {
+    let session = match session::SessionManager::from_json(session_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let config: session::OAuthConfig = match serde_json::from_str(config_json) {
+        Ok(c) => c,
+        Err(e) => return format!(r#"{{"error": "Invalid OAuth config: {}"}}"#, e),
+    };
+
+    match session.prepare_token_refresh(&config) {
+        Some(params) => {
+            serde_json::to_string(&params).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+        }
+        None => r#"{"error": "No refresh token available"}"#.to_string(),
+    }
+}
+
+// ─── Fas 14: Workflow Orchestration API ─────────────────────────────────────
+
+/// Create a new workflow orchestrator
+///
+/// Compiles the goal into an ActionPlan and initializes workflow state.
+///
+/// # Arguments
+/// * `goal` - What to achieve (e.g., "köp billigaste flyg")
+/// * `start_url` - Starting URL for the workflow
+/// * `config_json` - OrchestratorConfig JSON (or "{}" for defaults)
+///
+/// # Returns
+/// JSON with orchestrator state and first action
+#[wasm_bindgen]
+pub fn create_workflow(goal: &str, start_url: &str, config_json: &str) -> String {
+    let config: orchestrator::OrchestratorConfig =
+        serde_json::from_str(config_json).unwrap_or_default();
+    let mut orch = orchestrator::WorkflowOrchestrator::new(goal, start_url, config);
+    let result = orch.start(now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Provide a fetched page to the workflow orchestrator
+///
+/// Call this after the host fetches a page requested by a FetchPage action.
+///
+/// # Arguments
+/// * `orchestrator_json` - Current orchestrator state
+/// * `html` - Fetched HTML content
+/// * `url` - Final URL (after redirects)
+///
+/// # Returns
+/// JSON with StepResult: next action, status, progress, extracted data
+#[wasm_bindgen]
+pub fn workflow_provide_page(orchestrator_json: &str, html: &str, url: &str) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let result = orch.provide_page(html, url, now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Report a click result to the workflow orchestrator
+///
+/// Call this after the host executes a Click action.
+#[wasm_bindgen]
+pub fn workflow_report_click(orchestrator_json: &str, click_result_json: &str) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let click: types::ClickResult = match serde_json::from_str(click_result_json) {
+        Ok(c) => c,
+        Err(e) => return format!(r#"{{"error": "Invalid click result: {}"}}"#, e),
+    };
+
+    let result = orch.report_click_result(&click, now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Report a fill form result to the workflow orchestrator
+#[wasm_bindgen]
+pub fn workflow_report_fill(orchestrator_json: &str, fill_result_json: &str) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let fill: types::FillFormResult = match serde_json::from_str(fill_result_json) {
+        Ok(f) => f,
+        Err(e) => return format!(r#"{{"error": "Invalid fill result: {}"}}"#, e),
+    };
+
+    let result = orch.report_fill_result(&fill, now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Report an extract result to the workflow orchestrator
+#[wasm_bindgen]
+pub fn workflow_report_extract(orchestrator_json: &str, extract_result_json: &str) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let extract: types::ExtractDataResult = match serde_json::from_str(extract_result_json) {
+        Ok(e) => e,
+        Err(e) => return format!(r#"{{"error": "Invalid extract result: {}"}}"#, e),
+    };
+
+    let result = orch.report_extract_result(&extract, now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Report a step as manually completed (for Verify/Wait actions)
+#[wasm_bindgen]
+pub fn workflow_complete_step(orchestrator_json: &str, step_index: u32) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    let result = orch.report_step_completed(step_index, now_ms());
+    serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+/// Rollback a completed step and retry it
+#[wasm_bindgen]
+pub fn workflow_rollback_step(orchestrator_json: &str, step_index: u32) -> String {
+    let mut orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    orch.rollback_step(step_index);
+    orch.to_json()
+}
+
+/// Get workflow status summary
+#[wasm_bindgen]
+pub fn workflow_status(orchestrator_json: &str) -> String {
+    let orch = match orchestrator::WorkflowOrchestrator::from_json(orchestrator_json) {
+        Ok(o) => o,
+        Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
+    };
+
+    serde_json::to_string(&serde_json::json!({
+        "status": orch.status,
+        "goal": orch.goal,
+        "progress": format!("{}/{}", orch.completed_steps.len(), orch.plan.total_steps),
+        "current_url": orch.current_url,
+        "pages_visited": orch.pages_visited,
+        "extracted_data": orch.extracted_data,
+        "completed_steps": orch.completed_steps,
+        "page_history": orch.page_history,
+    }))
+    .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
@@ -1284,8 +1733,8 @@ mod tests {
     #[test]
     fn test_build_causal_graph_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let actions = r#"["click: Köp"]"#;
 
@@ -1296,10 +1745,29 @@ mod tests {
     }
 
     #[test]
+    fn test_build_causal_graph_minimal_fields() {
+        // Endast url krävs — övriga fält har defaults
+        let snapshots = r#"[{"url": "https://example.com"}, {"url": "https://example.com/page2"}]"#;
+        let actions = r#"["click: Link"]"#;
+
+        let result = build_causal_graph(snapshots, actions);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["states"].is_array(),
+            "Borde ha states med minimal input"
+        );
+        assert_eq!(
+            parsed["states"].as_array().unwrap().len(),
+            2,
+            "Borde ha 2 states"
+        );
+    }
+
+    #[test]
     fn test_predict_action_outcome_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
 
@@ -1314,8 +1782,8 @@ mod tests {
     #[test]
     fn test_find_safest_path_returns_valid_json() {
         let snapshots = r#"[
-            ["https://shop.se", 5, 0, ["button:Köp"]],
-            ["https://shop.se/kassa", 8, 0, ["button:Betala"]]
+            {"url": "https://shop.se", "node_count": 5, "warning_count": 0, "key_elements": ["button:Köp"]},
+            {"url": "https://shop.se/kassa", "node_count": 8, "warning_count": 0, "key_elements": ["button:Betala"]}
         ]"#;
         let graph_json = build_causal_graph(snapshots, r#"["click: Köp"]"#);
 
@@ -1423,5 +1891,174 @@ mod tests {
             parsed["result"]["deltas"].is_array(),
             "Borde ha deltas i result"
         );
+    }
+
+    // ─── Fas 13: Session Management smoke tests ─────────────────────
+
+    #[test]
+    fn test_create_session_returns_valid_json() {
+        let json = create_session();
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("Valid JSON");
+        assert_eq!(parsed["auth_state"], "Unauthenticated");
+    }
+
+    #[test]
+    fn test_session_add_and_get_cookies() {
+        let session = create_session();
+        let session = session_add_cookies(
+            &session,
+            "example.com",
+            r#"["session=abc123; Path=/; HttpOnly"]"#,
+        );
+        let result = session_get_cookies(&session, "example.com", "/");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["cookie_header"].is_string(),
+            "Borde ha cookie_header"
+        );
+        assert!(
+            parsed["cookie_header"]
+                .as_str()
+                .unwrap()
+                .contains("session=abc123"),
+            "Borde innehålla session cookie"
+        );
+    }
+
+    #[test]
+    fn test_session_set_token_and_status() {
+        let session = create_session();
+        let session = session_set_token(
+            &session,
+            "my_token",
+            "my_refresh",
+            3600,
+            r#"["read", "write"]"#,
+        );
+
+        let status = session_status(&session);
+        let parsed: serde_json::Value = serde_json::from_str(&status).expect("Valid JSON");
+        assert_eq!(parsed["authenticated"], true);
+        assert_eq!(parsed["auth_state"], "OAuthAuthenticated");
+    }
+
+    #[test]
+    fn test_session_oauth_authorize() {
+        let session = create_session();
+        let config = r#"{
+            "authorize_url": "https://auth.example.com/authorize",
+            "token_url": "https://auth.example.com/token",
+            "client_id": "my_client",
+            "redirect_uri": "https://app.example.com/callback",
+            "scopes": ["read"]
+        }"#;
+
+        let result = session_oauth_authorize(&session, config);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(
+            parsed["authorize_url"].is_string(),
+            "Borde ha authorize_url"
+        );
+        assert!(
+            parsed["authorize_url"]
+                .as_str()
+                .unwrap()
+                .contains("client_id=my_client"),
+            "Borde innehålla client_id"
+        );
+    }
+
+    #[test]
+    fn test_detect_login_form_found() {
+        let html = r##"<html><body>
+            <input name="email" placeholder="E-post" />
+            <input name="password" type="password" placeholder="Lösenord" />
+            <button>Logga in</button>
+        </body></html>"##;
+        let result = detect_login_form(html, "logga in", "https://test.com");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["found"], true, "Borde hitta login-formulär");
+    }
+
+    #[test]
+    fn test_detect_login_form_not_found() {
+        let html = r#"<html><body><p>Normal sida</p></body></html>"#;
+        let result = detect_login_form(html, "browse", "https://test.com");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert_eq!(parsed["found"], false, "Borde inte hitta login-formulär");
+    }
+
+    #[test]
+    fn test_session_add_cookies_invalid_json() {
+        let result = session_add_cookies("bad json", "domain", "[]");
+        assert!(result.contains("error"));
+    }
+
+    // ─── Fas 14: Workflow Orchestration smoke tests ─────────────────
+
+    #[test]
+    fn test_create_workflow_returns_valid_json() {
+        let result = create_workflow("köp flyg", "https://flights.se", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["next_action"].is_object(), "Borde ha next_action");
+        assert!(parsed["progress"].is_string(), "Borde ha progress");
+    }
+
+    #[test]
+    fn test_workflow_provide_page() {
+        let result = create_workflow("hitta priser", "https://shop.se", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        let orch_json = parsed["orchestrator_json"].as_str().unwrap();
+
+        let html = r#"<html><body><h1>Produkter</h1><button>Köp</button></body></html>"#;
+        let result = workflow_provide_page(orch_json, html, "https://shop.se");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["summary"].is_string(), "Borde ha summary");
+        assert!(parsed["progress"].is_string(), "Borde ha progress");
+    }
+
+    #[test]
+    fn test_workflow_complete_step() {
+        let result = create_workflow("test", "https://test.se", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        let orch_json = parsed["orchestrator_json"].as_str().unwrap();
+
+        let result = workflow_complete_step(orch_json, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        assert!(parsed["progress"].is_string(), "Borde ha progress");
+    }
+
+    #[test]
+    fn test_workflow_rollback_step() {
+        let result = create_workflow("test", "https://test.se", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        let orch_json = parsed["orchestrator_json"].as_str().unwrap();
+
+        // Complete then rollback
+        let step_result = workflow_complete_step(orch_json, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&step_result).expect("Valid JSON");
+        let orch_json = parsed["orchestrator_json"].as_str().unwrap();
+
+        let result = workflow_rollback_step(orch_json, 0);
+        let _: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+    }
+
+    #[test]
+    fn test_workflow_status() {
+        let result = create_workflow("test", "https://test.se", "{}");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("Valid JSON");
+        let orch_json = parsed["orchestrator_json"].as_str().unwrap();
+
+        let status = workflow_status(orch_json);
+        let parsed: serde_json::Value = serde_json::from_str(&status).expect("Valid JSON");
+        assert!(parsed["status"].is_string(), "Borde ha status");
+        assert!(parsed["goal"].is_string(), "Borde ha goal");
+        assert!(parsed["progress"].is_string(), "Borde ha progress");
+    }
+
+    #[test]
+    fn test_workflow_invalid_json() {
+        let result = workflow_provide_page("bad json", "<html></html>", "url");
+        assert!(result.contains("error"));
     }
 }

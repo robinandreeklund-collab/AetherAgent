@@ -81,6 +81,10 @@ fn is_true(v: &bool) -> bool {
     *v
 }
 
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 /// Säkerhetsnivå för innehåll – kärnan i trust shield
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TrustLevel {
@@ -101,6 +105,12 @@ pub struct SemanticTree {
     pub nodes: Vec<SemanticNode>,
     pub injection_warnings: Vec<InjectionWarning>,
     pub parse_time_ms: u64,
+    /// Antal XHR-anrop som fångades och hämtades (Fas 10)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub xhr_intercepted: u32,
+    /// Antal XHR-anrop som blockerades av Semantic Firewall (Fas 10)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub xhr_blocked: u32,
 }
 
 /// Varning när trust shield hittar misstänkt innehåll
@@ -230,6 +240,7 @@ pub struct NodeChange {
 /// Resultatet av en semantic diff mellan två träd
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticDelta {
+    #[serde(default)]
     pub url: String,
     pub goal: String,
     pub total_nodes_before: u32,
@@ -265,6 +276,15 @@ pub struct FetchConfig {
     /// Extra headers (key → value)
     #[serde(default)]
     pub extra_headers: HashMap<String, String>,
+    /// Aktivera XHR-interception (Fas 10, default false)
+    #[serde(default)]
+    pub intercept_xhr: bool,
+    /// Max antal XHR-anrop att följa (Fas 10)
+    #[serde(default = "FetchConfig::default_intercept_max")]
+    pub intercept_max: usize,
+    /// Timeout per XHR-anrop i ms (Fas 10)
+    #[serde(default = "FetchConfig::default_intercept_timeout_ms")]
+    pub intercept_timeout_ms: u64,
 }
 
 /// Resultat av en HTTP-fetch
@@ -423,6 +443,14 @@ impl FetchConfig {
     fn default_rate_limit_rps() -> u32 {
         2
     }
+
+    fn default_intercept_max() -> usize {
+        10
+    }
+
+    fn default_intercept_timeout_ms() -> u64 {
+        2000
+    }
 }
 
 impl Default for FetchConfig {
@@ -434,6 +462,9 @@ impl Default for FetchConfig {
             respect_robots_txt: false,
             rate_limit_rps: Self::default_rate_limit_rps(),
             extra_headers: HashMap::new(),
+            intercept_xhr: false,
+            intercept_max: Self::default_intercept_max(),
+            intercept_timeout_ms: Self::default_intercept_timeout_ms(),
         }
     }
 }

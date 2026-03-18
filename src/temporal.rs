@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::diff;
+use crate::intercept::XhrResponseCache;
 #[cfg(test)]
 use crate::types::{InjectionWarning, WarningSeverity};
 use crate::types::{SemanticDelta, SemanticTree};
@@ -114,9 +115,18 @@ pub struct TemporalMemory {
     pub observation_history: HashMap<u32, u32>,
     /// Node role/label cache för volatility output
     pub node_labels: HashMap<u32, (String, String)>,
+    /// XHR Response Cache – cachar API-svar över temporal snapshots
+    #[serde(default)]
+    pub xhr_cache: XhrResponseCache,
 }
 
 // ─── Implementation ─────────────────────────────────────────────────────────
+
+impl Default for TemporalMemory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TemporalMemory {
     /// Skapa nytt tomt temporal memory
@@ -128,6 +138,7 @@ impl TemporalMemory {
             change_history: HashMap::new(),
             observation_history: HashMap::new(),
             node_labels: HashMap::new(),
+            xhr_cache: XhrResponseCache::new(),
         }
     }
 
@@ -517,6 +528,8 @@ mod tests {
             nodes,
             injection_warnings: warnings,
             parse_time_ms: 0,
+            xhr_intercepted: 0,
+            xhr_blocked: 0,
         }
     }
 

@@ -62,7 +62,7 @@ No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly
 
 ### Honest Positioning
 
-AetherAgent is **not** a Chrome replacement. It fetches pages and builds semantic trees, but does not execute full JavaScript runtimes (V8) or render CSS. For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works fully standalone: URL in, semantic tree out.
+AetherAgent is **not** a Chrome replacement. It fetches pages and builds semantic trees, and can render pages to pixel-perfect screenshots via Blitz (pure Rust browser engine with CSS layout), but does not execute full JavaScript runtimes (V8). For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works fully standalone: URL in, semantic tree out, screenshot rendered.
 
 | Capability | AetherAgent | Playwright | Browser Use | Scrapy |
 |-----------|:-----------:|:----------:|:-----------:|:------:|
@@ -71,9 +71,11 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Startup time | <1 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
 | Memory per instance | ~12 MB | ~150 MB | ~200 MB | ~30 MB |
 | Full JavaScript (V8) | No | Yes | Yes | No |
-| CSS rendering | No | Yes | Yes | No |
+| CSS rendering (Blitz) | **Yes** (opt) | Yes | Yes | No |
 | Embeddable in WASM | **Yes** | No | No | No |
 | Semantic diff (token savings) | **Yes** | No | No | No |
+| XHR/fetch endpoint discovery | **Yes** | No | No | No |
+| Built-in vision (YOLOv8) | **Yes** (opt) | No | Partial | No |
 | MCP server built-in | **Yes** | No | No | No |
 | License | MIT | Apache-2.0 | MIT | BSD |
 
@@ -119,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **18 Rust modules**, **35 WASM-exported functions**, **41 HTTP endpoints**, and **20 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **23 Rust modules**, **58 WASM-exported functions**, **66 HTTP endpoints**, and **24 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -310,11 +312,94 @@ Shared diff store for multiple agents working on the same site. Reduces redundan
 | `collab_stats` | Active agents, cached deltas, publish/consume counts |
 | `cleanup_collab_store` | Remove inactive agents |
 
+### 14. XHR Network Interception
+
+**Module:** `intercept.rs`, `js_eval.rs`, `js_bridge.rs`
+
+Scans inline scripts and event handlers for `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` calls. Extracts target URLs and methods so agents can discover hidden API endpoints that load data dynamically (prices, inventory, search results).
+
+| Function | What it does |
+|----------|-------------|
+| `detect_xhr_urls` | Scan HTML for XHR/fetch calls → JSON array of `{url, method, headers}` |
+| `intercept_xhr` | Filter captures through firewall, fetch allowed URLs, run trust analysis |
+| `normalize_xhr_to_node` | Convert XHR response to SemanticNode (role: "price" or "data") |
+| `merge_xhr_nodes` | Append XHR-derived nodes to an existing SemanticTree |
+| `extract_price_from_json` | Recursive JSON search for price/amount/cost fields |
+
+### 15. Session Management
+
+**Module:** `session.rs`
+
+Persistent session cookies, OAuth 2.0 flow handling, and login form detection. All state is serializable JSON — the host owns and passes it between calls (WASM-compatible, no global mutable state).
+
+| Function | What it does |
+|----------|-------------|
+| `create_session` | Create empty session manager |
+| `session_add_cookies` | Parse `Set-Cookie` headers and store cookies |
+| `session_get_cookies` | Build `Cookie:` header for a given domain/path |
+| `session_set_token` | Store OAuth access/refresh token |
+| `session_oauth_authorize` | Build OAuth 2.0 authorize URL with PKCE state |
+| `session_prepare_token_exchange` | Prepare token exchange POST body from auth code |
+| `session_prepare_refresh` | Prepare token refresh POST body |
+| `detect_login_form` | Heuristic detection of username/password/submit fields |
+| `session_status` | Current auth state + token validity |
+| `session_evict_expired` | Remove expired cookies |
+| `session_mark_logged_in` | Transition auth state to LoggedIn |
+
+**OAuth flow:** `build_authorize_url` → host navigates → callback with `code` → `prepare_token_exchange` → host POSTs to token endpoint → `set_oauth_token`. Transparent refresh via `prepare_token_refresh` when token expires.
+
+### 16. Multi-page Workflow Orchestration
+
+**Module:** `orchestrator.rs`
+
+Stateful workflow engine that combines `ActionPlan` + `TemporalMemory` + `SessionManager` + `WorkflowMemory` into a single serializable state machine. Drives multi-page agent flows end-to-end.
+
+| Function | What it does |
+|----------|-------------|
+| `create_workflow` | Initialize workflow with goal, start URL, and config |
+| `workflow_provide_page` | Feed fetched HTML into the engine, get next action |
+| `workflow_report_click` | Report click result, auto-navigate if link returned |
+| `workflow_report_fill` | Report form fill result, retry on validation failure |
+| `workflow_report_extract` | Report extracted data, store in workflow state |
+| `workflow_complete_step` | Mark a step as completed |
+| `workflow_rollback_step` | Rollback a failed step for retry |
+| `workflow_status` | Current status, progress, extracted data |
+
+**Capabilities:**
+- **Auto-navigation** — `find_and_click` returns a link → automatically fetches next page and continues the plan
+- **Rollback/retry** — configurable `max_retries` per step with failure tracking
+- **Cross-page temporal memory** — semantic diffs span navigations, not just same-page snapshots
+- **Session integration** — cookies and auth headers automatically attached to every action
+- **Max pages protection** — prevents infinite navigation loops (default: 20 pages)
+
+### 17. Vision — YOLOv8 Screenshot Analysis + Blitz Rendering
+
+**Modules:** `vision.rs`, rendering in `server.rs` / `mcp_server.rs`
+
+Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detects UI elements directly from screenshots — no DOM required. Feature-gated behind `--features vision`.
+
+The `fetch_vision` pipeline renders pages to PNG using [Blitz](https://github.com/DioxusLabs/blitz) — a pure Rust browser engine (no headless Chrome/Chromium). Blitz handles HTML/CSS layout, external stylesheets, fonts, and images via an async resource loader. The full pipeline: URL → HTTP fetch → Blitz render → YOLOv8 detection → annotated screenshot + JSON.
+
+| Function | What it does |
+|----------|-------------|
+| `parse_screenshot` | PNG + ONNX model → detections + semantic tree (full pipeline) |
+| `detect_ui_elements` | Core detection: preprocess → inference → NMS → tree |
+| `preprocess_image` | PNG bytes → normalized float32 tensor |
+| `run_inference` | ONNX model inference via rten |
+| `nms` | Non-max suppression on overlapping detections |
+| `detections_to_tree` | Convert detections to SemanticTree with goal-relevance |
+| `render_url_to_png` | Fetch + render page to PNG via Blitz (server) |
+| `render_url_to_png_mcp` | Same as above for MCP server context |
+
+**Detected UI classes:** button, input, link, icon, text, image, checkbox, radio, select, heading.
+
+**Blitz rendering features:** CSS layout (flexbox, grid), external stylesheets, web fonts, images, viewport sizing. No JavaScript execution (use `parse_with_js` for inline JS).
+
 ---
 
 ## API Reference
 
-### HTTP Endpoints (41 routes)
+### HTTP Endpoints (66 routes)
 
 Run the server: `cargo run --features server --bin aether-server`
 
@@ -424,34 +509,89 @@ Run the server: `cargo run --features server --bin aether-server`
 | POST | `/api/collab/publish` | Publish delta |
 | POST | `/api/collab/fetch` | Fetch new deltas |
 
-### MCP Server (20 tools)
+#### Vision & Screenshot Analysis
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/detect-xhr` | Scan HTML for XHR/fetch/AJAX endpoints |
+| POST | `/api/parse-screenshot` | Analyze screenshot with YOLOv8 (client sends model) |
+| POST | `/api/vision/parse` | Analyze screenshot with server-loaded model |
+| POST | `/api/fetch-vision` | URL → Blitz render → YOLOv8 → images + JSON |
+
+`/api/fetch-vision` is the all-in-one endpoint: give it a URL and goal, and it renders the page with [Blitz](https://github.com/DioxusLabs/blitz) (pure Rust browser engine), runs YOLOv8-nano detection, and returns three response fields:
+1. `screenshot` — base64 PNG of the rendered page
+2. `annotated` — base64 PNG with color-coded bounding boxes drawn on detected elements
+3. `detections` — JSON array of `{class, confidence, bbox}` plus a semantic tree
+
+#### Session Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/session/create` | Create empty session manager |
+| POST | `/api/session/cookies/add` | Parse Set-Cookie headers |
+| POST | `/api/session/cookies/get` | Build Cookie header for domain/path |
+| POST | `/api/session/token/set` | Store OAuth access/refresh token |
+| POST | `/api/session/oauth/authorize` | Build OAuth 2.0 authorize URL |
+| POST | `/api/session/oauth/exchange` | Prepare token exchange body |
+| POST | `/api/session/status` | Auth state + token validity |
+| POST | `/api/session/login/detect` | Detect login form in HTML |
+| POST | `/api/session/evict` | Evict expired cookies |
+| POST | `/api/session/login/mark` | Mark session as logged in |
+| POST | `/api/session/token/refresh` | Prepare token refresh body |
+
+#### Workflow Orchestration
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/workflow/create` | Create workflow with goal + start URL |
+| POST | `/api/workflow/page` | Provide fetched HTML page |
+| POST | `/api/workflow/report/click` | Report click action result |
+| POST | `/api/workflow/report/fill` | Report form fill result |
+| POST | `/api/workflow/report/extract` | Report data extraction result |
+| POST | `/api/workflow/complete` | Mark step as completed |
+| POST | `/api/workflow/rollback` | Rollback step for retry |
+| POST | `/api/workflow/status` | Workflow status + progress |
+
+### MCP Server (24 tools)
 
 Run: `cargo run --features mcp --bin aether-mcp`
 
 Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 
-| Tool | Description |
-|------|-------------|
-| `parse` | Parse HTML to semantic tree |
-| `parse_top` | Top-N most relevant nodes |
-| `parse_with_js` | Parse with JS evaluation |
-| `find_and_click` | Find clickable element |
-| `fill_form` | Map form fields |
-| `extract_data` | Extract structured data |
-| `check_injection` | Check for prompt injection |
-| `compile_goal` | Compile goal to action plan |
-| `classify_request` | Classify URL against firewall |
-| `diff_trees` | Semantic diff (70-99% token savings) |
-| `build_causal_graph` | Build causal action graph |
-| `predict_action_outcome` | Predict action consequences |
-| `find_safest_path` | Safest path to goal state |
-| `discover_webmcp` | Discover WebMCP tools |
-| `ground_semantic_tree` | Ground tree with bounding boxes |
-| `match_bbox_iou` | Match bbox via IoU |
-| `create_collab_store` | Create collaboration store |
-| `register_collab_agent` | Register agent for collaboration |
-| `publish_collab_delta` | Publish semantic delta |
-| `fetch_collab_deltas` | Fetch new deltas |
+| Tool | Description | Use when… |
+|------|-------------|-----------|
+| **Core Parsing** | | |
+| `parse` | Parse HTML into a goal-aware semantic accessibility tree with roles, labels, actions, trust level, and relevance scoring | You need a full semantic view of a page |
+| `parse_top` | Return only the N most goal-relevant nodes, ranked by score | You want to save tokens on large pages (set top_n 5–20) |
+| `parse_with_js` | Parse HTML and evaluate inline JS (getElementById, querySelector, style changes) before building the tree | Page has dynamic DOM manipulation in inline scripts |
+| **Intent & Interaction** | | |
+| `find_and_click` | Find the best-matching clickable element by visible text or aria-label. Returns CSS selector, confidence, action metadata | You need to click "Add to cart", "Sign in", "Next page", etc. |
+| `fill_form` | Semantically map your key/value pairs to form fields by label/name/placeholder. Returns selectors | You need to fill login, checkout, registration, or search forms |
+| `extract_data` | Extract structured data by semantic keys (e.g. `["price", "title", "stock"]`). Returns key→value JSON | You need specific data points without parsing the full tree |
+| **Security** | | |
+| `check_injection` | Scan text for 20+ prompt injection patterns (EN+SV), zero-width chars, role-hijacking. Returns severity + matched patterns | Before passing any web content to an LLM |
+| `classify_request` | 3-level semantic firewall: L1 URL blocklist, L2 MIME/extension, L3 semantic relevance scoring | Before fetching a URL — blocks tracking, ads, irrelevant resources |
+| **Planning & Reasoning** | | |
+| `compile_goal` | Decompose a high-level goal into ordered sub-goals with dependencies and parallelizable steps | You need an action plan: "buy cheapest laptop", "book a flight" |
+| `diff_trees` | Compare two semantic trees and return only added/removed/modified nodes (80–95% token savings) | You parsed the same page twice and want to see what changed |
+| `build_causal_graph` | Build a directed graph of state transitions with probabilities and risk scores from page snapshots + actions | You have multi-step interaction history and want to reason about it |
+| `predict_action_outcome` | Predict next state, probability, risk score, and expected changes for a given action | "What happens if I click Submit?" — look-ahead before committing |
+| `find_safest_path` | Find the lowest-risk action sequence to reach a goal state (prefers safety over speed) | Navigating checkout/delete/transfer flows where mistakes are costly |
+| **WebMCP Discovery** | | |
+| `discover_webmcp` | Detect `navigator.modelContext.registerTool()` registrations (W3C WebMCP standard). Returns tool names, descriptions, JSON schemas | Checking if a site exposes its own AI-callable tools |
+| **Multimodal Grounding** | | |
+| `ground_semantic_tree` | Combine semantic tree with visual bounding boxes from a screenshot. Annotates nodes with screen position + Set-of-Mark IDs | Vision-language workflows where you need to click at screen coordinates |
+| `match_bbox_iou` | Find which DOM element best matches a bounding box via IoU overlap | Resolving "what did the user point at?" from vision model output |
+| **Cross-Agent Collaboration** | | |
+| `create_collab_store` | Create an empty shared state store for multi-agent collaboration | Multiple agents need to share observations about the same pages |
+| `register_collab_agent` | Register an agent (with ID + goal) in the collab store | Adding a new agent to a collaborative workflow |
+| `publish_collab_delta` | Share a semantic page delta with other agents | An agent observed a page change and wants to broadcast it |
+| `fetch_collab_deltas` | Get all undelivered deltas from other agents (exactly-once delivery) | Catching up on what other agents observed before taking action |
+| **Network & Vision** | | |
+| `detect_xhr_urls` | Scan inline scripts for `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` patterns. Returns `{url, method, headers}` | Discovering hidden API endpoints in a page's JavaScript |
+| `parse_screenshot` | Analyze a screenshot with YOLOv8-nano object detection. Returns detected UI elements with bounding boxes, confidence, and semantic tree | You have a screenshot but no HTML — visual element detection |
+| `vision_parse` | Same as `parse_screenshot` but uses the server-loaded ONNX model (no need to send model bytes) | Server already has the vision model configured |
+| `fetch_vision` | ALL-IN-ONE: Fetch URL → render with Blitz → YOLOv8 detection → returns original screenshot + annotated image with bounding boxes + JSON detections | You want to visually analyze any web page — just provide URL and goal |
 
 ### Claude Desktop Setup
 
@@ -506,7 +646,7 @@ cargo build --features mcp --bin aether-mcp --release
 
 #### What to try in Claude Desktop
 
-Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
+Once connected, Claude gets access to 22 AetherAgent tools. Try these prompts:
 
 **Parse a live page:**
 > "Use aether-agent to fetch and parse https://news.ycombinator.com with the goal 'find top stories'. Show me the most relevant nodes."
@@ -526,16 +666,19 @@ Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
 **Compare page states:**
 > "Parse this page twice (before and after I click 'Add to cart'), then use diff_trees to see what changed."
 
+**Discover hidden API endpoints:**
+> "Use detect_xhr_urls to scan this page for fetch/XHR calls: `<script>fetch('/api/prices').then(r => r.json())</script>`"
+
 **Multi-step agent flow:**
 > "I want to buy something from https://books.toscrape.com. Use compile_goal to plan it, then fetch_parse the page, and find the 'Add to basket' button with find_and_click."
 
 #### Available MCP Tools
 
+See the full [MCP Server (24 tools)](#mcp-server-22-tools) table above for the complete list. Key tools for getting started:
+
 | Tool | What it does |
 |------|-------------|
-| `parse` | HTML → semantic tree with goal-relevance scoring |
-| `parse_top` | HTML → top-N most relevant nodes |
-| `fetch_parse` | URL → fetch + semantic tree (one call) |
+| `parse` / `parse_top` | HTML → semantic tree (full or top-N) |
 | `find_and_click` | Find best clickable element by label |
 | `fill_form` | Map form fields to key/value pairs |
 | `extract_data` | Extract structured data by semantic keys |
@@ -543,8 +686,8 @@ Once connected, Claude gets access to 12 AetherAgent tools. Try these prompts:
 | `compile_goal` | Compile goal into action plan with steps |
 | `classify_request` | Semantic firewall: is URL relevant to goal? |
 | `diff_trees` | Compare two trees, return only changes |
-| `fetch_extract` | URL → fetch + extract data (one call) |
-| `fetch_click` | URL → fetch + find clickable element (one call) |
+| `detect_xhr_urls` | Discover hidden API endpoints in page scripts |
+| `parse_screenshot` | Analyze screenshot with YOLOv8 object detection |
 
 ### Python SDK
 
@@ -571,32 +714,37 @@ const click = await agent.findAndClick(html, 'buy', url, 'Add to cart');
 
 ## Tests
 
-**232 tests** across 4 levels. All must pass on every commit.
+**352 tests** across 4 levels. All must pass on every commit.
 
 ```bash
-cargo test              # Run all 232 tests
+cargo test              # Run all 352 tests
 cargo clippy -- -D warnings  # Zero warnings required
 cargo fmt --check       # Zero diffs required
 ```
 
-### Unit Tests (162 tests)
+### Unit Tests (256 tests)
 
 Every module has tests at the bottom of the source file:
 
 | Module | Tests | Coverage |
 |--------|------:|----------|
-| `lib.rs` | 41 | All 35 WASM bindings + smoke tests |
-| `js_eval.rs` | 10 | Detection, evaluation, safety blocking |
-| `compiler.rs` | 9 | Goal compilation, plan execution, serialization |
-| `causal.rs` | 13 | Graph building, prediction, safest path, serialization |
-| `collab.rs` | 10 | Store operations, agent registration, versioning |
-| `diff.rs` | 9 | Tree comparison, change detection, token savings |
+| `lib.rs` | 53 | All 58 WASM bindings + smoke tests |
+| `js_eval.rs` | 16 | Detection, evaluation, safety blocking, fetch URL extraction |
 | `firewall.rs` | 16 | L1/L2/L3 filtering, batch, MIME types, whitelisting |
+| `intercept.rs` | 20 | Price extraction, node normalization, merging, config, XHR response caching |
+| `causal.rs` | 13 | Graph building, prediction, safest path, serialization |
+| `vision.rs` | 18 | Config defaults, NMS, detections-to-tree, preprocessing, per-class thresholds, dynamic labels |
+| `streaming.rs` | 6 | Streaming parse, early-stopping, depth limit, relevance filter, injection detection |
+| `js_bridge.rs` | 12 | Selective execution, DOM targeting, XHR extraction |
 | `intent.rs` | 11 | Click, fill_form, extract_data edge cases |
-| `js_bridge.rs` | 7 | Selective execution, DOM targeting, variable extraction |
-| `temporal.rs` | 7 | Memory, adversarial detection, prediction, volatility |
+| `collab.rs` | 10 | Store operations, agent registration, versioning |
+| `compiler.rs` | 9 | Goal compilation, plan execution, serialization |
+| `diff.rs` | 9 | Tree comparison, change detection, token savings |
 | `grounding.rs` | 9 | Tree grounding, IoU computation, Set-of-Marks |
 | `webmcp.rs` | 8 | Tool discovery, schema extraction, polyfill detection |
+| `session.rs` | 22 | Cookie parsing, OAuth flow, login detection, token refresh |
+| `orchestrator.rs` | 17 | Workflow engine, auto-nav, rollback/retry, cross-page memory |
+| `temporal.rs` | 7 | Memory, adversarial detection, prediction, volatility |
 | `trust.rs` | 4 | Injection detection, zero-width chars, boundary wrapping |
 | `memory.rs` | 4 | Serialization, context operations, invalid JSON |
 | `parser.rs` | 2 | HTML parsing, aria-label priority |
@@ -630,7 +778,7 @@ Every module has tests at the bottom of the source file:
 | 20 | Large catalog (performance) | 2 (parse, top-N) |
 | — | Injection pattern library | 2 (safe + dangerous texts) |
 
-### Integration Tests (40 tests)
+### Integration Tests (49 tests)
 
 End-to-end tests exercising the full pipeline (HTML → parse → tree → JSON):
 
@@ -643,6 +791,7 @@ End-to-end tests exercising the full pipeline (HTML → parse → tree → JSON)
 - Temporal memory (ecommerce flow, adversarial escalation, prediction, safe pages)
 - Intent compiler (buy, login, search, plan execution, ecommerce flow)
 - Workflow memory (end-to-end with context)
+- Parse screenshot (vision stub without feature flag)
 
 ### Benchmarks (13 scenarios)
 
@@ -713,6 +862,29 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 | Post a comment | 2 | 5.2 ms | 2.6 ms |
 | Create GitLab issue | 2 | 5.1 ms | 2.5 ms |
 
+### Live Site Tests (Render deployment)
+
+End-to-end tests against real production websites, running on the deployed Render instance. These exercise the full pipeline: HTTP fetch → HTML parse → semantic tree → goal-aware action.
+
+| Test | Site | Result | Time |
+|------|------|--------|------|
+| fetch/parse | books.toscrape.com | 200, full semantic tree | 292 ms |
+| fetch/extract (price, title) | books.toscrape.com | Found price + title | 292 ms |
+| fetch/click "Add to basket" | books.toscrape.com | `found: true`, relevance: 0.98 | 306 ms |
+| fetch/parse | news.ycombinator.com | 492 nodes parsed | 159 ms |
+| fetch/plan "buy this book" | books.toscrape.com (product page) | 7-step buy plan with dependencies | 217 ms |
+| check-injection | — | Detected "ignore all previous" (High severity) | <1 ms |
+| firewall/classify | google-analytics.com | Blocked (L1: tracking domain) | <1 ms |
+| diff (price change) | — | Detected 199 kr → 149 kr | <1 ms |
+| webmcp/discover | — | Found `add_to_cart` tool registration | 1 ms |
+| compile_goal | — | Generated correct buy-plan (Navigate → Click → Checkout → Fill → Verify) | <1 ms |
+| detect-js (XHR) | — | Found all 3 patterns: `fetch()`, `XMLHttpRequest.open()`, `$.get()` | <1 ms |
+
+**Key observations:**
+- Full fetch + parse of a real website completes in **150–310 ms** end-to-end (including network latency to the target site)
+- Semantic operations (diff, injection check, firewall, compile) consistently run in **<1 ms**
+- XHR detection correctly identifies `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` patterns in inline scripts and event handlers
+
 ### Honest Caveats
 
 - **AetherAgent is a semantic browser engine** — it fetches pages and builds goal-aware semantic trees but does not execute full JavaScript (V8). Lightpanda runs full V8 and handles SPAs.
@@ -753,11 +925,17 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 │  │ cookies  │ │ goal-aware│ │ Graph    │ │ Set-of-Mark      │   │
 │  │ SSRF prot│ │ filtering │ │          │ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
-│  ┌──────────┐ ┌───────────┐                                     │
-│  │ WebMCP   │ │ Collab    │    18 modules · 35 WASM functions   │
-│  │ Discovery│ │ Cross-    │    41 HTTP endpoints · 20 MCP tools │
-│  │          │ │ Agent     │                                     │
-│  └──────────┘ └───────────┘                                     │
+│  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
+│  │ WebMCP   │ │ Collab    │ │ XHR      │ │   Vision         │   │
+│  │ Discovery│ │ Cross-    │ │ Intercept│ │ YOLOv8-nano      │   │
+│  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
+│  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ Blitz Renderer — pure Rust CSS layout → PNG screenshots  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│              23 modules · 58 WASM functions                       │
+│              66 HTTP endpoints · 24 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -772,14 +950,14 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 ```
 AetherAgent/
 ├── src/
-│   ├── lib.rs            # WASM API surface — 35 public functions
+│   ├── lib.rs            # WASM API surface — 58 public functions
 │   ├── parser.rs         # html5ever + rcdom DOM builder
 │   ├── semantic.rs       # Accessibility tree, goal-relevance scoring
 │   ├── trust.rs          # Prompt injection detection (20+ patterns)
 │   ├── intent.rs         # find_and_click, fill_form, extract_data
 │   ├── diff.rs           # Semantic DOM diffing, delta computation
-│   ├── js_eval.rs        # Boa JS sandbox, detection, evaluation
-│   ├── js_bridge.rs      # Selective execution, DOM targeting
+│   ├── js_eval.rs        # Boa JS sandbox, detection, evaluation, fetch URL extraction
+│   ├── js_bridge.rs      # Selective execution, DOM targeting, XHR extraction
 │   ├── temporal.rs       # Time-series memory, adversarial detection
 │   ├── compiler.rs       # Intent compiler, goal decomposition
 │   ├── fetch.rs          # HTTP fetching, SSRF, robots.txt, rate limiting
@@ -788,13 +966,18 @@ AetherAgent/
 │   ├── webmcp.rs         # WebMCP tool discovery
 │   ├── grounding.rs      # Multimodal grounding, IoU matching
 │   ├── collab.rs         # Cross-agent semantic diff store
+│   ├── intercept.rs      # XHR network interception, price extraction, response caching
+│   ├── streaming.rs      # Streaming parse with early-stopping, depth/relevance limits
+│   ├── vision.rs         # YOLOv8-nano inference via rten (feature: vision)
+│   ├── session.rs        # Session cookies, OAuth 2.0, login detection
+│   ├── orchestrator.rs   # Multi-page workflow engine, auto-nav, rollback/retry
 │   ├── memory.rs         # Workflow memory persistence
 │   ├── types.rs          # Core data structures
 │   └── bin/
-│       ├── server.rs     # Axum HTTP API (41 endpoints)
-│       └── mcp_server.rs # MCP server (20 tools, stdio transport)
+│       ├── server.rs     # Axum HTTP API (63 endpoints)
+│       └── mcp_server.rs # MCP server (24 tools, stdio transport)
 ├── tests/
-│   ├── integration_test.rs   # 40 end-to-end tests
+│   ├── integration_test.rs   # 49 end-to-end tests
 │   ├── fixture_tests.rs      # 30 fixture-based scenario tests
 │   └── fixtures/             # 20 realistic HTML test pages
 ├── benches/
@@ -802,6 +985,9 @@ AetherAgent/
 ├── bindings/
 │   ├── python/               # Python SDK
 │   └── node/                 # Node.js SDK + TypeScript types
+├── tools/
+│   ├── train.sh              # Fully automated training bootstrap (WSL)
+│   └── train_vision.py       # Training pipeline Python module
 ├── examples/
 │   └── python_test.py        # Complete agent loop demo
 ├── .github/workflows/
@@ -816,7 +1002,25 @@ AetherAgent/
 
 ## Quick Start
 
-### Build & Test
+### One-command WSL/Linux bootstrap
+
+Installerar **allt** automatiskt (systempaket, Rust, wasm-pack, bygger server + MCP + WASM, Python-venv, Node.js):
+
+```bash
+git clone https://github.com/robinandreeklund-collab/AetherAgent.git
+cd AetherAgent
+chmod +x tools/bootstrap_wsl.sh && ./tools/bootstrap_wsl.sh
+```
+
+Med vision-träning inkluderat:
+
+```bash
+./tools/bootstrap_wsl.sh --with-vision
+```
+
+Se `./tools/bootstrap_wsl.sh --help` för alla flaggor (`--skip-node`, `--skip-python`, `--skip-wasm`, `--skip-tests`).
+
+### Manual Build & Test
 
 ```bash
 # Prerequisites
@@ -839,6 +1043,15 @@ cargo run --features server --bin aether-server
 
 # Run MCP server
 cargo run --features mcp --bin aether-mcp
+
+# Build with vision (YOLOv8 screenshot analysis)
+cargo build --features vision
+
+# Build with Blitz rendering (fetch_vision screenshots)
+cargo build --features blitz
+
+# Build server with all features (vision + Blitz + MCP)
+cargo build --features "server,vision,blitz,mcp" --release
 ```
 
 ### Deploy to Render
@@ -887,11 +1100,11 @@ safety = agent.check_injection(page_text)
 
 AetherAgent is a fully functional AI browser engine with:
 
-- **18 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, workflow memory, core types
-- **35 WASM-exported functions** — complete API surface for any WASM host
-- **41 HTTP REST endpoints** — deployable Axum server with CORS
-- **20 MCP tools** — Claude Desktop, Cursor, VS Code compatible
-- **232 tests** — 162 unit + 30 fixture + 40 integration, all passing
+- **22 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, session management, workflow orchestration, workflow memory, core types
+- **58 WASM-exported functions** — complete API surface for any WASM host
+- **66 HTTP REST endpoints** — deployable Axum server with CORS
+- **24 MCP tools** — Claude Desktop, Cursor, VS Code compatible
+- **352 tests** — 256 unit + 30 fixture + 49 integration + 17 orchestrator, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)
@@ -916,6 +1129,15 @@ axum = "0.7"                # HTTP server (feature: server)
 tokio = "1"                 # Async runtime (feature: server)
 tower-http = "0.5"          # CORS middleware (feature: server)
 rmcp = "1.2"                # MCP protocol (feature: mcp)
+base64 = "0.22"             # Base64 encoding for MCP (feature: mcp)
+rten = "0.15"               # ONNX runtime for YOLOv8 (feature: vision)
+rten-imageproc = "0.15"     # Image processing for rten (feature: vision)
+rten-tensor = "0.15"        # Tensor operations (feature: vision)
+image = "0.25"              # PNG/JPEG decoding (feature: vision)
+blitz-html = "0.2"          # Pure Rust browser engine (feature: blitz)
+blitz-dom = "0.2"           # DOM rendering with Blitz (feature: blitz)
+blitz-traits = "0.2"        # Blitz trait definitions (feature: blitz)
+png = "0.17"                # PNG encoding for screenshots (feature: blitz)
 ```
 
 ### Design Principles
@@ -944,41 +1166,319 @@ rmcp = "1.2"                # MCP protocol (feature: mcp)
 | **JS sandbox** | No DOM, no fetch, no timers, no modules — pure computation only |
 | **Causal reasoning** | Risk-weighted path finding avoids high-risk actions |
 
+### Vision Model Training Guide
+
+AetherAgent's vision pipeline uses YOLOv8-nano for UI element detection from screenshots. The inference runtime (`rten`) is built in — you just need to train and export a model.
+
+#### Quick Start — Automated Pipeline
+
+The fastest way to train is the fully automated bootstrap script. One command handles everything: venv creation, CUDA PyTorch installation, base model download, dataset generation, training, ONNX export, and deployment.
+
+```bash
+# WSL / Linux — run from project root:
+./tools/train.sh
+
+# With your own labeled dataset:
+./tools/train.sh --dataset /mnt/c/Users/you/labels/my-dataset
+
+# Custom config:
+./tools/train.sh --epochs 300 --batch 64 --version v2
+
+# Just export an existing .pt model:
+./tools/train.sh --export-only runs/detect/aether-ui-v1/weights/best.pt
+```
+
+**What it does (8 steps):**
+
+| Step | What |
+|------|------|
+| 0 | Installs system deps (`python3-venv`, `libgl1`, etc.) via `apt` |
+| 1 | Creates `.venv-vision/` (isolated Python environment) |
+| 2 | Installs PyTorch CUDA 12.4 + Ultralytics + ONNX tools |
+| 3 | Downloads YOLOv8n base model (~6 MB) |
+| 4 | Generates synthetic UI dataset (or uses `--dataset`) |
+| 5 | Trains with RTX 5090 optimizations (AMP, batch=32, RAM cache) |
+| 6 | Validates → mAP, precision, recall |
+| 7 | Exports ONNX → `models/aether-ui-v1.onnx` |
+| 8 | Verifies against AetherAgent `/api/parse-screenshot` |
+
+**Output:** `models/aether-ui-v1.onnx` ready to pass to `parse_screenshot()`.
+
+Or use the Python module directly for more control:
+
+```bash
+# Activate the venv created by train.sh:
+source .venv-vision/bin/activate
+
+# Interactive wizard:
+python tools/train_vision.py --interactive
+
+# Verify model against running server:
+python tools/train_vision.py --verify-only models/aether-ui-v1.onnx
+```
+
+#### Manual Training (step-by-step)
+
+The sections below describe each step manually, for full control or custom setups.
+
+#### 1. Dataset Preparation
+
+**Recommended datasets:**
+
+| Dataset | Description | Size |
+|---------|-------------|------|
+| [WebUI-7K](https://huggingface.co/datasets) | Annotated web UI screenshots | ~7,000 images |
+| [Common Crawl Screenshots](https://commoncrawl.org/) | Rendered pages from Common Crawl | Millions (sample as needed) |
+| [RICO](https://interactionmining.org/rico) | Mobile UI screenshots with bounding boxes | ~66,000 screens |
+| Custom screenshots | Your own application screenshots | As needed |
+
+**Label format:** YOLOv8 expects one `.txt` file per image with bounding boxes in normalized `class_id cx cy w h` format:
+
+```
+0 0.45 0.32 0.12 0.04    # button at (cx=45%, cy=32%, w=12%, h=4%)
+1 0.20 0.55 0.35 0.03    # input at (cx=20%, cy=55%, w=35%, h=3%)
+4 0.50 0.10 0.80 0.02    # text at (cx=50%, cy=10%, w=80%, h=2%)
+```
+
+**Default class mapping (10 classes):**
+
+| ID | Class | Description |
+|----|-------|-------------|
+| 0 | `button` | Clickable buttons, submit controls |
+| 1 | `input` | Text inputs, textareas, search fields |
+| 2 | `link` | Hyperlinks, anchor elements |
+| 3 | `icon` | Icons, small graphical elements |
+| 4 | `text` | Paragraphs, labels, static text |
+| 5 | `image` | Photos, illustrations, banners |
+| 6 | `checkbox` | Checkboxes, toggle switches |
+| 7 | `radio` | Radio buttons |
+| 8 | `select` | Dropdowns, combo boxes |
+| 9 | `heading` | Headings (h1–h6), titles |
+
+**Labeling tools:** [Label Studio](https://labelstud.io/), [CVAT](https://www.cvat.ai/), or [Roboflow](https://roboflow.com/) can export directly to YOLOv8 format.
+
+**Directory structure:**
+
+```
+dataset/
+├── images/
+│   ├── train/          # ~80% of images
+│   ├── val/            # ~15% of images
+│   └── test/           # ~5% of images
+├── labels/
+│   ├── train/          # Matching .txt files
+│   ├── val/
+│   └── test/
+└── data.yaml           # Dataset config
+```
+
+**`data.yaml`:**
+
+```yaml
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: button
+  1: input
+  2: link
+  3: icon
+  4: text
+  5: image
+  6: checkbox
+  7: radio
+  8: select
+  9: heading
+```
+
+#### 2. Training with Ultralytics
+
+Install Ultralytics and train YOLOv8-nano:
+
+```bash
+pip install ultralytics
+
+# Train from scratch (or fine-tune from COCO pretrained)
+yolo detect train \
+  model=yolov8n.pt \
+  data=dataset/data.yaml \
+  epochs=100 \
+  imgsz=640 \
+  batch=16 \
+  name=aether-ui-v1
+
+# Resume interrupted training
+yolo detect train \
+  model=runs/detect/aether-ui-v1/weights/last.pt \
+  resume=True
+```
+
+**Recommended hyperparameters for UI detection:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `model` | `yolov8n.pt` | Nano variant — fast inference, small model size (~6 MB ONNX) |
+| `imgsz` | `640` | Matches AetherAgent's default `input_size` |
+| `epochs` | `100–300` | UI datasets are smaller than COCO, more epochs help |
+| `batch` | `16–32` | Depends on GPU memory |
+| `lr0` | `0.01` | Default works well for fine-tuning |
+| `augment` | `True` | Default augmentation is sufficient for UI |
+| `mosaic` | `0.5` | Reduce mosaic for UI (less useful than natural images) |
+
+**Validation:**
+
+```bash
+# Validate on test set
+yolo detect val \
+  model=runs/detect/aether-ui-v1/weights/best.pt \
+  data=dataset/data.yaml \
+  split=test
+
+# Expected: mAP50 > 0.7 for a well-labeled UI dataset
+```
+
+#### 3. ONNX Export
+
+Export the trained model to ONNX format compatible with the `rten` runtime:
+
+```bash
+yolo export \
+  model=runs/detect/aether-ui-v1/weights/best.pt \
+  format=onnx \
+  imgsz=640 \
+  opset=17 \
+  simplify=True
+
+# Output: runs/detect/aether-ui-v1/weights/best.onnx (~6 MB for nano)
+```
+
+**Convert ONNX to rten format** (optional — rten can load ONNX directly, but `.rten` is faster to load):
+
+```bash
+pip install rten-convert
+rten-convert runs/detect/aether-ui-v1/weights/best.onnx aether-ui-v1.rten
+```
+
+**Verify the model:**
+
+```bash
+# Check ONNX model structure
+python -c "
+import onnx
+model = onnx.load('best.onnx')
+print('Inputs:', [(i.name, [d.dim_value for d in i.type.tensor_type.shape.dim]) for i in model.graph.input])
+print('Outputs:', [(o.name, [d.dim_value for d in o.type.tensor_type.shape.dim]) for o in model.graph.output])
+"
+# Expected output shape: [1, 14, 8400] (14 = 4 bbox coords + 10 classes, 8400 predictions)
+```
+
+#### 4. Deploying in AetherAgent
+
+**Load and run the model via the WASM/HTTP API:**
+
+```python
+import requests
+
+# Read model and screenshot
+with open("aether-ui-v1.onnx", "rb") as f:
+    model_bytes = f.read()
+with open("screenshot.png", "rb") as f:
+    png_bytes = f.read()
+
+# Call the vision endpoint
+response = requests.post("http://localhost:3000/api/parse-screenshot", json={
+    "png_base64": base64.b64encode(png_bytes).decode(),
+    "model_base64": base64.b64encode(model_bytes).decode(),
+    "goal": "find the login button",
+    "config": {
+        "confidence_threshold": 0.25,
+        "nms_threshold": 0.45,
+        "input_size": 640,
+        "model_version": "aether-ui-v1.0"
+    }
+})
+```
+
+**Custom class labels:** If your model uses different classes than the default 10, pass `class_labels`:
+
+```json
+{
+    "config": {
+        "class_labels": ["btn", "textfield", "hyperlink", "icon", "paragraph",
+                         "photo", "toggle", "radio", "dropdown", "title"],
+        "model_version": "custom-ui-v2.0"
+    }
+}
+```
+
+**Per-class confidence thresholds:** Tune per class to reduce false positives for noisy classes (e.g., `text`) while keeping sensitivity for rare classes (e.g., `radio`):
+
+```json
+{
+    "config": {
+        "confidence_threshold": 0.25,
+        "class_thresholds": {
+            "button": 0.3,
+            "text": 0.6,
+            "icon": 0.4,
+            "radio": 0.15,
+            "checkbox": 0.15
+        },
+        "min_detection_area": 100.0
+    }
+}
+```
+
+**Minimum detection area:** Set `min_detection_area` (in pixels²) to filter out tiny artifact detections that are likely noise:
+
+```json
+{
+    "config": {
+        "min_detection_area": 50.0
+    }
+}
+```
+
+#### 5. Model Versioning
+
+Track which model produced each result via the `model_version` field:
+
+```json
+// VisionConfig
+{ "model_version": "aether-ui-v1.2-webui7k" }
+
+// VisionResult includes model_version in output
+{
+    "detections": [...],
+    "model_version": "aether-ui-v1.2-webui7k",
+    "inference_time_ms": 45,
+    "raw_detection_count": 23
+}
+```
+
+**Versioning convention:** `<model-name>-v<major>.<minor>-<dataset>`, e.g. `aether-ui-v1.0-webui7k`, `aether-ui-v2.1-custom-ecommerce`.
+
+#### 6. Tips for Better UI Detection
+
+- **Screenshot resolution:** Capture at 1280×720 or 1920×1080, then let the pipeline resize to 640×640. Higher resolution source images yield better small-element detection.
+- **Diverse training data:** Include screenshots from different sites, themes (light/dark), and viewport sizes. UI elements look very different across sites.
+- **Class imbalance:** UI screenshots typically have many `text` elements and fewer `radio`/`checkbox`. Use Ultralytics' built-in class weighting or oversample rare classes.
+- **Negative mining:** Include screenshots of non-UI content (images, charts, maps) with empty label files to reduce false positives.
+- **Iterative refinement:** Start with a small labeled set (~500 images), train, run inference on unlabeled screenshots, manually correct predictions, and add to the training set. Repeat.
+- **A/B testing:** Use `model_version` to run two models side-by-side and compare detection quality on the same pages.
+
+---
+
 ### Future Work
 
-#### Inbyggd YOLOv8-inferens via rten (screenshot-only path)
-
-Fas 9c (Multimodal Grounding) tar idag emot bounding boxes från externa källor — `getBoundingClientRect()` eller vision-modeller som körs utanför AetherAgent. Ett naturligt nästa steg är att baka in objektdetektering direkt i WASM-binären så att agenten kan arbeta från enbart en screenshot, utan tillgång till DOM.
-
-**Vad det ger:**
-- **Screenshot-only agenter** — ingen DOM behövs, bara en PNG
-- **Verifiering** — jämför visuella element mot semantiskt träd för att upptäcka dolda/osynliga noder
-- **Fallback** — fungerar även på canvas-renderade appar, PDF-viewers, Flash-liknande content
-
-**Arkitekturskiss:**
-```
-PNG-bytes → vision.rs (rten + YOLOv8-nano ONNX) → bboxes → grounding.rs → annoterat semantiskt träd
-```
-
-**Nya komponenter:**
-| Komponent | Beskrivning |
-|-----------|------------|
-| `src/vision.rs` | Bildavkodning → tensor → rten-inferens → bbox-lista |
-| `yolov8n-ui.onnx` | YOLOv8-nano ONNX-modell (~6 MB) fintrimmad för UI-element |
-| `parse_screenshot()` | Ny WASM-export: `(png_bytes, goal) → JSON` |
-| Feature flag `vision` | Gated bakom `--features vision` för att hålla core lightweight |
-
-**Dependencies:**
-```toml
-# Optional (feature: vision)
-rten = "0.15"              # Rust ONNX runtime (WASM-kompatibel)
-image = "0.25"             # PNG/JPEG-avkodning
-```
-
-**Avvägningar:**
-- WASM-binär ökar med ~10-15 MB (modell + runtime)
-- Feature-gated — påverkar inte befintliga användare
-- Alternativ: behåll extern pipeline och skicka bboxes till `ground_semantic_tree()`
+- **Full JS execution bridge** — Pair with headless browser (Playwright/Puppeteer) for SPA rendering, feeding rendered HTML back to AetherAgent for semantic analysis
+- ~~**Vision model training**~~ ✓ Training guide documented — The inference pipeline supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. See [Vision Model Training Guide](#vision-model-training-guide) above
+- ~~**XHR response caching**~~ ✓ Implemented — `XhrResponseCache` with TTL-based expiry, change detection (`has_changed`), and integration into `TemporalMemory` for diff-based monitoring across snapshots
+- ~~**Streaming parse**~~ ✓ Implemented — `streaming.rs` module with `StreamingParser`: early-stopping at `max_nodes`, depth limiting (`max_depth`), relevance filtering (`min_relevance`), and `parse_streaming` WASM API
+- ~~**Multi-page workflow orchestration**~~ ✓ Implemented — `orchestrator.rs` module with `WorkflowOrchestrator`: stateful engine combining ActionPlan + TemporalMemory + SessionManager + WorkflowMemory. Auto-navigation after clicks return links, configurable rollback/retry, cross-page temporal memory + semantic diff spanning navigations, max-pages protection. 8 WASM functions + 8 HTTP endpoints.
+- ~~**OAuth / session management**~~ ✓ Implemented — `session.rs` module with `SessionManager`: persistent cookies with path matching and expiry, OAuth 2.0 authorize/token/refresh flow, login form heuristic detection, auth state machine (Unauthenticated → OAuthPending → OAuthAuthenticated / LoggedIn → TokenExpired). 11 WASM functions + 11 HTTP endpoints.
 
 ---
 

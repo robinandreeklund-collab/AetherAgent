@@ -12,10 +12,19 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
+
+/// Delat server-state för förladdat vision-modell
+#[derive(Clone)]
+struct AppState {
+    vision_model: Arc<RwLock<Option<Vec<u8>>>>,
+}
 
 // ─── Request/Response types ──────────────────────────────────────────────────
 
@@ -280,6 +289,127 @@ struct CollabFetchRequest {
     agent_id: String,
 }
 
+#[derive(Deserialize)]
+struct DetectXhrRequest {
+    html: String,
+}
+
+#[derive(Deserialize)]
+struct ParseScreenshotRequest {
+    png_base64: String,
+    model_base64: String,
+    goal: String,
+}
+
+#[derive(Deserialize)]
+struct ParseScreenshotServerModelRequest {
+    png_base64: String,
+    goal: String,
+}
+
+// ─── Fas 13: Session Management request types ──────────────────────────────
+
+#[derive(Deserialize)]
+struct SessionAddCookiesRequest {
+    session_json: String,
+    domain: String,
+    cookies: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SessionGetCookiesRequest {
+    session_json: String,
+    domain: String,
+    #[serde(default = "default_path")]
+    path: String,
+}
+
+fn default_path() -> String {
+    "/".to_string()
+}
+
+#[derive(Deserialize)]
+struct SessionSetTokenRequest {
+    session_json: String,
+    access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    expires_in_secs: u64,
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SessionOAuthRequest {
+    session_json: String,
+    config: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct SessionTokenExchangeRequest {
+    session_json: String,
+    config: serde_json::Value,
+    authorization_code: String,
+}
+
+#[derive(Deserialize)]
+struct SessionStatusRequest {
+    session_json: String,
+}
+
+#[derive(Deserialize)]
+struct DetectLoginFormRequest {
+    html: String,
+    goal: String,
+    url: String,
+}
+
+// ─── Fas 14: Workflow Orchestration request types ───────────────────────────
+
+#[derive(Deserialize)]
+struct CreateWorkflowRequest {
+    goal: String,
+    start_url: String,
+    #[serde(default)]
+    config: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowProvidePageRequest {
+    orchestrator_json: String,
+    html: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportClickRequest {
+    orchestrator_json: String,
+    click_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportFillRequest {
+    orchestrator_json: String,
+    fill_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowReportExtractRequest {
+    orchestrator_json: String,
+    extract_result_json: String,
+}
+
+#[derive(Deserialize)]
+struct WorkflowStepRequest {
+    orchestrator_json: String,
+    step_index: u32,
+}
+
+#[derive(Deserialize)]
+struct WorkflowStatusRequest {
+    orchestrator_json: String,
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -288,6 +418,277 @@ struct ErrorResponse {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 async fn root() -> impl IntoResponse {
+    let html = r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherAgent — LLM-native browser engine</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#0a0e14;
+    color:#b3b1ad;
+    font-family:'JetBrains Mono',monospace;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:2rem 1rem;
+    overflow-x:hidden;
+  }
+  .scanline{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    pointer-events:none;z-index:10;
+    background:repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.03) 0px,
+      rgba(0,0,0,0.03) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+  }
+  .glow{
+    position:fixed;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    width:600px;height:600px;
+    background:radial-gradient(circle,rgba(255,180,50,0.04) 0%,transparent 70%);
+    pointer-events:none;z-index:0;
+  }
+  .terminal{
+    position:relative;z-index:1;
+    max-width:820px;width:100%;
+    border:1px solid #1d2433;
+    border-radius:8px;
+    background:#0d1117;
+    box-shadow:0 0 40px rgba(0,0,0,0.5),0 0 80px rgba(255,180,50,0.03);
+  }
+  .titlebar{
+    display:flex;align-items:center;gap:8px;
+    padding:12px 16px;
+    background:#161b22;
+    border-bottom:1px solid #1d2433;
+    border-radius:8px 8px 0 0;
+  }
+  .dot{width:12px;height:12px;border-radius:50%}
+  .dot.r{background:#ff5f57}
+  .dot.y{background:#ffbd2e}
+  .dot.g{background:#28c840}
+  .titlebar-text{
+    flex:1;text-align:center;
+    color:#484f58;font-size:13px;
+  }
+  .content{padding:24px 28px 32px;line-height:1.5}
+  .mascot{
+    color:#e6e1cf;
+    font-size:10px;
+    line-height:1.15;
+    letter-spacing:0.5px;
+    text-align:center;
+    margin-bottom:16px;
+    white-space:pre;
+  }
+  .mascot .hair{color:#8b949e}
+  .mascot .visor{color:#58a6ff}
+  .mascot .eyes{color:#1a1e24}
+  .mascot .bolt{color:#ffbd2e}
+  .mascot .wing{color:#c9d1d9}
+  .mascot .body{color:#e6e1cf}
+  .title-art{
+    text-align:center;
+    margin-bottom:8px;
+    white-space:pre;
+    line-height:1.1;
+  }
+  .title-art span{
+    background:linear-gradient(135deg,#ffbd2e 0%,#ff8c00 50%,#ffbd2e 100%);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+    background-clip:text;
+    font-size:11px;
+    font-weight:700;
+  }
+  .subtitle{
+    text-align:center;
+    color:#ffbd2e;
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:2px;
+    margin-bottom:20px;
+  }
+  .tagline{
+    text-align:center;
+    color:#8b949e;
+    font-size:13px;
+    max-width:560px;
+    margin:0 auto 28px;
+    line-height:1.6;
+  }
+  .tagline em{color:#c9d1d9;font-style:normal}
+  .prompt{color:#484f58;margin-bottom:4px;font-size:13px}
+  .prompt .path{color:#58a6ff}
+  .prompt .sym{color:#ffbd2e}
+  .cmd{color:#c9d1d9}
+  .response{color:#7ee787;margin-bottom:16px;font-size:13px}
+  .endpoints{
+    margin-top:20px;
+    border-top:1px solid #1d2433;
+    padding-top:20px;
+  }
+  .endpoints h3{
+    color:#484f58;font-size:12px;
+    text-transform:uppercase;letter-spacing:2px;
+    margin-bottom:12px;
+  }
+  .ep-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    gap:6px;
+  }
+  .ep{font-size:12px;display:flex;gap:8px}
+  .ep .method{
+    color:#1a1e24;
+    background:#7ee787;
+    padding:1px 5px;
+    border-radius:3px;
+    font-size:10px;
+    font-weight:700;
+    flex-shrink:0;
+    min-width:36px;
+    text-align:center;
+  }
+  .ep .method.post{background:#da8ee7;color:#1a1e24}
+  .ep .route{color:#58a6ff}
+  .ep .desc{color:#484f58}
+  .footer{
+    text-align:center;
+    margin-top:24px;
+    padding-top:16px;
+    border-top:1px solid #1d2433;
+  }
+  .footer a{
+    color:#58a6ff;text-decoration:none;font-size:13px;
+  }
+  .footer a:hover{text-decoration:underline}
+  .cursor{
+    display:inline-block;
+    width:8px;height:16px;
+    background:#ffbd2e;
+    animation:blink 1s step-end infinite;
+    vertical-align:middle;
+    margin-left:4px;
+  }
+  @keyframes blink{50%{opacity:0}}
+  @keyframes flicker{
+    0%,100%{opacity:1}
+    92%{opacity:1}
+    93%{opacity:0.8}
+    94%{opacity:1}
+  }
+  .terminal{animation:flicker 8s infinite}
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="glow"></div>
+<div class="terminal">
+  <div class="titlebar">
+    <div class="dot r"></div>
+    <div class="dot y"></div>
+    <div class="dot g"></div>
+    <div class="titlebar-text">aether@agent ~ /engine</div>
+  </div>
+  <div class="content">
+
+<div class="mascot"><span class="hair">              ,  ~  ,
+           ( ~  @@  ~ )
+            ' ,_@@_. '</span>
+        <span class="visor"> ┌──[<span class="eyes">●●●</span>]──┐</span>
+        <span class="visor"> │          │</span>
+        <span class="visor"> └────┬─────┘</span>
+        <span class="body">      │ <span class="eyes">●</span>  <span class="eyes">●</span> │</span>
+        <span class="body">      │  __  │</span>
+        <span class="body">      └──┬───┘</span>
+  <span class="wing">  ╱╲</span><span class="body">    ┌─┴─┐</span>
+  <span class="wing"> ╱  ╲</span><span class="body">   │ <span class="bolt">⚡</span> │</span>
+  <span class="wing">╱    ╲</span><span class="body">  │   │</span>
+  <span class="wing"> ╲  ╱</span><span class="body">   ├───┤</span>
+  <span class="wing">  ╲╱</span><span class="body">    │   │</span>
+        <span class="body">   ╱╲  ╱╲</span>
+        <span class="body">  ╱  ╲╱  ╲</span>
+        <span class="body">  ▔▔   ▔▔</span></div>
+
+<div class="title-art"><span>
+ █████╗ ███████╗████████╗██╗  ██╗███████╗██████╗
+██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔════╝██╔══██╗
+███████║█████╗     ██║   ███████║█████╗  ██████╔╝
+██╔══██║██╔══╝     ██║   ██╔══██║██╔══╝  ██╔══██╗
+██║  ██║███████╗   ██║   ██║  ██║███████╗██║  ██║
+╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+ █████╗  ██████╗ ███████╗███╗   ██╗████████╗
+██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║
+██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║
+██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝</span></div>
+
+<div class="subtitle">The LLM-native browser engine.</div>
+
+<div class="tagline">
+  <em>Semantic perception</em>, <em>goal-aware intelligence</em>, and
+  <em>prompt injection protection</em> — in a single embeddable
+  Rust/WASM library.
+</div>
+
+<div>
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span> <span class="cmd">curl -X POST /api/parse -d '{"html": "&lt;button&gt;Buy&lt;/button&gt;", "goal": "buy"}'</span></div>
+  <div class="response">{"nodes": [{"role": "button", "label": "Buy", "relevance": 0.95, "trust": "safe"}]}</div>
+
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span> <span class="cmd">curl /api/endpoints</span></div>
+  <div class="response">{"status": "ok", "count": 50, "docs": "/api/endpoints"}</div>
+
+  <div class="prompt"><span class="path">~/agent</span> <span class="sym">$</span><span class="cursor"></span></div>
+</div>
+
+<div class="endpoints">
+  <h3>// API Surface — 50+ endpoints</h3>
+  <div class="ep-grid">
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/parse</span><span class="desc"> — semantic tree</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/click</span><span class="desc"> — find element</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/extract</span><span class="desc"> — structured data</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fill-form</span><span class="desc"> — map fields</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/diff</span><span class="desc"> — semantic diff</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/compile</span><span class="desc"> — goal → plan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/parse</span><span class="desc"> — fetch + parse</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/plan</span><span class="desc"> — fetch + plan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/firewall/classify</span><span class="desc"> — L1/L2/L3</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/detect-xhr</span><span class="desc"> — XHR scan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/parse-screenshot</span><span class="desc"> — vision</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/mcp</span><span class="desc"> — MCP endpoint</span></div>
+    <div class="ep"><span class="method">GET</span><span class="route">/health</span><span class="desc"> — health check</span></div>
+    <div class="ep"><span class="method">GET</span><span class="route">/api/endpoints</span><span class="desc"> — full API list</span></div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="https://github.com/robinandreeklund-collab/AetherAgent">github.com/robinandreeklund-collab/AetherAgent</a>
+</div>
+
+  </div>
+</div>
+</body>
+</html>"##;
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+/// JSON API endpoint listing (moved from root)
+async fn api_endpoints() -> impl IntoResponse {
     let body = serde_json::json!({
         "engine": "AetherAgent",
         "version": "0.2.0",
@@ -333,6 +734,27 @@ async fn root() -> impl IntoResponse {
             "POST /api/collab/register": "Register agent in collab store",
             "POST /api/collab/publish": "Publish semantic delta to collab store",
             "POST /api/collab/fetch": "Fetch new deltas for agent",
+            "POST /api/detect-xhr": "Scan HTML for XHR/fetch/AJAX endpoints in scripts",
+            "POST /api/parse-screenshot": "Analyze screenshot with YOLOv8-nano vision model",
+            "POST /api/session/create": "Create empty session manager",
+            "POST /api/session/cookies/add": "Add cookies from Set-Cookie headers",
+            "POST /api/session/cookies/get": "Get Cookie header for domain/path",
+            "POST /api/session/token/set": "Set OAuth access token",
+            "POST /api/session/oauth/authorize": "Build OAuth 2.0 authorize URL",
+            "POST /api/session/oauth/exchange": "Prepare token exchange parameters",
+            "POST /api/session/status": "Check session auth status",
+            "POST /api/session/login/detect": "Detect login form in HTML",
+            "POST /api/session/evict": "Evict expired cookies/tokens",
+            "POST /api/session/login/mark": "Mark session as logged in",
+            "POST /api/session/token/refresh": "Prepare token refresh parameters",
+            "POST /api/workflow/create": "Create workflow orchestrator from goal",
+            "POST /api/workflow/page": "Provide fetched page to orchestrator",
+            "POST /api/workflow/report/click": "Report click result to orchestrator",
+            "POST /api/workflow/report/fill": "Report fill form result",
+            "POST /api/workflow/report/extract": "Report extract result",
+            "POST /api/workflow/complete": "Mark step as manually completed",
+            "POST /api/workflow/rollback": "Rollback a completed step",
+            "POST /api/workflow/status": "Get workflow status summary",
             "POST /mcp": "MCP Streamable HTTP endpoint (JSON-RPC, spec 2025-03-26)"
         },
         "example": {
@@ -619,6 +1041,8 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
                 nodes: vec![],
                 injection_warnings: vec![],
                 parse_time_ms: 0,
+                xhr_intercepted: 0,
+                xhr_blocked: 0,
             }
         }),
         total_time_ms,
@@ -854,6 +1278,190 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
     (StatusCode::OK, result)
 }
 
+// ─── Fas 10: XHR Interception ────────────────────────────────────────────────
+
+async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
+    let result = aether_agent::detect_xhr_urls(&req.html);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 11: Vision ─────────────────────────────────────────────────────────
+
+async fn parse_screenshot_handler(Json(req): Json<ParseScreenshotRequest>) -> impl IntoResponse {
+    let png_bytes = match B64.decode(&req.png_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid PNG base64: {e}"}}"#),
+            )
+        }
+    };
+    let model_bytes = match B64.decode(&req.model_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid model base64: {e}"}}"#),
+            )
+        }
+    };
+    let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    (StatusCode::OK, result)
+}
+
+/// Screenshot-analys med serverns förladdade modell (kräver AETHER_MODEL_URL/PATH)
+async fn parse_screenshot_server_model(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<ParseScreenshotServerModelRequest>,
+) -> impl IntoResponse {
+    let model_guard = state.vision_model.read().await;
+    let model_bytes = match model_guard.as_ref() {
+        Some(b) => b.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Ingen vision-modell laddad. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH."}"#
+                    .to_string(),
+            )
+        }
+    };
+    drop(model_guard);
+
+    let png_bytes = match B64.decode(&req.png_base64) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Invalid PNG base64: {e}"}}"#),
+            )
+        }
+    };
+    let result = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    (StatusCode::OK, result)
+}
+
+/// Kontrollera om bytes ser ut som ONNX-format (protobuf med ONNX magic)
+fn is_onnx_format(bytes: &[u8]) -> bool {
+    // ONNX-filer börjar med protobuf-header, vanligtvis 0x08 (field 1, varint)
+    // rten-filer börjar med FlatBuffer-prefix (vanligtvis 4-byte size prefix)
+    // Enklast: leta efter "onnx" eller "pytorch" strängar i första 256 bytes
+    if bytes.len() < 8 {
+        return false;
+    }
+    let header = &bytes[..bytes.len().min(512)];
+    let header_str = String::from_utf8_lossy(header);
+    header_str.contains("onnx")
+        || header_str.contains("pytorch")
+        || header_str.contains("ai.onnx")
+        || header_str.contains("ir_version")
+}
+
+/// Konvertera ONNX-bytes till rten-format via rten-convert subprocess
+fn convert_onnx_to_rten(onnx_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let tmp_dir = std::env::temp_dir();
+    let onnx_path = tmp_dir.join("_aether_model.onnx");
+    let rten_path = tmp_dir.join("_aether_model.rten");
+
+    // Skriv ONNX till temporär fil
+    std::fs::write(&onnx_path, onnx_bytes)
+        .map_err(|e| format!("Kunde inte skriva temp ONNX-fil: {e}"))?;
+
+    // Kör rten-convert
+    println!("Konverterar ONNX → rten via rten-convert...");
+    let output = std::process::Command::new("rten-convert")
+        .arg(onnx_path.to_str().unwrap_or(""))
+        .arg(rten_path.to_str().unwrap_or(""))
+        .output()
+        .map_err(|e| {
+            format!("Kunde inte köra rten-convert: {e}. Installera med: pip install rten-convert")
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Rensa temporära filer
+        let _ = std::fs::remove_file(&onnx_path);
+        return Err(format!("rten-convert misslyckades: {stderr}"));
+    }
+
+    // Läs konverterad rten-fil
+    let rten_bytes = std::fs::read(&rten_path)
+        .map_err(|e| format!("Kunde inte läsa konverterad rten-fil: {e}"))?;
+
+    // Rensa temporära filer
+    let _ = std::fs::remove_file(&onnx_path);
+    let _ = std::fs::remove_file(&rten_path);
+
+    println!(
+        "ONNX → rten konvertering klar: {:.1} MB",
+        rten_bytes.len() as f64 / (1024.0 * 1024.0)
+    );
+    Ok(rten_bytes)
+}
+
+/// Efterbehandla modellbytes: detektera format och konvertera vid behov
+fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if is_onnx_format(&bytes) {
+        println!("Detekterade ONNX-format, försöker konvertera till rten...");
+        match convert_onnx_to_rten(&bytes) {
+            Ok(rten_bytes) => Some(rten_bytes),
+            Err(e) => {
+                eprintln!("ONNX-konvertering misslyckades: {e}");
+                eprintln!("Tips: Använd .rten-format direkt, eller installera rten-convert i Docker-imagen.");
+                // Försök ladda som-det-är (kanske det funkar ändå)
+                Some(bytes)
+            }
+        }
+    } else {
+        // Antar rten-format
+        Some(bytes)
+    }
+}
+
+/// Ladda vision-modell från URL eller filsökväg vid serverstart
+async fn load_vision_model() -> Option<Vec<u8>> {
+    // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
+    if let Ok(url) = std::env::var("AETHER_MODEL_URL") {
+        println!("Laddar vision-modell från URL: {url}");
+        match reqwest::get(&url).await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            println!(
+                                "Vision-modell nedladdad: {:.1} MB",
+                                bytes.len() as f64 / (1024.0 * 1024.0)
+                            );
+                            return ensure_rten_format(bytes.to_vec());
+                        }
+                        Err(e) => eprintln!("Kunde inte läsa modell-bytes: {e}"),
+                    }
+                } else {
+                    eprintln!("Modell-URL returnerade {}", resp.status());
+                }
+            }
+            Err(e) => eprintln!("Kunde inte hämta modell från URL: {e}"),
+        }
+    }
+
+    if let Ok(path) = std::env::var("AETHER_MODEL_PATH") {
+        println!("Laddar vision-modell från fil: {path}");
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                println!(
+                    "Vision-modell laddad: {:.1} MB",
+                    bytes.len() as f64 / (1024.0 * 1024.0)
+                );
+                return ensure_rten_format(bytes);
+            }
+            Err(e) => eprintln!("Kunde inte läsa modell-fil: {e}"),
+        }
+    }
+
+    println!("Ingen vision-modell konfigurerad (AETHER_MODEL_URL/AETHER_MODEL_PATH ej satta)");
+    None
+}
+
 // ─── MCP Streamable HTTP (spec 2025-03-26) ───────────────────────────────────
 
 /// Tool schema som exponeras via MCP tools/list
@@ -1031,7 +1639,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "snapshots_json": {"type": "string", "description": "JSON array of temporal snapshots"},
+                    "snapshots_json": {"type": "string", "description": "JSON array of snapshot objects: [{\"url\": \"...\", \"node_count\": 5, \"warning_count\": 0, \"key_elements\": [\"button:Buy\"]}]. Only url is required."},
                     "actions_json": {"type": "string", "description": "JSON array of actions"}
                 },
                 "required": ["snapshots_json", "actions_json"]
@@ -1123,15 +1731,15 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "publish_collab_delta",
-            "description": "Publish a semantic delta to the collaboration store.",
+            "description": "Publish a semantic delta to the collaboration store. Pass the FULL output from diff_trees as delta_json.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "store_json": {"type": "string", "description": "Collab store JSON"},
-                    "agent_id": {"type": "string", "description": "Publishing agent's ID"},
+                    "store_json": {"type": "string", "description": "Collab store JSON (from create_collab_store)"},
+                    "agent_id": {"type": "string", "description": "Publishing agent's ID (from register_collab_agent)"},
                     "url": {"type": "string", "description": "URL the delta applies to"},
-                    "delta_json": {"type": "string", "description": "Semantic delta JSON"},
-                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms"}
+                    "delta_json": {"type": "string", "description": "FULL diff_trees output JSON containing: token_savings_ratio, total_nodes_before, total_nodes_after, changes[]"},
+                    "timestamp_ms": {"type": "integer", "description": "Current timestamp in ms (e.g. Date.now())"}
                 },
                 "required": ["store_json", "agent_id", "url", "delta_json", "timestamp_ms"]
             }
@@ -1147,25 +1755,432 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["store_json", "agent_id"]
             }
+        },
+        {
+            "name": "detect_xhr_urls",
+            "description": "Scan HTML for hidden XHR/fetch/AJAX network calls in inline scripts and event handlers. Discovers fetch(), XMLHttpRequest.open(), $.ajax(), $.get(), $.post() patterns. Returns array of {url, method, headers} objects.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string to scan for XHR/fetch calls"}
+                },
+                "required": ["html"]
+            }
+        },
+        {
+            "name": "parse_screenshot",
+            "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "png_base64": {"type": "string", "description": "PNG screenshot as base64 string"},
+                    "model_base64": {"type": "string", "description": "YOLOv8-nano ONNX model as base64 string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"}
+                },
+                "required": ["png_base64", "model_base64", "goal"]
+            }
+        },
+        {
+            "name": "vision_parse",
+            "description": "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns bounding boxes, confidence scores, and a semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "png_base64": {"type": "string", "description": "PNG screenshot as base64 string"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance scoring"}
+                },
+                "required": ["png_base64", "goal"]
+            }
+        },
+        {
+            "name": "fetch_vision",
+            "description": "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to screenshot and analyze (e.g. https://www.hjo.se)"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance scoring"},
+                    "width": {"type": "integer", "description": "Viewport width in pixels (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height in pixels (default: 800)", "default": 800}
+                },
+                "required": ["url", "goal"]
+            }
         }
     ])
 }
 
+/// Avkoda base64-sträng till bytes
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    B64.decode(input)
+        .map_err(|e| format!("Base64 decode error: {e}"))
+}
+
+/// Rita bounding boxar med klasslabels på en screenshot och returnera som base64 PNG.
+/// Gör bilden transparent och visuellt tydlig med färgkodade ramar.
+#[cfg(feature = "vision")]
+fn render_annotated_screenshot(png_bytes: &[u8], result_json: &str) -> Result<String, String> {
+    use image::{ImageFormat, Rgba, RgbaImage};
+    use std::io::Cursor;
+
+    // Ladda originalbilden
+    let img =
+        image::load_from_memory(png_bytes).map_err(|e| format!("Kunde inte ladda bild: {e}"))?;
+    let mut canvas: RgbaImage = img.to_rgba8();
+    let (img_w, img_h) = (canvas.width(), canvas.height());
+
+    // Parsa detektioner från JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(result_json).map_err(|e| format!("JSON-parse: {e}"))?;
+    let detections = parsed["detections"].as_array();
+
+    // Färgpalett per klass
+    let class_color = |class: &str| -> Rgba<u8> {
+        match class {
+            "button" => Rgba([0, 200, 0, 255]),     // Grön
+            "input" => Rgba([0, 150, 255, 255]),    // Blå
+            "link" => Rgba([255, 165, 0, 255]),     // Orange
+            "text" => Rgba([200, 200, 200, 180]),   // Grå
+            "heading" => Rgba([255, 255, 0, 255]),  // Gul
+            "image" => Rgba([180, 0, 255, 255]),    // Lila
+            "icon" => Rgba([255, 100, 100, 255]),   // Röd-rosa
+            "checkbox" => Rgba([0, 255, 200, 255]), // Turkos
+            "select" => Rgba([255, 80, 180, 255]),  // Magenta
+            _ => Rgba([255, 255, 255, 255]),        // Vit
+        }
+    };
+
+    if let Some(dets) = detections {
+        for det in dets {
+            let class = det["class"].as_str().unwrap_or("unknown");
+            let conf = det["confidence"].as_f64().unwrap_or(0.0);
+            let bbox = &det["bbox"];
+            let bx = bbox["x"].as_f64().unwrap_or(0.0);
+            let by = bbox["y"].as_f64().unwrap_or(0.0);
+            let bw = bbox["width"].as_f64().unwrap_or(0.0);
+            let bh = bbox["height"].as_f64().unwrap_or(0.0);
+
+            let color = class_color(class);
+
+            // Rita bounding box (3px bred ram)
+            let x1 = (bx.max(0.0) as u32).min(img_w.saturating_sub(1));
+            let y1 = (by.max(0.0) as u32).min(img_h.saturating_sub(1));
+            let x2 = ((bx + bw) as u32).min(img_w.saturating_sub(1));
+            let y2 = ((by + bh) as u32).min(img_h.saturating_sub(1));
+
+            // Horisontella linjer (topp + botten, 3px)
+            for thickness in 0..3u32 {
+                let yt = y1.saturating_add(thickness).min(img_h - 1);
+                let yb = y2.saturating_sub(thickness).max(y1);
+                for x in x1..=x2 {
+                    canvas.put_pixel(x, yt, color);
+                    canvas.put_pixel(x, yb, color);
+                }
+            }
+            // Vertikala linjer (vänster + höger, 3px)
+            for thickness in 0..3u32 {
+                let xl = x1.saturating_add(thickness).min(img_w - 1);
+                let xr = x2.saturating_sub(thickness).max(x1);
+                for y in y1..=y2 {
+                    canvas.put_pixel(xl, y, color);
+                    canvas.put_pixel(xr, y, color);
+                }
+            }
+
+            // Label-bakgrund (fylld rektangel ovanför bbox)
+            let label = format!("{class} {conf:.0}%", conf = conf * 100.0);
+            let label_w = (label.len() as u32 * 7).min(x2.saturating_sub(x1));
+            let label_h = 14u32;
+            let ly = y1.saturating_sub(label_h);
+            for lx in x1..x1.saturating_add(label_w) {
+                for ly_px in ly..y1 {
+                    if lx < img_w && ly_px < img_h {
+                        canvas.put_pixel(lx, ly_px, color);
+                    }
+                }
+            }
+
+            // Enkel textrendering (1-bit font, 5x7 pixlar per tecken)
+            let char_w = 6u32;
+            let text_y = ly + 3;
+            for (ci, ch) in label.chars().enumerate() {
+                let cx = x1 + 2 + ci as u32 * char_w;
+                render_char_5x7(&mut canvas, cx, text_y, ch, Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+
+    // Koda tillbaka till PNG
+    let mut buf = Cursor::new(Vec::new());
+    canvas
+        .write_to(&mut buf, ImageFormat::Png)
+        .map_err(|e| format!("PNG encode: {e}"))?;
+    Ok(B64.encode(buf.into_inner()))
+}
+
+/// Minimal 5x7 pixel-font för annotation-labels
+#[cfg(feature = "vision")]
+fn render_char_5x7(img: &mut image::RgbaImage, x: u32, y: u32, ch: char, color: image::Rgba<u8>) {
+    // Enkel bitmap-font (5 bred x 7 hög)
+    let bitmap: [u8; 7] = match ch {
+        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
+        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        '2' => [0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F],
+        '3' => [0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E],
+        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
+        '5' => [0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E],
+        '6' => [0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E],
+        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
+        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C],
+        'a' | 'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'b' | 'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
+        'c' | 'C' => [0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E],
+        'd' | 'D' => [0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E],
+        'e' | 'E' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
+        'f' | 'F' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10],
+        'g' | 'G' => [0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F],
+        'h' | 'H' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'i' | 'I' => [0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        'j' | 'J' => [0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E],
+        'k' | 'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
+        'l' | 'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
+        'm' | 'M' => [0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11],
+        'n' | 'N' => [0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11],
+        'o' | 'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'p' | 'P' => [0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10],
+        'r' | 'R' => [0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11],
+        's' | 'S' => [0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E],
+        't' | 'T' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+        'u' | 'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'x' | 'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
+        'y' | 'Y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
+        '%' => [0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03],
+        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
+        _ => [0x0E, 0x11, 0x01, 0x06, 0x04, 0x00, 0x04], // ?
+    };
+    let (img_w, img_h) = (img.width(), img.height());
+    for (row, &bits) in bitmap.iter().enumerate() {
+        for col in 0..5u32 {
+            if bits & (0x10 >> col) != 0 {
+                let px = x + col;
+                let py = y + row as u32;
+                if px < img_w && py < img_h {
+                    img.put_pixel(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+/// Fallback-version utan vision feature
+#[cfg(not(feature = "vision"))]
+fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<String, String> {
+    Err("Vision feature inte aktiverad".to_string())
+}
+
+/// Hämta HTML från URL och rendera till PNG med Blitz (ren Rust, ingen extern binär).
+/// Returnerar PNG-bytes vid framgång.
+#[cfg(feature = "blitz")]
+async fn render_url_to_png(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    // Hämta HTML med reqwest
+    let config = aether_agent::types::FetchConfig::default();
+    let response = aether_agent::fetch::fetch_page(url, &config)
+        .await
+        .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
+    let html = response.body.clone();
+    let base_url = url.to_string();
+
+    // Rendera HTML → PNG i spawn_blocking (HtmlDocument är inte Send)
+    // blitz_net::Provider skapar nätverks-tasks via tokio Handle::current()
+    // som fungerar i spawn_blocking-kontext
+    tokio::task::spawn_blocking(move || render_html_to_png(&html, &base_url, width, height))
+        .await
+        .map_err(|e| format!("Blitz render task error: {e}"))?
+}
+
+/// Ren-Rust HTML → PNG rendering med Blitz, med riktig resurs-laddning.
+/// CSS, bilder och fonter hämtas via blitz-net och matas tillbaka till DOM:et.
+#[cfg(feature = "blitz")]
+fn render_html_to_png(
+    html: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    use anyrender::{ImageRenderer, PaintScene as _};
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let scale: f32 = 1.0;
+
+    // Skapa MpscCallback — samlar resurser via en kanal istället för att kasta bort dem
+    let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+    let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+        std::sync::Arc::new(callback);
+    let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
+
+    // Parsa HTML → DOM med base_url för relativa CSS/font-URLer
+    let mut document = HtmlDocument::from_html(
+        html,
+        DocumentConfig {
+            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+            base_url: Some(base_url.to_string()),
+            net_provider: Some(std::sync::Arc::clone(&net)
+                as std::sync::Arc<
+                    dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                >),
+            ..Default::default()
+        },
+    );
+
+    // Resolva styles + layout — dränera resurser från kanalen och mata tillbaka dem
+    // Async-tasks körs på tokio-runtime i bakgrunden; vi pollar med thread::sleep
+    for _ in 0..20 {
+        // Dränera alla mottagna resurser och applicera på DOM
+        while let Ok((_doc_id, resource)) = rx.try_recv() {
+            document.as_mut().load_resource(resource);
+        }
+        document.as_mut().resolve(0.0);
+        if net.is_empty() {
+            break;
+        }
+        // Ge async-tasks tid att hämta resurser
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // Slutgiltig dränering av resterande resurser
+    while let Ok((_doc_id, resource)) = rx.try_recv() {
+        document.as_mut().load_resource(resource);
+    }
+    document.as_mut().resolve(0.0);
+
+    // Rendera till RGBA-buffer
+    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
+    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+    renderer.render_to_vec(
+        |scene| {
+            // Vit bakgrund
+            scene.fill(
+                peniko::Fill::NonZero,
+                peniko::kurbo::Affine::IDENTITY,
+                white,
+                None,
+                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+            );
+
+            // Måla DOM-trädet
+            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
+        },
+        &mut buffer,
+    );
+
+    // Koda till PNG
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header: {e}"))?;
+        writer
+            .write_image_data(&buffer)
+            .map_err(|e| format!("PNG data: {e}"))?;
+        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+    }
+
+    Ok(png_bytes)
+}
+
+/// Fallback om Blitz inte är kompilerat
+#[cfg(not(feature = "blitz"))]
+async fn render_url_to_png(_url: &str, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
+    Err("Blitz feature inte aktiverad. Kompilera med --features blitz".to_string())
+}
+
+/// REST-endpoint: POST /api/fetch-vision — hämta URL, ta screenshot, kör vision
+async fn fetch_vision_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<FetchVisionRequest>,
+) -> impl IntoResponse {
+    let width = req.width.unwrap_or(1280);
+    let height = req.height.unwrap_or(800);
+
+    // Rendera sidan till PNG med Blitz (ren Rust)
+    let png_bytes = match render_url_to_png(&req.url, width, height).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": e}).to_string(),
+            );
+        }
+    };
+
+    // Kör vision
+    let model_guard = state.vision_model.read().await;
+    let model_bytes = match model_guard.as_ref() {
+        Some(b) => b.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                serde_json::json!({"error": "Ingen vision-modell laddad"}).to_string(),
+            );
+        }
+    };
+    drop(model_guard);
+
+    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, &req.goal);
+    let annotated_b64 = render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+    let original_b64 = B64.encode(&png_bytes);
+
+    let response = serde_json::json!({
+        "original_screenshot": original_b64,
+        "annotated_screenshot": annotated_b64,
+        "detections": serde_json::from_str::<serde_json::Value>(&result_json).unwrap_or_default(),
+        "url": req.url,
+        "viewport": {"width": width, "height": height}
+    });
+
+    (StatusCode::OK, response.to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct FetchVisionRequest {
+    url: String,
+    goal: String,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
-async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<String, String> {
+/// Returnerar content-array (kan innehålla text + image blocks)
+async fn mcp_dispatch_tool(
+    name: &str,
+    args: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, String> {
+    // Hjälpfunktion: text-only content block
+    let text_ok = |s: String| -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!([{"type": "text", "text": s}]))
+    };
+
     match name {
         "parse" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::parse_to_semantic_tree(html, goal, url))
+            text_ok(aether_agent::parse_to_semantic_tree(html, goal, url))
         }
         "parse_top" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
-            Ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
+            text_ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
         }
         "fetch_parse" => {
             let url = args["url"].as_str().unwrap_or("");
@@ -1175,7 +2190,7 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             match aether_agent::fetch::fetch_page(url, &config).await {
                 Ok(r) => {
                     let tree = aether_agent::parse_to_semantic_tree(&r.body, goal, &r.final_url);
-                    Ok(tree)
+                    text_ok(tree)
                 }
                 Err(e) => Err(e),
             }
@@ -1185,41 +2200,42 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let target = args["target_label"].as_str().unwrap_or("");
-            Ok(aether_agent::find_and_click(html, goal, url, target))
+            text_ok(aether_agent::find_and_click(html, goal, url, target))
         }
         "fill_form" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let fields_json = serde_json::to_string(&args["fields"]).unwrap_or_default();
-            Ok(aether_agent::fill_form(html, goal, url, &fields_json))
+            text_ok(aether_agent::fill_form(html, goal, url, &fields_json))
         }
         "extract_data" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let keys_json = serde_json::to_string(&args["keys"]).unwrap_or_default();
-            Ok(aether_agent::extract_data(html, goal, url, &keys_json))
+            text_ok(aether_agent::extract_data(html, goal, url, &keys_json))
         }
         "check_injection" => {
             let text = args["text"].as_str().unwrap_or("");
-            Ok(aether_agent::check_injection(text))
+            text_ok(aether_agent::check_injection(text))
         }
         "compile_goal" => {
             let goal = args["goal"].as_str().unwrap_or("");
-            Ok(aether_agent::compile_goal(goal))
+            text_ok(aether_agent::compile_goal(goal))
         }
         "classify_request" => {
             let url = args["url"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let config = aether_agent::firewall::FirewallConfig::default();
             let verdict = aether_agent::firewall::classify_request(url, goal, &config);
-            serde_json::to_string(&verdict).map_err(|e| e.to_string())
+            let s = serde_json::to_string(&verdict).map_err(|e| e.to_string())?;
+            text_ok(s)
         }
         "diff_trees" => {
             let old = args["old_tree_json"].as_str().unwrap_or("");
             let new = args["new_tree_json"].as_str().unwrap_or("");
-            Ok(aether_agent::diff_semantic_trees(old, new))
+            text_ok(aether_agent::diff_semantic_trees(old, new))
         }
         "fetch_extract" => {
             let url = args["url"].as_str().unwrap_or("");
@@ -1228,7 +2244,7 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             aether_agent::fetch::validate_url(url)?;
             let config = aether_agent::types::FetchConfig::default();
             match aether_agent::fetch::fetch_page(url, &config).await {
-                Ok(r) => Ok(aether_agent::extract_data(
+                Ok(r) => text_ok(aether_agent::extract_data(
                     &r.body,
                     goal,
                     &r.final_url,
@@ -1244,7 +2260,7 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             aether_agent::fetch::validate_url(url)?;
             let config = aether_agent::types::FetchConfig::default();
             match aether_agent::fetch::fetch_page(url, &config).await {
-                Ok(r) => Ok(aether_agent::find_and_click(
+                Ok(r) => text_ok(aether_agent::find_and_click(
                     &r.body,
                     goal,
                     &r.final_url,
@@ -1257,49 +2273,49 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::parse_with_js(html, goal, url))
+            text_ok(aether_agent::parse_with_js(html, goal, url))
         }
         "build_causal_graph" => {
             let snapshots = args["snapshots_json"].as_str().unwrap_or("");
             let actions = args["actions_json"].as_str().unwrap_or("");
-            Ok(aether_agent::build_causal_graph(snapshots, actions))
+            text_ok(aether_agent::build_causal_graph(snapshots, actions))
         }
         "predict_action_outcome" => {
             let graph = args["graph_json"].as_str().unwrap_or("");
             let action = args["action"].as_str().unwrap_or("");
-            Ok(aether_agent::predict_action_outcome(graph, action))
+            text_ok(aether_agent::predict_action_outcome(graph, action))
         }
         "find_safest_path" => {
             let graph = args["graph_json"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
-            Ok(aether_agent::find_safest_path(graph, goal))
+            text_ok(aether_agent::find_safest_path(graph, goal))
         }
         "discover_webmcp" => {
             let html = args["html"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
-            Ok(aether_agent::discover_webmcp(html, url))
+            text_ok(aether_agent::discover_webmcp(html, url))
         }
         "ground_semantic_tree" => {
             let html = args["html"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let ann_json = serde_json::to_string(&args["annotations"]).unwrap_or_default();
-            Ok(aether_agent::ground_semantic_tree(
+            text_ok(aether_agent::ground_semantic_tree(
                 html, goal, url, &ann_json,
             ))
         }
         "match_bbox_iou" => {
             let tree = args["tree_json"].as_str().unwrap_or("");
             let bbox_json = serde_json::to_string(&args["bbox"]).unwrap_or_default();
-            Ok(aether_agent::match_bbox_iou(tree, &bbox_json))
+            text_ok(aether_agent::match_bbox_iou(tree, &bbox_json))
         }
-        "create_collab_store" => Ok(aether_agent::create_collab_store()),
+        "create_collab_store" => text_ok(aether_agent::create_collab_store()),
         "register_collab_agent" => {
             let store = args["store_json"].as_str().unwrap_or("");
             let agent_id = args["agent_id"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
             let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
-            Ok(aether_agent::register_collab_agent(
+            text_ok(aether_agent::register_collab_agent(
                 store, agent_id, goal, ts,
             ))
         }
@@ -1309,14 +2325,83 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
             let url = args["url"].as_str().unwrap_or("");
             let delta = args["delta_json"].as_str().unwrap_or("");
             let ts = args["timestamp_ms"].as_u64().unwrap_or(0);
-            Ok(aether_agent::publish_collab_delta(
+            text_ok(aether_agent::publish_collab_delta(
                 store, agent_id, url, delta, ts,
             ))
         }
         "fetch_collab_deltas" => {
             let store = args["store_json"].as_str().unwrap_or("");
             let agent_id = args["agent_id"].as_str().unwrap_or("");
-            Ok(aether_agent::fetch_collab_deltas(store, agent_id))
+            text_ok(aether_agent::fetch_collab_deltas(store, agent_id))
+        }
+        "detect_xhr_urls" => {
+            let html = args["html"].as_str().unwrap_or("");
+            text_ok(aether_agent::detect_xhr_urls(html))
+        }
+        "parse_screenshot" => {
+            let png_b64 = args["png_base64"].as_str().unwrap_or("");
+            let model_b64 = args["model_base64"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let png_bytes = base64_decode(png_b64)?;
+            let model_bytes = base64_decode(model_b64)?;
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
+        }
+        "vision_parse" => {
+            let png_b64 = args["png_base64"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let png_bytes = base64_decode(png_b64)?;
+            let model_guard = state.vision_model.read().await;
+            let model_bytes = model_guard
+                .as_ref()
+                .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
+                .clone();
+            drop(model_guard);
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
+        }
+        "fetch_vision" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+
+            // Validera URL
+            aether_agent::fetch::validate_url(url)?;
+
+            // Rendera sidan till PNG med Blitz
+            let png_bytes = render_url_to_png(url, width, height).await?;
+            let png_b64 = B64.encode(&png_bytes);
+
+            // Kör vision
+            let model_guard = state.vision_model.read().await;
+            let model_bytes = model_guard
+                .as_ref()
+                .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
+                .clone();
+            drop(model_guard);
+
+            let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+            let annotated_b64 =
+                render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
+
+            Ok(serde_json::json!([
+                {"type": "image", "data": png_b64, "mimeType": "image/png"},
+                {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
+                {"type": "text", "text": result_json}
+            ]))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -1341,7 +2426,11 @@ fn jsonrpc_error(id: &serde_json::Value, code: i32, message: &str) -> serde_json
 
 /// MCP Streamable HTTP POST handler
 /// Hanterar initialize, tools/list, tools/call, notifications, och ping
-async fn mcp_post(headers: HeaderMap, Json(msg): Json<serde_json::Value>) -> impl IntoResponse {
+async fn mcp_post(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
+    Json(msg): Json<serde_json::Value>,
+) -> impl IntoResponse {
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
     let params = &msg["params"];
@@ -1395,11 +2484,11 @@ async fn mcp_post(headers: HeaderMap, Json(msg): Json<serde_json::Value>) -> imp
         "tools/call" => {
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
-            match mcp_dispatch_tool(tool_name, arguments).await {
-                Ok(result_text) => jsonrpc_result(
+            match mcp_dispatch_tool(tool_name, arguments, &state).await {
+                Ok(content_blocks) => jsonrpc_result(
                     id,
                     serde_json::json!({
-                        "content": [{"type": "text", "text": result_text}]
+                        "content": content_blocks
                     }),
                 ),
                 Err(e) => jsonrpc_result(
@@ -1449,7 +2538,129 @@ async fn mcp_delete() -> impl IntoResponse {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
-fn build_router() -> Router {
+// ─── Fas 13: Session Management handlers ────────────────────────────────────
+
+async fn session_create() -> impl IntoResponse {
+    let result = aether_agent::create_session();
+    (StatusCode::OK, result)
+}
+
+async fn session_add_cookies(Json(req): Json<SessionAddCookiesRequest>) -> impl IntoResponse {
+    let cookies_json = serde_json::to_string(&req.cookies).unwrap_or_default();
+    let result = aether_agent::session_add_cookies(&req.session_json, &req.domain, &cookies_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_get_cookies(Json(req): Json<SessionGetCookiesRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_get_cookies(&req.session_json, &req.domain, &req.path);
+    (StatusCode::OK, result)
+}
+
+async fn session_set_token(Json(req): Json<SessionSetTokenRequest>) -> impl IntoResponse {
+    let scopes_json = serde_json::to_string(&req.scopes).unwrap_or_default();
+    let result = aether_agent::session_set_token(
+        &req.session_json,
+        &req.access_token,
+        &req.refresh_token,
+        req.expires_in_secs,
+        &scopes_json,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn session_oauth_authorize(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_oauth_authorize(&req.session_json, &config_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_token_exchange(Json(req): Json<SessionTokenExchangeRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_prepare_token_exchange(
+        &req.session_json,
+        &config_json,
+        &req.authorization_code,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn session_status_handler(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_status(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_detect_login(Json(req): Json<DetectLoginFormRequest>) -> impl IntoResponse {
+    let result = aether_agent::detect_login_form(&req.html, &req.goal, &req.url);
+    (StatusCode::OK, result)
+}
+
+async fn session_evict(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_evict_expired(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_mark_login(Json(req): Json<SessionStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::session_mark_logged_in(&req.session_json);
+    (StatusCode::OK, result)
+}
+
+async fn session_token_refresh(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
+    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let result = aether_agent::session_prepare_refresh(&req.session_json, &config_json);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 14: Workflow Orchestration handlers ────────────────────────────────
+
+async fn workflow_create(Json(req): Json<CreateWorkflowRequest>) -> impl IntoResponse {
+    let config_json = req
+        .config
+        .map(|c| serde_json::to_string(&c).unwrap_or_default())
+        .unwrap_or_else(|| "{}".to_string());
+    let result = aether_agent::create_workflow(&req.goal, &req.start_url, &config_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_page(Json(req): Json<WorkflowProvidePageRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_provide_page(&req.orchestrator_json, &req.html, &req.url);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_click(Json(req): Json<WorkflowReportClickRequest>) -> impl IntoResponse {
+    let result =
+        aether_agent::workflow_report_click(&req.orchestrator_json, &req.click_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_fill(Json(req): Json<WorkflowReportFillRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_report_fill(&req.orchestrator_json, &req.fill_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_report_extract(
+    Json(req): Json<WorkflowReportExtractRequest>,
+) -> impl IntoResponse {
+    let result =
+        aether_agent::workflow_report_extract(&req.orchestrator_json, &req.extract_result_json);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_complete(Json(req): Json<WorkflowStepRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_complete_step(&req.orchestrator_json, req.step_index);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_rollback(Json(req): Json<WorkflowStepRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_rollback_step(&req.orchestrator_json, req.step_index);
+    (StatusCode::OK, result)
+}
+
+async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl IntoResponse {
+    let result = aether_agent::workflow_status(&req.orchestrator_json);
+    (StatusCode::OK, result)
+}
+
+fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -1458,6 +2669,7 @@ fn build_router() -> Router {
     Router::new()
         // Root & Health
         .route("/", get(root))
+        .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
@@ -1515,8 +2727,42 @@ fn build_router() -> Router {
         .route("/api/collab/register", post(collab_register))
         .route("/api/collab/publish", post(collab_publish))
         .route("/api/collab/fetch", post(collab_fetch))
+        // Fas 10: XHR Interception
+        .route("/api/detect-xhr", post(detect_xhr))
+        // Fas 11: Vision
+        .route("/api/parse-screenshot", post(parse_screenshot_handler))
+        .route("/api/vision/parse", post(parse_screenshot_server_model))
+        .route("/api/fetch-vision", post(fetch_vision_handler))
+        // Fas 13: Session Management
+        .route("/api/session/create", post(session_create))
+        .route("/api/session/cookies/add", post(session_add_cookies))
+        .route("/api/session/cookies/get", post(session_get_cookies))
+        .route("/api/session/token/set", post(session_set_token))
+        .route(
+            "/api/session/oauth/authorize",
+            post(session_oauth_authorize),
+        )
+        .route("/api/session/oauth/exchange", post(session_token_exchange))
+        .route("/api/session/status", post(session_status_handler))
+        .route("/api/session/login/detect", post(session_detect_login))
+        .route("/api/session/evict", post(session_evict))
+        .route("/api/session/login/mark", post(session_mark_login))
+        .route("/api/session/token/refresh", post(session_token_refresh))
+        // Fas 14: Workflow Orchestration
+        .route("/api/workflow/create", post(workflow_create))
+        .route("/api/workflow/page", post(workflow_page))
+        .route("/api/workflow/report/click", post(workflow_report_click))
+        .route("/api/workflow/report/fill", post(workflow_report_fill))
+        .route(
+            "/api/workflow/report/extract",
+            post(workflow_report_extract),
+        )
+        .route("/api/workflow/complete", post(workflow_complete))
+        .route("/api/workflow/rollback", post(workflow_rollback))
+        .route("/api/workflow/status", post(workflow_status_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
+        .with_state(state)
         .layer(cors)
 }
 
@@ -1528,6 +2774,12 @@ async fn main() {
         .unwrap_or(3000);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    // Ladda vision-modell vid startup (om konfigurerad)
+    let model_bytes = load_vision_model().await;
+    let state = AppState {
+        vision_model: Arc::new(RwLock::new(model_bytes)),
+    };
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
@@ -1567,14 +2819,22 @@ async fn main() {
     println!("  POST /api/collab/publish         – Publish delta to collab store");
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
     println!();
-    println!("  POST /mcp                        – MCP Streamable HTTP endpoint");
-    println!("  GET  /mcp                        – MCP SSE stream (not yet implemented)");
+    println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
+    println!(
+        "  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision (client model)"
+    );
+    println!("  POST /api/vision/parse           – Analyze screenshot with server-loaded model");
+    println!("  POST /api/fetch-vision           – URL → screenshot → YOLO vision → images + JSON");
+    println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
+    println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
+    println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
+    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications, returns 405 — use POST)");
     println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind");
-    axum::serve(listener, build_router())
+    axum::serve(listener, build_router(state))
         .await
         .expect("Server error");
 }

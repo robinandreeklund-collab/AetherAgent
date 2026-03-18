@@ -11,6 +11,9 @@ pub fn parse_html(html: &str) -> RcDom {
 }
 
 /// Rekursiv helper för att hämta all text ur ett DOM-träd
+/// Taggar vars textinnehåll ska ignoreras vid text-extraktion
+const TEXT_SKIP_TAGS: &[&str] = &["script", "style", "noscript", "template"];
+
 pub fn extract_text(handle: &Handle) -> String {
     let mut text = String::new();
 
@@ -21,6 +24,15 @@ pub fn extract_text(handle: &Handle) -> String {
             if !trimmed.is_empty() {
                 text.push_str(trimmed);
                 text.push(' ');
+            }
+        }
+        NodeData::Element { name, .. } => {
+            // Skippa script/style/noscript — deras text är kod, inte innehåll
+            if TEXT_SKIP_TAGS.contains(&name.local.as_ref()) {
+                return text;
+            }
+            for child in handle.children.borrow().iter() {
+                text.push_str(&extract_text(child));
             }
         }
         _ => {
