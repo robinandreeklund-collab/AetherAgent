@@ -62,7 +62,7 @@ No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly
 
 ### Honest Positioning
 
-AetherAgent is **not** a Chrome replacement. It fetches pages and builds semantic trees, but does not execute full JavaScript runtimes (V8) or render CSS. For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works fully standalone: URL in, semantic tree out.
+AetherAgent is **not** a Chrome replacement. It fetches pages and builds semantic trees, and can render pages to pixel-perfect screenshots via Blitz (pure Rust browser engine with CSS layout), but does not execute full JavaScript runtimes (V8). For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~40% of the web, and the entire data extraction niche), AetherAgent works fully standalone: URL in, semantic tree out, screenshot rendered.
 
 | Capability | AetherAgent | Playwright | Browser Use | Scrapy |
 |-----------|:-----------:|:----------:|:-----------:|:------:|
@@ -71,7 +71,7 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Startup time | <1 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
 | Memory per instance | ~12 MB | ~150 MB | ~200 MB | ~30 MB |
 | Full JavaScript (V8) | No | Yes | Yes | No |
-| CSS rendering | No | Yes | Yes | No |
+| CSS rendering (Blitz) | **Yes** (opt) | Yes | Yes | No |
 | Embeddable in WASM | **Yes** | No | No | No |
 | Semantic diff (token savings) | **Yes** | No | No | No |
 | XHR/fetch endpoint discovery | **Yes** | No | No | No |
@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **23 Rust modules**, **58 WASM-exported functions**, **63 HTTP endpoints**, and **22 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **23 Rust modules**, **58 WASM-exported functions**, **66 HTTP endpoints**, and **24 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -372,11 +372,13 @@ Stateful workflow engine that combines `ActionPlan` + `TemporalMemory` + `Sessio
 - **Session integration** — cookies and auth headers automatically attached to every action
 - **Max pages protection** — prevents infinite navigation loops (default: 20 pages)
 
-### 17. Vision — YOLOv8 Screenshot Analysis
+### 17. Vision — YOLOv8 Screenshot Analysis + Blitz Rendering
 
-**Module:** `vision.rs`
+**Modules:** `vision.rs`, rendering in `server.rs` / `mcp_server.rs`
 
 Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detects UI elements directly from screenshots — no DOM required. Feature-gated behind `--features vision`.
+
+The `fetch_vision` pipeline renders pages to PNG using [Blitz](https://github.com/DioxusLabs/blitz) — a pure Rust browser engine (no headless Chrome/Chromium). Blitz handles HTML/CSS layout, external stylesheets, fonts, and images via an async resource loader. The full pipeline: URL → HTTP fetch → Blitz render → YOLOv8 detection → annotated screenshot + JSON.
 
 | Function | What it does |
 |----------|-------------|
@@ -386,14 +388,18 @@ Embedded YOLOv8-nano object detection via `rten` (pure Rust ONNX runtime). Detec
 | `run_inference` | ONNX model inference via rten |
 | `nms` | Non-max suppression on overlapping detections |
 | `detections_to_tree` | Convert detections to SemanticTree with goal-relevance |
+| `render_url_to_png` | Fetch + render page to PNG via Blitz (server) |
+| `render_url_to_png_mcp` | Same as above for MCP server context |
 
 **Detected UI classes:** button, input, link, icon, text, image, checkbox, radio, select, heading.
+
+**Blitz rendering features:** CSS layout (flexbox, grid), external stylesheets, web fonts, images, viewport sizing. No JavaScript execution (use `parse_with_js` for inline JS).
 
 ---
 
 ## API Reference
 
-### HTTP Endpoints (63 routes)
+### HTTP Endpoints (66 routes)
 
 Run the server: `cargo run --features server --bin aether-server`
 
@@ -503,6 +509,20 @@ Run the server: `cargo run --features server --bin aether-server`
 | POST | `/api/collab/publish` | Publish delta |
 | POST | `/api/collab/fetch` | Fetch new deltas |
 
+#### Vision & Screenshot Analysis
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/detect-xhr` | Scan HTML for XHR/fetch/AJAX endpoints |
+| POST | `/api/parse-screenshot` | Analyze screenshot with YOLOv8 (client sends model) |
+| POST | `/api/vision/parse` | Analyze screenshot with server-loaded model |
+| POST | `/api/fetch-vision` | URL → Blitz render → YOLOv8 → images + JSON |
+
+`/api/fetch-vision` is the all-in-one endpoint: give it a URL and goal, and it renders the page with [Blitz](https://github.com/DioxusLabs/blitz) (pure Rust browser engine), runs YOLOv8-nano detection, and returns three response fields:
+1. `screenshot` — base64 PNG of the rendered page
+2. `annotated` — base64 PNG with color-coded bounding boxes drawn on detected elements
+3. `detections` — JSON array of `{class, confidence, bbox}` plus a semantic tree
+
 #### Session Management
 
 | Method | Path | Description |
@@ -532,7 +552,7 @@ Run the server: `cargo run --features server --bin aether-server`
 | POST | `/api/workflow/rollback` | Rollback step for retry |
 | POST | `/api/workflow/status` | Workflow status + progress |
 
-### MCP Server (22 tools)
+### MCP Server (24 tools)
 
 Run: `cargo run --features mcp --bin aether-mcp`
 
@@ -570,6 +590,8 @@ Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 | **Network & Vision** | | |
 | `detect_xhr_urls` | Scan inline scripts for `fetch()`, `XMLHttpRequest.open()`, `$.ajax()`, `$.get()`, `$.post()` patterns. Returns `{url, method, headers}` | Discovering hidden API endpoints in a page's JavaScript |
 | `parse_screenshot` | Analyze a screenshot with YOLOv8-nano object detection. Returns detected UI elements with bounding boxes, confidence, and semantic tree | You have a screenshot but no HTML — visual element detection |
+| `vision_parse` | Same as `parse_screenshot` but uses the server-loaded ONNX model (no need to send model bytes) | Server already has the vision model configured |
+| `fetch_vision` | ALL-IN-ONE: Fetch URL → render with Blitz → YOLOv8 detection → returns original screenshot + annotated image with bounding boxes + JSON detections | You want to visually analyze any web page — just provide URL and goal |
 
 ### Claude Desktop Setup
 
@@ -652,7 +674,7 @@ Once connected, Claude gets access to 22 AetherAgent tools. Try these prompts:
 
 #### Available MCP Tools
 
-See the full [MCP Server (22 tools)](#mcp-server-22-tools) table above for the complete list. Key tools for getting started:
+See the full [MCP Server (24 tools)](#mcp-server-22-tools) table above for the complete list. Key tools for getting started:
 
 | Tool | What it does |
 |------|-------------|
@@ -908,9 +930,12 @@ End-to-end tests against real production websites, running on the deployed Rende
 │  │ Discovery│ │ Cross-    │ │ Intercept│ │ YOLOv8-nano      │   │
 │  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ Blitz Renderer — pure Rust CSS layout → PNG screenshots  │   │
+│  └──────────────────────────────────────────────────────────┘   │
 │                                                                   │
 │              23 modules · 58 WASM functions                       │
-│              63 HTTP endpoints · 22 MCP tools                     │
+│              66 HTTP endpoints · 24 MCP tools                     │
 └──────────────────────────────┬────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼────────────────────────────────────┐
@@ -950,7 +975,7 @@ AetherAgent/
 │   ├── types.rs          # Core data structures
 │   └── bin/
 │       ├── server.rs     # Axum HTTP API (63 endpoints)
-│       └── mcp_server.rs # MCP server (22 tools, stdio transport)
+│       └── mcp_server.rs # MCP server (24 tools, stdio transport)
 ├── tests/
 │   ├── integration_test.rs   # 49 end-to-end tests
 │   ├── fixture_tests.rs      # 30 fixture-based scenario tests
@@ -1021,6 +1046,12 @@ cargo run --features mcp --bin aether-mcp
 
 # Build with vision (YOLOv8 screenshot analysis)
 cargo build --features vision
+
+# Build with Blitz rendering (fetch_vision screenshots)
+cargo build --features blitz
+
+# Build server with all features (vision + Blitz + MCP)
+cargo build --features "server,vision,blitz,mcp" --release
 ```
 
 ### Deploy to Render
@@ -1071,8 +1102,8 @@ AetherAgent is a fully functional AI browser engine with:
 
 - **22 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, session management, workflow orchestration, workflow memory, core types
 - **58 WASM-exported functions** — complete API surface for any WASM host
-- **63 HTTP REST endpoints** — deployable Axum server with CORS
-- **22 MCP tools** — Claude Desktop, Cursor, VS Code compatible
+- **66 HTTP REST endpoints** — deployable Axum server with CORS
+- **24 MCP tools** — Claude Desktop, Cursor, VS Code compatible
 - **352 tests** — 256 unit + 30 fixture + 49 integration + 17 orchestrator, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
@@ -1103,6 +1134,10 @@ rten = "0.15"               # ONNX runtime for YOLOv8 (feature: vision)
 rten-imageproc = "0.15"     # Image processing for rten (feature: vision)
 rten-tensor = "0.15"        # Tensor operations (feature: vision)
 image = "0.25"              # PNG/JPEG decoding (feature: vision)
+blitz-html = "0.2"          # Pure Rust browser engine (feature: blitz)
+blitz-dom = "0.2"           # DOM rendering with Blitz (feature: blitz)
+blitz-traits = "0.2"        # Blitz trait definitions (feature: blitz)
+png = "0.17"                # PNG encoding for screenshots (feature: blitz)
 ```
 
 ### Design Principles
