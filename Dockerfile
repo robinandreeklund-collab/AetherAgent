@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev python3 \
     # Blitz rendering deps: fontconfig for font discovery
     libfontconfig1-dev \
+    # ORT (ONNX Runtime) kräver libstdc++ vid länkning
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -46,7 +48,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     python3-minimal \
-    python3-pip \
     # Fonts for Blitz rendering (system fallback fonts)
     fonts-liberation \
     fonts-noto-color-emoji \
@@ -57,8 +58,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
     chromium \
-    # rten-convert for ONNX → rten model conversion at startup
-    && pip3 install --no-cache-dir --break-system-packages rten-convert \
+    # ORT (ONNX Runtime) kräver libstdc++ vid runtime
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromium sökväg för headless_chrome crate
@@ -72,7 +73,7 @@ ENV PORT=10000
 # Vision model: set AETHER_MODEL_URL to a public URL (e.g. GitHub Release)
 # or AETHER_MODEL_PATH to a local file path inside the container.
 # The server loads the model at startup and exposes /api/vision/parse.
-# Supports both .onnx and .rten formats (auto-converts ONNX → rten at startup).
+# ORT laddar .onnx-modellen direkt (ingen konvertering behövs).
 # ENV AETHER_MODEL_URL=https://github.com/.../aether-ui-latest.onnx
 
 EXPOSE 10000
