@@ -195,7 +195,7 @@ mod tests {
     fn test_parse_simple_html() {
         let html = r#"<html><body><button>Klicka här</button></body></html>"#;
         let dom = parse_html(html);
-        assert!(dom.document.children.borrow().len() > 0);
+        assert!(!dom.document.children.borrow().is_empty());
     }
 
     #[test]

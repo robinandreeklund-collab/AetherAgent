@@ -744,12 +744,14 @@ mod tests {
 
     #[test]
     fn test_dynamic_class_labels() {
-        let mut config = VisionConfig::default();
-        config.class_labels = vec![
-            "btn".to_string(),
-            "textfield".to_string(),
-            "hyperlink".to_string(),
-        ];
+        let config = VisionConfig {
+            class_labels: vec![
+                "btn".to_string(),
+                "textfield".to_string(),
+                "hyperlink".to_string(),
+            ],
+            ..Default::default()
+        };
         assert_eq!(
             config.class_name(0),
             "btn",
@@ -785,8 +787,10 @@ mod tests {
 
     #[test]
     fn test_model_version() {
-        let mut config = VisionConfig::default();
-        config.model_version = "v2.1-ui-detector".to_string();
+        let config = VisionConfig {
+            model_version: "v2.1-ui-detector".to_string(),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&config).expect("Borde serialisera");
         assert!(
             json.contains("v2.1-ui-detector"),

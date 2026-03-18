@@ -367,7 +367,7 @@ mod tests {
         let result = extract_price_from_json(&json);
         assert!(result.is_some(), "Borde hitta numeriskt pris");
         assert!(
-            result.as_ref().map_or(false, |v| v.contains("1599")),
+            result.as_ref().is_some_and(|v| v.contains("1599")),
             "Borde innehålla 1599, fick: {:?}",
             result
         );
@@ -559,11 +559,11 @@ mod tests {
         cache.put("https://api.shop.se/b", "{}", node2, 1000, None);
         cache.evict_expired(7000);
         assert!(
-            cache.entries.get("https://api.shop.se/a").is_none(),
+            !cache.entries.contains_key("https://api.shop.se/a"),
             "Expirerad entry borde tas bort"
         );
         assert!(
-            cache.entries.get("https://api.shop.se/b").is_some(),
+            cache.entries.contains_key("https://api.shop.se/b"),
             "Entry utan TTL borde finnas kvar"
         );
     }

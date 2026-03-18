@@ -90,7 +90,7 @@ fn test_01_ecommerce_extract() {
     );
     let r = parse_json(&result);
     assert!(
-        r["entries"].as_array().unwrap().len() > 0,
+        !r["entries"].as_array().unwrap().is_empty(),
         "Borde extrahera produktinfo"
     );
 }
@@ -289,7 +289,7 @@ fn test_10_injection_hidden_detected() {
     let result = parse_to_semantic_tree(&html, "köp produkt", "https://evil.com/shop");
     let tree = parse_json(&result);
     assert!(
-        tree["injection_warnings"].as_array().unwrap().len() > 0,
+        !tree["injection_warnings"].as_array().unwrap().is_empty(),
         "Borde detektera dolda injektionsförsök"
     );
 }
@@ -302,7 +302,7 @@ fn test_11_injection_social_detected() {
     let result = parse_to_semantic_tree(&html, "läs recensioner", "https://shop.com/reviews");
     let tree = parse_json(&result);
     assert!(
-        tree["injection_warnings"].as_array().unwrap().len() > 0,
+        !tree["injection_warnings"].as_array().unwrap().is_empty(),
         "Borde detektera sociala injektionsförsök i recensioner"
     );
 }
@@ -461,7 +461,7 @@ fn test_20_catalog_parse_performance() {
 
     let tree = parse_json(&result);
     assert!(
-        tree["nodes"].as_array().unwrap().len() > 0,
+        !tree["nodes"].as_array().unwrap().is_empty(),
         "Borde ha noder"
     );
     assert!(elapsed < 500, "Borde parsa under 500ms, tog {}ms", elapsed);

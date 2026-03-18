@@ -473,7 +473,7 @@ fn test_diff_ecommerce_product_to_checkout() {
     let delta: serde_json::Value = serde_json::from_str(&result).unwrap();
 
     assert!(
-        delta["changes"].as_array().unwrap().len() > 0,
+        !delta["changes"].as_array().unwrap().is_empty(),
         "Sidnavigering borde ge förändringar"
     );
     assert!(
@@ -828,7 +828,7 @@ fn test_temporal_memory_ecommerce_flow() {
     // Simulera en e-handelsprocess: 3 sidor i sekvens
     let mut mem_json = create_temporal_memory();
 
-    let pages = vec![
+    let pages = [
         (
             r##"<html><body><button>Köp</button><a href="/cart">Varukorg (0)</a></body></html>"##,
             "köp produkt",
