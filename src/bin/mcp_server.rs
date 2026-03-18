@@ -235,6 +235,8 @@ struct FetchVisionParams {
     width: Option<u32>,
     /// Viewport height in pixels (default: 800)
     height: Option<u32>,
+    /// true (default): skip external resources (~50ms). false: load all (~2s cap).
+    fast_render: Option<bool>,
 }
 
 // ─── Server ─────────────────────────────────────────────────────────────────
@@ -493,7 +495,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap)."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
@@ -503,7 +505,12 @@ impl AetherMcpServer {
 
 /// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
 #[cfg(feature = "blitz")]
-async fn render_url_to_png_mcp(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+async fn render_url_to_png_mcp(
+    url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<Vec<u8>, String> {
     // Hämta HTML med enkel reqwest
     let html = reqwest::get(url)
         .await
@@ -513,18 +520,24 @@ async fn render_url_to_png_mcp(url: &str, width: u32, height: u32) -> Result<Vec
         .map_err(|e| format!("Body error: {e}"))?;
 
     let base_url = url.to_string();
-    tokio::task::spawn_blocking(move || render_html_to_png_mcp(&html, &base_url, width, height))
-        .await
-        .map_err(|e| format!("Render task: {e}"))?
+    tokio::task::spawn_blocking(move || {
+        render_html_to_png_mcp(&html, &base_url, width, height, fast_render)
+    })
+    .await
+    .map_err(|e| format!("Render task: {e}"))?
 }
 
-/// Ren-Rust HTML → PNG med Blitz, med riktig resurs-laddning via MpscCallback.
+/// Ren-Rust HTML → PNG med Blitz.
+///
+/// `fast_render=true`: Skippar externa resurser — ~50ms. Räcker för YOLO-detektering.
+/// `fast_render=false`: Laddar CSS/fonter/bilder med 2s timeout, 10ms poll.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_mcp(
     html: &str,
     base_url: &str,
     width: u32,
     height: u32,
+    fast_render: bool,
 ) -> Result<Vec<u8>, String> {
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
@@ -533,42 +546,62 @@ fn render_html_to_png_mcp(
 
     let scale: f32 = 1.0;
 
-    // MpscCallback samlar resurser via kanal
-    let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
-    let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-        std::sync::Arc::new(callback);
-    let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
+    let mut document = if fast_render {
+        // Fast mode: ingen net_provider → inga nätverksresurser
+        HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                ..Default::default()
+            },
+        )
+    } else {
+        // Full mode: ladda CSS, fonter, bilder via blitz-net
+        let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+        let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+            std::sync::Arc::new(callback);
+        let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
 
-    let mut document = HtmlDocument::from_html(
-        html,
-        DocumentConfig {
-            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-            base_url: Some(base_url.to_string()),
-            net_provider: Some(std::sync::Arc::clone(&net)
-                as std::sync::Arc<
-                    dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
-                >),
-            ..Default::default()
-        },
-    );
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                net_provider: Some(std::sync::Arc::clone(&net)
+                    as std::sync::Arc<
+                        dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                    >),
+                ..Default::default()
+            },
+        );
 
-    // Polla resurser och resolva styles+layout
-    for _ in 0..20 {
+        // Polla resurser med 10ms intervall, max 2s total timeout
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            while let Ok((_doc_id, resource)) = rx.try_recv() {
+                doc.as_mut().load_resource(resource);
+            }
+            doc.as_mut().resolve(0.0);
+            if net.is_empty() || std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Dränera resterande resurser
         while let Ok((_doc_id, resource)) = rx.try_recv() {
-            document.as_mut().load_resource(resource);
+            doc.as_mut().load_resource(resource);
         }
-        document.as_mut().resolve(0.0);
-        if net.is_empty() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+        doc.as_mut().resolve(0.0);
 
-    // Dränera resterande resurser
-    while let Ok((_doc_id, resource)) = rx.try_recv() {
-        document.as_mut().load_resource(resource);
+        doc
+    };
+
+    // Fast mode: resolva layout en gång
+    if fast_render {
+        document.as_mut().resolve(0.0);
     }
-    document.as_mut().resolve(0.0);
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
@@ -605,7 +638,12 @@ fn render_html_to_png_mcp(
 }
 
 #[cfg(not(feature = "blitz"))]
-async fn render_url_to_png_mcp(_url: &str, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
+async fn render_url_to_png_mcp(
+    _url: &str,
+    _width: u32,
+    _height: u32,
+    _fast_render: bool,
+) -> Result<Vec<u8>, String> {
     Err("Blitz feature inte aktiverad".to_string())
 }
 
@@ -643,8 +681,14 @@ async fn handle_fetch_vision(
         )]);
     }
 
+    // Default fast_render=true: skippa externa resurser för snabb YOLO-detektering
+    let fast_render = args
+        .get("fast_render")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     // Rendera sidan till PNG med Blitz (ren Rust)
-    let png_bytes = match render_url_to_png_mcp(url, width, height).await {
+    let png_bytes = match render_url_to_png_mcp(url, width, height, fast_render).await {
         Ok(b) => b,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
