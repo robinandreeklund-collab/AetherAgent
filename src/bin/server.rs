@@ -1979,53 +1979,106 @@ fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<
     Err("Vision feature inte aktiverad".to_string())
 }
 
-/// Ta en headless screenshot av en URL med Chromium.
+/// Hämta HTML från URL och rendera till PNG med Blitz (ren Rust, ingen extern binär).
 /// Returnerar PNG-bytes vid framgång.
-async fn headless_screenshot(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let chromium = std::env::var("CHROMIUM_PATH").unwrap_or_else(|_| "chromium".to_string());
-
-    let tmp_dir = std::env::temp_dir();
-    let screenshot_path = tmp_dir.join(format!("aether_screenshot_{}.png", std::process::id()));
-    let screenshot_str = screenshot_path
-        .to_str()
-        .ok_or("Ogiltig temp-sökväg")?
-        .to_string();
-
-    let output = tokio::process::Command::new(&chromium)
-        .args([
-            "--headless=new",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--disable-software-rasterizer",
-            &format!("--window-size={width},{height}"),
-            &format!("--screenshot={screenshot_str}"),
-            "--hide-scrollbars",
-            // Vänta max 15s på sidan
-            "--timeout=15000",
-            url,
-        ])
-        .output()
+#[cfg(feature = "blitz")]
+async fn render_url_to_png(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    // Hämta HTML med reqwest
+    let config = aether_agent::types::FetchConfig::default();
+    let response = aether_agent::fetch::fetch_page(url, &config)
         .await
-        .map_err(|e| format!("Kunde inte starta Chromium: {e}. Sätt CHROMIUM_PATH."))?;
+        .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
+    let html = &response.body;
 
-    if !screenshot_path.exists() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "Chromium skapade ingen screenshot. Exit={}, stderr={}",
-            output.status,
-            &stderr[..stderr.len().min(500)]
-        ));
-    }
-
-    let png_bytes = tokio::fs::read(&screenshot_path)
-        .await
-        .map_err(|e| format!("Kunde inte läsa screenshot: {e}"))?;
-
-    // Städa upp
-    let _ = tokio::fs::remove_file(&screenshot_path).await;
+    // Rendera HTML till pixel-buffer med Blitz (i en blocking task)
+    let html_owned = html.to_string();
+    let png_bytes =
+        tokio::task::spawn_blocking(move || render_html_to_png(&html_owned, width, height))
+            .await
+            .map_err(|e| format!("Blitz render task error: {e}"))??;
 
     Ok(png_bytes)
+}
+
+/// Ren-Rust HTML → PNG rendering med Blitz (synkron, körs i spawn_blocking)
+#[cfg(feature = "blitz")]
+fn render_html_to_png(html: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    use anyrender::{ImageRenderer, PaintScene as _};
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::net::DummyNetCallback;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let scale: f32 = 1.0;
+    let dummy_cb: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+        std::sync::Arc::new(DummyNetCallback);
+    let net = std::sync::Arc::new(blitz_net::Provider::new(dummy_cb));
+
+    // Parsa HTML → DOM
+    let mut document = HtmlDocument::from_html(
+        html,
+        DocumentConfig {
+            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+            net_provider: Some(std::sync::Arc::clone(&net)
+                as std::sync::Arc<
+                    dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                >),
+            ..Default::default()
+        },
+    );
+
+    // Resolva styles + layout (loopa tills alla assets är hämtade)
+    for _ in 0..10 {
+        document.resolve(0.0);
+        if net.is_empty() {
+            break;
+        }
+    }
+    document.as_mut().resolve(0.0);
+
+    // Rendera till RGBA-buffer
+    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
+    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+    renderer.render_to_vec(
+        |scene| {
+            // Vit bakgrund
+            scene.fill(
+                peniko::Fill::NonZero,
+                peniko::kurbo::Affine::IDENTITY,
+                white,
+                None,
+                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+            );
+
+            // Måla DOM-trädet
+            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
+        },
+        &mut buffer,
+    );
+
+    // Koda till PNG
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header: {e}"))?;
+        writer
+            .write_image_data(&buffer)
+            .map_err(|e| format!("PNG data: {e}"))?;
+        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+    }
+
+    Ok(png_bytes)
+}
+
+/// Fallback om Blitz inte är kompilerat
+#[cfg(not(feature = "blitz"))]
+async fn render_url_to_png(_url: &str, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
+    Err("Blitz feature inte aktiverad. Kompilera med --features blitz".to_string())
 }
 
 /// REST-endpoint: POST /api/fetch-vision — hämta URL, ta screenshot, kör vision
@@ -2036,8 +2089,8 @@ async fn fetch_vision_handler(
     let width = req.width.unwrap_or(1280);
     let height = req.height.unwrap_or(800);
 
-    // Ta screenshot
-    let png_bytes = match headless_screenshot(&req.url, width, height).await {
+    // Rendera sidan till PNG med Blitz (ren Rust)
+    let png_bytes = match render_url_to_png(&req.url, width, height).await {
         Ok(b) => b,
         Err(e) => {
             return (
@@ -2309,7 +2362,7 @@ async fn mcp_dispatch_tool(
             aether_agent::fetch::validate_url(url)?;
 
             // Ta screenshot med headless Chromium
-            let png_bytes = headless_screenshot(url, width, height).await?;
+            let png_bytes = render_url_to_png(url, width, height).await?;
             let png_b64 = B64.encode(&png_bytes);
 
             // Kör vision

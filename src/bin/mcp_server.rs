@@ -501,7 +501,97 @@ impl AetherMcpServer {
     }
 }
 
-/// Hanterar fetch_vision: ta screenshot med Chromium, kör vision, returnera bilder
+/// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
+#[cfg(feature = "blitz")]
+async fn render_url_to_png_mcp(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    // Hämta HTML med enkel reqwest
+    let html = reqwest::get(url)
+        .await
+        .map_err(|e| format!("Fetch error: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("Body error: {e}"))?;
+
+    let html_owned = html;
+    tokio::task::spawn_blocking(move || render_html_to_png_mcp(&html_owned, width, height))
+        .await
+        .map_err(|e| format!("Render task: {e}"))?
+}
+
+/// Ren-Rust HTML → PNG med Blitz (synkron, körs i spawn_blocking)
+#[cfg(feature = "blitz")]
+fn render_html_to_png_mcp(html: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    use anyrender::{ImageRenderer, PaintScene as _};
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::net::DummyNetCallback;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let scale: f32 = 1.0;
+    let dummy_cb: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+        std::sync::Arc::new(DummyNetCallback);
+    let net = std::sync::Arc::new(blitz_net::Provider::new(dummy_cb));
+
+    let mut document = HtmlDocument::from_html(
+        html,
+        DocumentConfig {
+            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+            net_provider: Some(std::sync::Arc::clone(&net)
+                as std::sync::Arc<
+                    dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                >),
+            ..Default::default()
+        },
+    );
+
+    for _ in 0..10 {
+        document.resolve(0.0);
+        if net.is_empty() {
+            break;
+        }
+    }
+    document.as_mut().resolve(0.0);
+
+    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
+    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+    renderer.render_to_vec(
+        |scene| {
+            scene.fill(
+                peniko::Fill::NonZero,
+                peniko::kurbo::Affine::IDENTITY,
+                white,
+                None,
+                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+            );
+            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
+        },
+        &mut buffer,
+    );
+
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header: {e}"))?;
+        writer
+            .write_image_data(&buffer)
+            .map_err(|e| format!("PNG data: {e}"))?;
+        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+    }
+
+    Ok(png_bytes)
+}
+
+#[cfg(not(feature = "blitz"))]
+async fn render_url_to_png_mcp(_url: &str, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
+    Err("Blitz feature inte aktiverad".to_string())
+}
+
+/// Hanterar fetch_vision: hämta URL, rendera med Blitz, kör vision, returnera bilder
 async fn handle_fetch_vision(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> rmcp::model::CallToolResult {
@@ -535,52 +625,15 @@ async fn handle_fetch_vision(
         )]);
     }
 
-    // Ta screenshot med headless Chromium
-    let chromium = std::env::var("CHROMIUM_PATH").unwrap_or_else(|_| "chromium".to_string());
-    let tmp_path = std::env::temp_dir().join(format!("aether_mcp_ss_{}.png", std::process::id()));
-    let tmp_str = tmp_path.to_string_lossy().to_string();
-
-    let output = match tokio::process::Command::new(&chromium)
-        .args([
-            "--headless=new",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--disable-software-rasterizer",
-            &format!("--window-size={width},{height}"),
-            &format!("--screenshot={tmp_str}"),
-            "--hide-scrollbars",
-            "--timeout=15000",
-            url,
-        ])
-        .output()
-        .await
-    {
-        Ok(o) => o,
-        Err(e) => {
-            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                "Kunde inte starta Chromium: {e}. Sätt CHROMIUM_PATH."
-            ))]);
-        }
-    };
-
-    if !tmp_path.exists() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-            "Screenshot misslyckades: {}",
-            &stderr[..stderr.len().min(500)]
-        ))]);
-    }
-
-    let png_bytes = match tokio::fs::read(&tmp_path).await {
+    // Rendera sidan till PNG med Blitz (ren Rust)
+    let png_bytes = match render_url_to_png_mcp(url, width, height).await {
         Ok(b) => b,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                "Kunde inte läsa screenshot: {e}"
+                "Rendering misslyckades: {e}"
             ))]);
         }
     };
-    let _ = tokio::fs::remove_file(&tmp_path).await;
 
     let png_b64 = b64.encode(&png_bytes);
 

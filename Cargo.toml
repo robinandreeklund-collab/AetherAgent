@@ -43,16 +43,29 @@ rten-imageproc = { version = "0.15", optional = true }
 rten-tensor = { version = "0.15", optional = true }
 image = { version = "0.25", optional = true }
 
+# Blitz – ren Rust HTML/CSS-renderer för server-side screenshots (optional)
+blitz-html = { version = "0.2", optional = true }
+blitz-dom = { version = "0.2", optional = true }
+blitz-paint = { version = "0.2", optional = true }
+blitz-net = { version = "0.2", optional = true }
+blitz-traits = { version = "0.2", optional = true }
+anyrender = { version = "0.6", optional = true }
+anyrender_vello_cpu = { version = "0.7", optional = true }
+# Peniko version must match anyrender 0.6's dep (peniko 0.5)
+peniko = { version = "0.5", optional = true }
+png = { version = "0.17", optional = true }
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
 [features]
 default = []
-server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64"]
+server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64", "blitz"]
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
-mcp = ["rmcp", "tokio", "schemars", "base64"]
+mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest"]
 vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
+blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
 
 [[bin]]
 name = "aether-server"
