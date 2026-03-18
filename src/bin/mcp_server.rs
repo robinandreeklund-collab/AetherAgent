@@ -217,6 +217,14 @@ struct ParseScreenshotParams {
     goal: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct VisionParseParams {
+    /// PNG screenshot as base64 string
+    png_base64: String,
+    /// The agent's current goal for relevance scoring
+    goal: String,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -445,7 +453,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_screenshot",
-        description = "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings). USE THIS TOOL WHEN: you have a screenshot (PNG) of a web page or app and want to detect interactive elements visually — useful when HTML is unavailable, rendered differently from source, or for canvas/image-based UIs. Provide base64-encoded PNG and ONNX model bytes. Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires the 'vision' feature flag at compile time."
+        description = "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings). USE THIS TOOL WHEN: you have a screenshot (PNG) of a web page or app and want to detect interactive elements visually — useful when HTML is unavailable, rendered differently from source, or for canvas/image-based UIs. Provide base64-encoded PNG and ONNX model bytes. Returns the original screenshot as image, an annotated image with bounding boxes, and JSON detections. Requires the 'vision' feature flag at compile time."
     )]
     fn parse_screenshot(&self, Parameters(params): Parameters<ParseScreenshotParams>) -> String {
         use base64::Engine;
@@ -460,9 +468,299 @@ impl AetherMcpServer {
             };
         aether_agent::parse_screenshot(&png_bytes, &model_bytes, &params.goal)
     }
+
+    #[tool(
+        name = "vision_parse",
+        description = "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns: 1) the original screenshot as an image, 2) an annotated screenshot with color-coded bounding boxes and labels drawn on it, and 3) the detection JSON with confidence scores and semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH on the server. USE THIS WHEN: you want visual analysis without managing model files yourself."
+    )]
+    fn vision_parse(&self, Parameters(params): Parameters<VisionParseParams>) -> String {
+        // Stubba — call_tool override hanterar image blocks
+        // Denna funktion kallas aldrig direkt, men behövs för tool-registrering
+        params.goal.clone()
+    }
+}
+
+/// Hanterar vision-verktyg med image content blocks
+fn handle_vision_tool(
+    tool_name: &str,
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    use base64::Engine;
+    let b64 = &base64::engine::general_purpose::STANDARD;
+
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let png_b64 = args
+        .get("png_base64")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+
+    let png_bytes = match b64.decode(png_b64) {
+        Ok(b) => b,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Invalid PNG base64: {e}"
+            ))]);
+        }
+    };
+
+    // Bestäm modell
+    let model_bytes = if tool_name == "parse_screenshot" {
+        // Client-provided model
+        let model_b64 = args
+            .get("model_base64")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        match b64.decode(model_b64) {
+            Ok(b) => b,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!("Invalid model base64: {e}"),
+                )]);
+            }
+        }
+    } else {
+        // Server-loaded model (vision_parse)
+        let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
+        if model_path.is_empty() {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Ingen vision-modell tillgänglig. Sätt AETHER_MODEL_PATH.".to_string(),
+            )]);
+        }
+        match std::fs::read(&model_path) {
+            Ok(b) => b,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!("Kunde inte läsa modell {model_path}: {e}"),
+                )]);
+            }
+        }
+    };
+
+    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+    build_vision_result(png_b64, &png_bytes, &result_json)
+}
+
+/// Bygg MCP CallToolResult med original-bild, annoterad bild och JSON-text
+fn build_vision_result(
+    png_b64: &str,
+    png_bytes: &[u8],
+    result_json: &str,
+) -> rmcp::model::CallToolResult {
+    let mut content = vec![
+        // Block 1: Originalskärmdump
+        rmcp::model::Content::image(png_b64, "image/png"),
+    ];
+
+    // Block 2: Annoterad bild med bboxar (om vision feature är aktivt)
+    if let Ok(annotated_b64) = render_annotated_screenshot_mcp(png_bytes, result_json) {
+        content.push(rmcp::model::Content::image(annotated_b64, "image/png"));
+    }
+
+    // Block 3: JSON-resultat
+    content.push(rmcp::model::Content::text(result_json));
+
+    rmcp::model::CallToolResult::success(content)
+}
+
+/// Rita bounding boxar med klasslabels på en screenshot (MCP-version)
+#[cfg(feature = "vision")]
+fn render_annotated_screenshot_mcp(png_bytes: &[u8], result_json: &str) -> Result<String, String> {
+    use base64::Engine;
+    use image::{ImageFormat, Rgba, RgbaImage};
+    use std::io::Cursor;
+
+    let img =
+        image::load_from_memory(png_bytes).map_err(|e| format!("Kunde inte ladda bild: {e}"))?;
+    let mut canvas: RgbaImage = img.to_rgba8();
+    let (img_w, img_h) = (canvas.width(), canvas.height());
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(result_json).map_err(|e| format!("JSON-parse: {e}"))?;
+    let detections = parsed["detections"].as_array();
+
+    let class_color = |class: &str| -> Rgba<u8> {
+        match class {
+            "button" => Rgba([0, 200, 0, 255]),
+            "input" => Rgba([0, 150, 255, 255]),
+            "link" => Rgba([255, 165, 0, 255]),
+            "text" => Rgba([200, 200, 200, 180]),
+            "heading" => Rgba([255, 255, 0, 255]),
+            "image" => Rgba([180, 0, 255, 255]),
+            "icon" => Rgba([255, 100, 100, 255]),
+            "checkbox" => Rgba([0, 255, 200, 255]),
+            "select" => Rgba([255, 80, 180, 255]),
+            _ => Rgba([255, 255, 255, 255]),
+        }
+    };
+
+    if let Some(dets) = detections {
+        for det in dets {
+            let class = det["class"].as_str().unwrap_or("unknown");
+            let conf = det["confidence"].as_f64().unwrap_or(0.0);
+            let bbox = &det["bbox"];
+            let bx = bbox["x"].as_f64().unwrap_or(0.0);
+            let by = bbox["y"].as_f64().unwrap_or(0.0);
+            let bw = bbox["width"].as_f64().unwrap_or(0.0);
+            let bh = bbox["height"].as_f64().unwrap_or(0.0);
+
+            let color = class_color(class);
+            let x1 = (bx.max(0.0) as u32).min(img_w.saturating_sub(1));
+            let y1 = (by.max(0.0) as u32).min(img_h.saturating_sub(1));
+            let x2 = ((bx + bw) as u32).min(img_w.saturating_sub(1));
+            let y2 = ((by + bh) as u32).min(img_h.saturating_sub(1));
+
+            // Horisontella linjer (3px)
+            for t in 0..3u32 {
+                let yt = y1.saturating_add(t).min(img_h - 1);
+                let yb = y2.saturating_sub(t).max(y1);
+                for x in x1..=x2 {
+                    canvas.put_pixel(x, yt, color);
+                    canvas.put_pixel(x, yb, color);
+                }
+            }
+            // Vertikala linjer (3px)
+            for t in 0..3u32 {
+                let xl = x1.saturating_add(t).min(img_w - 1);
+                let xr = x2.saturating_sub(t).max(x1);
+                for y in y1..=y2 {
+                    canvas.put_pixel(xl, y, color);
+                    canvas.put_pixel(xr, y, color);
+                }
+            }
+
+            // Label-bakgrund
+            let label = format!("{class} {conf:.0}%", conf = conf * 100.0);
+            let label_w = (label.len() as u32 * 7).min(x2.saturating_sub(x1));
+            let label_h = 14u32;
+            let ly = y1.saturating_sub(label_h);
+            for lx in x1..x1.saturating_add(label_w) {
+                for ly_px in ly..y1 {
+                    if lx < img_w && ly_px < img_h {
+                        canvas.put_pixel(lx, ly_px, color);
+                    }
+                }
+            }
+
+            // Text (5x7 font)
+            let char_w = 6u32;
+            let text_y = ly + 3;
+            for (ci, ch) in label.chars().enumerate() {
+                let cx = x1 + 2 + ci as u32 * char_w;
+                render_char_5x7_mcp(&mut canvas, cx, text_y, ch, Rgba([0, 0, 0, 255]));
+            }
+        }
+    }
+
+    let mut buf = Cursor::new(Vec::new());
+    canvas
+        .write_to(&mut buf, ImageFormat::Png)
+        .map_err(|e| format!("PNG encode: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(buf.into_inner()))
+}
+
+#[cfg(feature = "vision")]
+fn render_char_5x7_mcp(
+    img: &mut image::RgbaImage,
+    x: u32,
+    y: u32,
+    ch: char,
+    color: image::Rgba<u8>,
+) {
+    let bitmap: [u8; 7] = match ch {
+        '0' => [0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E],
+        '1' => [0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        '2' => [0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F],
+        '3' => [0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E],
+        '4' => [0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02],
+        '5' => [0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E],
+        '6' => [0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E],
+        '7' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+        '8' => [0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E],
+        '9' => [0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C],
+        'a' | 'A' => [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'b' | 'B' => [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
+        'c' | 'C' => [0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E],
+        'd' | 'D' => [0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E],
+        'e' | 'E' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F],
+        'f' | 'F' => [0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10],
+        'g' | 'G' => [0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F],
+        'h' | 'H' => [0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
+        'i' | 'I' => [0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E],
+        'j' | 'J' => [0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E],
+        'k' | 'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
+        'l' | 'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F],
+        'm' | 'M' => [0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11],
+        'n' | 'N' => [0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11],
+        'o' | 'O' => [0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'p' | 'P' => [0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10],
+        'r' | 'R' => [0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11],
+        's' | 'S' => [0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E],
+        't' | 'T' => [0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+        'u' | 'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E],
+        'x' | 'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
+        'y' | 'Y' => [0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04],
+        '%' => [0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03],
+        ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
+        _ => [0x0E, 0x11, 0x01, 0x06, 0x04, 0x00, 0x04],
+    };
+    let (img_w, img_h) = (img.width(), img.height());
+    for (row, &bits) in bitmap.iter().enumerate() {
+        for col in 0..5u32 {
+            if bits & (0x10 >> col) != 0 {
+                let px = x + col;
+                let py = y + row as u32;
+                if px < img_w && py < img_h {
+                    img.put_pixel(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+/// Fallback utan vision feature
+#[cfg(not(feature = "vision"))]
+fn render_annotated_screenshot_mcp(
+    _png_bytes: &[u8],
+    _result_json: &str,
+) -> Result<String, String> {
+    Err("Vision feature inte aktiverad".to_string())
 }
 
 impl ServerHandler for AetherMcpServer {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+        let tool_name = request.name.as_ref();
+        // Intercepta vision-verktyg för image content blocks
+        match tool_name {
+            "vision_parse" | "parse_screenshot" => {
+                let args = request.arguments.as_ref();
+                let result = handle_vision_tool(tool_name, args);
+                Ok(result)
+            }
+            // Alla andra verktyg: delegera till router
+            _ => {
+                let ctx = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                self.tool_router
+                    .call(ctx)
+                    .await
+                    .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+            }
+        }
+    }
+
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::default();
         info.instructions = Some(
@@ -484,8 +782,9 @@ impl ServerHandler for AetherMcpServer {
              multi-agent workflows. Use grounding tools for vision-language integration.\n\n\
              XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
              in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
-             VISION: Use 'parse_screenshot' to analyze screenshots with YOLOv8 object detection — \
-             finds buttons, inputs, links, and other UI elements visually when HTML is unavailable."
+             VISION: Use 'vision_parse' (server model) or 'parse_screenshot' (client model) to analyze \
+             screenshots with YOLOv8 object detection — returns the original screenshot, an annotated image \
+             with color-coded bounding boxes, and detection JSON. Perfect for visual reports and debugging."
                 .to_string(),
         );
         info
@@ -502,7 +801,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
-    eprintln!("        detect_xhr_urls, parse_screenshot");
+    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse");
 
     let server = AetherMcpServer::new();
 
