@@ -636,11 +636,12 @@ async fn handle_fetch_vision(
         )]);
     }
 
-    // Default fast_render=true: skippa externa resurser för snabb YOLO-detektering
+    // Default fast_render=false: ladda CSS/bilder för visuell screenshot.
+    // Sätt fast_render=true explicit om man bara vill ha snabb YOLO utan styling.
     let fast_render = args
         .get("fast_render")
         .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+        .unwrap_or(false);
 
     // Rendera sidan till PNG med Blitz (ren Rust)
     let png_bytes = match render_url_to_png_mcp(url, width, height, fast_render).await {

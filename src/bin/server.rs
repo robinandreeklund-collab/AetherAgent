@@ -2075,7 +2075,7 @@ async fn render_url_to_png(
 /// Ren-Rust HTML → PNG rendering med Blitz. Delegerar till lib-funktionen.
 ///
 /// `fast_render=true`: ~50ms (skippar externa resurser).
-/// `fast_render=false`: ~2s cap (laddar CSS/fonter/bilder).
+/// `fast_render=false`: ~5s cap (laddar CSS/fonter/bilder).
 #[cfg(feature = "blitz")]
 fn render_html_to_png(
     html: &str,
@@ -2105,8 +2105,9 @@ async fn fetch_vision_handler(
 ) -> impl IntoResponse {
     let width = req.width.unwrap_or(1280);
     let height = req.height.unwrap_or(800);
-    // Default true: skippa externa resurser för snabb YOLO-detektering (~50ms vs ~10s)
-    let fast_render = req.fast_render.unwrap_or(true);
+    // Default false: ladda CSS/bilder för visuell screenshot.
+    // Sätt fast_render=true explicit om man bara vill ha snabb YOLO utan styling.
+    let fast_render = req.fast_render.unwrap_or(false);
 
     // Rendera sidan till PNG med Blitz (ren Rust)
     let png_bytes = match render_url_to_png(&req.url, width, height, fast_render).await {

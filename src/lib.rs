@@ -856,7 +856,7 @@ pub fn load_vision_model(model_bytes: &[u8]) -> Result<rten::Model, String> {
 /// Render HTML to PNG using Blitz (pure Rust).
 ///
 /// `fast_render=true`: skip external resources (~50ms). Good enough for YOLO.
-/// `fast_render=false`: load CSS/fonts/images with 2s timeout cap.
+/// `fast_render=false`: load CSS/fonts/images with 5s timeout cap.
 #[cfg(feature = "blitz")]
 pub fn render_html_to_png(
     html: &str,
@@ -900,7 +900,7 @@ pub fn render_html_to_png(
             },
         );
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             while let Ok((_doc_id, resource)) = rx.try_recv() {
                 doc.as_mut().load_resource(resource);
