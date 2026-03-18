@@ -2,25 +2,25 @@
   {
     "test": "fetch_parse",
     "site": "Hacker News",
-    "latency_ms": 870.6,
-    "nodes": 488,
-    "tokens": 19399,
+    "latency_ms": 806.7,
+    "nodes": 492,
+    "tokens": 19665,
     "warnings": 0,
-    "server_parse_ms": 4
+    "server_parse_ms": 3
   },
   {
     "test": "fetch_parse",
     "site": "Wikipedia",
-    "latency_ms": 1017.9,
+    "latency_ms": 1259.2,
     "nodes": 4459,
     "tokens": 178315,
     "warnings": 1,
-    "server_parse_ms": 48
+    "server_parse_ms": 41
   },
   {
     "test": "fetch_parse",
     "site": "Example.com",
-    "latency_ms": 429.7,
+    "latency_ms": 456.2,
     "nodes": 6,
     "tokens": 278,
     "warnings": 0,
@@ -29,7 +29,7 @@
   {
     "test": "fetch_parse",
     "site": "HTTPBin HTML",
-    "latency_ms": 660.3,
+    "latency_ms": 867.2,
     "nodes": 3,
     "tokens": 163,
     "warnings": 0,
@@ -38,7 +38,7 @@
   {
     "test": "fetch_parse",
     "site": "Books to Scrape",
-    "latency_ms": 608.5,
+    "latency_ms": 680.8,
     "nodes": 289,
     "tokens": 10964,
     "warnings": 0,
@@ -47,7 +47,7 @@
   {
     "test": "fetch_parse",
     "site": "Quotes to Scrape",
-    "latency_ms": 1167.1,
+    "latency_ms": 764.0,
     "nodes": 114,
     "tokens": 4094,
     "warnings": 0,
@@ -56,17 +56,17 @@
   {
     "test": "fetch_vision",
     "site": "Hacker News",
-    "latency_ms": 1521.8,
-    "detections": 7,
+    "latency_ms": 1357.4,
+    "detections": 13,
     "classes": {
-      "link": 6,
+      "link": 12,
       "button": 1
     }
   },
   {
     "test": "fetch_vision",
     "site": "Wikipedia",
-    "latency_ms": 1561.7,
+    "latency_ms": 1712.5,
     "detections": 1,
     "classes": {
       "button": 1
@@ -75,7 +75,7 @@
   {
     "test": "fetch_vision",
     "site": "Example.com",
-    "latency_ms": 1319.6,
+    "latency_ms": 1304.4,
     "detections": 1,
     "classes": {
       "text": 1
@@ -84,14 +84,14 @@
   {
     "test": "fetch_vision",
     "site": "HTTPBin HTML",
-    "latency_ms": 1740.4,
+    "latency_ms": 1856.6,
     "detections": 0,
     "classes": {}
   },
   {
     "test": "fetch_vision",
     "site": "Books to Scrape",
-    "latency_ms": 1377.6,
+    "latency_ms": 1563.1,
     "detections": 2,
     "classes": {
       "button": 2
@@ -100,7 +100,7 @@
   {
     "test": "fetch_vision",
     "site": "Quotes to Scrape",
-    "latency_ms": 2090.9,
+    "latency_ms": 1736.9,
     "detections": 0,
     "classes": {}
   },
@@ -110,7 +110,7 @@
     "tier_used": "Blitz",
     "expected_tier": "Blitz",
     "match": true,
-    "latency_ms": 2849.2,
+    "latency_ms": 507.2,
     "size_bytes": 28374,
     "escalation": "none"
   },
@@ -120,7 +120,7 @@
     "tier_used": "?",
     "expected_tier": "Cdp",
     "match": false,
-    "latency_ms": 6195.1,
+    "latency_ms": 416.5,
     "size_bytes": 0,
     "escalation": "none"
   },
@@ -130,7 +130,7 @@
     "tier_used": "Blitz",
     "expected_tier": "Cdp",
     "match": false,
-    "latency_ms": 2254.1,
+    "latency_ms": 496.5,
     "size_bytes": 21617,
     "escalation": "none"
   },
@@ -140,7 +140,7 @@
     "tier_used": "Blitz",
     "expected_tier": "Blitz",
     "match": true,
-    "latency_ms": 372.8,
+    "latency_ms": 528.4,
     "size_bytes": 32352,
     "escalation": "none"
   },
@@ -156,11 +156,11 @@
   {
     "test": "semantic_diff",
     "site": "Hacker News",
-    "full_tokens": 19399,
-    "diff_tokens": 59,
+    "full_tokens": 19665,
+    "diff_tokens": 58,
     "savings_ratio": 1.0,
     "changes": 0,
-    "diff_latency_ms": 709.1
+    "diff_latency_ms": 395.0
   },
   {
     "test": "semantic_diff",
@@ -169,7 +169,7 @@
     "diff_tokens": 61,
     "savings_ratio": 1.0,
     "changes": 0,
-    "diff_latency_ms": 451.8
+    "diff_latency_ms": 313.0
   },
   {
     "test": "semantic_diff",
@@ -178,22 +178,22 @@
     "diff_tokens": 69,
     "savings_ratio": 1.0,
     "changes": 0,
-    "diff_latency_ms": 766.9
+    "diff_latency_ms": 842.7
   },
   {
     "test": "vision_parse_mcp",
     "site": "Hacker News",
-    "latency_ms": 1773.6,
-    "detections": 10,
+    "latency_ms": 1876.0,
+    "detections": 15,
     "classes": {
-      "link": 9,
+      "link": 14,
       "button": 1
     }
   },
   {
     "test": "vision_parse_mcp",
     "site": "Wikipedia",
-    "latency_ms": 1227.4,
+    "latency_ms": 1279.4,
     "detections": 1,
     "classes": {
       "button": 1
@@ -202,7 +202,7 @@
   {
     "test": "vision_parse_mcp",
     "site": "Example.com",
-    "latency_ms": 1117.6,
+    "latency_ms": 1275.1,
     "detections": 1,
     "classes": {
       "select": 1
@@ -211,21 +211,21 @@
   {
     "test": "vision_parse_mcp",
     "site": "HTTPBin HTML",
-    "latency_ms": 1325.0,
+    "latency_ms": 1616.8,
     "detections": 0,
     "classes": {}
   },
   {
     "test": "multi_agent_flow",
-    "total_ms": 3821.9,
+    "total_ms": 3659.5,
     "steps": {
-      "compile_goal": 382.4,
-      "fetch_parse": 547.9,
-      "fetch_vision": 1493.5,
-      "check_injection": 236.8,
-      "extract_data": 335.2,
-      "fetch_parse_2": 546.7,
-      "diff_trees": 279.3
+      "compile_goal": 232.1,
+      "fetch_parse": 524.6,
+      "fetch_vision": 1407.2,
+      "check_injection": 146.5,
+      "extract_data": 189.2,
+      "fetch_parse_2": 684.2,
+      "diff_trees": 475.7
     },
     "parse_tokens": 10995,
     "diff_savings": 1.0
@@ -233,14 +233,14 @@
   {
     "test": "latency_consistency",
     "runs_ms": [
-      245.6,
-      255.5,
-      286.0,
-      465.8,
-      507.1
+      294.1,
+      297.1,
+      304.4,
+      351.5,
+      541.0
     ],
-    "avg_ms": 352.0,
-    "median_ms": 286.0,
-    "p99_ms": 507.1
+    "avg_ms": 357.6,
+    "median_ms": 304.4,
+    "p99_ms": 541.0
   }
 ]
