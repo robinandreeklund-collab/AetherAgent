@@ -303,8 +303,9 @@ impl CausalGraph {
         // Sortera efter poäng (högst först)
         scored_states.sort_by(|a, b| b.1.total_cmp(&a.1));
 
-        // Om start-staten matchar men det finns bättre matchande states,
-        // exkludera start-staten från goal_states (den är inte målet utan startpunkten)
+        // Om start-staten matchar men det finns BÄTTRE matchande states,
+        // exkludera start-staten (agenten vill navigera framåt, inte stanna).
+        // Om start är bästa eller enda match → behåll den (vi är redan vid målet).
         let goal_states: Vec<u32> = if scored_states.len() > 1 {
             let best_score = scored_states[0].1;
             let start_score = scored_states
@@ -313,7 +314,7 @@ impl CausalGraph {
                 .map(|(_, s)| *s)
                 .unwrap_or(0.0);
             if start_score < best_score {
-                // Det finns bättre mål — exkludera start
+                // Det finns strikt bättre mål — exkludera start
                 scored_states
                     .iter()
                     .filter(|(id, _)| *id != start)
@@ -336,13 +337,16 @@ impl CausalGraph {
             };
         }
 
+        // Bygg en map state_id → semantic score för tiebreaking i BFS
+        let goal_score_map: HashMap<u32, f32> = scored_states.iter().copied().collect();
+
         // BFS med risk-viktning
         type BfsEntry = (u32, Vec<u32>, Vec<String>, f32, f32);
         let mut queue: Vec<BfsEntry> = vec![(start, vec![start], vec![], 0.0, 1.0)];
         let mut visited: HashMap<u32, f32> = HashMap::new();
         visited.insert(start, 0.0);
 
-        let mut best_path: Option<SafePath> = None;
+        let mut best_path: Option<(SafePath, f32)> = None; // (path, semantic_score)
 
         while let Some((current, path, actions, risk, prob)) = queue.pop() {
             if path.len() as u32 > max_depth {
@@ -364,15 +368,26 @@ impl CausalGraph {
                     ),
                 };
 
-                // Behåll bästa (lägst risk × högst sannolikhet)
-                let score = risk - prob;
-                let best_score = best_path
-                    .as_ref()
-                    .map(|b| b.total_risk - b.success_probability)
-                    .unwrap_or(f32::MAX);
+                // Behåll bästa: lägst risk × högst sannolikhet.
+                // Vid lika: föredra högre semantic goal score.
+                let bfs_score = risk - prob;
+                let sem_score = goal_score_map.get(&current).copied().unwrap_or(0.0);
 
-                if score < best_score {
-                    best_path = Some(candidate);
+                let is_better = match &best_path {
+                    None => true,
+                    Some((best, best_sem)) => {
+                        let best_bfs = best.total_risk - best.success_probability;
+                        if (bfs_score - best_bfs).abs() < 0.001 {
+                            // Lika BFS-score → välj högre semantic score
+                            sem_score > *best_sem
+                        } else {
+                            bfs_score < best_bfs
+                        }
+                    }
+                };
+
+                if is_better {
+                    best_path = Some((candidate, sem_score));
                 }
                 continue;
             }
@@ -395,7 +410,7 @@ impl CausalGraph {
             }
         }
 
-        best_path.unwrap_or(SafePath {
+        best_path.map(|(p, _)| p).unwrap_or(SafePath {
             path: vec![start],
             actions: vec![],
             total_risk: 0.0,
@@ -511,11 +526,11 @@ fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
     }
 
     // Nivå 3: Kontextord-mappning — domänspecifika synonymer
+    // Matcha enbart mot innehållselement (text:, heading:), inte nav-element
     let context_matches: &[(&[&str], &[&str])] = &[
-        // Goal-ord → element-mönster som indikerar match
         (
             &["kontakt", "contact", "telefon", "phone", "ring"],
-            &["0", "tel:", "phone", "mail", "@", "kontakt"],
+            &["telefon", "tel:", "phone", "mail", "@", "kontakt"],
         ),
         (
             &["epost", "email", "e-post", "mail"],
@@ -544,9 +559,15 @@ fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
         (&["sök", "search"], &["sök", "search", "hitta", "find"]),
     ];
 
-    let all_elements_lower: String = state
+    // Matcha kontextmönster enbart mot innehållselement + URL,
+    // INTE mot navigeringselement (de pekar på innehåll, de ÄR inte det)
+    let content_elements_lower: String = state
         .key_elements
         .iter()
+        .filter(|e| {
+            let el = e.to_lowercase();
+            !el.starts_with("link:") && !el.starts_with("button:") && !el.starts_with("menuitem:")
+        })
         .map(|e| e.to_lowercase())
         .collect::<Vec<_>>()
         .join(" ");
@@ -558,7 +579,7 @@ fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
         }
         let element_has_pattern = element_patterns
             .iter()
-            .any(|p| all_elements_lower.contains(p) || url_lower.contains(p));
+            .any(|p| content_elements_lower.contains(p) || url_lower.contains(p));
         if element_has_pattern {
             return true;
         }
@@ -593,18 +614,11 @@ fn semantic_goal_score(goal: &str, state: &CausalState) -> f32 {
         .filter(|w| w.len() >= 3)
         .collect();
 
-    let all_elements_lower: String = state
-        .key_elements
-        .iter()
-        .map(|e| e.to_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    // Kontextord-matchning bonus
+    // Kontextord-matchning bonus — matcha enbart mot innehållselement
     let context_matches: &[(&[&str], &[&str])] = &[
         (
             &["kontakt", "contact", "telefon", "phone"],
-            &["0", "tel:", "phone", "mail", "@", "kontakt"],
+            &["telefon", "tel:", "phone", "mail", "@", "kontakt"],
         ),
         (
             &["epost", "email", "e-post", "mail"],
@@ -620,14 +634,31 @@ fn semantic_goal_score(goal: &str, state: &CausalState) -> f32 {
         ),
     ];
 
+    // Separera innehåll (text:, heading:) från nav (link:, button:) för scoring
+    let content_elements_lower: String = state
+        .key_elements
+        .iter()
+        .filter(|e| {
+            let el = e.to_lowercase();
+            !el.starts_with("link:") && !el.starts_with("button:") && !el.starts_with("menuitem:")
+        })
+        .map(|e| e.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+
     let url_lower = state.url.to_lowercase();
     for (goal_patterns, element_patterns) in context_matches {
         let goal_has = goal_patterns.iter().any(|p| goal_lower.contains(p));
-        let elem_has = element_patterns
+        if !goal_has {
+            continue;
+        }
+        // Räkna antal matchande mönster (inte binärt) — fler matcher = starkare signal
+        let match_count = element_patterns
             .iter()
-            .any(|p| all_elements_lower.contains(p) || url_lower.contains(p));
-        if goal_has && elem_has {
-            score += 0.4; // Stark kontextbonus
+            .filter(|p| content_elements_lower.contains(*p) || url_lower.contains(*p))
+            .count();
+        if match_count > 0 {
+            score += 0.2 + (match_count as f32 * 0.1);
         }
     }
 

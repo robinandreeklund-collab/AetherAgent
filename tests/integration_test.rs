@@ -2660,3 +2660,114 @@ fn test_vision_backend_tier_hint_from_xhr() {
         "XHR till /api/chart borde ge RequiresJs"
     );
 }
+
+#[test]
+fn test_bug6_find_safest_path_startsida_navigates_to_kontakt() {
+    // Startar från startsidan — bör navigera till kontakt-staten
+    // (inte stanna på start trots att start har "link:Kontakt")
+    let snapshots = r##"[
+        {"url": "https://www.hjo.se", "node_count": 15, "warning_count": 0,
+         "key_elements": ["heading:Välkommen till Hjo", "link:Om Hjo", "link:Kontakt", "link:Turism"]},
+        {"url": "https://www.hjo.se/kontakt", "node_count": 12, "warning_count": 0,
+         "key_elements": ["heading:Kontakta oss", "text:Telefon: 0503-350 00", "text:E-post: kommun@hjo.se"]},
+        {"url": "https://www.hjo.se", "node_count": 15, "warning_count": 0,
+         "key_elements": ["heading:Välkommen till Hjo", "link:Om Hjo", "link:Kontakt", "link:Turism"]}
+    ]"##;
+    let actions = r#"["click:Kontakt", "click:Tillbaka"]"#;
+    let graph_json = build_causal_graph(snapshots, actions);
+
+    // Skriv över current_state_id till 0 (startsida)
+    let mut graph: serde_json::Value = serde_json::from_str(&graph_json).expect("Valid JSON");
+    graph["current_state_id"] = serde_json::json!(0);
+    let graph_json_fixed = graph.to_string();
+
+    let path_json = find_safest_path(&graph_json_fixed, "hitta kontaktinformation");
+    let path: serde_json::Value = serde_json::from_str(&path_json).expect("Valid JSON");
+
+    let path_vec = path["path"].as_array().expect("path borde vara array");
+    assert!(
+        path_vec.len() >= 2,
+        "Borde navigera från start till kontakt, fick path={:?}",
+        path_vec
+    );
+    // Sista stoppet bör vara kontakt-staten (state_id 1)
+    let last_state = path_vec.last().unwrap().as_u64().unwrap();
+    assert_eq!(
+        last_state, 1,
+        "Borde landa på kontakt-staten (1), fick {}",
+        last_state
+    );
+    assert!(
+        path["success_probability"].as_f64().unwrap_or(0.0) > 0.0,
+        "Borde ha success > 0"
+    );
+}
+
+#[test]
+fn test_bug6_find_safest_path_telefonnummer_reaches_kontakt() {
+    // "hitta telefonnummer" bör matcha staten med telefon-info, inte pris-stat
+    let snapshots = r##"[
+        {"url": "https://example.se", "node_count": 10, "warning_count": 0,
+         "key_elements": ["heading:Startsida", "link:Kontakt", "link:Produkter"]},
+        {"url": "https://example.se/kontakt", "node_count": 8, "warning_count": 0,
+         "key_elements": ["heading:Kontakta oss", "text:Telefon: 0503-350 00", "text:E-post: info@hjo.se"]},
+        {"url": "https://example.se", "node_count": 10, "warning_count": 0,
+         "key_elements": ["heading:Startsida", "link:Kontakt", "link:Produkter"]},
+        {"url": "https://example.se/produkter", "node_count": 12, "warning_count": 0,
+         "key_elements": ["heading:Produkter", "text:Pris: 150 kr", "button:Boka"]}
+    ]"##;
+    let actions = r#"["click:Kontakt", "click:Tillbaka", "click:Produkter"]"#;
+    let graph_json = build_causal_graph(snapshots, actions);
+
+    let mut graph: serde_json::Value = serde_json::from_str(&graph_json).expect("Valid JSON");
+    graph["current_state_id"] = serde_json::json!(0);
+    let graph_json_fixed = graph.to_string();
+
+    let path_json = find_safest_path(&graph_json_fixed, "hitta telefonnummer och epostadress");
+    let path: serde_json::Value = serde_json::from_str(&path_json).expect("Valid JSON");
+
+    let path_vec = path["path"].as_array().expect("path borde vara array");
+    let last_state = path_vec.last().unwrap().as_u64().unwrap();
+    assert_eq!(
+        last_state, 1,
+        "Borde navigera till kontakt (1) inte produkter, fick state {}",
+        last_state
+    );
+}
+
+#[test]
+fn test_bug6_context_matching_excludes_nav_elements() {
+    // Kontextmatchning ska inte trigga på "link:Kontakt" (nav-element),
+    // bara på innehållselement som "text:Telefon:" och "text:E-post:"
+    let snapshots = r##"[
+        {"url": "https://example.se", "node_count": 5, "warning_count": 0,
+         "key_elements": ["link:Kontakt", "link:Priser", "heading:Startsida"]},
+        {"url": "https://example.se/kontakt", "node_count": 5, "warning_count": 0,
+         "key_elements": ["heading:Kontakt", "text:Ring oss: 08-123 456"]}
+    ]"##;
+    let actions = r#"["click:Kontakt"]"#;
+    let graph_json = build_causal_graph(snapshots, actions);
+
+    // Start vid state 0 — bör navigera till state 1
+    let mut graph: serde_json::Value = serde_json::from_str(&graph_json).expect("Valid JSON");
+    graph["current_state_id"] = serde_json::json!(0);
+    let graph_json_fixed = graph.to_string();
+
+    let path_json = find_safest_path(&graph_json_fixed, "hitta telefonnummer");
+    let path: serde_json::Value = serde_json::from_str(&path_json).expect("Valid JSON");
+
+    // State 0 har bara nav-element (link:Kontakt) — borde inte matcha via kontext
+    // State 1 har "text:Ring oss: 08-123 456" — borde matcha via kontext
+    let success = path["success_probability"].as_f64().unwrap_or(0.0);
+    assert!(
+        success > 0.0,
+        "Borde hitta väg till kontakt-staten, fick success={}",
+        success
+    );
+    let path_vec = path["path"].as_array().expect("path borde vara array");
+    assert!(
+        path_vec.len() >= 2,
+        "Borde navigera (inte stanna på start), fick path={:?}",
+        path_vec
+    );
+}
