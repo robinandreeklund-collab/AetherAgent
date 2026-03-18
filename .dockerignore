@@ -6,4 +6,7 @@ node_modules/
 examples/
 bindings/
 tests/
+dev/
+tools/
+models/
 *.md

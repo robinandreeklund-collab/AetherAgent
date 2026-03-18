@@ -4,9 +4,9 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
       - key: AETHER_MODEL_URL
-        sync: false  # Sätt manuellt i Render Dashboard efter modell-upload
-    healthCheckPath: /health
+        sync: false  # Set manually in Render Dashboard after model upload
