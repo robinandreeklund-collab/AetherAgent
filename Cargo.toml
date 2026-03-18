@@ -37,10 +37,13 @@ rmcp = { version = "1.2", features = ["server", "transport-io", "macros"], optio
 schemars = { version = "0.8", optional = true }
 base64 = { version = "0.22", optional = true }
 
-# Fas 11: Vision – YOLOv8 inference via rten (optional, feature-gated)
-rten = { version = "0.15", optional = true }
-rten-imageproc = { version = "0.15", optional = true }
-rten-tensor = { version = "0.15", optional = true }
+# Fas 11: Vision – YOLOv8 inference via ONNX Runtime (optional, feature-gated)
+# [RTEN-ROLLBACK-ID:vision-deps] Gamla rten-deps:
+# rten = { version = "0.15", optional = true }
+# rten-imageproc = { version = "0.15", optional = true }
+# rten-tensor = { version = "0.15", optional = true }
+ort = { version = "2.0.0-rc.9", optional = true }
+ndarray = { version = "0.16", optional = true }
 image = { version = "0.25", optional = true }
 
 # CDP – Chrome DevTools Protocol for Tier 2 rendering (optional)
@@ -67,7 +70,8 @@ server = ["axum", "tokio", "tower-http", "js-eval", "fetch", "base64", "blitz", 
 js-eval = ["boa_engine"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
-vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
+# [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
+vision = ["ort", "ndarray", "image"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
 cdp = ["headless_chrome"]
 

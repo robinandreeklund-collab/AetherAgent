@@ -840,22 +840,29 @@ pub fn parse_screenshot(png_bytes: &[u8], model_bytes: &[u8], goal: &str) -> Str
     }
 }
 
-/// Parse a screenshot with a pre-loaded rten model (fast path — no model reload).
+/// Parse a screenshot with a pre-loaded ORT session (fast path — no model reload).
 ///
 /// Use `load_vision_model` to load the model once, then pass it here for each request.
+// [RTEN-ROLLBACK-ID:lib-parse-model] Gamla: pub fn parse_screenshot_with_model(... model: &rten::Model ...)
 #[cfg(feature = "vision")]
-pub fn parse_screenshot_with_model(png_bytes: &[u8], model: &rten::Model, goal: &str) -> String {
+pub fn parse_screenshot_with_model(
+    png_bytes: &[u8],
+    session: &mut ort::session::Session,
+    goal: &str,
+) -> String {
     let config = vision::VisionConfig::default();
-    match vision::detect_ui_elements_with_model(png_bytes, model, goal, &config) {
+    match vision::detect_ui_elements_with_model(png_bytes, session, goal, &config) {
         Ok(result) => serde_json::to_string(&result)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string()),
         Err(e) => serde_json::json!({"error": e}).to_string(),
     }
 }
 
-/// Load an rten vision model from bytes. Call once at startup, reuse for all requests.
+/// Load a vision model from ONNX bytes into an ORT session.
+/// Call once at startup, reuse for all requests.
+// [RTEN-ROLLBACK-ID:lib-load-model] Gamla: pub fn load_vision_model(... ) -> Result<rten::Model, String>
 #[cfg(feature = "vision")]
-pub fn load_vision_model(model_bytes: &[u8]) -> Result<rten::Model, String> {
+pub fn load_vision_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
     vision::load_model(model_bytes)
 }
 

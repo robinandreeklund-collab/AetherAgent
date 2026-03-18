@@ -17,16 +17,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+// [RTEN-ROLLBACK-ID:server-rwlock] Gamla: use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
-/// Delat server-state med förladdad vision-modell (rten::Model istället för bytes)
+/// Delat server-state med förladdad vision-modell (ORT session med Mutex för &mut run)
+// [RTEN-ROLLBACK-ID:server-state] Gamla: vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>
 #[derive(Clone)]
 struct AppState {
     #[cfg(feature = "vision")]
-    vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>,
+    vision_model: Arc<std::sync::Mutex<Option<ort::session::Session>>>,
     #[cfg(not(feature = "vision"))]
-    vision_model: Arc<RwLock<Option<()>>>,
+    vision_model: Arc<std::sync::Mutex<Option<()>>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -1365,19 +1366,6 @@ async fn parse_screenshot_server_model(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(req): Json<ParseScreenshotServerModelRequest>,
 ) -> impl IntoResponse {
-    let model_guard = state.vision_model.read().await;
-    let model = match model_guard.as_ref() {
-        Some(m) => m.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                r#"{"error":"Ingen vision-modell laddad. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH."}"#
-                    .to_string(),
-            )
-        }
-    };
-    drop(model_guard);
-
     let png_bytes = match B64.decode(&req.png_base64) {
         Ok(b) => b,
         Err(e) => {
@@ -1387,113 +1375,49 @@ async fn parse_screenshot_server_model(
             )
         }
     };
-    let result = aether_agent::parse_screenshot_with_model(&png_bytes, &model, &req.goal);
+
+    let mut model_guard = state.vision_model.lock().unwrap_or_else(|e| e.into_inner());
+    let session = match model_guard.as_mut() {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Ingen vision-modell laddad. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH."}"#
+                    .to_string(),
+            )
+        }
+    };
+    let result = aether_agent::parse_screenshot_with_model(&png_bytes, session, &req.goal);
     (StatusCode::OK, result)
 }
 
-/// Kontrollera om bytes ser ut som ONNX-format (protobuf med ONNX magic)
-#[cfg(feature = "vision")]
-fn is_onnx_format(bytes: &[u8]) -> bool {
-    // ONNX-filer börjar med protobuf-header, vanligtvis 0x08 (field 1, varint)
-    // rten-filer börjar med FlatBuffer-prefix (vanligtvis 4-byte size prefix)
-    // Enklast: leta efter "onnx" eller "pytorch" strängar i första 256 bytes
-    if bytes.len() < 8 {
-        return false;
-    }
-    let header = &bytes[..bytes.len().min(512)];
-    let header_str = String::from_utf8_lossy(header);
-    header_str.contains("onnx")
-        || header_str.contains("pytorch")
-        || header_str.contains("ai.onnx")
-        || header_str.contains("ir_version")
-}
-
-/// Konvertera ONNX-bytes till rten-format via rten-convert subprocess
-#[cfg(feature = "vision")]
-fn convert_onnx_to_rten(onnx_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let tmp_dir = std::env::temp_dir();
-    let onnx_path = tmp_dir.join("_aether_model.onnx");
-    let rten_path = tmp_dir.join("_aether_model.rten");
-
-    // Skriv ONNX till temporär fil
-    std::fs::write(&onnx_path, onnx_bytes)
-        .map_err(|e| format!("Kunde inte skriva temp ONNX-fil: {e}"))?;
-
-    // Kör rten-convert
-    println!("Konverterar ONNX → rten via rten-convert...");
-    let output = std::process::Command::new("rten-convert")
-        .arg(onnx_path.to_str().unwrap_or(""))
-        .arg(rten_path.to_str().unwrap_or(""))
-        .output()
-        .map_err(|e| {
-            format!("Kunde inte köra rten-convert: {e}. Installera med: pip install rten-convert")
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Rensa temporära filer
-        let _ = std::fs::remove_file(&onnx_path);
-        return Err(format!("rten-convert misslyckades: {stderr}"));
-    }
-
-    // Läs konverterad rten-fil
-    let rten_bytes = std::fs::read(&rten_path)
-        .map_err(|e| format!("Kunde inte läsa konverterad rten-fil: {e}"))?;
-
-    // Rensa temporära filer
-    let _ = std::fs::remove_file(&onnx_path);
-    let _ = std::fs::remove_file(&rten_path);
-
-    println!(
-        "ONNX → rten konvertering klar: {:.1} MB",
-        rten_bytes.len() as f64 / (1024.0 * 1024.0)
-    );
-    Ok(rten_bytes)
-}
-
-/// Efterbehandla modellbytes: detektera format och konvertera vid behov
-#[cfg(feature = "vision")]
-fn ensure_rten_format(bytes: Vec<u8>) -> Option<Vec<u8>> {
-    if is_onnx_format(&bytes) {
-        println!("Detekterade ONNX-format, försöker konvertera till rten...");
-        match convert_onnx_to_rten(&bytes) {
-            Ok(rten_bytes) => Some(rten_bytes),
-            Err(e) => {
-                eprintln!("ONNX-konvertering misslyckades: {e}");
-                eprintln!("Tips: Använd .rten-format direkt, eller installera rten-convert i Docker-imagen.");
-                // Försök ladda som-det-är (kanske det funkar ändå)
-                Some(bytes)
-            }
-        }
-    } else {
-        // Antar rten-format
-        Some(bytes)
-    }
-}
+// [RTEN-ROLLBACK-ID:server-conversion] Gamla: is_onnx_format(), convert_onnx_to_rten(),
+// ensure_rten_format(), load_vision_model() med rten::Model, load_vision_model_bytes()
+// Se git-historik för fullständig implementering
 
 /// Ladda vision-modell från URL eller filsökväg vid serverstart.
-/// Returnerar en förladdad rten::Model (Model::load körs en gång här).
+/// Returnerar en förladdad ORT Session (laddas en gång, återanvänds).
 #[cfg(feature = "vision")]
-async fn load_vision_model() -> Option<Arc<rten::Model>> {
+async fn load_vision_model() -> Option<ort::session::Session> {
     let model_bytes = load_vision_model_bytes().await?;
-    println!("Laddar rten::Model (Model::load)...");
+    println!("Laddar ORT Session (ONNX Runtime)...");
     let start = std::time::Instant::now();
     match aether_agent::load_vision_model(&model_bytes) {
-        Ok(model) => {
+        Ok(session) => {
             println!(
-                "rten::Model laddad på {:.1}s — alla requests använder förladdad modell",
+                "ORT Session laddad på {:.1}s — alla requests använder förladdad modell",
                 start.elapsed().as_secs_f64()
             );
-            Some(Arc::new(model))
+            Some(session)
         }
         Err(e) => {
-            eprintln!("Kunde inte ladda rten-modell: {e}");
+            eprintln!("Kunde inte ladda ORT-modell: {e}");
             None
         }
     }
 }
 
-/// Hämta modell-bytes från URL eller fil
+/// Hämta modell-bytes från URL eller fil (ONNX-format direkt — ingen konvertering behövs)
 #[cfg(feature = "vision")]
 async fn load_vision_model_bytes() -> Option<Vec<u8>> {
     // Prioritet: AETHER_MODEL_URL > AETHER_MODEL_PATH
@@ -1508,7 +1432,7 @@ async fn load_vision_model_bytes() -> Option<Vec<u8>> {
                                 "Vision-modell nedladdad: {:.1} MB",
                                 bytes.len() as f64 / (1024.0 * 1024.0)
                             );
-                            return ensure_rten_format(bytes.to_vec());
+                            return Some(bytes.to_vec());
                         }
                         Err(e) => eprintln!("Kunde inte läsa modell-bytes: {e}"),
                     }
@@ -1528,7 +1452,7 @@ async fn load_vision_model_bytes() -> Option<Vec<u8>> {
                     "Vision-modell laddad: {:.1} MB",
                     bytes.len() as f64 / (1024.0 * 1024.0)
                 );
-                return ensure_rten_format(bytes);
+                return Some(bytes);
             }
             Err(e) => eprintln!("Kunde inte läsa modell-fil: {e}"),
         }
@@ -2134,10 +2058,10 @@ async fn fetch_vision_handler(
         }
     };
 
-    // Kör vision med förladdad modell
-    let model_guard = state.vision_model.read().await;
-    let model = match model_guard.as_ref() {
-        Some(m) => m.clone(),
+    // Kör vision med förladdad ORT session
+    let mut model_guard = state.vision_model.lock().unwrap_or_else(|e| e.into_inner());
+    let session = match model_guard.as_mut() {
+        Some(s) => s,
         None => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2145,9 +2069,9 @@ async fn fetch_vision_handler(
             );
         }
     };
-    drop(model_guard);
 
-    let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, &model, &req.goal);
+    let result_json = aether_agent::parse_screenshot_with_model(&png_bytes, session, &req.goal);
+    drop(model_guard);
     let annotated_b64 = render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
     let original_b64 = B64.encode(&png_bytes);
 
@@ -2382,14 +2306,13 @@ async fn mcp_dispatch_tool(
                 let png_b64 = args["png_base64"].as_str().unwrap_or("");
                 let goal = args["goal"].as_str().unwrap_or("");
                 let png_bytes = base64_decode(png_b64)?;
-                let model_guard = state.vision_model.read().await;
-                let model = model_guard
-                    .as_ref()
-                    .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
-                    .clone();
-                drop(model_guard);
+                let mut model_guard = state.vision_model.lock().unwrap_or_else(|e| e.into_inner());
+                let session = model_guard
+                    .as_mut()
+                    .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?;
                 let result_json =
-                    aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
+                    aether_agent::parse_screenshot_with_model(&png_bytes, session, goal);
+                drop(model_guard);
                 let annotated_b64 =
                     render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
                 Ok(serde_json::json!([
@@ -2419,16 +2342,15 @@ async fn mcp_dispatch_tool(
                 let png_bytes = render_url_to_png(url, width, height, fast_render).await?;
                 let png_b64 = B64.encode(&png_bytes);
 
-                // Kör vision med förladdad modell
-                let model_guard = state.vision_model.read().await;
-                let model = model_guard
-                    .as_ref()
-                    .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?
-                    .clone();
-                drop(model_guard);
+                // Kör vision med förladdad ORT session
+                let mut model_guard = state.vision_model.lock().unwrap_or_else(|e| e.into_inner());
+                let session = model_guard
+                    .as_mut()
+                    .ok_or_else(|| "Ingen vision-modell laddad på servern.".to_string())?;
 
                 let result_json =
-                    aether_agent::parse_screenshot_with_model(&png_bytes, &model, goal);
+                    aether_agent::parse_screenshot_with_model(&png_bytes, session, goal);
+                drop(model_guard);
                 let annotated_b64 =
                     render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
 
@@ -2869,7 +2791,7 @@ async fn main() {
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
     let state = AppState {
-        vision_model: Arc::new(RwLock::new(vision_model)),
+        vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
     };
 
     println!("AetherAgent API server starting on http://{}", addr);

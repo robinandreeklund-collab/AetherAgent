@@ -1,10 +1,11 @@
-// Fas 11: Inbyggd YOLOv8-inferens via rten
+// Fas 11: Inbyggd YOLOv8-inferens via ONNX Runtime (ort)
 // Screenshot -> objektdetektering -> bounding boxes -> semantiskt trad
+//
+// [RTEN-ROLLBACK-ID:vision-imports] Gamla imports:
+// use rten_tensor::{AsView, Layout};
 
 use std::collections::HashMap;
 
-#[cfg(feature = "vision")]
-use rten_tensor::{AsView, Layout};
 use serde::{Deserialize, Serialize};
 
 use crate::grounding::compute_iou;
@@ -295,72 +296,85 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
     Ok(tensor)
 }
 
+// [RTEN-ROLLBACK-ID:vision-core] Gamla rten-baserade funktioner:
+// pub fn load_model(model_bytes: &[u8]) -> Result<rten::Model, String> { ... }
+// pub fn run_inference_with_model(model: &rten::Model, ...) -> Result<Vec<UiDetection>, String> { ... }
+// pub fn run_inference(model_bytes: &[u8], ...) -> Result<Vec<UiDetection>, String> { ... }
+// pub fn detect_ui_elements_with_model(png_bytes: &[u8], model: &rten::Model, ...) { ... }
+// pub fn detect_ui_elements(png_bytes: &[u8], model_bytes: &[u8], ...) { ... }
+// Se git-historik för fullständig implementering (commit före denna)
+
 #[cfg(feature = "vision")]
-/// Load an rten model from bytes (expensive — call once, reuse the result).
-pub fn load_model(model_bytes: &[u8]) -> Result<rten::Model, String> {
-    rten::Model::load(model_bytes.to_vec()).map_err(|e| format!("Kunde inte ladda modell: {}", e))
+/// Load an ONNX model into an ORT session (expensive — call once, reuse the result).
+///
+/// Konfigurerar ONNX Runtime med:
+/// - Graph optimization level ALL (op fusion, constant folding)
+/// - Inter-op parallelism
+/// - Optimerad tråd-pool
+pub fn load_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
+    let session = ort::session::Session::builder()
+        .map_err(|e| format!("ORT session builder: {e}"))?
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .map_err(|e| format!("ORT optimization level: {e}"))?
+        .with_intra_threads(4)
+        .map_err(|e| format!("ORT intra threads: {e}"))?
+        .with_inter_threads(2)
+        .map_err(|e| format!("ORT inter threads: {e}"))?
+        .commit_from_memory(model_bytes)
+        .map_err(|e| format!("ORT model load: {e}"))?;
+    Ok(session)
 }
 
 #[cfg(feature = "vision")]
-/// Run YOLOv8-nano inference with a pre-loaded model (fast path).
+/// Run YOLOv8-nano inference with a pre-loaded ORT session (fast path).
+///
+/// ORT `run` kräver `&mut Session`. Anroparen ansvarar för synkronisering
+/// (t.ex. via Mutex i server state).
 pub fn run_inference_with_model(
-    model: &rten::Model,
+    session: &mut ort::session::Session,
     tensor: &[f32],
     input_size: u32,
     config: &VisionConfig,
 ) -> Result<Vec<UiDetection>, String> {
-    use rten_tensor::NdTensor;
+    use ort::value::TensorRef;
 
-    // Skapa input-tensor med form [1, 3, input_size, input_size]
     let size = input_size as usize;
-    let input = NdTensor::from_data([1, 3, size, size], tensor.to_vec());
 
-    // Kor inferens
-    let input_id = model
-        .input_ids()
-        .first()
-        .copied()
-        .ok_or_else(|| "Modellen har inga inputs".to_string())?;
-    let output_id = model
-        .output_ids()
-        .first()
-        .copied()
-        .ok_or_else(|| "Modellen har inga outputs".to_string())?;
+    // Skapa input TensorRef (zero-copy view av vår data)
+    let input_ref = TensorRef::<f32>::from_array_view(([1usize, 3, size, size], tensor))
+        .map_err(|e| format!("ORT tensor create: {e}"))?;
 
-    let result = model
-        .run(vec![(input_id, input.into())], &[output_id], None)
-        .map_err(|e| format!("Inferensfel: {}", e))?;
+    // Kör inferens
+    let outputs = session
+        .run(ort::inputs![input_ref])
+        .map_err(|e| format!("ORT inference: {e}"))?;
 
-    // Hamta output-tensor
-    let output = result
-        .first()
+    // Hämta output — YOLOv8 output: [1, num_classes+4, num_predictions]
+    let (_name, output_value) = outputs
+        .iter()
+        .next()
         .ok_or_else(|| "Inget output fran modellen".to_string())?;
-    let output_tensor = match output {
-        rten::Output::FloatTensor(t) => t,
-        _ => return Err("Output ar inte float-tensor".to_string()),
-    };
+    let (shape, data) = output_value
+        .try_extract_tensor::<f32>()
+        .map_err(|e| format!("ORT output extract: {e}"))?;
 
-    // Post-process: YOLOv8 output ar [1, num_classes+4, num_predictions]
-    // Forsta 4 rader: cx, cy, w, h
-    // Resterande rader: klasskonfidens
-    let shape = output_tensor.shape();
+    // Shape deref:ar till SmallVec<[i64; 4]>
     if shape.len() < 3 {
-        return Err(format!("Ovantad output-form: {:?}", shape));
+        return Err(format!("Ovantad output-form: {:?}", &**shape));
     }
 
-    let num_attrs = shape[1]; // 4 + num_classes
-    let num_preds = shape[2];
+    let num_attrs = shape[1] as usize; // 4 + num_classes
+    let num_preds = shape[2] as usize;
     let num_classes = num_attrs.saturating_sub(4).min(config.num_classes());
 
     if num_classes == 0 {
         return Err("Modellen har inga klasser".to_string());
     }
 
-    let data = output_tensor.to_vec();
+    // Platt data-access: data har layout [1, num_attrs, num_preds] row-major
     let mut detections = Vec::new();
 
     for pred_idx in 0..num_preds {
-        // Hitta basta klassen for denna prediktion
         let mut best_class = 0;
         let mut best_conf = 0.0f32;
 
@@ -372,20 +386,17 @@ pub fn run_inference_with_model(
             }
         }
 
-        // Per-klass konfidenströskel
         let class_name = config.class_name(best_class);
         let threshold = config.threshold_for_class(class_name);
         if best_conf < threshold {
             continue;
         }
 
-        // Extrahera bounding box (cx, cy, w, h) -> (x, y, w, h)
         let cx = data[pred_idx];
         let cy = data[num_preds + pred_idx];
         let w = data[2 * num_preds + pred_idx];
         let h = data[3 * num_preds + pred_idx];
 
-        // Filtrera för liten area
         if config.min_detection_area > 0.0 && w * h < config.min_detection_area {
             continue;
         }
@@ -405,10 +416,7 @@ pub fn run_inference_with_model(
         });
     }
 
-    // Applicera NMS
     nms(&mut detections, config.nms_threshold);
-
-    // Begränsa antal detektioner
     detections.truncate(config.max_detections);
 
     Ok(detections)
@@ -417,23 +425,22 @@ pub fn run_inference_with_model(
 #[cfg(feature = "vision")]
 /// Run YOLOv8-nano inference on preprocessed image tensor.
 ///
-/// Loads the model from bytes each time — use `run_inference_with_model` for
-/// repeated calls to avoid the ~10s model-load overhead.
+/// Loads the model each time — use `run_inference_with_model` for repeated calls.
 pub fn run_inference(
     model_bytes: &[u8],
     tensor: &[f32],
     input_size: u32,
     config: &VisionConfig,
 ) -> Result<Vec<UiDetection>, String> {
-    let model = load_model(model_bytes)?;
-    run_inference_with_model(&model, tensor, input_size, config)
+    let mut session = load_model(model_bytes)?;
+    run_inference_with_model(&mut session, tensor, input_size, config)
 }
 
 #[cfg(feature = "vision")]
-/// Full pipeline with pre-loaded model (fast path — no model reload).
+/// Full pipeline with pre-loaded ORT session (fast path — no model reload).
 pub fn detect_ui_elements_with_model(
     png_bytes: &[u8],
-    model: &rten::Model,
+    session: &mut ort::session::Session,
     goal: &str,
     config: &VisionConfig,
 ) -> Result<VisionResult, String> {
@@ -444,7 +451,7 @@ pub fn detect_ui_elements_with_model(
     let preprocess_time_ms = pre_start.elapsed().as_millis() as u64;
 
     let inf_start = Instant::now();
-    let raw_detections = run_inference_with_model(model, &tensor, config.input_size, config)?;
+    let raw_detections = run_inference_with_model(session, &tensor, config.input_size, config)?;
     let inference_time_ms = inf_start.elapsed().as_millis() as u64;
 
     let raw_detection_count = raw_detections.len() as u32;
@@ -463,16 +470,16 @@ pub fn detect_ui_elements_with_model(
 #[cfg(feature = "vision")]
 /// Full pipeline: PNG bytes -> detections -> semantic tree
 ///
-/// Loads the model from bytes each time. For server use, prefer
-/// `detect_ui_elements_with_model` with a pre-loaded model.
+/// Loads the model each time. For server use, prefer
+/// `detect_ui_elements_with_model` with a pre-loaded session.
 pub fn detect_ui_elements(
     png_bytes: &[u8],
     model_bytes: &[u8],
     goal: &str,
     config: &VisionConfig,
 ) -> Result<VisionResult, String> {
-    let model = load_model(model_bytes)?;
-    detect_ui_elements_with_model(png_bytes, &model, goal, config)
+    let mut session = load_model(model_bytes)?;
+    detect_ui_elements_with_model(png_bytes, &mut session, goal, config)
 }
 
 // Stub nar vision-feature inte ar aktiverat
