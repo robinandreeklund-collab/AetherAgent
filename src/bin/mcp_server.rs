@@ -14,8 +14,21 @@ use rmcp::model::ServerInfo;
 use rmcp::schemars;
 use rmcp::{tool, tool_router, ServerHandler, ServiceExt};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+
+/// Deserializer som accepterar både en JSON-sträng och ett JSON-objekt.
+/// Små LLM:er (t.ex. Nemotron) skickar ofta objekt istället för serialiserad sträng.
+fn deserialize_json_string_or_object<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(s) => Ok(s),
+        other => serde_json::to_string(&other).map_err(serde::de::Error::custom),
+    }
+}
 
 // ─── Parameter types ────────────────────────────────────────────────────────
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -98,9 +111,11 @@ struct FirewallParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct DiffParams {
-    /// Previous semantic tree JSON
+    /// Previous semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     old_tree_json: String,
-    /// Current semantic tree JSON
+    /// Current semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     new_tree_json: String,
 }
 
@@ -108,15 +123,18 @@ struct DiffParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct BuildCausalGraphParams {
-    /// JSON array of snapshot objects: [{"url": "...", "node_count": 5, "warning_count": 0, "key_elements": ["button:Buy"]}]. Only "url" is required.
+    /// JSON array of snapshot objects (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     snapshots_json: String,
-    /// JSON array of action labels between snapshots
+    /// JSON array of action labels between snapshots (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     actions_json: String,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct PredictOutcomeParams {
-    /// Causal graph JSON (from build_causal_graph)
+    /// Causal graph JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     graph_json: String,
     /// Action to predict outcome for
     action: String,
@@ -124,7 +142,8 @@ struct PredictOutcomeParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct SafestPathParams {
-    /// Causal graph JSON (from build_causal_graph)
+    /// Causal graph JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     graph_json: String,
     /// Target goal state label
     goal: String,
@@ -146,15 +165,18 @@ struct GroundTreeParams {
     goal: String,
     /// The page URL
     url: String,
-    /// JSON array of bbox annotations to match against nodes
+    /// JSON array of bbox annotations (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     annotations_json: String,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MatchBboxParams {
-    /// Semantic tree JSON (from parse)
+    /// Semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     tree_json: String,
-    /// Bounding box JSON ({x, y, width, height})
+    /// Bounding box JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     bbox_json: String,
 }
 
@@ -163,7 +185,8 @@ struct CollabCreateParams {}
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabRegisterParams {
-    /// Collab store JSON
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Unique agent ID
     agent_id: String,
@@ -175,15 +198,17 @@ struct CollabRegisterParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabPublishParams {
-    /// Collab store JSON (from create_collab_store)
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Publishing agent's ID (from register_collab_agent)
     agent_id: String,
     /// URL the delta applies to
     url: String,
-    /// Semantic delta JSON — pass the FULL output from diff_trees directly.
+    /// Semantic delta JSON — pass the FULL output from diff_trees directly (string or object).
     /// Required fields: token_savings_ratio (f32), total_nodes_before (u32),
     /// total_nodes_after (u32), changes (array of {change_type, role, label}).
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     delta_json: String,
     /// Timestamp in milliseconds since epoch (e.g. Date.now())
     timestamp_ms: u64,
@@ -191,7 +216,8 @@ struct CollabPublishParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabFetchParams {
-    /// Collab store JSON
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Requesting agent's ID
     agent_id: String,
