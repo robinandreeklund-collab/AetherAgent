@@ -1779,6 +1779,18 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["png_base64", "model_base64", "goal"]
             }
+        },
+        {
+            "name": "vision_parse",
+            "description": "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns bounding boxes, confidence scores, and a semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "png_base64": {"type": "string", "description": "PNG screenshot as base64 string"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance scoring"}
+                },
+                "required": ["png_base64", "goal"]
+            }
         }
     ])
 }
@@ -1790,7 +1802,11 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
-async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<String, String> {
+async fn mcp_dispatch_tool(
+    name: &str,
+    args: &serde_json::Value,
+    state: &AppState,
+) -> Result<String, String> {
     match name {
         "parse" => {
             let html = args["html"].as_str().unwrap_or("");
@@ -1972,6 +1988,22 @@ async fn mcp_dispatch_tool(name: &str, args: &serde_json::Value) -> Result<Strin
                 goal,
             ))
         }
+        "vision_parse" => {
+            let png_b64 = args["png_base64"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let png_bytes = base64_decode(png_b64)?;
+            let model_guard = state.vision_model.read().await;
+            let model_bytes = model_guard
+                .as_ref()
+                .ok_or_else(|| "Ingen vision-modell laddad på servern. Sätt AETHER_MODEL_URL eller AETHER_MODEL_PATH.".to_string())?
+                .clone();
+            drop(model_guard);
+            Ok(aether_agent::parse_screenshot(
+                &png_bytes,
+                &model_bytes,
+                goal,
+            ))
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -1995,7 +2027,11 @@ fn jsonrpc_error(id: &serde_json::Value, code: i32, message: &str) -> serde_json
 
 /// MCP Streamable HTTP POST handler
 /// Hanterar initialize, tools/list, tools/call, notifications, och ping
-async fn mcp_post(headers: HeaderMap, Json(msg): Json<serde_json::Value>) -> impl IntoResponse {
+async fn mcp_post(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
+    Json(msg): Json<serde_json::Value>,
+) -> impl IntoResponse {
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
     let params = &msg["params"];
@@ -2049,7 +2085,7 @@ async fn mcp_post(headers: HeaderMap, Json(msg): Json<serde_json::Value>) -> imp
         "tools/call" => {
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
-            match mcp_dispatch_tool(tool_name, arguments).await {
+            match mcp_dispatch_tool(tool_name, arguments, &state).await {
                 Ok(result_text) => jsonrpc_result(
                     id,
                     serde_json::json!({

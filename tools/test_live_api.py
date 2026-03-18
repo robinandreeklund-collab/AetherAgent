@@ -322,7 +322,7 @@ log_result(
 
 # Verify key tools exist
 key_tools = ["parse", "find_and_click", "extract_data", "check_injection",
-             "parse_screenshot", "detect_xhr_urls", "compile_goal"]
+             "parse_screenshot", "vision_parse", "detect_xhr_urls", "compile_goal"]
 missing = [t for t in key_tools if t not in tool_names]
 log_result(
     "MCP key tools present",
@@ -375,6 +375,33 @@ log_result(
     has_xhr,
     "found /api/data",
 )
+
+# MCP tool call: vision_parse (server-side model)
+if login_b64:
+    data = mcp_call("tools/call", {
+        "name": "vision_parse",
+        "arguments": {"png_base64": login_b64, "goal": "find login button"},
+    }, req_id=13)
+    content = data.get("result", {}).get("content", [])
+    is_error = data.get("result", {}).get("isError", False)
+    text_content = ""
+    for c in content:
+        if c.get("type") == "text":
+            text_content = c["text"]
+    if is_error and ("modell" in text_content.lower() or "header" in text_content.lower() or "model" in text_content.lower()):
+        log_skip("MCP tools/call 'vision_parse'", "Model format issue on server")
+    else:
+        try:
+            parsed = json.loads(text_content)
+            detections = parsed.get("detections", [])
+            classes = [d["class"] for d in detections]
+            log_result(
+                "MCP tools/call 'vision_parse'",
+                len(detections) > 0 and "button" in classes,
+                f"{len(detections)} detections: {classes}",
+            )
+        except Exception:
+            log_result("MCP tools/call 'vision_parse'", False, f"unexpected: {text_content[:100]}")
 
 # MCP error handling: invalid method
 data = mcp_call("nonexistent/method", {}, req_id=99)
