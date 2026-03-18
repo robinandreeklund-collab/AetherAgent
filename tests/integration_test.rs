@@ -1191,6 +1191,7 @@ mod fetch_tests {
                 "Authorization".to_string(),
                 "Bearer token123".to_string(),
             )]),
+            ..Default::default()
         };
         assert_eq!(config.user_agent, "CustomBot/1.0");
         assert_eq!(config.timeout_ms, 5000);

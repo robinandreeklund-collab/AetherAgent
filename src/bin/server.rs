@@ -2069,14 +2069,17 @@ async fn render_url_to_png(
     let response = aether_agent::fetch::fetch_page(url, &config)
         .await
         .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
-    let html = response.body.clone();
     let base_url = url.to_string();
 
+    // Inlina extern CSS för Blitz-rendering (blitz_net hämtar inte CSS tillförlitligt)
+    let html = aether_agent::fetch::inline_external_css(&response.body, &base_url).await;
+
+    // Med inlinad CSS kan vi använda fast_render=true (inga externa resurser behövs)
+    let effective_fast_render = if !fast_render { true } else { fast_render };
+
     // Rendera HTML → PNG i spawn_blocking (HtmlDocument är inte Send)
-    // blitz_net::Provider skapar nätverks-tasks via tokio Handle::current()
-    // som fungerar i spawn_blocking-kontext
     tokio::task::spawn_blocking(move || {
-        render_html_to_png(&html, &base_url, width, height, fast_render)
+        render_html_to_png(&html, &base_url, width, height, effective_fast_render)
     })
     .await
     .map_err(|e| format!("Blitz render task error: {e}"))?

@@ -588,19 +588,23 @@ async fn render_url_to_png_mcp(
     url: &str,
     width: u32,
     height: u32,
-    fast_render: bool,
+    _fast_render: bool,
 ) -> Result<Vec<u8>, String> {
     // Hämta HTML med enkel reqwest
-    let html = reqwest::get(url)
+    let raw_html = reqwest::get(url)
         .await
         .map_err(|e| format!("Fetch error: {e}"))?
         .text()
         .await
         .map_err(|e| format!("Body error: {e}"))?;
 
+    // Inlina extern CSS för Blitz-rendering
+    let html = aether_agent::fetch::inline_external_css(&raw_html, url).await;
     let base_url = url.to_string();
+
+    // Med inlinad CSS kan vi använda fast_render=true
     tokio::task::spawn_blocking(move || {
-        render_html_to_png_mcp(&html, &base_url, width, height, fast_render)
+        render_html_to_png_mcp(&html, &base_url, width, height, true)
     })
     .await
     .map_err(|e| format!("Render task: {e}"))?
