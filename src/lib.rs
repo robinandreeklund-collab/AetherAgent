@@ -54,6 +54,21 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     tree
 }
 
+/// Pre-allokerad JSON-serialisering via serde_json::to_writer.
+/// Undviker intern String-allokering genom att skriva direkt till Vec<u8>.
+/// Estimerar buffert-storlek baserat på antal noder (~200 bytes/nod).
+fn serialize_json<T: serde::Serialize>(
+    value: &T,
+    estimated_nodes: usize,
+) -> Result<String, String> {
+    let capacity = (estimated_nodes * 200).max(1024);
+    let mut buf = Vec::with_capacity(capacity);
+    serde_json::to_writer(&mut buf, value)
+        .map_err(|e| format!(r#"{{"error": "Serialization failed: {e}"}}"#))?;
+    // SAFETY: serde_json::to_writer producerar alltid giltig UTF-8
+    Ok(unsafe { String::from_utf8_unchecked(buf) })
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -91,9 +106,9 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    match serde_json::to_string(&tree) {
+    match serialize_json(&tree, tree.nodes.len()) {
         Ok(json) => json,
-        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => e,
     }
 }
 
@@ -157,9 +172,9 @@ pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> Str
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    match serde_json::to_string(&tree) {
+    match serialize_json(&tree, tree.nodes.len()) {
         Ok(json) => json,
-        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => e,
     }
 }
 
@@ -513,9 +528,9 @@ pub fn add_temporal_snapshot(
     };
 
     let tree = build_tree(html, goal, url);
-    let tree_json = match serde_json::to_string(&tree) {
+    let tree_json = match serialize_json(&tree, tree.nodes.len()) {
         Ok(j) => j,
-        Err(e) => return format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => return e,
     };
 
     mem.add_snapshot(&tree, &tree_json, timestamp_ms);

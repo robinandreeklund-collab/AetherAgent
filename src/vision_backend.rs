@@ -555,9 +555,10 @@ impl TieredBackend {
             tab.wait_until_navigated()
                 .map_err(|e| format!("CDP wait: {e}"))?;
 
-            // Extra delay för SPA-appar (React/Vue/Angular) som renderar efter
-            // DOMContentLoaded/load event. Utan detta fångar vi bara laddningsspinners.
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            // networkidle0-logik: vänta tills inga aktiva nätverksanrop pågår.
+            // Injicerar JS-interceptor som räknar fetch()/XHR-anrop och pollar.
+            // Fallback: max 5s total väntetid (undviker eviga lopar på long-poll/WebSocket-sidor).
+            wait_for_network_idle(&tab, 500, 5000);
         }
 
         // Ta viewport screenshot som PNG
@@ -681,6 +682,95 @@ impl Default for TieredBackend {
             false
         };
         TieredBackend::new(cdp_available)
+    }
+}
+
+/// networkidle0: Vänta tills inga nätverksanrop pågår under `quiet_ms` millisekunder.
+///
+/// Injicerar JS som interceptar fetch() och XMLHttpRequest för att räkna aktiva requests.
+/// Pollar var 100ms och returnerar när räknaren hållit sig på 0 under `quiet_ms`.
+/// Avbryter efter `timeout_ms` totalt (undviker eviga WebSocket/long-poll-lopar).
+#[cfg(feature = "cdp")]
+fn wait_for_network_idle(
+    tab: &std::sync::Arc<headless_chrome::Tab>,
+    quiet_ms: u64,
+    timeout_ms: u64,
+) {
+    // Injicera nätverksräknare — interceptar fetch() och XHR
+    let inject_result = tab.evaluate(
+        r#"
+        (function() {
+            if (window.__aether_net_count !== undefined) return;
+            window.__aether_net_count = 0;
+
+            // Intercepta fetch()
+            const origFetch = window.fetch;
+            window.fetch = function(...args) {
+                window.__aether_net_count++;
+                return origFetch.apply(this, args).finally(() => {
+                    window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+                });
+            };
+
+            // Intercepta XMLHttpRequest
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(...args) {
+                this.__aether_tracked = true;
+                return origOpen.apply(this, args);
+            };
+            XMLHttpRequest.prototype.send = function(...args) {
+                if (this.__aether_tracked) {
+                    window.__aether_net_count++;
+                    this.addEventListener('loadend', function() {
+                        window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+                    }, { once: true });
+                }
+                return origSend.apply(this, args);
+            };
+        })()
+        "#,
+        false,
+    );
+
+    if inject_result.is_err() {
+        // Om JS-injection misslyckades, fall tillbaka på fast delay
+        std::thread::sleep(std::time::Duration::from_millis(quiet_ms));
+        return;
+    }
+
+    let poll_interval = std::time::Duration::from_millis(100);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let quiet_duration = std::time::Duration::from_millis(quiet_ms);
+    let start = std::time::Instant::now();
+    let mut idle_since: Option<std::time::Instant> = None;
+
+    loop {
+        if start.elapsed() >= timeout {
+            break;
+        }
+
+        let count = tab
+            .evaluate("window.__aether_net_count || 0", false)
+            .ok()
+            .and_then(|v| v.value)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if count == 0 {
+            let now = std::time::Instant::now();
+            if let Some(since) = idle_since {
+                if now.duration_since(since) >= quiet_duration {
+                    break; // Nätverket har varit idle tillräckligt länge
+                }
+            } else {
+                idle_since = Some(now);
+            }
+        } else {
+            idle_since = None; // Aktiva requests → nollställ
+        }
+
+        std::thread::sleep(poll_interval);
     }
 }
 
