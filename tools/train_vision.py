@@ -657,17 +657,13 @@ def _find_yolo_root(base_dir: Path) -> Path:
 
 
 def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
-    """Ladda ner ett HuggingFace-dataset via `datasets`-biblioteket."""
+    """Ladda ner ett HuggingFace-dataset via snapshot_download + datasets.
+
+    Steg 1: snapshot_download() — laddar ner ALLA filer parallellt (8+ trådar).
+    Steg 2: load_dataset() — laddar från lokal cache, ingen nätverks-IO.
+    """
     hf_name = info["hf_dataset"]
     hf_subset = info.get("hf_subset")
-
-    # Installera datasets-biblioteket om det saknas
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        log("Installerar 'datasets' (HuggingFace)...", "INFO")
-        run(f"{sys.executable} -m pip install datasets")
-        from datasets import load_dataset
 
     extract_dir.mkdir(parents=True, exist_ok=True)
 
@@ -676,21 +672,58 @@ def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
         log(f"HuggingFace-dataset redan nedladdat: {extract_dir}", "OK")
         return extract_dir
 
-    log(f"Laddar ner {hf_name} från HuggingFace...", "STEP")
+    # --- Steg 1: Parallell bulk-nedladdning via snapshot_download ---
+    log(f"Laddar ner {hf_name} från HuggingFace (parallellt)...", "STEP")
     if hf_subset:
         log(f"  Subset: {hf_subset}", "INFO")
+
+    snapshot_dir = extract_dir / "snapshot"
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        log("Installerar 'huggingface_hub'...", "INFO")
+        run(f"{sys.executable} -m pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+
+    try:
+        snapshot_download(
+            repo_id=hf_name,
+            repo_type="dataset",
+            local_dir=str(snapshot_dir),
+        )
+        log(f"Snapshot-nedladdning klar: {snapshot_dir}", "OK")
+    except Exception as e:
+        log(f"snapshot_download misslyckades: {e}", "WARN")
+        log("Faller tillbaka på load_dataset() (långsammare)...", "WARN")
+        snapshot_dir = None
+
+    # --- Steg 2: Ladda datasetet (lokalt om snapshot lyckades) ---
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        log("Installerar 'datasets' (HuggingFace)...", "INFO")
+        run(f"{sys.executable} -m pip install datasets")
+        from datasets import load_dataset
 
     kwargs = {"trust_remote_code": True}
     if hf_subset:
         kwargs["name"] = hf_subset
 
     try:
-        ds = load_dataset(hf_name, **kwargs)
+        if snapshot_dir and snapshot_dir.exists():
+            # Ladda från lokal kopia — ingen nätverks-IO
+            log("Laddar dataset från lokal snapshot...", "STEP")
+            ds = load_dataset(str(snapshot_dir), **kwargs)
+        else:
+            ds = load_dataset(hf_name, **kwargs)
     except Exception as e:
         # Försök utan subset vid fel
         log(f"Kunde inte ladda med subset, provar utan: {e}", "WARN")
         try:
-            ds = load_dataset(hf_name, trust_remote_code=True)
+            if snapshot_dir and snapshot_dir.exists():
+                ds = load_dataset(str(snapshot_dir), trust_remote_code=True)
+            else:
+                ds = load_dataset(hf_name, trust_remote_code=True)
         except Exception as e2:
             log(f"Kunde inte ladda {hf_name}: {e2}", "ERR")
             sys.exit(1)
