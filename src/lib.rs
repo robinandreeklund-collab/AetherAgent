@@ -1098,6 +1098,35 @@ pub fn tiered_screenshot(
     }
 }
 
+/// Take a screenshot using TieredBackend with tier-hint analysis.
+///
+/// Returns (png_bytes, tier_used) — use this when you need the actual PNG bytes
+/// (unlike `tiered_screenshot` which returns metadata JSON only).
+pub fn screenshot_with_tier(
+    html: &str,
+    url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<(Vec<u8>, vision_backend::ScreenshotTier), String> {
+    let backend = global_tiered_backend();
+
+    let tier_hint = vision_backend::determine_tier_hint_with_url(html, &[], url);
+
+    let req = vision_backend::ScreenshotRequest {
+        url: url.to_string(),
+        html: Some(html.to_string()),
+        width,
+        height,
+        fast_render,
+        tier_hint,
+        goal: String::new(),
+    };
+
+    let result = backend.screenshot(&req)?;
+    Ok((result.png_bytes, result.tier_used))
+}
+
 /// Get tier statistics for monitoring
 ///
 /// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.

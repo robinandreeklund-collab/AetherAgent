@@ -559,6 +559,12 @@ impl TieredBackend {
             // Injicerar JS-interceptor som räknar fetch()/XHR-anrop och pollar.
             // Fallback: max 5s total väntetid (undviker eviga lopar på long-poll/WebSocket-sidor).
             wait_for_network_idle(&tab, 500, 5000);
+
+            // BUG-002 fix: Vänta på DOM-stabilitet efter network idle.
+            // SPAs renderar ofta asynkront efter att XHR/fetch slutfört — DOM
+            // ändras fortfarande (spinner → faktiskt innehåll). Pollar
+            // document.body.innerHTML.length tills det stabiliserats.
+            wait_for_dom_stable(&tab, 300, 3000);
         }
 
         // Ta viewport screenshot som PNG
@@ -768,6 +774,60 @@ fn wait_for_network_idle(
             }
         } else {
             idle_since = None; // Aktiva requests → nollställ
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// BUG-002 fix: Vänta tills DOM stabiliserats (innerHTML.length slutar ändras).
+///
+/// SPAs renderar ofta asynkront efter nätverks-idle:
+///   1. HTML laddas med tom <div id="root">
+///   2. JS hämtar data via fetch/XHR (network idle väntar på detta)
+///   3. React/Vue/Angular renderar DOM med data (~50-500ms efter network idle)
+///
+/// Denna funktion pollar `document.body.innerHTML.length` var 100ms.
+/// Om längden inte ändrats under `stable_ms` → DOM är stabil.
+/// Max `timeout_ms` total väntetid.
+#[cfg(feature = "cdp")]
+fn wait_for_dom_stable(
+    tab: &std::sync::Arc<headless_chrome::Tab>,
+    stable_ms: u64,
+    timeout_ms: u64,
+) {
+    let poll_interval = std::time::Duration::from_millis(100);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let stable_duration = std::time::Duration::from_millis(stable_ms);
+    let start = std::time::Instant::now();
+
+    let mut last_length: i64 = -1;
+    let mut stable_since: Option<std::time::Instant> = None;
+
+    loop {
+        if start.elapsed() >= timeout {
+            break;
+        }
+
+        let current_length = tab
+            .evaluate("document.body ? document.body.innerHTML.length : 0", false)
+            .ok()
+            .and_then(|v| v.value)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if current_length == last_length && current_length > 0 {
+            let now = std::time::Instant::now();
+            if let Some(since) = stable_since {
+                if now.duration_since(since) >= stable_duration {
+                    break; // DOM har varit stabil tillräckligt länge
+                }
+            } else {
+                stable_since = Some(now);
+            }
+        } else {
+            last_length = current_length;
+            stable_since = None; // DOM ändrades → nollställ
         }
 
         std::thread::sleep(poll_interval);
