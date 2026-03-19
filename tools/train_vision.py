@@ -71,9 +71,9 @@ UI_CLASSES_EXTENDED = [
     "form",            # 15 - formulärgrupp
 ]
 
-# RTX 5090 optimized defaults (32 GB VRAM)
+# RTX 5090 defaults (24 GB VRAM)
 DEFAULT_EPOCHS = 150
-DEFAULT_BATCH = 64
+DEFAULT_BATCH = 32
 DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
@@ -2286,18 +2286,18 @@ def train_model(
 
     # Auto-tune batch om användaren valt default
     if batch == DEFAULT_BATCH and vram_gb > 0:
-        # YOLO26s @ 640px: ~0.5 GB overhead + ~0.35 GB/batch-item med AMP
-        # Lämna 2 GB marginal för overhead, cache, OS
-        usable_vram = vram_gb - 2.0
-        auto_batch = max(16, min(int(usable_vram / 0.35), 128))
-        # Avrunda nedåt till närmaste multipel av 16 (bättre GPU-utnyttjande)
-        auto_batch = (auto_batch // 16) * 16
+        # YOLO26n @ 640px med AMP: ~0.5 GB overhead + ~0.55 GB/batch-item
+        # Lämna 3 GB marginal för overhead, augmentation, gradients
+        usable_vram = vram_gb - 3.0
+        auto_batch = max(8, min(int(usable_vram / 0.55), 64))
+        # Avrunda nedåt till närmaste multipel av 8
+        auto_batch = (auto_batch // 8) * 8
         if auto_batch != batch:
             log(f"Auto-tuned batch: {batch} → {auto_batch} (baserat på {vram_gb:.0f} GB VRAM)", "OK")
             batch = auto_batch
 
-    # Workers: 2 per CPU-kärna, max 16 (diminishing returns efter det)
-    optimal_workers = min(num_cpu * 2, 16)
+    # Workers: 1 per CPU-kärna, max 8 (fler slukar RAM utan speedup)
+    optimal_workers = min(num_cpu, 8)
 
     # Bygg träningsparametrar
     train_kwargs = dict(
@@ -2310,7 +2310,7 @@ def train_model(
         exist_ok=True,
         resume=resume,
         workers=optimal_workers,
-        cache="ram",
+        cache="disk",  # "ram" äter systemminne och ger icke-deterministiska resultat
         # Augmentation tuned for UI (less aggressive than natural images)
         mosaic=0.5,
         mixup=0.0,         # Mixup hurts UI element detection
@@ -2325,7 +2325,7 @@ def train_model(
         verbose=True,
         plots=True,
         # Dataloader-optimeringar
-        multi_scale=0.5,   # Slumpmässig multi-scale ±50% — mer variation, bättre generalisering
+        multi_scale=0.0,   # Avstängt — 0.5 krympte bilder till ~352px, svälte GPU:n
     )
 
     # GPU-specifika optimeringar
