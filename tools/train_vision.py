@@ -2072,27 +2072,89 @@ def validate_model(best_pt: Path, data_yaml: Path, imgsz: int) -> dict:
 # Step 4: ONNX Export
 # ---------------------------------------------------------------------------
 
-def export_onnx(best_pt: Path, imgsz: int) -> Path:
-    """Export best.pt → ONNX (opset 17, simplified)."""
+EXPORT_OPTIONS = [
+    {
+        "key": "fp32",
+        "label": "ONNX FP32",
+        "desc": "Full precision, ~11-12 MB, 0% kvalitetsförlust",
+        "kwargs": {},
+    },
+    {
+        "key": "fp16",
+        "label": "ONNX FP16 (half)",
+        "desc": "~5.8-6.5 MB, 1.5-2x snabbare, ~0-2% kvalitetsförlust (REKOMMENDERAD)",
+        "kwargs": {"half": True},
+    },
+    {
+        "key": "int8",
+        "label": "ONNX INT8",
+        "desc": "~3.5-5 MB, 2-3x snabbare (CPU/edge), ~3-8% kvalitetsförlust",
+        "kwargs": {"int8": True},
+    },
+]
+
+
+def prompt_export_format() -> dict:
+    """Interaktiv val av exportformat i terminalen."""
+    print("\n  Välj exportformat:\n")
+    print("  ┌─────────────────────────────────────────────────────────────────────┐")
+    print("  │ #  Format          Storlek      Hastighet    Kvalitetsförlust       │")
+    print("  ├─────────────────────────────────────────────────────────────────────┤")
+    print("  │ 1) ONNX FP32      ~11-12 MB    Baseline     0%                     │")
+    print("  │ 2) ONNX FP16 *    ~5.8-6.5 MB  1.5-2x       ~0-2%  (REKOMMENDERAD)│")
+    print("  │ 3) ONNX INT8      ~3.5-5 MB    2-3x (CPU)   ~3-8%  (kräver kalib.) │")
+    print("  └─────────────────────────────────────────────────────────────────────┘")
+    print()
+
+    while True:
+        choice = input("  Exportformat [1-3, Enter=2 (FP16)]: ").strip()
+        if not choice:
+            return EXPORT_OPTIONS[1]  # FP16 default
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(EXPORT_OPTIONS):
+                selected = EXPORT_OPTIONS[idx - 1]
+                log(f"Valt exportformat: {selected['label']}", "OK")
+                return selected
+        except ValueError:
+            pass
+        print(f"  Ogiltigt val. Ange 1-{len(EXPORT_OPTIONS)}.")
+
+
+def export_onnx(best_pt: Path, imgsz: int, export_fmt: dict | None = None) -> Path:
+    """Export best.pt → ONNX med valt format (FP32/FP16/INT8)."""
     from ultralytics import YOLO
 
-    log("Exporting to ONNX format...", "STEP")
+    if export_fmt is None:
+        export_fmt = EXPORT_OPTIONS[1]  # FP16 default
+
+    log(f"Exporting to {export_fmt['label']}...", "STEP")
 
     model = YOLO(str(best_pt))
-    onnx_path_str = model.export(
+
+    export_kwargs = dict(
         format="onnx",
         imgsz=imgsz,
         opset=17,
         simplify=True,
         dynamic=False,
     )
+    export_kwargs.update(export_fmt.get("kwargs", {}))
+
+    onnx_path_str = model.export(**export_kwargs)
     onnx_path = Path(onnx_path_str)
 
     size_mb = onnx_path.stat().st_size / (1024 * 1024)
     log(f"ONNX exported: {onnx_path} ({size_mb:.1f} MB)", "OK")
 
+    pt_size = best_pt.stat().st_size / (1024 * 1024)
+    reduction = (1 - size_mb / pt_size) * 100 if pt_size > 0 else 0
+    if reduction > 0:
+        log(f"  Storlek: {pt_size:.1f} MB (.pt) → {size_mb:.1f} MB (.onnx) "
+            f"({reduction:.0f}% reduktion)", "INFO")
+
     if size_mb > 6:
-        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Consider pruning or using yolo26n.", "WARN")
+        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Prova FP16 eller INT8.", "WARN")
 
     return onnx_path
 
@@ -2296,11 +2358,16 @@ def interactive_mode():
     batch = int(batch) if batch else DEFAULT_BATCH
     version = input("  Model version [v1]: ").strip() or "v1"
 
-    # Step 4: Confirm
+    # Step 4: Export format
+    print("\n[4/6] EXPORTFORMAT")
+    export_fmt = prompt_export_format()
+
+    # Step 5: Confirm
     print(f"\n  Modell:   {model_base}")
     print(f"  Dataset:  {dataset_dir}")
     print(f"  Epochs:   {epochs}")
     print(f"  Batch:    {batch}")
+    print(f"  Export:   {export_fmt['label']}")
     print(f"  Version:  {version}")
     confirm = input("\n  Start training? [Y/n]: ").strip().lower()
     if confirm == "n":
@@ -2315,6 +2382,7 @@ def interactive_mode():
         model_base=model_base,
         version=version,
         server_url="http://localhost:3000",
+        export_fmt=export_fmt,
     )
 
 
@@ -2334,6 +2402,7 @@ def run_pipeline(
     skip_verify: bool = False,
     device: str = None,
     fresh: bool = False,
+    export_fmt: dict = None,
 ):
     """Run the full training pipeline."""
     print(BANNER)
@@ -2387,8 +2456,10 @@ def run_pipeline(
     metrics = validate_model(best_pt, data_yaml, imgsz)
 
     # Step 4: Export ONNX
+    if export_fmt is None:
+        export_fmt = prompt_export_format()
     log("Step 4/6: Exporting to ONNX...", "STEP")
-    onnx_path = export_onnx(best_pt, imgsz)
+    onnx_path = export_onnx(best_pt, imgsz, export_fmt=export_fmt)
 
     # Step 5: Deploy
     log("Step 5/6: Deploying model...", "STEP")
@@ -2482,6 +2553,10 @@ Examples:
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
+    parser.add_argument("--export-format", type=str, default=None,
+                        choices=["fp32", "fp16", "int8"],
+                        help="ONNX export format: fp32 (full), fp16 (recommended), int8 (smallest). "
+                             "If omitted, interactive prompt shown after training.")
     parser.add_argument("--verify-only", type=Path, help="Only verify ONNX model against API")
 
     args = parser.parse_args()
@@ -2489,6 +2564,10 @@ Examples:
     # Interaktiv modellväljare om --select-model angetts
     if args.select_model:
         args.model_base = prompt_model_selection()
+
+    # Resolve export format from CLI flag
+    _export_fmt_map = {opt["key"]: opt for opt in EXPORT_OPTIONS}
+    export_fmt = _export_fmt_map.get(args.export_format) if args.export_format else None
 
     # Mode: Interactive
     if args.interactive:
@@ -2498,7 +2577,9 @@ Examples:
     # Mode: Export only
     if args.export_only:
         ensure_deps()
-        onnx_path = export_onnx(args.export_only, args.imgsz)
+        if export_fmt is None:
+            export_fmt = prompt_export_format()
+        onnx_path = export_onnx(args.export_only, args.imgsz, export_fmt=export_fmt)
         deploy_path = copy_to_deploy(onnx_path, args.deploy_dir, args.version)
         convert_rten(onnx_path)
         log(f"Export complete: {deploy_path}", "OK")
@@ -2548,6 +2629,7 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 
@@ -2568,6 +2650,7 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 
@@ -2597,6 +2680,7 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 
