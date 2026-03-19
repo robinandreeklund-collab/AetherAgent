@@ -229,7 +229,8 @@ fn test_find_and_click_ecommerce() {
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
 
     assert_eq!(parsed["found"], true, "Borde hitta varukorg-knappen");
-    assert_eq!(parsed["role"], "button");
+    // "Lägg i varukorg" detekteras som CTA av heuristiken
+    assert_eq!(parsed["role"], "cta");
     assert_eq!(parsed["action"], "click");
     assert_eq!(parsed["selector_hint"], "button#add-to-cart");
     assert!(

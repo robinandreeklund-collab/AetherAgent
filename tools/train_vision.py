@@ -40,31 +40,34 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
+# Basklasser — namnen matchar Rust-rollerna i parser.rs/types.rs
 UI_CLASSES = [
-    "button", "input", "link", "icon", "text",
-    "image", "checkbox", "radio", "select", "heading",
+    "button", "textbox", "link", "icon", "text",
+    "img", "checkbox", "radio", "combobox", "heading",
 ]
 
 # Utökade agentsemantiska klasser — aktiveras med --extended-classes
 # Dessa ger modellen förmågan att skilja på t.ex. pris vs vanlig text,
 # CTA-knapp vs generell knapp, produktbild vs dekorationsbild.
 # Kräver om-träning om man byter — kan inte blandas med standard 10-klassmodell.
+# Namnen matchar exakt Rust-rollerna i parser.rs/types.rs:
+#   nav → "navigation", search → "searchbox", select → "combobox"
 UI_CLASSES_EXTENDED = [
     "button",          # 0  - generell knapp
-    "input",           # 1  - textfält
+    "textbox",         # 1  - textfält (Rust: "textbox")
     "link",            # 2  - klickbar länk
     "icon",            # 3  - ikon
     "text",            # 4  - generell text
-    "image",           # 5  - generell bild
+    "img",             # 5  - bild (Rust: "img")
     "checkbox",        # 6  - checkbox
     "radio",           # 7  - radioknapp
-    "select",          # 8  - dropdown
+    "combobox",        # 8  - dropdown (Rust: "combobox")
     "heading",         # 9  - rubrik
     "price",           # 10 - pristext (valuta, siffror)
     "cta",             # 11 - call-to-action (köp, lägg i kundvagn)
     "product_card",    # 12 - produktkort (bild + text + pris)
-    "nav",             # 13 - navigering (meny, tabs, breadcrumb)
-    "search",          # 14 - sökfält
+    "navigation",      # 13 - navigering (Rust: "navigation")
+    "searchbox",       # 14 - sökfält (Rust: "searchbox")
     "form",            # 15 - formulärgrupp
 ]
 
@@ -1102,26 +1105,26 @@ _RICO_CLASS_MAP = {
     "Text Button": 0,    # button
     "Icon": 3,           # icon
     "Text": 4,           # text
-    "Image": 5,          # image
-    "Input": 1,          # input
+    "Image": 5,          # img
+    "Input": 1,          # textbox
     "Web View": 4,       # text (fallback)
     "List Item": 4,      # text
     "Card": 4,           # text
     "Radio Button": 7,   # radio
     "Checkbox": 6,       # checkbox
     "Switch": 6,         # checkbox (nära nog)
-    "Spinner": 8,        # select
+    "Spinner": 8,        # combobox
     "Toolbar": 9,        # heading
     "Multi-Tab": 2,      # link
-    "Slider": 1,         # input (fallback)
-    "Advertisement": 5,  # image
+    "Slider": 1,         # textbox (fallback)
+    "Advertisement": 5,  # img
     "Pager Indicator": 3,  # icon
     "Modal": 4,          # text
     "Button Bar": 0,     # button
-    "Number Stepper": 1, # input
-    "Map View": 5,       # image
-    "Video": 5,          # image
-    "Date Picker": 8,    # select
+    "Number Stepper": 1, # textbox
+    "Map View": 5,       # img
+    "Video": 5,          # img
+    "Date Picker": 8,    # combobox
     "On/Off Switch": 6,  # checkbox
     "Drawer": 2,         # link
     "Bottom Navigation": 2,  # link
@@ -1212,9 +1215,12 @@ _WEBUI_CLASS_MAP = {
     "h3": 9,
     "h4": 9,
     "title": 9,
-    "nav": 2,
+    "nav": 2,            # fallback till link i bas; navigation(13) i extended
     "menu": 2,
-    "search": 1,
+    "search": 1,         # fallback till textbox i bas; searchbox(14) i extended
+    "searchbox": 1,
+    "combobox": 8,
+    "navigation": 2,     # fallback till link i bas
 }
 
 
@@ -1917,14 +1923,14 @@ def _match_class_name(name: str, extended: bool = False) -> int:
     if name in _WEBUI_CLASS_MAP:
         return _WEBUI_CLASS_MAP[name]
 
-    # Extended-specifika mappningar
+    # Extended-specifika mappningar (index matchar UI_CLASSES_EXTENDED)
     if extended:
         extended_map = {
             "price": 10, "pris": 10, "cost": 10, "currency": 10,
-            "cta": 11, "call_to_action": 11, "buy_button": 11,
+            "cta": 11, "call_to_action": 11, "buy_button": 11, "add_to_cart": 11,
             "product_card": 12, "product": 12, "card": 12,
-            "nav": 13, "navigation": 13, "breadcrumb": 13, "tabs": 13,
-            "search": 14, "searchbar": 14, "search_field": 14,
+            "navigation": 13, "nav": 13, "breadcrumb": 13, "tabs": 13, "menu": 13,
+            "searchbox": 14, "search": 14, "searchbar": 14, "search_field": 14,
             "form": 15, "form_group": 15,
         }
         if name in extended_map:

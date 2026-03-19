@@ -378,11 +378,12 @@ impl SemanticNode {
     /// Beräkna action baserat på roll
     pub fn infer_action(role: &str) -> Option<String> {
         match role {
-            "button" | "link" | "menuitem" => Some("click".to_string()),
+            "button" | "link" | "menuitem" | "cta" => Some("click".to_string()),
             "textbox" | "searchbox" | "textarea" => Some("type".to_string()),
             "checkbox" | "radio" => Some("toggle".to_string()),
             "combobox" | "listbox" | "select" => Some("select".to_string()),
             "slider" => Some("slide".to_string()),
+            "product_card" => Some("click".to_string()),
             _ => None,
         }
     }
@@ -390,12 +391,17 @@ impl SemanticNode {
     /// Rollens prioritet för goal-relevance scoring
     pub fn role_priority(role: &str) -> f32 {
         match role {
+            "cta" => 0.95,
             "button" => 0.9,
             "link" => 0.8,
             "textbox" | "searchbox" => 0.85,
             "checkbox" | "radio" => 0.75,
             "combobox" | "select" => 0.75,
+            "product_card" => 0.7,
+            "price" => 0.65,
+            "navigation" => 0.6,
             "heading" => 0.6,
+            "form" => 0.5,
             "img" => 0.4,
             "text" | "paragraph" => 0.3,
             _ => 0.2,

@@ -622,7 +622,12 @@ fn build_recommended_action(sub_goal: &SubGoal, tree: &SemanticTree) -> Recommen
             // Hitta bästa matchande klickbara element
             let best = all_nodes
                 .iter()
-                .filter(|n| matches!(n.role.as_str(), "button" | "link" | "menuitem"))
+                .filter(|n| {
+                    matches!(
+                        n.role.as_str(),
+                        "button" | "link" | "menuitem" | "cta" | "product_card"
+                    )
+                })
                 .map(|n| (n, text_similarity(&sub_goal.description, &n.label)))
                 .max_by(|(_, a), (_, b)| a.total_cmp(b));
 
