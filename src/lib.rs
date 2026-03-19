@@ -1019,18 +1019,18 @@ pub fn tiered_screenshot(
 ) -> String {
     let backend = global_tiered_backend();
 
-    // Bestäm tier-hint från XHR-captures
+    // Bestäm tier-hint från URL + XHR-captures + HTML
     let tier_hint = if xhr_captures_json.is_empty() || xhr_captures_json == "[]" {
-        // Kolla HTML direkt
-        vision_backend::determine_tier_hint(html, &[])
+        // Kolla URL + HTML direkt (BUG-2 fix: URL-heuristiker + script-src-analys)
+        vision_backend::determine_tier_hint_with_url(html, &[], url)
     } else {
         // Parsa XHR-captures och analysera
         let captures: Vec<intercept::XhrCapture> =
             serde_json::from_str(xhr_captures_json).unwrap_or_default();
         let hint = intercept::tier_hint_from_captures(&captures);
         if matches!(hint, vision_backend::TierHint::TryBlitzFirst) {
-            // Fallback: analysera HTML
-            vision_backend::determine_tier_hint(html, &[])
+            // Fallback: analysera URL + HTML
+            vision_backend::determine_tier_hint_with_url(html, &[], url)
         } else {
             hint
         }

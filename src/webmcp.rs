@@ -48,9 +48,19 @@ pub struct WebMcpDiscoveryResult {
 // ─── Discovery ──────────────────────────────────────────────────────────────
 
 /// Skanna HTML efter WebMCP-verktygsregistreringar
+///
+/// BUG-4 fix: Stödjer flera format:
+///   1. `navigator.modelContext.registerTool({...})` (W3C-standard)
+///   2. `<script type="application/mcp+json">` (deklarativt JSON-format)
+///   3. `window.__webmcp__ = { tools: [...] }` (polyfill-format)
+///   4. `window.mcpTools = [...]` (förenklat format)
 pub fn discover_webmcp_tools(html: &str, url: &str) -> WebMcpDiscoveryResult {
     let mut tools = Vec::new();
     let mut has_polyfill = false;
+
+    // Format 2: <script type="application/mcp+json"> (deklarativt)
+    let mcp_json_tools = extract_mcp_json_blocks(html);
+    tools.extend(mcp_json_tools);
 
     // Extrahera inline script-block
     let scripts = extract_script_blocks(html);
@@ -62,14 +72,26 @@ pub fn discover_webmcp_tools(html: &str, url: &str) -> WebMcpDiscoveryResult {
             has_polyfill = true;
         }
 
-        // Hitta registerTool-anrop
+        // Format 1: navigator.modelContext.registerTool({...})
         let found = extract_register_tool_calls(script);
         tools.extend(found);
+
+        // Format 3: window.__webmcp__ = { tools: [...] }
+        let webmcp_tools = extract_webmcp_global(script);
+        tools.extend(webmcp_tools);
+
+        // Format 4: window.mcpTools = [...]
+        let mcp_tools_arr = extract_mcp_tools_array(script);
+        tools.extend(mcp_tools_arr);
     }
 
     let has_webmcp = !tools.is_empty()
         || html.contains("navigator.modelContext")
-        || html.contains("modelContext.registerTool");
+        || html.contains("modelContext.registerTool")
+        || html.contains("application/mcp+json")
+        || html.contains("__webmcp__")
+        || html.contains("mcpTools")
+        || html.contains("navigator.mcp");
 
     WebMcpDiscoveryResult {
         url: url.to_string(),
@@ -255,6 +277,159 @@ fn extract_nested_object(src: &str, field_name: &str) -> Option<String> {
     None
 }
 
+// ─── BUG-4 fix: Nya format ──────────────────────────────────────────────────
+
+/// Extrahera verktyg från `<script type="application/mcp+json">...</script>`
+fn extract_mcp_json_blocks(html: &str) -> Vec<WebMcpTool> {
+    let mut tools = Vec::new();
+    let lower = html.to_lowercase();
+    let mut pos = 0;
+
+    while let Some(start) = lower[pos..].find("application/mcp+json") {
+        let abs = pos + start;
+        // Hitta slutet av <script ...> taggen
+        let tag_end = match lower[abs..].find('>') {
+            Some(p) => abs + p + 1,
+            None => break,
+        };
+        // Hitta </script>
+        let close = match lower[tag_end..].find("</script>") {
+            Some(p) => tag_end + p,
+            None => break,
+        };
+
+        let json_content = html[tag_end..close].trim();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_content) {
+            // Kan vara ett enskilt tool-objekt eller { tools: [...] }
+            if let Some(arr) = value.get("tools").and_then(|v| v.as_array()) {
+                for item in arr {
+                    if let Some(t) = tool_from_json_value(item) {
+                        tools.push(t);
+                    }
+                }
+            } else if let Some(t) = tool_from_json_value(&value) {
+                tools.push(t);
+            }
+        }
+
+        pos = close + 9;
+    }
+
+    tools
+}
+
+/// Extrahera verktyg från `window.__webmcp__ = { tools: [...] }`
+fn extract_webmcp_global(script: &str) -> Vec<WebMcpTool> {
+    let pattern = "__webmcp__";
+    let pos = match script.find(pattern) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    // Hitta tools-arrayen i objektet
+    let after = &script[pos..];
+    if let Some(tools_pos) = after.find("tools") {
+        let after_tools = &after[tools_pos..];
+        // Hitta öppnande [
+        if let Some(bracket_pos) = after_tools.find('[') {
+            let arr_start = tools_pos + bracket_pos;
+            let arr_src = &after[arr_start..];
+            return extract_tools_from_js_array(arr_src);
+        }
+    }
+    Vec::new()
+}
+
+/// Extrahera verktyg från `window.mcpTools = [...]` eller `mcpTools = [...]`
+fn extract_mcp_tools_array(script: &str) -> Vec<WebMcpTool> {
+    let pattern = "mcpTools";
+    let pos = match script.find(pattern) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    let after = &script[pos + pattern.len()..];
+    // Hitta = och sedan [
+    if let Some(eq_pos) = after.find('=') {
+        let after_eq = &after[eq_pos + 1..];
+        if let Some(bracket_pos) = after_eq.find('[') {
+            let arr_src = &after_eq[bracket_pos..];
+            return extract_tools_from_js_array(arr_src);
+        }
+    }
+    Vec::new()
+}
+
+/// Extrahera verktyg från en JS-array-literal: [{name: "...", ...}, ...]
+fn extract_tools_from_js_array(src: &str) -> Vec<WebMcpTool> {
+    let mut tools = Vec::new();
+    if !src.starts_with('[') {
+        return tools;
+    }
+
+    // Hitta varje objekt i arrayen
+    let mut depth = 0i32;
+    let mut obj_start: Option<usize> = None;
+
+    for (i, ch) in src.char_indices() {
+        match ch {
+            '[' if depth == 0 => depth = 1,
+            '{' => {
+                if depth == 1 && obj_start.is_none() {
+                    obj_start = Some(i);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(start) = obj_start.take() {
+                        let obj_src = &src[start..=i];
+                        // Försök parsa som JSON först, annars JS-syntax
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(obj_src) {
+                            if let Some(t) = tool_from_json_value(&val) {
+                                tools.push(t);
+                            }
+                        } else if let Some(t) = parse_tool_object(obj_src, 0) {
+                            tools.push(t);
+                        }
+                    }
+                }
+            }
+            ']' if depth == 1 => break,
+            _ => {}
+        }
+    }
+
+    tools
+}
+
+/// Konvertera JSON Value till WebMcpTool
+fn tool_from_json_value(value: &serde_json::Value) -> Option<WebMcpTool> {
+    let name = value.get("name")?.as_str()?.to_string();
+    let description = value
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let input_schema = value
+        .get("inputSchema")
+        .map(|v| serde_json::to_string(v).unwrap_or_default());
+    let read_only = value
+        .get("annotations")
+        .and_then(|a| a.get("readOnlyHint"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    Some(WebMcpTool {
+        name,
+        description,
+        input_schema,
+        read_only,
+        source_line: 0,
+    })
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -384,6 +559,82 @@ mod tests {
     fn test_no_name_returns_none() {
         let tool = parse_tool_object("{ description: 'no name' }", 1);
         assert!(tool.is_none(), "Verktyg utan namn borde returnera None");
+    }
+
+    #[test]
+    fn test_discover_mcp_json_block() {
+        let html = r##"<html><body>
+        <script type="application/mcp+json">
+        {
+            "tools": [
+                {
+                    "name": "search_api",
+                    "description": "Search via API",
+                    "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}}
+                }
+            ]
+        }
+        </script>
+        </body></html>"##;
+
+        let result = discover_webmcp_tools(html, "https://test.com");
+        assert!(result.has_webmcp, "Borde detektera WebMCP via mcp+json");
+        assert_eq!(result.tools.len(), 1, "Borde hitta 1 verktyg");
+        assert_eq!(result.tools[0].name, "search_api");
+    }
+
+    #[test]
+    fn test_discover_webmcp_global() {
+        let html = r##"<html><body>
+        <script>
+            window.__webmcp__ = {
+                tools: [{
+                    name: "get_price",
+                    description: "Get product price"
+                }],
+                endpoint: "/mcp"
+            };
+        </script>
+        </body></html>"##;
+
+        let result = discover_webmcp_tools(html, "https://shop.com");
+        assert!(result.has_webmcp, "Borde detektera __webmcp__");
+        assert_eq!(result.tools.len(), 1, "Borde hitta 1 verktyg");
+        assert_eq!(result.tools[0].name, "get_price");
+    }
+
+    #[test]
+    fn test_discover_mcp_tools_array() {
+        let html = r##"<html><body>
+        <script>
+            window.mcpTools = [{
+                name: "lookup",
+                description: "Lookup item"
+            }];
+        </script>
+        </body></html>"##;
+
+        let result = discover_webmcp_tools(html, "https://test.com");
+        assert!(result.has_webmcp, "Borde detektera mcpTools");
+        assert_eq!(result.tools.len(), 1, "Borde hitta 1 verktyg");
+        assert_eq!(result.tools[0].name, "lookup");
+    }
+
+    #[test]
+    fn test_discover_mcp_json_single_tool() {
+        let html = r##"<html><body>
+        <script type="application/mcp+json">
+        {
+            "name": "single_tool",
+            "description": "A single tool"
+        }
+        </script>
+        </body></html>"##;
+
+        let result = discover_webmcp_tools(html, "https://test.com");
+        assert!(result.has_webmcp, "Borde detektera mcp+json single tool");
+        assert_eq!(result.tools.len(), 1);
+        assert_eq!(result.tools[0].name, "single_tool");
     }
 
     #[test]

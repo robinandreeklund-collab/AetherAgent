@@ -2076,6 +2076,7 @@ async fn fetch_vision_handler(
     let original_b64 = B64.encode(&png_bytes);
 
     let response = serde_json::json!({
+        "tier_used": "Blitz",
         "original_screenshot": original_b64,
         "annotated_screenshot": annotated_b64,
         "detections": serde_json::from_str::<serde_json::Value>(&result_json).unwrap_or_default(),
@@ -2428,9 +2429,7 @@ async fn mcp_post(
             let mut resp_headers = HeaderMap::new();
             resp_headers.insert(
                 "content-type",
-                "application/json"
-                    .parse()
-                    .unwrap_or_else(|_| "application/json".parse().unwrap()),
+                axum::http::header::HeaderValue::from_static("application/json"),
             );
             if let Ok(v) = session_id.parse() {
                 resp_headers.insert("mcp-session-id", v);

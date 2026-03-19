@@ -703,7 +703,22 @@ async fn handle_fetch_vision(
 
     // Kör vision
     let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
-    build_vision_result(&png_b64, &png_bytes, &result_json)
+
+    // BUG-0 fix: Lägg till tier_used i svaret så klienten vet vilken tier som kördes
+    let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
+        Ok(mut v) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert(
+                    "tier_used".to_string(),
+                    serde_json::Value::String("Blitz".to_string()),
+                );
+            }
+            serde_json::to_string(&v).unwrap_or(result_json)
+        }
+        Err(_) => result_json,
+    };
+
+    build_vision_result(&png_b64, &png_bytes, &enriched_json)
 }
 
 /// Hanterar vision-verktyg med image content blocks
