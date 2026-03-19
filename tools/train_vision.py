@@ -2340,13 +2340,16 @@ def train_model(
         train_kwargs["amp"] = True  # FP16 mixed precision — 2x speedup på Ampere+
 
         # torch.compile (PyTorch 2.0+) — JIT-kompilerar modellen för snabbare kernels
-        try:
-            import torch
-            if hasattr(torch, "compile") and torch.__version__ >= "2.0":
-                train_kwargs["compile"] = True
-                log("torch.compile aktiverat — snabbare GPU-kernels", "OK")
-        except Exception:
-            pass
+        # Avstängt: Blackwell (RTX 5090) har instabilt Dynamo-stöd, ger pow_by_natural-
+        # varningar och extremt lång kompileringstid. Kan återaktiveras när PyTorch
+        # har fullt Blackwell-stöd.
+        # try:
+        #     import torch
+        #     if hasattr(torch, "compile") and torch.__version__ >= "2.0":
+        #         train_kwargs["compile"] = True
+        #         log("torch.compile aktiverat — snabbare GPU-kernels", "OK")
+        # except Exception:
+        #     pass
 
     log(f"Training config: batch={batch}, workers={optimal_workers}, "
         f"VRAM={vram_gb:.0f}GB, multi_scale={train_kwargs.get('multi_scale', 0)}", "INFO")
