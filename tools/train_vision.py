@@ -918,15 +918,24 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
             if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
                 log(f"Existing data.yaml found: {nc} classes", "OK")
                 return yaml_path
-            # Klassnamn matchar inte — uppdatera namn men behåll sökvägar
+            # Klassnamn matchar inte — uppdatera namn, validera sökvägar
             log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, uppdaterar", "WARN")
-            existing_data["nc"] = len(UI_CLASSES)
-            existing_data["names"] = {i: name for i, name in enumerate(UI_CLASSES)}
-            existing_data["path"] = str(dataset_dir.resolve())
-            with open(yaml_path, "w") as f:
-                yaml.dump(existing_data, f, default_flow_style=False)
-            log(f"Uppdaterade klassnamn i data.yaml, behöll train/val-sökvägar", "OK")
-            return yaml_path
+            # Verifiera att train-sökvägen faktiskt finns
+            train_path = existing_data.get("train", "")
+            resolved_base = Path(existing_data.get("path", str(dataset_dir.resolve())))
+            train_abs = resolved_base / train_path if train_path else None
+            # Ultralytics söker bilder i train_abs direkt — kontrollera att det finns
+            paths_valid = (train_abs is not None and train_abs.exists()
+                           and (any(train_abs.rglob("*.jpg")) or any(train_abs.rglob("*.png"))))
+            if paths_valid:
+                existing_data["nc"] = len(UI_CLASSES)
+                existing_data["names"] = {i: name for i, name in enumerate(UI_CLASSES)}
+                existing_data["path"] = str(dataset_dir.resolve())
+                with open(yaml_path, "w") as f:
+                    yaml.dump(existing_data, f, default_flow_style=False)
+                log(f"Uppdaterade klassnamn i data.yaml, behöll train/val-sökvägar", "OK")
+                return yaml_path
+            log(f"Befintlig train-sökväg '{train_path}' har inga bilder, regenererar helt", "WARN")
         if existing_data:
             log("data.yaml exists but is incomplete, regenerating", "WARN")
 
