@@ -1027,34 +1027,42 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
             )
         }
     };
+    let fetch_ms = fetch_result.fetch_time_ms;
 
+    let parse_start = std::time::Instant::now();
     let tree_json = aether_agent::parse_to_semantic_tree(
         &fetch_result.body,
         &req.goal,
         &fetch_result.final_url,
     );
+    let parse_ms = parse_start.elapsed().as_millis() as u64;
+
+    // Fas C.13: Inline XHR-URLs i svaret (om de finns i HTML:en)
+    let xhr_urls = aether_agent::detect_xhr_urls(&fetch_result.body);
+
     let total_time_ms = total_start.elapsed().as_millis() as u64;
 
-    let result = aether_agent::types::FetchAndParseResult {
-        fetch: fetch_result,
-        tree: serde_json::from_str(&tree_json).unwrap_or_else(|_| {
-            aether_agent::types::SemanticTree {
-                url: String::new(),
-                title: String::new(),
-                goal: req.goal.clone(),
-                nodes: vec![],
-                injection_warnings: vec![],
-                parse_time_ms: 0,
-                xhr_intercepted: 0,
-                xhr_blocked: 0,
-            }
-        }),
-        total_time_ms,
-    };
+    // Fas C.12: Per-steg timing i svaret
+    let mut result_value = serde_json::json!({
+        "fetch": fetch_result,
+        "tree": serde_json::from_str::<serde_json::Value>(&tree_json).unwrap_or_default(),
+        "total_time_ms": total_time_ms,
+        "timing": {
+            "fetch_ms": fetch_ms,
+            "parse_ms": parse_ms,
+            "total_ms": total_time_ms,
+        }
+    });
+
+    if let Ok(xhr_value) = serde_json::from_str::<serde_json::Value>(&xhr_urls) {
+        if let Some(obj) = result_value.as_object_mut() {
+            obj.insert("xhr_calls".to_string(), xhr_value);
+        }
+    }
 
     (
         StatusCode::OK,
-        serde_json::to_string(&result).unwrap_or_default(),
+        serde_json::to_string(&result_value).unwrap_or_default(),
     )
 }
 
