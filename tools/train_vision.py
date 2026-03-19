@@ -365,10 +365,10 @@ _DATASET_REGISTRY = {
     },
     "yashjain": {
         "name": "UI-Elements-Detection — YOLO-format, webfokus",
-        "hf_dataset": "YashJain/UI-Elements-Detection-Dataset",
+        "hf_repo": "YashJain/UI-Elements-Detection-Dataset",
         "size_hint": "~2 GB",
-        "description": "Direkt YOLO-format. Klasser: buttons, links, inputs, checkboxes, "
-                       "radios, dropdowns, sliders, toggles, labels, icons. Okt 2025.",
+        "description": "Direkt YOLO-format med train/val/test splits. Klasser: buttons, links, "
+                       "inputs, checkboxes, radios, dropdowns, sliders, toggles, labels, icons. Okt 2025.",
     },
 }
 
@@ -483,6 +483,8 @@ def download_dataset(fmt: str, output_dir: Path) -> Path:
         return _download_coco(info, dl_dir, extract_dir)
     elif fmt == "webui":
         return _download_webui(info, dl_dir, extract_dir)
+    elif "hf_repo" in info:
+        return _download_hf_repo(info, extract_dir)
     elif "hf_dataset" in info:
         return _download_hf_dataset(info, extract_dir)
 
@@ -589,6 +591,66 @@ def _download_webui(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
             return child
 
     return extract_dir
+
+
+def _download_hf_repo(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner ett HuggingFace-repo som är YOLO-format (git clone)."""
+    repo_id = info["hf_repo"]
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    marker = extract_dir / ".hf_download_complete"
+    if marker.exists():
+        log(f"HuggingFace-repo redan klonat: {extract_dir}", "OK")
+        return _find_yolo_root(extract_dir)
+
+    log(f"Klonar {repo_id} från HuggingFace...", "STEP")
+
+    # Försök med huggingface_hub först (hanterar LFS bättre)
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(extract_dir),
+        )
+    except ImportError:
+        log("Installerar 'huggingface_hub'...", "INFO")
+        run(f"{sys.executable} -m pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(extract_dir),
+        )
+
+    marker.touch()
+    yolo_root = _find_yolo_root(extract_dir)
+    log(f"YOLO-dataset klart: {yolo_root}", "OK")
+    return yolo_root
+
+
+def _find_yolo_root(base_dir: Path) -> Path:
+    """Hitta roten av ett YOLO-dataset (mappen som innehåller images/ eller train/)."""
+    # Direkt YOLO-struktur: images/train/ + labels/train/
+    if (base_dir / "images" / "train").exists():
+        return base_dir
+    # Alternativ: train/images/ (som YashJain)
+    if (base_dir / "train" / "images").exists():
+        return base_dir
+    # dataset.yaml finns?
+    if (base_dir / "dataset.yaml").exists() or (base_dir / "data.yaml").exists():
+        return base_dir
+    # Sök en nivå ner
+    for child in base_dir.iterdir():
+        if child.is_dir():
+            if (child / "images" / "train").exists():
+                return child
+            if (child / "train" / "images").exists():
+                return child
+            if (child / "dataset.yaml").exists() or (child / "data.yaml").exists():
+                return child
+    # Fallback
+    return base_dir
 
 
 def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
@@ -1885,6 +1947,70 @@ def _find_image(images_dir: Path, stem: str) -> Path:
     return None
 
 
+def _prepare_yolo_repo_yaml(source_path: Path):
+    """Förbered data.yaml för ett YOLO-repo (t.ex. YashJain).
+
+    Hanterar varierande mappstrukturer:
+    - train/images/ + val/images/ (YashJain-stil)
+    - images/train/ + images/val/ (standard YOLO)
+    - yolo_dataset/ undermapp
+    """
+    import yaml
+
+    yaml_dst = source_path / "data.yaml"
+
+    # Sök efter existerande yaml
+    for name in ("data.yaml", "dataset.yaml"):
+        candidate = source_path / name
+        if candidate.exists():
+            with open(candidate) as f:
+                data = yaml.safe_load(f)
+            if data and "names" in data:
+                # Sätt absolut path
+                data["path"] = str(source_path.resolve())
+                with open(yaml_dst, "w") as f:
+                    yaml.dump(data, f, default_flow_style=False)
+                log(f"data.yaml uppdaterad med absolut path: {source_path.resolve()}", "OK")
+                return
+
+    # Ingen yaml hittad — auto-generera baserat på mappstruktur
+    log("Ingen data.yaml hittad, autogenererar...", "INFO")
+
+    # Hitta train-bilder
+    train_dir = None
+    for candidate in [
+        source_path / "train" / "images",
+        source_path / "images" / "train",
+        source_path / "yolo_dataset" / "train" / "images",
+        source_path / "yolo_dataset" / "images" / "train",
+    ]:
+        if candidate.exists():
+            train_dir = candidate
+            break
+
+    if train_dir is None:
+        log(f"Kunde inte hitta train-bilder i {source_path}", "WARN")
+        return
+
+    # Bestäm relativa paths
+    rel_train = str(train_dir.parent.relative_to(source_path))
+    val_dir = train_dir.parent.parent / "val" / "images"
+    if not val_dir.exists():
+        val_dir = train_dir.parent.parent / "images" / "val"
+    rel_val = str(val_dir.parent.relative_to(source_path)) if val_dir.exists() else rel_train
+
+    data = {
+        "path": str(source_path.resolve()),
+        "train": rel_train,
+        "val": rel_val,
+        "nc": len(UI_CLASSES),
+        "names": {i: name for i, name in enumerate(UI_CLASSES)},
+    }
+    with open(yaml_dst, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+    log(f"Genererade data.yaml: train={rel_train}, val={rel_val}", "OK")
+
+
 def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
                     extended: bool = False) -> Path:
     """Huvudfunktion: konverterar dataset från givet format till YOLO.
@@ -1942,8 +2068,14 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
     if fmt == "webui":
         return convert_webui_to_yolo(source_path, output_dir, extended=extended)
 
+    # yashjain är redan YOLO-format (klonat repo med dataset.yaml)
+    if fmt == "yashjain":
+        log("YashJain-dataset är redan YOLO-format", "OK")
+        _prepare_yolo_repo_yaml(source_path)
+        return source_path
+
     # HuggingFace-datasets konverteras redan vid nedladdning (_convert_hf_to_yolo)
-    hf_formats = ("osatlas", "guiactor", "showui-web", "waveui", "yashjain")
+    hf_formats = ("osatlas", "guiactor", "showui-web", "waveui")
     if fmt in hf_formats:
         log(f"HuggingFace-dataset ({fmt}) konverterades vid nedladdning", "OK")
         return source_path
