@@ -72,7 +72,7 @@ UI_CLASSES_EXTENDED = [
 ]
 
 # RTX 5090 defaults (24 GB VRAM)
-DEFAULT_EPOCHS = 150
+DEFAULT_EPOCHS = 300
 DEFAULT_BATCH = 32
 DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
@@ -2731,6 +2731,9 @@ def _pct_change(baseline: float, final: float) -> str:
         return "N/A"
     pct = ((final - baseline) / baseline) * 100
     arrow = "▲" if pct > 0 else "▼" if pct < 0 else "="
+    # Near-zero baseline ger absurda procent — visa absolut diff istället
+    if baseline < 0.01:
+        return f"{arrow} {final:.4f} (från ~0)"
     return f"{arrow} {pct:+.1f}%"
 
 
