@@ -2363,10 +2363,24 @@ async fn mcp_dispatch_tool(
                 let annotated_b64 =
                     render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
 
+                // BUG-001 fix: Lägg till tier_used i svaret
+                let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
+                    Ok(mut v) => {
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert(
+                                "tier_used".to_string(),
+                                serde_json::Value::String("Blitz".to_string()),
+                            );
+                        }
+                        serde_json::to_string(&v).unwrap_or(result_json)
+                    }
+                    Err(_) => result_json,
+                };
+
                 Ok(serde_json::json!([
                     {"type": "image", "data": png_b64, "mimeType": "image/png"},
                     {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
-                    {"type": "text", "text": result_json}
+                    {"type": "text", "text": enriched_json}
                 ]))
             }
             #[cfg(not(feature = "vision"))]

@@ -701,8 +701,26 @@ pub fn build_causal_graph(snapshots_json: &str, actions_json: &str) -> String {
         }
     };
 
-    let actions: Vec<String> = match serde_json::from_str(actions_json) {
-        Ok(a) => a,
+    // BUG-011 fix: Acceptera både array och objekt (extrahera values som strängar)
+    let actions: Vec<String> = match serde_json::from_str::<serde_json::Value>(actions_json) {
+        Ok(serde_json::Value::Array(arr)) => arr
+            .into_iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            })
+            .collect(),
+        Ok(serde_json::Value::Object(obj)) => obj
+            .into_iter()
+            .map(|(_, v)| match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            })
+            .collect(),
+        Ok(serde_json::Value::String(s)) => vec![s],
+        Ok(_) => {
+            return r#"{"error": "Invalid actions_json: expected array or object"}"#.to_string();
+        }
         Err(e) => return format!(r#"{{"error": "Invalid actions_json: {}"}}"#, e),
     };
 

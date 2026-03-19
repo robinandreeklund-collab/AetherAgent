@@ -240,11 +240,13 @@ impl CausalGraph {
             .collect();
 
         if matching_edges.is_empty() {
+            // BUG-012 fix: Okänd action bör ha hög risk (0.8) istället för neutral 0.5,
+            // eftersom avsaknad av historisk data innebär osäkerhet.
             return PredictedOutcome {
                 outcomes: vec![],
-                aggregate_risk: 0.5,
+                aggregate_risk: 0.8,
                 recommendation:
-                    "Okänd action – ingen historisk data. Rekommenderar försiktig utforskning."
+                    "Okänd action – ingen historisk data. HÖG osäkerhet, rekommenderar försiktig utforskning."
                         .to_string(),
             };
         }

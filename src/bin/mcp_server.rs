@@ -207,7 +207,8 @@ struct CollabPublishParams {
     url: String,
     /// Semantic delta JSON — pass the FULL output from diff_trees directly (string or object).
     /// Required fields: token_savings_ratio (f32), total_nodes_before (u32),
-    /// total_nodes_after (u32), changes (array of {change_type, role, label}).
+    /// total_nodes_after (u32), changes (array of {node_id: u32, change_type: "Added"|"Removed"|"Modified",
+    /// role: string, label: string, changes: [{field: string, before: string, after: string}]}).
     #[serde(deserialize_with = "deserialize_json_string_or_object")]
     delta_json: String,
     /// Timestamp in milliseconds since epoch (e.g. Date.now())
