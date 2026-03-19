@@ -24,6 +24,19 @@ type DomainLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 static RATE_LIMITERS: std::sync::LazyLock<Mutex<HashMap<String, Arc<DomainLimiter>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Återanvändbar HTTP-klient — undvik att bygga ny TLS-session per request.
+/// Konfigureras med rimliga defaults (10s timeout, cookies, gzip/brotli).
+static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .cookie_store(true)
+        .gzip(true)
+        .brotli(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+});
+
 /// Hämta eller skapa en rate limiter för en domän (default 2 req/s)
 fn get_rate_limiter(domain: &str, requests_per_second: u32) -> Arc<DomainLimiter> {
     let mut limiters = RATE_LIMITERS.lock().unwrap_or_else(|e| e.into_inner());
@@ -59,23 +72,12 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         check_robots_txt_google(url, &config.user_agent).await?;
     }
 
-    // Bygg klient med konfiguration
-    let client_builder = reqwest::Client::builder()
-        .user_agent(&config.user_agent)
-        .timeout(std::time::Duration::from_millis(config.timeout_ms))
-        .redirect(reqwest::redirect::Policy::limited(
-            config.max_redirects as usize,
-        ))
-        .cookie_store(true)
-        .gzip(true)
-        .brotli(true);
-
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("Kunde inte skapa HTTP-klient: {e}"))?;
+    // Återanvänd global klient (undviker TLS-handshake + connection pool setup per request)
+    let client = &*SHARED_CLIENT;
 
     // Bygg request med realistiska headers
     let mut request = client.get(url);
+    request = request.header("User-Agent", &config.user_agent);
     request = request.header(
         "Accept",
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -207,7 +209,7 @@ pub fn validate_url(url: &str) -> Result<(), String> {
             || host == "0.0.0.0"
             || host.starts_with("10.")
             || host.starts_with("192.168.")
-            || host.starts_with("172.16.")
+            || is_rfc1918_172(host)
         {
             return Err(format!("Blockerad: interna adresser tillåts inte ({host})"));
         }
@@ -216,6 +218,18 @@ pub fn validate_url(url: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Kontrollera om en host är i RFC 1918 172.16.0.0/12-rangen (172.16.0.0–172.31.255.255)
+fn is_rfc1918_172(host: &str) -> bool {
+    if let Some(rest) = host.strip_prefix("172.") {
+        if let Some(second_octet_str) = rest.split('.').next() {
+            if let Ok(second_octet) = second_octet_str.parse::<u8>() {
+                return (16..=31).contains(&second_octet);
+            }
+        }
+    }
+    false
 }
 
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
@@ -251,18 +265,31 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    // Hämta CSS sekventiellt (undviker futures-dependency, sällan >3-4 filer)
-    let mut results: Vec<Option<String>> = Vec::with_capacity(css_links.len());
+    // Parallell CSS-hämtning med tokio tasks
+    let mut handles = Vec::with_capacity(css_links.len());
     for link in &css_links {
-        let css = match client.get(&link.url).send().await {
-            Ok(resp) => resp.text().await.ok(),
-            Err(_) => None,
-        };
-        results.push(css);
+        let client = client.clone();
+        let url = link.url.clone();
+        handles.push(tokio::spawn(async move {
+            match client.get(&url).send().await {
+                Ok(resp) => resp.text().await.ok(),
+                Err(_) => None,
+            }
+        }));
     }
 
-    // Bygg inlinad CSS
-    let mut inlined_css = String::new();
+    let mut results: Vec<Option<String>> = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await.ok().flatten());
+    }
+
+    // Bygg inlinad CSS (pre-allokera för typisk CSS-storlek)
+    let estimated_size: usize = results
+        .iter()
+        .filter_map(|r| r.as_ref())
+        .map(|s| s.len() + 80)
+        .sum();
+    let mut inlined_css = String::with_capacity(estimated_size);
     for (i, css_text) in results.iter().enumerate() {
         if let Some(css) = css_text {
             // Begränsa storlek (max 500KB per fil)
@@ -407,6 +434,32 @@ mod tests {
         assert!(
             validate_url("http://10.0.0.1/secret").is_err(),
             "Ska blockera 10.x.x.x"
+        );
+    }
+
+    #[test]
+    fn test_validate_url_blocked_172_full_range() {
+        // Fas A.3: Kontrollera hela 172.16.0.0/12 (172.16–172.31)
+        assert!(
+            validate_url("http://172.16.0.1").is_err(),
+            "Ska blockera 172.16.x.x"
+        );
+        assert!(
+            validate_url("http://172.20.0.1").is_err(),
+            "Ska blockera 172.20.x.x"
+        );
+        assert!(
+            validate_url("http://172.31.255.255").is_err(),
+            "Ska blockera 172.31.x.x"
+        );
+        // 172.15 och 172.32 är INTE privata
+        assert!(
+            validate_url("http://172.15.0.1").is_ok(),
+            "Ska INTE blockera 172.15.x.x (ej RFC 1918)"
+        );
+        assert!(
+            validate_url("http://172.32.0.1").is_ok(),
+            "Ska INTE blockera 172.32.x.x (ej RFC 1918)"
         );
     }
 

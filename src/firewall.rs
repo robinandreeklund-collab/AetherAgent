@@ -7,6 +7,7 @@
 //   L3: Semantic relevance – poängsätt mot agentens mål (~1ms)
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 // ─── L1: Kända tracking-domäner ─────────────────────────────────────────────
 
@@ -174,7 +175,7 @@ pub fn classify_request(url: &str, goal: &str, config: &FirewallConfig) -> Firew
     if !config.allowed_domains.is_empty() {
         if let Some(host) = extract_host(url) {
             for allowed in &config.allowed_domains {
-                if host == *allowed || host.ends_with(&format!(".{allowed}")) {
+                if host_matches_domain(&host, allowed) {
                     return FirewallVerdict {
                         allowed: true,
                         blocked_by: None,
@@ -286,19 +287,35 @@ pub fn classify_batch(
 
 // ─── L1: URL-pattern kontroll ───────────────────────────────────────────────
 
+/// Statisk HashSet av tracking-domäner för O(1) lookup
+static TRACKING_DOMAIN_SET: std::sync::LazyLock<HashSet<&'static str>> =
+    std::sync::LazyLock::new(|| TRACKING_DOMAINS.iter().copied().collect());
+
+/// Kolla om en host matchar en domän (exakt eller som subdomän)
+fn host_matches_domain(host: &str, domain: &str) -> bool {
+    host == domain
+        || host.ends_with(domain)
+            && host.as_bytes().get(host.len() - domain.len() - 1) == Some(&b'.')
+}
+
 fn check_l1(url: &str, config: &FirewallConfig) -> Option<String> {
     let host = extract_host(url)?;
 
-    // Kolla inbyggd blocklista
+    // O(1) exakt domän-lookup
+    if TRACKING_DOMAIN_SET.contains(host.as_str()) {
+        return Some(format!("L1: Tracking-domän '{host}'"));
+    }
+
+    // Subdomän-kontroll (t.ex. sub.google-analytics.com)
     for domain in TRACKING_DOMAINS {
-        if host == *domain || host.ends_with(&format!(".{domain}")) {
+        if host_matches_domain(&host, domain) {
             return Some(format!("L1: Tracking-domän '{domain}'"));
         }
     }
 
     // Kolla extra domäner
     for domain in &config.extra_blocked_domains {
-        if host == *domain || host.ends_with(&format!(".{domain}")) {
+        if host_matches_domain(&host, domain) {
             return Some(format!("L1: Blockerad domän '{domain}'"));
         }
     }
