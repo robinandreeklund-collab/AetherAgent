@@ -2067,6 +2067,116 @@ def _prepare_yolo_repo_yaml(source_path: Path):
     log(f"Genererade data.yaml: train={rel_train}, val={rel_val}", "OK")
 
 
+# Ommappning: YashJain originalklasser → våra UI_CLASSES-index
+# YashJain dataset.yaml: 0:link 1:button 2:input 3:select 4:textarea
+#   5:label 6:checkbox 7:radio 8:dropdown 9:slider 10:toggle
+#   11:menu_item 12:clickable 13:icon 14:image
+_YASHJAIN_REMAP = {
+    0: 2,     # link → link
+    1: 0,     # button → button
+    2: 1,     # input → textbox
+    3: 8,     # select → combobox
+    4: 1,     # textarea → textbox
+    5: 4,     # label → text
+    6: 6,     # checkbox → checkbox
+    7: 7,     # radio → radio
+    8: 8,     # dropdown → combobox
+    9: None,  # slider → skip (ingen matchande klass)
+    10: 6,    # toggle → checkbox
+    11: 2,    # menu_item → link
+    12: 0,    # clickable → button
+    13: 3,    # icon → icon
+    14: 5,    # image → img
+}
+
+
+def _remap_yashjain_labels(source_path: Path, extended: bool = False):
+    """Ommappa YashJain YOLO-labels till AetherAgent UI_CLASSES.
+
+    YashJain-datasetet har 15 klasser med annan ordning.
+    Vi omskriver varje label-fils klass-ID till våra index.
+    Rader med omappningsbara klasser (slider) tas bort.
+    """
+    import yaml
+
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
+    nc = len(active_classes)
+    remap = _YASHJAIN_REMAP
+
+    # Hitta alla label-kataloger
+    label_dirs = []
+    for split in ("train", "val", "test"):
+        # train/labels/ eller labels/train/
+        for candidate in [
+            source_path / split / "labels",
+            source_path / "labels" / split,
+        ]:
+            if candidate.exists():
+                label_dirs.append((split, candidate))
+                break
+
+    total_remapped = 0
+    total_dropped = 0
+
+    for split, label_dir in label_dirs:
+        txt_files = list(label_dir.glob("*.txt"))
+        for txt_file in txt_files:
+            lines = txt_file.read_text().strip().split("\n")
+            new_lines = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                parts = line.strip().split()
+                if len(parts) < 5:
+                    continue
+                old_cls = int(parts[0])
+                new_cls = remap.get(old_cls)
+                if new_cls is None or new_cls >= nc:
+                    total_dropped += 1
+                    continue
+                parts[0] = str(new_cls)
+                new_lines.append(" ".join(parts))
+                total_remapped += 1
+            txt_file.write_text("\n".join(new_lines) + "\n" if new_lines else "")
+
+        log(f"  {split}: {len(txt_files)} label-filer behandlade", "INFO")
+
+    log(f"Ommappning klar: {total_remapped} annotationer behållna, {total_dropped} borttagna", "OK")
+
+    # Generera korrekt data.yaml
+    yaml_dst = source_path / "data.yaml"
+
+    # Detektera mappstruktur
+    train_rel = val_rel = test_rel = None
+    for t, v, te in [
+        ("train/images", "val/images", "test/images"),
+        ("images/train", "images/val", "images/test"),
+    ]:
+        td = source_path / t
+        if td.exists() and (any(td.rglob("*.jpg")) or any(td.rglob("*.png"))):
+            train_rel = t
+            val_rel = v if (source_path / v).exists() else t
+            test_rel = te if (source_path / te).exists() else ""
+            break
+
+    if train_rel is None:
+        log("Kunde inte hitta träningsbilder efter ommappning", "ERR")
+        sys.exit(1)
+
+    data = {
+        "path": str(source_path.resolve()),
+        "train": train_rel,
+        "val": val_rel,
+        "test": test_rel,
+        "nc": nc,
+        "names": {i: name for i, name in enumerate(active_classes)},
+    }
+    with open(yaml_dst, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+    log(f"data.yaml genererad: nc={nc}, train={train_rel}", "OK")
+
+
 def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
                     extended: bool = False) -> Path:
     """Huvudfunktion: konverterar dataset från givet format till YOLO.
@@ -2124,10 +2234,10 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
     if fmt == "webui":
         return convert_webui_to_yolo(source_path, output_dir, extended=extended)
 
-    # yashjain är redan YOLO-format (klonat repo med dataset.yaml)
+    # yashjain — YOLO-format men med annan klassindelning, kräver ommappning
     if fmt == "yashjain":
-        log("YashJain-dataset är redan YOLO-format", "OK")
-        _prepare_yolo_repo_yaml(source_path)
+        log("YashJain-dataset: omklassificerar labels till AetherAgent-klasser", "STEP")
+        _remap_yashjain_labels(source_path, extended=extended)
         return source_path
 
     # HuggingFace-datasets konverteras redan vid nedladdning (_convert_hf_to_yolo)
