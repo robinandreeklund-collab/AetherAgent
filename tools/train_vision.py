@@ -794,9 +794,11 @@ def _map_fiftyone_label_to_ui_class(label: str) -> int | None:
         "title": 9,
         "h1": 9, "h2": 9, "h3": 9, "h4": 9, "h5": 9, "h6": 9,
         # ShowUI-specifika
+        "edit": 1,             # Edit → textbox (textinmatningsfält)
         "listitem": 2,         # ListItem → link (interaktivt, klickbart)
         "menuitem": 2,         # MenuItem → link
         "tab": 0,              # Tab → button
+        "tabitem": 0,          # TabItem → button
         "switch": 6,           # Switch → checkbox (toggle)
         "slider": 1,           # Slider → textbox (interaktiv input)
         "progressbar": 4,      # ProgressBar → text (visuellt)
