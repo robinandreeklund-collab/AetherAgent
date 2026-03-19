@@ -909,12 +909,17 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     if yaml_path.exists():
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
-        # Validate
+        # Validate — kontrollera att klassnamn matchar UI_CLASSES
         if "names" in data and "train" in data:
-            nc = len(data["names"]) if isinstance(data["names"], list) else len(data["names"].values())
-            log(f"Existing data.yaml found: {nc} classes", "OK")
-            return yaml_path
-        log("data.yaml exists but is incomplete, regenerating", "WARN")
+            existing_names = list(data["names"].values()) if isinstance(data["names"], dict) else list(data["names"])
+            nc = len(existing_names)
+            if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
+                log(f"Existing data.yaml found: {nc} classes", "OK")
+                return yaml_path
+            # Klassnamn matchar inte — regenerera med korrekta namn
+            log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, regenererar", "WARN")
+        else:
+            log("data.yaml exists but is incomplete, regenerating", "WARN")
 
     # Generate data.yaml
     train_imgs = dataset_dir / "images" / "train"
@@ -2463,10 +2468,23 @@ def generate_report(
 # Interactive Mode
 # ---------------------------------------------------------------------------
 
-def interactive_mode():
-    """Step-by-step interactive wizard."""
+def interactive_mode(args=None):
+    """Step-by-step interactive wizard.
+
+    Om args skickas med respekteras --download, --format, --version etc.
+    som förvalda värden i wizarden.
+    """
     print(BANNER)
     print("This wizard will guide you through the full training pipeline.\n")
+
+    # Förval från CLI-argument
+    cli_format = getattr(args, "format", None) if args else None
+    cli_version = getattr(args, "version", "v1") if args else "v1"
+    cli_download = getattr(args, "download", False) if args else False
+    cli_device = getattr(args, "device", None) if args else None
+    cli_server = getattr(args, "server", "http://localhost:3000") if args else "http://localhost:3000"
+    cli_fresh = getattr(args, "fresh", False) if args else False
+    cli_extended = getattr(args, "extended_classes", False) if args else False
 
     # Step 1: Modellval
     print("[1/6] BASMODELL")
@@ -2474,18 +2492,50 @@ def interactive_mode():
 
     # Step 2: Dataset
     print("\n[2/6] DATASET")
-    print("  a) I have a labeled dataset ready")
-    print("  b) Download starter dataset (synthetic, for testing)")
-    choice = input("  Choice [a/b]: ").strip().lower()
+    # Visa externa dataset-alternativ
+    ext_datasets = list(_DATASET_REGISTRY.keys())
+    print("  a) Lokalt dataset (ange sökväg)")
+    print("  b) Syntetiskt starter-dataset (för testning)")
+    for idx, ds_name in enumerate(ext_datasets):
+        info = _DATASET_REGISTRY[ds_name]
+        print(f"  {chr(99 + idx)}) Ladda ner: {info['name']} ({info['size_hint']})")
 
-    if choice == "b":
+    # Automatiskt välja om --download --format angavs
+    if cli_download and cli_format and cli_format in ext_datasets:
+        ds_idx = ext_datasets.index(cli_format)
+        default_choice = chr(99 + ds_idx)
+        log(f"  (förval från --download --format {cli_format})", "INFO")
+    else:
+        default_choice = None
+
+    prompt_str = f"  Val [{default_choice}]: " if default_choice else "  Val [a/b/...]: "
+    choice = input(prompt_str).strip().lower() or (default_choice or "")
+
+    dataset_dir = None
+    if choice == "a":
+        path = input("  Dataset-sökväg: ").strip()
+        dataset_dir = Path(path)
+        if not dataset_dir.exists():
+            log(f"Sökvägen finns inte: {dataset_dir}", "ERR")
+            sys.exit(1)
+    elif choice == "b":
         dataset_dir = Path("dataset")
         download_starter_dataset(dataset_dir)
     else:
-        path = input("  Dataset path: ").strip()
-        dataset_dir = Path(path)
-        if not dataset_dir.exists():
-            log(f"Path not found: {dataset_dir}", "ERR")
+        # Matcha mot dataset-lista (c, d, e, ...)
+        ds_offset = ord(choice) - ord('c') if len(choice) == 1 and choice >= 'c' else -1
+        if 0 <= ds_offset < len(ext_datasets):
+            fmt_name = ext_datasets[ds_offset]
+            info = _DATASET_REGISTRY[fmt_name]
+            log(f"Laddar ner {info['name']}...", "STEP")
+            ensure_deps()
+            base_dir = Path("dataset")
+            raw_dir = download_dataset(fmt_name, base_dir)
+            converted_dir = base_dir / f"{fmt_name}_converted"
+            dataset_dir = convert_dataset(raw_dir, converted_dir, fmt_name,
+                                          extended=cli_extended)
+        else:
+            log(f"Ogiltigt val: {choice}", "ERR")
             sys.exit(1)
 
     # Step 3: Config
@@ -2494,7 +2544,7 @@ def interactive_mode():
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
     batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
     batch = int(batch) if batch else DEFAULT_BATCH
-    version = input("  Model version [v1]: ").strip() or "v1"
+    version = input(f"  Model version [{cli_version}]: ").strip() or cli_version
 
     # Step 4: Export format
     print("\n[4/6] EXPORTFORMAT")
@@ -2519,8 +2569,10 @@ def interactive_mode():
         batch=batch,
         model_base=model_base,
         version=version,
-        server_url="http://localhost:3000",
+        server_url=cli_server,
         export_fmt=export_fmt,
+        device=cli_device,
+        fresh=cli_fresh,
     )
 
 
@@ -2709,7 +2761,7 @@ Examples:
 
     # Mode: Interactive
     if args.interactive:
-        interactive_mode()
+        interactive_mode(args)
         return
 
     # Mode: Export only
