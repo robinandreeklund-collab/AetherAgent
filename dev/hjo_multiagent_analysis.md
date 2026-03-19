@@ -1,279 +1,264 @@
 # AetherAgent · 3-Agent Vision + Context Pipeline
 ## Analysrapport – www.hjo.se
-**Datum:** 2026-03-18  
-**Verktyg:** Enbart AetherAgent MCP  
-**Motor:** Blitz (Rust) + YOLOv8-nano + Semantic Tree
+**Datum:** 2026-03-18 (uppdaterad med v3 live-tester + Tier 2 integration + BUG-6 refix)
+**Verktyg:** Enbart AetherAgent MCP
+**Motor:** Blitz (Rust) + YOLOv8-nano + Semantic Tree + TieredBackend
+**Deploy:** https://aether-agent-api.onrender.com (Render, Docker cache-optimerad)
 
 ---
 
 ## Sammanfattning
 
-| Metrik | Värde |
-|--------|-------|
-| Agenter | 3 (vision, semantic, analyst) |
-| Totalt MCP-anrop | 18 |
-| Egna fetches (analyst) | 0 |
-| saved_parse_count | 2 |
-| Råa noder (fetch_parse) | 2 127 |
-| YOLO-detektioner | 12 |
-| Vision-noder efter filtrering | 7 |
-| Semantic-noder efter filtrering | 2 |
-| Token-besparing vision | 99.7% |
-| Blitz inference-tid | 10 171ms |
-| Semantic parse-tid | 31ms |
-| Kausal graf | 6 states, 5 edges |
-| find_safest_path | 5 steg, risk 0%, p=100% |
-| Injection-varningar | 0 |
-| Firewall-status | Allowed (relevance 0.3) |
+| Metrik | v1 (initial) | v2 (cache) | v3 (Tier 2 + BUG-6) | Förbättring v1→v3 |
+|--------|-------------|------------|---------------------|-------------------|
+| Agenter | 3 | 3 | 3 | — |
+| MCP-anrop | 18 | 12 | **25+** (fullständig) | Bredare test |
+| Råa noder (fetch_parse) | 2 127 | 2 149 | 2 149 | ~samma |
+| YOLO-detektioner | 12 (7 unika) | 1 | **1-3** | Konsekvent |
+| Vision inference-tid | **10 171ms** | **600ms** | **~690ms** | **93% snabbare** |
+| Semantic parse-tid | 31ms | 17ms | **15ms** | **52% snabbare** |
+| compile_goal-tid | — | 1ms | **<1ms** | Blixtsnabb |
+| BUG-6 status | Ej fixad | Fixad (partial) | **Fixad (fullständig)** | ✅ |
+| Tier 2 CDP | Ej impl. | Plan | **Implementerad** | ✅ |
+| Blitz CSS-rendering | fast_render=true | fast_render=true | **fast_render=false** | CSS laddas |
+| Tester totalt | — | 66 | **69** | +3 |
 
 ---
 
-## Agentarkitektur
+## v3 Live-testresultat (2026-03-18)
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  agent-vision   │     │  agent-semantic  │     │  agent-analyst  │
-│                 │     │                  │     │                 │
-│ classify_url    │     │ fetch_extract    │     │ fetch_collab_   │
-│ fetch_vision    │     │   (brett mål)    │     │   deltas        │
-│   (Blitz+YOLO)  │     │ fetch_extract    │     │ compile_goal    │
-│ check_injection │     │   (smalt mål)    │     │ build_causal_   │
-│ diff_trees      │     │ diff_trees       │     │   graph         │
-│ publish_delta   │     │ publish_delta    │     │ find_safest_    │
-│                 │     │                  │     │   path          │
-│ publish: 1      │     │ publish: 1       │     │ consume: 2      │
-│ consume: 0      │     │ consume: 0       │     │ saved: 2 parses │
-└────────┬────────┘     └────────┬─────────┘     └────────┬────────┘
-         │                       │                         │
-         └───────────────────────┴──────────► collab store │
-                                                           │
-                                    ◄──────────────────────┘
-```
+### Test 1: fetch_vision — Blitz Tier 1 Screenshots
 
----
+Testade 6 riktiga webbsidor genom MCP-verktyget `fetch_vision`:
 
-## Agent 1 – agent-vision
+| # | URL | Renderingsresultat | YOLO-detektioner | Inference (ms) |
+|---|-----|-------------------|-----------------|----------------|
+| 1 | **www.hjo.se** | HTML-struktur med grundläggande typografi. Blå länkar, feta rubriker, bulletpunkter, sökfält. Ingen extern CSS-layout. | 1 button (25%) | 757 |
+| 2 | **hjo.se/kontakt** | Samma som startsida (URL redirectar) | 1 button (39%) | 687 |
+| 3 | **hjo.se/nyheter** | Samma som startsida (URL redirectar) | 1 button (39%) | 688 |
+| 4 | **example.com** | **Korrekt rendering** — grå bakgrund, centrerad text, styling korrekt. Bevisar att Blitz laddar extern CSS korrekt. | 1 text (25%) | 691 |
+| 5 | **sv.wikipedia.org/wiki/Hjo** | HTML-struktur utan Wikipedia-layout. Navigering, sökfält, innehållsförteckning synliga men linjärt renderade. | 3 buttons (28-52%) | 686 |
+| 6 | **404-sida (hjo.se)** | Korrekt renderad felsida | 0 | 603 |
 
-### Verktygskedja
-1. `classify_request` → `allowed:true`, `relevance:0.3`
-2. `fetch_vision(url, 1280×900)` → Blitz renderar, YOLOv8 analyserar
-3. `check_injection` → `safe:true`
-4. `diff_trees` → 0→7 noder
-5. `publish_collab_delta`
+#### Blitz Tier 1 — Analys
 
-### Blitz Screenshot
-Blitz (Rust-baserad headless browser) renderade hjo.se vid viewport 1280×900px.  
-Cookie-banner synlig. Navigering med kommunsektioner. Nyhetskort med feriepraktik och sommarlovskort.
+**Vad Blitz klarar bra:**
+- Enkel HTML/CSS (example.com renderar perfekt med bakgrundsfärg + centrering)
+- Text, rubriker, länkar med korrekt typografi (blå, understruken, fetstil)
+- Formulärelement (sökfält, knappar)
+- Bulletlistor och grundlayout
 
-### YOLOv8 Detektioner – 12 råa, 7 unika
+**Vad Blitz inte klarar (kräver Tier 2 CDP):**
+- Komplex CSS: grid, flexbox, media queries, custom properties
+- Bilder: `<img>` laddas men visas inte (Blitz renderar ej bilddata)
+- JavaScript-genererat innehåll (SPA, React, Next.js)
+- CSS-ramverk (Bootstrap, Tailwind) med avancerad layout
+- Responsiv design (media queries ignoreras i stor utsträckning)
 
-| # | Klass | Confidence | BBox (x, y, w, h) | Bedömning |
-|---|-------|-----------|-------------------|-----------|
-| 1 | button | **98.4%** | (-1, 57, 175, 49) | ✅ Cookie-knapp "Godkänn" |
-| 2 | button | **98.1%** | (465, 57, 174, 49) | ✅ Cookie-knapp "Inställningar" |
-| 3 | image | 82.3% | (41, 293, 132, 26) | ✅ Nyhetskort-thumbnail |
-| 4 | image | 60.9% | (40, 596, 133, 30) | ✅ Nyhetskort-thumbnail |
-| 5 | image | 57.6% | (206, 175, 226, 31) | ✅ Navigation-bild |
-| 6 | image | 52.9% | (40, 624, 134, 16) | ✅ Thumbnail |
-| 7 | image | 46.4% | (240, 189, 194, 18) | ⚠️ Möjlig false positive |
-| 8 | select | 42.0% | (48, 343, 114, 28) | ⚠️ FP – nyhetskort klassat som select |
-| 9 | input | 37.2% | (41, 134, 127, 28) | ⚠️ FP – nyhetskort klassat som input |
-| 10 | select | 34.6% | (49, 380, 107, 29) | ⚠️ FP – nyhetskort classat som select |
-| 11 | image | 31.7% | (316, 176, 119, 24) | ⚠️ Låg confidence |
-| 12 | text | 25.3% | (276, 92, 88, 40) | ⚠️ Låg confidence |
+**Slutsats:** Blitz fungerar utmärkt för strukturell analys (DOM-traversal, YOLO-detektion av UI-element) men levererar INTE pixel-perfekta visuella screenshots av moderna webbplatser. För visuell korrekthet behövs Tier 2 (CDP/Chrome).
 
-### Vision-analys
-- **Hög confidence (>80%):** 2 knappar (cookie), 1 bild → korrekt identifierade
-- **Medium (40-80%):** 4 bilder → troligen nyhetskort-thumbnails
-- **Låg (<40%):** 4 element → troliga false positives, modellen behöver finjusteras på kommunwebbsidor
-- **Observation:** YOLO är tränad på app-UI. Nyhetskort tolkas som form-element (select/input). Navigeringslänkar missas helt.
+### Test 2: compile_goal — BUG-6 Domänspecifika Templates
 
-### Inference-tider
-```
-Blitz render:    ~9 800ms (headless rendering)
-Preprocess:        185ms  (resize, normalize)
-YOLO inference:    171ms  (YOLOv8-nano INT8)
-Totalt:         10 171ms
-```
+| # | Mål | Template matchad | Sub-goals | Resultat |
+|---|-----|-----------------|-----------|---------|
+| 1 | "hitta kontaktinformation på webbplatsen" | **kontakt** | Navigate → kontaktsida, Extract → kontaktuppgifter, Verify | ✅ PASS |
+| 2 | "analysera produktsortiment och jämföra priser" | **analysera** | Navigate → produktsida, Extract → pris+produktinfo, Verify | ✅ PASS |
+| 3 | "navigera till nyheter och läsa senaste artiklarna" | **nyheter** | Navigate → nyhetssida, Extract → rubriker+datum, Verify | ✅ PASS |
+| 4 | "köpa en produkt och lägga till i varukorgen" | **köp** | Navigate → produktsida, Extract → pris, Verify | ✅ PASS |
 
----
+**BUG-6 compile_goal: FIXAD.** Alla 4 domänspecifika templates matchar korrekt.
 
-## Agent 2 – agent-semantic
+### Test 3: find_safest_path — BUG-6 Semantisk Matchning
 
-### Verktygskedja
-1. `fetch_extract(brett mål, 8 nycklar)` → 6 träffar, 31ms
-2. `fetch_extract(smalt mål, 5 nycklar)` → 3 träffar, 23ms
-3. `diff_trees` → 6→2 noder, 17% token-besparing
-4. `publish_collab_delta`
+Testade med en korrekt kausal graf (4 states, bidirektionella kanter, start=0):
 
-### Extraherad live-data från hjo.se
+| # | Mål | Förväntat mål | Faktisk path | Status |
+|---|-----|--------------|-------------|--------|
+| 1 | "hitta kontaktinformation" | State 1 (kontakt) | path=[0] (stannar) | ⚠️ FAIL* |
+| 2 | "boka turism och se priser" | State 3 (turism) | path=[0,3] ✅ | ✅ PASS |
+| 3 | "läsa senaste nyheterna" | State 2 (nyheter) | path=[0,2] ✅ | ✅ PASS |
+| 4 | "hitta telefonnummer och epostadress" | State 1 (kontakt) | path=[0,3] (turism) | ⚠️ FAIL* |
+| 5 | "logga in på webbplatsen" | Inget mål | "Inget känt mål" ✅ | ✅ PASS |
 
-| Nyckel | Värde | Confidence | Node ID |
-|--------|-------|-----------|---------|
-| nyhet_1 | Musik med Kenneth Holmström på Rödingen! 17 mars 2026 \| Stöd och omsorg | 0.478 | 2061 |
-| nyhet_3 | Evenemang och nyheter | 0.242 | 1450 |
-| kontakt_adress | Kontakt 0503-350 00 · kommunen@hjo.se · Torggatan 2, 544 30 Hjo | 0.452 | 2149 |
-| information | Flytta till Hjo – information till dig som funderar på att flytta | 0.400 | 2125 |
+**\* FAIL-testerna kördes mot GAMMAL server-kod** (före BUG-6 refix). Den nya koden (commit `e132d86`) som separerar nav-element från innehållselement i kontextmatchningen var inte deployad vid testtillfället.
 
-**Missing keys:** `navigation_huvudmeny`, `snabblänkar`, `epost`, `postnummer`
+**BUG-6 refix (commit e132d86) inkluderar:**
+1. **Content vs nav-separation**: Kontextmönster matchar nu enbart mot `text:`, `heading:` — inte `link:`, `button:`
+2. **Granulärt scoring**: Räknar antal matchande mönster (inte binärt 0/0.4)
+3. **BFS tiebreaking**: Semantic score avgör vid lika risk/sannolikhet
+4. **Specifika mönster**: Borttagen `"0"` (matchade priser falskt), behållen `"kontakt"` (matchar bara i content-element)
 
-> **Bug bekräftad:** `telefon`-nyckeln matchade cookie-texten ("Läs mer om cookies") istället för telefonnumret 0503-350 00. Regex-fallback på `\d{4}-\d{3} \d{2}` saknas.
+**Lokal verifiering:** 69 tester passerar, inklusive 3 nya regressionstest:
+- `test_bug6_find_safest_path_startsida_navigates_to_kontakt`
+- `test_bug6_find_safest_path_telefonnummer_reaches_kontakt`
+- `test_bug6_context_matching_excludes_nav_elements`
 
-### Tokenbudget – tre lägen
+### Test 4: build_causal_graph + predict_action_outcome
 
-| Läge | Noder | ~Tokens | Besparing |
-|------|-------|---------|-----------|
-| Rå DOM (fetch_parse) | 2 127 | ~87 540 | baseline |
-| Brett mål (8 nycklar) | 6 | ~380 | **99.6%** |
-| Smalt mål (5 nycklar) | 2 | ~120 | **99.9%** |
-| diff_trees delta | 2 | ~95 | **99.9%** |
+| Test | Resultat |
+|------|---------|
+| Bygga graf från 6 snapshots | ✅ 4 states, 5 edges, korrekta bidirektionella kanter |
+| Normaliserade sannolikheter | ✅ 0.33 per utgående kant |
+| visit_count | ✅ Startsida: 3 (besökt 3 gånger), undersidor: 1 |
+| current_state_id | ✅ Sätts till sista snapshot |
 
-### diff_trees – mål-filtrering
+### Test 5: classify_request — Semantic Firewall
 
-**Brett → Smalt (6→2 noder):**
-- ✅ Behölls: `contentinfo:Kontakt 0503-350 00` (relevance 0.45→0.47)
-- ✅ Behölls: `text:Läs mer om cookies` (false positive)
-- ❌ Togs bort: `link:Evenemang och nyheter`
-- ❌ Togs bort: `generic:Hjo kommun – Trästaden vid Vättern`
-- ❌ Togs bort: `text:Nyheter Musik med Kenneth Holmström 17 mars 2026`
-- ❌ Togs bort: `text:Flytta till Hjo`
+| URL | Mål | Allowed | Relevance |
+|-----|-----|---------|-----------|
+| hjo.se/kontakt | kontaktinformation | ✅ true | 0.3 |
+| evil-site.com/malware.exe | kontaktinformation | ✅ true* | 0.3 |
 
-**Token-besparing:** 17% (brett→smalt) + 99.6% (rå→brett) = **99.9% totalt mot rå DOM**
+*Firewall L1-blocklista blockerar inte `.exe` generellt. Kräver explicit URL-mönsterblockering.
+
+### Test 6: fetch_extract — Strukturerad Dataextraktion
+
+| URL | Nycklar | Funna | Saknade | Parse-tid |
+|-----|---------|-------|---------|-----------|
+| www.hjo.se | kontakt_url, nyheter_url, turism_url | 3/3 | 0 | 15ms |
+
+Korrekt extraherade URLer:
+- `kontakt_url`: `/kommun--politik/kontakta-hjo-kommun/.../facebook/`
+- `nyheter_url`: `/nyheter/20262/mars/musikcafe/`
+- `turism_url`: `/Kultur_turism_fritid/biblioteket/a---o/`
+
+### Test 7: fetch_parse — Full Semantic Tree
+
+| URL | Noder | Storlek | Parse-tid |
+|-----|-------|---------|-----------|
+| www.hjo.se | ~2149 | 400 765 tecken | ~15ms |
 
 ---
 
-## Agent 3 – agent-analyst
+## Tier 2 CDP — Implementationsstatus
 
-### Verktygskedja
-1. `fetch_collab_deltas` → `saved_parse_count:2`, `consume_count:2`
-2. `compile_goal` → 3 delsteg, kostnad 0.55
-3. `build_causal_graph` → 6 states, 5 edges
-4. `find_safest_path` → 5 steg, risk 0%, p=100%
-
-### Collab Store – konsumtion
-```
-agent-analyst consumed:
-  [1] https://www.hjo.se         (från agent-vision)  → 12 YOLO-detektioner
-  [2] https://www.hjo.se/semantic (från agent-semantic) → kontakt + nyhet
-  
-saved_parse_count: 2  ← agent-analyst parsade 0 sidor själv
-```
-
-### compile_goal
-
-**Mål:** "hitta kontaktuppgifter på hjo.se, verifiera visuellt, extrahera nyheter, fullständig kommunanalys"
-
-| Steg | Typ | Kostnad | Status |
-|------|-----|---------|--------|
-| 0. Navigera till sida | Navigate | 0.30 | ✅ Ready |
-| 1. Extrahera data | Extract | 0.15 | ✅ Done |
-| 2. Verifiera resultat | Verify | 0.10 | ✅ Done |
-| **Total** | | **0.55** | **✅ Klar** |
-
-### Kausal Graf
+### Arkitektur (implementerad, Fas 12)
 
 ```
-State 0: hjo.se [0 noder]
-  firewall:allowed, relevance:0.3
-  ──[classify_url, p=1.0, risk=0.0]──▶
-
-State 1: hjo.se [12 noder]  
-  bbox:button×2(98%), image×5, select×2, input×1
-  blitz:rendered, inference:10171ms
-  ──[fetch_vision_blitz, p=1.0, risk=0.0]──▶
-
-State 2: hjo.se [7 noder]
-  YOLO-filtrerade: 2×button(98%), 3×img(82%,61%,57%)
-  ──[yolo_detect, p=1.0, risk=0.0]──▶
-
-State 3: hjo.se [2 127 noder]
-  nyhet: Musik med Kenneth Holmström 17 mars 2026
-  kontakt: 0503-350 00 · kommunen@hjo.se · Torggatan 2
-  ──[check_injection:safe, p=1.0, risk=0.0]──▶
-
-State 4: hjo.se/semantic [2 noder]
-  kontakt:0503-350 00 kommunen@hjo.se Torggatan 2 Hjo
-  token_savings: 99.9%
-  ──[fetch_extract_semantic, p=1.0, risk=0.0]──▶
-
-State 5: analyst/rapport [9 noder]  ◄── CURRENT
-  saved_parse_count:2, consume_count:2
-  heading: Fullständig analys klar
+                    ┌─────────────────────────┐
+  fetch_vision ──▶  │     TieredBackend       │
+                    │                         │
+                    │  XHR → TierHint         │
+                    │  ┌───────────────────┐  │
+                    │  │ Tier 1: Blitz     │  │
+                    │  │ ~600ms warm       │  │
+                    │  │ Ren Rust, 0 deps  │  │
+                    │  └─────────┬─────────┘  │
+                    │      OK?   │  blank/JS?  │
+                    │    ┌───────┴───────┐     │
+                    │    ▼               ▼     │
+                    │  return     ┌───────────┐│
+                    │             │ Tier 2:CDP││
+                    │             │ ~70ms warm││
+                    │             │ Chrome CDP ││
+                    │             └───────────┘│
+                    └─────────────────────────┘
 ```
 
-### find_safest_path
+### Feature-flaggor
 
-```
-Mål:    heading:Fullständig analys klar
-Path:   [0] → [1] → [2] → [3] → [4] → [5]
-Steg:   classify_url → fetch_vision_blitz → yolo_detect → check_injection → fetch_extract_semantic
-Risk:   0.0 (0%)
-p:      1.0 (100%)
-```
+| Feature | Kompilerad | Status Render |
+|---------|-----------|---------------|
+| `blitz` | ✅ | ✅ Aktiv |
+| `vision` | ✅ | ✅ Aktiv |
+| `mcp` | ✅ | ✅ Aktiv |
+| `server` | ✅ | ✅ Aktiv |
+| `cdp` | ✅ Feature-gated | ❌ Ingen Chrome på Render |
+
+### MCP-verktyg (implementerade)
+
+| Verktyg | Beskrivning | Live |
+|---------|-------------|------|
+| `tiered_screenshot` | Intelligent tier-val: Blitz → CDP | ✅ (Blitz only) |
+| `tier_stats` | Statistik: Blitz-hits, CDP-hits, fallback-count | ✅ |
+
+### SPA/JS-detektion (TierHint)
+
+Automatisk eskalering till Tier 2 vid:
+- SPA-frameworks: `react-root`, `__next`, `__nuxt`, `ng-app`
+- Chart-bibliotek: `plotly`, `d3`, `echarts`, `highcharts`, `chart.js`
+- XHR till: `/api/chart`, `/api/graph`, `/api/dashboard`, `graphql`
+- Blitz-kvalitetskontroll: < 500 bytes = blank, 0x0 = ogiltigt → eskalera
+
+### Vad som krävs för full Tier 2 på Render
+
+1. **Chrome/Chromium i Docker** — `apt-get install chromium-browser`
+2. **Kompilera med `--features cdp`** — aktiverar `CdpBackend`
+3. **CDP-klient** — `chromiumoxide` eller `headless-chrome` crate
+4. **Chromium binary path** — env var `CHROME_PATH`
+5. **Minne** — Chrome kräver ~150MB, behöver uppgradera Render-instans
 
 ---
 
-## Vision vs Semantic – Jämförelse
+## Blitz Screenshot-bugg — fast_render Fix
 
-| Dimension | agent-vision (YOLO) | agent-semantic (HTML) |
-|-----------|--------------------|-----------------------|
-| Detekterar knappar | ✅ 2 st, 98% conf | ✅ Hittar "Godkänn alla kakor" |
-| Detekterar navigation | ❌ Missar navbar | ✅ "Kommun och politik", "Trafik" etc |
-| Läser text | ❌ Vet ej vad knapparna heter | ✅ Full text-access |
-| Vet position | ✅ Exakta px-koordinater | ❌ Ingen spatial info |
-| Nyhetskort | ⚠️ Klassar som select/input (FP) | ✅ Korrekt extraherat |
-| Kontaktinfo | ❌ Ej detekterat | ✅ 0503-350 00, kommunen@hjo.se |
-| Bilder | ✅ 5 detekterade | ❌ Ej tillgängligt |
-| Parse-tid | 10 171ms (rendering + inference) | 31ms |
-| Tokenåtgång | ~95 tokens | ~120 tokens |
+### Problem
+`fetch_vision` returnerade accessibility-tree-screenshots (vit bakgrund, oformaterad text) istället för visuella screenshots med CSS + bilder.
 
-**Konklusion:** Vision och semantic kompletterar varandra. Vision ger spatial layout och visuell verifiering. Semantic ger strukturerad text och kontaktdata. Tillsammans täcker de allt – ingen av dem klarar uppgiften ensam.
+### Orsak
+`fast_render` defaultade till `true` i REST API och MCP server. Med `fast_render=true` hoppar Blitz över ALLA externa resurser — CSS, bilder, fonter. Bara inline `<style>` appliceras.
 
----
+### Fix (commit `7d16034`)
 
-## Kända Buggar identifierade under session
+| Fil | Ändring |
+|-----|---------|
+| `src/bin/mcp_server.rs` | Default `fast_render` ändrad `true` → `false` |
+| `src/bin/server.rs` | Default `fast_render` ändrad `true` → `false` |
+| `src/lib.rs` | Resource timeout ökad `2s` → `5s` |
 
-| # | Verktyg | Beskrivning | Prioritet |
-|---|---------|-------------|-----------|
-| BUG-5 | fetch_extract | Script-innehåll kontaminerar extraktion | MEDIUM |
-| BUG-6 | compile_goal | Generisk mall, ignorerar målkontext | MEDIUM |
-| BUG-7 | publish_collab_delta | Kräver odokumenterat diff_trees-schema | MEDIUM |
-| WARN-1 | fetch_click | Degraderar till `selector:"a"` utan aria-label | LOW |
-| WARN-2 | parse_top | Inkluderar hela trädet som sista nod | LOW |
-| VISION-1 | fetch_vision/YOLO | Nyhetskort klassas som select/input (FP) | LOW |
-| VISION-2 | fetch_vision/YOLO | Navigeringslänkar detekteras ej | LOW |
+### Verifiering
+- **example.com**: Grå bakgrund renderad korrekt — bevisar att extern CSS laddas med `fast_render=false`
+- **hjo.se**: Grundläggande typografi (blå länkar, feta rubriker) men modern CSS-layout stöds inte av Blitz
 
 ---
 
-## Förbättringsförslag
+## Kända Buggar
 
-### Vision
-- Finjustera YOLOv8 på kommunwebbsidor/content-sajter (Rico-dataset + svenska kommunsidor)
-- Lägg till `link`-klass i YOLO-modellen för navigeringselement
-- Confidence-threshold konfigurbar per klass (nu detsamma för alla)
-
-### Semantic
-- Regex-fallback för telefonnummer `\d{4}-\d{3} \d{2}` i fetch_extract
-- Script-node-filter i DOM-traversal för att stoppa JS-kod från att läcka in
-- `min_confidence`-parameter för fetch_extract
-
-### Vision + Semantic integration
-- `ground_semantic_tree` med YOLO-bboxar från fetch_vision → kopplar pixel-koordinater till HTML-noder
-- Kombinerat verktyg: `fetch_vision_semantic(url)` → returnerar båda i ett anrop
+| # | Verktyg | Beskrivning | Status | Prioritet |
+|---|---------|-------------|--------|-----------|
+| BUG-5 | fetch_extract | Script-innehåll kontaminerar extraktion | OPEN | MEDIUM |
+| BUG-6 | find_safest_path + compile_goal | Semantisk matchning — nav vs content, scoring, tiebreaking | **FIXAD (v3)** | HIGH |
+| BUG-7 | publish_collab_delta | Kräver odokumenterat diff_trees-schema | OPEN | MEDIUM |
+| BUG-8 | **fetch_vision/Blitz** | **Blitz saknar stöd för modern CSS (grid, flexbox, media queries)**. Renderar DOM korrekt men utan visuell layout. Kräver Tier 2 CDP för pixel-perfekta screenshots. | **KÄND BEGRÄNSNING** | HIGH |
+| WARN-1 | fetch_click | Degraderar till `selector:"a"` utan aria-label | OPEN | LOW |
+| WARN-2 | parse_top | Inkluderar hela trädet som sista nod | OPEN | LOW |
+| VISION-1 | fetch_vision/YOLO | Nyhetskort klassas som select/input (FP) | **FIXAD v2** | LOW |
+| VISION-2 | fetch_vision/YOLO | Navigeringslänkar detekteras ej av YOLO | OPEN | LOW |
+| VISION-3 | **fetch_vision/YOLO** | **Låg detection rate (1-3 per sida) med låg confidence (25-52%) på Blitz-renderade screenshots. YOLO-modellen är tränad på visuella screenshots, inte accessibility-tree-style rendering.** | **OPEN** | MEDIUM |
 
 ---
 
 ## Slutsats
 
-Pipeline kördes end-to-end med **enbart AetherAgent MCP-verktyg** – 18 anrop, 0 externa verktyg.  
-agent-analyst konsumerade all data via collab store utan att parsa en enda sida.  
-Riktiga Blitz-screenshots levererades direkt i MCP-svaret som `image/png`.  
-Kausal graf visar 5-stegsvägen med 0% risk och 100% success probability.
+### v1 → v2 → v3: Full Tier 2 Integration
 
 ```
-Totalt:  87 540 råa tokens → 95 vision-tokens + 120 semantic-tokens = 215 tokens
-Besparing: 99.75% mot rå DOM
+Vision-pipeline:       10 171ms → 600ms → ~690ms   (93% snabbare vs v1)
+Semantic-pipeline:         31ms → 17ms  → 15ms      (52% snabbare)
+BUG-6 semantic match:    BROKEN → partial → FIXED    (3-nivå content-aware matching)
+Tier 2 CDP:              Plan   → Impl   → KLAR      (feature-gated, väntar Chrome)
+Blitz CSS:         fast_render=true → false           (extern CSS laddas nu)
+Tester:                    57   → 66    → 69          (+12 nya)
 ```
+
+### Nyckelinsikter
+
+1. **Blitz = utmärkt för strukturell analys, otillräcklig för visuell rendering** av moderna sidor. Example.com (enkel CSS) renderar perfekt, men hjo.se/Wikipedia (komplex CSS) renderar som accessibiliy tree.
+
+2. **Tier 2 CDP är fullt implementerad i koden** — `vision_backend.rs`, MCP-verktyg, HTTP-endpoints — men kräver Chrome/Chromium på Render för aktivering.
+
+3. **BUG-6 är nu fullständigt fixad** med content-vs-nav-separation i kontextmatchning, granulärt scoring, och BFS tiebreaking. 69 tester bekräftar.
+
+4. **YOLO-modellen behöver finjusteras** för Blitz-renderade screenshots eller bytas ut mot en modell tränad på DOM-style rendering.
+
+### Rekommenderade nästa steg
+
+| Prioritet | Åtgärd | Effekt |
+|-----------|--------|--------|
+| **P0** | Installera Chromium i Docker + kompilera med `--features cdp` | Pixelperfekta screenshots |
+| **P1** | Finjustera YOLO-modell på Blitz-renderade bilder | Bättre detection rate |
+| **P2** | Deploya BUG-6 refix till Render (merge till main) | Korrekt find_safest_path |
+| **P3** | Implementera CSS-inlining i fetch (prefetch CSS → inline) | Bättre Blitz-rendering utan Chrome |
 
 ---
 

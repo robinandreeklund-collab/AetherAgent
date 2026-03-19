@@ -23,11 +23,20 @@ mod temporal;
 mod trust;
 pub mod types;
 pub mod vision;
+pub mod vision_backend;
 mod webmcp;
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wasm_bindgen::prelude::*;
+
+// Global delad TieredBackend så att tier-statistik ackumuleras över anrop
+static GLOBAL_TIERED_BACKEND: OnceLock<vision_backend::TieredBackend> = OnceLock::new();
+
+fn global_tiered_backend() -> &'static vision_backend::TieredBackend {
+    GLOBAL_TIERED_BACKEND.get_or_init(vision_backend::TieredBackend::default)
+}
 
 use parser::parse_html;
 use semantic::{extract_title, SemanticBuilder};
@@ -825,11 +834,243 @@ pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
 pub fn parse_screenshot(png_bytes: &[u8], model_bytes: &[u8], goal: &str) -> String {
     let config = vision::VisionConfig::default();
     match vision::detect_ui_elements(png_bytes, model_bytes, goal, &config) {
-        Ok(result) => {
-            serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
-        }
-        Err(e) => format!(r#"{{"error":"{}"}}"#, e),
+        Ok(result) => serde_json::to_string(&result)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string()),
+        Err(e) => serde_json::json!({"error": e}).to_string(),
     }
+}
+
+/// Parse a screenshot with a pre-loaded ORT session (fast path — no model reload).
+///
+/// Use `load_vision_model` to load the model once, then pass it here for each request.
+// [RTEN-ROLLBACK-ID:lib-parse-model] Gamla: pub fn parse_screenshot_with_model(... model: &rten::Model ...)
+#[cfg(feature = "vision")]
+pub fn parse_screenshot_with_model(
+    png_bytes: &[u8],
+    session: &mut ort::session::Session,
+    goal: &str,
+) -> String {
+    let config = vision::VisionConfig::default();
+    match vision::detect_ui_elements_with_model(png_bytes, session, goal, &config) {
+        Ok(result) => serde_json::to_string(&result)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string()),
+        Err(e) => serde_json::json!({"error": e}).to_string(),
+    }
+}
+
+/// Load a vision model from ONNX bytes into an ORT session.
+/// Call once at startup, reuse for all requests.
+// [RTEN-ROLLBACK-ID:lib-load-model] Gamla: pub fn load_vision_model(... ) -> Result<rten::Model, String>
+#[cfg(feature = "vision")]
+pub fn load_vision_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
+    vision::load_model(model_bytes)
+}
+
+// ─── Blitz rendering (testbar via library) ──────────────────────────────────
+
+/// Render HTML to PNG using Blitz (pure Rust).
+///
+/// `fast_render=true`: skip external resources (~50ms). Good enough for YOLO.
+/// `fast_render=false`: load CSS/fonts/images with 5s timeout cap.
+#[cfg(feature = "blitz")]
+pub fn render_html_to_png(
+    html: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<Vec<u8>, String> {
+    use anyrender::{ImageRenderer, PaintScene as _};
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let scale: f32 = 1.0;
+
+    let mut document = if fast_render {
+        HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                ..Default::default()
+            },
+        )
+    } else {
+        let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+        let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+            std::sync::Arc::new(callback);
+        let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
+
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                net_provider: Some(std::sync::Arc::clone(&net)
+                    as std::sync::Arc<
+                        dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                    >),
+                ..Default::default()
+            },
+        );
+
+        // Vänta kort så att Blitz hinner starta alla resurshämtningar
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut idle_rounds = 0u32;
+        loop {
+            let mut loaded_any = false;
+            while let Ok((_doc_id, resource)) = rx.try_recv() {
+                doc.as_mut().load_resource(resource);
+                loaded_any = true;
+            }
+            doc.as_mut().resolve(0.0);
+
+            // Kräv minst 3 tomma rundor i rad innan vi avslutar
+            if net.is_empty() && !loaded_any {
+                idle_rounds += 1;
+                if idle_rounds >= 3 {
+                    break;
+                }
+            } else {
+                idle_rounds = 0;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        while let Ok((_doc_id, resource)) = rx.try_recv() {
+            doc.as_mut().load_resource(resource);
+        }
+        doc.as_mut().resolve(0.0);
+        doc
+    };
+
+    if fast_render {
+        document.as_mut().resolve(0.0);
+    }
+
+    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
+    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+    renderer.render_to_vec(
+        |scene| {
+            scene.fill(
+                peniko::Fill::NonZero,
+                peniko::kurbo::Affine::IDENTITY,
+                white,
+                None,
+                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+            );
+            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
+        },
+        &mut buffer,
+    );
+
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header: {e}"))?;
+        writer
+            .write_image_data(&buffer)
+            .map_err(|e| format!("PNG data: {e}"))?;
+        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+    }
+
+    Ok(png_bytes)
+}
+
+// ─── Fas 12: TieredBackend – Blitz/CDP tier-val ─────────────────────────────
+
+/// Screenshot with intelligent tier selection (Blitz → CDP fallback)
+///
+/// Uses TieredBackend to render a page:
+/// - Tier 1 (Blitz): Pure Rust, ~10-50ms, no Chrome needed
+/// - Tier 2 (CDP): Chrome DevTools Protocol, ~60-80ms, JS-capable
+///
+/// # Arguments
+/// * `html` - Page HTML
+/// * `url` - Page URL
+/// * `goal` - Agent's goal
+/// * `width` - Viewport width (default 1280)
+/// * `height` - Viewport height (default 800)
+/// * `fast_render` - Skip external resources (default true)
+/// * `xhr_captures_json` - Optional: XHR captures JSON for tier hint
+///
+/// # Returns
+/// JSON with ScreenshotResult: tier_used, latency_ms, size_bytes
+pub fn tiered_screenshot(
+    html: &str,
+    url: &str,
+    goal: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+    xhr_captures_json: &str,
+) -> String {
+    let backend = global_tiered_backend();
+
+    // Bestäm tier-hint från XHR-captures
+    let tier_hint = if xhr_captures_json.is_empty() || xhr_captures_json == "[]" {
+        // Kolla HTML direkt
+        vision_backend::determine_tier_hint(html, &[])
+    } else {
+        // Parsa XHR-captures och analysera
+        let captures: Vec<intercept::XhrCapture> =
+            serde_json::from_str(xhr_captures_json).unwrap_or_default();
+        let hint = intercept::tier_hint_from_captures(&captures);
+        if matches!(hint, vision_backend::TierHint::TryBlitzFirst) {
+            // Fallback: analysera HTML
+            vision_backend::determine_tier_hint(html, &[])
+        } else {
+            hint
+        }
+    };
+
+    let req = vision_backend::ScreenshotRequest {
+        url: url.to_string(),
+        html: Some(html.to_string()),
+        width,
+        height,
+        fast_render,
+        tier_hint,
+        goal: goal.to_string(),
+    };
+
+    match backend.screenshot(&req) {
+        Ok(result) => {
+            // Returnera metadata (inte PNG-bytes — de hanteras separat)
+            let stats = backend.stats();
+            serde_json::json!({
+                "tier_used": result.tier_used,
+                "latency_ms": result.latency_ms,
+                "size_bytes": result.size_bytes,
+                "width": result.width,
+                "height": result.height,
+                "escalation_reason": result.escalation_reason,
+                "stats": stats,
+            })
+            .to_string()
+        }
+        Err(e) => serde_json::json!({"error": e}).to_string(),
+    }
+}
+
+/// Get tier statistics for monitoring
+///
+/// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.
+pub fn tier_stats() -> String {
+    let stats = global_tiered_backend().stats();
+    serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ─── Fas 9d: Cross-Agent Semantic Diffing ───────────────────────────────────

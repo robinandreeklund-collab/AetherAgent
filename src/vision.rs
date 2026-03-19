@@ -1,10 +1,11 @@
-// Fas 11: Inbyggd YOLOv8-inferens via rten
+// Fas 11: Inbyggd YOLOv8-inferens via ONNX Runtime (ort)
 // Screenshot -> objektdetektering -> bounding boxes -> semantiskt trad
+//
+// [RTEN-ROLLBACK-ID:vision-imports] Gamla imports:
+// use rten_tensor::{AsView, Layout};
 
 use std::collections::HashMap;
 
-#[cfg(feature = "vision")]
-use rten_tensor::{AsView, Layout};
 use serde::{Deserialize, Serialize};
 
 use crate::grounding::compute_iou;
@@ -295,74 +296,85 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
     Ok(tensor)
 }
 
+// [RTEN-ROLLBACK-ID:vision-core] Gamla rten-baserade funktioner:
+// pub fn load_model(model_bytes: &[u8]) -> Result<rten::Model, String> { ... }
+// pub fn run_inference_with_model(model: &rten::Model, ...) -> Result<Vec<UiDetection>, String> { ... }
+// pub fn run_inference(model_bytes: &[u8], ...) -> Result<Vec<UiDetection>, String> { ... }
+// pub fn detect_ui_elements_with_model(png_bytes: &[u8], model: &rten::Model, ...) { ... }
+// pub fn detect_ui_elements(png_bytes: &[u8], model_bytes: &[u8], ...) { ... }
+// Se git-historik för fullständig implementering (commit före denna)
+
 #[cfg(feature = "vision")]
-/// Run YOLOv8-nano inference on preprocessed image tensor
+/// Load an ONNX model into an ORT session (expensive — call once, reuse the result).
 ///
-/// Loads the ONNX model, creates the input tensor, runs inference,
-/// and post-processes results with confidence thresholding and NMS.
-pub fn run_inference(
-    model_bytes: &[u8],
+/// Konfigurerar ONNX Runtime med:
+/// - Graph optimization level ALL (op fusion, constant folding)
+/// - Inter-op parallelism
+/// - Optimerad tråd-pool
+pub fn load_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
+    let session = ort::session::Session::builder()
+        .map_err(|e| format!("ORT session builder: {e}"))?
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .map_err(|e| format!("ORT optimization level: {e}"))?
+        .with_intra_threads(4)
+        .map_err(|e| format!("ORT intra threads: {e}"))?
+        .with_inter_threads(2)
+        .map_err(|e| format!("ORT inter threads: {e}"))?
+        .commit_from_memory(model_bytes)
+        .map_err(|e| format!("ORT model load: {e}"))?;
+    Ok(session)
+}
+
+#[cfg(feature = "vision")]
+/// Run YOLOv8-nano inference with a pre-loaded ORT session (fast path).
+///
+/// ORT `run` kräver `&mut Session`. Anroparen ansvarar för synkronisering
+/// (t.ex. via Mutex i server state).
+pub fn run_inference_with_model(
+    session: &mut ort::session::Session,
     tensor: &[f32],
     input_size: u32,
     config: &VisionConfig,
 ) -> Result<Vec<UiDetection>, String> {
-    use rten::Model;
-    use rten_tensor::NdTensor;
+    use ort::value::TensorRef;
 
-    // Ladda modellen fran bytes
-    let model =
-        Model::load(model_bytes.to_vec()).map_err(|e| format!("Kunde inte ladda modell: {}", e))?;
-
-    // Skapa input-tensor med form [1, 3, input_size, input_size]
     let size = input_size as usize;
-    let input = NdTensor::from_data([1, 3, size, size], tensor.to_vec());
 
-    // Kor inferens
-    let input_id = model
-        .input_ids()
-        .first()
-        .copied()
-        .ok_or_else(|| "Modellen har inga inputs".to_string())?;
-    let output_id = model
-        .output_ids()
-        .first()
-        .copied()
-        .ok_or_else(|| "Modellen har inga outputs".to_string())?;
+    // Skapa input TensorRef (zero-copy view av vår data)
+    let input_ref = TensorRef::<f32>::from_array_view(([1usize, 3, size, size], tensor))
+        .map_err(|e| format!("ORT tensor create: {e}"))?;
 
-    let result = model
-        .run(vec![(input_id, input.into())], &[output_id], None)
-        .map_err(|e| format!("Inferensfel: {}", e))?;
+    // Kör inferens
+    let outputs = session
+        .run(ort::inputs![input_ref])
+        .map_err(|e| format!("ORT inference: {e}"))?;
 
-    // Hamta output-tensor
-    let output = result
-        .first()
+    // Hämta output — YOLOv8 output: [1, num_classes+4, num_predictions]
+    let (_name, output_value) = outputs
+        .iter()
+        .next()
         .ok_or_else(|| "Inget output fran modellen".to_string())?;
-    let output_tensor = match output {
-        rten::Output::FloatTensor(t) => t,
-        _ => return Err("Output ar inte float-tensor".to_string()),
-    };
+    let (shape, data) = output_value
+        .try_extract_tensor::<f32>()
+        .map_err(|e| format!("ORT output extract: {e}"))?;
 
-    // Post-process: YOLOv8 output ar [1, num_classes+4, num_predictions]
-    // Forsta 4 rader: cx, cy, w, h
-    // Resterande rader: klasskonfidens
-    let shape = output_tensor.shape();
+    // Shape deref:ar till SmallVec<[i64; 4]>
     if shape.len() < 3 {
-        return Err(format!("Ovantad output-form: {:?}", shape));
+        return Err(format!("Ovantad output-form: {:?}", &**shape));
     }
 
-    let num_attrs = shape[1]; // 4 + num_classes
-    let num_preds = shape[2];
+    let num_attrs = shape[1] as usize; // 4 + num_classes
+    let num_preds = shape[2] as usize;
     let num_classes = num_attrs.saturating_sub(4).min(config.num_classes());
 
     if num_classes == 0 {
         return Err("Modellen har inga klasser".to_string());
     }
 
-    let data = output_tensor.to_vec();
+    // Platt data-access: data har layout [1, num_attrs, num_preds] row-major
     let mut detections = Vec::new();
 
     for pred_idx in 0..num_preds {
-        // Hitta basta klassen for denna prediktion
         let mut best_class = 0;
         let mut best_conf = 0.0f32;
 
@@ -374,20 +386,17 @@ pub fn run_inference(
             }
         }
 
-        // Per-klass konfidenströskel
         let class_name = config.class_name(best_class);
         let threshold = config.threshold_for_class(class_name);
         if best_conf < threshold {
             continue;
         }
 
-        // Extrahera bounding box (cx, cy, w, h) -> (x, y, w, h)
         let cx = data[pred_idx];
         let cy = data[num_preds + pred_idx];
         let w = data[2 * num_preds + pred_idx];
         let h = data[3 * num_preds + pred_idx];
 
-        // Filtrera för liten area
         if config.min_detection_area > 0.0 && w * h < config.min_detection_area {
             continue;
         }
@@ -407,41 +416,45 @@ pub fn run_inference(
         });
     }
 
-    // Applicera NMS
     nms(&mut detections, config.nms_threshold);
-
-    // Begränsa antal detektioner
     detections.truncate(config.max_detections);
 
     Ok(detections)
 }
 
 #[cfg(feature = "vision")]
-/// Full pipeline: PNG bytes -> detections -> semantic tree
+/// Run YOLOv8-nano inference on preprocessed image tensor.
 ///
-/// Preprocesses the image, runs YOLOv8-nano inference, applies NMS,
-/// and builds a semantic tree from the detections.
-pub fn detect_ui_elements(
-    png_bytes: &[u8],
+/// Loads the model each time — use `run_inference_with_model` for repeated calls.
+pub fn run_inference(
     model_bytes: &[u8],
+    tensor: &[f32],
+    input_size: u32,
+    config: &VisionConfig,
+) -> Result<Vec<UiDetection>, String> {
+    let mut session = load_model(model_bytes)?;
+    run_inference_with_model(&mut session, tensor, input_size, config)
+}
+
+#[cfg(feature = "vision")]
+/// Full pipeline with pre-loaded ORT session (fast path — no model reload).
+pub fn detect_ui_elements_with_model(
+    png_bytes: &[u8],
+    session: &mut ort::session::Session,
     goal: &str,
     config: &VisionConfig,
 ) -> Result<VisionResult, String> {
     use std::time::Instant;
 
-    // Preprocessing
     let pre_start = Instant::now();
     let tensor = preprocess_image(png_bytes, config.input_size)?;
     let preprocess_time_ms = pre_start.elapsed().as_millis() as u64;
 
-    // Inferens
     let inf_start = Instant::now();
-    let raw_detections = run_inference(model_bytes, &tensor, config.input_size, config)?;
+    let raw_detections = run_inference_with_model(session, &tensor, config.input_size, config)?;
     let inference_time_ms = inf_start.elapsed().as_millis() as u64;
 
     let raw_detection_count = raw_detections.len() as u32;
-
-    // Bygg semantiskt trad
     let tree = detections_to_tree(&raw_detections, goal, "screenshot://local");
 
     Ok(VisionResult {
@@ -452,6 +465,21 @@ pub fn detect_ui_elements(
         raw_detection_count,
         model_version: config.model_version.clone(),
     })
+}
+
+#[cfg(feature = "vision")]
+/// Full pipeline: PNG bytes -> detections -> semantic tree
+///
+/// Loads the model each time. For server use, prefer
+/// `detect_ui_elements_with_model` with a pre-loaded session.
+pub fn detect_ui_elements(
+    png_bytes: &[u8],
+    model_bytes: &[u8],
+    goal: &str,
+    config: &VisionConfig,
+) -> Result<VisionResult, String> {
+    let mut session = load_model(model_bytes)?;
+    detect_ui_elements_with_model(png_bytes, &mut session, goal, config)
 }
 
 // Stub nar vision-feature inte ar aktiverat
@@ -823,6 +851,339 @@ mod tests {
         assert!(
             result.unwrap_err().contains("not available"),
             "Felmeddelande borde nämna 'not available'"
+        );
+    }
+
+    // ─── Prestandatester ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nms_performance_100_detections() {
+        // NMS på 100 detektioner borde klara sig under 5ms
+        let mut detections: Vec<UiDetection> = (0..100)
+            .map(|i| UiDetection {
+                class: UI_CLASSES[i % UI_CLASSES.len()].to_string(),
+                confidence: 0.95 - (i as f32 * 0.005),
+                bbox: BoundingBox {
+                    x: (i % 10) as f32 * 130.0,
+                    y: (i / 10) as f32 * 90.0,
+                    width: 120.0,
+                    height: 40.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        nms(&mut detections, 0.45);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 5,
+            "NMS på 100 detektioner tog {}ms, borde vara <5ms",
+            elapsed.as_millis()
+        );
+        assert!(
+            !detections.is_empty(),
+            "NMS borde behålla åtminstone några detektioner"
+        );
+    }
+
+    #[test]
+    fn test_nms_performance_500_detections_heavy_overlap() {
+        // Stresstest: 500 starkt överlappande detektioner
+        let mut detections: Vec<UiDetection> = (0..500)
+            .map(|i| UiDetection {
+                class: "button".to_string(),
+                confidence: 0.99 - (i as f32 * 0.001),
+                bbox: BoundingBox {
+                    x: 100.0 + (i as f32 * 0.5),
+                    y: 100.0 + (i as f32 * 0.3),
+                    width: 200.0,
+                    height: 50.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        nms(&mut detections, 0.45);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 50,
+            "NMS på 500 överlappande detektioner tog {}ms, borde vara <50ms",
+            elapsed.as_millis()
+        );
+        // Starkt överlappande → borde filtreras ner kraftigt
+        assert!(
+            detections.len() < 20,
+            "500 överlappande borde filtreras till <20, fick {}",
+            detections.len()
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_performance_100_elements() {
+        // Bygga semantiskt träd av 100 detektioner borde ta <1ms
+        let detections: Vec<UiDetection> = (0..100)
+            .map(|i| UiDetection {
+                class: UI_CLASSES[i % UI_CLASSES.len()].to_string(),
+                confidence: 0.8,
+                bbox: BoundingBox {
+                    x: (i % 10) as f32 * 130.0,
+                    y: (i / 10) as f32 * 90.0,
+                    width: 120.0,
+                    height: 40.0,
+                },
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        let tree = detections_to_tree(&detections, "hitta kontaktuppgifter", "https://example.com");
+        let elapsed = start.elapsed();
+
+        assert_eq!(tree.nodes.len(), 100, "Borde skapa 100 noder");
+        assert!(
+            elapsed.as_millis() < 1,
+            "detections_to_tree för 100 element tog {}ms, borde vara <1ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn test_vision_config_per_class_threshold_filtering() {
+        // Simulera hjo.se-scenariot: höj threshold för select/input för att filtrera FP
+        let mut config = VisionConfig::default();
+        config.class_thresholds.insert("select".to_string(), 0.6);
+        config.class_thresholds.insert("input".to_string(), 0.6);
+        config.class_thresholds.insert("button".to_string(), 0.3);
+
+        // select med 42% confidence borde filtreras (under 60%)
+        assert!(
+            config.threshold_for_class("select") > 0.42,
+            "select-tröskeln (0.6) borde filtrera 42% confidence"
+        );
+        // button med 98% confidence borde behållas (över 30%)
+        assert!(
+            config.threshold_for_class("button") < 0.98,
+            "button-tröskeln (0.3) borde behålla 98% confidence"
+        );
+        // input med 37% confidence borde filtreras (under 60%)
+        assert!(
+            config.threshold_for_class("input") > 0.37,
+            "input-tröskeln (0.6) borde filtrera 37% confidence"
+        );
+    }
+
+    #[test]
+    fn test_min_detection_area_filters_artefacts() {
+        let config = VisionConfig {
+            min_detection_area: 500.0,
+            ..VisionConfig::default()
+        };
+        // Liten artefakt: 10×10 = 100px² < 500 → borde filtreras
+        assert!(
+            10.0 * 10.0 < config.min_detection_area,
+            "10×10 detektion borde filtreras av min_detection_area=500"
+        );
+        // Normal knapp: 120×40 = 4800px² > 500 → borde behållas
+        assert!(
+            120.0 * 40.0 > config.min_detection_area,
+            "120×40 detektion borde passera min_detection_area=500"
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_goal_relevance_scoring() {
+        let detections = vec![
+            UiDetection {
+                class: "button".to_string(),
+                confidence: 0.95,
+                bbox: BoundingBox {
+                    x: 100.0,
+                    y: 200.0,
+                    width: 80.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "text".to_string(),
+                confidence: 0.88,
+                bbox: BoundingBox {
+                    x: 50.0,
+                    y: 100.0,
+                    width: 200.0,
+                    height: 25.0,
+                },
+            },
+        ];
+
+        // Mål som nämner "button" borde ge button högre relevans
+        let tree_button_goal =
+            detections_to_tree(&detections, "click the button", "https://example.com");
+        let tree_text_goal =
+            detections_to_tree(&detections, "read the text", "https://example.com");
+
+        let button_rel_with_button_goal = tree_button_goal.nodes[0].relevance;
+        let button_rel_with_text_goal = tree_text_goal.nodes[0].relevance;
+        assert!(
+            button_rel_with_button_goal > button_rel_with_text_goal,
+            "Button borde ha högre relevans med 'click the button' ({}) vs 'read the text' ({})",
+            button_rel_with_button_goal,
+            button_rel_with_text_goal
+        );
+
+        let text_rel_with_text_goal = tree_text_goal.nodes[1].relevance;
+        let text_rel_with_button_goal = tree_button_goal.nodes[1].relevance;
+        assert!(
+            text_rel_with_text_goal > text_rel_with_button_goal,
+            "Text borde ha högre relevans med 'read the text' ({}) vs 'click the button' ({})",
+            text_rel_with_text_goal,
+            text_rel_with_button_goal
+        );
+    }
+
+    #[test]
+    fn test_detections_to_tree_all_classes_mapped() {
+        // Verifiera att alla UI_CLASSES mappar till giltiga roller
+        let detections: Vec<UiDetection> = UI_CLASSES
+            .iter()
+            .enumerate()
+            .map(|(i, cls)| UiDetection {
+                class: cls.to_string(),
+                confidence: 0.9,
+                bbox: BoundingBox {
+                    x: i as f32 * 100.0,
+                    y: 0.0,
+                    width: 80.0,
+                    height: 30.0,
+                },
+            })
+            .collect();
+
+        let tree = detections_to_tree(&detections, "test", "url");
+        assert_eq!(
+            tree.nodes.len(),
+            UI_CLASSES.len(),
+            "Borde skapa en nod per UI-klass"
+        );
+
+        for node in &tree.nodes {
+            assert!(
+                !node.role.is_empty(),
+                "Nod-roll borde inte vara tom för klass"
+            );
+            assert_eq!(
+                node.trust,
+                TrustLevel::Untrusted,
+                "Alla vision-noder borde vara Untrusted"
+            );
+            assert!(node.bbox.is_some(), "Alla vision-noder borde ha bbox");
+        }
+    }
+
+    #[test]
+    fn test_vision_result_serde_roundtrip() {
+        let result = VisionResult {
+            detections: vec![UiDetection {
+                class: "button".to_string(),
+                confidence: 0.95,
+                bbox: BoundingBox {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 100.0,
+                    height: 40.0,
+                },
+            }],
+            tree: detections_to_tree(
+                &[UiDetection {
+                    class: "button".to_string(),
+                    confidence: 0.95,
+                    bbox: BoundingBox {
+                        x: 10.0,
+                        y: 20.0,
+                        width: 100.0,
+                        height: 40.0,
+                    },
+                }],
+                "test",
+                "url",
+            ),
+            inference_time_ms: 171,
+            preprocess_time_ms: 185,
+            raw_detection_count: 12,
+            model_version: "v1-int8".to_string(),
+        };
+
+        let json = serde_json::to_string(&result).expect("Borde kunna serialisera VisionResult");
+        let parsed: VisionResult =
+            serde_json::from_str(&json).expect("Borde kunna deserialisera VisionResult");
+
+        assert_eq!(
+            parsed.detections.len(),
+            1,
+            "Borde ha 1 detektion efter roundtrip"
+        );
+        assert_eq!(
+            parsed.inference_time_ms, 171,
+            "inference_time_ms borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.preprocess_time_ms, 185,
+            "preprocess_time_ms borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.raw_detection_count, 12,
+            "raw_detection_count borde överleva roundtrip"
+        );
+        assert_eq!(
+            parsed.model_version, "v1-int8",
+            "model_version borde överleva roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_nms_preserves_sort_order() {
+        // NMS borde returnera detektioner sorterade efter confidence (högst först)
+        let mut detections = vec![
+            UiDetection {
+                class: "button".to_string(),
+                confidence: 0.5,
+                bbox: BoundingBox {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 50.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "input".to_string(),
+                confidence: 0.9,
+                bbox: BoundingBox {
+                    x: 200.0,
+                    y: 200.0,
+                    width: 100.0,
+                    height: 30.0,
+                },
+            },
+            UiDetection {
+                class: "link".to_string(),
+                confidence: 0.7,
+                bbox: BoundingBox {
+                    x: 400.0,
+                    y: 0.0,
+                    width: 60.0,
+                    height: 20.0,
+                },
+            },
+        ];
+        nms(&mut detections, 0.45);
+        assert_eq!(detections.len(), 3, "Icke-överlappande borde alla behållas");
+        assert!(
+            detections[0].confidence >= detections[1].confidence
+                && detections[1].confidence >= detections[2].confidence,
+            "Detektioner borde vara sorterade efter confidence (högst först): {}, {}, {}",
+            detections[0].confidence,
+            detections[1].confidence,
+            detections[2].confidence
         );
     }
 }

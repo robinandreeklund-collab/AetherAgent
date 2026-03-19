@@ -39,6 +39,20 @@ fn find_node_recursive<'a>(
     None
 }
 
+/// Sök nod med flera möjliga roller (t.ex. "button" eller "cta")
+fn find_node_any_role<'a>(
+    nodes: &'a [serde_json::Value],
+    roles: &[&str],
+    label_contains: &str,
+) -> Option<&'a serde_json::Value> {
+    for role in roles {
+        if let Some(found) = find_node_recursive(nodes, role, label_contains) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // ─── 01: E-commerce product page ─────────────────────────────────────────────
 
 #[test]
@@ -54,8 +68,11 @@ fn test_01_ecommerce_product_parse() {
     );
 
     let nodes = tree["nodes"].as_array().unwrap();
-    let btn = find_node_recursive(nodes, "button", "varukorg");
-    assert!(btn.is_some(), "Borde hitta varukorg-knapp");
+    let btn = find_node_any_role(nodes, &["button", "cta"], "varukorg");
+    assert!(
+        btn.is_some(),
+        "Borde hitta varukorg-knapp (button eller cta)"
+    );
     assert!(
         btn.unwrap()["relevance"].as_f64().unwrap() > 0.3,
         "Varukorg-knappen borde ha hög relevans"

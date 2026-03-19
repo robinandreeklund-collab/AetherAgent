@@ -175,6 +175,9 @@ impl SemanticBuilder {
                     || !c.children.is_empty()
                     || c.role == "heading"
                     || c.role == "link"
+                    || c.role == "price"
+                    || c.role == "cta"
+                    || c.role == "product_card"
             })
             .collect();
 
@@ -280,6 +283,9 @@ fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
             || n.relevance >= threshold
             || n.role == "heading"
             || n.role == "link"
+            || n.role == "price"
+            || n.role == "cta"
+            || n.role == "product_card"
     });
 }
 
@@ -374,15 +380,15 @@ mod tests {
         let mut builder = SemanticBuilder::new("köp billigaste flyg");
         let tree = builder.build(&dom, "https://example.com", "Test");
 
-        // Hitta button-noder
+        // Hitta button/cta-noder (CTA-heuristik kan ge "cta" för "Köp"-knappar)
         let buttons: Vec<&SemanticNode> = tree
             .nodes
             .iter()
             .flat_map(|n| collect_nodes(n))
-            .filter(|n| n.role == "button")
+            .filter(|n| n.role == "button" || n.role == "cta")
             .collect();
 
-        assert!(!buttons.is_empty(), "Borde hitta minst en button");
+        assert!(!buttons.is_empty(), "Borde hitta minst en button/cta");
         let btn = &buttons[0];
         assert!(
             btn.relevance > 0.7,

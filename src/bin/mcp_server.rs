@@ -14,8 +14,21 @@ use rmcp::model::ServerInfo;
 use rmcp::schemars;
 use rmcp::{tool, tool_router, ServerHandler, ServiceExt};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+
+/// Deserializer som accepterar både en JSON-sträng och ett JSON-objekt.
+/// Små LLM:er (t.ex. Nemotron) skickar ofta objekt istället för serialiserad sträng.
+fn deserialize_json_string_or_object<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(s) => Ok(s),
+        other => serde_json::to_string(&other).map_err(serde::de::Error::custom),
+    }
+}
 
 // ─── Parameter types ────────────────────────────────────────────────────────
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -98,9 +111,11 @@ struct FirewallParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct DiffParams {
-    /// Previous semantic tree JSON
+    /// Previous semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     old_tree_json: String,
-    /// Current semantic tree JSON
+    /// Current semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     new_tree_json: String,
 }
 
@@ -108,15 +123,18 @@ struct DiffParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct BuildCausalGraphParams {
-    /// JSON array of snapshot objects: [{"url": "...", "node_count": 5, "warning_count": 0, "key_elements": ["button:Buy"]}]. Only "url" is required.
+    /// JSON array of snapshot objects (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     snapshots_json: String,
-    /// JSON array of action labels between snapshots
+    /// JSON array of action labels between snapshots (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     actions_json: String,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct PredictOutcomeParams {
-    /// Causal graph JSON (from build_causal_graph)
+    /// Causal graph JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     graph_json: String,
     /// Action to predict outcome for
     action: String,
@@ -124,7 +142,8 @@ struct PredictOutcomeParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct SafestPathParams {
-    /// Causal graph JSON (from build_causal_graph)
+    /// Causal graph JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     graph_json: String,
     /// Target goal state label
     goal: String,
@@ -146,15 +165,18 @@ struct GroundTreeParams {
     goal: String,
     /// The page URL
     url: String,
-    /// JSON array of bbox annotations to match against nodes
+    /// JSON array of bbox annotations (string or array)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     annotations_json: String,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct MatchBboxParams {
-    /// Semantic tree JSON (from parse)
+    /// Semantic tree JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     tree_json: String,
-    /// Bounding box JSON ({x, y, width, height})
+    /// Bounding box JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     bbox_json: String,
 }
 
@@ -163,7 +185,8 @@ struct CollabCreateParams {}
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabRegisterParams {
-    /// Collab store JSON
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Unique agent ID
     agent_id: String,
@@ -175,15 +198,17 @@ struct CollabRegisterParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabPublishParams {
-    /// Collab store JSON (from create_collab_store)
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Publishing agent's ID (from register_collab_agent)
     agent_id: String,
     /// URL the delta applies to
     url: String,
-    /// Semantic delta JSON — pass the FULL output from diff_trees directly.
+    /// Semantic delta JSON — pass the FULL output from diff_trees directly (string or object).
     /// Required fields: token_savings_ratio (f32), total_nodes_before (u32),
     /// total_nodes_after (u32), changes (array of {change_type, role, label}).
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     delta_json: String,
     /// Timestamp in milliseconds since epoch (e.g. Date.now())
     timestamp_ms: u64,
@@ -191,7 +216,8 @@ struct CollabPublishParams {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CollabFetchParams {
-    /// Collab store JSON
+    /// Collab store JSON (string or object)
+    #[serde(deserialize_with = "deserialize_json_string_or_object")]
     store_json: String,
     /// Requesting agent's ID
     agent_id: String,
@@ -235,7 +261,32 @@ struct FetchVisionParams {
     width: Option<u32>,
     /// Viewport height in pixels (default: 800)
     height: Option<u32>,
+    /// true (default): skip external resources (~50ms). false: load all (~2s cap).
+    fast_render: Option<bool>,
 }
+
+// ─── Fas 12 parameter types ─────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct TieredScreenshotParams {
+    /// Raw HTML string from the web page
+    html: String,
+    /// The page URL
+    url: String,
+    /// The agent's current goal
+    goal: String,
+    /// Viewport width in pixels (default: 1280)
+    width: Option<u32>,
+    /// Viewport height in pixels (default: 800)
+    height: Option<u32>,
+    /// Skip external resources for faster rendering (default: true)
+    fast_render: Option<bool>,
+    /// Optional: XHR captures JSON for intelligent tier selection
+    xhr_captures_json: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct TierStatsParams {}
 
 // ─── Server ─────────────────────────────────────────────────────────────────
 
@@ -246,7 +297,7 @@ struct AetherMcpServer {
 impl AetherMcpServer {
     fn new() -> Self {
         Self {
-            tool_router: ToolRouter::new(),
+            tool_router: Self::tool_router(),
         }
     }
 }
@@ -461,6 +512,36 @@ impl AetherMcpServer {
         aether_agent::detect_xhr_urls(&params.html)
     }
 
+    // ─── Fas 12: TieredBackend – Intelligent Screenshot ────────────────────────
+
+    #[tool(
+        name = "tiered_screenshot",
+        description = "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. USE THIS TOOL WHEN: you need a screenshot and want the system to automatically choose the best rendering engine. Provide HTML + URL. Optionally pass XHR captures JSON for smarter tier selection — if the page uses Chart.js, D3, or other JS visualization libraries, CDP is used directly. Returns: tier_used (Blitz/Cdp), latency_ms, size_bytes, and escalation_reason if tier switching occurred."
+    )]
+    fn tiered_screenshot(&self, Parameters(params): Parameters<TieredScreenshotParams>) -> String {
+        let width = params.width.unwrap_or(1280);
+        let height = params.height.unwrap_or(800);
+        let fast_render = params.fast_render.unwrap_or(true);
+        let xhr_json = params.xhr_captures_json.as_deref().unwrap_or("[]");
+        aether_agent::tiered_screenshot(
+            &params.html,
+            &params.url,
+            &params.goal,
+            width,
+            height,
+            fast_render,
+            xhr_json,
+        )
+    }
+
+    #[tool(
+        name = "tier_stats",
+        description = "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier. USE THIS TOOL WHEN: you want to monitor rendering performance and tier distribution in production."
+    )]
+    fn tier_stats(&self, Parameters(_params): Parameters<TierStatsParams>) -> String {
+        aether_agent::tier_stats()
+    }
+
     // ─── Fas 11: Vision – YOLOv8 Screenshot Analysis ──────────────────────────
 
     #[tool(
@@ -493,7 +574,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap)."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
@@ -503,109 +584,51 @@ impl AetherMcpServer {
 
 /// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
 #[cfg(feature = "blitz")]
-async fn render_url_to_png_mcp(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+async fn render_url_to_png_mcp(
+    url: &str,
+    width: u32,
+    height: u32,
+    _fast_render: bool,
+) -> Result<Vec<u8>, String> {
     // Hämta HTML med enkel reqwest
-    let html = reqwest::get(url)
+    let raw_html = reqwest::get(url)
         .await
         .map_err(|e| format!("Fetch error: {e}"))?
         .text()
         .await
         .map_err(|e| format!("Body error: {e}"))?;
 
+    // Inlina extern CSS för Blitz-rendering
+    let html = aether_agent::fetch::inline_external_css(&raw_html, url).await;
     let base_url = url.to_string();
-    tokio::task::spawn_blocking(move || render_html_to_png_mcp(&html, &base_url, width, height))
-        .await
-        .map_err(|e| format!("Render task: {e}"))?
+
+    // Med inlinad CSS kan vi använda fast_render=true
+    tokio::task::spawn_blocking(move || {
+        render_html_to_png_mcp(&html, &base_url, width, height, true)
+    })
+    .await
+    .map_err(|e| format!("Render task: {e}"))?
 }
 
-/// Ren-Rust HTML → PNG med Blitz, med riktig resurs-laddning via MpscCallback.
+/// Ren-Rust HTML → PNG med Blitz. Delegerar till lib-funktionen.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_mcp(
     html: &str,
     base_url: &str,
     width: u32,
     height: u32,
+    fast_render: bool,
 ) -> Result<Vec<u8>, String> {
-    use anyrender::{ImageRenderer, PaintScene as _};
-    use blitz_dom::DocumentConfig;
-    use blitz_html::HtmlDocument;
-    use blitz_traits::shell::{ColorScheme, Viewport};
-
-    let scale: f32 = 1.0;
-
-    // MpscCallback samlar resurser via kanal
-    let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
-    let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-        std::sync::Arc::new(callback);
-    let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
-
-    let mut document = HtmlDocument::from_html(
-        html,
-        DocumentConfig {
-            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-            base_url: Some(base_url.to_string()),
-            net_provider: Some(std::sync::Arc::clone(&net)
-                as std::sync::Arc<
-                    dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
-                >),
-            ..Default::default()
-        },
-    );
-
-    // Polla resurser och resolva styles+layout
-    for _ in 0..20 {
-        while let Ok((_doc_id, resource)) = rx.try_recv() {
-            document.as_mut().load_resource(resource);
-        }
-        document.as_mut().resolve(0.0);
-        if net.is_empty() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-
-    // Dränera resterande resurser
-    while let Ok((_doc_id, resource)) = rx.try_recv() {
-        document.as_mut().load_resource(resource);
-    }
-    document.as_mut().resolve(0.0);
-
-    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
-    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
-    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
-    renderer.render_to_vec(
-        |scene| {
-            scene.fill(
-                peniko::Fill::NonZero,
-                peniko::kurbo::Affine::IDENTITY,
-                white,
-                None,
-                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
-            );
-            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
-        },
-        &mut buffer,
-    );
-
-    let mut png_bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| format!("PNG header: {e}"))?;
-        writer
-            .write_image_data(&buffer)
-            .map_err(|e| format!("PNG data: {e}"))?;
-        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
-    }
-
-    Ok(png_bytes)
+    aether_agent::render_html_to_png(html, base_url, width, height, fast_render)
 }
 
 #[cfg(not(feature = "blitz"))]
-async fn render_url_to_png_mcp(_url: &str, _width: u32, _height: u32) -> Result<Vec<u8>, String> {
+async fn render_url_to_png_mcp(
+    _url: &str,
+    _width: u32,
+    _height: u32,
+    _fast_render: bool,
+) -> Result<Vec<u8>, String> {
     Err("Blitz feature inte aktiverad".to_string())
 }
 
@@ -643,8 +666,15 @@ async fn handle_fetch_vision(
         )]);
     }
 
+    // Default fast_render=false: ladda CSS/bilder för visuell screenshot.
+    // Sätt fast_render=true explicit om man bara vill ha snabb YOLO utan styling.
+    let fast_render = args
+        .get("fast_render")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     // Rendera sidan till PNG med Blitz (ren Rust)
-    let png_bytes = match render_url_to_png_mcp(url, width, height).await {
+    let png_bytes = match render_url_to_png_mcp(url, width, height, fast_render).await {
         Ok(b) => b,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
@@ -933,6 +963,18 @@ fn render_annotated_screenshot_mcp(
 }
 
 impl ServerHandler for AetherMcpServer {
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListToolsResult {
+            tools: self.tool_router.list_all(),
+            next_cursor: None,
+            meta: None,
+        })
+    }
+
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
@@ -996,6 +1038,10 @@ impl ServerHandler for AetherMcpServer {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("AetherAgent MCP Server starting on stdio...");
+
+    // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
+    aether_agent::vision_backend::warmup_cdp_background();
+
     eprintln!("Tools: parse, parse_top, find_and_click, fill_form, extract_data,");
     eprintln!(
         "        check_injection, compile_goal, classify_request, diff_trees, parse_with_js,"
@@ -1003,7 +1049,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
-    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision");
+    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
+    eprintln!("        tiered_screenshot, tier_stats");
 
     let server = AetherMcpServer::new();
 

@@ -11,7 +11,7 @@ use crate::types::{
 };
 
 /// Klickbara roller
-const CLICKABLE_ROLES: &[&str] = &["button", "link", "menuitem"];
+const CLICKABLE_ROLES: &[&str] = &["button", "link", "menuitem", "cta", "product_card"];
 
 /// Minsta confidence för att inkludera ett extraherat värde i resultatet.
 /// Script-kontaminering filtreras primärt via looks_like_script_content().
@@ -48,12 +48,14 @@ fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
 /// Bygg en CSS-liknande selector hint från en nod
 fn build_selector_hint(node: &SemanticNode) -> String {
     let tag = match node.role.as_str() {
-        "button" => "button",
+        "button" | "cta" => "button",
         "link" => "a",
         "textbox" | "searchbox" => "input",
         "textarea" => "textarea",
         "combobox" | "select" => "select",
         "checkbox" | "radio" => "input",
+        "product_card" => "div",
+        "price" => "span",
         _ => "*",
     };
 
@@ -273,8 +275,16 @@ fn role_boost_for_key(key: &str) -> Option<(&'static str, f32)> {
         match *part {
             "url" | "href" | "link" | "src" => return Some(("link", 0.3)),
             "title" | "heading" | "headline" | "rubrik" => return Some(("heading", 0.2)),
-            "button" | "action" | "cta" => return Some(("button", 0.2)),
+            "button" | "action" => return Some(("button", 0.2)),
+            "cta" | "buy" | "purchase" | "köp" | "cart" | "checkout" => {
+                return Some(("cta", 0.35))
+            }
+            "price" | "pris" | "cost" | "amount" | "belopp" => return Some(("price", 0.3)),
+            "product" | "produkt" | "item" | "card" | "vara" => {
+                return Some(("product_card", 0.25))
+            }
             "image" | "img" | "photo" | "bild" => return Some(("img", 0.2)),
+            "nav" | "menu" | "navigation" | "meny" => return Some(("navigation", 0.2)),
             _ => {}
         }
     }

@@ -1,0 +1,246 @@
+[
+  {
+    "test": "fetch_parse",
+    "site": "Hacker News",
+    "latency_ms": 466.5,
+    "nodes": 494,
+    "tokens": 19564,
+    "warnings": 0,
+    "server_parse_ms": 8
+  },
+  {
+    "test": "fetch_parse",
+    "site": "Wikipedia",
+    "latency_ms": 832.2,
+    "nodes": 4457,
+    "tokens": 178229,
+    "warnings": 1,
+    "server_parse_ms": 71
+  },
+  {
+    "test": "fetch_parse",
+    "site": "Example.com",
+    "latency_ms": 791.2,
+    "nodes": 6,
+    "tokens": 278,
+    "warnings": 0,
+    "server_parse_ms": 0
+  },
+  {
+    "test": "fetch_parse",
+    "site": "HTTPBin HTML",
+    "latency_ms": 992.1,
+    "nodes": 3,
+    "tokens": 163,
+    "warnings": 0,
+    "server_parse_ms": 0
+  },
+  {
+    "test": "fetch_parse",
+    "site": "Books to Scrape",
+    "latency_ms": 864.1,
+    "nodes": 289,
+    "tokens": 10964,
+    "warnings": 0,
+    "server_parse_ms": 4
+  },
+  {
+    "test": "fetch_parse",
+    "site": "Quotes to Scrape",
+    "latency_ms": 755.7,
+    "nodes": 114,
+    "tokens": 4094,
+    "warnings": 0,
+    "server_parse_ms": 1
+  },
+  {
+    "test": "fetch_vision",
+    "site": "Hacker News",
+    "latency_ms": 1954.5,
+    "detections": 10,
+    "classes": {
+      "link": 9,
+      "button": 1
+    }
+  },
+  {
+    "test": "fetch_vision",
+    "site": "Wikipedia",
+    "latency_ms": 1433.9,
+    "detections": 1,
+    "classes": {
+      "button": 1
+    }
+  },
+  {
+    "test": "fetch_vision",
+    "site": "Example.com",
+    "latency_ms": 1350.6,
+    "detections": 1,
+    "classes": {
+      "text": 1
+    }
+  },
+  {
+    "test": "fetch_vision",
+    "site": "HTTPBin HTML",
+    "latency_ms": 1435.3,
+    "detections": 0,
+    "classes": {}
+  },
+  {
+    "test": "fetch_vision",
+    "site": "Books to Scrape",
+    "latency_ms": 1572.0,
+    "detections": 2,
+    "classes": {
+      "button": 2
+    }
+  },
+  {
+    "test": "fetch_vision",
+    "site": "Quotes to Scrape",
+    "latency_ms": 1340.0,
+    "detections": 0,
+    "classes": {}
+  },
+  {
+    "test": "tiered_screenshot",
+    "scenario": "Simple HTML",
+    "tier_used": "Blitz",
+    "expected_tier": "Blitz",
+    "match": true,
+    "latency_ms": 951.1,
+    "size_bytes": 28374,
+    "escalation": "none"
+  },
+  {
+    "test": "tiered_screenshot",
+    "scenario": "JS-heavy SPA",
+    "tier_used": "?",
+    "expected_tier": "Cdp",
+    "match": false,
+    "latency_ms": 235.2,
+    "size_bytes": 0,
+    "escalation": "none"
+  },
+  {
+    "test": "tiered_screenshot",
+    "scenario": "Chart page",
+    "tier_used": "?",
+    "expected_tier": "Cdp",
+    "match": false,
+    "latency_ms": 205.5,
+    "size_bytes": 0,
+    "escalation": "none"
+  },
+  {
+    "test": "tiered_screenshot",
+    "scenario": "Static e-commerce",
+    "tier_used": "Blitz",
+    "expected_tier": "Blitz",
+    "match": true,
+    "latency_ms": 233.7,
+    "size_bytes": 32352,
+    "escalation": "none"
+  },
+  {
+    "test": "tier_stats",
+    "blitz_count": 2,
+    "cdp_count": 0,
+    "escalation_count": 0,
+    "skip_blitz_count": 2,
+    "avg_blitz_latency_ms": 16.0,
+    "avg_cdp_latency_ms": 0.0
+  },
+  {
+    "test": "semantic_diff",
+    "site": "Hacker News",
+    "full_tokens": 19564,
+    "diff_tokens": 58,
+    "savings_ratio": 1.0,
+    "changes": 0,
+    "diff_latency_ms": 540.9
+  },
+  {
+    "test": "semantic_diff",
+    "site": "Books to Scrape",
+    "full_tokens": 10964,
+    "diff_tokens": 61,
+    "savings_ratio": 1.0,
+    "changes": 0,
+    "diff_latency_ms": 511.5
+  },
+  {
+    "test": "semantic_diff",
+    "site": "Wikipedia",
+    "full_tokens": 178229,
+    "diff_tokens": 69,
+    "savings_ratio": 1.0,
+    "changes": 0,
+    "diff_latency_ms": 849.1
+  },
+  {
+    "test": "vision_parse_mcp",
+    "site": "Hacker News",
+    "latency_ms": 1143.4,
+    "detections": 14,
+    "classes": {
+      "link": 13,
+      "button": 1
+    }
+  },
+  {
+    "test": "vision_parse_mcp",
+    "site": "Wikipedia",
+    "latency_ms": 966.8,
+    "detections": 1,
+    "classes": {
+      "button": 1
+    }
+  },
+  {
+    "test": "vision_parse_mcp",
+    "site": "Example.com",
+    "latency_ms": 1180.4,
+    "detections": 1,
+    "classes": {
+      "select": 1
+    }
+  },
+  {
+    "test": "vision_parse_mcp",
+    "site": "HTTPBin HTML",
+    "latency_ms": 1288.1,
+    "detections": 0,
+    "classes": {}
+  },
+  {
+    "test": "multi_agent_flow",
+    "total_ms": 4012.6,
+    "steps": {
+      "compile_goal": 201.8,
+      "fetch_parse": 674.8,
+      "fetch_vision": 1369.7,
+      "check_injection": 311.9,
+      "extract_data": 174.7,
+      "fetch_parse_2": 730.6,
+      "diff_trees": 549.1
+    },
+    "parse_tokens": 10995,
+    "diff_savings": 1.0
+  },
+  {
+    "test": "latency_consistency",
+    "runs_ms": [
+      293.2,
+      294.3,
+      311.2,
+      407.1,
+      500.9
+    ],
+    "avg_ms": 361.3,
+    "median_ms": 311.2,
+    "p99_ms": 500.9
+  }
+]

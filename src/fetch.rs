@@ -229,6 +229,155 @@ fn extract_domain(url: &str) -> Option<String> {
     Some(host.to_lowercase())
 }
 
+// ─── CSS Inlining för Blitz-rendering ──────────────────────────────────────
+
+/// Hämta externa CSS-filer (<link rel="stylesheet">) och inlina dem som <style>-taggar.
+///
+/// Blitz (ren Rust-renderer) kan inte ladda externa resurser tillförlitligt.
+/// Denna funktion prefetchar alla CSS-länkar parallellt och ersätter
+/// <link>-taggarna med <style>-block i HTML:en.
+///
+/// Returnerar modifierad HTML med inlinad CSS.
+pub async fn inline_external_css(html: &str, base_url: &str) -> String {
+    // Hitta alla <link rel="stylesheet" href="...">
+    let css_links = extract_css_links(html, base_url);
+    if css_links.is_empty() {
+        return html.to_string();
+    }
+
+    // Hämta alla CSS-filer parallellt (max 3s per fil)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    // Hämta CSS sekventiellt (undviker futures-dependency, sällan >3-4 filer)
+    let mut results: Vec<Option<String>> = Vec::with_capacity(css_links.len());
+    for link in &css_links {
+        let css = match client.get(&link.url).send().await {
+            Ok(resp) => resp.text().await.ok(),
+            Err(_) => None,
+        };
+        results.push(css);
+    }
+
+    // Bygg inlinad CSS
+    let mut inlined_css = String::new();
+    for (i, css_text) in results.iter().enumerate() {
+        if let Some(css) = css_text {
+            // Begränsa storlek (max 500KB per fil)
+            if css.len() <= 512_000 {
+                inlined_css.push_str(&format!(
+                    "\n<style data-inlined-from=\"{}\">\n{}\n</style>\n",
+                    css_links[i].url, css
+                ));
+            }
+        }
+    }
+
+    if inlined_css.is_empty() {
+        return html.to_string();
+    }
+
+    // Injicera inlinad CSS före </head> (eller i början av <body>)
+    let result = if let Some(pos) = html.find("</head>") {
+        format!("{}{}{}", &html[..pos], inlined_css, &html[pos..])
+    } else if let Some(pos) = html.find("<body") {
+        format!("{}{}{}", &html[..pos], inlined_css, &html[pos..])
+    } else {
+        format!("{}{}", inlined_css, html)
+    };
+
+    result
+}
+
+/// Intern: extrahera CSS-länk-URLer från HTML
+struct CssLink {
+    url: String,
+}
+
+fn extract_css_links(html: &str, base_url: &str) -> Vec<CssLink> {
+    let mut links = Vec::new();
+    let lower = html.to_lowercase();
+
+    // Enkel regex-fri parser: hitta <link ... rel="stylesheet" ... href="...">
+    let mut search_from = 0;
+    while let Some(link_start) = lower[search_from..].find("<link") {
+        let abs_start = search_from + link_start;
+        let tag_end = match lower[abs_start..].find('>') {
+            Some(e) => abs_start + e,
+            None => break,
+        };
+        let tag = &html[abs_start..=tag_end];
+        let tag_lower = &lower[abs_start..=tag_end];
+
+        // Kolla att det är stylesheet
+        if tag_lower.contains("stylesheet") || tag_lower.contains("text/css") {
+            if let Some(href) = extract_href(tag) {
+                let url = resolve_url(base_url, &href);
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    links.push(CssLink { url });
+                }
+            }
+        }
+        search_from = tag_end + 1;
+    }
+    links
+}
+
+/// Intern: plocka ut href-attribut ur en tag-sträng
+fn extract_href(tag: &str) -> Option<String> {
+    // Hitta href="..." eller href='...'
+    let lower = tag.to_lowercase();
+    let href_pos = lower.find("href=")?;
+    let after_href = &tag[href_pos + 5..];
+
+    if let Some(stripped) = after_href.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        Some(stripped[..end].to_string())
+    } else if let Some(stripped) = after_href.strip_prefix('\'') {
+        let end = stripped.find('\'')?;
+        Some(stripped[..end].to_string())
+    } else {
+        // href=value (utan citattecken, ovanligt men giltigt)
+        let end = after_href.find([' ', '>', '/'])?;
+        Some(after_href[..end].to_string())
+    }
+}
+
+/// Intern: resolva relativa URLer
+fn resolve_url(base_url: &str, href: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+    if href.starts_with("//") {
+        // Protokoll-relativ
+        let scheme = if base_url.starts_with("https://") {
+            "https:"
+        } else {
+            "http:"
+        };
+        return format!("{}{}", scheme, href);
+    }
+    if href.starts_with('/') {
+        // Absolut sökväg — extrahera origin
+        if let Some(origin_end) = base_url
+            .find("://")
+            .and_then(|i| base_url[i + 3..].find('/').map(|j| i + 3 + j))
+        {
+            return format!("{}{}", &base_url[..origin_end], href);
+        }
+        return format!("{}{}", base_url.trim_end_matches('/'), href);
+    }
+    // Relativ sökväg
+    let base_dir = if let Some(last_slash) = base_url.rfind('/') {
+        &base_url[..last_slash + 1]
+    } else {
+        base_url
+    };
+    format!("{}{}", base_dir, href)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,7 +469,7 @@ mod tests {
     fn test_robots_txt_google_parser() {
         // Testar Googles parser direkt (utan nätverk)
         let robots_body = "User-agent: *\nDisallow: /admin\nDisallow: /private\n";
-        let matcher = robotstxt::DefaultMatcher::default();
+        let mut matcher = robotstxt::DefaultMatcher::default();
 
         assert!(
             matcher.one_agent_allowed_by_robots(robots_body, "AetherAgent", "/products"),
@@ -339,7 +488,7 @@ mod tests {
     #[test]
     fn test_robots_txt_specific_agent() {
         let robots_body = "User-agent: AetherAgent\nDisallow: /secret\n\nUser-agent: *\nAllow: /\n";
-        let matcher = robotstxt::DefaultMatcher::default();
+        let mut matcher = robotstxt::DefaultMatcher::default();
 
         assert!(
             !matcher.one_agent_allowed_by_robots(robots_body, "AetherAgent", "/secret"),
@@ -348,6 +497,66 @@ mod tests {
         assert!(
             matcher.one_agent_allowed_by_robots(robots_body, "OtherBot", "/secret"),
             "Borde tillåta /secret för andra botar"
+        );
+    }
+
+    #[test]
+    fn test_extract_css_links_finds_stylesheets() {
+        let html = r#"<html><head>
+            <link rel="stylesheet" href="/css/main.css">
+            <link rel="stylesheet" href="https://cdn.example.com/style.css">
+            <link rel="icon" href="/favicon.ico">
+        </head><body></body></html>"#;
+        let links = super::extract_css_links(html, "https://www.hjo.se");
+        assert_eq!(links.len(), 2, "Borde hitta 2 CSS-länkar");
+        assert_eq!(links[0].url, "https://www.hjo.se/css/main.css");
+        assert_eq!(links[1].url, "https://cdn.example.com/style.css");
+    }
+
+    #[test]
+    fn test_extract_css_links_no_stylesheets() {
+        let html = "<html><head><title>Hej</title></head><body></body></html>";
+        let links = super::extract_css_links(html, "https://example.com");
+        assert!(links.is_empty(), "Borde inte hitta CSS-länkar i enkel HTML");
+    }
+
+    #[test]
+    fn test_resolve_url_absolute() {
+        assert_eq!(
+            super::resolve_url("https://www.hjo.se/sida", "https://cdn.example.com/s.css"),
+            "https://cdn.example.com/s.css"
+        );
+    }
+
+    #[test]
+    fn test_resolve_url_relative_root() {
+        assert_eq!(
+            super::resolve_url("https://www.hjo.se/sida/info", "/css/main.css"),
+            "https://www.hjo.se/css/main.css"
+        );
+    }
+
+    #[test]
+    fn test_resolve_url_protocol_relative() {
+        assert_eq!(
+            super::resolve_url("https://www.hjo.se", "//cdn.example.com/s.css"),
+            "https://cdn.example.com/s.css"
+        );
+    }
+
+    #[test]
+    fn test_extract_href_double_quotes() {
+        assert_eq!(
+            super::extract_href(r#"<link rel="stylesheet" href="/style.css">"#),
+            Some("/style.css".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_href_single_quotes() {
+        assert_eq!(
+            super::extract_href("<link rel='stylesheet' href='/style.css'>"),
+            Some("/style.css".to_string())
         );
     }
 }

@@ -23,7 +23,7 @@ Usage:
     python tools/train_vision.py --interactive
 
 Requirements:
-    pip install ultralytics pillow requests tqdm pyyaml
+    pip install ultralytics>=8.3 pillow requests tqdm pyyaml
 """
 
 import argparse
@@ -40,39 +40,42 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
+# Basklasser — namnen matchar Rust-rollerna i parser.rs/types.rs
 UI_CLASSES = [
-    "button", "input", "link", "icon", "text",
-    "image", "checkbox", "radio", "select", "heading",
+    "button", "textbox", "link", "icon", "text",
+    "img", "checkbox", "radio", "combobox", "heading",
 ]
 
 # Utökade agentsemantiska klasser — aktiveras med --extended-classes
 # Dessa ger modellen förmågan att skilja på t.ex. pris vs vanlig text,
 # CTA-knapp vs generell knapp, produktbild vs dekorationsbild.
 # Kräver om-träning om man byter — kan inte blandas med standard 10-klassmodell.
+# Namnen matchar exakt Rust-rollerna i parser.rs/types.rs:
+#   nav → "navigation", search → "searchbox", select → "combobox"
 UI_CLASSES_EXTENDED = [
     "button",          # 0  - generell knapp
-    "input",           # 1  - textfält
+    "textbox",         # 1  - textfält (Rust: "textbox")
     "link",            # 2  - klickbar länk
     "icon",            # 3  - ikon
     "text",            # 4  - generell text
-    "image",           # 5  - generell bild
+    "img",             # 5  - bild (Rust: "img")
     "checkbox",        # 6  - checkbox
     "radio",           # 7  - radioknapp
-    "select",          # 8  - dropdown
+    "combobox",        # 8  - dropdown (Rust: "combobox")
     "heading",         # 9  - rubrik
     "price",           # 10 - pristext (valuta, siffror)
     "cta",             # 11 - call-to-action (köp, lägg i kundvagn)
     "product_card",    # 12 - produktkort (bild + text + pris)
-    "nav",             # 13 - navigering (meny, tabs, breadcrumb)
-    "search",          # 14 - sökfält
+    "navigation",      # 13 - navigering (Rust: "navigation")
+    "searchbox",       # 14 - sökfält (Rust: "searchbox")
     "form",            # 15 - formulärgrupp
 ]
 
-# RTX 5090 optimized defaults (24 GB VRAM)
-DEFAULT_EPOCHS = 150
+# RTX 5090 defaults (24 GB VRAM)
+DEFAULT_EPOCHS = 300
 DEFAULT_BATCH = 32
 DEFAULT_IMGSZ = 640
-DEFAULT_MODEL_BASE = "yolov8n.pt"  # nano — keeps ONNX < 6 MB
+DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
 DEFAULT_NAME = "aether-ui"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -80,9 +83,18 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 BANNER = r"""
  ╔═══════════════════════════════════════════════════════════════╗
  ║          AetherAgent Vision Training Pipeline                ║
- ║          YOLOv8-nano · Ultralytics · RTX 5090                ║
+ ║          YOLO26-nano · Ultralytics · RTX 5090                ║
  ╚═══════════════════════════════════════════════════════════════╝
 """
+
+# Modellval — visas i interaktiv prompt
+AVAILABLE_MODELS = [
+    ("yolo26n.pt", "YOLO26 nano  — NMS-free, 43% snabbare CPU, edge-optimerad (REKOMMENDERAD)"),
+    ("yolo26s.pt", "YOLO26 small — NMS-free, högre precision, lite tyngre"),
+    ("yolo11n.pt", "YOLO11 nano  — beprövad, stabil, bra balans"),
+    ("yolo11s.pt", "YOLO11 small — mer precision, långsammare"),
+    ("yolov8n.pt", "YOLOv8 nano  — legacy, äldre arkitektur"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +106,32 @@ def log(msg: str, level: str = "INFO"):
     reset = "\033[0m"
     color = colors.get(level, "")
     print(f"{color}[{level}]{reset} {msg}")
+
+
+def prompt_model_selection() -> str:
+    """Interaktiv modellväljare i terminalen."""
+    print("\n  Välj basmodell för träning:\n")
+    for i, (name, desc) in enumerate(AVAILABLE_MODELS, 1):
+        marker = " *" if name == DEFAULT_MODEL_BASE else "  "
+        print(f"  {marker} {i}) {name:16s} {desc}")
+    print()
+
+    while True:
+        choice = input(f"  Modell [1-{len(AVAILABLE_MODELS)}, Enter={DEFAULT_MODEL_BASE}]: ").strip()
+        if not choice:
+            return DEFAULT_MODEL_BASE
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(AVAILABLE_MODELS):
+                selected = AVAILABLE_MODELS[idx - 1][0]
+                log(f"Vald modell: {selected}", "OK")
+                return selected
+        except ValueError:
+            # Tillåt direkt modellnamn, t.ex. "yolo26n.pt"
+            if choice.endswith(".pt"):
+                log(f"Custom modell: {choice}", "OK")
+                return choice
+        print(f"  Ogiltigt val. Ange 1-{len(AVAILABLE_MODELS)} eller ett modellnamn (.pt)")
 
 
 def _find_latest_model() -> Path | None:
@@ -298,6 +336,43 @@ _DATASET_REGISTRY = {
         "size_hint": "~2 GB",
         "description": "7K web UI screenshots med element-annotations",
     },
+    # ── 2025-2026 datasets (HuggingFace) ──────────────────────────────
+    "osatlas": {
+        "name": "OS-Atlas Web Subset — 270K+ web screenshots, 3M+ element",
+        "hf_dataset": "OS-Copilot/OS-Atlas-data",
+        "hf_subset": "web",
+        "size_hint": "~15 GB",
+        "description": "ICLR 2025 Spotlight. Störst cross-platform GUI grounding corpus. "
+                       "Vi laddar ner web-subsetet (270K screenshots, 3M+ element).",
+    },
+    "guiactor": {
+        "name": "GUI-Actor-Data — 1M screenshots, 10M element",
+        "hf_dataset": "cckevinn/GUI-Actor-Data",
+        "size_hint": "~30 GB",
+        "description": "Merge av 6 publika datasets (Uground, GUICourse, AMEX, AndroidControl, Wave-UI). "
+                       "Bbox supervision, web + mobil + desktop.",
+    },
+    "showui-web": {
+        "name": "ShowUI Web — 22K screenshots, 576K interaktiva element",
+        "hf_dataset": "Voxel51/ShowUI_Web",
+        "size_hint": "~5 GB",
+        "description": "CVPR 2025. Filtrerar bort statisk text → fokus på interaktiva UI-element. "
+                       "Perfekt för agent-orienterad detection.",
+    },
+    "waveui": {
+        "name": "WaveUI-25K — curated, dedup, 25K samples",
+        "hf_dataset": "agentsea/wave-ui-25k",
+        "size_hint": "~10.6 GB",
+        "description": "Curated och dedup:at från WebUI + Roboflow + GroundUI-18K. "
+                       "LLM-berikade element-beskrivningar. Dec 2025.",
+    },
+    "yashjain": {
+        "name": "UI-Elements-Detection — YOLO-format, webfokus",
+        "hf_repo": "YashJain/UI-Elements-Detection-Dataset",
+        "size_hint": "~2 GB",
+        "description": "Direkt YOLO-format med train/val/test splits. Klasser: buttons, links, "
+                       "inputs, checkboxes, radios, dropdowns, sliders, toggles, labels, icons. Okt 2025.",
+    },
 }
 
 
@@ -411,6 +486,10 @@ def download_dataset(fmt: str, output_dir: Path) -> Path:
         return _download_coco(info, dl_dir, extract_dir)
     elif fmt == "webui":
         return _download_webui(info, dl_dir, extract_dir)
+    elif "hf_repo" in info:
+        return _download_hf_repo(info, extract_dir)
+    elif "hf_dataset" in info:
+        return _download_hf_dataset(info, extract_dir)
 
     log(f"Nedladdning ej implementerad för {fmt}", "ERR")
     sys.exit(1)
@@ -517,6 +596,560 @@ def _download_webui(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
     return extract_dir
 
 
+def _download_hf_repo(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner ett HuggingFace-repo som är YOLO-format (git clone)."""
+    repo_id = info["hf_repo"]
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    marker = extract_dir / ".hf_download_complete"
+    if marker.exists():
+        log(f"HuggingFace-repo redan klonat: {extract_dir}", "OK")
+        return _find_yolo_root(extract_dir)
+
+    log(f"Klonar {repo_id} från HuggingFace...", "STEP")
+
+    # Försök med huggingface_hub först (hanterar LFS bättre)
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(extract_dir),
+        )
+    except ImportError:
+        log("Installerar 'huggingface_hub'...", "INFO")
+        run(f"{sys.executable} -m pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(extract_dir),
+        )
+
+    marker.touch()
+    yolo_root = _find_yolo_root(extract_dir)
+    log(f"YOLO-dataset klart: {yolo_root}", "OK")
+    return yolo_root
+
+
+def _find_yolo_root(base_dir: Path) -> Path:
+    """Hitta roten av ett YOLO-dataset (mappen som innehåller images/ eller train/)."""
+    # Direkt YOLO-struktur: images/train/ + labels/train/
+    if (base_dir / "images" / "train").exists():
+        return base_dir
+    # Alternativ: train/images/ (som YashJain)
+    if (base_dir / "train" / "images").exists():
+        return base_dir
+    # dataset.yaml finns?
+    if (base_dir / "dataset.yaml").exists() or (base_dir / "data.yaml").exists():
+        return base_dir
+    # Sök en nivå ner
+    for child in base_dir.iterdir():
+        if child.is_dir():
+            if (child / "images" / "train").exists():
+                return child
+            if (child / "train" / "images").exists():
+                return child
+            if (child / "dataset.yaml").exists() or (child / "data.yaml").exists():
+                return child
+    # Fallback
+    return base_dir
+
+
+def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner ett HuggingFace-dataset via snapshot_download + direkt konvertering.
+
+    Steg 1: snapshot_download() — laddar ner ALLA filer parallellt (8+ trådar).
+    Steg 2: Om FiftyOne-format (samples.json) — konverterar direkt utan load_dataset().
+             Annars fallback till load_dataset() från lokal kopia.
+    """
+    hf_name = info["hf_dataset"]
+    hf_subset = info.get("hf_subset")
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    marker = extract_dir / ".hf_download_complete"
+    if marker.exists():
+        log(f"HuggingFace-dataset redan nedladdat: {extract_dir}", "OK")
+        return extract_dir
+
+    # --- Steg 1: Parallell bulk-nedladdning via snapshot_download ---
+    log(f"Laddar ner {hf_name} från HuggingFace (parallellt)...", "STEP")
+    if hf_subset:
+        log(f"  Subset: {hf_subset}", "INFO")
+
+    snapshot_dir = extract_dir / "snapshot"
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        log("Installerar 'huggingface_hub'...", "INFO")
+        run(f"{sys.executable} -m pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+
+    try:
+        snapshot_download(
+            repo_id=hf_name,
+            repo_type="dataset",
+            local_dir=str(snapshot_dir),
+        )
+        log(f"Snapshot-nedladdning klar: {snapshot_dir}", "OK")
+    except Exception as e:
+        log(f"snapshot_download misslyckades: {e}", "WARN")
+        log("Faller tillbaka på load_dataset() (långsammare)...", "WARN")
+        snapshot_dir = None
+
+    # --- Steg 2: Konvertera till YOLO ---
+    samples_json = snapshot_dir / "samples.json" if snapshot_dir else None
+
+    if samples_json and samples_json.exists():
+        # FiftyOne-format: konvertera direkt utan load_dataset() (mycket snabbare)
+        _convert_fiftyone_to_yolo(snapshot_dir, extract_dir, info)
+    else:
+        # Fallback: använd load_dataset() (t.ex. parquet-baserade dataset)
+        try:
+            from datasets import load_dataset
+        except ImportError:
+            log("Installerar 'datasets' (HuggingFace)...", "INFO")
+            run(f"{sys.executable} -m pip install datasets")
+            from datasets import load_dataset
+
+        kwargs = {"trust_remote_code": True}
+        if hf_subset:
+            kwargs["name"] = hf_subset
+
+        try:
+            if snapshot_dir and snapshot_dir.exists():
+                log("Laddar dataset från lokal snapshot...", "STEP")
+                ds = load_dataset(str(snapshot_dir), **kwargs)
+            else:
+                ds = load_dataset(hf_name, **kwargs)
+        except Exception as e:
+            log(f"Kunde inte ladda med subset, provar utan: {e}", "WARN")
+            try:
+                if snapshot_dir and snapshot_dir.exists():
+                    ds = load_dataset(str(snapshot_dir), trust_remote_code=True)
+                else:
+                    ds = load_dataset(hf_name, trust_remote_code=True)
+            except Exception as e2:
+                log(f"Kunde inte ladda {hf_name}: {e2}", "ERR")
+                sys.exit(1)
+
+        # Extrahera bilder och bboxar till YOLO-struktur
+        _convert_hf_to_yolo(ds, extract_dir, info)
+
+    marker.touch()
+    log(f"HuggingFace-dataset klart: {extract_dir}", "OK")
+    return extract_dir
+
+
+def _map_fiftyone_label_to_ui_class(label: str) -> int | None:
+    """Mappa FiftyOne-labels (ShowUI-web etc.) till AetherAgent UI_CLASSES index.
+
+    ShowUI-web labels: ListItem, Button, Checkbox, Link, Heading, Image, Icon,
+                       RadioButton, Textbox, Select, Text, etc.
+    UI_CLASSES: button, textbox, link, icon, text, img, checkbox, radio, combobox, heading
+
+    Returns None om labeln ska filtreras bort (t.ex. ej interaktiv).
+    """
+    _ui_class_map = {name: i for i, name in enumerate(UI_CLASSES)}
+    label_lower = label.lower().strip()
+
+    # Direkt matchning
+    if label_lower in _ui_class_map:
+        return _ui_class_map[label_lower]
+
+    # ShowUI-web → UI_CLASSES mappning
+    _fiftyone_to_ui = {
+        "button": 0,           # button
+        "btn": 0,
+        "submitbutton": 0,
+        "textbox": 1,          # textbox
+        "textarea": 1,
+        "input": 1,
+        "textfield": 1,
+        "searchbox": 1,
+        "link": 2,             # link
+        "hyperlink": 2,
+        "anchor": 2,
+        "icon": 3,             # icon
+        "svg": 3,
+        "text": 4,             # text
+        "statictext": 4,
+        "label": 4,
+        "paragraph": 4,
+        "span": 4,
+        "img": 5,              # img
+        "image": 5,
+        "figure": 5,
+        "photo": 5,
+        "checkbox": 6,         # checkbox
+        "radio": 7,            # radio
+        "radiobutton": 7,
+        "combobox": 8,         # combobox
+        "select": 8,
+        "dropdown": 8,
+        "listbox": 8,
+        "heading": 9,          # heading
+        "header": 9,
+        "title": 9,
+        "h1": 9, "h2": 9, "h3": 9, "h4": 9, "h5": 9, "h6": 9,
+        # ShowUI-specifika
+        "edit": 1,             # Edit → textbox (textinmatningsfält)
+        "listitem": 2,         # ListItem → link (interaktivt, klickbart)
+        "menuitem": 2,         # MenuItem → link
+        "tab": 0,              # Tab → button
+        "tabitem": 0,          # TabItem → button
+        "switch": 6,           # Switch → checkbox (toggle)
+        "slider": 1,           # Slider → textbox (interaktiv input)
+        "progressbar": 4,      # ProgressBar → text (visuellt)
+        "navigation": 2,       # Navigation → link
+        "nav": 2,
+    }
+
+    if label_lower in _fiftyone_to_ui:
+        return _fiftyone_to_ui[label_lower]
+
+    # Fuzzy: kolla om något UI_CLASS-namn finns i labeln
+    for name, cid in _ui_class_map.items():
+        if name in label_lower or label_lower in name:
+            return cid
+
+    # Fallback: text (klass 4)
+    return 4
+
+
+def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
+    """Konverterar ett FiftyOne-format dataset (samples.json + bilder) direkt till YOLO.
+
+    Mycket snabbare än load_dataset() — läser JSON + kopierar/symlänkar bilder.
+    FiftyOne bbox-format: [x, y, width, height] (normaliserade 0-1) → matchar YOLO
+    (x_center, y_center, width, height).
+
+    Mappar FiftyOne-labels till AetherAgent UI_CLASSES (10 klasser).
+    """
+    import json
+    import shutil
+
+    samples_json = snapshot_dir / "samples.json"
+    log(f"Konverterar FiftyOne-dataset direkt (skippar load_dataset)...", "STEP")
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    log("Läser samples.json...", "INFO")
+    with open(samples_json, "r") as f:
+        data = json.load(f)
+
+    samples = data.get("samples", [])
+    log(f"  {len(samples)} samples hittade", "INFO")
+
+    # Samla unika labels för loggning
+    all_labels = set()
+    for sample in samples:
+        detections = sample.get("detections", {})
+        det_list = detections.get("detections", []) if isinstance(detections, dict) else []
+        for det in det_list:
+            all_labels.add(det.get("label", "unknown"))
+    log(f"  {len(all_labels)} unika FiftyOne-labels: {sorted(all_labels)[:15]}...", "INFO")
+    log(f"  Mappar till {len(UI_CLASSES)} UI_CLASSES: {UI_CLASSES}", "INFO")
+
+    saved = 0
+    skipped = 0
+    label_stats = {}
+
+    for idx, sample in enumerate(samples):
+        if idx % 2000 == 0 and idx > 0:
+            log(f"  {idx}/{len(samples)} konverterade...", "INFO")
+
+        # Hitta bildfilen
+        filepath = sample.get("filepath", "")
+        # FiftyOne lagrar relativa sökvägar som "data/data_X/screenshot-Y.png"
+        # eller absoluta sökvägar — hantera båda
+        if filepath.startswith("/"):
+            # Absolut sökväg — gör relativ till snapshot_dir
+            img_path = snapshot_dir / Path(filepath).name
+        else:
+            img_path = snapshot_dir / filepath
+
+        if not img_path.exists():
+            # Prova att leta i data/-mappen
+            for data_subdir in (snapshot_dir / "data").iterdir() if (snapshot_dir / "data").exists() else []:
+                candidate = data_subdir / Path(filepath).name
+                if candidate.exists():
+                    img_path = candidate
+                    break
+
+        if not img_path.exists():
+            skipped += 1
+            continue
+
+        # Extrahera detections
+        detections = sample.get("detections", {})
+        det_list = detections.get("detections", []) if isinstance(detections, dict) else []
+
+        if not det_list:
+            skipped += 1
+            continue
+
+        # Konvertera bboxar till YOLO-format med UI_CLASSES-mappning
+        yolo_lines = []
+        for det in det_list:
+            label = det.get("label", "unknown")
+            bbox = det.get("bounding_box", [])
+            if len(bbox) != 4:
+                continue
+            # FiftyOne: [x, y, w, h] (top-left, normaliserat)
+            # YOLO: [x_center, y_center, w, h] (normaliserat)
+            x, y, w, h = bbox
+            x_center = x + w / 2
+            y_center = y + h / 2
+
+            class_id = _map_fiftyone_label_to_ui_class(label)
+            if class_id is None:
+                continue
+
+            yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+            label_stats[label] = label_stats.get(label, 0) + 1
+
+        if not yolo_lines:
+            skipped += 1
+            continue
+
+        # Kopiera bild (symlänk om möjligt för snabbhet)
+        img_dest = images_dir / f"{idx:06d}.png"
+        label_dest = labels_dir / f"{idx:06d}.txt"
+
+        try:
+            img_dest.symlink_to(img_path.resolve())
+        except OSError:
+            shutil.copy2(img_path, img_dest)
+
+        with open(label_dest, "w") as f:
+            f.write("\n".join(yolo_lines) + "\n")
+
+        saved += 1
+
+    log(f"  Konverterat: {saved} bilder, skippade: {skipped}", "OK")
+
+    # Logga label-distribution
+    top_labels = sorted(label_stats.items(), key=lambda x: -x[1])[:15]
+    for label, count in top_labels:
+        mapped = _map_fiftyone_label_to_ui_class(label)
+        ui_name = UI_CLASSES[mapped] if mapped is not None else "SKIP"
+        log(f"    {label} → {ui_name} ({count} detections)", "INFO")
+
+    # Auto-split till train/val/test
+    auto_split_dataset(output_dir)
+
+    # Spara dataset.yaml med UI_CLASSES (inte FiftyOne-labels)
+    import yaml
+    yaml_path = output_dir / "dataset.yaml"
+    yaml_data = {
+        "path": str(output_dir.resolve()),
+        "train": "images/train",
+        "val": "images/val",
+        "test": "images/test",
+        "nc": len(UI_CLASSES),
+        "names": {i: name for i, name in enumerate(UI_CLASSES)},
+    }
+    with open(yaml_path, "w") as f:
+        yaml.dump(yaml_data, f, default_flow_style=False)
+    log(f"  dataset.yaml sparad med {len(UI_CLASSES)} UI_CLASSES", "OK")
+
+
+def _convert_hf_to_yolo(ds, output_dir: Path, info: dict):
+    """Konverterar ett HuggingFace dataset till YOLO-format.
+
+    Hanterar varierande kolumnnamn: bbox, bounding_box, objects, etc.
+    Sparar bilder till images/train/ och labels till labels/train/.
+    """
+    from PIL import Image as PILImage
+    import io
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hämta split — föredra "train", annars första tillgängliga
+    split_name = "train" if "train" in ds else list(ds.keys())[0]
+    split = ds[split_name]
+    columns = split.column_names
+
+    log(f"Konverterar {len(split)} samples (split: {split_name})...", "STEP")
+    log(f"  Kolumner: {columns}", "INFO")
+
+    # Detektera bildkolumn
+    img_col = None
+    for candidate in ("image", "screenshot", "img", "png", "frame"):
+        if candidate in columns:
+            img_col = candidate
+            break
+
+    # Detektera bbox-kolumn
+    bbox_col = None
+    label_col = None
+    for candidate in ("objects", "annotations", "bboxes", "bbox", "bounding_boxes"):
+        if candidate in columns:
+            bbox_col = candidate
+            break
+
+    # Detektera element/label-kolumner
+    for candidate in ("label", "labels", "class", "classes", "category"):
+        if candidate in columns:
+            label_col = candidate
+            break
+
+    saved = 0
+    skipped = 0
+
+    for idx, row in enumerate(split):
+        if idx % 1000 == 0:
+            log(f"  {idx}/{len(split)} konverterade...", "INFO")
+
+        # Extrahera bild
+        img = None
+        if img_col and row.get(img_col) is not None:
+            val = row[img_col]
+            if isinstance(val, PILImage.Image):
+                img = val
+            elif isinstance(val, dict) and "bytes" in val:
+                img = PILImage.open(io.BytesIO(val["bytes"]))
+            elif isinstance(val, bytes):
+                img = PILImage.open(io.BytesIO(val))
+        if img is None:
+            skipped += 1
+            continue
+
+        w, h = img.size
+        if w < 10 or h < 10:
+            skipped += 1
+            continue
+
+        # Spara bild
+        img_name = f"{idx:06d}.png"
+        img.save(str(images_dir / img_name))
+
+        # Extrahera bboxar
+        yolo_lines = []
+        bboxes_data = row.get(bbox_col) if bbox_col else None
+
+        if bboxes_data is not None:
+            yolo_lines = _parse_hf_bboxes(bboxes_data, label_col, row, w, h)
+
+        # Skriv YOLO label-fil
+        label_name = f"{idx:06d}.txt"
+        with open(labels_dir / label_name, "w") as f:
+            f.write("\n".join(yolo_lines))
+
+        saved += 1
+
+    log(f"Konverterat {saved} bilder ({skipped} överhoppade)", "OK")
+
+    # Auto-split
+    auto_split_dataset(output_dir)
+
+
+def _parse_hf_bboxes(bboxes_data, label_col, row, img_w, img_h) -> list:
+    """Parsa bboxar från varierande HuggingFace-format → YOLO-rader."""
+    lines = []
+
+    # UI-klass-mappning (text → class-id)
+    _class_map = {name: i for i, name in enumerate(UI_CLASSES)}
+
+    def _map_class(label) -> int:
+        if isinstance(label, int):
+            return min(label, len(UI_CLASSES) - 1)
+        label_lower = str(label).lower().strip()
+        if label_lower in _class_map:
+            return _class_map[label_lower]
+        # Fuzzy-match
+        for name, cid in _class_map.items():
+            if name in label_lower or label_lower in name:
+                return cid
+        return _class_map.get("text", 4)  # fallback: text
+
+    # Format A: {"bbox": [...], "category": [...]} dict
+    if isinstance(bboxes_data, dict):
+        bboxes = bboxes_data.get("bbox", bboxes_data.get("bboxes", []))
+        labels = bboxes_data.get("category", bboxes_data.get("label",
+                 bboxes_data.get("labels", bboxes_data.get("classes", []))))
+
+        for i, bbox in enumerate(bboxes):
+            cls_id = _map_class(labels[i]) if i < len(labels) else 4
+            yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+            if yolo_bbox:
+                lines.append(f"{cls_id} {yolo_bbox}")
+
+    # Format B: lista av dicts [{bbox: [...], label: ...}, ...]
+    elif isinstance(bboxes_data, list) and bboxes_data and isinstance(bboxes_data[0], dict):
+        for item in bboxes_data:
+            bbox = item.get("bbox", item.get("bounding_box", item.get("coordinates")))
+            label = item.get("label", item.get("class", item.get("category", "text")))
+            if bbox:
+                cls_id = _map_class(label)
+                yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+                if yolo_bbox:
+                    lines.append(f"{cls_id} {yolo_bbox}")
+
+    # Format C: lista av listor [[x1, y1, x2, y2], ...]
+    elif isinstance(bboxes_data, list) and bboxes_data and isinstance(bboxes_data[0], (list, tuple)):
+        labels = row.get(label_col, []) if label_col else []
+        for i, bbox in enumerate(bboxes_data):
+            cls_id = _map_class(labels[i]) if i < len(labels) else 4
+            yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+            if yolo_bbox:
+                lines.append(f"{cls_id} {yolo_bbox}")
+
+    return lines
+
+
+def _bbox_to_yolo(bbox, img_w: int, img_h: int) -> str | None:
+    """Konvertera bbox → YOLO-format (cx cy w h, normaliserat 0-1).
+
+    Hanterar: [x1,y1,x2,y2], [x,y,w,h], [left,top,right,bottom] (normaliserat eller pixlar).
+    """
+    if not bbox or len(bbox) < 4:
+        return None
+
+    x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+
+    # Om alla värden är 0-1 → redan normaliserat, tolka som [left,top,right,bottom]
+    if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+        if x2 <= x1 or y2 <= y1:
+            # Troligen [x, y, w, h] normaliserat
+            cx, cy, bw, bh = x1 + x2 / 2, y1 + y2 / 2, x2, y2
+        else:
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            bw = x2 - x1
+            bh = y2 - y1
+    else:
+        # Pixelkoordinater
+        if x2 > img_w or y2 > img_h:
+            # Troligen redan [x1,y1,x2,y2] i pixlar
+            pass
+        if x2 <= x1:
+            # Troligen [x, y, w, h] i pixlar
+            bw = x2 / img_w
+            bh = y2 / img_h
+            cx = (x1 + x2 / 2) / img_w
+            cy = (y1 + y2 / 2) / img_h
+        else:
+            cx = (x1 + x2) / 2 / img_w
+            cy = (y1 + y2) / 2 / img_h
+            bw = (x2 - x1) / img_w
+            bh = (y2 - y1) / img_h
+
+    # Validera
+    if not (0 < bw <= 1 and 0 < bh <= 1 and 0 <= cx <= 1 and 0 <= cy <= 1):
+        return None
+
+    return f"{cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}"
+
+
 # ---------------------------------------------------------------------------
 # Step 1: Dataset Preparation
 # ---------------------------------------------------------------------------
@@ -526,35 +1159,85 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     import yaml
 
     yaml_path = dataset_dir / "data.yaml"
+    existing_data = None
+
     if yaml_path.exists():
         with open(yaml_path) as f:
-            data = yaml.safe_load(f)
-        # Validate
-        if "names" in data and "train" in data:
-            nc = len(data["names"]) if isinstance(data["names"], list) else len(data["names"].values())
-            log(f"Existing data.yaml found: {nc} classes", "OK")
-            return yaml_path
-        log("data.yaml exists but is incomplete, regenerating", "WARN")
+            existing_data = yaml.safe_load(f)
+        if existing_data and "names" in existing_data and "train" in existing_data:
+            # Validera att train-sökvägen faktiskt innehåller bilder
+            train_path = existing_data.get("train", "")
+            resolved_base = Path(existing_data.get("path", str(dataset_dir.resolve())))
+            train_abs = resolved_base / train_path if train_path else None
+            has_images = (train_abs is not None and train_abs.exists()
+                          and (any(train_abs.rglob("*.jpg")) or any(train_abs.rglob("*.png"))))
 
-    # Generate data.yaml
-    train_imgs = dataset_dir / "images" / "train"
-    val_imgs = dataset_dir / "images" / "val"
-    test_imgs = dataset_dir / "images" / "test"
+            if not has_images:
+                log(f"data.yaml train-sökväg '{train_path}' har inga bilder, regenererar", "WARN")
+                # Faller igenom till auto-detektering nedan
+            else:
+                # Sökvägar OK — kontrollera klassnamn
+                existing_names = list(existing_data["names"].values()) if isinstance(existing_data["names"], dict) else list(existing_data["names"])
+                nc = len(existing_names)
+                if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
+                    log(f"Existing data.yaml found: {nc} classes", "OK")
+                    return yaml_path
+                # Klassnamn matchar inte — uppdatera namn, behåll validerade sökvägar
+                log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, uppdaterar", "WARN")
+                existing_data["nc"] = len(UI_CLASSES)
+                existing_data["names"] = {i: name for i, name in enumerate(UI_CLASSES)}
+                existing_data["path"] = str(dataset_dir.resolve())
+                with open(yaml_path, "w") as f:
+                    yaml.dump(existing_data, f, default_flow_style=False)
+                log(f"Uppdaterade klassnamn i data.yaml, behöll train/val-sökvägar", "OK")
+                return yaml_path
+        elif existing_data:
+            log("data.yaml exists but is incomplete, regenerating", "WARN")
 
-    if not train_imgs.exists():
-        log(f"Expected directory not found: {train_imgs}", "ERR")
-        log("Dataset must have structure: dataset/images/{{train,val}}/", "ERR")
+    # Generera data.yaml — auto-detektera mappstruktur
+    # Standard YOLO: images/train/ + images/val/
+    # YashJain-stil: train/images/ + val/images/
+    train_rel, val_rel, test_rel = None, None, None
+
+    # Ordning: testa vanligaste strukturerna — kräv att mappen har bilder (inte bara existerar)
+    candidates = [
+        ("images/train", "images/val", "images/test"),    # Standard YOLO
+        ("train/images", "val/images", "test/images"),    # YashJain
+        ("train", "val", "test"),                         # Flat
+    ]
+
+    def _dir_has_images(d: Path) -> bool:
+        return d.exists() and (any(d.rglob("*.jpg")) or any(d.rglob("*.png")))
+
+    for train_try, val_try, test_try in candidates:
+        if _dir_has_images(dataset_dir / train_try):
+            train_rel = train_try
+            val_rel = val_try if (dataset_dir / val_try).exists() else train_try
+            test_rel = test_try if (dataset_dir / test_try).exists() else ""
+            break
+
+    if train_rel is None:
+        log(f"Kunde inte hitta träningsbilder i {dataset_dir}", "ERR")
+        log("Förväntad struktur: images/train/ eller train/images/", "ERR")
         sys.exit(1)
 
-    # Count images
-    train_count = len(list(train_imgs.glob("*.png")) + list(train_imgs.glob("*.jpg")))
-    val_count = len(list(val_imgs.glob("*.png")) + list(val_imgs.glob("*.jpg"))) if val_imgs.exists() else 0
+    train_imgs = dataset_dir / train_rel
+    val_imgs = dataset_dir / val_rel
+
+    # Räkna bilder
+    def _count_images(d: Path) -> int:
+        if not d.exists():
+            return 0
+        return len(list(d.glob("*.png")) + list(d.glob("*.jpg")) + list(d.glob("*.jpeg")))
+
+    train_count = _count_images(train_imgs)
+    val_count = _count_images(val_imgs) if val_rel != train_rel else 0
 
     data = {
         "path": str(dataset_dir.resolve()),
-        "train": "images/train",
-        "val": "images/val" if val_imgs.exists() else "images/train",
-        "test": "images/test" if test_imgs.exists() else "",
+        "train": train_rel,
+        "val": val_rel,
+        "test": test_rel,
         "nc": len(UI_CLASSES),
         "names": {i: name for i, name in enumerate(UI_CLASSES)},
     }
@@ -562,26 +1245,45 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     with open(yaml_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
 
-    log(f"Created data.yaml: {train_count} train, {val_count} val images", "OK")
+    log(f"Created data.yaml: {train_count} train, {val_count} val images ({train_rel})", "OK")
     return yaml_path
 
 
 def auto_split_dataset(dataset_dir: Path, val_ratio: float = 0.15, test_ratio: float = 0.05):
-    """Auto-split a flat image directory into train/val/test."""
+    """Auto-split dataset into train/val/test.
+
+    Hanterar två strukturer:
+    1. Flat: images/*.png → skapar images/train/, images/val/, images/test/
+    2. Redan i train: images/train/*.png → flyttar subset till val/test
+
+    Motsvarande labels flyttas med (labels/train/ → labels/val/ etc.).
+    """
     import random
+    import shutil
 
-    flat_imgs = dataset_dir / "images"
-    if not flat_imgs.exists():
-        flat_imgs = dataset_dir
+    # Kolla om bilder redan ligger i images/train/ (t.ex. från _convert_fiftyone_to_yolo)
+    train_imgs_dir = dataset_dir / "images" / "train"
+    train_lbls_dir = dataset_dir / "labels" / "train"
+    val_imgs_dir = dataset_dir / "images" / "val"
 
-    all_images = list(flat_imgs.glob("*.png")) + list(flat_imgs.glob("*.jpg"))
-    if not all_images:
-        log("No images found for splitting", "ERR")
-        sys.exit(1)
-
-    # Check if already split
-    if (flat_imgs / "train").exists():
+    if train_imgs_dir.exists() and val_imgs_dir.exists() and any(val_imgs_dir.iterdir()):
         log("Dataset already split into train/val/test", "OK")
+        return
+
+    if train_imgs_dir.exists():
+        # Bilder ligger i images/train/ — split därifrån
+        all_images = list(train_imgs_dir.glob("*.png")) + list(train_imgs_dir.glob("*.jpg"))
+        labels_source = train_lbls_dir
+    else:
+        # Flat: bilder direkt i images/
+        flat_imgs = dataset_dir / "images"
+        if not flat_imgs.exists():
+            flat_imgs = dataset_dir
+        all_images = list(flat_imgs.glob("*.png")) + list(flat_imgs.glob("*.jpg"))
+        labels_source = dataset_dir / "labels"
+
+    if not all_images:
+        log("No images found for splitting", "WARN")
         return
 
     log(f"Auto-splitting {len(all_images)} images ({1 - val_ratio - test_ratio:.0%}/{val_ratio:.0%}/{test_ratio:.0%})", "STEP")
@@ -589,35 +1291,123 @@ def auto_split_dataset(dataset_dir: Path, val_ratio: float = 0.15, test_ratio: f
     random.shuffle(all_images)
     n_val = int(len(all_images) * val_ratio)
     n_test = int(len(all_images) * test_ratio)
-    n_train = len(all_images) - n_val - n_test
 
-    splits = {
-        "train": all_images[:n_train],
-        "val": all_images[n_train:n_train + n_val],
-        "test": all_images[n_train + n_val:],
-    }
+    # Val och test tas från slutet, resten förblir train
+    val_images = all_images[:n_val]
+    test_images = all_images[n_val:n_val + n_test]
+    # Train = resten (behöver inte flyttas om de redan ligger i images/train/)
 
-    labels_dir = dataset_dir / "labels"
-
-    for split_name, images in splits.items():
+    for split_name, images in [("val", val_images), ("test", test_images)]:
         img_dir = dataset_dir / "images" / split_name
         lbl_dir = dataset_dir / "labels" / split_name
         img_dir.mkdir(parents=True, exist_ok=True)
         lbl_dir.mkdir(parents=True, exist_ok=True)
 
         for img_path in images:
-            # Move image
+            # Flytta bild till val/test
             shutil.move(str(img_path), str(img_dir / img_path.name))
-            # Move corresponding label if exists
+            # Flytta matchande label
             label_name = img_path.stem + ".txt"
-            label_path = labels_dir / label_name
+            label_path = labels_source / label_name
             if label_path.exists():
                 shutil.move(str(label_path), str(lbl_dir / label_name))
             else:
-                # Empty label file = negative sample
                 (lbl_dir / label_name).touch()
 
         log(f"  {split_name}: {len(images)} images", "INFO")
+
+    # Om flat-struktur: flytta resterande till train/
+    if not (dataset_dir / "images" / "train").exists():
+        train_dir = dataset_dir / "images" / "train"
+        train_lbl = dataset_dir / "labels" / "train"
+        train_dir.mkdir(parents=True, exist_ok=True)
+        train_lbl.mkdir(parents=True, exist_ok=True)
+        remaining = list((dataset_dir / "images").glob("*.png")) + list((dataset_dir / "images").glob("*.jpg"))
+        for img_path in remaining:
+            shutil.move(str(img_path), str(train_dir / img_path.name))
+            label_path = labels_source / (img_path.stem + ".txt")
+            if label_path.exists():
+                shutil.move(str(label_path), str(train_lbl / (img_path.stem + ".txt")))
+
+    train_count = len(list((dataset_dir / "images" / "train").glob("*")))
+    log(f"  train: {train_count} images (kvar efter split)", "INFO")
+
+
+def merge_datasets(dataset_dirs: list[Path], output_dir: Path) -> Path:
+    """Merge multiple YOLO datasets into one combined dataset (incremental merge).
+
+    Kopierar bilder + labels från alla dataset till en gemensam mapp.
+    Hanterar namnkollisioner genom att prefixa med dataset-index.
+    Stödjer alla vanliga YOLO-strukturer:
+      - images/train/ + labels/train/   (standard YOLO)
+      - train/images/ + train/labels/   (YashJain-stil)
+    """
+    log(f"Merging {len(dataset_dirs)} datasets into {output_dir}", "STEP")
+
+    for split in ["train", "val", "test"]:
+        (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+        (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
+
+    total_copied = {"train": 0, "val": 0, "test": 0}
+
+    for ds_idx, ds_dir in enumerate(dataset_dirs):
+        ds_dir = Path(ds_dir).resolve()
+        if not ds_dir.exists():
+            log(f"  Dataset finns inte, hoppar över: {ds_dir}", "WARN")
+            continue
+
+        ds_prefix = f"ds{ds_idx}_"
+        ds_name = ds_dir.name
+
+        # Detektera mappstruktur
+        # Variant 1: images/train/ + labels/train/
+        # Variant 2: train/images/ + train/labels/
+        for split in ["train", "val", "test"]:
+            src_imgs = None
+            src_lbls = None
+
+            if (ds_dir / "images" / split).exists():
+                src_imgs = ds_dir / "images" / split
+                src_lbls = ds_dir / "labels" / split
+            elif (ds_dir / split / "images").exists():
+                src_imgs = ds_dir / split / "images"
+                src_lbls = ds_dir / split / "labels"
+
+            if src_imgs is None or not src_imgs.exists():
+                continue
+
+            images = list(src_imgs.glob("*.png")) + list(src_imgs.glob("*.jpg")) + list(src_imgs.glob("*.jpeg"))
+            for img_path in images:
+                # Prefix med dataset-index för att undvika namnkollisioner
+                dst_name = f"{ds_prefix}{img_path.name}"
+                dst_img = output_dir / "images" / split / dst_name
+                shutil.copy2(str(img_path), str(dst_img))
+
+                # Kopiera matchande label
+                label_name = img_path.stem + ".txt"
+                dst_label_name = f"{ds_prefix}{img_path.stem}.txt"
+                if src_lbls and (src_lbls / label_name).exists():
+                    shutil.copy2(str(src_lbls / label_name),
+                                 str(output_dir / "labels" / split / dst_label_name))
+                else:
+                    # Tom label = negativ sample
+                    (output_dir / "labels" / split / dst_label_name).touch()
+
+                total_copied[split] += 1
+
+        log(f"  [{ds_idx + 1}/{len(dataset_dirs)}] {ds_name}: kopierad", "OK")
+
+    for split, count in total_copied.items():
+        if count > 0:
+            log(f"  {split}: {count} bilder totalt", "INFO")
+
+    total = sum(total_copied.values())
+    if total == 0:
+        log("Inga bilder hittades i dataseten!", "ERR")
+        sys.exit(1)
+
+    log(f"Merged dataset: {total} bilder → {output_dir}", "OK")
+    return output_dir
 
 
 def download_starter_dataset(output_dir: Path):
@@ -725,26 +1515,26 @@ _RICO_CLASS_MAP = {
     "Text Button": 0,    # button
     "Icon": 3,           # icon
     "Text": 4,           # text
-    "Image": 5,          # image
-    "Input": 1,          # input
+    "Image": 5,          # img
+    "Input": 1,          # textbox
     "Web View": 4,       # text (fallback)
     "List Item": 4,      # text
     "Card": 4,           # text
     "Radio Button": 7,   # radio
     "Checkbox": 6,       # checkbox
     "Switch": 6,         # checkbox (nära nog)
-    "Spinner": 8,        # select
+    "Spinner": 8,        # combobox
     "Toolbar": 9,        # heading
     "Multi-Tab": 2,      # link
-    "Slider": 1,         # input (fallback)
-    "Advertisement": 5,  # image
+    "Slider": 1,         # textbox (fallback)
+    "Advertisement": 5,  # img
     "Pager Indicator": 3,  # icon
     "Modal": 4,          # text
     "Button Bar": 0,     # button
-    "Number Stepper": 1, # input
-    "Map View": 5,       # image
-    "Video": 5,          # image
-    "Date Picker": 8,    # select
+    "Number Stepper": 1, # textbox
+    "Map View": 5,       # img
+    "Video": 5,          # img
+    "Date Picker": 8,    # combobox
     "On/Off Switch": 6,  # checkbox
     "Drawer": 2,         # link
     "Bottom Navigation": 2,  # link
@@ -835,9 +1625,12 @@ _WEBUI_CLASS_MAP = {
     "h3": 9,
     "h4": 9,
     "title": 9,
-    "nav": 2,
+    "nav": 2,            # fallback till link i bas; navigation(13) i extended
     "menu": 2,
-    "search": 1,
+    "search": 1,         # fallback till textbox i bas; searchbox(14) i extended
+    "searchbox": 1,
+    "combobox": 8,
+    "navigation": 2,     # fallback till link i bas
 }
 
 
@@ -1540,14 +2333,14 @@ def _match_class_name(name: str, extended: bool = False) -> int:
     if name in _WEBUI_CLASS_MAP:
         return _WEBUI_CLASS_MAP[name]
 
-    # Extended-specifika mappningar
+    # Extended-specifika mappningar (index matchar UI_CLASSES_EXTENDED)
     if extended:
         extended_map = {
             "price": 10, "pris": 10, "cost": 10, "currency": 10,
-            "cta": 11, "call_to_action": 11, "buy_button": 11,
+            "cta": 11, "call_to_action": 11, "buy_button": 11, "add_to_cart": 11,
             "product_card": 12, "product": 12, "card": 12,
-            "nav": 13, "navigation": 13, "breadcrumb": 13, "tabs": 13,
-            "search": 14, "searchbar": 14, "search_field": 14,
+            "navigation": 13, "nav": 13, "breadcrumb": 13, "tabs": 13, "menu": 13,
+            "searchbox": 14, "search": 14, "searchbar": 14, "search_field": 14,
             "form": 15, "form_group": 15,
         }
         if name in extended_map:
@@ -1568,6 +2361,180 @@ def _find_image(images_dir: Path, stem: str) -> Path:
         if candidate.exists():
             return candidate
     return None
+
+
+def _prepare_yolo_repo_yaml(source_path: Path):
+    """Förbered data.yaml för ett YOLO-repo (t.ex. YashJain).
+
+    Hanterar varierande mappstrukturer:
+    - train/images/ + val/images/ (YashJain-stil)
+    - images/train/ + images/val/ (standard YOLO)
+    - yolo_dataset/ undermapp
+    """
+    import yaml
+
+    yaml_dst = source_path / "data.yaml"
+
+    # Sök efter existerande yaml
+    for name in ("data.yaml", "dataset.yaml"):
+        candidate = source_path / name
+        if candidate.exists():
+            with open(candidate) as f:
+                data = yaml.safe_load(f)
+            if data and "names" in data:
+                # Sätt absolut path
+                data["path"] = str(source_path.resolve())
+                with open(yaml_dst, "w") as f:
+                    yaml.dump(data, f, default_flow_style=False)
+                log(f"data.yaml uppdaterad med absolut path: {source_path.resolve()}", "OK")
+                return
+
+    # Ingen yaml hittad — auto-generera baserat på mappstruktur
+    log("Ingen data.yaml hittad, autogenererar...", "INFO")
+
+    # Hitta train-bilder
+    train_dir = None
+    for candidate in [
+        source_path / "train" / "images",
+        source_path / "images" / "train",
+        source_path / "yolo_dataset" / "train" / "images",
+        source_path / "yolo_dataset" / "images" / "train",
+    ]:
+        if candidate.exists():
+            train_dir = candidate
+            break
+
+    if train_dir is None:
+        log(f"Kunde inte hitta train-bilder i {source_path}", "WARN")
+        return
+
+    # Bestäm relativa paths
+    rel_train = str(train_dir.parent.relative_to(source_path))
+    val_dir = train_dir.parent.parent / "val" / "images"
+    if not val_dir.exists():
+        val_dir = train_dir.parent.parent / "images" / "val"
+    rel_val = str(val_dir.parent.relative_to(source_path)) if val_dir.exists() else rel_train
+
+    data = {
+        "path": str(source_path.resolve()),
+        "train": rel_train,
+        "val": rel_val,
+        "nc": len(UI_CLASSES),
+        "names": {i: name for i, name in enumerate(UI_CLASSES)},
+    }
+    with open(yaml_dst, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+    log(f"Genererade data.yaml: train={rel_train}, val={rel_val}", "OK")
+
+
+# Ommappning: YashJain originalklasser → våra UI_CLASSES-index
+# YashJain dataset.yaml: 0:link 1:button 2:input 3:select 4:textarea
+#   5:label 6:checkbox 7:radio 8:dropdown 9:slider 10:toggle
+#   11:menu_item 12:clickable 13:icon 14:image
+_YASHJAIN_REMAP = {
+    0: 2,     # link → link
+    1: 0,     # button → button
+    2: 1,     # input → textbox
+    3: 8,     # select → combobox
+    4: 1,     # textarea → textbox
+    5: 4,     # label → text
+    6: 6,     # checkbox → checkbox
+    7: 7,     # radio → radio
+    8: 8,     # dropdown → combobox
+    9: None,  # slider → skip (ingen matchande klass)
+    10: 6,    # toggle → checkbox
+    11: 2,    # menu_item → link
+    12: 0,    # clickable → button
+    13: 3,    # icon → icon
+    14: 5,    # image → img
+}
+
+
+def _remap_yashjain_labels(source_path: Path, extended: bool = False):
+    """Ommappa YashJain YOLO-labels till AetherAgent UI_CLASSES.
+
+    YashJain-datasetet har 15 klasser med annan ordning.
+    Vi omskriver varje label-fils klass-ID till våra index.
+    Rader med omappningsbara klasser (slider) tas bort.
+    """
+    import yaml
+
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
+    nc = len(active_classes)
+    remap = _YASHJAIN_REMAP
+
+    # Hitta alla label-kataloger
+    label_dirs = []
+    for split in ("train", "val", "test"):
+        # train/labels/ eller labels/train/
+        for candidate in [
+            source_path / split / "labels",
+            source_path / "labels" / split,
+        ]:
+            if candidate.exists():
+                label_dirs.append((split, candidate))
+                break
+
+    total_remapped = 0
+    total_dropped = 0
+
+    for split, label_dir in label_dirs:
+        txt_files = list(label_dir.glob("*.txt"))
+        for txt_file in txt_files:
+            lines = txt_file.read_text().strip().split("\n")
+            new_lines = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                parts = line.strip().split()
+                if len(parts) < 5:
+                    continue
+                old_cls = int(parts[0])
+                new_cls = remap.get(old_cls)
+                if new_cls is None or new_cls >= nc:
+                    total_dropped += 1
+                    continue
+                parts[0] = str(new_cls)
+                new_lines.append(" ".join(parts))
+                total_remapped += 1
+            txt_file.write_text("\n".join(new_lines) + "\n" if new_lines else "")
+
+        log(f"  {split}: {len(txt_files)} label-filer behandlade", "INFO")
+
+    log(f"Ommappning klar: {total_remapped} annotationer behållna, {total_dropped} borttagna", "OK")
+
+    # Generera korrekt data.yaml
+    yaml_dst = source_path / "data.yaml"
+
+    # Detektera mappstruktur
+    train_rel = val_rel = test_rel = None
+    for t, v, te in [
+        ("train/images", "val/images", "test/images"),
+        ("images/train", "images/val", "images/test"),
+    ]:
+        td = source_path / t
+        if td.exists() and (any(td.rglob("*.jpg")) or any(td.rglob("*.png"))):
+            train_rel = t
+            val_rel = v if (source_path / v).exists() else t
+            test_rel = te if (source_path / te).exists() else ""
+            break
+
+    if train_rel is None:
+        log("Kunde inte hitta träningsbilder efter ommappning", "ERR")
+        sys.exit(1)
+
+    data = {
+        "path": str(source_path.resolve()),
+        "train": train_rel,
+        "val": val_rel,
+        "test": test_rel,
+        "nc": nc,
+        "names": {i: name for i, name in enumerate(active_classes)},
+    }
+    with open(yaml_dst, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+    log(f"data.yaml genererad: nc={nc}, train={train_rel}", "OK")
 
 
 def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
@@ -1627,7 +2594,20 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
     if fmt == "webui":
         return convert_webui_to_yolo(source_path, output_dir, extended=extended)
 
-    log(f"Okänt format: {fmt}. Stödda format: rico, coco, webui, yolo", "ERR")
+    # yashjain — YOLO-format men med annan klassindelning, kräver ommappning
+    if fmt == "yashjain":
+        log("YashJain-dataset: omklassificerar labels till AetherAgent-klasser", "STEP")
+        _remap_yashjain_labels(source_path, extended=extended)
+        return source_path
+
+    # HuggingFace-datasets konverteras redan vid nedladdning (_convert_hf_to_yolo)
+    hf_formats = ("osatlas", "guiactor", "showui-web", "waveui")
+    if fmt in hf_formats:
+        log(f"HuggingFace-dataset ({fmt}) konverterades vid nedladdning", "OK")
+        return source_path
+
+    log(f"Okänt format: {fmt}. Stödda: rico, coco, webui, osatlas, guiactor, "
+        f"showui-web, waveui, yashjain, yolo", "ERR")
     sys.exit(1)
 
 
@@ -1646,13 +2626,38 @@ def train_model(
     resume: bool = False,
     device: str = None,
 ) -> Path:
-    """Train YOLOv8-nano with Ultralytics."""
+    """Train YOLO model with Ultralytics."""
     from ultralytics import YOLO
 
     log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}, device={device or 'auto'}", "STEP")
     log(f"Base model: {model_base}", "INFO")
 
     model = YOLO(model_base)
+
+    # Detektera VRAM för auto-tuning av batch/workers
+    vram_gb = 0
+    num_cpu = os.cpu_count() or 8
+    try:
+        import torch
+        if torch.cuda.is_available():
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    except Exception:
+        pass
+
+    # Auto-tune batch om användaren valt default
+    if batch == DEFAULT_BATCH and vram_gb > 0:
+        # YOLO26n @ 640px med AMP: ~0.5 GB overhead + ~0.55 GB/batch-item
+        # Lämna 3 GB marginal för overhead, augmentation, gradients
+        usable_vram = vram_gb - 3.0
+        auto_batch = max(8, min(int(usable_vram / 0.55), 64))
+        # Avrunda nedåt till närmaste multipel av 8
+        auto_batch = (auto_batch // 8) * 8
+        if auto_batch != batch:
+            log(f"Auto-tuned batch: {batch} → {auto_batch} (baserat på {vram_gb:.0f} GB VRAM)", "OK")
+            batch = auto_batch
+
+    # Workers: max 4 med cache=ram (fler → RAM-explosion), annars max 8
+    optimal_workers = min(num_cpu, 4)
 
     # Bygg träningsparametrar
     train_kwargs = dict(
@@ -1664,8 +2669,8 @@ def train_model(
         name=name,
         exist_ok=True,
         resume=resume,
-        workers=8,
-        cache="ram",
+        workers=optimal_workers,
+        cache="ram",   # Snabbast — RAM-tryck hanteras via färre workers
         # Augmentation tuned for UI (less aggressive than natural images)
         mosaic=0.5,
         mixup=0.0,         # Mixup hurts UI element detection
@@ -1679,17 +2684,35 @@ def train_model(
         translate=0.1,
         verbose=True,
         plots=True,
+        # Dataloader-optimeringar
+        multi_scale=0.0,   # Avstängt — 0.5 krympte bilder till ~352px, svälte GPU:n
     )
 
     # GPU-specifika optimeringar
     if device == "cpu":
         train_kwargs["device"] = "cpu"
         train_kwargs["amp"] = False  # AMP fungerar inte på CPU
+        train_kwargs["multi_scale"] = 0.0  # Multi-scale för dyrt på CPU
         log("Training on CPU — this will be slow but works", "WARN")
     else:
         if device:
             train_kwargs["device"] = device
-        train_kwargs["amp"] = True  # Mixed precision — speedup på GPU
+        train_kwargs["amp"] = True  # FP16 mixed precision — 2x speedup på Ampere+
+
+        # torch.compile (PyTorch 2.0+) — JIT-kompilerar modellen för snabbare kernels
+        # Avstängt: Blackwell (RTX 5090) har instabilt Dynamo-stöd, ger pow_by_natural-
+        # varningar och extremt lång kompileringstid. Kan återaktiveras när PyTorch
+        # har fullt Blackwell-stöd.
+        # try:
+        #     import torch
+        #     if hasattr(torch, "compile") and torch.__version__ >= "2.0":
+        #         train_kwargs["compile"] = True
+        #         log("torch.compile aktiverat — snabbare GPU-kernels", "OK")
+        # except Exception:
+        #     pass
+
+    log(f"Training config: batch={batch}, workers={optimal_workers}, "
+        f"VRAM={vram_gb:.0f}GB, multi_scale={train_kwargs.get('multi_scale', 0)}", "INFO")
 
     results = model.train(**train_kwargs)
 
@@ -1750,27 +2773,89 @@ def validate_model(best_pt: Path, data_yaml: Path, imgsz: int) -> dict:
 # Step 4: ONNX Export
 # ---------------------------------------------------------------------------
 
-def export_onnx(best_pt: Path, imgsz: int) -> Path:
-    """Export best.pt → ONNX (opset 17, simplified)."""
+EXPORT_OPTIONS = [
+    {
+        "key": "fp32",
+        "label": "ONNX FP32",
+        "desc": "Full precision, ~11-12 MB, 0% kvalitetsförlust",
+        "kwargs": {},
+    },
+    {
+        "key": "fp16",
+        "label": "ONNX FP16 (half)",
+        "desc": "~5.8-6.5 MB, 1.5-2x snabbare, ~0-2% kvalitetsförlust (REKOMMENDERAD)",
+        "kwargs": {"half": True},
+    },
+    {
+        "key": "int8",
+        "label": "ONNX INT8",
+        "desc": "~3.5-5 MB, 2-3x snabbare (CPU/edge), ~3-8% kvalitetsförlust",
+        "kwargs": {"int8": True},
+    },
+]
+
+
+def prompt_export_format() -> dict:
+    """Interaktiv val av exportformat i terminalen."""
+    print("\n  Välj exportformat:\n")
+    print("  ┌─────────────────────────────────────────────────────────────────────┐")
+    print("  │ #  Format          Storlek      Hastighet    Kvalitetsförlust       │")
+    print("  ├─────────────────────────────────────────────────────────────────────┤")
+    print("  │ 1) ONNX FP32      ~11-12 MB    Baseline     0%                     │")
+    print("  │ 2) ONNX FP16 *    ~5.8-6.5 MB  1.5-2x       ~0-2%  (REKOMMENDERAD)│")
+    print("  │ 3) ONNX INT8      ~3.5-5 MB    2-3x (CPU)   ~3-8%  (kräver kalib.) │")
+    print("  └─────────────────────────────────────────────────────────────────────┘")
+    print()
+
+    while True:
+        choice = input("  Exportformat [1-3, Enter=2 (FP16)]: ").strip()
+        if not choice:
+            return EXPORT_OPTIONS[1]  # FP16 default
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(EXPORT_OPTIONS):
+                selected = EXPORT_OPTIONS[idx - 1]
+                log(f"Valt exportformat: {selected['label']}", "OK")
+                return selected
+        except ValueError:
+            pass
+        print(f"  Ogiltigt val. Ange 1-{len(EXPORT_OPTIONS)}.")
+
+
+def export_onnx(best_pt: Path, imgsz: int, export_fmt: dict | None = None) -> Path:
+    """Export best.pt → ONNX med valt format (FP32/FP16/INT8)."""
     from ultralytics import YOLO
 
-    log("Exporting to ONNX format...", "STEP")
+    if export_fmt is None:
+        export_fmt = EXPORT_OPTIONS[1]  # FP16 default
+
+    log(f"Exporting to {export_fmt['label']}...", "STEP")
 
     model = YOLO(str(best_pt))
-    onnx_path_str = model.export(
+
+    export_kwargs = dict(
         format="onnx",
         imgsz=imgsz,
         opset=17,
         simplify=True,
         dynamic=False,
     )
+    export_kwargs.update(export_fmt.get("kwargs", {}))
+
+    onnx_path_str = model.export(**export_kwargs)
     onnx_path = Path(onnx_path_str)
 
     size_mb = onnx_path.stat().st_size / (1024 * 1024)
     log(f"ONNX exported: {onnx_path} ({size_mb:.1f} MB)", "OK")
 
+    pt_size = best_pt.stat().st_size / (1024 * 1024)
+    reduction = (1 - size_mb / pt_size) * 100 if pt_size > 0 else 0
+    if reduction > 0:
+        log(f"  Storlek: {pt_size:.1f} MB (.pt) → {size_mb:.1f} MB (.onnx) "
+            f"({reduction:.0f}% reduktion)", "INFO")
+
     if size_mb > 6:
-        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Consider pruning or using yolov8n.", "WARN")
+        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Prova FP16 eller INT8.", "WARN")
 
     return onnx_path
 
@@ -1888,6 +2973,53 @@ def verify_with_server(onnx_path: Path, server_url: str, test_png: Path = None):
         log(f"Verification error: {e}", "WARN")
 
 
+def _parse_results_csv(csv_path: Path) -> list[dict]:
+    """Parse YOLO results.csv for epoch-by-epoch metrics."""
+    history = []
+    if not csv_path.exists():
+        return history
+    try:
+        with open(csv_path) as f:
+            import csv as csv_mod
+            reader = csv_mod.DictReader(f)
+            for row in reader:
+                # YOLO results.csv har kolumner med whitespace i namnen
+                cleaned = {k.strip(): v.strip() for k, v in row.items()}
+                entry = {}
+                for key, target in [
+                    ("epoch", "epoch"),
+                    ("metrics/mAP50(B)", "map50"),
+                    ("metrics/mAP50-95(B)", "map5095"),
+                    ("metrics/precision(B)", "precision"),
+                    ("metrics/recall(B)", "recall"),
+                    ("train/box_loss", "box_loss"),
+                    ("train/cls_loss", "cls_loss"),
+                    ("train/dfl_loss", "dfl_loss"),
+                ]:
+                    if key in cleaned:
+                        try:
+                            entry[target] = float(cleaned[key])
+                        except ValueError:
+                            pass
+                if entry:
+                    history.append(entry)
+    except Exception:
+        pass
+    return history
+
+
+def _pct_change(baseline: float, final: float) -> str:
+    """Format percentage change with arrow."""
+    if baseline == 0:
+        return "N/A"
+    pct = ((final - baseline) / baseline) * 100
+    arrow = "▲" if pct > 0 else "▼" if pct < 0 else "="
+    # Near-zero baseline ger absurda procent — visa absolut diff istället
+    if baseline < 0.01:
+        return f"{arrow} {final:.4f} (från ~0)"
+    return f"{arrow} {pct:+.1f}%"
+
+
 def generate_report(
     dataset_dir: Path,
     best_pt: Path,
@@ -1895,8 +3027,10 @@ def generate_report(
     metrics: dict,
     deploy_path: Path,
     version: str,
+    baseline_metrics: dict = None,
+    epoch_history: list[dict] = None,
 ):
-    """Generate a summary report."""
+    """Generate a summary report with baseline comparison and progression."""
     report = {
         "version": version,
         "dataset": str(dataset_dir),
@@ -1905,27 +3039,81 @@ def generate_report(
         "deployed_to": str(deploy_path),
         "onnx_size_mb": round(onnx_path.stat().st_size / (1024 * 1024), 2),
         "metrics": metrics,
+        "baseline_metrics": baseline_metrics,
         "classes": UI_CLASSES,
         "input_size": DEFAULT_IMGSZ,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if epoch_history:
+        report["epoch_history"] = epoch_history
 
     report_path = deploy_path.parent / f"report-{version}.json"
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     log("TRAINING COMPLETE", "OK")
-    print("=" * 60)
+    print("=" * 70)
     print(f"  Model version:  {version}")
     print(f"  ONNX path:      {onnx_path}")
     print(f"  ONNX size:      {report['onnx_size_mb']} MB")
-    print(f"  mAP@50:         {metrics.get('map50', 'N/A'):.4f}")
-    print(f"  mAP@50-95:      {metrics.get('map5095', 'N/A'):.4f}")
-    print(f"  Precision:      {metrics.get('precision', 'N/A'):.4f}")
-    print(f"  Recall:         {metrics.get('recall', 'N/A'):.4f}")
+
+    # Baseline vs Final comparison
+    metric_labels = [
+        ("mAP@50", "map50"),
+        ("mAP@50-95", "map5095"),
+        ("Precision", "precision"),
+        ("Recall", "recall"),
+    ]
+
+    if baseline_metrics:
+        print()
+        print(f"  {'Metric':<14} {'Baseline':>10} {'Final':>10} {'Change':>12}")
+        print(f"  {'─' * 48}")
+        for label, key in metric_labels:
+            bval = baseline_metrics.get(key, 0)
+            fval = metrics.get(key, 0)
+            change = _pct_change(bval, fval)
+            print(f"  {label:<14} {bval:>10.4f} {fval:>10.4f} {change:>12}")
+    else:
+        print()
+        for label, key in metric_labels:
+            print(f"  {label:<14} {metrics.get(key, 0):.4f}")
+
+    # Epoch progression summary (first, 25%, 50%, 75%, last)
+    if epoch_history and len(epoch_history) > 1:
+        total = len(epoch_history)
+        checkpoints = [0, total // 4, total // 2, 3 * total // 4, total - 1]
+        # Dedup while preserving order
+        seen = set()
+        checkpoints = [c for c in checkpoints if c not in seen and not seen.add(c)]
+        print()
+        print(f"  Epoch Progression:")
+        print(f"  {'Epoch':>7} {'mAP@50':>10} {'mAP50-95':>10} {'box_loss':>10} {'cls_loss':>10}")
+        print(f"  {'─' * 49}")
+        for idx in checkpoints:
+            ep = epoch_history[idx]
+            epoch_num = int(ep.get("epoch", idx + 1))
+            m50 = ep.get("map50", 0)
+            m5095 = ep.get("map5095", 0)
+            bloss = ep.get("box_loss", 0)
+            closs = ep.get("cls_loss", 0)
+            print(f"  {epoch_num:>7} {m50:>10.4f} {m5095:>10.4f} {bloss:>10.4f} {closs:>10.4f}")
+
+        # Convergence: improvement last 25% vs first 25%
+        q1_map = sum(e.get("map50", 0) for e in epoch_history[:total // 4]) / max(total // 4, 1)
+        q4_map = sum(e.get("map50", 0) for e in epoch_history[3 * total // 4:]) / max(total - 3 * total // 4, 1)
+        if q1_map > 0:
+            convergence = ((q4_map - q1_map) / q1_map) * 100
+            print(f"\n  Convergence: Q4 vs Q1 mAP@50 {convergence:+.1f}%")
+            if abs(convergence) < 2.0:
+                print("  → Modellen har konvergerat — fler epochs ger troligen lite")
+            elif convergence < 0:
+                print("  → Negativ trend — möjlig overfitting, prova fewer epochs")
+
+    print()
     print(f"  Report:         {report_path}")
-    print("=" * 60)
+    print("=" * 70)
     print()
     print("  To use in AetherAgent:")
     print(f'    model_bytes = open("{deploy_path}", "rb").read()')
@@ -1941,39 +3129,113 @@ def generate_report(
 # Interactive Mode
 # ---------------------------------------------------------------------------
 
-def interactive_mode():
-    """Step-by-step interactive wizard."""
+def interactive_mode(args=None):
+    """Step-by-step interactive wizard.
+
+    Om args skickas med respekteras --download, --format, --version etc.
+    som förvalda värden i wizarden.
+    """
     print(BANNER)
     print("This wizard will guide you through the full training pipeline.\n")
 
-    # Step 1: Dataset
-    print("[1/5] DATASET")
-    print("  a) I have a labeled dataset ready")
-    print("  b) Download starter dataset (synthetic, for testing)")
-    choice = input("  Choice [a/b]: ").strip().lower()
+    # Förval från CLI-argument
+    cli_format = getattr(args, "format", None) if args else None
+    cli_version = getattr(args, "version", "v1") if args else "v1"
+    cli_download = getattr(args, "download", False) if args else False
+    cli_device = getattr(args, "device", None) if args else None
+    cli_server = getattr(args, "server", "http://localhost:3000") if args else "http://localhost:3000"
+    cli_fresh = getattr(args, "fresh", False) if args else False
+    cli_extended = getattr(args, "extended_classes", False) if args else False
 
-    if choice == "b":
-        dataset_dir = Path("dataset")
-        download_starter_dataset(dataset_dir)
+    # Step 1: Modellval
+    print("[1/7] BASMODELL")
+    model_base = prompt_model_selection()
+
+    # Step 2: Dataset
+    print("\n[2/7] DATASET")
+    # Visa externa dataset-alternativ
+    ext_datasets = list(_DATASET_REGISTRY.keys())
+    print("  a) Lokalt dataset (ange sökväg)")
+    print("  b) Syntetiskt starter-dataset (för testning)")
+    for idx, ds_name in enumerate(ext_datasets):
+        info = _DATASET_REGISTRY[ds_name]
+        print(f"  {chr(99 + idx)}) Ladda ner: {info['name']} ({info['size_hint']})")
+    print(f"  m) Slå ihop flera dataset (incremental merge)")
+
+    # Automatiskt välja om --download --format angavs
+    if cli_download and cli_format and cli_format in ext_datasets:
+        ds_idx = ext_datasets.index(cli_format)
+        default_choice = chr(99 + ds_idx)
+        log(f"  (förval från --download --format {cli_format})", "INFO")
     else:
-        path = input("  Dataset path: ").strip()
+        default_choice = None
+
+    prompt_str = f"  Val [{default_choice}]: " if default_choice else "  Val [a/b/m/...]: "
+    choice = input(prompt_str).strip().lower() or (default_choice or "")
+
+    dataset_dir = None
+    if choice == "a":
+        path = input("  Dataset-sökväg: ").strip()
         dataset_dir = Path(path)
         if not dataset_dir.exists():
-            log(f"Path not found: {dataset_dir}", "ERR")
+            log(f"Sökvägen finns inte: {dataset_dir}", "ERR")
+            sys.exit(1)
+    elif choice == "b":
+        dataset_dir = Path("dataset")
+        download_starter_dataset(dataset_dir)
+    elif choice == "m":
+        # Merge-läge: samla sökvägar
+        print("\n  Ange sökvägar till dataset att slå ihop (en per rad, tom rad avslutar):")
+        merge_paths = []
+        while True:
+            p = input(f"    Dataset {len(merge_paths) + 1} (enter = klar): ").strip()
+            if not p:
+                break
+            pp = Path(p)
+            if not pp.exists():
+                log(f"  Sökvägen finns inte: {pp}", "WARN")
+                continue
+            merge_paths.append(pp)
+        if len(merge_paths) < 2:
+            log("Minst 2 dataset krävs för merge", "ERR")
+            sys.exit(1)
+        merged_dir = Path("dataset") / "merged"
+        dataset_dir = merge_datasets(merge_paths, merged_dir)
+    else:
+        # Matcha mot dataset-lista (c, d, e, ...)
+        ds_offset = ord(choice) - ord('c') if len(choice) == 1 and choice >= 'c' else -1
+        if 0 <= ds_offset < len(ext_datasets):
+            fmt_name = ext_datasets[ds_offset]
+            info = _DATASET_REGISTRY[fmt_name]
+            log(f"Laddar ner {info['name']}...", "STEP")
+            ensure_deps()
+            base_dir = Path("dataset")
+            raw_dir = download_dataset(fmt_name, base_dir)
+            converted_dir = base_dir / f"{fmt_name}_converted"
+            dataset_dir = convert_dataset(raw_dir, converted_dir, fmt_name,
+                                          extended=cli_extended)
+        else:
+            log(f"Ogiltigt val: {choice}", "ERR")
             sys.exit(1)
 
-    # Step 2: Config
-    print("\n[2/5] TRAINING CONFIG")
+    # Step 3: Config
+    print("\n[3/7] TRAINING CONFIG")
     epochs = input(f"  Epochs [{DEFAULT_EPOCHS}]: ").strip()
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
     batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
     batch = int(batch) if batch else DEFAULT_BATCH
-    version = input("  Model version [v1]: ").strip() or "v1"
+    version = input(f"  Model version [{cli_version}]: ").strip() or cli_version
 
-    # Step 3: Confirm
-    print(f"\n  Dataset:  {dataset_dir}")
+    # Step 4: Export format
+    print("\n[4/7] EXPORTFORMAT")
+    export_fmt = prompt_export_format()
+
+    # Step 5: Confirm
+    print(f"\n  Modell:   {model_base}")
+    print(f"  Dataset:  {dataset_dir}")
     print(f"  Epochs:   {epochs}")
     print(f"  Batch:    {batch}")
+    print(f"  Export:   {export_fmt['label']}")
     print(f"  Version:  {version}")
     confirm = input("\n  Start training? [Y/n]: ").strip().lower()
     if confirm == "n":
@@ -1985,8 +3247,12 @@ def interactive_mode():
         dataset_dir=dataset_dir,
         epochs=epochs,
         batch=batch,
+        model_base=model_base,
         version=version,
-        server_url="http://localhost:3000",
+        server_url=cli_server,
+        export_fmt=export_fmt,
+        device=cli_device,
+        fresh=cli_fresh,
     )
 
 
@@ -2006,6 +3272,7 @@ def run_pipeline(
     skip_verify: bool = False,
     device: str = None,
     fresh: bool = False,
+    export_fmt: dict = None,
 ):
     """Run the full training pipeline."""
     print(BANNER)
@@ -2041,8 +3308,12 @@ def run_pipeline(
         else:
             log(f"Ingen tidigare modell hittades — startar från {model_base}", "INFO")
 
-    # Step 2: Train
-    log("Step 2/6: Training YOLOv8-nano...", "STEP")
+    # Step 2a: Baseline — mät basmodellens metrics före träning
+    log("Step 2/7: Measuring baseline metrics...", "STEP")
+    baseline_metrics = validate_model(Path(model_base), data_yaml, imgsz)
+
+    # Step 2b: Train
+    log(f"Step 3/7: Training {model_base}...", "STEP")
     best_pt = train_model(
         data_yaml=data_yaml,
         epochs=epochs,
@@ -2054,30 +3325,39 @@ def run_pipeline(
         device=device,
     )
 
-    # Step 3: Validate
-    log("Step 3/6: Validating model...", "STEP")
+    # Step 4: Validate
+    log("Step 4/7: Validating model...", "STEP")
     metrics = validate_model(best_pt, data_yaml, imgsz)
 
-    # Step 4: Export ONNX
-    log("Step 4/6: Exporting to ONNX...", "STEP")
-    onnx_path = export_onnx(best_pt, imgsz)
+    # Läs epoch-progression från YOLO:s results.csv
+    results_csv = Path(DEFAULT_PROJECT) / f"{DEFAULT_NAME}-{version}" / "results.csv"
+    epoch_history = _parse_results_csv(results_csv)
 
-    # Step 5: Deploy
-    log("Step 5/6: Deploying model...", "STEP")
+    # Step 5: Export ONNX
+    if export_fmt is None:
+        export_fmt = prompt_export_format()
+    log("Step 5/7: Exporting to ONNX...", "STEP")
+    onnx_path = export_onnx(best_pt, imgsz, export_fmt=export_fmt)
+
+    # Step 6: Deploy
+    log("Step 6/7: Deploying model...", "STEP")
     deploy_path = copy_to_deploy(onnx_path, deploy_dir, version)
 
     # Try rten conversion (optional)
     convert_rten(onnx_path)
 
-    # Step 6: Verify
+    # Step 7: Verify
     if not skip_verify and server_url:
-        log("Step 6/6: Verifying with AetherAgent API...", "STEP")
+        log("Step 7/7: Verifying with AetherAgent API...", "STEP")
         verify_with_server(onnx_path, server_url)
     else:
-        log("Step 6/6: Skipping API verification", "INFO")
+        log("Step 7/7: Skipping API verification", "INFO")
 
     # Report
-    generate_report(dataset_dir, best_pt, onnx_path, metrics, deploy_path, version)
+    generate_report(
+        dataset_dir, best_pt, onnx_path, metrics, deploy_path, version,
+        baseline_metrics=baseline_metrics, epoch_history=epoch_history,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2096,17 +3376,27 @@ Examples:
   # Download WebUI dataset, convert only (no training):
   python tools/train_vision.py --download-only --format webui
 
-  # Download COCO, convert, fine-tune from existing model:
-  python tools/train_vision.py --download --format coco --model-base runs/detect/aether-ui-v1/weights/best.pt --version v2
+  # 2025-2026 HuggingFace datasets:
+  python tools/train_vision.py --download --format osatlas --version v5     # OS-Atlas (3M web-element)
+  python tools/train_vision.py --download --format guiactor --version v6    # GUI-Actor (10M element)
+  python tools/train_vision.py --download --format showui-web --version v7  # ShowUI Web (576K element)
+  python tools/train_vision.py --download --format waveui --version v8      # WaveUI-25K (curated)
+  python tools/train_vision.py --download --format yashjain --version v9    # YOLO-format direkt
 
   # Full pipeline with your own local dataset:
   python tools/train_vision.py --dataset ./my-labeled-data
+
+  # Interactive model selection + train:
+  python tools/train_vision.py --download --format rico --select-model
 
   # Generate synthetic starter dataset + train:
   python tools/train_vision.py --download-starter
 
   # Export existing model:
   python tools/train_vision.py --export-only runs/detect/aether-ui-v1/weights/best.pt
+
+  # Merge multiple datasets (incremental) and train:
+  python tools/train_vision.py --merge-datasets dataset/rico_converted dataset/yashjain_raw dataset/webui_converted --version v3
 
   # Interactive wizard:
   python tools/train_vision.py --interactive
@@ -2115,8 +3405,10 @@ Examples:
 
     parser.add_argument("--dataset", type=Path, help="Path to labeled dataset directory")
     parser.add_argument("--format", type=str, default="yolo",
-                        choices=["yolo", "rico", "coco", "webui"],
-                        help="Dataset format (default: yolo). Converts to YOLO automatically.")
+                        choices=["yolo", "rico", "coco", "webui",
+                                 "osatlas", "guiactor", "showui-web", "waveui", "yashjain"],
+                        help="Dataset format (default: yolo). Converts to YOLO automatically. "
+                             "2026 datasets: osatlas, guiactor, showui-web, waveui, yashjain.")
     parser.add_argument("--extended-classes", action="store_true",
                         help="Use 16 agent-semantic classes (price, cta, product_card, nav, search, form) "
                              "instead of standard 10. Enables text heuristics for class upgrades.")
@@ -2127,33 +3419,54 @@ Examples:
                         help="Download and convert dataset without training. Use with --format.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
+    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, auto-tuned per VRAM)")
     parser.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ, help=f"Image size (default: {DEFAULT_IMGSZ})")
     parser.add_argument("--version", type=str, default="v1", help="Model version tag (default: v1)")
-    parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE, help=f"Base model (default: {DEFAULT_MODEL_BASE})")
+    parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE,
+                        help=f"Base model (default: {DEFAULT_MODEL_BASE}). "
+                             f"Available: yolo26n, yolo26s, yolo11n, yolo11s, yolov8n")
+    parser.add_argument("--select-model", action="store_true",
+                        help="Interactive model selection prompt before training")
     parser.add_argument("--deploy-dir", type=Path, default=Path("models"), help="Model deployment directory")
     parser.add_argument("--server", type=str, default="http://localhost:3000", help="AetherAgent server URL for verification")
     parser.add_argument("--device", type=str, default=None,
                         help="Training device: 'cuda', 'cpu', or device ID. "
                              "Auto-detects and installs correct PyTorch if needed.")
     parser.add_argument("--fresh", action="store_true",
-                        help="Start training from scratch (yolov8n.pt) instead of auto-chaining from latest model")
+                        help="Start training from scratch (yolo26n.pt) instead of auto-chaining from latest model")
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
+    parser.add_argument("--merge-datasets", type=Path, nargs="+", metavar="DIR",
+                        help="Merge multiple datasets into one before training. "
+                             "Example: --merge-datasets dataset/rico dataset/webui dataset/yashjain")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
+    parser.add_argument("--export-format", type=str, default=None,
+                        choices=["fp32", "fp16", "int8"],
+                        help="ONNX export format: fp32 (full), fp16 (recommended), int8 (smallest). "
+                             "If omitted, interactive prompt shown after training.")
     parser.add_argument("--verify-only", type=Path, help="Only verify ONNX model against API")
 
     args = parser.parse_args()
 
+    # Interaktiv modellväljare om --select-model angetts
+    if args.select_model:
+        args.model_base = prompt_model_selection()
+
+    # Resolve export format from CLI flag
+    _export_fmt_map = {opt["key"]: opt for opt in EXPORT_OPTIONS}
+    export_fmt = _export_fmt_map.get(args.export_format) if args.export_format else None
+
     # Mode: Interactive
     if args.interactive:
-        interactive_mode()
+        interactive_mode(args)
         return
 
     # Mode: Export only
     if args.export_only:
         ensure_deps()
-        onnx_path = export_onnx(args.export_only, args.imgsz)
+        if export_fmt is None:
+            export_fmt = prompt_export_format()
+        onnx_path = export_onnx(args.export_only, args.imgsz, export_fmt=export_fmt)
         deploy_path = copy_to_deploy(onnx_path, args.deploy_dir, args.version)
         convert_rten(onnx_path)
         log(f"Export complete: {deploy_path}", "OK")
@@ -2203,6 +3516,7 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 
@@ -2223,6 +3537,29 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
+        )
+        return
+
+    # Mode: Merge datasets + train
+    if args.merge_datasets:
+        ensure_deps()
+        merged_dir = Path("dataset") / "merged"
+        dataset_path = merge_datasets(args.merge_datasets, merged_dir)
+        data_yaml = create_data_yaml(dataset_path, dataset_path / "data.yaml")
+        run_pipeline(
+            dataset_dir=dataset_path,
+            epochs=args.epochs,
+            batch=args.batch,
+            imgsz=args.imgsz,
+            model_base=args.model_base,
+            version=args.version,
+            server_url=args.server,
+            deploy_dir=args.deploy_dir,
+            skip_verify=args.skip_verify,
+            device=args.device,
+            fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 
@@ -2252,6 +3589,7 @@ Examples:
             skip_verify=args.skip_verify,
             device=args.device,
             fresh=args.fresh,
+            export_fmt=export_fmt,
         )
         return
 

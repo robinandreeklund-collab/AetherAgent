@@ -283,8 +283,9 @@ mod tests {
             }
             None
         }
-        let btn = find_role(&tree.nodes, "button");
-        assert!(btn.is_some(), "Borde hitta button");
+        // "Köp nu" detekteras som CTA av parser-heuristiken
+        let btn = find_role(&tree.nodes, "cta").or_else(|| find_role(&tree.nodes, "button"));
+        assert!(btn.is_some(), "Borde hitta button/cta");
         assert_eq!(btn.unwrap().label, "Köp nu");
     }
 

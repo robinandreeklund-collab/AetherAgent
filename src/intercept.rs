@@ -315,6 +315,36 @@ pub fn _merge_xhr_nodes_stub(
     let _ = tree;
 }
 
+// ─── Tier Hint – Fas 12 CDP Integration ──────────────────────────────────────
+
+/// Bestäm TierHint baserat på XHR-captures
+///
+/// Analyserar XHR-svar och returnerar om sidan troligen kräver
+/// JavaScript-rendering (Tier 2/CDP) eller om Blitz (Tier 1) räcker.
+pub fn tier_hint_from_captures(captures: &[XhrCapture]) -> crate::vision_backend::TierHint {
+    // Inga captures → default (Blitz)
+    if captures.is_empty() {
+        return crate::vision_backend::TierHint::TryBlitzFirst;
+    }
+
+    // Kolla URL-mönster som indikerar dynamiskt innehåll
+    for capture in captures {
+        let url_lower = capture.url.to_lowercase();
+        // API-endpoints som ofta returnerar data för JS-rendering
+        if url_lower.contains("/api/chart")
+            || url_lower.contains("/api/graph")
+            || url_lower.contains("/api/dashboard")
+            || url_lower.contains("graphql")
+        {
+            return crate::vision_backend::TierHint::RequiresJs {
+                reason: format!("XHR to dynamic endpoint: {}", capture.url),
+            };
+        }
+    }
+
+    crate::vision_backend::TierHint::TryBlitzFirst
+}
+
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
 
 /// Trunkera body-text säkert (UTF-8-aware)

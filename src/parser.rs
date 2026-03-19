@@ -92,7 +92,34 @@ pub fn is_likely_visible(handle: &Handle) -> bool {
     true
 }
 
-/// Inferera semantisk roll från HTML-tagg + ARIA-attribut
+/// CTA-nyckelord som indikerar call-to-action-knappar
+const CTA_KEYWORDS: &[&str] = &[
+    "add to cart",
+    "buy now",
+    "purchase",
+    "checkout",
+    "sign up",
+    "subscribe",
+    "get started",
+    "download",
+    "try free",
+    "order now",
+    "köp",
+    "lägg i varukorg",
+    "handla",
+    "beställ",
+    "registrera",
+    "prenumerera",
+    "ladda ner",
+    "kom igång",
+];
+
+/// Valutasymboler och nyckelord som indikerar pristext
+const PRICE_INDICATORS: &[&str] = &[
+    "$", "€", "£", "¥", "₹", "kr", "SEK", "NOK", "DKK", "USD", "EUR", "GBP",
+];
+
+/// Inferera semantisk roll från HTML-tagg + ARIA-attribut + heuristik
 pub fn infer_role(handle: &Handle) -> String {
     // ARIA-roll har högst prioritet
     if let Some(role) = get_attr(handle, "role") {
@@ -104,31 +131,109 @@ pub fn infer_role(handle: &Handle) -> String {
     let tag = get_tag_name(handle).unwrap_or_default();
     let input_type = get_attr(handle, "type").unwrap_or_default().to_lowercase();
 
-    match tag.as_str() {
-        "button" => "button".to_string(),
-        "a" => "link".to_string(),
+    // Tagg-baserad roll (grundläggande)
+    let base_role = match tag.as_str() {
+        "button" => "button",
+        "a" => "link",
         "input" => match input_type.as_str() {
-            "checkbox" => "checkbox".to_string(),
-            "radio" => "radio".to_string(),
-            "submit" | "button" | "reset" => "button".to_string(),
-            "search" => "searchbox".to_string(),
-            _ => "textbox".to_string(),
+            "checkbox" => "checkbox",
+            "radio" => "radio",
+            "submit" | "button" | "reset" => "button",
+            "search" => "searchbox",
+            _ => "textbox",
         },
-        "textarea" => "textarea".to_string(),
-        "select" => "combobox".to_string(),
-        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading".to_string(),
-        "img" => "img".to_string(),
-        "nav" => "navigation".to_string(),
-        "main" => "main".to_string(),
-        "header" => "banner".to_string(),
-        "footer" => "contentinfo".to_string(),
-        "form" => "form".to_string(),
-        "table" => "table".to_string(),
-        "li" => "listitem".to_string(),
-        "ul" | "ol" => "list".to_string(),
-        "p" | "span" | "div" => "text".to_string(),
-        _ => "generic".to_string(),
+        "textarea" => "textarea",
+        "select" => "combobox",
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading",
+        "img" => "img",
+        "nav" => "navigation",
+        "main" => "main",
+        "header" => "banner",
+        "footer" => "contentinfo",
+        "form" => "form",
+        "table" => "table",
+        "li" => "listitem",
+        "ul" | "ol" => "list",
+        "p" | "span" | "div" => "text",
+        _ => "generic",
+    };
+
+    // Heuristik: Schema.org product_card
+    if let Some(itemtype) = get_attr(handle, "itemtype") {
+        let it_lower = itemtype.to_lowercase();
+        if it_lower.contains("schema.org/product") || it_lower.contains("schema.org/offer") {
+            return "product_card".to_string();
+        }
     }
+    // Dataattribut som indikerar produktkort
+    if get_attr(handle, "data-product-id").is_some()
+        || get_attr(handle, "data-product").is_some()
+        || get_attr(handle, "data-item-id").is_some()
+    {
+        let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
+        if class.contains("product") || class.contains("card") || class.contains("item") {
+            return "product_card".to_string();
+        }
+    }
+
+    // Heuristik: CTA — bara för klickbara element (button/a)
+    if base_role == "button" || base_role == "link" {
+        let text = extract_text(handle).to_lowercase();
+        for kw in CTA_KEYWORDS {
+            if text.contains(kw) {
+                return "cta".to_string();
+            }
+        }
+        // CSS-klasser som antyder CTA
+        let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
+        if class.contains("cta")
+            || class.contains("add-to-cart")
+            || class.contains("buy-btn")
+            || class.contains("checkout")
+        {
+            return "cta".to_string();
+        }
+    }
+
+    // Heuristik: pristext — spans/divs med valutatecken + siffror
+    if matches!(base_role, "text" | "generic") && looks_like_price(handle) {
+        return "price".to_string();
+    }
+
+    base_role.to_string()
+}
+
+/// Kontrollera om ett elements text ser ut som ett pris
+fn looks_like_price(handle: &Handle) -> bool {
+    let text = extract_text(handle);
+    let trimmed = text.trim();
+    // Tomt eller för långt → inte pris
+    if trimmed.is_empty() || trimmed.len() > 40 {
+        return false;
+    }
+    // Måste innehålla minst en siffra
+    if !trimmed.chars().any(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    // Kontrollera valutaindikatorer i texten
+    let upper = trimmed.to_uppercase();
+    for indicator in PRICE_INDICATORS {
+        if upper.contains(indicator) {
+            return true;
+        }
+    }
+    // CSS-klass som antyder pris
+    let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
+    if class.contains("price") || class.contains("pris") || class.contains("cost") {
+        return true;
+    }
+    // itemprop=price
+    if let Some(itemprop) = get_attr(handle, "itemprop") {
+        if itemprop.to_lowercase().contains("price") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Extrahera label för ett element (WCAG-fallback-kedja)
