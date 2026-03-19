@@ -1,13 +1,23 @@
 # ─── Build stage ──────────────────────────────────────────────────────────────
-FROM rust:1.88-slim AS builder
+# Ubuntu 24.04 har glibc 2.39 — krävs av ORT:s prebuilt binaries (glibc 2.38+)
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
     pkg-config libssl-dev python3 \
     # Blitz rendering deps: fontconfig for font discovery
     libfontconfig1-dev \
     # ORT (ONNX Runtime) kräver libstdc++ vid länkning
     g++ \
+    # Build essentials for cc linker
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# Installera Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
@@ -43,7 +53,10 @@ RUN cargo build --profile server-release --features server,vision,cdp --bin aeth
     cargo build --profile server-release --features mcp,vision,cdp --bin aether-mcp
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# Måste matcha builder:ns glibc (2.39), annars kraschar binären vid start
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -57,13 +70,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # curl for health checks
     curl \
     # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
-    chromium \
+    chromium-browser \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromium sökväg för headless_chrome crate
-ENV CHROME_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium-browser
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
