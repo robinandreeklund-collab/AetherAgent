@@ -906,40 +906,70 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     import yaml
 
     yaml_path = dataset_dir / "data.yaml"
+    existing_data = None
+
     if yaml_path.exists():
         with open(yaml_path) as f:
-            data = yaml.safe_load(f)
+            existing_data = yaml.safe_load(f)
         # Validate — kontrollera att klassnamn matchar UI_CLASSES
-        if "names" in data and "train" in data:
-            existing_names = list(data["names"].values()) if isinstance(data["names"], dict) else list(data["names"])
+        if existing_data and "names" in existing_data and "train" in existing_data:
+            existing_names = list(existing_data["names"].values()) if isinstance(existing_data["names"], dict) else list(existing_data["names"])
             nc = len(existing_names)
             if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
                 log(f"Existing data.yaml found: {nc} classes", "OK")
                 return yaml_path
-            # Klassnamn matchar inte — regenerera med korrekta namn
-            log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, regenererar", "WARN")
-        else:
+            # Klassnamn matchar inte — uppdatera namn men behåll sökvägar
+            log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, uppdaterar", "WARN")
+            existing_data["nc"] = len(UI_CLASSES)
+            existing_data["names"] = {i: name for i, name in enumerate(UI_CLASSES)}
+            existing_data["path"] = str(dataset_dir.resolve())
+            with open(yaml_path, "w") as f:
+                yaml.dump(existing_data, f, default_flow_style=False)
+            log(f"Uppdaterade klassnamn i data.yaml, behöll train/val-sökvägar", "OK")
+            return yaml_path
+        if existing_data:
             log("data.yaml exists but is incomplete, regenerating", "WARN")
 
-    # Generate data.yaml
-    train_imgs = dataset_dir / "images" / "train"
-    val_imgs = dataset_dir / "images" / "val"
-    test_imgs = dataset_dir / "images" / "test"
+    # Generera data.yaml — auto-detektera mappstruktur
+    # Standard YOLO: images/train/ + images/val/
+    # YashJain-stil: train/images/ + val/images/
+    train_rel, val_rel, test_rel = None, None, None
 
-    if not train_imgs.exists():
-        log(f"Expected directory not found: {train_imgs}", "ERR")
-        log("Dataset must have structure: dataset/images/{{train,val}}/", "ERR")
+    # Ordning: testa vanligaste strukturerna
+    candidates = [
+        ("images/train", "images/val", "images/test"),    # Standard YOLO
+        ("train/images", "val/images", "test/images"),    # YashJain
+        ("train", "val", "test"),                         # Flat
+    ]
+    for train_try, val_try, test_try in candidates:
+        if (dataset_dir / train_try).exists():
+            train_rel = train_try
+            val_rel = val_try if (dataset_dir / val_try).exists() else train_try
+            test_rel = test_try if (dataset_dir / test_try).exists() else ""
+            break
+
+    if train_rel is None:
+        log(f"Kunde inte hitta träningsbilder i {dataset_dir}", "ERR")
+        log("Förväntad struktur: images/train/ eller train/images/", "ERR")
         sys.exit(1)
 
-    # Count images
-    train_count = len(list(train_imgs.glob("*.png")) + list(train_imgs.glob("*.jpg")))
-    val_count = len(list(val_imgs.glob("*.png")) + list(val_imgs.glob("*.jpg"))) if val_imgs.exists() else 0
+    train_imgs = dataset_dir / train_rel
+    val_imgs = dataset_dir / val_rel
+
+    # Räkna bilder
+    def _count_images(d: Path) -> int:
+        if not d.exists():
+            return 0
+        return len(list(d.glob("*.png")) + list(d.glob("*.jpg")) + list(d.glob("*.jpeg")))
+
+    train_count = _count_images(train_imgs)
+    val_count = _count_images(val_imgs) if val_rel != train_rel else 0
 
     data = {
         "path": str(dataset_dir.resolve()),
-        "train": "images/train",
-        "val": "images/val" if val_imgs.exists() else "images/train",
-        "test": "images/test" if test_imgs.exists() else "",
+        "train": train_rel,
+        "val": val_rel,
+        "test": test_rel,
         "nc": len(UI_CLASSES),
         "names": {i: name for i, name in enumerate(UI_CLASSES)},
     }
@@ -947,7 +977,7 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     with open(yaml_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
 
-    log(f"Created data.yaml: {train_count} train, {val_count} val images", "OK")
+    log(f"Created data.yaml: {train_count} train, {val_count} val images ({train_rel})", "OK")
     return yaml_path
 
 
