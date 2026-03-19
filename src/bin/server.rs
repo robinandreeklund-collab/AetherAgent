@@ -6,7 +6,7 @@
 ///
 /// Run: cargo run --features server --bin aether-server
 use axum::{
-    extract::Json,
+    extract::{DefaultBodyLimit, Json},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -2692,6 +2692,7 @@ fn build_router(state: AppState) -> Router {
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
         // Fas 11: Vision (kräver --features vision)
+        // 50 MB body limit — ONNX-modeller + screenshots i base64
         .route("/api/parse-screenshot", {
             #[cfg(feature = "vision")]
             {
@@ -2771,6 +2772,8 @@ fn build_router(state: AppState) -> Router {
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .with_state(state)
         .layer(cors)
+        // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
 }
 
 #[tokio::main]
