@@ -71,9 +71,9 @@ UI_CLASSES_EXTENDED = [
     "form",            # 15 - formulärgrupp
 ]
 
-# RTX 5090 optimized defaults (24 GB VRAM)
+# RTX 5090 optimized defaults (32 GB VRAM)
 DEFAULT_EPOCHS = 150
-DEFAULT_BATCH = 32
+DEFAULT_BATCH = 64
 DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
@@ -2274,6 +2274,31 @@ def train_model(
 
     model = YOLO(model_base)
 
+    # Detektera VRAM för auto-tuning av batch/workers
+    vram_gb = 0
+    num_cpu = os.cpu_count() or 8
+    try:
+        import torch
+        if torch.cuda.is_available():
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    except Exception:
+        pass
+
+    # Auto-tune batch om användaren valt default
+    if batch == DEFAULT_BATCH and vram_gb > 0:
+        # YOLO26s @ 640px: ~0.5 GB overhead + ~0.35 GB/batch-item med AMP
+        # Lämna 2 GB marginal för overhead, cache, OS
+        usable_vram = vram_gb - 2.0
+        auto_batch = max(16, min(int(usable_vram / 0.35), 128))
+        # Avrunda nedåt till närmaste multipel av 16 (bättre GPU-utnyttjande)
+        auto_batch = (auto_batch // 16) * 16
+        if auto_batch != batch:
+            log(f"Auto-tuned batch: {batch} → {auto_batch} (baserat på {vram_gb:.0f} GB VRAM)", "OK")
+            batch = auto_batch
+
+    # Workers: 2 per CPU-kärna, max 16 (diminishing returns efter det)
+    optimal_workers = min(num_cpu * 2, 16)
+
     # Bygg träningsparametrar
     train_kwargs = dict(
         data=str(data_yaml),
@@ -2284,7 +2309,7 @@ def train_model(
         name=name,
         exist_ok=True,
         resume=resume,
-        workers=8,
+        workers=optimal_workers,
         cache="ram",
         # Augmentation tuned for UI (less aggressive than natural images)
         mosaic=0.5,
@@ -2299,17 +2324,32 @@ def train_model(
         translate=0.1,
         verbose=True,
         plots=True,
+        # Dataloader-optimeringar
+        multi_scale=0.5,   # Slumpmässig multi-scale ±50% — mer variation, bättre generalisering
     )
 
     # GPU-specifika optimeringar
     if device == "cpu":
         train_kwargs["device"] = "cpu"
         train_kwargs["amp"] = False  # AMP fungerar inte på CPU
+        train_kwargs["multi_scale"] = 0.0  # Multi-scale för dyrt på CPU
         log("Training on CPU — this will be slow but works", "WARN")
     else:
         if device:
             train_kwargs["device"] = device
-        train_kwargs["amp"] = True  # Mixed precision — speedup på GPU
+        train_kwargs["amp"] = True  # FP16 mixed precision — 2x speedup på Ampere+
+
+        # torch.compile (PyTorch 2.0+) — JIT-kompilerar modellen för snabbare kernels
+        try:
+            import torch
+            if hasattr(torch, "compile") and torch.__version__ >= "2.0":
+                train_kwargs["compile"] = True
+                log("torch.compile aktiverat — snabbare GPU-kernels", "OK")
+        except Exception:
+            pass
+
+    log(f"Training config: batch={batch}, workers={optimal_workers}, "
+        f"VRAM={vram_gb:.0f}GB, multi_scale={train_kwargs.get('multi_scale', 0)}", "INFO")
 
     results = model.train(**train_kwargs)
 
@@ -2880,7 +2920,7 @@ Examples:
                         help="Download and convert dataset without training. Use with --format.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
+    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, auto-tuned per VRAM)")
     parser.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ, help=f"Image size (default: {DEFAULT_IMGSZ})")
     parser.add_argument("--version", type=str, default="v1", help="Model version tag (default: v1)")
     parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE,
