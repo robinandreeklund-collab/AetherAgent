@@ -23,7 +23,7 @@ Usage:
     python tools/train_vision.py --interactive
 
 Requirements:
-    pip install ultralytics pillow requests tqdm pyyaml
+    pip install ultralytics>=8.3 pillow requests tqdm pyyaml
 """
 
 import argparse
@@ -72,7 +72,7 @@ UI_CLASSES_EXTENDED = [
 DEFAULT_EPOCHS = 150
 DEFAULT_BATCH = 32
 DEFAULT_IMGSZ = 640
-DEFAULT_MODEL_BASE = "yolov8n.pt"  # nano — keeps ONNX < 6 MB
+DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
 DEFAULT_NAME = "aether-ui"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -80,9 +80,18 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 BANNER = r"""
  ╔═══════════════════════════════════════════════════════════════╗
  ║          AetherAgent Vision Training Pipeline                ║
- ║          YOLOv8-nano · Ultralytics · RTX 5090                ║
+ ║          YOLO26-nano · Ultralytics · RTX 5090                ║
  ╚═══════════════════════════════════════════════════════════════╝
 """
+
+# Modellval — visas i interaktiv prompt
+AVAILABLE_MODELS = [
+    ("yolo26n.pt", "YOLO26 nano  — NMS-free, 43% snabbare CPU, edge-optimerad (REKOMMENDERAD)"),
+    ("yolo26s.pt", "YOLO26 small — NMS-free, högre precision, lite tyngre"),
+    ("yolo11n.pt", "YOLO11 nano  — beprövad, stabil, bra balans"),
+    ("yolo11s.pt", "YOLO11 small — mer precision, långsammare"),
+    ("yolov8n.pt", "YOLOv8 nano  — legacy, äldre arkitektur"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +103,32 @@ def log(msg: str, level: str = "INFO"):
     reset = "\033[0m"
     color = colors.get(level, "")
     print(f"{color}[{level}]{reset} {msg}")
+
+
+def prompt_model_selection() -> str:
+    """Interaktiv modellväljare i terminalen."""
+    print("\n  Välj basmodell för träning:\n")
+    for i, (name, desc) in enumerate(AVAILABLE_MODELS, 1):
+        marker = " *" if name == DEFAULT_MODEL_BASE else "  "
+        print(f"  {marker} {i}) {name:16s} {desc}")
+    print()
+
+    while True:
+        choice = input(f"  Modell [1-{len(AVAILABLE_MODELS)}, Enter={DEFAULT_MODEL_BASE}]: ").strip()
+        if not choice:
+            return DEFAULT_MODEL_BASE
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(AVAILABLE_MODELS):
+                selected = AVAILABLE_MODELS[idx - 1][0]
+                log(f"Vald modell: {selected}", "OK")
+                return selected
+        except ValueError:
+            # Tillåt direkt modellnamn, t.ex. "yolo26n.pt"
+            if choice.endswith(".pt"):
+                log(f"Custom modell: {choice}", "OK")
+                return choice
+        print(f"  Ogiltigt val. Ange 1-{len(AVAILABLE_MODELS)} eller ett modellnamn (.pt)")
 
 
 def _find_latest_model() -> Path | None:
@@ -1646,7 +1681,7 @@ def train_model(
     resume: bool = False,
     device: str = None,
 ) -> Path:
-    """Train YOLOv8-nano with Ultralytics."""
+    """Train YOLO model with Ultralytics."""
     from ultralytics import YOLO
 
     log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}, device={device or 'auto'}", "STEP")
@@ -1770,7 +1805,7 @@ def export_onnx(best_pt: Path, imgsz: int) -> Path:
     log(f"ONNX exported: {onnx_path} ({size_mb:.1f} MB)", "OK")
 
     if size_mb > 6:
-        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Consider pruning or using yolov8n.", "WARN")
+        log(f"Model is {size_mb:.1f} MB (> 6 MB target). Consider pruning or using yolo26n.", "WARN")
 
     return onnx_path
 
@@ -1946,8 +1981,12 @@ def interactive_mode():
     print(BANNER)
     print("This wizard will guide you through the full training pipeline.\n")
 
-    # Step 1: Dataset
-    print("[1/5] DATASET")
+    # Step 1: Modellval
+    print("[1/6] BASMODELL")
+    model_base = prompt_model_selection()
+
+    # Step 2: Dataset
+    print("\n[2/6] DATASET")
     print("  a) I have a labeled dataset ready")
     print("  b) Download starter dataset (synthetic, for testing)")
     choice = input("  Choice [a/b]: ").strip().lower()
@@ -1962,16 +2001,17 @@ def interactive_mode():
             log(f"Path not found: {dataset_dir}", "ERR")
             sys.exit(1)
 
-    # Step 2: Config
-    print("\n[2/5] TRAINING CONFIG")
+    # Step 3: Config
+    print("\n[3/6] TRAINING CONFIG")
     epochs = input(f"  Epochs [{DEFAULT_EPOCHS}]: ").strip()
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
     batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
     batch = int(batch) if batch else DEFAULT_BATCH
     version = input("  Model version [v1]: ").strip() or "v1"
 
-    # Step 3: Confirm
-    print(f"\n  Dataset:  {dataset_dir}")
+    # Step 4: Confirm
+    print(f"\n  Modell:   {model_base}")
+    print(f"  Dataset:  {dataset_dir}")
     print(f"  Epochs:   {epochs}")
     print(f"  Batch:    {batch}")
     print(f"  Version:  {version}")
@@ -1985,6 +2025,7 @@ def interactive_mode():
         dataset_dir=dataset_dir,
         epochs=epochs,
         batch=batch,
+        model_base=model_base,
         version=version,
         server_url="http://localhost:3000",
     )
@@ -2042,7 +2083,7 @@ def run_pipeline(
             log(f"Ingen tidigare modell hittades — startar från {model_base}", "INFO")
 
     # Step 2: Train
-    log("Step 2/6: Training YOLOv8-nano...", "STEP")
+    log(f"Step 2/6: Training {model_base}...", "STEP")
     best_pt = train_model(
         data_yaml=data_yaml,
         epochs=epochs,
@@ -2130,20 +2171,28 @@ Examples:
     parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, tuned for RTX 5090)")
     parser.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ, help=f"Image size (default: {DEFAULT_IMGSZ})")
     parser.add_argument("--version", type=str, default="v1", help="Model version tag (default: v1)")
-    parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE, help=f"Base model (default: {DEFAULT_MODEL_BASE})")
+    parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE,
+                        help=f"Base model (default: {DEFAULT_MODEL_BASE}). "
+                             f"Available: yolo26n, yolo26s, yolo11n, yolo11s, yolov8n")
+    parser.add_argument("--select-model", action="store_true",
+                        help="Interactive model selection prompt before training")
     parser.add_argument("--deploy-dir", type=Path, default=Path("models"), help="Model deployment directory")
     parser.add_argument("--server", type=str, default="http://localhost:3000", help="AetherAgent server URL for verification")
     parser.add_argument("--device", type=str, default=None,
                         help="Training device: 'cuda', 'cpu', or device ID. "
                              "Auto-detects and installs correct PyTorch if needed.")
     parser.add_argument("--fresh", action="store_true",
-                        help="Start training from scratch (yolov8n.pt) instead of auto-chaining from latest model")
+                        help="Start training from scratch (yolo26n.pt) instead of auto-chaining from latest model")
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
     parser.add_argument("--verify-only", type=Path, help="Only verify ONNX model against API")
 
     args = parser.parse_args()
+
+    # Interaktiv modellväljare om --select-model angetts
+    if args.select_model:
+        args.model_base = prompt_model_selection()
 
     # Mode: Interactive
     if args.interactive:
