@@ -911,23 +911,26 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     if yaml_path.exists():
         with open(yaml_path) as f:
             existing_data = yaml.safe_load(f)
-        # Validate — kontrollera att klassnamn matchar UI_CLASSES
         if existing_data and "names" in existing_data and "train" in existing_data:
-            existing_names = list(existing_data["names"].values()) if isinstance(existing_data["names"], dict) else list(existing_data["names"])
-            nc = len(existing_names)
-            if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
-                log(f"Existing data.yaml found: {nc} classes", "OK")
-                return yaml_path
-            # Klassnamn matchar inte — uppdatera namn, validera sökvägar
-            log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, uppdaterar", "WARN")
-            # Verifiera att train-sökvägen faktiskt finns
+            # Validera att train-sökvägen faktiskt innehåller bilder
             train_path = existing_data.get("train", "")
             resolved_base = Path(existing_data.get("path", str(dataset_dir.resolve())))
             train_abs = resolved_base / train_path if train_path else None
-            # Ultralytics söker bilder i train_abs direkt — kontrollera att det finns
-            paths_valid = (train_abs is not None and train_abs.exists()
-                           and (any(train_abs.rglob("*.jpg")) or any(train_abs.rglob("*.png"))))
-            if paths_valid:
+            has_images = (train_abs is not None and train_abs.exists()
+                          and (any(train_abs.rglob("*.jpg")) or any(train_abs.rglob("*.png"))))
+
+            if not has_images:
+                log(f"data.yaml train-sökväg '{train_path}' har inga bilder, regenererar", "WARN")
+                # Faller igenom till auto-detektering nedan
+            else:
+                # Sökvägar OK — kontrollera klassnamn
+                existing_names = list(existing_data["names"].values()) if isinstance(existing_data["names"], dict) else list(existing_data["names"])
+                nc = len(existing_names)
+                if nc == len(UI_CLASSES) and existing_names == list(UI_CLASSES):
+                    log(f"Existing data.yaml found: {nc} classes", "OK")
+                    return yaml_path
+                # Klassnamn matchar inte — uppdatera namn, behåll validerade sökvägar
+                log(f"data.yaml har {nc} klasser men namnen matchar inte UI_CLASSES, uppdaterar", "WARN")
                 existing_data["nc"] = len(UI_CLASSES)
                 existing_data["names"] = {i: name for i, name in enumerate(UI_CLASSES)}
                 existing_data["path"] = str(dataset_dir.resolve())
@@ -935,8 +938,7 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
                     yaml.dump(existing_data, f, default_flow_style=False)
                 log(f"Uppdaterade klassnamn i data.yaml, behöll train/val-sökvägar", "OK")
                 return yaml_path
-            log(f"Befintlig train-sökväg '{train_path}' har inga bilder, regenererar helt", "WARN")
-        if existing_data:
+        elif existing_data:
             log("data.yaml exists but is incomplete, regenerating", "WARN")
 
     # Generera data.yaml — auto-detektera mappstruktur
@@ -944,14 +946,18 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
     # YashJain-stil: train/images/ + val/images/
     train_rel, val_rel, test_rel = None, None, None
 
-    # Ordning: testa vanligaste strukturerna
+    # Ordning: testa vanligaste strukturerna — kräv att mappen har bilder (inte bara existerar)
     candidates = [
         ("images/train", "images/val", "images/test"),    # Standard YOLO
         ("train/images", "val/images", "test/images"),    # YashJain
         ("train", "val", "test"),                         # Flat
     ]
+
+    def _dir_has_images(d: Path) -> bool:
+        return d.exists() and (any(d.rglob("*.jpg")) or any(d.rglob("*.png")))
+
     for train_try, val_try, test_try in candidates:
-        if (dataset_dir / train_try).exists():
+        if _dir_has_images(dataset_dir / train_try):
             train_rel = train_try
             val_rel = val_try if (dataset_dir / val_try).exists() else train_try
             test_rel = test_try if (dataset_dir / test_try).exists() else ""
