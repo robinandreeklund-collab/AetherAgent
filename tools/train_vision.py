@@ -2296,8 +2296,8 @@ def train_model(
             log(f"Auto-tuned batch: {batch} → {auto_batch} (baserat på {vram_gb:.0f} GB VRAM)", "OK")
             batch = auto_batch
 
-    # Workers: 1 per CPU-kärna, max 8 (fler slukar RAM utan speedup)
-    optimal_workers = min(num_cpu, 8)
+    # Workers: max 4 med cache=ram (fler → RAM-explosion), annars max 8
+    optimal_workers = min(num_cpu, 4)
 
     # Bygg träningsparametrar
     train_kwargs = dict(
@@ -2310,7 +2310,7 @@ def train_model(
         exist_ok=True,
         resume=resume,
         workers=optimal_workers,
-        cache="disk",  # "ram" äter systemminne och ger icke-deterministiska resultat
+        cache="ram",   # Snabbast — RAM-tryck hanteras via färre workers
         # Augmentation tuned for UI (less aggressive than natural images)
         mosaic=0.5,
         mixup=0.0,         # Mixup hurts UI element detection
@@ -2613,6 +2613,50 @@ def verify_with_server(onnx_path: Path, server_url: str, test_png: Path = None):
         log(f"Verification error: {e}", "WARN")
 
 
+def _parse_results_csv(csv_path: Path) -> list[dict]:
+    """Parse YOLO results.csv for epoch-by-epoch metrics."""
+    history = []
+    if not csv_path.exists():
+        return history
+    try:
+        with open(csv_path) as f:
+            import csv as csv_mod
+            reader = csv_mod.DictReader(f)
+            for row in reader:
+                # YOLO results.csv har kolumner med whitespace i namnen
+                cleaned = {k.strip(): v.strip() for k, v in row.items()}
+                entry = {}
+                for key, target in [
+                    ("epoch", "epoch"),
+                    ("metrics/mAP50(B)", "map50"),
+                    ("metrics/mAP50-95(B)", "map5095"),
+                    ("metrics/precision(B)", "precision"),
+                    ("metrics/recall(B)", "recall"),
+                    ("train/box_loss", "box_loss"),
+                    ("train/cls_loss", "cls_loss"),
+                    ("train/dfl_loss", "dfl_loss"),
+                ]:
+                    if key in cleaned:
+                        try:
+                            entry[target] = float(cleaned[key])
+                        except ValueError:
+                            pass
+                if entry:
+                    history.append(entry)
+    except Exception:
+        pass
+    return history
+
+
+def _pct_change(baseline: float, final: float) -> str:
+    """Format percentage change with arrow."""
+    if baseline == 0:
+        return "N/A"
+    pct = ((final - baseline) / baseline) * 100
+    arrow = "▲" if pct > 0 else "▼" if pct < 0 else "="
+    return f"{arrow} {pct:+.1f}%"
+
+
 def generate_report(
     dataset_dir: Path,
     best_pt: Path,
@@ -2620,8 +2664,10 @@ def generate_report(
     metrics: dict,
     deploy_path: Path,
     version: str,
+    baseline_metrics: dict = None,
+    epoch_history: list[dict] = None,
 ):
-    """Generate a summary report."""
+    """Generate a summary report with baseline comparison and progression."""
     report = {
         "version": version,
         "dataset": str(dataset_dir),
@@ -2630,27 +2676,81 @@ def generate_report(
         "deployed_to": str(deploy_path),
         "onnx_size_mb": round(onnx_path.stat().st_size / (1024 * 1024), 2),
         "metrics": metrics,
+        "baseline_metrics": baseline_metrics,
         "classes": UI_CLASSES,
         "input_size": DEFAULT_IMGSZ,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if epoch_history:
+        report["epoch_history"] = epoch_history
 
     report_path = deploy_path.parent / f"report-{version}.json"
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     log("TRAINING COMPLETE", "OK")
-    print("=" * 60)
+    print("=" * 70)
     print(f"  Model version:  {version}")
     print(f"  ONNX path:      {onnx_path}")
     print(f"  ONNX size:      {report['onnx_size_mb']} MB")
-    print(f"  mAP@50:         {metrics.get('map50', 'N/A'):.4f}")
-    print(f"  mAP@50-95:      {metrics.get('map5095', 'N/A'):.4f}")
-    print(f"  Precision:      {metrics.get('precision', 'N/A'):.4f}")
-    print(f"  Recall:         {metrics.get('recall', 'N/A'):.4f}")
+
+    # Baseline vs Final comparison
+    metric_labels = [
+        ("mAP@50", "map50"),
+        ("mAP@50-95", "map5095"),
+        ("Precision", "precision"),
+        ("Recall", "recall"),
+    ]
+
+    if baseline_metrics:
+        print()
+        print(f"  {'Metric':<14} {'Baseline':>10} {'Final':>10} {'Change':>12}")
+        print(f"  {'─' * 48}")
+        for label, key in metric_labels:
+            bval = baseline_metrics.get(key, 0)
+            fval = metrics.get(key, 0)
+            change = _pct_change(bval, fval)
+            print(f"  {label:<14} {bval:>10.4f} {fval:>10.4f} {change:>12}")
+    else:
+        print()
+        for label, key in metric_labels:
+            print(f"  {label:<14} {metrics.get(key, 0):.4f}")
+
+    # Epoch progression summary (first, 25%, 50%, 75%, last)
+    if epoch_history and len(epoch_history) > 1:
+        total = len(epoch_history)
+        checkpoints = [0, total // 4, total // 2, 3 * total // 4, total - 1]
+        # Dedup while preserving order
+        seen = set()
+        checkpoints = [c for c in checkpoints if c not in seen and not seen.add(c)]
+        print()
+        print(f"  Epoch Progression:")
+        print(f"  {'Epoch':>7} {'mAP@50':>10} {'mAP50-95':>10} {'box_loss':>10} {'cls_loss':>10}")
+        print(f"  {'─' * 49}")
+        for idx in checkpoints:
+            ep = epoch_history[idx]
+            epoch_num = int(ep.get("epoch", idx + 1))
+            m50 = ep.get("map50", 0)
+            m5095 = ep.get("map5095", 0)
+            bloss = ep.get("box_loss", 0)
+            closs = ep.get("cls_loss", 0)
+            print(f"  {epoch_num:>7} {m50:>10.4f} {m5095:>10.4f} {bloss:>10.4f} {closs:>10.4f}")
+
+        # Convergence: improvement last 25% vs first 25%
+        q1_map = sum(e.get("map50", 0) for e in epoch_history[:total // 4]) / max(total // 4, 1)
+        q4_map = sum(e.get("map50", 0) for e in epoch_history[3 * total // 4:]) / max(total - 3 * total // 4, 1)
+        if q1_map > 0:
+            convergence = ((q4_map - q1_map) / q1_map) * 100
+            print(f"\n  Convergence: Q4 vs Q1 mAP@50 {convergence:+.1f}%")
+            if abs(convergence) < 2.0:
+                print("  → Modellen har konvergerat — fler epochs ger troligen lite")
+            elif convergence < 0:
+                print("  → Negativ trend — möjlig overfitting, prova fewer epochs")
+
+    print()
     print(f"  Report:         {report_path}")
-    print("=" * 60)
+    print("=" * 70)
     print()
     print("  To use in AetherAgent:")
     print(f'    model_bytes = open("{deploy_path}", "rb").read()')
@@ -2826,8 +2926,12 @@ def run_pipeline(
         else:
             log(f"Ingen tidigare modell hittades — startar från {model_base}", "INFO")
 
-    # Step 2: Train
-    log(f"Step 2/6: Training {model_base}...", "STEP")
+    # Step 2a: Baseline — mät basmodellens metrics före träning
+    log("Step 2/7: Measuring baseline metrics...", "STEP")
+    baseline_metrics = validate_model(Path(model_base), data_yaml, imgsz)
+
+    # Step 2b: Train
+    log(f"Step 3/7: Training {model_base}...", "STEP")
     best_pt = train_model(
         data_yaml=data_yaml,
         epochs=epochs,
@@ -2839,32 +2943,39 @@ def run_pipeline(
         device=device,
     )
 
-    # Step 3: Validate
-    log("Step 3/6: Validating model...", "STEP")
+    # Step 4: Validate
+    log("Step 4/7: Validating model...", "STEP")
     metrics = validate_model(best_pt, data_yaml, imgsz)
 
-    # Step 4: Export ONNX
+    # Läs epoch-progression från YOLO:s results.csv
+    results_csv = Path(DEFAULT_PROJECT) / f"{DEFAULT_NAME}-{version}" / "results.csv"
+    epoch_history = _parse_results_csv(results_csv)
+
+    # Step 5: Export ONNX
     if export_fmt is None:
         export_fmt = prompt_export_format()
-    log("Step 4/6: Exporting to ONNX...", "STEP")
+    log("Step 5/7: Exporting to ONNX...", "STEP")
     onnx_path = export_onnx(best_pt, imgsz, export_fmt=export_fmt)
 
-    # Step 5: Deploy
-    log("Step 5/6: Deploying model...", "STEP")
+    # Step 6: Deploy
+    log("Step 6/7: Deploying model...", "STEP")
     deploy_path = copy_to_deploy(onnx_path, deploy_dir, version)
 
     # Try rten conversion (optional)
     convert_rten(onnx_path)
 
-    # Step 6: Verify
+    # Step 7: Verify
     if not skip_verify and server_url:
-        log("Step 6/6: Verifying with AetherAgent API...", "STEP")
+        log("Step 7/7: Verifying with AetherAgent API...", "STEP")
         verify_with_server(onnx_path, server_url)
     else:
-        log("Step 6/6: Skipping API verification", "INFO")
+        log("Step 7/7: Skipping API verification", "INFO")
 
     # Report
-    generate_report(dataset_dir, best_pt, onnx_path, metrics, deploy_path, version)
+    generate_report(
+        dataset_dir, best_pt, onnx_path, metrics, deploy_path, version,
+        baseline_metrics=baseline_metrics, epoch_history=epoch_history,
+    )
 
 
 # ---------------------------------------------------------------------------
