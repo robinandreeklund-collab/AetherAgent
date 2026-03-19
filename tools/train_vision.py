@@ -742,12 +742,88 @@ def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
     return extract_dir
 
 
+def _map_fiftyone_label_to_ui_class(label: str) -> int | None:
+    """Mappa FiftyOne-labels (ShowUI-web etc.) till AetherAgent UI_CLASSES index.
+
+    ShowUI-web labels: ListItem, Button, Checkbox, Link, Heading, Image, Icon,
+                       RadioButton, Textbox, Select, Text, etc.
+    UI_CLASSES: button, textbox, link, icon, text, img, checkbox, radio, combobox, heading
+
+    Returns None om labeln ska filtreras bort (t.ex. ej interaktiv).
+    """
+    _ui_class_map = {name: i for i, name in enumerate(UI_CLASSES)}
+    label_lower = label.lower().strip()
+
+    # Direkt matchning
+    if label_lower in _ui_class_map:
+        return _ui_class_map[label_lower]
+
+    # ShowUI-web → UI_CLASSES mappning
+    _fiftyone_to_ui = {
+        "button": 0,           # button
+        "btn": 0,
+        "submitbutton": 0,
+        "textbox": 1,          # textbox
+        "textarea": 1,
+        "input": 1,
+        "textfield": 1,
+        "searchbox": 1,
+        "link": 2,             # link
+        "hyperlink": 2,
+        "anchor": 2,
+        "icon": 3,             # icon
+        "svg": 3,
+        "text": 4,             # text
+        "statictext": 4,
+        "label": 4,
+        "paragraph": 4,
+        "span": 4,
+        "img": 5,              # img
+        "image": 5,
+        "figure": 5,
+        "photo": 5,
+        "checkbox": 6,         # checkbox
+        "radio": 7,            # radio
+        "radiobutton": 7,
+        "combobox": 8,         # combobox
+        "select": 8,
+        "dropdown": 8,
+        "listbox": 8,
+        "heading": 9,          # heading
+        "header": 9,
+        "title": 9,
+        "h1": 9, "h2": 9, "h3": 9, "h4": 9, "h5": 9, "h6": 9,
+        # ShowUI-specifika
+        "listitem": 2,         # ListItem → link (interaktivt, klickbart)
+        "menuitem": 2,         # MenuItem → link
+        "tab": 0,              # Tab → button
+        "switch": 6,           # Switch → checkbox (toggle)
+        "slider": 1,           # Slider → textbox (interaktiv input)
+        "progressbar": 4,      # ProgressBar → text (visuellt)
+        "navigation": 2,       # Navigation → link
+        "nav": 2,
+    }
+
+    if label_lower in _fiftyone_to_ui:
+        return _fiftyone_to_ui[label_lower]
+
+    # Fuzzy: kolla om något UI_CLASS-namn finns i labeln
+    for name, cid in _ui_class_map.items():
+        if name in label_lower or label_lower in name:
+            return cid
+
+    # Fallback: text (klass 4)
+    return 4
+
+
 def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
     """Konverterar ett FiftyOne-format dataset (samples.json + bilder) direkt till YOLO.
 
     Mycket snabbare än load_dataset() — läser JSON + kopierar/symlänkar bilder.
     FiftyOne bbox-format: [x, y, width, height] (normaliserade 0-1) → matchar YOLO
     (x_center, y_center, width, height).
+
+    Mappar FiftyOne-labels till AetherAgent UI_CLASSES (10 klasser).
     """
     import json
     import shutil
@@ -760,7 +836,6 @@ def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
 
-    # Bygg klassmappning från detections
     log("Läser samples.json...", "INFO")
     with open(samples_json, "r") as f:
         data = json.load(f)
@@ -768,21 +843,19 @@ def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
     samples = data.get("samples", [])
     log(f"  {len(samples)} samples hittade", "INFO")
 
-    # Första passet: samla alla unika labels
+    # Samla unika labels för loggning
     all_labels = set()
     for sample in samples:
         detections = sample.get("detections", {})
         det_list = detections.get("detections", []) if isinstance(detections, dict) else []
         for det in det_list:
-            label = det.get("label", "unknown")
-            all_labels.add(label)
+            all_labels.add(det.get("label", "unknown"))
+    log(f"  {len(all_labels)} unika FiftyOne-labels: {sorted(all_labels)[:15]}...", "INFO")
+    log(f"  Mappar till {len(UI_CLASSES)} UI_CLASSES: {UI_CLASSES}", "INFO")
 
-    class_map = {label: idx for idx, label in enumerate(sorted(all_labels))}
-    log(f"  {len(class_map)} klasser: {list(class_map.keys())[:15]}...", "INFO")
-
-    # Andra passet: konvertera till YOLO
     saved = 0
     skipped = 0
+    label_stats = {}
 
     for idx, sample in enumerate(samples):
         if idx % 2000 == 0 and idx > 0:
@@ -818,7 +891,7 @@ def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
             skipped += 1
             continue
 
-        # Konvertera bboxar till YOLO-format
+        # Konvertera bboxar till YOLO-format med UI_CLASSES-mappning
         yolo_lines = []
         for det in det_list:
             label = det.get("label", "unknown")
@@ -830,8 +903,13 @@ def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
             x, y, w, h = bbox
             x_center = x + w / 2
             y_center = y + h / 2
-            class_id = class_map.get(label, 0)
+
+            class_id = _map_fiftyone_label_to_ui_class(label)
+            if class_id is None:
+                continue
+
             yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+            label_stats[label] = label_stats.get(label, 0) + 1
 
         if not yolo_lines:
             skipped += 1
@@ -853,12 +931,30 @@ def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
 
     log(f"  Konverterat: {saved} bilder, skippade: {skipped}", "OK")
 
-    # Spara dataset.yaml
+    # Logga label-distribution
+    top_labels = sorted(label_stats.items(), key=lambda x: -x[1])[:15]
+    for label, count in top_labels:
+        mapped = _map_fiftyone_label_to_ui_class(label)
+        ui_name = UI_CLASSES[mapped] if mapped is not None else "SKIP"
+        log(f"    {label} → {ui_name} ({count} detections)", "INFO")
+
+    # Auto-split till train/val/test
+    auto_split_dataset(output_dir)
+
+    # Spara dataset.yaml med UI_CLASSES (inte FiftyOne-labels)
+    import yaml
     yaml_path = output_dir / "dataset.yaml"
-    yaml_content = f"train: images/train\nval: images/train\nnc: {len(class_map)}\nnames: {list(class_map.keys())}\n"
+    yaml_data = {
+        "path": str(output_dir.resolve()),
+        "train": "images/train",
+        "val": "images/val",
+        "test": "images/test",
+        "nc": len(UI_CLASSES),
+        "names": {i: name for i, name in enumerate(UI_CLASSES)},
+    }
     with open(yaml_path, "w") as f:
-        f.write(yaml_content)
-    log(f"  dataset.yaml sparad med {len(class_map)} klasser", "OK")
+        yaml.dump(yaml_data, f, default_flow_style=False)
+    log(f"  dataset.yaml sparad med {len(UI_CLASSES)} UI_CLASSES", "OK")
 
 
 def _convert_hf_to_yolo(ds, output_dir: Path, info: dict):
@@ -1152,21 +1248,40 @@ def create_data_yaml(dataset_dir: Path, output_path: Path) -> Path:
 
 
 def auto_split_dataset(dataset_dir: Path, val_ratio: float = 0.15, test_ratio: float = 0.05):
-    """Auto-split a flat image directory into train/val/test."""
+    """Auto-split dataset into train/val/test.
+
+    Hanterar två strukturer:
+    1. Flat: images/*.png → skapar images/train/, images/val/, images/test/
+    2. Redan i train: images/train/*.png → flyttar subset till val/test
+
+    Motsvarande labels flyttas med (labels/train/ → labels/val/ etc.).
+    """
     import random
+    import shutil
 
-    flat_imgs = dataset_dir / "images"
-    if not flat_imgs.exists():
-        flat_imgs = dataset_dir
+    # Kolla om bilder redan ligger i images/train/ (t.ex. från _convert_fiftyone_to_yolo)
+    train_imgs_dir = dataset_dir / "images" / "train"
+    train_lbls_dir = dataset_dir / "labels" / "train"
+    val_imgs_dir = dataset_dir / "images" / "val"
 
-    all_images = list(flat_imgs.glob("*.png")) + list(flat_imgs.glob("*.jpg"))
-    if not all_images:
-        log("No images found for splitting", "ERR")
-        sys.exit(1)
-
-    # Check if already split
-    if (flat_imgs / "train").exists():
+    if train_imgs_dir.exists() and val_imgs_dir.exists() and any(val_imgs_dir.iterdir()):
         log("Dataset already split into train/val/test", "OK")
+        return
+
+    if train_imgs_dir.exists():
+        # Bilder ligger i images/train/ — split därifrån
+        all_images = list(train_imgs_dir.glob("*.png")) + list(train_imgs_dir.glob("*.jpg"))
+        labels_source = train_lbls_dir
+    else:
+        # Flat: bilder direkt i images/
+        flat_imgs = dataset_dir / "images"
+        if not flat_imgs.exists():
+            flat_imgs = dataset_dir
+        all_images = list(flat_imgs.glob("*.png")) + list(flat_imgs.glob("*.jpg"))
+        labels_source = dataset_dir / "labels"
+
+    if not all_images:
+        log("No images found for splitting", "WARN")
         return
 
     log(f"Auto-splitting {len(all_images)} images ({1 - val_ratio - test_ratio:.0%}/{val_ratio:.0%}/{test_ratio:.0%})", "STEP")
@@ -1174,35 +1289,46 @@ def auto_split_dataset(dataset_dir: Path, val_ratio: float = 0.15, test_ratio: f
     random.shuffle(all_images)
     n_val = int(len(all_images) * val_ratio)
     n_test = int(len(all_images) * test_ratio)
-    n_train = len(all_images) - n_val - n_test
 
-    splits = {
-        "train": all_images[:n_train],
-        "val": all_images[n_train:n_train + n_val],
-        "test": all_images[n_train + n_val:],
-    }
+    # Val och test tas från slutet, resten förblir train
+    val_images = all_images[:n_val]
+    test_images = all_images[n_val:n_val + n_test]
+    # Train = resten (behöver inte flyttas om de redan ligger i images/train/)
 
-    labels_dir = dataset_dir / "labels"
-
-    for split_name, images in splits.items():
+    for split_name, images in [("val", val_images), ("test", test_images)]:
         img_dir = dataset_dir / "images" / split_name
         lbl_dir = dataset_dir / "labels" / split_name
         img_dir.mkdir(parents=True, exist_ok=True)
         lbl_dir.mkdir(parents=True, exist_ok=True)
 
         for img_path in images:
-            # Move image
+            # Flytta bild till val/test
             shutil.move(str(img_path), str(img_dir / img_path.name))
-            # Move corresponding label if exists
+            # Flytta matchande label
             label_name = img_path.stem + ".txt"
-            label_path = labels_dir / label_name
+            label_path = labels_source / label_name
             if label_path.exists():
                 shutil.move(str(label_path), str(lbl_dir / label_name))
             else:
-                # Empty label file = negative sample
                 (lbl_dir / label_name).touch()
 
         log(f"  {split_name}: {len(images)} images", "INFO")
+
+    # Om flat-struktur: flytta resterande till train/
+    if not (dataset_dir / "images" / "train").exists():
+        train_dir = dataset_dir / "images" / "train"
+        train_lbl = dataset_dir / "labels" / "train"
+        train_dir.mkdir(parents=True, exist_ok=True)
+        train_lbl.mkdir(parents=True, exist_ok=True)
+        remaining = list((dataset_dir / "images").glob("*.png")) + list((dataset_dir / "images").glob("*.jpg"))
+        for img_path in remaining:
+            shutil.move(str(img_path), str(train_dir / img_path.name))
+            label_path = labels_source / (img_path.stem + ".txt")
+            if label_path.exists():
+                shutil.move(str(label_path), str(train_lbl / (img_path.stem + ".txt")))
+
+    train_count = len(list((dataset_dir / "images" / "train").glob("*")))
+    log(f"  train: {train_count} images (kvar efter split)", "INFO")
 
 
 def merge_datasets(dataset_dirs: list[Path], output_dir: Path) -> Path:
