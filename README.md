@@ -75,7 +75,7 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Embeddable in WASM | **Yes** | No | No | No |
 | Semantic diff (token savings) | **Yes** | No | No | No |
 | XHR/fetch endpoint discovery | **Yes** | No | No | No |
-| Built-in vision (YOLOv8) | **Yes** (opt) | No | Partial | No |
+| Built-in vision (YOLO26) | **Yes** (opt) | No | Partial | No |
 | MCP server built-in | **Yes** | No | No | No |
 | License | MIT | Apache-2.0 | MIT | BSD |
 
