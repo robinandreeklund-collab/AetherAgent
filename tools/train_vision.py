@@ -657,10 +657,11 @@ def _find_yolo_root(base_dir: Path) -> Path:
 
 
 def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
-    """Ladda ner ett HuggingFace-dataset via snapshot_download + datasets.
+    """Ladda ner ett HuggingFace-dataset via snapshot_download + direkt konvertering.
 
     Steg 1: snapshot_download() — laddar ner ALLA filer parallellt (8+ trådar).
-    Steg 2: load_dataset() — laddar från lokal cache, ingen nätverks-IO.
+    Steg 2: Om FiftyOne-format (samples.json) — konverterar direkt utan load_dataset().
+             Annars fallback till load_dataset() från lokal kopia.
     """
     hf_name = info["hf_dataset"]
     hf_subset = info.get("hf_subset")
@@ -697,46 +698,167 @@ def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
         log("Faller tillbaka på load_dataset() (långsammare)...", "WARN")
         snapshot_dir = None
 
-    # --- Steg 2: Ladda datasetet (lokalt om snapshot lyckades) ---
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        log("Installerar 'datasets' (HuggingFace)...", "INFO")
-        run(f"{sys.executable} -m pip install datasets")
-        from datasets import load_dataset
+    # --- Steg 2: Konvertera till YOLO ---
+    samples_json = snapshot_dir / "samples.json" if snapshot_dir else None
 
-    kwargs = {"trust_remote_code": True}
-    if hf_subset:
-        kwargs["name"] = hf_subset
+    if samples_json and samples_json.exists():
+        # FiftyOne-format: konvertera direkt utan load_dataset() (mycket snabbare)
+        _convert_fiftyone_to_yolo(snapshot_dir, extract_dir, info)
+    else:
+        # Fallback: använd load_dataset() (t.ex. parquet-baserade dataset)
+        try:
+            from datasets import load_dataset
+        except ImportError:
+            log("Installerar 'datasets' (HuggingFace)...", "INFO")
+            run(f"{sys.executable} -m pip install datasets")
+            from datasets import load_dataset
 
-    try:
-        if snapshot_dir and snapshot_dir.exists():
-            # Ladda från lokal kopia — ingen nätverks-IO
-            log("Laddar dataset från lokal snapshot...", "STEP")
-            ds = load_dataset(str(snapshot_dir), **kwargs)
-        else:
-            ds = load_dataset(hf_name, **kwargs)
-    except Exception as e:
-        # Försök utan subset vid fel
-        log(f"Kunde inte ladda med subset, provar utan: {e}", "WARN")
+        kwargs = {"trust_remote_code": True}
+        if hf_subset:
+            kwargs["name"] = hf_subset
+
         try:
             if snapshot_dir and snapshot_dir.exists():
-                ds = load_dataset(str(snapshot_dir), trust_remote_code=True)
+                log("Laddar dataset från lokal snapshot...", "STEP")
+                ds = load_dataset(str(snapshot_dir), **kwargs)
             else:
-                ds = load_dataset(hf_name, trust_remote_code=True)
-        except Exception as e2:
-            log(f"Kunde inte ladda {hf_name}: {e2}", "ERR")
-            sys.exit(1)
+                ds = load_dataset(hf_name, **kwargs)
+        except Exception as e:
+            log(f"Kunde inte ladda med subset, provar utan: {e}", "WARN")
+            try:
+                if snapshot_dir and snapshot_dir.exists():
+                    ds = load_dataset(str(snapshot_dir), trust_remote_code=True)
+                else:
+                    ds = load_dataset(hf_name, trust_remote_code=True)
+            except Exception as e2:
+                log(f"Kunde inte ladda {hf_name}: {e2}", "ERR")
+                sys.exit(1)
 
-    # Spara som Arrow-filer för snabb åtkomst
-    ds.save_to_disk(str(extract_dir / "raw"))
-
-    # Extrahera bilder och bboxar till YOLO-struktur
-    _convert_hf_to_yolo(ds, extract_dir, info)
+        # Extrahera bilder och bboxar till YOLO-struktur
+        _convert_hf_to_yolo(ds, extract_dir, info)
 
     marker.touch()
     log(f"HuggingFace-dataset klart: {extract_dir}", "OK")
     return extract_dir
+
+
+def _convert_fiftyone_to_yolo(snapshot_dir: Path, output_dir: Path, info: dict):
+    """Konverterar ett FiftyOne-format dataset (samples.json + bilder) direkt till YOLO.
+
+    Mycket snabbare än load_dataset() — läser JSON + kopierar/symlänkar bilder.
+    FiftyOne bbox-format: [x, y, width, height] (normaliserade 0-1) → matchar YOLO
+    (x_center, y_center, width, height).
+    """
+    import json
+    import shutil
+
+    samples_json = snapshot_dir / "samples.json"
+    log(f"Konverterar FiftyOne-dataset direkt (skippar load_dataset)...", "STEP")
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Bygg klassmappning från detections
+    log("Läser samples.json...", "INFO")
+    with open(samples_json, "r") as f:
+        data = json.load(f)
+
+    samples = data.get("samples", [])
+    log(f"  {len(samples)} samples hittade", "INFO")
+
+    # Första passet: samla alla unika labels
+    all_labels = set()
+    for sample in samples:
+        detections = sample.get("detections", {})
+        det_list = detections.get("detections", []) if isinstance(detections, dict) else []
+        for det in det_list:
+            label = det.get("label", "unknown")
+            all_labels.add(label)
+
+    class_map = {label: idx for idx, label in enumerate(sorted(all_labels))}
+    log(f"  {len(class_map)} klasser: {list(class_map.keys())[:15]}...", "INFO")
+
+    # Andra passet: konvertera till YOLO
+    saved = 0
+    skipped = 0
+
+    for idx, sample in enumerate(samples):
+        if idx % 2000 == 0 and idx > 0:
+            log(f"  {idx}/{len(samples)} konverterade...", "INFO")
+
+        # Hitta bildfilen
+        filepath = sample.get("filepath", "")
+        # FiftyOne lagrar relativa sökvägar som "data/data_X/screenshot-Y.png"
+        # eller absoluta sökvägar — hantera båda
+        if filepath.startswith("/"):
+            # Absolut sökväg — gör relativ till snapshot_dir
+            img_path = snapshot_dir / Path(filepath).name
+        else:
+            img_path = snapshot_dir / filepath
+
+        if not img_path.exists():
+            # Prova att leta i data/-mappen
+            for data_subdir in (snapshot_dir / "data").iterdir() if (snapshot_dir / "data").exists() else []:
+                candidate = data_subdir / Path(filepath).name
+                if candidate.exists():
+                    img_path = candidate
+                    break
+
+        if not img_path.exists():
+            skipped += 1
+            continue
+
+        # Extrahera detections
+        detections = sample.get("detections", {})
+        det_list = detections.get("detections", []) if isinstance(detections, dict) else []
+
+        if not det_list:
+            skipped += 1
+            continue
+
+        # Konvertera bboxar till YOLO-format
+        yolo_lines = []
+        for det in det_list:
+            label = det.get("label", "unknown")
+            bbox = det.get("bounding_box", [])
+            if len(bbox) != 4:
+                continue
+            # FiftyOne: [x, y, w, h] (top-left, normaliserat)
+            # YOLO: [x_center, y_center, w, h] (normaliserat)
+            x, y, w, h = bbox
+            x_center = x + w / 2
+            y_center = y + h / 2
+            class_id = class_map.get(label, 0)
+            yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+
+        if not yolo_lines:
+            skipped += 1
+            continue
+
+        # Kopiera bild (symlänk om möjligt för snabbhet)
+        img_dest = images_dir / f"{idx:06d}.png"
+        label_dest = labels_dir / f"{idx:06d}.txt"
+
+        try:
+            img_dest.symlink_to(img_path.resolve())
+        except OSError:
+            shutil.copy2(img_path, img_dest)
+
+        with open(label_dest, "w") as f:
+            f.write("\n".join(yolo_lines) + "\n")
+
+        saved += 1
+
+    log(f"  Konverterat: {saved} bilder, skippade: {skipped}", "OK")
+
+    # Spara dataset.yaml
+    yaml_path = output_dir / "dataset.yaml"
+    yaml_content = f"train: images/train\nval: images/train\nnc: {len(class_map)}\nnames: {list(class_map.keys())}\n"
+    with open(yaml_path, "w") as f:
+        f.write(yaml_content)
+    log(f"  dataset.yaml sparad med {len(class_map)} klasser", "OK")
 
 
 def _convert_hf_to_yolo(ds, output_dir: Path, info: dict):
