@@ -153,7 +153,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
 // ─── robots.txt med Googles parser ──────────────────────────────────────────
 
 /// Kontrollera robots.txt med Googles officiella parser (robotstxt crate)
-async fn check_robots_txt_google(url: &str, user_agent: &str) -> Result<(), String> {
+pub async fn check_robots_txt_google(url: &str, user_agent: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("Ogiltig URL: {e}"))?;
     let robots_url = format!(
         "{}://{}/robots.txt",

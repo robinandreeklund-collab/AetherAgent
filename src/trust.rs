@@ -3,7 +3,10 @@
 /// Baserat på forskning från Anthropic, Brave och OpenAI (2025):
 /// Prompt injection är det #1 säkerhetshotet för browser agents.
 /// Vi filtrerar i perception-steget – inte som efterhandsfilter.
+///
+/// Använder Aho-Corasick automaton för O(n) pattern matching oavsett antal mönster.
 use crate::types::{InjectionWarning, TrustLevel, WarningSeverity};
+use std::sync::LazyLock;
 
 /// Mönster som indikerar prompt injection-försök
 const HIGH_RISK_PATTERNS: &[&str] = &[
@@ -42,34 +45,49 @@ const MEDIUM_RISK_PATTERNS: &[&str] = &[
     "hemlig instruktion",
 ];
 
+/// Antal high-risk patterns (används för att avgöra severity vid matchning)
+const HIGH_RISK_COUNT: usize = HIGH_RISK_PATTERNS.len();
+
+/// Kompilerad Aho-Corasick automaton — alla patterns i en sökning, O(n)
+/// Byggs en gång vid första anrop (LazyLock). Case-insensitive via AsciiCaseInsensitive.
+static AC_AUTOMATON: LazyLock<aho_corasick::AhoCorasick> = LazyLock::new(|| {
+    let all_patterns: Vec<&str> = HIGH_RISK_PATTERNS
+        .iter()
+        .chain(MEDIUM_RISK_PATTERNS.iter())
+        .copied()
+        .collect();
+    aho_corasick::AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(&all_patterns)
+        .expect("Aho-Corasick build: alla patterns är giltiga")
+});
+
 /// Analysera ett textstycke för injection-försök
+///
+/// Använder Aho-Corasick automaton för O(n) sökning genom alla patterns samtidigt.
 pub fn analyze_text(node_id: u32, text: &str) -> (TrustLevel, Option<InjectionWarning>) {
-    let lower = text.to_lowercase();
-
-    // Kolla high-risk mönster
-    for pattern in HIGH_RISK_PATTERNS {
-        if lower.contains(pattern) {
-            let warning = InjectionWarning {
-                node_id,
-                reason: format!("Hög risk: innehåller mönster '{}'", pattern),
-                severity: WarningSeverity::High,
-                raw_text: truncate(text, 100),
-            };
-            return (TrustLevel::Untrusted, Some(warning));
-        }
-    }
-
-    // Kolla medium-risk mönster
-    for pattern in MEDIUM_RISK_PATTERNS {
-        if lower.contains(pattern) {
-            let warning = InjectionWarning {
-                node_id,
-                reason: format!("Medium risk: innehåller mönster '{}'", pattern),
-                severity: WarningSeverity::Medium,
-                raw_text: truncate(text, 100),
-            };
-            return (TrustLevel::Untrusted, Some(warning));
-        }
+    // Aho-Corasick: en sökning genom texten, hittar första matchning
+    if let Some(mat) = AC_AUTOMATON.find(text) {
+        let pattern_idx = mat.pattern().as_usize();
+        let (severity, severity_label) = if pattern_idx < HIGH_RISK_COUNT {
+            (WarningSeverity::High, "Hög")
+        } else {
+            (WarningSeverity::Medium, "Medium")
+        };
+        // Hämta det matchande mönstret
+        let all_patterns: Vec<&str> = HIGH_RISK_PATTERNS
+            .iter()
+            .chain(MEDIUM_RISK_PATTERNS.iter())
+            .copied()
+            .collect();
+        let pattern = all_patterns[pattern_idx];
+        let warning = InjectionWarning {
+            node_id,
+            reason: format!("{} risk: innehåller mönster '{}'", severity_label, pattern),
+            severity,
+            raw_text: truncate(text, 100),
+        };
+        return (TrustLevel::Untrusted, Some(warning));
     }
 
     // Kolla för onormal teckenkombination (invisibel text-trick)
@@ -112,53 +130,27 @@ pub fn wrap_untrusted(content: &str) -> String {
 
 /// Filtrera ut injection-patterns från text (ersätt med placeholder)
 ///
-/// Hanterar alla förekomster av varje mönster, case-insensitive.
-/// Alla mönster är ASCII, men omgivande text kan innehålla UTF-8 (svenska tecken).
+/// Använder Aho-Corasick automaton för O(n) scanning oavsett antal patterns.
+/// Case-insensitive via AsciiCaseInsensitive i automaton.
 ///
-/// Optimerad: Bygger lowercase en gång, skannar alla patterns, samlar positioner,
-/// och gör alla ersättningar i ett pass (bakifrån för att bevara index).
-/// Tidigare: O(patterns × matches × strlen) pga re-lowercase per iteration.
-/// Nu: O(patterns × strlen) + O(matches × log(matches)) — drastiskt snabbare på stora payloads.
+/// Alla förekomster samlas, dedupliceras (överlappande), och ersätts bakifrån.
 pub fn sanitize_text(text: &str) -> String {
-    let lower = text.to_lowercase();
+    // Aho-Corasick hittar alla icke-överlappande matchningar i ett pass
+    let matches: Vec<(usize, usize)> = AC_AUTOMATON
+        .find_iter(text)
+        .map(|m| (m.start(), m.end()))
+        .collect();
 
-    // Samla alla (start, end) positioner för matchningar
-    let mut replacements: Vec<(usize, usize)> = Vec::new();
-
-    for pattern in HIGH_RISK_PATTERNS.iter().chain(MEDIUM_RISK_PATTERNS) {
-        let mut search_start = 0;
-        while let Some(pos) = lower[search_start..].find(pattern) {
-            let abs_start = search_start + pos;
-            let abs_end = abs_start + pattern.len();
-            // Alla patterns är ASCII men verifiera char boundaries
-            if text.is_char_boundary(abs_start) && text.is_char_boundary(abs_end) {
-                replacements.push((abs_start, abs_end));
-            }
-            search_start = abs_end;
-        }
-    }
-
-    if replacements.is_empty() {
+    if matches.is_empty() {
         return text.to_string();
     }
 
-    // Sortera bakifrån så vi kan ersätta utan att förskjuta index
-    replacements.sort_by(|a, b| b.0.cmp(&a.0));
-
-    // Deduplicera överlappande matchningar (behåll den längsta)
-    let mut deduped: Vec<(usize, usize)> = Vec::with_capacity(replacements.len());
-    for r in &replacements {
-        if deduped
-            .last()
-            .is_none_or(|prev: &(usize, usize)| r.1 <= prev.0)
-        {
-            deduped.push(*r);
-        }
-    }
-
+    // Matchningar kommer i ordning från Aho-Corasick, ersätt bakifrån
     let mut result = text.to_string();
-    for (start, end) in &deduped {
-        result.replace_range(*start..*end, "[FILTERED]");
+    for &(start, end) in matches.iter().rev() {
+        if result.is_char_boundary(start) && result.is_char_boundary(end) {
+            result.replace_range(start..end, "[FILTERED]");
+        }
     }
 
     result

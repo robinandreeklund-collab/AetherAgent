@@ -263,6 +263,8 @@ struct FetchVisionParams {
     height: Option<u32>,
     /// true (default): skip external resources (~50ms). false: load all (~2s cap).
     fast_render: Option<bool>,
+    /// Respect robots.txt before fetching (default: false). Set to true for ethical crawling.
+    obey_robots: Option<bool>,
 }
 
 // ─── Fas 12 parameter types ─────────────────────────────────────────────────
@@ -574,7 +576,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap)."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap). Set obey_robots=true to respect robots.txt before fetching."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
@@ -672,6 +674,19 @@ async fn handle_fetch_vision(
         .get("fast_render")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+
+    // Respektera robots.txt om aktiverat
+    let obey_robots = args
+        .get("obey_robots")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if obey_robots {
+        if let Err(e) = aether_agent::fetch::check_robots_txt_google(url, "AetherAgent/1.0").await {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Blockerad av robots.txt: {e}"
+            ))]);
+        }
+    }
 
     // Rendera sidan till PNG med Blitz (ren Rust)
     let png_bytes = match render_url_to_png_mcp(url, width, height, fast_render).await {

@@ -1,6 +1,6 @@
 # AetherAgent Vision — 2026 Update
 
-> YOLO26n, interaktiv modellväljare, 5 nya HuggingFace-datasets.
+> YOLO26n, interaktiv modellväljare, 5 nya HuggingFace-datasets, metric-baserad early stopping.
 
 ---
 
@@ -91,6 +91,85 @@ Fas 4: + egna screenshots (finjustering)
 ```
 
 Auto-chain gör att varje fas bygger vidare automatiskt.
+
+---
+
+## Early Stopping (metric-baserad)
+
+Istället för att köra fasta 300 epochs stoppar träningen automatiskt när målen nåtts.
+
+### Två stopmekanismer
+
+1. **Metric targets** — stoppar när `mAP@50 ≥ 0.65` OCH `mAP@50-95 ≥ 0.50`
+2. **Patience plateau** — stoppar efter 30 epochs utan förbättring (Ultralytics inbyggd)
+
+Båda körs parallellt. Whichever triggers first sparar och avslutar.
+
+### CLI-flaggor
+
+| Flagga | Default | Beskrivning |
+|--------|---------|-------------|
+| `--early-stop` | off | Aktivera metric-baserad early stopping |
+| `--target-map50` | 0.65 | Mål mAP@50 (implicit `--early-stop`) |
+| `--target-map5095` | 0.50 | Mål mAP@50-95 (implicit `--early-stop`) |
+| `--patience` | 30 | Epochs utan förbättring före stopp (implicit `--early-stop`) |
+| `--epochs` | 300 | Max epochs (övre gräns) |
+
+### Kommandon
+
+```bash
+# Enklast — defaults (mAP@50≥0.65, mAP@50-95≥0.50, patience=30)
+python tools/train_vision.py --dataset ./data --early-stop
+
+# Högre krav
+python tools/train_vision.py --dataset ./data --target-map50 0.70 --target-map5095 0.55
+
+# Snabbare stopp vid platå
+python tools/train_vision.py --dataset ./data --patience 20
+
+# Kombinera med dataset-download
+python tools/train_vision.py --download --format osatlas --early-stop --version v2
+```
+
+### Hur det fungerar
+
+```
+Epoch  1/300  mAP@50=0.12  mAP@50-95=0.08   ...tränar
+Epoch 10/300  mAP@50=0.35  mAP@50-95=0.24   ← progress-rapport
+Epoch 20/300  mAP@50=0.52  mAP@50-95=0.38   ← progress-rapport
+...
+Epoch 67/300  mAP@50=0.65  mAP@50-95=0.51   ← MÅL NÅTT! Stoppar.
+```
+
+En Ultralytics callback läser `results.csv` efter varje epoch och sätter `trainer.stop = True`
+när båda målen nåtts. `best.pt` uppdateras löpande — den bästa modellen sparas alltid.
+
+### Interaktiv wizard
+
+`--interactive` frågar nu efter early-stop-config i steg 3/7:
+
+```
+[3/7] TRAINING CONFIG
+  Epochs (max) [300]:
+  Batch size [32]:
+  Model version [v1]:
+
+  Early stopping (stoppar automatiskt vid mål eller platå):
+  Aktivera early-stop? [Y/n]:
+  mAP@50 mål [0.65]:
+  mAP@50-95 mål [0.5]:
+  Patience (epochs utan förbättring) [30]:
+```
+
+### Varför dessa defaults?
+
+| Mål | Tröskel | Motivering |
+|-----|---------|------------|
+| mAP@50 ≥ 0.65 | Stark detection — de flesta UI-element hittas korrekt |
+| mAP@50-95 ≥ 0.50 | Bra bounding-box lokalisering — tight boxes |
+| Patience = 30 | UI-modeller har ofta platåer runt epoch 40-60 innan ett andra hopp |
+
+För produktionsmodeller med bättre data (osatlas + showui-web merged): sätt `--target-map50 0.75`.
 
 ---
 

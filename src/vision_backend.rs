@@ -400,6 +400,12 @@ pub struct TieredBackend {
     stats: std::sync::Mutex<TierStats>,
 }
 
+// Kompileringsgaranti: TieredBackend måste vara Send + Sync för serverless scaling
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TieredBackend>();
+};
+
 impl TieredBackend {
     /// Skapa ny TieredBackend
     ///
