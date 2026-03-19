@@ -80,6 +80,15 @@ DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect"
 DEFAULT_NAME = "aether-ui"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Early stopping — metric-baserade mål
+# Optimerade trösklar för UI-element detection (YOLO26n @ 640px):
+#   mAP@50 ≥ 0.65  = stark detection, redo för produktion
+#   mAP@50-95 ≥ 0.50 = bra lokalisering, stabil modell
+#   Patience 30 = stoppa om ingen förbättring på 30 epochs (platå)
+DEFAULT_TARGET_MAP50 = 0.65
+DEFAULT_TARGET_MAP5095 = 0.50
+DEFAULT_PATIENCE = 30
+
 BANNER = r"""
  ╔═══════════════════════════════════════════════════════════════╗
  ║          AetherAgent Vision Training Pipeline                ║
@@ -2625,11 +2634,25 @@ def train_model(
     name: str,
     resume: bool = False,
     device: str = None,
+    early_stop: bool = False,
+    target_map50: float = DEFAULT_TARGET_MAP50,
+    target_map5095: float = DEFAULT_TARGET_MAP5095,
+    patience: int = DEFAULT_PATIENCE,
 ) -> Path:
-    """Train YOLO model with Ultralytics."""
+    """Train YOLO model with Ultralytics.
+
+    Early stopping: om early_stop=True, träningen avbryts automatiskt när:
+      1. mAP@50 ≥ target_map50 OCH mAP@50-95 ≥ target_map5095, eller
+      2. Ingen förbättring på `patience` epochs (Ultralytics inbyggd).
+    Modellen sparas alltid — best.pt uppdateras löpande av Ultralytics.
+    """
     from ultralytics import YOLO
 
-    log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}, device={device or 'auto'}", "STEP")
+    if early_stop:
+        log(f"Starting training: max {epochs} epochs (early-stop ON), batch={batch}, imgsz={imgsz}", "STEP")
+        log(f"  Mål: mAP@50 ≥ {target_map50:.2f}, mAP@50-95 ≥ {target_map5095:.2f}, patience={patience}", "INFO")
+    else:
+        log(f"Starting training: {epochs} epochs, batch={batch}, imgsz={imgsz}, device={device or 'auto'}", "STEP")
     log(f"Base model: {model_base}", "INFO")
 
     model = YOLO(model_base)
@@ -2688,6 +2711,13 @@ def train_model(
         multi_scale=0.0,   # Avstängt — 0.5 krympte bilder till ~352px, svälte GPU:n
     )
 
+    # Early stopping: Ultralytics patience (platå-detection)
+    if early_stop:
+        train_kwargs["patience"] = patience
+    else:
+        # patience=0 = ingen early stop (kör alla epochs)
+        train_kwargs["patience"] = 0
+
     # GPU-specifika optimeringar
     if device == "cpu":
         train_kwargs["device"] = "cpu"
@@ -2714,7 +2744,68 @@ def train_model(
     log(f"Training config: batch={batch}, workers={optimal_workers}, "
         f"VRAM={vram_gb:.0f}GB, multi_scale={train_kwargs.get('multi_scale', 0)}", "INFO")
 
+    # Metric-target callback: stoppar träning när mål nåtts
+    # Ultralytics patience hanterar platå, men denna callback stoppar vid specifika mål.
+    _stop_reason = {}  # Mutable dict för att kommunicera från callback
+    if early_stop:
+        results_csv_path = Path(project) / name / "results.csv"
+
+        def _check_metric_targets(trainer):
+            """Callback som körs efter varje val-epoch. Stoppar om mål nåtts."""
+            history = _parse_results_csv(results_csv_path)
+            if not history:
+                return
+            latest = history[-1]
+            current_map50 = latest.get("map50", 0)
+            current_map5095 = latest.get("map5095", 0)
+            epoch_num = int(latest.get("epoch", len(history)))
+
+            # Kolla om båda målen nåtts
+            map50_ok = current_map50 >= target_map50
+            map5095_ok = current_map5095 >= target_map5095
+
+            if map50_ok and map5095_ok:
+                log(f"🎯 Mål nåtts vid epoch {epoch_num}! "
+                    f"mAP@50={current_map50:.4f} (≥{target_map50}), "
+                    f"mAP@50-95={current_map5095:.4f} (≥{target_map5095})", "OK")
+                _stop_reason["met_targets"] = True
+                _stop_reason["epoch"] = epoch_num
+                _stop_reason["map50"] = current_map50
+                _stop_reason["map5095"] = current_map5095
+                # Signalera till Ultralytics att stoppa
+                trainer.stop = True
+            elif epoch_num % 10 == 0:
+                # Progress-rapport var 10:e epoch
+                status_parts = []
+                if map50_ok:
+                    status_parts.append(f"mAP@50 ✓ {current_map50:.3f}")
+                else:
+                    status_parts.append(f"mAP@50 {current_map50:.3f}/{target_map50}")
+                if map5095_ok:
+                    status_parts.append(f"mAP@50-95 ✓ {current_map5095:.3f}")
+                else:
+                    status_parts.append(f"mAP@50-95 {current_map5095:.3f}/{target_map5095}")
+                log(f"  Epoch {epoch_num}: {', '.join(status_parts)}", "INFO")
+
+        # Registrera callback på Ultralytics trainer
+        model.add_callback("on_fit_epoch_end", _check_metric_targets)
+        log("Metric-target callback registrerad", "OK")
+
     results = model.train(**train_kwargs)
+
+    # Logga varför träningen stoppade
+    if early_stop:
+        if _stop_reason.get("met_targets"):
+            log(f"Träningen stoppade: mål nåtts vid epoch {_stop_reason['epoch']} "
+                f"(mAP@50={_stop_reason['map50']:.4f}, mAP@50-95={_stop_reason['map5095']:.4f})", "OK")
+        else:
+            # Kolla om patience triggade
+            final_epoch = getattr(results, "epoch", epochs)
+            if final_epoch < epochs - 1:
+                log(f"Träningen stoppade: patience ({patience} epochs utan förbättring)", "INFO")
+            else:
+                log(f"Träningen körde alla {epochs} epochs utan att nå målen", "WARN")
+                log(f"  Tips: öka --epochs, justera --target-map50/--target-map5095, eller förbättra datasetet", "INFO")
 
     best_pt = Path(project) / name / "weights" / "best.pt"
     if not best_pt.exists():
@@ -3220,23 +3311,42 @@ def interactive_mode(args=None):
 
     # Step 3: Config
     print("\n[3/7] TRAINING CONFIG")
-    epochs = input(f"  Epochs [{DEFAULT_EPOCHS}]: ").strip()
+    epochs = input(f"  Epochs (max) [{DEFAULT_EPOCHS}]: ").strip()
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
     batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
     batch = int(batch) if batch else DEFAULT_BATCH
     version = input(f"  Model version [{cli_version}]: ").strip() or cli_version
+
+    # Early stopping
+    print("\n  Early stopping (stoppar automatiskt vid mål eller platå):")
+    es_choice = input(f"  Aktivera early-stop? [Y/n]: ").strip().lower()
+    early_stop = es_choice != "n"
+    target_map50 = DEFAULT_TARGET_MAP50
+    target_map5095 = DEFAULT_TARGET_MAP5095
+    patience = DEFAULT_PATIENCE
+    if early_stop:
+        t50 = input(f"  mAP@50 mål [{DEFAULT_TARGET_MAP50}]: ").strip()
+        target_map50 = float(t50) if t50 else DEFAULT_TARGET_MAP50
+        t5095 = input(f"  mAP@50-95 mål [{DEFAULT_TARGET_MAP5095}]: ").strip()
+        target_map5095 = float(t5095) if t5095 else DEFAULT_TARGET_MAP5095
+        pat = input(f"  Patience (epochs utan förbättring) [{DEFAULT_PATIENCE}]: ").strip()
+        patience = int(pat) if pat else DEFAULT_PATIENCE
 
     # Step 4: Export format
     print("\n[4/7] EXPORTFORMAT")
     export_fmt = prompt_export_format()
 
     # Step 5: Confirm
-    print(f"\n  Modell:   {model_base}")
-    print(f"  Dataset:  {dataset_dir}")
-    print(f"  Epochs:   {epochs}")
-    print(f"  Batch:    {batch}")
-    print(f"  Export:   {export_fmt['label']}")
-    print(f"  Version:  {version}")
+    print(f"\n  Modell:      {model_base}")
+    print(f"  Dataset:     {dataset_dir}")
+    print(f"  Epochs (max): {epochs}")
+    print(f"  Batch:       {batch}")
+    print(f"  Export:      {export_fmt['label']}")
+    print(f"  Version:     {version}")
+    if early_stop:
+        print(f"  Early-stop:  ON (mAP@50≥{target_map50}, mAP@50-95≥{target_map5095}, patience={patience})")
+    else:
+        print(f"  Early-stop:  OFF (kör alla {epochs} epochs)")
     confirm = input("\n  Start training? [Y/n]: ").strip().lower()
     if confirm == "n":
         print("Cancelled.")
@@ -3253,6 +3363,10 @@ def interactive_mode(args=None):
         export_fmt=export_fmt,
         device=cli_device,
         fresh=cli_fresh,
+        early_stop=early_stop,
+        target_map50=target_map50,
+        target_map5095=target_map5095,
+        patience=patience,
     )
 
 
@@ -3273,6 +3387,10 @@ def run_pipeline(
     device: str = None,
     fresh: bool = False,
     export_fmt: dict = None,
+    early_stop: bool = False,
+    target_map50: float = DEFAULT_TARGET_MAP50,
+    target_map5095: float = DEFAULT_TARGET_MAP5095,
+    patience: int = DEFAULT_PATIENCE,
 ):
     """Run the full training pipeline."""
     print(BANNER)
@@ -3313,7 +3431,10 @@ def run_pipeline(
     baseline_metrics = validate_model(Path(model_base), data_yaml, imgsz)
 
     # Step 2b: Train
-    log(f"Step 3/7: Training {model_base}...", "STEP")
+    if early_stop:
+        log(f"Step 3/7: Training {model_base} (early-stop: mAP@50≥{target_map50}, mAP@50-95≥{target_map5095}, patience={patience})...", "STEP")
+    else:
+        log(f"Step 3/7: Training {model_base}...", "STEP")
     best_pt = train_model(
         data_yaml=data_yaml,
         epochs=epochs,
@@ -3323,6 +3444,10 @@ def run_pipeline(
         project=DEFAULT_PROJECT,
         name=f"{DEFAULT_NAME}-{version}",
         device=device,
+        early_stop=early_stop,
+        target_map50=target_map50,
+        target_map5095=target_map5095,
+        patience=patience,
     )
 
     # Step 4: Validate
@@ -3418,8 +3543,16 @@ Examples:
     parser.add_argument("--download-only", action="store_true",
                         help="Download and convert dataset without training. Use with --format.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
-    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Training epochs (default: {DEFAULT_EPOCHS})")
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Max training epochs (default: {DEFAULT_EPOCHS})")
     parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, auto-tuned per VRAM)")
+    parser.add_argument("--early-stop", action="store_true",
+                        help="Enable metric-based early stopping. Saves when targets reached or no improvement.")
+    parser.add_argument("--target-map50", type=float, default=DEFAULT_TARGET_MAP50,
+                        help=f"Target mAP@50 for early stop (default: {DEFAULT_TARGET_MAP50}). Implies --early-stop.")
+    parser.add_argument("--target-map5095", type=float, default=DEFAULT_TARGET_MAP5095,
+                        help=f"Target mAP@50-95 for early stop (default: {DEFAULT_TARGET_MAP5095}). Implies --early-stop.")
+    parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE,
+                        help=f"Stop after N epochs without improvement (default: {DEFAULT_PATIENCE}). Implies --early-stop.")
     parser.add_argument("--imgsz", type=int, default=DEFAULT_IMGSZ, help=f"Image size (default: {DEFAULT_IMGSZ})")
     parser.add_argument("--version", type=str, default="v1", help="Model version tag (default: v1)")
     parser.add_argument("--model-base", type=str, default=DEFAULT_MODEL_BASE,
@@ -3455,6 +3588,13 @@ Examples:
     # Resolve export format from CLI flag
     _export_fmt_map = {opt["key"]: opt for opt in EXPORT_OPTIONS}
     export_fmt = _export_fmt_map.get(args.export_format) if args.export_format else None
+
+    # Auto-enable early_stop om mål eller patience ändrats från default
+    early_stop = args.early_stop
+    if (args.target_map50 != DEFAULT_TARGET_MAP50
+            or args.target_map5095 != DEFAULT_TARGET_MAP5095
+            or args.patience != DEFAULT_PATIENCE):
+        early_stop = True
 
     # Mode: Interactive
     if args.interactive:
@@ -3517,6 +3657,10 @@ Examples:
             device=args.device,
             fresh=args.fresh,
             export_fmt=export_fmt,
+            early_stop=early_stop,
+            target_map50=args.target_map50,
+            target_map5095=args.target_map5095,
+            patience=args.patience,
         )
         return
 
@@ -3538,6 +3682,10 @@ Examples:
             device=args.device,
             fresh=args.fresh,
             export_fmt=export_fmt,
+            early_stop=early_stop,
+            target_map50=args.target_map50,
+            target_map5095=args.target_map5095,
+            patience=args.patience,
         )
         return
 
@@ -3560,6 +3708,10 @@ Examples:
             device=args.device,
             fresh=args.fresh,
             export_fmt=export_fmt,
+            early_stop=early_stop,
+            target_map50=args.target_map50,
+            target_map5095=args.target_map5095,
+            patience=args.patience,
         )
         return
 
@@ -3590,6 +3742,10 @@ Examples:
             device=args.device,
             fresh=args.fresh,
             export_fmt=export_fmt,
+            early_stop=early_stop,
+            target_map50=args.target_map50,
+            target_map5095=args.target_map5095,
+            patience=args.patience,
         )
         return
 
