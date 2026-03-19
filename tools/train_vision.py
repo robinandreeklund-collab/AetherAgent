@@ -1050,6 +1050,83 @@ def auto_split_dataset(dataset_dir: Path, val_ratio: float = 0.15, test_ratio: f
         log(f"  {split_name}: {len(images)} images", "INFO")
 
 
+def merge_datasets(dataset_dirs: list[Path], output_dir: Path) -> Path:
+    """Merge multiple YOLO datasets into one combined dataset (incremental merge).
+
+    Kopierar bilder + labels från alla dataset till en gemensam mapp.
+    Hanterar namnkollisioner genom att prefixa med dataset-index.
+    Stödjer alla vanliga YOLO-strukturer:
+      - images/train/ + labels/train/   (standard YOLO)
+      - train/images/ + train/labels/   (YashJain-stil)
+    """
+    log(f"Merging {len(dataset_dirs)} datasets into {output_dir}", "STEP")
+
+    for split in ["train", "val", "test"]:
+        (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+        (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
+
+    total_copied = {"train": 0, "val": 0, "test": 0}
+
+    for ds_idx, ds_dir in enumerate(dataset_dirs):
+        ds_dir = Path(ds_dir).resolve()
+        if not ds_dir.exists():
+            log(f"  Dataset finns inte, hoppar över: {ds_dir}", "WARN")
+            continue
+
+        ds_prefix = f"ds{ds_idx}_"
+        ds_name = ds_dir.name
+
+        # Detektera mappstruktur
+        # Variant 1: images/train/ + labels/train/
+        # Variant 2: train/images/ + train/labels/
+        for split in ["train", "val", "test"]:
+            src_imgs = None
+            src_lbls = None
+
+            if (ds_dir / "images" / split).exists():
+                src_imgs = ds_dir / "images" / split
+                src_lbls = ds_dir / "labels" / split
+            elif (ds_dir / split / "images").exists():
+                src_imgs = ds_dir / split / "images"
+                src_lbls = ds_dir / split / "labels"
+
+            if src_imgs is None or not src_imgs.exists():
+                continue
+
+            images = list(src_imgs.glob("*.png")) + list(src_imgs.glob("*.jpg")) + list(src_imgs.glob("*.jpeg"))
+            for img_path in images:
+                # Prefix med dataset-index för att undvika namnkollisioner
+                dst_name = f"{ds_prefix}{img_path.name}"
+                dst_img = output_dir / "images" / split / dst_name
+                shutil.copy2(str(img_path), str(dst_img))
+
+                # Kopiera matchande label
+                label_name = img_path.stem + ".txt"
+                dst_label_name = f"{ds_prefix}{img_path.stem}.txt"
+                if src_lbls and (src_lbls / label_name).exists():
+                    shutil.copy2(str(src_lbls / label_name),
+                                 str(output_dir / "labels" / split / dst_label_name))
+                else:
+                    # Tom label = negativ sample
+                    (output_dir / "labels" / split / dst_label_name).touch()
+
+                total_copied[split] += 1
+
+        log(f"  [{ds_idx + 1}/{len(dataset_dirs)}] {ds_name}: kopierad", "OK")
+
+    for split, count in total_copied.items():
+        if count > 0:
+            log(f"  {split}: {count} bilder totalt", "INFO")
+
+    total = sum(total_copied.values())
+    if total == 0:
+        log("Inga bilder hittades i dataseten!", "ERR")
+        sys.exit(1)
+
+    log(f"Merged dataset: {total} bilder → {output_dir}", "OK")
+    return output_dir
+
+
 def download_starter_dataset(output_dir: Path):
     """Download a small starter dataset for testing the pipeline."""
     log("Creating starter dataset with synthetic examples...", "STEP")
@@ -2785,11 +2862,11 @@ def interactive_mode(args=None):
     cli_extended = getattr(args, "extended_classes", False) if args else False
 
     # Step 1: Modellval
-    print("[1/6] BASMODELL")
+    print("[1/7] BASMODELL")
     model_base = prompt_model_selection()
 
     # Step 2: Dataset
-    print("\n[2/6] DATASET")
+    print("\n[2/7] DATASET")
     # Visa externa dataset-alternativ
     ext_datasets = list(_DATASET_REGISTRY.keys())
     print("  a) Lokalt dataset (ange sökväg)")
@@ -2797,6 +2874,7 @@ def interactive_mode(args=None):
     for idx, ds_name in enumerate(ext_datasets):
         info = _DATASET_REGISTRY[ds_name]
         print(f"  {chr(99 + idx)}) Ladda ner: {info['name']} ({info['size_hint']})")
+    print(f"  m) Slå ihop flera dataset (incremental merge)")
 
     # Automatiskt välja om --download --format angavs
     if cli_download and cli_format and cli_format in ext_datasets:
@@ -2806,7 +2884,7 @@ def interactive_mode(args=None):
     else:
         default_choice = None
 
-    prompt_str = f"  Val [{default_choice}]: " if default_choice else "  Val [a/b/...]: "
+    prompt_str = f"  Val [{default_choice}]: " if default_choice else "  Val [a/b/m/...]: "
     choice = input(prompt_str).strip().lower() or (default_choice or "")
 
     dataset_dir = None
@@ -2819,6 +2897,24 @@ def interactive_mode(args=None):
     elif choice == "b":
         dataset_dir = Path("dataset")
         download_starter_dataset(dataset_dir)
+    elif choice == "m":
+        # Merge-läge: samla sökvägar
+        print("\n  Ange sökvägar till dataset att slå ihop (en per rad, tom rad avslutar):")
+        merge_paths = []
+        while True:
+            p = input(f"    Dataset {len(merge_paths) + 1} (enter = klar): ").strip()
+            if not p:
+                break
+            pp = Path(p)
+            if not pp.exists():
+                log(f"  Sökvägen finns inte: {pp}", "WARN")
+                continue
+            merge_paths.append(pp)
+        if len(merge_paths) < 2:
+            log("Minst 2 dataset krävs för merge", "ERR")
+            sys.exit(1)
+        merged_dir = Path("dataset") / "merged"
+        dataset_dir = merge_datasets(merge_paths, merged_dir)
     else:
         # Matcha mot dataset-lista (c, d, e, ...)
         ds_offset = ord(choice) - ord('c') if len(choice) == 1 and choice >= 'c' else -1
@@ -2837,7 +2933,7 @@ def interactive_mode(args=None):
             sys.exit(1)
 
     # Step 3: Config
-    print("\n[3/6] TRAINING CONFIG")
+    print("\n[3/7] TRAINING CONFIG")
     epochs = input(f"  Epochs [{DEFAULT_EPOCHS}]: ").strip()
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
     batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
@@ -2845,7 +2941,7 @@ def interactive_mode(args=None):
     version = input(f"  Model version [{cli_version}]: ").strip() or cli_version
 
     # Step 4: Export format
-    print("\n[4/6] EXPORTFORMAT")
+    print("\n[4/7] EXPORTFORMAT")
     export_fmt = prompt_export_format()
 
     # Step 5: Confirm
@@ -3013,6 +3109,9 @@ Examples:
   # Export existing model:
   python tools/train_vision.py --export-only runs/detect/aether-ui-v1/weights/best.pt
 
+  # Merge multiple datasets (incremental) and train:
+  python tools/train_vision.py --merge-datasets dataset/rico_converted dataset/yashjain_raw dataset/webui_converted --version v3
+
   # Interactive wizard:
   python tools/train_vision.py --interactive
         """,
@@ -3051,6 +3150,9 @@ Examples:
                         help="Start training from scratch (yolo26n.pt) instead of auto-chaining from latest model")
     parser.add_argument("--skip-verify", action="store_true", help="Skip API verification step")
     parser.add_argument("--interactive", action="store_true", help="Interactive step-by-step wizard")
+    parser.add_argument("--merge-datasets", type=Path, nargs="+", metavar="DIR",
+                        help="Merge multiple datasets into one before training. "
+                             "Example: --merge-datasets dataset/rico dataset/webui dataset/yashjain")
     parser.add_argument("--export-only", type=Path, help="Only export .pt → ONNX (skip training)")
     parser.add_argument("--export-format", type=str, default=None,
                         choices=["fp32", "fp16", "int8"],
@@ -3139,6 +3241,28 @@ Examples:
         download_starter_dataset(dataset_dir)
         run_pipeline(
             dataset_dir=dataset_dir,
+            epochs=args.epochs,
+            batch=args.batch,
+            imgsz=args.imgsz,
+            model_base=args.model_base,
+            version=args.version,
+            server_url=args.server,
+            deploy_dir=args.deploy_dir,
+            skip_verify=args.skip_verify,
+            device=args.device,
+            fresh=args.fresh,
+            export_fmt=export_fmt,
+        )
+        return
+
+    # Mode: Merge datasets + train
+    if args.merge_datasets:
+        ensure_deps()
+        merged_dir = Path("dataset") / "merged"
+        dataset_path = merge_datasets(args.merge_datasets, merged_dir)
+        data_yaml = create_data_yaml(dataset_path, dataset_path / "data.yaml")
+        run_pipeline(
+            dataset_dir=dataset_path,
             epochs=args.epochs,
             batch=args.batch,
             imgsz=args.imgsz,
