@@ -333,6 +333,43 @@ _DATASET_REGISTRY = {
         "size_hint": "~2 GB",
         "description": "7K web UI screenshots med element-annotations",
     },
+    # ── 2025-2026 datasets (HuggingFace) ──────────────────────────────
+    "osatlas": {
+        "name": "OS-Atlas Web Subset — 270K+ web screenshots, 3M+ element",
+        "hf_dataset": "OS-Copilot/OS-Atlas-data",
+        "hf_subset": "web",
+        "size_hint": "~15 GB",
+        "description": "ICLR 2025 Spotlight. Störst cross-platform GUI grounding corpus. "
+                       "Vi laddar ner web-subsetet (270K screenshots, 3M+ element).",
+    },
+    "guiactor": {
+        "name": "GUI-Actor-Data — 1M screenshots, 10M element",
+        "hf_dataset": "cckevinn/GUI-Actor-Data",
+        "size_hint": "~30 GB",
+        "description": "Merge av 6 publika datasets (Uground, GUICourse, AMEX, AndroidControl, Wave-UI). "
+                       "Bbox supervision, web + mobil + desktop.",
+    },
+    "showui-web": {
+        "name": "ShowUI Web — 22K screenshots, 576K interaktiva element",
+        "hf_dataset": "Voxel51/ShowUI_Web",
+        "size_hint": "~5 GB",
+        "description": "CVPR 2025. Filtrerar bort statisk text → fokus på interaktiva UI-element. "
+                       "Perfekt för agent-orienterad detection.",
+    },
+    "waveui": {
+        "name": "WaveUI-25K — curated, dedup, 25K samples",
+        "hf_dataset": "agentsea/wave-ui-25k",
+        "size_hint": "~10.6 GB",
+        "description": "Curated och dedup:at från WebUI + Roboflow + GroundUI-18K. "
+                       "LLM-berikade element-beskrivningar. Dec 2025.",
+    },
+    "yashjain": {
+        "name": "UI-Elements-Detection — YOLO-format, webfokus",
+        "hf_dataset": "YashJain/UI-Elements-Detection-Dataset",
+        "size_hint": "~2 GB",
+        "description": "Direkt YOLO-format. Klasser: buttons, links, inputs, checkboxes, "
+                       "radios, dropdowns, sliders, toggles, labels, icons. Okt 2025.",
+    },
 }
 
 
@@ -446,6 +483,8 @@ def download_dataset(fmt: str, output_dir: Path) -> Path:
         return _download_coco(info, dl_dir, extract_dir)
     elif fmt == "webui":
         return _download_webui(info, dl_dir, extract_dir)
+    elif "hf_dataset" in info:
+        return _download_hf_dataset(info, extract_dir)
 
     log(f"Nedladdning ej implementerad för {fmt}", "ERR")
     sys.exit(1)
@@ -550,6 +589,247 @@ def _download_webui(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
             return child
 
     return extract_dir
+
+
+def _download_hf_dataset(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner ett HuggingFace-dataset via `datasets`-biblioteket."""
+    hf_name = info["hf_dataset"]
+    hf_subset = info.get("hf_subset")
+
+    # Installera datasets-biblioteket om det saknas
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        log("Installerar 'datasets' (HuggingFace)...", "INFO")
+        run(f"{sys.executable} -m pip install datasets")
+        from datasets import load_dataset
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    marker = extract_dir / ".hf_download_complete"
+    if marker.exists():
+        log(f"HuggingFace-dataset redan nedladdat: {extract_dir}", "OK")
+        return extract_dir
+
+    log(f"Laddar ner {hf_name} från HuggingFace...", "STEP")
+    if hf_subset:
+        log(f"  Subset: {hf_subset}", "INFO")
+
+    kwargs = {"trust_remote_code": True}
+    if hf_subset:
+        kwargs["name"] = hf_subset
+
+    try:
+        ds = load_dataset(hf_name, **kwargs)
+    except Exception as e:
+        # Försök utan subset vid fel
+        log(f"Kunde inte ladda med subset, provar utan: {e}", "WARN")
+        try:
+            ds = load_dataset(hf_name, trust_remote_code=True)
+        except Exception as e2:
+            log(f"Kunde inte ladda {hf_name}: {e2}", "ERR")
+            sys.exit(1)
+
+    # Spara som Arrow-filer för snabb åtkomst
+    ds.save_to_disk(str(extract_dir / "raw"))
+
+    # Extrahera bilder och bboxar till YOLO-struktur
+    _convert_hf_to_yolo(ds, extract_dir, info)
+
+    marker.touch()
+    log(f"HuggingFace-dataset klart: {extract_dir}", "OK")
+    return extract_dir
+
+
+def _convert_hf_to_yolo(ds, output_dir: Path, info: dict):
+    """Konverterar ett HuggingFace dataset till YOLO-format.
+
+    Hanterar varierande kolumnnamn: bbox, bounding_box, objects, etc.
+    Sparar bilder till images/train/ och labels till labels/train/.
+    """
+    from PIL import Image as PILImage
+    import io
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hämta split — föredra "train", annars första tillgängliga
+    split_name = "train" if "train" in ds else list(ds.keys())[0]
+    split = ds[split_name]
+    columns = split.column_names
+
+    log(f"Konverterar {len(split)} samples (split: {split_name})...", "STEP")
+    log(f"  Kolumner: {columns}", "INFO")
+
+    # Detektera bildkolumn
+    img_col = None
+    for candidate in ("image", "screenshot", "img", "png", "frame"):
+        if candidate in columns:
+            img_col = candidate
+            break
+
+    # Detektera bbox-kolumn
+    bbox_col = None
+    label_col = None
+    for candidate in ("objects", "annotations", "bboxes", "bbox", "bounding_boxes"):
+        if candidate in columns:
+            bbox_col = candidate
+            break
+
+    # Detektera element/label-kolumner
+    for candidate in ("label", "labels", "class", "classes", "category"):
+        if candidate in columns:
+            label_col = candidate
+            break
+
+    saved = 0
+    skipped = 0
+
+    for idx, row in enumerate(split):
+        if idx % 1000 == 0:
+            log(f"  {idx}/{len(split)} konverterade...", "INFO")
+
+        # Extrahera bild
+        img = None
+        if img_col and row.get(img_col) is not None:
+            val = row[img_col]
+            if isinstance(val, PILImage.Image):
+                img = val
+            elif isinstance(val, dict) and "bytes" in val:
+                img = PILImage.open(io.BytesIO(val["bytes"]))
+            elif isinstance(val, bytes):
+                img = PILImage.open(io.BytesIO(val))
+        if img is None:
+            skipped += 1
+            continue
+
+        w, h = img.size
+        if w < 10 or h < 10:
+            skipped += 1
+            continue
+
+        # Spara bild
+        img_name = f"{idx:06d}.png"
+        img.save(str(images_dir / img_name))
+
+        # Extrahera bboxar
+        yolo_lines = []
+        bboxes_data = row.get(bbox_col) if bbox_col else None
+
+        if bboxes_data is not None:
+            yolo_lines = _parse_hf_bboxes(bboxes_data, label_col, row, w, h)
+
+        # Skriv YOLO label-fil
+        label_name = f"{idx:06d}.txt"
+        with open(labels_dir / label_name, "w") as f:
+            f.write("\n".join(yolo_lines))
+
+        saved += 1
+
+    log(f"Konverterat {saved} bilder ({skipped} överhoppade)", "OK")
+
+    # Auto-split
+    auto_split_dataset(output_dir)
+
+
+def _parse_hf_bboxes(bboxes_data, label_col, row, img_w, img_h) -> list:
+    """Parsa bboxar från varierande HuggingFace-format → YOLO-rader."""
+    lines = []
+
+    # UI-klass-mappning (text → class-id)
+    _class_map = {name: i for i, name in enumerate(UI_CLASSES)}
+
+    def _map_class(label) -> int:
+        if isinstance(label, int):
+            return min(label, len(UI_CLASSES) - 1)
+        label_lower = str(label).lower().strip()
+        if label_lower in _class_map:
+            return _class_map[label_lower]
+        # Fuzzy-match
+        for name, cid in _class_map.items():
+            if name in label_lower or label_lower in name:
+                return cid
+        return _class_map.get("text", 4)  # fallback: text
+
+    # Format A: {"bbox": [...], "category": [...]} dict
+    if isinstance(bboxes_data, dict):
+        bboxes = bboxes_data.get("bbox", bboxes_data.get("bboxes", []))
+        labels = bboxes_data.get("category", bboxes_data.get("label",
+                 bboxes_data.get("labels", bboxes_data.get("classes", []))))
+
+        for i, bbox in enumerate(bboxes):
+            cls_id = _map_class(labels[i]) if i < len(labels) else 4
+            yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+            if yolo_bbox:
+                lines.append(f"{cls_id} {yolo_bbox}")
+
+    # Format B: lista av dicts [{bbox: [...], label: ...}, ...]
+    elif isinstance(bboxes_data, list) and bboxes_data and isinstance(bboxes_data[0], dict):
+        for item in bboxes_data:
+            bbox = item.get("bbox", item.get("bounding_box", item.get("coordinates")))
+            label = item.get("label", item.get("class", item.get("category", "text")))
+            if bbox:
+                cls_id = _map_class(label)
+                yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+                if yolo_bbox:
+                    lines.append(f"{cls_id} {yolo_bbox}")
+
+    # Format C: lista av listor [[x1, y1, x2, y2], ...]
+    elif isinstance(bboxes_data, list) and bboxes_data and isinstance(bboxes_data[0], (list, tuple)):
+        labels = row.get(label_col, []) if label_col else []
+        for i, bbox in enumerate(bboxes_data):
+            cls_id = _map_class(labels[i]) if i < len(labels) else 4
+            yolo_bbox = _bbox_to_yolo(bbox, img_w, img_h)
+            if yolo_bbox:
+                lines.append(f"{cls_id} {yolo_bbox}")
+
+    return lines
+
+
+def _bbox_to_yolo(bbox, img_w: int, img_h: int) -> str | None:
+    """Konvertera bbox → YOLO-format (cx cy w h, normaliserat 0-1).
+
+    Hanterar: [x1,y1,x2,y2], [x,y,w,h], [left,top,right,bottom] (normaliserat eller pixlar).
+    """
+    if not bbox or len(bbox) < 4:
+        return None
+
+    x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+
+    # Om alla värden är 0-1 → redan normaliserat, tolka som [left,top,right,bottom]
+    if all(0 <= v <= 1.0 for v in [x1, y1, x2, y2]):
+        if x2 <= x1 or y2 <= y1:
+            # Troligen [x, y, w, h] normaliserat
+            cx, cy, bw, bh = x1 + x2 / 2, y1 + y2 / 2, x2, y2
+        else:
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            bw = x2 - x1
+            bh = y2 - y1
+    else:
+        # Pixelkoordinater
+        if x2 > img_w or y2 > img_h:
+            # Troligen redan [x1,y1,x2,y2] i pixlar
+            pass
+        if x2 <= x1:
+            # Troligen [x, y, w, h] i pixlar
+            bw = x2 / img_w
+            bh = y2 / img_h
+            cx = (x1 + x2 / 2) / img_w
+            cy = (y1 + y2 / 2) / img_h
+        else:
+            cx = (x1 + x2) / 2 / img_w
+            cy = (y1 + y2) / 2 / img_h
+            bw = (x2 - x1) / img_w
+            bh = (y2 - y1) / img_h
+
+    # Validera
+    if not (0 < bw <= 1 and 0 < bh <= 1 and 0 <= cx <= 1 and 0 <= cy <= 1):
+        return None
+
+    return f"{cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}"
 
 
 # ---------------------------------------------------------------------------
@@ -1662,7 +1942,14 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
     if fmt == "webui":
         return convert_webui_to_yolo(source_path, output_dir, extended=extended)
 
-    log(f"Okänt format: {fmt}. Stödda format: rico, coco, webui, yolo", "ERR")
+    # HuggingFace-datasets konverteras redan vid nedladdning (_convert_hf_to_yolo)
+    hf_formats = ("osatlas", "guiactor", "showui-web", "waveui", "yashjain")
+    if fmt in hf_formats:
+        log(f"HuggingFace-dataset ({fmt}) konverterades vid nedladdning", "OK")
+        return source_path
+
+    log(f"Okänt format: {fmt}. Stödda: rico, coco, webui, osatlas, guiactor, "
+        f"showui-web, waveui, yashjain, yolo", "ERR")
     sys.exit(1)
 
 
@@ -2137,11 +2424,18 @@ Examples:
   # Download WebUI dataset, convert only (no training):
   python tools/train_vision.py --download-only --format webui
 
-  # Download COCO, convert, fine-tune from existing model:
-  python tools/train_vision.py --download --format coco --model-base runs/detect/aether-ui-v1/weights/best.pt --version v2
+  # 2025-2026 HuggingFace datasets:
+  python tools/train_vision.py --download --format osatlas --version v5     # OS-Atlas (3M web-element)
+  python tools/train_vision.py --download --format guiactor --version v6    # GUI-Actor (10M element)
+  python tools/train_vision.py --download --format showui-web --version v7  # ShowUI Web (576K element)
+  python tools/train_vision.py --download --format waveui --version v8      # WaveUI-25K (curated)
+  python tools/train_vision.py --download --format yashjain --version v9    # YOLO-format direkt
 
   # Full pipeline with your own local dataset:
   python tools/train_vision.py --dataset ./my-labeled-data
+
+  # Interactive model selection + train:
+  python tools/train_vision.py --download --format rico --select-model
 
   # Generate synthetic starter dataset + train:
   python tools/train_vision.py --download-starter
@@ -2156,8 +2450,10 @@ Examples:
 
     parser.add_argument("--dataset", type=Path, help="Path to labeled dataset directory")
     parser.add_argument("--format", type=str, default="yolo",
-                        choices=["yolo", "rico", "coco", "webui"],
-                        help="Dataset format (default: yolo). Converts to YOLO automatically.")
+                        choices=["yolo", "rico", "coco", "webui",
+                                 "osatlas", "guiactor", "showui-web", "waveui", "yashjain"],
+                        help="Dataset format (default: yolo). Converts to YOLO automatically. "
+                             "2026 datasets: osatlas, guiactor, showui-web, waveui, yashjain.")
     parser.add_argument("--extended-classes", action="store_true",
                         help="Use 16 agent-semantic classes (price, cta, product_card, nav, search, form) "
                              "instead of standard 10. Enables text heuristics for class upgrades.")
