@@ -50,6 +50,9 @@ Alla laddas ner via `--download --format <namn>`:
 | `showui-web` | ShowUI Web | 22K screenshots, 576K element | `Voxel51/ShowUI_Web` | CVPR 2025. Filtrerar bort statisk text. |
 | `waveui` | WaveUI-25K | 25K curated samples | `agentsea/wave-ui-25k` | Dedup, LLM-berikad. Dec 2025. |
 | `yashjain` | UI-Elements | YOLO-format direkt | `YashJain/UI-Elements-Detection-Dataset` | Web-fokus, balanserade klasser. Okt 2025. |
+| `klarna` | Klarna Product Pages | 51.7K e-handelssidor | `klarna/product-page-dataset` | WTL-metadata + screenshots. E-handels-fokus. |
+| `webclick` | Hcompany/WebClick | 1639 screenshots | `Hcompany/WebClick` | Intent-annoterat, ScreenSpot-format. |
+| `roboflow-ui` | Roboflow UI Screenshots | 1800 bilder, 8 klasser | `webuiproject/ui-screenshots` | YOLO native, MIT-licens. |
 
 ### Existerande (redan tillgängliga)
 
@@ -87,7 +90,8 @@ python tools/train_vision.py --download --format guiactor --version v5
 Fas 1: yashjain (plug-and-play YOLO, snabb baseline)
 Fas 2: + osatlas (3M web-element, bred coverage)
 Fas 3: + showui-web (interaktiva element, agent-fokus)
-Fas 4: + egna screenshots (finjustering)
+Fas 4: + klarna + webclick + roboflow-ui (e-handel + intent + web-UI)
+Fas 5: + egna screenshots (finjustering)
 ```
 
 Auto-chain gör att varje fas bygger vidare automatiskt.
@@ -173,26 +177,114 @@ För produktionsmodeller med bättre data (osatlas + showui-web merged): sätt `
 
 ---
 
-## Nyligen integrerade datasets
+## Klarna Product Pages (nytt)
 
-| Dataset | Storlek | Format | Kommando |
-|---------|---------|--------|----------|
-| Klarna Product Pages | 51.7K e-handelssidor | WTL+screenshots → YOLO | `--download --format klarna` |
-| Hcompany/WebClick | 1639 screenshots, 100+ sajter | ScreenSpot → YOLO | `--download --format webclick` |
-| Roboflow UI Screenshots | 1800 bilder, 8 klasser | YOLO (native) | `--download --format roboflow-ui` |
+**Källa:** [klarna/product-page-dataset](https://github.com/klarna/product-page-dataset) (AWS S3 + Zenodo)
+
+51 700 e-handelssidor från 8 175 sajter i 8 regioner. WTL-snapshots med elementmetadata
+(bounding boxes, font-storlekar). 5 annoterade element per sida:
+
+| Klarna-label | Standard klass | Extended klass |
+|--------------|---------------|----------------|
+| Price | text (4) | price (10) |
+| Name | heading (9) | heading (9) |
+| Main picture | img (5) | img (5) |
+| Add to cart | button (0) | cta (11) |
+| Cart | button (0) | cta (11) |
+
+Med `--extended-classes` får du bättre separation — Price mappas till dedikerad `price`-klass
+och Add to cart/Cart till `cta`.
 
 ```bash
-# Ladda ner alla tre + träna merged:
+# Standard 10-klasser
+python tools/train_vision.py --download --format klarna --version v10
+
+# Med utökade klasser (rekommenderat för e-handel)
+python tools/train_vision.py --download --format klarna --extended-classes --version v10e
+```
+
+---
+
+## Hcompany/WebClick (nytt)
+
+**Källa:** [Hcompany/WebClick](https://huggingface.co/datasets/Hcompany/WebClick) (HuggingFace)
+
+1 639 engelska web-screenshots från 100+ sajter. ScreenSpot-format:
+varje bild har exakt en annoterad element med naturligt-språk instruktion + exakt bbox.
+
+Instruktioner klassificeras automatiskt via nyckelord:
+
+| Nyckelord | UI-klass |
+|-----------|----------|
+| "click", "button", "submit", "press", "tap" | button (0) |
+| "type", "enter", "search", "fill", "write" | textbox (1) |
+| "link", "navigate", "go to", "open" | link (2) |
+| "icon", "logo" | icon (3) |
+| "image", "photo", "picture" | img (5) |
+| "check", "toggle" | checkbox (6) |
+| "select", "dropdown", "choose" | combobox (8) |
+| "heading", "title" | heading (9) |
+| Default (generellt klick) | button (0) |
+
+```bash
+python tools/train_vision.py --download --format webclick --version v11
+```
+
+---
+
+## Roboflow UI Screenshots (nytt)
+
+**Källa:** [webuiproject/ui-screenshots](https://universe.roboflow.com/webuiproject/ui-screenshots) (Roboflow Universe)
+
+1 800 web-UI screenshots, MIT-licens. Nativt YOLO-format med automatisk klassommappning.
+
+**Kräver** `ROBOFLOW_API_KEY` i miljön (gratis konto på roboflow.com).
+
+| Roboflow-klass | AetherAgent-klass |
+|----------------|-------------------|
+| button (0) | button (0) |
+| field (1) | textbox (1) |
+| heading (2) | heading (9) |
+| iframe (3) | img (5) |
+| image (4) | img (5) |
+| label (5) | text (4) |
+| link (6) | link (2) |
+| text (7) | text (4) |
+
+```bash
+export ROBOFLOW_API_KEY="din_nyckel_här"
+python tools/train_vision.py --download --format roboflow-ui --version v12
+```
+
+---
+
+## Alla nya datasets — kommandon
+
+```bash
+# Ladda ner var för sig (utan träning):
 python tools/train_vision.py --download-only --format klarna
 python tools/train_vision.py --download-only --format webclick
 python tools/train_vision.py --download-only --format roboflow-ui
 
+# Träna merged med enbart de tre nya:
 python tools/train_vision.py --merge-datasets \
   dataset/klarna_raw \
   dataset/webclick_raw \
   dataset/roboflow-ui_raw \
-  --version v_new
+  --version v_new --epochs 300 --early-stop
+
+# Bästa mix — alla datasets:
+python tools/train_vision.py --merge-datasets \
+  dataset/yashjain_raw \
+  dataset/showui-web_raw \
+  dataset/waveui_raw \
+  dataset/klarna_raw \
+  dataset/webclick_raw \
+  dataset/roboflow-ui_raw \
+  --version v1.004 --early-stop --target-map50 0.70
 ```
+
+---
 
 ## Övriga datasets (ej integrerade, för manuell användning)
 
