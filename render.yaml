@@ -2,11 +2,20 @@ services:
   - type: web
     name: aether-agent-api
     runtime: docker
-    plan: free
+    plan: starter  # 1 GB RAM — behövs för Chromium + ORT vision
+    region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    numInstances: 1
     envVars:
       - key: PORT
-        value: 10000
+        value: "10000"
+      # Chromium sökväg (satt i Dockerfile men explicit här för tydlighet)
+      - key: CHROME_PATH
+        value: /usr/bin/chromium-browser
+      # YOLOv8-nano ONNX-modell — sätt URL i Render Dashboard efter model-upload
       - key: AETHER_MODEL_URL
-        sync: false  # Set manually in Render Dashboard after model upload
+        sync: false
+      # Rust-logging (info-nivå default, debug vid felsökning)
+      - key: RUST_LOG
+        value: info
