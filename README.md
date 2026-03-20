@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **24 Rust modules**, **58 WASM-exported functions**, **65 HTTP endpoints**, and **24 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **24 Rust modules**, **58 WASM-exported functions**, **65 HTTP endpoints**, and **30 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -561,7 +561,7 @@ Optional parameter `fast_render` (default: `true`): skip external resource loadi
 | POST | `/api/workflow/rollback` | Rollback step for retry |
 | POST | `/api/workflow/status` | Workflow status + progress |
 
-### MCP Server (24 tools)
+### MCP Server (30 tools)
 
 Run: `cargo run --features mcp --bin aether-mcp`
 
@@ -601,6 +601,13 @@ Compatible with Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 | `parse_screenshot` | Analyze a screenshot with YOLOv8-nano object detection. Returns detected UI elements with bounding boxes, confidence, and semantic tree | You have a screenshot but no HTML — visual element detection |
 | `vision_parse` | Same as `parse_screenshot` but uses the server-loaded ONNX model (no need to send model bytes) | Server already has the vision model configured |
 | `fetch_vision` | ALL-IN-ONE: Fetch URL → render with Blitz → YOLOv8 detection → returns original screenshot + annotated image with bounding boxes + JSON detections | You want to visually analyze any web page — just provide URL and goal |
+| **Adaptive Streaming** | | |
+| `stream_parse` | Goal-driven adaptive DOM streaming — emits only the most relevant nodes (90–99% token savings) | You want minimal, goal-focused output from a page |
+| `stream_parse_directive` | Stream parse with LLM directives: `expand(node_id)`, `stop`, `next_branch`, `lower_threshold(value)` | Interactive multi-step exploration of a page's DOM |
+| `fetch_stream_parse` | ALL-IN-ONE: Fetch URL → adaptive stream parse in one call | You want URL → goal-ranked nodes with minimal tokens |
+| **Tiered Rendering** | | |
+| `tiered_screenshot` | Render HTML to PNG with automatic tier selection (Blitz or Chrome) | You need a screenshot and want automatic JS detection |
+| `tier_stats` | Get rendering tier statistics (Blitz vs CDP usage counts) | Monitoring which rendering tier is being used |
 
 ### Claude Desktop Setup
 
@@ -655,7 +662,7 @@ cargo build --features mcp --bin aether-mcp --release
 
 #### What to try in Claude Desktop
 
-Once connected, Claude gets access to 22 AetherAgent tools. Try these prompts:
+Once connected, Claude gets access to 30 AetherAgent tools. Try these prompts:
 
 **Parse a live page:**
 > "Use aether-agent to fetch and parse https://news.ycombinator.com with the goal 'find top stories'. Show me the most relevant nodes."
@@ -1063,6 +1070,88 @@ cargo build --features blitz
 cargo build --features "server,vision,blitz,mcp" --release
 ```
 
+### Build Configurations
+
+AetherAgent has three binaries and six feature flags. Here's what each combination gives you.
+
+#### Feature Flags
+
+| Feature | What it enables | Crates pulled in |
+|---------|----------------|------------------|
+| `server` | HTTP API server (Axum) + all core features | axum, tokio, tower-http, blitz, vision, fetch, js-eval, base64 |
+| `mcp` | MCP stdio server (rmcp) + all core features | rmcp, tokio, blitz, vision, fetch, reqwest, schemars, base64 |
+| `cdp` | Chrome DevTools Protocol (Tier 2 rendering) | headless_chrome |
+| `fetch` | HTTP page fetching, cookies, robots.txt, SSRF protection | reqwest, tokio, robotstxt, governor |
+| `vision` | YOLOv8 screenshot analysis (ONNX Runtime) | ort, ndarray, image |
+| `blitz` | Pure Rust browser engine (HTML → PNG screenshots) | blitz-html, blitz-dom, blitz-paint, png, ... |
+| `js-eval` | Boa JavaScript sandbox | boa_engine |
+
+> `server` and `mcp` are "umbrella" features — they include `blitz`, `vision`, `fetch`, `js-eval`, and `base64` automatically.
+
+#### Binaries
+
+| Binary | Feature required | What it is |
+|--------|-----------------|------------|
+| `aether-server` | `server` | HTTP API server on port 3000 (65+ endpoints + MCP via `/mcp`) |
+| `aether-mcp` | `mcp` | MCP stdio server (for Claude Desktop, Cursor, VS Code) |
+| `aether-bench` | *(none)* | Benchmark runner |
+
+#### Common Build Commands
+
+```bash
+# HTTP server with everything (recommended for local dev)
+cargo build --release --features "server cdp" --bin aether-server
+
+# MCP stdio binary with everything
+cargo build --release --features "mcp cdp" --bin aether-mcp
+
+# HTTP server without Chrome/CDP (pure Rust only, no external deps)
+cargo build --release --features server --bin aether-server
+
+# Minimal: just fetch + parse (no vision, no rendering, no server)
+cargo build --release --features fetch
+
+# WASM library (no feature flags — core only)
+wasm-pack build --target web --release
+```
+
+#### Common Run Commands
+
+```bash
+# HTTP server with all features (starts on http://0.0.0.0:3000)
+cargo run --release --features "server cdp" --bin aether-server
+
+# MCP stdio server (pipe JSON-RPC via stdin/stdout)
+cargo run --release --features "mcp cdp" --bin aether-mcp
+
+# HTTP server without CDP (no Chrome dependency)
+cargo run --release --features server --bin aether-server
+
+# Run benchmarks
+cargo run --release --bin aether-bench
+
+# Run all tests
+cargo test && cargo clippy -- -D warnings && cargo fmt --check
+```
+
+#### What each build gives you
+
+| Capability | `server` | `server cdp` | `mcp` | `mcp cdp` | `fetch` only |
+|-----------|:---:|:---:|:---:|:---:|:---:|
+| HTTP API (65 endpoints) | Yes | Yes | — | — | — |
+| MCP via `/mcp` (HTTP) | Yes | Yes | — | — | — |
+| MCP via stdio | — | — | Yes | Yes | — |
+| Blitz screenshots (Tier 1) | Yes | Yes | Yes | Yes | — |
+| Chrome screenshots (Tier 2) | — | Yes | — | Yes | — |
+| YOLOv8 vision | Yes | Yes | Yes | Yes | — |
+| JS sandbox (Boa) | Yes | Yes | Yes | Yes | — |
+| HTTP fetch + cookies | Yes | Yes | Yes | Yes | Yes |
+| Semantic firewall | Yes | Yes | Yes | Yes | Yes |
+| Core parse/diff/intent | Yes | Yes | Yes | Yes | Yes |
+| WASM export | — | — | — | — | — |
+
+> **Tip:** For Claude Desktop / Cursor / VS Code, use `aether-mcp` (stdio). For connecting via Claude connectors or any HTTP client, use `aether-server` with the `/mcp` endpoint.
+
 ### Deploy to Render
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/robinandreeklund-collab/AetherAgent)
@@ -1112,7 +1201,7 @@ AetherAgent is a fully functional AI browser engine with:
 - **24 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, vision backend (tiered), session management, workflow orchestration, streaming parse, workflow memory, core types
 - **58 WASM-exported functions** — complete API surface for any WASM host
 - **65 HTTP REST endpoints** — deployable Axum server with CORS
-- **24 MCP tools** — Claude Desktop, Cursor, VS Code compatible
+- **30 MCP tools** — Claude Desktop, Cursor, VS Code compatible
 - **427 tests** — 327 unit + 30 fixture + 70 integration, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
