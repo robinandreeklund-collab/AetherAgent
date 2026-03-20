@@ -8,7 +8,10 @@
 use axum::{
     extract::{DefaultBodyLimit, Json},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::{get, post},
     Router,
 };
@@ -2729,13 +2732,65 @@ async fn mcp_post(
     )
 }
 
-/// MCP Streamable HTTP GET handler — SSE stream (returnerar tom 405 för nu)
-async fn mcp_get() -> impl IntoResponse {
-    // Server-initiated notifications behövs inte ännu
-    (
-        StatusCode::METHOD_NOT_ALLOWED,
-        "SSE stream not implemented — use POST",
-    )
+/// MCP Streamable HTTP GET handler — SSE stream för server-initiated notifications
+///
+/// Spec 2025-03-26: Klienten öppnar GET /mcp för att ta emot server-pushade
+/// notifications (t.ex. tools/listChanged). Strömmen hålls öppen med keepalive.
+/// Meddelanden skickas som JSON-RPC notifications via SSE `event: message`.
+async fn mcp_get(
+    headers: HeaderMap,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let session_id = headers
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
+    // Bygg SSE-ström via mpsc-kanal
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(32);
+
+    // Skicka initial serverInfo-notification
+    let tx_init = tx.clone();
+    tokio::spawn(async move {
+        let server_info = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {
+                "serverInfo": {
+                    "name": "aether-agent",
+                    "version": "0.3.0"
+                },
+                "session": session_id
+            }
+        });
+        let _ = tx_init
+            .send(Ok(Event::default()
+                .event("message")
+                .data(server_info.to_string())))
+            .await;
+    });
+
+    // Håll kanalen öppen — framtida server-pushade events skickas här
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            if tx
+                .send(Ok(Event::default().event("message").data(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/ping"
+                    })
+                    .to_string(),
+                )))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx)).keep_alive(KeepAlive::default())
 }
 
 /// MCP Streamable HTTP DELETE handler — avsluta session
@@ -3116,7 +3171,7 @@ async fn main() {
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
-    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications, returns 405 — use POST)");
+    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications)");
     println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)
