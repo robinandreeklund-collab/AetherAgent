@@ -385,7 +385,7 @@ pub fn run_inference_with_model(
         for cls in 0..num_classes {
             let raw = data[(4 + cls) * num_preds + pred_idx];
             // Normalisera: om råvärdet ligger utanför [0,1] behövs sigmoid
-            let conf = if raw < 0.0 || raw > 1.0 {
+            let conf = if !(0.0..=1.0).contains(&raw) {
                 1.0 / (1.0 + (-raw).exp())
             } else {
                 raw

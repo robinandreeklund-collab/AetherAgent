@@ -1840,6 +1840,8 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
         parse_ms: now_ms() - start,
         nodes_seen: total_nodes,
         nodes_emitted: total_nodes,
+        deep: None,
+        deep_fetch_ms: None,
     };
 
     match serialize_json(&search_result, 10) {

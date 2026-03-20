@@ -344,6 +344,10 @@ struct FetchSearchParams {
     top_n: Option<usize>,
     /// Agent goal for relevance scoring (default: same as query)
     goal: Option<String>,
+    /// Deep fetch: also fetch and parse each result page (default: true). Set false to only get DDG snippets.
+    deep: Option<bool>,
+    /// Max semantic nodes to extract per result page (default: 5)
+    max_nodes_per_result: Option<usize>,
 }
 
 // ─── Server ─────────────────────────────────────────────────────────────────
@@ -695,7 +699,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_search",
-        description = "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results — all in one call. USE THIS TOOL WHEN: you need to answer a question but don't know which URL to visit. Provide a free-text query like 'population of Sweden 2026' and get back ranked results with title, URL, snippet, domain, confidence score, and optional direct_answer. This is the recommended search tool — it handles fetching automatically. Returns up to top_n results (default 3, max 10). Example: query='best restaurants in Stockholm' → returns top restaurant listing URLs with snippets."
+        description = "Deep web search: searches DuckDuckGo, then FETCHES AND PARSES each result page with AetherAgent's semantic engine. Returns rich page_content (top semantic nodes) for each result — not just DDG snippets. USE THIS TOOL WHEN: you need to answer a question but don't know which URL to visit. Each result includes: title, URL, snippet, domain, confidence, and page_content (array of {role, label, relevance} nodes extracted from the actual page). Set deep=false to skip page fetching and only get DDG snippets. Set max_nodes_per_result to control how many nodes per page (default 5). Returns up to top_n results (default 3, max 10)."
     )]
     fn fetch_search(&self, Parameters(params): Parameters<FetchSearchParams>) -> String {
         // Bygg DDG URL och returnera instruktion att fetcha
@@ -810,7 +814,7 @@ async fn render_url_to_png_mcp(
     Err("Blitz feature inte aktiverad".to_string())
 }
 
-/// Hanterar fetch_search: hämta DDG HTML, parsa sökresultat, returnera strukturerad data
+/// Hanterar fetch_search: hämta DDG HTML, parsa sökresultat, deep-fetcha varje resultat-sida
 async fn handle_fetch_search(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> rmcp::model::CallToolResult {
@@ -832,6 +836,11 @@ async fn handle_fetch_search(
         .get("goal")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    let deep = args.get("deep").and_then(|v| v.as_bool()).unwrap_or(true);
+    let max_nodes_per_result = args
+        .get("max_nodes_per_result")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5) as usize;
 
     if query.is_empty() {
         return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
@@ -842,7 +851,7 @@ async fn handle_fetch_search(
     let ddg_url = aether_agent::build_search_url(query);
     let config = aether_agent::types::FetchConfig::default();
 
-    // Hämta DDG HTML
+    // Steg 1: Hämta DDG HTML
     let html = match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
         Ok(result) => result.body,
         Err(e) => {
@@ -852,10 +861,148 @@ async fn handle_fetch_search(
         }
     };
 
-    // Parsa sökresultat
-    let result = aether_agent::search_from_html(query, &html, top_n, goal);
+    // Steg 2: Parsa DDG-resultat
+    let search_json = aether_agent::search_from_html(query, &html, top_n, goal);
+    let mut search_result: aether_agent::search::SearchResult =
+        match serde_json::from_str(&search_json) {
+            Ok(r) => r,
+            Err(_) => {
+                // Om parsning misslyckas, returnera rå JSON ändå
+                return rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(
+                    search_json,
+                )]);
+            }
+        };
 
-    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
+    // Steg 3: Deep fetch — hämta och parsa varje resultat-sida
+    if deep && !search_result.results.is_empty() {
+        let deep_start = std::time::Instant::now();
+        let effective_goal = if goal.is_empty() {
+            format!("hitta svar på: {}", query)
+        } else {
+            goal.to_string()
+        };
+
+        // Kör alla fetches parallellt med JoinSet
+        let mut join_set = tokio::task::JoinSet::new();
+        for (idx, entry) in search_result.results.iter().enumerate() {
+            let url = entry.url.clone();
+            let g = effective_goal.clone();
+            let mnpr = max_nodes_per_result;
+            join_set.spawn(async move {
+                let fetch_start = std::time::Instant::now();
+                let cfg = aether_agent::types::FetchConfig::default();
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(8),
+                    aether_agent::fetch::fetch_page(&url, &cfg),
+                )
+                .await
+                {
+                    Ok(Ok(result)) => {
+                        let stream_json = aether_agent::stream_parse_adaptive(
+                            &result.body,
+                            &g,
+                            &url,
+                            mnpr as u32,
+                            0.1,
+                            (mnpr * 2) as u32,
+                        );
+                        let nodes = extract_page_nodes(&stream_json, mnpr);
+                        let elapsed = fetch_start.elapsed().as_millis() as u64;
+                        (nodes, elapsed)
+                    }
+                    _ => (Vec::new(), 0),
+                };
+                (idx, result.0, result.1)
+            });
+        }
+
+        let mut results_data: Vec<(usize, Vec<aether_agent::search::PageNode>, u64)> = Vec::new();
+        while let Some(Ok(data)) = join_set.join_next().await {
+            results_data.push(data);
+        }
+
+        for (idx, nodes, elapsed) in results_data {
+            if idx < search_result.results.len() && !nodes.is_empty() {
+                search_result.results[idx].page_content = Some(nodes);
+                search_result.results[idx].fetch_ms = Some(elapsed);
+            }
+        }
+
+        search_result.deep = Some(true);
+        search_result.deep_fetch_ms = Some(deep_start.elapsed().as_millis() as u64);
+
+        // Uppdatera direct_answer om vi nu har bättre snippets
+        if search_result.direct_answer.is_none() {
+            // Bygg enriched snippets från page_content
+            for entry in &mut search_result.results {
+                if let Some(ref nodes) = entry.page_content {
+                    // Ta text-noder med högst relevance som snippet om nuvarande är dålig
+                    let best_text: Vec<&str> = nodes
+                        .iter()
+                        .filter(|n| n.label.len() > 30)
+                        .take(2)
+                        .map(|n| n.label.as_str())
+                        .collect();
+                    if !best_text.is_empty()
+                        && (entry.snippet.len() < 30 || entry.snippet.contains("www."))
+                    {
+                        entry.snippet = best_text.join(" | ");
+                    }
+                }
+            }
+            // Försök hitta direktsvar igen med berikade snippets
+            let (direct_answer, direct_answer_confidence) =
+                aether_agent::search::detect_direct_answer(&search_result.results)
+                    .map(|(a, c)| (Some(a), c))
+                    .unwrap_or((None, 0.0));
+            if direct_answer.is_some() {
+                search_result.direct_answer = direct_answer;
+                search_result.direct_answer_confidence = direct_answer_confidence;
+            }
+        }
+    } else {
+        search_result.deep = Some(false);
+    }
+
+    // Serialisera slutresultat
+    let final_json = match serde_json::to_string(&search_result) {
+        Ok(j) => j,
+        Err(e) => format!(r#"{{"error": "serialize failed: {e}"}}"#),
+    };
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(final_json)])
+}
+
+/// Extrahera PageNode:er från stream_parse JSON-output
+fn extract_page_nodes(stream_json: &str, max: usize) -> Vec<aether_agent::search::PageNode> {
+    let parsed: serde_json::Value = match serde_json::from_str(stream_json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+    nodes
+        .iter()
+        .filter_map(|n| {
+            let label = n.get("label")?.as_str()?.to_string();
+            if label.is_empty() {
+                return None;
+            }
+            Some(aether_agent::search::PageNode {
+                role: n
+                    .get("role")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("text")
+                    .to_string(),
+                label,
+                relevance: n.get("relevance").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32,
+            })
+        })
+        .take(max)
+        .collect()
 }
 
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder

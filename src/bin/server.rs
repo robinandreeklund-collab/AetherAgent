@@ -1410,6 +1410,12 @@ struct FetchSearchRequest {
     goal: Option<String>,
     #[serde(default)]
     config: Option<aether_agent::types::FetchConfig>,
+    /// Deep fetch: hämta och parsa varje resultat-sida (default: true)
+    #[serde(default)]
+    deep: Option<bool>,
+    /// Max semantiska noder per resultat-sida (default: 5)
+    #[serde(default)]
+    max_nodes_per_result: Option<usize>,
 }
 
 async fn search_handler(Json(req): Json<SearchRequest>) -> impl IntoResponse {
@@ -1442,11 +1448,138 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
 
     let top_n = req.top_n.unwrap_or(3);
     let goal = req.goal.as_deref().unwrap_or("");
-    let result = aether_agent::search_from_html(&req.query, &html, top_n, goal);
-    (StatusCode::OK, result)
+    let search_json = aether_agent::search_from_html(&req.query, &html, top_n, goal);
+
+    let deep = req.deep.unwrap_or(true);
+    let max_nodes_per_result = req.max_nodes_per_result.unwrap_or(5);
+
+    if !deep {
+        return (StatusCode::OK, search_json);
+    }
+
+    // Deep fetch: parsa DDG-resultat, fetcha varje URL parallellt
+    let mut search_result: aether_agent::search::SearchResult =
+        match serde_json::from_str(&search_json) {
+            Ok(r) => r,
+            Err(_) => return (StatusCode::OK, search_json),
+        };
+
+    if !search_result.results.is_empty() {
+        let deep_start = std::time::Instant::now();
+        let effective_goal = if goal.is_empty() {
+            format!("hitta svar på: {}", req.query)
+        } else {
+            goal.to_string()
+        };
+
+        let mut join_set = tokio::task::JoinSet::new();
+        for (idx, entry) in search_result.results.iter().enumerate() {
+            let url = entry.url.clone();
+            let g = effective_goal.clone();
+            let mnpr = max_nodes_per_result;
+            join_set.spawn(async move {
+                let fetch_start = std::time::Instant::now();
+                let cfg = aether_agent::types::FetchConfig::default();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(8),
+                    aether_agent::fetch::fetch_page(&url, &cfg),
+                )
+                .await
+                {
+                    Ok(Ok(result)) => {
+                        let stream_json = aether_agent::stream_parse_adaptive(
+                            &result.body,
+                            &g,
+                            &url,
+                            mnpr as u32,
+                            0.1,
+                            (mnpr * 2) as u32,
+                        );
+                        let nodes = deep_extract_page_nodes(&stream_json, mnpr);
+                        (idx, nodes, fetch_start.elapsed().as_millis() as u64)
+                    }
+                    _ => (idx, Vec::new(), 0),
+                }
+            });
+        }
+
+        while let Some(Ok((idx, nodes, elapsed))) = join_set.join_next().await {
+            if idx < search_result.results.len() && !nodes.is_empty() {
+                search_result.results[idx].page_content = Some(nodes);
+                search_result.results[idx].fetch_ms = Some(elapsed);
+            }
+        }
+
+        search_result.deep = Some(true);
+        search_result.deep_fetch_ms = Some(deep_start.elapsed().as_millis() as u64);
+
+        // Berika snippets från page_content
+        for entry in &mut search_result.results {
+            if let Some(ref nodes) = entry.page_content {
+                let best_text: Vec<&str> = nodes
+                    .iter()
+                    .filter(|n| n.label.len() > 30)
+                    .take(2)
+                    .map(|n| n.label.as_str())
+                    .collect();
+                if !best_text.is_empty()
+                    && (entry.snippet.len() < 30 || entry.snippet.contains("www."))
+                {
+                    entry.snippet = best_text.join(" | ");
+                }
+            }
+        }
+
+        // Försök hitta direktsvar med berikade snippets
+        if search_result.direct_answer.is_none() {
+            let (direct_answer, confidence) =
+                aether_agent::search::detect_direct_answer(&search_result.results)
+                    .map(|(a, c)| (Some(a), c))
+                    .unwrap_or((None, 0.0));
+            if direct_answer.is_some() {
+                search_result.direct_answer = direct_answer;
+                search_result.direct_answer_confidence = confidence;
+            }
+        }
+    }
+
+    let final_json = serde_json::to_string(&search_result)
+        .unwrap_or_else(|e| format!(r#"{{"error": "serialize: {e}"}}"#));
+    (StatusCode::OK, final_json)
 }
 
-/// ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
+/// Extrahera PageNode:er från stream_parse JSON
+fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::PageNode> {
+    let parsed: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+    nodes
+        .iter()
+        .filter_map(|n| {
+            let label = n.get("label")?.as_str()?.to_string();
+            if label.is_empty() {
+                return None;
+            }
+            Some(aether_agent::search::PageNode {
+                role: n
+                    .get("role")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("text")
+                    .to_string(),
+                label,
+                relevance: n.get("relevance").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32,
+            })
+        })
+        .take(max)
+        .collect()
+}
+
+// ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
 
 async fn stream_parse_handler(Json(req): Json<StreamParseRequest>) -> impl IntoResponse {
     let result = aether_agent::stream_parse_adaptive(
@@ -2986,7 +3119,7 @@ async fn mcp_events_poll(
             .filter(|e| {
                 e["params"]["timestamp"]
                     .as_u64()
-                    .map_or(false, |ts| ts > since)
+                    .is_some_and(|ts| ts > since)
             })
             .collect()
     } else {

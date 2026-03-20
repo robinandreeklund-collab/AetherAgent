@@ -9,6 +9,14 @@ use serde::{Deserialize, Serialize};
 
 // ─── Typer ───────────────────────────────────────────────────────────────────
 
+/// En semantisk nod extraherad från en resultat-sida (deep fetch)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageNode {
+    pub role: String,
+    pub label: String,
+    pub relevance: f32,
+}
+
 /// Ett sökresultat från DDG
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResultEntry {
@@ -18,6 +26,12 @@ pub struct SearchResultEntry {
     pub snippet: String,
     pub domain: String,
     pub confidence: f32,
+    /// Semantiska noder från själva sidan (fylls av deep fetch)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_content: Option<Vec<PageNode>>,
+    /// Fetch-tid i ms för deep fetch av denna sida
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_ms: Option<u64>,
 }
 
 /// Komplett svar från search()
@@ -32,6 +46,12 @@ pub struct SearchResult {
     pub parse_ms: u64,
     pub nodes_seen: usize,
     pub nodes_emitted: usize,
+    /// Indikerar om deep fetch utfördes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep: Option<bool>,
+    /// Total tid för alla deep fetches i ms
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep_fetch_ms: Option<u64>,
 }
 
 // ─── DDG URL-byggare ─────────────────────────────────────────────────────────
@@ -118,6 +138,8 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
                 domain,
                 snippet: String::new(),
                 confidence: node.relevance,
+                page_content: None,
+                fetch_ms: None,
             });
             continue;
         }
@@ -350,6 +372,8 @@ mod tests {
             snippet: "Sverige har 10 521 556 invånare".to_string(),
             domain: "scb.se".to_string(),
             confidence: 0.85,
+            page_content: None,
+            fetch_ms: None,
         }];
         let answer = detect_direct_answer(&results);
         assert!(answer.is_some(), "Ska hitta direktsvar i snippet");
