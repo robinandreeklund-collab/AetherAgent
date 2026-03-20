@@ -65,6 +65,8 @@ fn init_chrome_browser() -> Result<(), String> {
             std::ffi::OsStr::new("--disable-dev-shm-usage"),
             std::ffi::OsStr::new("--disable-software-rasterizer"),
             std::ffi::OsStr::new("--disable-extensions"),
+            // BUG-5 fix: Dölj automation-flaggor för bot-detection (Cloudflare m.fl.)
+            std::ffi::OsStr::new("--disable-blink-features=AutomationControlled"),
         ],
         ..LaunchOptions::default()
     };
@@ -209,6 +211,40 @@ const SPA_INDICATORS: &[&str] = &[
     "<noscript>",
 ];
 
+/// Kända JS-ramverk/chart-bibliotek i <script src="..."> URLs
+const SCRIPT_SRC_JS_INDICATORS: &[&str] = &[
+    "react",
+    "vue",
+    "angular",
+    "next",
+    "nuxt",
+    "svelte",
+    "plotly",
+    "chart.js",
+    "chartjs",
+    "d3.js",
+    "d3.min.js",
+    "highcharts",
+    "echarts",
+    "tradingview",
+    "lightweight-charts",
+    "apex",
+    "amcharts",
+    "canvasjs",
+];
+
+/// Kända SPA-domäner som alltid kräver JS-rendering
+const KNOWN_SPA_DOMAINS: &[&str] = &[
+    "tradingview.com",
+    "plotly.com",
+    "app.powerbi.com",
+    "datastudio.google.com",
+    "grafana",
+    "kibana",
+    "vercel.app",
+    "netlify.app",
+];
+
 // ─── TierHint-bestämning ──────────────────────────────────────────────────
 
 /// Analysera XHR-captures och HTML för att bestämma TierHint
@@ -236,8 +272,16 @@ pub fn determine_tier_hint(html: &str, xhr_bodies: &[&str]) -> TierHint {
         }
     }
 
-    // Kolla HTML efter SPA-ramverksmarkörer med tom body
     let html_lower = html.to_lowercase();
+
+    // BUG-2 fix: Scanna <script src="..."> efter kända JS-ramverk/chart-bibliotek.
+    // Löser hönan-och-ägg-problemet: Blitz kör inte JS → ingen XHR → ingen tier-hint.
+    // Statisk analys av script-källor ger oss hinten utan att köra JS.
+    if let Some(reason) = detect_js_framework_in_script_src(&html_lower) {
+        return TierHint::RequiresJs { reason };
+    }
+
+    // Kolla HTML efter SPA-ramverksmarkörer med tom body
     let has_spa_marker = SPA_INDICATORS
         .iter()
         .any(|marker| html_lower.contains(marker));
@@ -253,6 +297,63 @@ pub fn determine_tier_hint(html: &str, xhr_bodies: &[&str]) -> TierHint {
     }
 
     TierHint::TryBlitzFirst
+}
+
+/// Analysera URL för kända SPA-domäner som alltid kräver JS
+pub fn determine_tier_hint_with_url(html: &str, xhr_bodies: &[&str], url: &str) -> TierHint {
+    // Kolla URL mot kända SPA-domäner
+    let url_lower = url.to_lowercase();
+    for domain in KNOWN_SPA_DOMAINS {
+        if url_lower.contains(domain) {
+            return TierHint::RequiresJs {
+                reason: format!("Known SPA domain: {}", domain),
+            };
+        }
+    }
+
+    // Fallback till vanlig HTML-analys
+    determine_tier_hint(html, xhr_bodies)
+}
+
+/// Scanna <script src="..."> efter kända JS-ramverk
+fn detect_js_framework_in_script_src(html_lower: &str) -> Option<String> {
+    let mut pos = 0;
+    while let Some(script_start) = html_lower[pos..].find("<script") {
+        let abs_start = pos + script_start;
+        let tag_end = match html_lower[abs_start..].find('>') {
+            Some(p) => abs_start + p,
+            None => break,
+        };
+        let tag = &html_lower[abs_start..tag_end];
+
+        // Extrahera src-attribut
+        if let Some(src_start) = tag.find("src=") {
+            let after_src = &tag[src_start + 4..];
+            let quote = if after_src.starts_with('"') {
+                '"'
+            } else if after_src.starts_with('\'') {
+                '\''
+            } else {
+                pos = tag_end + 1;
+                continue;
+            };
+            let src_value_start = 1; // Skip quote
+            if let Some(src_end) = after_src[src_value_start..].find(quote) {
+                let src_value = &after_src[src_value_start..src_value_start + src_end];
+                for indicator in SCRIPT_SRC_JS_INDICATORS {
+                    if src_value.contains(indicator) {
+                        return Some(format!(
+                            "Script src contains JS framework: {} (src={})",
+                            indicator, src_value
+                        ));
+                    }
+                }
+            }
+        }
+
+        pos = tag_end + 1;
+    }
+    None
 }
 
 /// Extrahera textinnehållet mellan <body> och </body>
@@ -298,6 +399,12 @@ pub struct TieredBackend {
     /// Statistik
     stats: std::sync::Mutex<TierStats>,
 }
+
+// Kompileringsgaranti: TieredBackend måste vara Send + Sync för serverless scaling
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TieredBackend>();
+};
 
 impl TieredBackend {
     /// Skapa ny TieredBackend
@@ -400,6 +507,13 @@ impl TieredBackend {
         // Skapa ny tab och navigera
         let tab = browser.new_tab().map_err(|e| format!("CDP new tab: {e}"))?;
 
+        // BUG-5 fix: Dölj navigator.webdriver = true för att undvika
+        // Cloudflare/bot-detection-blockering (inet.se, komplett.se m.fl.)
+        let _ = tab.evaluate(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined })",
+            false,
+        );
+
         // Sätt viewport-storlek
         tab.set_bounds(headless_chrome::types::Bounds::Normal {
             left: None,
@@ -440,6 +554,17 @@ impl TieredBackend {
             // Vänta på page load (max 10s)
             tab.wait_until_navigated()
                 .map_err(|e| format!("CDP wait: {e}"))?;
+
+            // networkidle0-logik: vänta tills inga aktiva nätverksanrop pågår.
+            // Injicerar JS-interceptor som räknar fetch()/XHR-anrop och pollar.
+            // Fallback: max 5s total väntetid (undviker eviga lopar på long-poll/WebSocket-sidor).
+            wait_for_network_idle(&tab, 500, 5000);
+
+            // BUG-002 fix: Vänta på DOM-stabilitet efter network idle.
+            // SPAs renderar ofta asynkront efter att XHR/fetch slutfört — DOM
+            // ändras fortfarande (spinner → faktiskt innehåll). Pollar
+            // document.body.innerHTML.length tills det stabiliserats.
+            wait_for_dom_stable(&tab, 300, 3000);
         }
 
         // Ta viewport screenshot som PNG
@@ -482,6 +607,11 @@ impl TieredBackend {
     }
 
     /// Avgör om Blitz-resultatet är giltigt
+    ///
+    /// BUG-3 fix: Utökad validering — förutom size/dimension kollar vi även
+    /// om PNG:en är nästan helt enhetlig (vit/svart bakgrund utan innehåll),
+    /// vilket indikerar att Blitz inte kunde rendera sidan korrekt
+    /// (t.ex. background-image saknas, CSS-renderat innehåll ej laddat).
     fn blitz_result_is_valid(&self, result: &ScreenshotResult) -> bool {
         // Under 500 bytes = blank rendering (typisk blank PNG header ~67 bytes)
         if result.size_bytes < 500 {
@@ -490,6 +620,21 @@ impl TieredBackend {
 
         // Extremt liten = troligen rendering-fel
         if result.width == 0 || result.height == 0 {
+            return false;
+        }
+
+        // Heuristik: Väldigt liten PNG för den givna viewporten antyder
+        // nästan tom rendering. En 1280x800 sida med rimligt innehåll
+        // bör vara > 5KB. Under det indikerar blank/spinner-rendering.
+        let pixels = result.width as usize * result.height as usize;
+        let bytes_per_pixel = if pixels > 0 {
+            result.size_bytes as f64 / pixels as f64
+        } else {
+            0.0
+        };
+        // Extremt lågt bytes/pixel = enhetlig bild (blank/single-color)
+        // Typisk kompression: vit PNG ~0.01 bytes/px, innehållsrik ~0.1-1.0
+        if bytes_per_pixel < 0.005 && result.size_bytes < 5000 {
             return false;
         }
 
@@ -543,6 +688,149 @@ impl Default for TieredBackend {
             false
         };
         TieredBackend::new(cdp_available)
+    }
+}
+
+/// networkidle0: Vänta tills inga nätverksanrop pågår under `quiet_ms` millisekunder.
+///
+/// Injicerar JS som interceptar fetch() och XMLHttpRequest för att räkna aktiva requests.
+/// Pollar var 100ms och returnerar när räknaren hållit sig på 0 under `quiet_ms`.
+/// Avbryter efter `timeout_ms` totalt (undviker eviga WebSocket/long-poll-lopar).
+#[cfg(feature = "cdp")]
+fn wait_for_network_idle(
+    tab: &std::sync::Arc<headless_chrome::Tab>,
+    quiet_ms: u64,
+    timeout_ms: u64,
+) {
+    // Injicera nätverksräknare — interceptar fetch() och XHR
+    let inject_result = tab.evaluate(
+        r#"
+        (function() {
+            if (window.__aether_net_count !== undefined) return;
+            window.__aether_net_count = 0;
+
+            // Intercepta fetch()
+            const origFetch = window.fetch;
+            window.fetch = function(...args) {
+                window.__aether_net_count++;
+                return origFetch.apply(this, args).finally(() => {
+                    window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+                });
+            };
+
+            // Intercepta XMLHttpRequest
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(...args) {
+                this.__aether_tracked = true;
+                return origOpen.apply(this, args);
+            };
+            XMLHttpRequest.prototype.send = function(...args) {
+                if (this.__aether_tracked) {
+                    window.__aether_net_count++;
+                    this.addEventListener('loadend', function() {
+                        window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+                    }, { once: true });
+                }
+                return origSend.apply(this, args);
+            };
+        })()
+        "#,
+        false,
+    );
+
+    if inject_result.is_err() {
+        // Om JS-injection misslyckades, fall tillbaka på fast delay
+        std::thread::sleep(std::time::Duration::from_millis(quiet_ms));
+        return;
+    }
+
+    let poll_interval = std::time::Duration::from_millis(100);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let quiet_duration = std::time::Duration::from_millis(quiet_ms);
+    let start = std::time::Instant::now();
+    let mut idle_since: Option<std::time::Instant> = None;
+
+    loop {
+        if start.elapsed() >= timeout {
+            break;
+        }
+
+        let count = tab
+            .evaluate("window.__aether_net_count || 0", false)
+            .ok()
+            .and_then(|v| v.value)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if count == 0 {
+            let now = std::time::Instant::now();
+            if let Some(since) = idle_since {
+                if now.duration_since(since) >= quiet_duration {
+                    break; // Nätverket har varit idle tillräckligt länge
+                }
+            } else {
+                idle_since = Some(now);
+            }
+        } else {
+            idle_since = None; // Aktiva requests → nollställ
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// BUG-002 fix: Vänta tills DOM stabiliserats (innerHTML.length slutar ändras).
+///
+/// SPAs renderar ofta asynkront efter nätverks-idle:
+///   1. HTML laddas med tom <div id="root">
+///   2. JS hämtar data via fetch/XHR (network idle väntar på detta)
+///   3. React/Vue/Angular renderar DOM med data (~50-500ms efter network idle)
+///
+/// Denna funktion pollar `document.body.innerHTML.length` var 100ms.
+/// Om längden inte ändrats under `stable_ms` → DOM är stabil.
+/// Max `timeout_ms` total väntetid.
+#[cfg(feature = "cdp")]
+fn wait_for_dom_stable(
+    tab: &std::sync::Arc<headless_chrome::Tab>,
+    stable_ms: u64,
+    timeout_ms: u64,
+) {
+    let poll_interval = std::time::Duration::from_millis(100);
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let stable_duration = std::time::Duration::from_millis(stable_ms);
+    let start = std::time::Instant::now();
+
+    let mut last_length: i64 = -1;
+    let mut stable_since: Option<std::time::Instant> = None;
+
+    loop {
+        if start.elapsed() >= timeout {
+            break;
+        }
+
+        let current_length = tab
+            .evaluate("document.body ? document.body.innerHTML.length : 0", false)
+            .ok()
+            .and_then(|v| v.value)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if current_length == last_length && current_length > 0 {
+            let now = std::time::Instant::now();
+            if let Some(since) = stable_since {
+                if now.duration_since(since) >= stable_duration {
+                    break; // DOM har varit stabil tillräckligt länge
+                }
+            } else {
+                stable_since = Some(now);
+            }
+        } else {
+            last_length = current_length;
+            stable_since = None; // DOM ändrades → nollställ
+        }
+
+        std::thread::sleep(poll_interval);
     }
 }
 
@@ -802,6 +1090,94 @@ mod tests {
         assert!(
             SPA_INDICATORS.contains(&"__nuxt"),
             "Borde innehålla __nuxt (Nuxt)"
+        );
+    }
+
+    // ─── BUG-2 tester: script src detection ────────────────────────────────
+
+    #[test]
+    fn test_determine_tier_hint_react_script_src() {
+        let html = r##"<html><head>
+            <script src="https://cdn.example.com/react.production.min.js"></script>
+        </head><body><div id="root"></div></body></html>"##;
+        let hint = determine_tier_hint(html, &[]);
+        assert!(
+            matches!(hint, TierHint::RequiresJs { .. }),
+            "React script src borde ge RequiresJs, fick: {:?}",
+            hint
+        );
+    }
+
+    #[test]
+    fn test_determine_tier_hint_chartjs_script_src() {
+        let html = r##"<html><head>
+            <script src="/js/chart.js"></script>
+        </head><body><canvas id="myChart"></canvas></body></html>"##;
+        let hint = determine_tier_hint(html, &[]);
+        assert!(
+            matches!(hint, TierHint::RequiresJs { .. }),
+            "Chart.js script src borde ge RequiresJs"
+        );
+    }
+
+    #[test]
+    fn test_determine_tier_hint_tradingview_url() {
+        let html = r##"<html><body><div id="app"></div></body></html>"##;
+        let hint =
+            determine_tier_hint_with_url(html, &[], "https://www.tradingview.com/chart/ABC123");
+        assert!(
+            matches!(hint, TierHint::RequiresJs { .. }),
+            "TradingView URL borde ge RequiresJs"
+        );
+    }
+
+    #[test]
+    fn test_determine_tier_hint_plotly_url() {
+        let html = r##"<html><body><p>Charts</p></body></html>"##;
+        let hint =
+            determine_tier_hint_with_url(html, &[], "https://plotly.com/javascript/line-charts/");
+        assert!(
+            matches!(hint, TierHint::RequiresJs { .. }),
+            "Plotly URL borde ge RequiresJs"
+        );
+    }
+
+    #[test]
+    fn test_determine_tier_hint_normal_url() {
+        let html = r##"<html><body><h1>Normal sida</h1><p>Med mycket text</p></body></html>"##;
+        let hint = determine_tier_hint_with_url(html, &[], "https://example.com/about");
+        assert_eq!(
+            hint,
+            TierHint::TryBlitzFirst,
+            "Normal URL borde ge TryBlitzFirst"
+        );
+    }
+
+    #[test]
+    fn test_detect_js_framework_d3() {
+        let html = r##"<script src="https://d3js.org/d3.min.js"></script>"##;
+        let result = detect_js_framework_in_script_src(&html.to_lowercase());
+        assert!(result.is_some(), "Borde detektera d3.min.js i script src");
+    }
+
+    // ─── BUG-3 tester: förbättrad blank-detection ─────────────────────────
+
+    #[test]
+    fn test_blitz_result_blank_large_viewport() {
+        let backend = TieredBackend::new(false);
+        // En 1280x800 viewport som genererar en väldigt liten PNG = blank
+        let result = ScreenshotResult {
+            png_bytes: vec![0; 2000],
+            width: 1280,
+            height: 800,
+            latency_ms: 50,
+            size_bytes: 2000,
+            tier_used: ScreenshotTier::Blitz,
+            escalation_reason: None,
+        };
+        assert!(
+            !backend.blitz_result_is_valid(&result),
+            "Liten PNG för stor viewport borde vara ogiltigt (blank rendering)"
         );
     }
 

@@ -59,8 +59,8 @@ check_deps() {
     # Vision-modell (valfri)
     if [ -n "${AETHER_MODEL_PATH:-}" ] && [ -f "$AETHER_MODEL_PATH" ]; then
         log "Vision-modell: $AETHER_MODEL_PATH"
-    elif [ -f "$PROJECT_DIR/models/aether-ui-latest.rten" ]; then
-        export AETHER_MODEL_PATH="$PROJECT_DIR/models/aether-ui-latest.rten"
+    elif [ -f "$PROJECT_DIR/models/aether-ui-latest.onnx" ]; then
+        export AETHER_MODEL_PATH="$PROJECT_DIR/models/aether-ui-latest.onnx"
         log "Vision-modell: $AETHER_MODEL_PATH"
     else
         warn "Ingen vision-modell hittad (YOLO-detektion inaktiv)"

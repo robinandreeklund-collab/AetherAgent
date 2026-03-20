@@ -1027,34 +1027,42 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
             )
         }
     };
+    let fetch_ms = fetch_result.fetch_time_ms;
 
+    let parse_start = std::time::Instant::now();
     let tree_json = aether_agent::parse_to_semantic_tree(
         &fetch_result.body,
         &req.goal,
         &fetch_result.final_url,
     );
+    let parse_ms = parse_start.elapsed().as_millis() as u64;
+
+    // Fas C.13: Inline XHR-URLs i svaret (om de finns i HTML:en)
+    let xhr_urls = aether_agent::detect_xhr_urls(&fetch_result.body);
+
     let total_time_ms = total_start.elapsed().as_millis() as u64;
 
-    let result = aether_agent::types::FetchAndParseResult {
-        fetch: fetch_result,
-        tree: serde_json::from_str(&tree_json).unwrap_or_else(|_| {
-            aether_agent::types::SemanticTree {
-                url: String::new(),
-                title: String::new(),
-                goal: req.goal.clone(),
-                nodes: vec![],
-                injection_warnings: vec![],
-                parse_time_ms: 0,
-                xhr_intercepted: 0,
-                xhr_blocked: 0,
-            }
-        }),
-        total_time_ms,
-    };
+    // Fas C.12: Per-steg timing i svaret
+    let mut result_value = serde_json::json!({
+        "fetch": fetch_result,
+        "tree": serde_json::from_str::<serde_json::Value>(&tree_json).unwrap_or_default(),
+        "total_time_ms": total_time_ms,
+        "timing": {
+            "fetch_ms": fetch_ms,
+            "parse_ms": parse_ms,
+            "total_ms": total_time_ms,
+        }
+    });
+
+    if let Ok(xhr_value) = serde_json::from_str::<serde_json::Value>(&xhr_urls) {
+        if let Some(obj) = result_value.as_object_mut() {
+            obj.insert("xhr_calls".to_string(), xhr_value);
+        }
+    }
 
     (
         StatusCode::OK,
-        serde_json::to_string(&result).unwrap_or_default(),
+        serde_json::to_string(&result_value).unwrap_or_default(),
     )
 }
 
@@ -2035,7 +2043,49 @@ async fn render_url_to_png(
     Err("Blitz feature inte aktiverad. Kompilera med --features blitz".to_string())
 }
 
+/// BUG-003 fix: Hämta HTML, analysera TierHint, rendera med rätt tier.
+/// Returnerar (png_bytes, tier_used_label).
+#[cfg(feature = "blitz")]
+async fn render_url_tiered(
+    url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<(Vec<u8>, String), String> {
+    let config = aether_agent::types::FetchConfig::default();
+    let response = aether_agent::fetch::fetch_page(url, &config)
+        .await
+        .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
+    let base_url = url.to_string();
+
+    let html = aether_agent::fetch::inline_external_css(&response.body, &base_url).await;
+
+    let url_owned = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        let (png_bytes, tier) =
+            aether_agent::screenshot_with_tier(&html, &url_owned, width, height, fast_render)?;
+        let tier_label = format!("{:?}", tier);
+        Ok((png_bytes, tier_label))
+    })
+    .await
+    .map_err(|e| format!("Render task: {e}"))?
+}
+
+#[cfg(not(feature = "blitz"))]
+async fn render_url_tiered(
+    _url: &str,
+    _width: u32,
+    _height: u32,
+    _fast_render: bool,
+) -> Result<(Vec<u8>, String), String> {
+    Err("Blitz feature inte aktiverad".to_string())
+}
+
 /// REST-endpoint: POST /api/fetch-vision — hämta URL, ta screenshot, kör vision
+///
+/// BUG-003 fix: Använder nu screenshot_with_tier istället för ren Blitz-rendering.
+/// HTML analyseras med determine_tier_hint_with_url → automatisk eskalering till CDP
+/// för SPA/JS-tunga sidor.
 #[cfg(feature = "vision")]
 async fn fetch_vision_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -2047,9 +2097,10 @@ async fn fetch_vision_handler(
     // Sätt fast_render=true explicit om man bara vill ha snabb YOLO utan styling.
     let fast_render = req.fast_render.unwrap_or(false);
 
-    // Rendera sidan till PNG med Blitz (ren Rust)
-    let png_bytes = match render_url_to_png(&req.url, width, height, fast_render).await {
-        Ok(b) => b,
+    // Hämta HTML och rendera med TieredBackend (analyserar TierHint automatiskt)
+    let (png_bytes, tier_used) = match render_url_tiered(&req.url, width, height, fast_render).await
+    {
+        Ok(result) => result,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2076,6 +2127,7 @@ async fn fetch_vision_handler(
     let original_b64 = B64.encode(&png_bytes);
 
     let response = serde_json::json!({
+        "tier_used": tier_used,
         "original_screenshot": original_b64,
         "annotated_screenshot": annotated_b64,
         "detections": serde_json::from_str::<serde_json::Value>(&result_json).unwrap_or_default(),
@@ -2337,9 +2389,10 @@ async fn mcp_dispatch_tool(
                 // Validera URL
                 aether_agent::fetch::validate_url(url)?;
 
-                // Rendera sidan till PNG med Blitz (fast mode: skippa externa resurser)
+                // BUG-003 fix: Rendera med TieredBackend (automatisk CDP-eskalering)
                 let fast_render = args["fast_render"].as_bool().unwrap_or(true);
-                let png_bytes = render_url_to_png(url, width, height, fast_render).await?;
+                let (png_bytes, tier_used) =
+                    render_url_tiered(url, width, height, fast_render).await?;
                 let png_b64 = B64.encode(&png_bytes);
 
                 // Kör vision med förladdad ORT session
@@ -2354,10 +2407,24 @@ async fn mcp_dispatch_tool(
                 let annotated_b64 =
                     render_annotated_screenshot(&png_bytes, &result_json).unwrap_or_default();
 
+                // Lägg till tier_used i svaret (nu dynamiskt)
+                let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
+                    Ok(mut v) => {
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert(
+                                "tier_used".to_string(),
+                                serde_json::Value::String(tier_used),
+                            );
+                        }
+                        serde_json::to_string(&v).unwrap_or(result_json)
+                    }
+                    Err(_) => result_json,
+                };
+
                 Ok(serde_json::json!([
                     {"type": "image", "data": png_b64, "mimeType": "image/png"},
                     {"type": "image", "data": annotated_b64, "mimeType": "image/png"},
-                    {"type": "text", "text": result_json}
+                    {"type": "text", "text": enriched_json}
                 ]))
             }
             #[cfg(not(feature = "vision"))]
@@ -2428,9 +2495,7 @@ async fn mcp_post(
             let mut resp_headers = HeaderMap::new();
             resp_headers.insert(
                 "content-type",
-                "application/json"
-                    .parse()
-                    .unwrap_or_else(|_| "application/json".parse().unwrap()),
+                axum::http::header::HeaderValue::from_static("application/json"),
             );
             if let Ok(v) = session_id.parse() {
                 resp_headers.insert("mcp-session-id", v);

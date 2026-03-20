@@ -2,7 +2,7 @@
 ///
 /// Fas 2: find_and_click, fill_form, extract_data
 /// Bygger på SemanticTree från Fas 1 och text_similarity från semantic.rs.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::semantic::text_similarity;
 use crate::types::{
@@ -143,15 +143,15 @@ pub fn map_form_fields(tree: &SemanticTree, fields: &HashMap<String, String>) ->
         .collect();
 
     let mut mappings = Vec::new();
-    let mut matched_node_ids: Vec<u32> = Vec::new();
-    let mut matched_keys: Vec<String> = Vec::new();
+    let mut matched_node_ids: HashSet<u32> = HashSet::new();
+    let mut matched_keys: HashSet<String> = HashSet::new();
 
     for (key, value) in fields {
         let mut best_match: Option<&SemanticNode> = None;
         let mut best_confidence: f32 = 0.0;
 
         for node in &input_nodes {
-            // Skippa redan matchade noder
+            // Skippa redan matchade noder (O(1) med HashSet)
             if matched_node_ids.contains(&node.id) {
                 continue;
             }
@@ -181,8 +181,8 @@ pub fn map_form_fields(tree: &SemanticTree, fields: &HashMap<String, String>) ->
 
         if let Some(node) = best_match {
             if best_confidence > 0.2 {
-                matched_node_ids.push(node.id);
-                matched_keys.push(key.clone());
+                matched_node_ids.insert(node.id);
+                matched_keys.insert(key.clone());
                 mappings.push(FormFieldMapping {
                     field_label: node.label.clone(),
                     field_role: node.role.clone(),
@@ -198,7 +198,7 @@ pub fn map_form_fields(tree: &SemanticTree, fields: &HashMap<String, String>) ->
 
     let unmapped_keys: Vec<String> = fields
         .keys()
-        .filter(|k| !matched_keys.contains(k))
+        .filter(|k| !matched_keys.contains(k.as_str()))
         .cloned()
         .collect();
 

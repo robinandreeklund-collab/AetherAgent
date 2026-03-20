@@ -121,7 +121,7 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **23 Rust modules**, **58 WASM-exported functions**, **66 HTTP endpoints**, and **24 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **24 Rust modules**, **58 WASM-exported functions**, **65 HTTP endpoints**, and **24 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
@@ -406,7 +406,7 @@ Fast mode is the default for `fetch_vision` — sufficient for YOLOv8 UI element
 
 ## API Reference
 
-### HTTP Endpoints (66 routes)
+### HTTP Endpoints (65 routes)
 
 Run the server: `cargo run --features server --bin aether-server`
 
@@ -683,7 +683,7 @@ Once connected, Claude gets access to 22 AetherAgent tools. Try these prompts:
 
 #### Available MCP Tools
 
-See the full [MCP Server (24 tools)](#mcp-server-22-tools) table above for the complete list. Key tools for getting started:
+See the full [MCP Server (24 tools)](#mcp-server-24-tools) table above for the complete list. Key tools for getting started:
 
 | Tool | What it does |
 |------|-------------|
@@ -723,10 +723,10 @@ const click = await agent.findAndClick(html, 'buy', url, 'Add to cart');
 
 ## Tests
 
-**352 tests** across 4 levels. All must pass on every commit.
+**427 tests** across 4 levels. All must pass on every commit.
 
 ```bash
-cargo test              # Run all 352 tests
+cargo test              # Run all 427 tests
 cargo clippy -- -D warnings  # Zero warnings required
 cargo fmt --check       # Zero diffs required
 ```
@@ -983,7 +983,7 @@ AetherAgent/
 │   ├── memory.rs         # Workflow memory persistence
 │   ├── types.rs          # Core data structures
 │   └── bin/
-│       ├── server.rs     # Axum HTTP API (63 endpoints)
+│       ├── server.rs     # Axum HTTP API (65 endpoints)
 │       └── mcp_server.rs # MCP server (24 tools, stdio transport)
 ├── tests/
 │   ├── integration_test.rs   # 49 end-to-end tests
@@ -1109,11 +1109,11 @@ safety = agent.check_injection(page_text)
 
 AetherAgent is a fully functional AI browser engine with:
 
-- **22 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, session management, workflow orchestration, workflow memory, core types
+- **24 Rust source modules** — parser, semantic, trust, intent, diff, JS sandbox, selective execution, temporal memory, adversarial modeling, intent compiler, HTTP fetch, semantic firewall, causal graph, WebMCP discovery, multimodal grounding, cross-agent collaboration, XHR interception, YOLOv8 vision, vision backend (tiered), session management, workflow orchestration, streaming parse, workflow memory, core types
 - **58 WASM-exported functions** — complete API surface for any WASM host
-- **66 HTTP REST endpoints** — deployable Axum server with CORS
+- **65 HTTP REST endpoints** — deployable Axum server with CORS
 - **24 MCP tools** — Claude Desktop, Cursor, VS Code compatible
-- **352 tests** — 256 unit + 30 fixture + 49 integration + 17 orchestrator, all passing
+- **427 tests** — 327 unit + 30 fixture + 70 integration, all passing
 - **13 benchmarks** — parse, intent, injection, all within targets
 - **Head-to-head benchmarks** — 213-292x faster than Lightpanda on their own benchmarks
 - **2 SDK bindings** — Python + Node.js (with TypeScript types)

@@ -21,14 +21,23 @@ const STRUCTURAL_TAGS: &[&str] = &[
 pub struct SemanticBuilder {
     pub warnings: Vec<InjectionWarning>,
     goal: String,
+    /// Pre-computed goal words för text_similarity (undviker upprepade allokeringar)
+    goal_words: Vec<String>,
     next_id: u32,
 }
 
 impl SemanticBuilder {
     pub fn new(goal: &str) -> Self {
+        let goal_lower = goal.to_lowercase();
+        let goal_words: Vec<String> = goal_lower
+            .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         SemanticBuilder {
             warnings: vec![],
-            goal: goal.to_lowercase(),
+            goal: goal_lower,
+            goal_words,
             next_id: 0,
         }
     }
@@ -202,8 +211,8 @@ impl SemanticBuilder {
     /// 2. ARIA-rollprioritet
     /// 3. Djupberoende (grundare = viktigare)
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
-        // 1. Textuell likhet
-        let text_score = text_similarity(&self.goal, label);
+        // 1. Textuell likhet (använder cachade goal_words)
+        let text_score = text_similarity_cached(&self.goal, &self.goal_words, label);
 
         // 2. Roll-prioritet
         let role_score = SemanticNode::role_priority(role);
@@ -295,24 +304,32 @@ fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
 /// Hanterar compound keys (underscore/bindestreck) genom att splitta och matcha delar.
 pub fn text_similarity(query: &str, candidate: &str) -> f32 {
     let query_lower = query.to_lowercase();
-    let candidate_lower = candidate.to_lowercase();
-
-    // Splitta på whitespace, underscore och bindestreck för compound keys
-    let query_words: Vec<&str> = query_lower
+    let query_words: Vec<String> = query_lower
         .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
         .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
         .collect();
+    text_similarity_cached(&query_lower, &query_words, candidate)
+}
+
+/// Optimerad version med pre-computed query words (undviker upprepade allokeringar)
+///
+/// Används av SemanticBuilder::score_relevance() som anropar denna per nod.
+/// Sparar ~300 allokeringar per typisk sida.
+fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: &str) -> f32 {
     if query_words.is_empty() {
         return 0.0;
     }
 
-    // Exakt substring-match ger full poäng (kolla originalformatet)
-    if candidate_lower.contains(&query_lower) {
+    let candidate_lower = candidate.to_lowercase();
+
+    // Exakt substring-match ger full poäng
+    if candidate_lower.contains(query_lower) {
         return 1.0;
     }
 
     // Kolla även utan separatorer: "story_title" → "storytitle"
-    let query_joined: String = query_words.iter().copied().collect();
+    let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
     let candidate_no_sep: String = candidate_lower
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
@@ -324,7 +341,7 @@ pub fn text_similarity(query: &str, candidate: &str) -> f32 {
     // Word overlap — varje del av compound key matchas separat
     let matches = query_words
         .iter()
-        .filter(|w| candidate_lower.contains(*w))
+        .filter(|w| candidate_lower.contains(w.as_str()))
         .count();
 
     matches as f32 / query_words.len() as f32

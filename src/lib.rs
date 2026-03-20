@@ -54,6 +54,21 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     tree
 }
 
+/// Pre-allokerad JSON-serialisering via serde_json::to_writer.
+/// Undviker intern String-allokering genom att skriva direkt till Vec<u8>.
+/// Estimerar buffert-storlek baserat på antal noder (~200 bytes/nod).
+fn serialize_json<T: serde::Serialize>(
+    value: &T,
+    estimated_nodes: usize,
+) -> Result<String, String> {
+    let capacity = (estimated_nodes * 200).max(1024);
+    let mut buf = Vec::with_capacity(capacity);
+    serde_json::to_writer(&mut buf, value)
+        .map_err(|e| format!(r#"{{"error": "Serialization failed: {e}"}}"#))?;
+    // SAFETY: serde_json::to_writer producerar alltid giltig UTF-8
+    Ok(unsafe { String::from_utf8_unchecked(buf) })
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -91,9 +106,9 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    match serde_json::to_string(&tree) {
+    match serialize_json(&tree, tree.nodes.len()) {
         Ok(json) => json,
-        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => e,
     }
 }
 
@@ -157,9 +172,9 @@ pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> Str
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    match serde_json::to_string(&tree) {
+    match serialize_json(&tree, tree.nodes.len()) {
         Ok(json) => json,
-        Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => e,
     }
 }
 
@@ -513,9 +528,9 @@ pub fn add_temporal_snapshot(
     };
 
     let tree = build_tree(html, goal, url);
-    let tree_json = match serde_json::to_string(&tree) {
+    let tree_json = match serialize_json(&tree, tree.nodes.len()) {
         Ok(j) => j,
-        Err(e) => return format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+        Err(e) => return e,
     };
 
     mem.add_snapshot(&tree, &tree_json, timestamp_ms);
@@ -686,8 +701,26 @@ pub fn build_causal_graph(snapshots_json: &str, actions_json: &str) -> String {
         }
     };
 
-    let actions: Vec<String> = match serde_json::from_str(actions_json) {
-        Ok(a) => a,
+    // BUG-011 fix: Acceptera både array och objekt (extrahera values som strängar)
+    let actions: Vec<String> = match serde_json::from_str::<serde_json::Value>(actions_json) {
+        Ok(serde_json::Value::Array(arr)) => arr
+            .into_iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            })
+            .collect(),
+        Ok(serde_json::Value::Object(obj)) => obj
+            .into_iter()
+            .map(|(_, v)| match v {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            })
+            .collect(),
+        Ok(serde_json::Value::String(s)) => vec![s],
+        Ok(_) => {
+            return r#"{"error": "Invalid actions_json: expected array or object"}"#.to_string();
+        }
         Err(e) => return format!(r#"{{"error": "Invalid actions_json: {}"}}"#, e),
     };
 
@@ -1019,18 +1052,18 @@ pub fn tiered_screenshot(
 ) -> String {
     let backend = global_tiered_backend();
 
-    // Bestäm tier-hint från XHR-captures
+    // Bestäm tier-hint från URL + XHR-captures + HTML
     let tier_hint = if xhr_captures_json.is_empty() || xhr_captures_json == "[]" {
-        // Kolla HTML direkt
-        vision_backend::determine_tier_hint(html, &[])
+        // Kolla URL + HTML direkt (BUG-2 fix: URL-heuristiker + script-src-analys)
+        vision_backend::determine_tier_hint_with_url(html, &[], url)
     } else {
         // Parsa XHR-captures och analysera
         let captures: Vec<intercept::XhrCapture> =
             serde_json::from_str(xhr_captures_json).unwrap_or_default();
         let hint = intercept::tier_hint_from_captures(&captures);
         if matches!(hint, vision_backend::TierHint::TryBlitzFirst) {
-            // Fallback: analysera HTML
-            vision_backend::determine_tier_hint(html, &[])
+            // Fallback: analysera URL + HTML
+            vision_backend::determine_tier_hint_with_url(html, &[], url)
         } else {
             hint
         }
@@ -1063,6 +1096,35 @@ pub fn tiered_screenshot(
         }
         Err(e) => serde_json::json!({"error": e}).to_string(),
     }
+}
+
+/// Take a screenshot using TieredBackend with tier-hint analysis.
+///
+/// Returns (png_bytes, tier_used) — use this when you need the actual PNG bytes
+/// (unlike `tiered_screenshot` which returns metadata JSON only).
+pub fn screenshot_with_tier(
+    html: &str,
+    url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<(Vec<u8>, vision_backend::ScreenshotTier), String> {
+    let backend = global_tiered_backend();
+
+    let tier_hint = vision_backend::determine_tier_hint_with_url(html, &[], url);
+
+    let req = vision_backend::ScreenshotRequest {
+        url: url.to_string(),
+        html: Some(html.to_string()),
+        width,
+        height,
+        fast_render,
+        tier_hint,
+        goal: String::new(),
+    };
+
+    let result = backend.screenshot(&req)?;
+    Ok((result.png_bytes, result.tier_used))
 }
 
 /// Get tier statistics for monitoring

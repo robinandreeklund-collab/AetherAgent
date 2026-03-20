@@ -196,6 +196,10 @@ pub struct StepResult {
     /// Varningar
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Speculative Pre-Parsing: URL:er som sannolikt behövs i kommande steg.
+    /// Hosten kan pre-fetcha dessa parallellt för att eliminera sekventiell latency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefetch_urls: Vec<String>,
 }
 
 // ─── Implementation ─────────────────────────────────────────────────────────
@@ -239,6 +243,7 @@ impl WorkflowOrchestrator {
         };
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&first_action);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: first_action,
@@ -247,6 +252,7 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: format!("0/{}", self.plan.total_steps),
             warnings: vec![],
+            prefetch_urls,
         }
     }
 
@@ -267,6 +273,7 @@ impl WorkflowOrchestrator {
                 extracted_data: self.extracted_data.clone(),
                 progress: self.progress_string(),
                 warnings: vec!["Max pages exceeded".to_string()],
+                prefetch_urls: vec![],
             };
         }
 
@@ -305,6 +312,7 @@ impl WorkflowOrchestrator {
         let status = self.determine_status(&next);
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&next);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: next,
@@ -317,6 +325,7 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: self.progress_string(),
             warnings: vec![],
+            prefetch_urls,
         }
     }
 
@@ -344,6 +353,7 @@ impl WorkflowOrchestrator {
         let status = self.determine_status(&next);
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&next);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: next,
@@ -356,6 +366,7 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: self.progress_string(),
             warnings,
+            prefetch_urls,
         }
     }
 
@@ -395,6 +406,7 @@ impl WorkflowOrchestrator {
         let status = self.determine_status(&next);
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&next);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: next,
@@ -407,6 +419,7 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: self.progress_string(),
             warnings,
+            prefetch_urls,
         }
     }
 
@@ -444,6 +457,7 @@ impl WorkflowOrchestrator {
         let status = self.determine_status(&next);
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&next);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: next,
@@ -452,6 +466,7 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: self.progress_string(),
             warnings,
+            prefetch_urls,
         }
     }
 
@@ -468,6 +483,7 @@ impl WorkflowOrchestrator {
         let status = self.determine_status(&next);
         self.status = status.clone();
 
+        let prefetch_urls = self.collect_prefetch_urls(&next);
         StepResult {
             orchestrator_json: self.to_json(),
             next_action: next,
@@ -476,7 +492,33 @@ impl WorkflowOrchestrator {
             extracted_data: self.extracted_data.clone(),
             progress: self.progress_string(),
             warnings: vec![],
+            prefetch_urls,
         }
+    }
+
+    /// Speculative Pre-Parsing: hitta URL:er som troligen behövs i kommande steg.
+    ///
+    /// Kollar framåt i planen bortom `next_action` och returnerar URL:er
+    /// som hosten kan pre-fetcha parallellt. Typiskt: om current step = click,
+    /// och steget efter = navigate, returnera navigate-URL:en.
+    fn collect_prefetch_urls(&self, next_action: &Option<NextAction>) -> Vec<String> {
+        let current_idx = next_action.as_ref().map(|a| a.step_index).unwrap_or(0);
+
+        // Hitta Ready-steg efter current, filtrera ut Navigate-steg med kända URL:er
+        self.plan
+            .sub_goals
+            .iter()
+            .filter(|sg| {
+                sg.index > current_idx
+                    && sg.status == GoalStatus::Ready
+                    && sg.action_type == ActionType::Navigate
+            })
+            .take(2) // Max 2 prefetch-hints
+            .filter_map(|sg| {
+                // Extrahera URL från step-beskrivningen om den finns
+                extract_url_from_description(&sg.description)
+            })
+            .collect()
     }
 
     /// Rollback: markera ett steg som ej klart och försök igen
@@ -752,6 +794,26 @@ fn extract_keys_from_description(description: &str) -> Vec<String> {
     }
 
     keys
+}
+
+/// Extrahera URL från en steg-beskrivning
+///
+/// Letar efter http:// eller https:// i texten.
+fn extract_url_from_description(description: &str) -> Option<String> {
+    let start = description
+        .find("http://")
+        .or_else(|| description.find("https://"))?;
+    // URL slutar vid whitespace, citattecken, eller slut av sträng
+    let url_part = &description[start..];
+    let end = url_part
+        .find(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '>' || c == ')')
+        .unwrap_or(url_part.len());
+    let url = &url_part[..end];
+    if url.len() > 10 {
+        Some(url.to_string())
+    } else {
+        None
+    }
 }
 
 /// Extrahera domän från URL

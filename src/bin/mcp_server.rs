@@ -207,7 +207,8 @@ struct CollabPublishParams {
     url: String,
     /// Semantic delta JSON — pass the FULL output from diff_trees directly (string or object).
     /// Required fields: token_savings_ratio (f32), total_nodes_before (u32),
-    /// total_nodes_after (u32), changes (array of {change_type, role, label}).
+    /// total_nodes_after (u32), changes (array of {node_id: u32, change_type: "Added"|"Removed"|"Modified",
+    /// role: string, label: string, changes: [{field: string, before: string, after: string}]}).
     #[serde(deserialize_with = "deserialize_json_string_or_object")]
     delta_json: String,
     /// Timestamp in milliseconds since epoch (e.g. Date.now())
@@ -263,6 +264,8 @@ struct FetchVisionParams {
     height: Option<u32>,
     /// true (default): skip external resources (~50ms). false: load all (~2s cap).
     fast_render: Option<bool>,
+    /// Respect robots.txt before fetching (default: false). Set to true for ethical crawling.
+    obey_robots: Option<bool>,
 }
 
 // ─── Fas 12 parameter types ─────────────────────────────────────────────────
@@ -574,7 +577,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap)."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap). Set obey_robots=true to respect robots.txt before fetching."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
@@ -610,6 +613,52 @@ async fn render_url_to_png_mcp(
     .map_err(|e| format!("Render task: {e}"))?
 }
 
+/// BUG-003 fix: Hämta HTML, analysera TierHint, rendera med rätt tier.
+///
+/// Returnerar (png_bytes, tier_used_label).
+/// 1. Hämta HTML via reqwest
+/// 2. Inlina extern CSS
+/// 3. Kör screenshot_with_tier — analyserar HTML+URL för TierHint,
+///    eskalerar automatiskt till CDP om RequiresJs
+#[cfg(feature = "blitz")]
+async fn fetch_and_render_tiered(
+    url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<(Vec<u8>, String), String> {
+    // Hämta HTML
+    let raw_html = reqwest::get(url)
+        .await
+        .map_err(|e| format!("Fetch error: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("Body error: {e}"))?;
+
+    // Inlina extern CSS för Blitz-rendering
+    let html = aether_agent::fetch::inline_external_css(&raw_html, url).await;
+
+    let url_owned = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        let (png_bytes, tier) =
+            aether_agent::screenshot_with_tier(&html, &url_owned, width, height, fast_render)?;
+        let tier_label = format!("{:?}", tier);
+        Ok((png_bytes, tier_label))
+    })
+    .await
+    .map_err(|e| format!("Render task: {e}"))?
+}
+
+#[cfg(not(feature = "blitz"))]
+async fn fetch_and_render_tiered(
+    _url: &str,
+    _width: u32,
+    _height: u32,
+    _fast_render: bool,
+) -> Result<(Vec<u8>, String), String> {
+    Err("Blitz feature inte aktiverad".to_string())
+}
+
 /// Ren-Rust HTML → PNG med Blitz. Delegerar till lib-funktionen.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_mcp(
@@ -632,7 +681,7 @@ async fn render_url_to_png_mcp(
     Err("Blitz feature inte aktiverad".to_string())
 }
 
-/// Hanterar fetch_vision: hämta URL, rendera med Blitz, kör vision, returnera bilder
+/// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
 async fn handle_fetch_vision(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> rmcp::model::CallToolResult {
@@ -673,15 +722,30 @@ async fn handle_fetch_vision(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Rendera sidan till PNG med Blitz (ren Rust)
-    let png_bytes = match render_url_to_png_mcp(url, width, height, fast_render).await {
-        Ok(b) => b,
-        Err(e) => {
+    // Respektera robots.txt om aktiverat
+    let obey_robots = args
+        .get("obey_robots")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if obey_robots {
+        if let Err(e) = aether_agent::fetch::check_robots_txt_google(url, "AetherAgent/1.0").await {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                "Rendering misslyckades: {e}"
+                "Blockerad av robots.txt: {e}"
             ))]);
         }
-    };
+    }
+
+    // BUG-003 fix: Hämta HTML först, analysera med TierHint, rendera med rätt tier.
+    // Tidigare gick fetch_vision alltid till Blitz utan tier-analys → RequiresJs triggades aldrig.
+    let (png_bytes, tier_used) =
+        match fetch_and_render_tiered(url, width, height, fast_render).await {
+            Ok(result) => result,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!("Rendering misslyckades: {e}"),
+                )]);
+            }
+        };
 
     let png_b64 = b64.encode(&png_bytes);
 
@@ -703,7 +767,22 @@ async fn handle_fetch_vision(
 
     // Kör vision
     let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
-    build_vision_result(&png_b64, &png_bytes, &result_json)
+
+    // Lägg till tier_used i svaret (nu dynamiskt baserat på faktisk tier)
+    let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
+        Ok(mut v) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert(
+                    "tier_used".to_string(),
+                    serde_json::Value::String(tier_used),
+                );
+            }
+            serde_json::to_string(&v).unwrap_or(result_json)
+        }
+        Err(_) => result_json,
+    };
+
+    build_vision_result(&png_b64, &png_bytes, &enriched_json)
 }
 
 /// Hanterar vision-verktyg med image content blocks

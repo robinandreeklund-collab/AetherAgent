@@ -171,4 +171,22 @@ Types:
 
 **Fas 8 (Complete)**: Semantic Firewall & Ethical Engine & MCP Server — three-level goal-aware request filtering (L1: URL pattern blocklist, L2: MIME/extension filter, L3: semantic relevance scoring), Google's `robotstxt` crate for RFC 9309 compliance, `governor` per-domain rate limiter (GCRA), Retry-After handling, MCP server via `rmcp` crate exposing all tools to Claude/Cursor/VS Code. Modules: `firewall.rs`, `bin/mcp_server.rs`. Endpoints: `/api/firewall/classify`, `/api/firewall/classify-batch`. Binary: `aether-mcp` (stdio MCP).
 
+**Fas 9a (Complete)**: Causal Action Graph — `causal.rs`, action-consequence modeling, `find_safest_path` with semantic goal matching.
+
+**Fas 9b (Complete)**: WebMCP Discovery — `webmcp.rs`, detect and extract `navigator.modelContext.registerTool()`, `<script type="application/mcp+json">`, `window.__webmcp__`, `window.mcpTools` registrations from web pages.
+
+**Fas 9c (Complete)**: Multimodal Grounding — `grounding.rs`, ground semantic nodes to visual coordinates.
+
+**Fas 9d (Complete)**: Cross-Agent Semantic Diffing — `collab.rs`, shared diff stores for multi-agent collaboration.
+
+**Fas 10 (Complete)**: XHR Network Interception — `intercept.rs`, capture fetch()/XHR calls from JS sandbox, firewall-filtered fetching, response normalization to semantic nodes, XHR response caching.
+
+**Fas 11 (Complete)**: YOLOv8 Vision — `vision.rs`, built-in ONNX Runtime inference for UI element detection (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). MCP tools: `parse_screenshot`, `vision_parse`, `fetch_vision`.
+
 **Fas 12 (Complete)**: TieredBackend & BUG-6 Fix — intelligent dual-tier screenshot rendering: Tier 1 (Blitz, pure Rust, ~10-50ms) with automatic escalation to Tier 2 (CDP/Chrome, feature-gated `cdp`) for JS-heavy pages. XHR-driven tier selection via `TierHint` (SPA detection, chart library detection). BUG-6 fixed: `find_safest_path` now uses 3-level semantic goal matching (direct similarity, word-level matching, context-word mapping for domain-specific synonyms like kontakt↔telefon/email). `compile_goal` enhanced with domain-specific templates (kontakt, analysera, nyheter, navigera). Modules: `vision_backend.rs`, updates to `causal.rs`, `compiler.rs`, `intercept.rs`. MCP tools: `tiered_screenshot`, `tier_stats`. HTTP endpoints: `/api/tiered-screenshot`, `/api/tier-stats`.
+
+**Fas 13 (Complete)**: Session Management — `session.rs`, persistent browser sessions with cookie jars, page history, form state, workflow context. 11 HTTP endpoints for session CRUD.
+
+**Fas 14 (Complete)**: Workflow Orchestration — `orchestrator.rs`, multi-page workflow engine with auto-navigation, rollback/retry, step tracking. 8 HTTP endpoints.
+
+**Fas 15 (Complete)**: Streaming Parse — `streaming.rs`, `StreamingParser` with early-stopping at `max_nodes`, depth limiting, relevance filtering. WASM API: `parse_streaming`.
