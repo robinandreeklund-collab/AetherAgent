@@ -1088,6 +1088,7 @@ async fn fetch_raw(Json(req): Json<FetchRawRequest>) -> impl IntoResponse {
 }
 
 async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
+    log_rss(&format!("fetch_parse start: {}", req.url));
     let config = req.config.unwrap_or_default();
 
     if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
@@ -1122,6 +1123,12 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     let xhr_urls = aether_agent::detect_xhr_urls(&fetch_result.body);
 
     let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    log_rss(&format!(
+        "fetch_parse after parse: {} (body={}KB)",
+        req.url,
+        fetch_result.body_size_bytes / 1024
+    ));
 
     // Fas C.12: Per-steg timing i svaret
     let mut result_value = serde_json::json!({
@@ -3350,8 +3357,24 @@ fn build_router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
 }
 
+/// Logga aktuell RSS (Resident Set Size) från /proc/self/statm
+fn log_rss(label: &str) {
+    if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
+        let parts: Vec<&str> = statm.split_whitespace().collect();
+        if parts.len() >= 2 {
+            // parts[1] = RSS i sidor (4 KB/sida på x86_64)
+            if let Ok(rss_pages) = parts[1].parse::<u64>() {
+                let rss_mb = rss_pages * 4 / 1024;
+                eprintln!("[MEM] {label}: {rss_mb} MB RSS");
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    log_rss("startup");
+
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -3364,12 +3387,15 @@ async fn main() {
 
     // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
     aether_agent::vision_backend::warmup_cdp_background();
+    log_rss("after CDP warmup init");
 
     // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
     #[cfg(feature = "vision")]
     let vision_model = load_vision_model().await;
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
+    log_rss("after vision model load");
+
     let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),

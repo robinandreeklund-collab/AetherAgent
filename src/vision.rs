@@ -308,17 +308,19 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
 /// Load an ONNX model into an ORT session (expensive — call once, reuse the result).
 ///
 /// Konfigurerar ONNX Runtime med:
-/// - Graph optimization level ALL (op fusion, constant folding)
-/// - Inter-op parallelism
-/// - Optimerad tråd-pool
+/// - Graph optimization Level1 (basic op fusion, låg minnesanvändning)
+/// - Minimal tråd-pool (1+1) — undviker ORT memory arena-explosion
+///
+/// Level3 + 4+2 trådar orsakade ~500MB+ ORT-allokering. Level1 + 1+1
+/// ger lägre latens-overhead men drastiskt lägre minnesfotavtryck.
 pub fn load_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
     let session = ort::session::Session::builder()
         .map_err(|e| format!("ORT session builder: {e}"))?
-        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level1)
         .map_err(|e| format!("ORT optimization level: {e}"))?
-        .with_intra_threads(4)
+        .with_intra_threads(1)
         .map_err(|e| format!("ORT intra threads: {e}"))?
-        .with_inter_threads(2)
+        .with_inter_threads(1)
         .map_err(|e| format!("ORT inter threads: {e}"))?
         .commit_from_memory(model_bytes)
         .map_err(|e| format!("ORT model load: {e}"))?;
