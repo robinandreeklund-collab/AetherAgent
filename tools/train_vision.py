@@ -3707,6 +3707,740 @@ def _pct_change(baseline: float, final: float) -> str:
     return f"{arrow} {pct:+.1f}%"
 
 
+# ---------------------------------------------------------------------------
+# Benchmarks — automated validation against standard GUI grounding datasets
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_REGISTRY = {
+    "screenspot-v2": {
+        "name": "ScreenSpot-v2",
+        "hf_dataset": "Voxel51/ScreenSpot-v2",
+        "size_hint": "~1.4 GB",
+        "samples": 1272,
+        "description": "Standard GUI grounding eval — web, desktop, mobile. "
+                       "Normalized [x,y,w,h] bboxar, click accuracy.",
+        "metric": "click_accuracy",
+        "platforms": ["web", "desktop", "mobile"],
+    },
+    "screenspot-pro": {
+        "name": "ScreenSpot-Pro",
+        "hf_dataset": "Voxel51/ScreenSpot-Pro",
+        "size_hint": "~2 GB",
+        "samples": 1581,
+        "description": "Svår benchmark — professionella appar, element = 0.07% av bild. "
+                       "23 appar, 5 branscher.",
+        "metric": "click_accuracy",
+        "platforms": ["desktop"],
+    },
+    "groundui-18k": {
+        "name": "GroundUI-18K",
+        "hf_dataset": "Voxel51/GroundUI-18k",
+        "size_hint": "~5 GB",
+        "samples": 18026,
+        "description": "Cross-platform grounding — 18K samples från Mind2Web, OmniACT, "
+                       "MoTIF, ScreenSpot, AgentStudio. ICLR 2025.",
+        "metric": "click_accuracy",
+        "platforms": ["web", "desktop", "mobile"],
+    },
+    "ui-vision": {
+        "name": "ServiceNow UI-Vision",
+        "hf_dataset": "ServiceNow/ui-vision",
+        "size_hint": "~3 GB",
+        "samples": 5000,
+        "description": "83 desktop-appar, MIT-licens. Element grounding + layout grounding. "
+                       "ICML 2025.",
+        "metric": "map_and_click",
+        "platforms": ["desktop"],
+    },
+}
+
+
+def download_benchmark(name: str, output_dir: Path) -> Path:
+    """Ladda ner ett benchmark-dataset från HuggingFace.
+
+    Returns:
+        Sökväg till nedladdat dataset
+    """
+    if name not in _BENCHMARK_REGISTRY:
+        log(f"Okänt benchmark: {name}", "ERR")
+        log(f"Tillgängliga: {', '.join(_BENCHMARK_REGISTRY.keys())}", "INFO")
+        sys.exit(1)
+
+    info = _BENCHMARK_REGISTRY[name]
+    hf_name = info["hf_dataset"]
+    bench_dir = output_dir / f"benchmark_{name}"
+    bench_dir.mkdir(parents=True, exist_ok=True)
+
+    marker = bench_dir / ".benchmark_download_complete"
+    if marker.exists():
+        log(f"Benchmark {info['name']} redan nedladdat: {bench_dir}", "OK")
+        return bench_dir
+
+    log(f"Laddar ner benchmark: {info['name']}", "STEP")
+    log(f"  Dataset: {hf_name}", "INFO")
+    log(f"  Storlek: {info['size_hint']}", "INFO")
+    log(f"  Samples: ~{info['samples']}", "INFO")
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        log("Installerar 'huggingface_hub'...", "INFO")
+        run(f"{sys.executable} -m pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+
+    snapshot_dir = bench_dir / "snapshot"
+    try:
+        snapshot_download(
+            repo_id=hf_name,
+            repo_type="dataset",
+            local_dir=str(snapshot_dir),
+        )
+    except Exception as e:
+        log(f"snapshot_download misslyckades: {e}", "WARN")
+        log("Faller tillbaka på load_dataset()...", "WARN")
+
+    marker.touch()
+    log(f"Benchmark nedladdat: {bench_dir}", "OK")
+    return bench_dir
+
+
+def _load_benchmark_samples(bench_dir: Path, bench_name: str) -> list[dict]:
+    """Ladda benchmark-samples till en enhetlig lista.
+
+    Returnerar lista av dicts med:
+        image: PIL.Image
+        bbox: [x_center, y_center, w, h] (normaliserat 0-1)
+        instruction: str
+        platform: str
+        label_type: str (text/icon)
+    """
+    from PIL import Image as PILImage
+    import io
+
+    info = _BENCHMARK_REGISTRY[bench_name]
+    hf_name = info["hf_dataset"]
+    snapshot_dir = bench_dir / "snapshot"
+
+    # Försök FiftyOne-format (samples.json) — ScreenSpot/GroundUI använder detta
+    samples_json = snapshot_dir / "samples.json"
+    if samples_json.exists():
+        return _load_fiftyone_benchmark(snapshot_dir, samples_json, bench_name)
+
+    # Fallback: load_dataset via HuggingFace
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        run(f"{sys.executable} -m pip install datasets")
+        from datasets import load_dataset
+
+    try:
+        if snapshot_dir.exists():
+            ds = load_dataset(str(snapshot_dir), trust_remote_code=True)
+        else:
+            ds = load_dataset(hf_name, trust_remote_code=True)
+    except Exception as e:
+        log(f"Kunde inte ladda benchmark {bench_name}: {e}", "ERR")
+        return []
+
+    # Hämta split
+    split_name = "test" if "test" in ds else ("train" if "train" in ds else list(ds.keys())[0])
+    split = ds[split_name]
+    columns = split.column_names
+    log(f"  Benchmark split: {split_name}, {len(split)} samples", "INFO")
+    log(f"  Kolumner: {columns}", "INFO")
+
+    # Detektera kolumner
+    img_col = None
+    for c in ("image", "screenshot", "img"):
+        if c in columns:
+            img_col = c
+            break
+
+    samples = []
+    for idx, row in enumerate(split):
+        img = None
+        if img_col and row.get(img_col) is not None:
+            val = row[img_col]
+            if isinstance(val, PILImage.Image):
+                img = val
+            elif isinstance(val, dict) and "bytes" in val:
+                img = PILImage.open(io.BytesIO(val["bytes"]))
+            elif isinstance(val, bytes):
+                img = PILImage.open(io.BytesIO(val))
+        if img is None:
+            continue
+
+        # Extrahera bbox och metadata
+        instruction = row.get("instruction", row.get("text", ""))
+        platform = row.get("data_source", row.get("platform", "unknown"))
+        label_type = row.get("label", row.get("type", "unknown"))
+
+        # Hitta bbox — varierande kolumnnamn
+        bbox = None
+        for c in ("bbox", "bounding_box", "box", "target"):
+            if c in columns and row.get(c) is not None:
+                bbox = row[c]
+                break
+
+        # Nested detections (FiftyOne-stil)
+        if bbox is None:
+            for c in ("action_detection", "detections", "detection"):
+                if c in columns and row.get(c) is not None:
+                    det = row[c]
+                    if isinstance(det, dict):
+                        bbox = det.get("bounding_box", det.get("bbox"))
+                        if not label_type or label_type == "unknown":
+                            label_type = det.get("label", "unknown")
+                    elif isinstance(det, list) and det:
+                        d0 = det[0]
+                        if isinstance(d0, dict):
+                            bbox = d0.get("bounding_box", d0.get("bbox"))
+                            if not label_type or label_type == "unknown":
+                                label_type = d0.get("label", "unknown")
+                    break
+
+        if bbox is None or len(bbox) < 4:
+            continue
+
+        # Normalisera bbox till [x_center, y_center, w, h] (0-1)
+        bx, by, bw, bh = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+        img_w, img_h = img.size
+
+        # Kolla om redan normaliserat (alla < 2.0) eller pixlar
+        if bw > 2.0 or bh > 2.0:
+            # Troligen pixlar — normalisera
+            # Kolla om [x1,y1,x2,y2] eller [x,y,w,h]
+            if bw > bx and bh > by:
+                # [x1,y1,x2,y2]
+                bw_real = bw - bx
+                bh_real = bh - by
+                bx_center = (bx + bw / 2) / img_w
+                by_center = (by + bh / 2) / img_h
+                bw_norm = bw_real / img_w
+                bh_norm = bh_real / img_h
+            else:
+                # [x,y,w,h] pixlar
+                bx_center = (bx + bw / 2) / img_w
+                by_center = (by + bh / 2) / img_h
+                bw_norm = bw / img_w
+                bh_norm = bh / img_h
+        else:
+            # Redan normaliserat [x,y,w,h] (FiftyOne/ScreenSpot-stil: top-left + w,h)
+            bx_center = bx + bw / 2
+            by_center = by + bh / 2
+            bw_norm = bw
+            bh_norm = bh
+
+        samples.append({
+            "image": img,
+            "bbox": [bx_center, by_center, bw_norm, bh_norm],
+            "instruction": instruction,
+            "platform": str(platform),
+            "label_type": str(label_type),
+            "img_w": img_w,
+            "img_h": img_h,
+        })
+
+    log(f"  Laddade {len(samples)} benchmark-samples", "OK")
+    return samples
+
+
+def _load_fiftyone_benchmark(snapshot_dir: Path, samples_json: Path,
+                             bench_name: str) -> list[dict]:
+    """Ladda benchmark från FiftyOne samples.json."""
+    import json
+    from PIL import Image as PILImage
+
+    with open(samples_json, "r") as f:
+        data = json.load(f)
+
+    raw_samples = data.get("samples", [])
+    log(f"  FiftyOne: {len(raw_samples)} samples", "INFO")
+
+    samples = []
+    for s in raw_samples:
+        filepath = s.get("filepath", "")
+        img_path = snapshot_dir / filepath
+        if not img_path.exists():
+            # Prova utan leading /
+            img_path = snapshot_dir / filepath.lstrip("/")
+        if not img_path.exists():
+            continue
+
+        try:
+            img = PILImage.open(img_path)
+            img_w, img_h = img.size
+        except Exception:
+            continue
+
+        # Extrahera detection
+        det_field = None
+        for field in ("action_detection", "detections", "ground_truth"):
+            if field in s:
+                det_field = s[field]
+                break
+
+        if det_field is None:
+            continue
+
+        # FiftyOne kan ha nested detections
+        if isinstance(det_field, dict):
+            dets = det_field.get("detections", [det_field])
+        elif isinstance(det_field, list):
+            dets = det_field
+        else:
+            continue
+
+        for det in dets:
+            bbox = det.get("bounding_box")
+            if not bbox or len(bbox) < 4:
+                continue
+
+            bx, by, bw, bh = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+            # FiftyOne: [x, y, w, h] normaliserat (top-left)
+            bx_center = bx + bw / 2
+            by_center = by + bh / 2
+
+            samples.append({
+                "image": img,
+                "bbox": [bx_center, by_center, bw, bh],
+                "instruction": s.get("instruction", ""),
+                "platform": s.get("data_source", s.get("platform", "unknown")),
+                "label_type": det.get("label", "unknown"),
+                "img_w": img_w,
+                "img_h": img_h,
+            })
+
+    log(f"  Laddade {len(samples)} FiftyOne benchmark-samples", "OK")
+    return samples
+
+
+def run_benchmark(model_path: Path, bench_names: list[str], output_dir: Path,
+                  imgsz: int = DEFAULT_IMGSZ, conf: float = 0.25) -> dict:
+    """Kör modellen mot ett eller flera benchmarks och returnera resultat.
+
+    Args:
+        model_path: Sökväg till .pt eller .onnx modell
+        bench_names: Lista av benchmark-namn (eller ["all"])
+        output_dir: Sökväg för nedladdade benchmarks
+        imgsz: Input-storlek för modellen
+        conf: Confidence-tröskel
+
+    Returns:
+        Dict med resultat per benchmark
+    """
+    from ultralytics import YOLO
+
+    if "all" in bench_names:
+        bench_names = list(_BENCHMARK_REGISTRY.keys())
+
+    log(f"Laddar modell: {model_path}", "STEP")
+    model = YOLO(str(model_path))
+
+    all_results = {}
+
+    for bench_name in bench_names:
+        if bench_name not in _BENCHMARK_REGISTRY:
+            log(f"Okänt benchmark: {bench_name}, hoppar över", "WARN")
+            continue
+
+        info = _BENCHMARK_REGISTRY[bench_name]
+        log(f"\n{'═' * 60}", "INFO")
+        log(f"Benchmark: {info['name']}", "STEP")
+        log(f"{'═' * 60}", "INFO")
+
+        # Ladda ner om det behövs
+        bench_dir = download_benchmark(bench_name, output_dir)
+
+        # Ladda samples
+        samples = _load_benchmark_samples(bench_dir, bench_name)
+        if not samples:
+            log(f"Inga samples laddade för {bench_name}", "WARN")
+            all_results[bench_name] = {"error": "no_samples"}
+            continue
+
+        # Kör inference på varje sample
+        results = _evaluate_benchmark(model, samples, info, imgsz, conf)
+        all_results[bench_name] = results
+
+        # Visa snabbresultat
+        _print_benchmark_summary(bench_name, info, results)
+
+    return all_results
+
+
+def _evaluate_benchmark(model, samples: list[dict], info: dict,
+                        imgsz: int, conf: float) -> dict:
+    """Kör YOLO-modellen mot benchmark-samples och beräkna metriker.
+
+    Beräknar:
+    - Click accuracy (punkt-i-box): modellens center-prediction i GT bbox
+    - IoU (Intersection over Union): genomsnittlig bbox-overlap
+    - mAP-liknande: andel detections med IoU > tröskel
+    - Per-plattform och per-label breakdown
+    """
+    total = len(samples)
+    click_correct = 0
+    iou_scores = []
+    iou_at_50 = 0  # IoU > 0.5
+    iou_at_25 = 0  # IoU > 0.25
+
+    # Per-plattform och per-label tracking
+    platform_stats = {}
+    label_stats = {}
+
+    for idx, sample in enumerate(samples):
+        if idx % 200 == 0 and idx > 0:
+            pct = idx * 100 // total
+            log(f"  [{pct:3d}%] {idx}/{total} samples evaluerade...", "INFO")
+
+        img = sample["image"]
+        gt_bbox = sample["bbox"]  # [x_center, y_center, w, h] normaliserat
+        platform = sample.get("platform", "unknown")
+        label_type = sample.get("label_type", "unknown")
+
+        # Kör YOLO inference
+        try:
+            results = model.predict(img, imgsz=imgsz, conf=conf, verbose=False)
+        except Exception:
+            continue
+
+        if not results or len(results) == 0:
+            # Ingen detection — miss
+            iou_scores.append(0.0)
+            _update_stats(platform_stats, platform, False, 0.0)
+            _update_stats(label_stats, label_type, False, 0.0)
+            continue
+
+        # Hitta bästa matchande detection (högst IoU med GT)
+        best_iou = 0.0
+        best_det_center = None
+        img_w, img_h = sample["img_w"], sample["img_h"]
+
+        for result in results:
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
+                continue
+
+            for i in range(len(boxes)):
+                # YOLO ger [x1,y1,x2,y2] i pixlar
+                xyxy = boxes.xyxy[i].cpu().numpy()
+                x1, y1, x2, y2 = xyxy
+
+                # Normalisera till [x_center, y_center, w, h]
+                det_xc = ((x1 + x2) / 2) / img_w
+                det_yc = ((y1 + y2) / 2) / img_h
+                det_w = (x2 - x1) / img_w
+                det_h = (y2 - y1) / img_h
+
+                iou = _compute_iou(
+                    gt_bbox,
+                    [det_xc, det_yc, det_w, det_h]
+                )
+                if iou > best_iou:
+                    best_iou = iou
+                    best_det_center = (det_xc, det_yc)
+
+        # Click accuracy: modellens center inom GT bbox?
+        click_hit = False
+        if best_det_center is not None:
+            gt_xc, gt_yc, gt_w, gt_h = gt_bbox
+            gt_x1 = gt_xc - gt_w / 2
+            gt_y1 = gt_yc - gt_h / 2
+            gt_x2 = gt_xc + gt_w / 2
+            gt_y2 = gt_yc + gt_h / 2
+            px, py = best_det_center
+            if gt_x1 <= px <= gt_x2 and gt_y1 <= py <= gt_y2:
+                click_hit = True
+                click_correct += 1
+
+        iou_scores.append(best_iou)
+        if best_iou >= 0.50:
+            iou_at_50 += 1
+        if best_iou >= 0.25:
+            iou_at_25 += 1
+
+        _update_stats(platform_stats, platform, click_hit, best_iou)
+        _update_stats(label_stats, label_type, click_hit, best_iou)
+
+    # Beräkna aggregerade metriker
+    avg_iou = sum(iou_scores) / max(len(iou_scores), 1)
+
+    return {
+        "total_samples": total,
+        "evaluated": len(iou_scores),
+        "click_accuracy": click_correct / max(len(iou_scores), 1),
+        "click_correct": click_correct,
+        "avg_iou": avg_iou,
+        "iou_at_50": iou_at_50 / max(len(iou_scores), 1),
+        "iou_at_25": iou_at_25 / max(len(iou_scores), 1),
+        "platform_breakdown": _finalize_stats(platform_stats),
+        "label_breakdown": _finalize_stats(label_stats),
+    }
+
+
+def _compute_iou(box_a: list, box_b: list) -> float:
+    """Beräkna IoU mellan två [x_center, y_center, w, h] bboxar (normaliserade)."""
+    ax, ay, aw, ah = box_a
+    bx, by, bw, bh = box_b
+
+    a_x1, a_y1 = ax - aw / 2, ay - ah / 2
+    a_x2, a_y2 = ax + aw / 2, ay + ah / 2
+    b_x1, b_y1 = bx - bw / 2, by - bh / 2
+    b_x2, b_y2 = bx + bw / 2, by + bh / 2
+
+    inter_x1 = max(a_x1, b_x1)
+    inter_y1 = max(a_y1, b_y1)
+    inter_x2 = min(a_x2, b_x2)
+    inter_y2 = min(a_y2, b_y2)
+
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+    a_area = aw * ah
+    b_area = bw * bh
+    union_area = a_area + b_area - inter_area
+
+    if union_area <= 0:
+        return 0.0
+    return inter_area / union_area
+
+
+def _update_stats(stats: dict, key: str, click_hit: bool, iou: float):
+    """Uppdatera per-kategori statistik."""
+    if key not in stats:
+        stats[key] = {"total": 0, "click_correct": 0, "iou_sum": 0.0}
+    stats[key]["total"] += 1
+    if click_hit:
+        stats[key]["click_correct"] += 1
+    stats[key]["iou_sum"] += iou
+
+
+def _finalize_stats(stats: dict) -> dict:
+    """Beräkna slutliga metriker per kategori."""
+    result = {}
+    for key, s in stats.items():
+        total = s["total"]
+        result[key] = {
+            "total": total,
+            "click_accuracy": s["click_correct"] / max(total, 1),
+            "avg_iou": s["iou_sum"] / max(total, 1),
+        }
+    return result
+
+
+def _print_benchmark_summary(bench_name: str, info: dict, results: dict):
+    """Visa benchmark-resultat i terminalen."""
+    if "error" in results:
+        log(f"  {info['name']}: FEL — {results['error']}", "ERR")
+        return
+
+    print()
+    print(f"  ┌{'─' * 56}┐")
+    print(f"  │  {info['name']:^52}  │")
+    print(f"  ├{'─' * 56}┤")
+    print(f"  │  {'Metric':<28} {'Värde':>10} {'Samples':>12}  │")
+    print(f"  ├{'─' * 56}┤")
+
+    ca = results["click_accuracy"]
+    ai = results["avg_iou"]
+    i50 = results["iou_at_50"]
+    i25 = results["iou_at_25"]
+    n = results["evaluated"]
+
+    print(f"  │  {'Click Accuracy':<28} {ca:>9.1%} {n:>12}  │")
+    print(f"  │  {'Avg IoU':<28} {ai:>10.4f} {n:>12}  │")
+    print(f"  │  {'IoU ≥ 0.50':<28} {i50:>9.1%} {n:>12}  │")
+    print(f"  │  {'IoU ≥ 0.25':<28} {i25:>9.1%} {n:>12}  │")
+    print(f"  └{'─' * 56}┘")
+
+    # Per-plattform breakdown
+    platform_data = results.get("platform_breakdown", {})
+    if len(platform_data) > 1:
+        print()
+        print(f"  Per plattform:")
+        print(f"  {'Platform':<16} {'Click Acc':>10} {'Avg IoU':>10} {'N':>8}")
+        print(f"  {'─' * 46}")
+        for plat, ps in sorted(platform_data.items()):
+            print(f"  {plat:<16} {ps['click_accuracy']:>9.1%} {ps['avg_iou']:>10.4f} {ps['total']:>8}")
+
+    # Per-label breakdown
+    label_data = results.get("label_breakdown", {})
+    if len(label_data) > 1:
+        print()
+        print(f"  Per label-typ:")
+        print(f"  {'Label':<16} {'Click Acc':>10} {'Avg IoU':>10} {'N':>8}")
+        print(f"  {'─' * 46}")
+        for lbl, ls in sorted(label_data.items()):
+            print(f"  {lbl:<16} {ls['click_accuracy']:>9.1%} {ls['avg_iou']:>10.4f} {ls['total']:>8}")
+
+    print()
+
+
+def generate_benchmark_report(model_path: Path, all_results: dict,
+                              version: str, output_dir: Path) -> Path:
+    """Generera fullständig benchmark-rapport (JSON + Markdown + terminal).
+
+    Sparar:
+      - benchmark-report-{version}.json — maskinläsbar
+      - benchmark-report-{version}.md  — visuell rapport
+
+    Returns:
+        Sökväg till JSON-rapporten
+    """
+    import json
+
+    report = {
+        "version": version,
+        "model": str(model_path),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "benchmarks": {},
+    }
+
+    # Samla resultat
+    for bench_name, results in all_results.items():
+        if "error" in results:
+            report["benchmarks"][bench_name] = {"error": results["error"]}
+            continue
+
+        info = _BENCHMARK_REGISTRY.get(bench_name, {})
+        report["benchmarks"][bench_name] = {
+            "name": info.get("name", bench_name),
+            "click_accuracy": results["click_accuracy"],
+            "avg_iou": results["avg_iou"],
+            "iou_at_50": results["iou_at_50"],
+            "iou_at_25": results["iou_at_25"],
+            "total_samples": results["total_samples"],
+            "evaluated": results["evaluated"],
+            "platform_breakdown": results.get("platform_breakdown", {}),
+            "label_breakdown": results.get("label_breakdown", {}),
+        }
+
+    # Sammanfattad score (genomsnitt av click accuracy över alla benchmarks)
+    valid_scores = [
+        r["click_accuracy"] for r in report["benchmarks"].values()
+        if isinstance(r, dict) and "click_accuracy" in r
+    ]
+    report["overall_click_accuracy"] = (
+        sum(valid_scores) / len(valid_scores) if valid_scores else 0
+    )
+
+    # Spara JSON
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / f"benchmark-report-{version}.json"
+    with open(json_path, "w") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    # Generera Markdown
+    md_path = output_dir / f"benchmark-report-{version}.md"
+    md_lines = [
+        f"# Benchmark Report — {version}",
+        "",
+        f"**Modell:** `{model_path}`",
+        f"**Datum:** {report['timestamp']}",
+        f"**Overall Click Accuracy:** {report['overall_click_accuracy']:.1%}",
+        "",
+        "---",
+        "",
+        "## Sammanfattning",
+        "",
+        "| Benchmark | Click Accuracy | Avg IoU | IoU≥0.50 | IoU≥0.25 | Samples |",
+        "|-----------|---------------|---------|----------|----------|---------|",
+    ]
+
+    for bench_name, r in report["benchmarks"].items():
+        if "error" in r:
+            md_lines.append(f"| {bench_name} | ERROR | — | — | — | — |")
+            continue
+        md_lines.append(
+            f"| {r['name']} "
+            f"| {r['click_accuracy']:.1%} "
+            f"| {r['avg_iou']:.4f} "
+            f"| {r['iou_at_50']:.1%} "
+            f"| {r['iou_at_25']:.1%} "
+            f"| {r['evaluated']} |"
+        )
+
+    # Per-benchmark detaljer
+    for bench_name, r in report["benchmarks"].items():
+        if "error" in r:
+            continue
+
+        md_lines.extend([
+            "",
+            "---",
+            "",
+            f"## {r['name']}",
+            "",
+        ])
+
+        # Plattform
+        pf = r.get("platform_breakdown", {})
+        if pf:
+            md_lines.extend([
+                "### Per plattform",
+                "",
+                "| Platform | Click Accuracy | Avg IoU | N |",
+                "|----------|---------------|---------|---|",
+            ])
+            for plat, ps in sorted(pf.items()):
+                md_lines.append(
+                    f"| {plat} | {ps['click_accuracy']:.1%} "
+                    f"| {ps['avg_iou']:.4f} | {ps['total']} |"
+                )
+            md_lines.append("")
+
+        # Label-typ
+        lf = r.get("label_breakdown", {})
+        if lf:
+            md_lines.extend([
+                "### Per element-typ",
+                "",
+                "| Type | Click Accuracy | Avg IoU | N |",
+                "|------|---------------|---------|---|",
+            ])
+            for lbl, ls in sorted(lf.items()):
+                md_lines.append(
+                    f"| {lbl} | {ls['click_accuracy']:.1%} "
+                    f"| {ls['avg_iou']:.4f} | {ls['total']} |"
+                )
+            md_lines.append("")
+
+    md_lines.extend([
+        "",
+        "---",
+        "",
+        f"*Genererad av AetherAgent Vision Training Pipeline — {report['timestamp']}*",
+    ])
+
+    md_path.write_text("\n".join(md_lines))
+
+    # Terminal-sammanfattning
+    print("\n" + "═" * 70)
+    log("BENCHMARK REPORT", "OK")
+    print("═" * 70)
+    print(f"  Model:     {model_path}")
+    print(f"  Version:   {version}")
+    print(f"  Overall:   {report['overall_click_accuracy']:.1%} click accuracy")
+    print()
+    print(f"  {'Benchmark':<24} {'Click Acc':>10} {'Avg IoU':>10} {'Samples':>10}")
+    print(f"  {'─' * 56}")
+    for bench_name, r in report["benchmarks"].items():
+        if "error" in r:
+            print(f"  {bench_name:<24} {'ERROR':>10} {'—':>10} {'—':>10}")
+        else:
+            print(
+                f"  {r['name']:<24} "
+                f"{r['click_accuracy']:>9.1%} "
+                f"{r['avg_iou']:>10.4f} "
+                f"{r['evaluated']:>10}"
+            )
+    print("═" * 70)
+    print(f"  JSON:     {json_path}")
+    print(f"  Markdown: {md_path}")
+    print()
+
+    return json_path
+
+
 def generate_report(
     dataset_dir: Path,
     best_pt: Path,
@@ -4124,6 +4858,11 @@ Examples:
 
   # Interactive wizard:
   python tools/train_vision.py --interactive
+
+  # Benchmark against standard datasets:
+  python tools/train_vision.py --benchmark all --model-pt runs/detect/best.pt --version v1
+  python tools/train_vision.py --benchmark screenspot-v2 screenspot-pro --version v2
+  python tools/train_vision.py --benchmark groundui-18k --benchmark-conf 0.15 --version v3
         """,
     )
 
@@ -4179,6 +4918,17 @@ Examples:
                         help="ONNX export format: fp32 (full), fp16 (recommended), int8 (smallest). "
                              "If omitted, interactive prompt shown after training.")
     parser.add_argument("--verify-only", type=Path, help="Only verify ONNX model against API")
+    parser.add_argument("--benchmark", type=str, nargs="+",
+                        metavar="NAME",
+                        help="Run model against benchmark(s). Names: "
+                             "screenspot-v2, screenspot-pro, groundui-18k, ui-vision, all. "
+                             "Requires --model-pt or uses latest best.pt.")
+    parser.add_argument("--model-pt", type=Path,
+                        help="Path to .pt model for benchmark evaluation")
+    parser.add_argument("--benchmark-conf", type=float, default=0.25,
+                        help="Confidence threshold for benchmark inference (default: 0.25)")
+    parser.add_argument("--benchmark-report-dir", type=Path, default=Path("reports"),
+                        help="Output directory for benchmark reports (default: reports/)")
 
     args = parser.parse_args()
 
@@ -4217,6 +4967,47 @@ Examples:
     if args.verify_only:
         ensure_deps()
         verify_with_server(args.verify_only, args.server)
+        return
+
+    # Mode: Benchmark
+    if args.benchmark:
+        ensure_deps()
+
+        # Hitta modell
+        model_pt = args.model_pt
+        if model_pt is None:
+            # Sök senaste best.pt
+            candidates = sorted(
+                Path("runs").rglob("best.pt"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            ) if Path("runs").exists() else []
+            if not candidates:
+                candidates = sorted(
+                    args.deploy_dir.rglob("*.pt"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                ) if args.deploy_dir.exists() else []
+            if not candidates:
+                log("Ingen modell hittad. Ange --model-pt <sökväg>", "ERR")
+                sys.exit(1)
+            model_pt = candidates[0]
+            log(f"Auto-vald modell: {model_pt}", "INFO")
+
+        bench_dir = Path("dataset")
+        all_results = run_benchmark(
+            model_path=model_pt,
+            bench_names=args.benchmark,
+            output_dir=bench_dir,
+            imgsz=args.imgsz,
+            conf=args.benchmark_conf,
+        )
+        generate_benchmark_report(
+            model_path=model_pt,
+            all_results=all_results,
+            version=args.version,
+            output_dir=args.benchmark_report_dir,
+        )
         return
 
     # Mode: Download dataset + convert + (optionally) train

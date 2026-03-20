@@ -294,11 +294,110 @@ python tools/train_vision.py --merge-datasets \
 | AGUVis Stage 1 | 4.2M samples | `xlangai/aguvis-stage1` | +41% på ScreenSpot-v2 |
 | Explorer-Web | 720K screenshots, 33M element | ACL 2025 | Massivt trajectory-data |
 
-### Benchmarks (validering, ej träning)
+---
 
-| Benchmark | HuggingFace | Vad |
-|-----------|-------------|-----|
-| ScreenSpot-v2 | `Voxel51/ScreenSpot-v2` | Standard GUI-grounding eval |
-| ScreenSpot-Pro | `Voxel51/ScreenSpot-Pro` | Svår: element = 0.07% av bild |
-| GroundUI-18k | `Voxel51/GroundUI-18k` | Cross-platform (ICLR 2025) |
-| ServiceNow/ui-vision | `ServiceNow/ui-vision` | 83 appar, MIT-licens |
+## Benchmarks — automatisk validering
+
+Kör din tränade modell mot standardiserade GUI grounding benchmarks.
+Laddar ner automatiskt, kör inference, och genererar detaljerade rapporter.
+
+### Tillgängliga benchmarks
+
+| Namn | Dataset | Samples | Metric | Beskrivning |
+|------|---------|---------|--------|-------------|
+| `screenspot-v2` | `Voxel51/ScreenSpot-v2` | 1 272 | Click Accuracy | Standard GUI grounding — web, desktop, mobile |
+| `screenspot-pro` | `Voxel51/ScreenSpot-Pro` | 1 581 | Click Accuracy | Svår — professionella appar, element = 0.07% av bild |
+| `groundui-18k` | `Voxel51/GroundUI-18k` | 18 026 | Click Accuracy + IoU | Cross-platform, 5 datakällor (ICLR 2025) |
+| `ui-vision` | `ServiceNow/ui-vision` | ~5 000 | mAP + Click Accuracy | 83 desktop-appar, MIT-licens (ICML 2025) |
+
+### Kommandon
+
+```bash
+# Kör alla benchmarks mot senaste modellen:
+python tools/train_vision.py --benchmark all --version v1
+
+# Specifika benchmarks:
+python tools/train_vision.py --benchmark screenspot-v2 screenspot-pro --version v2
+
+# Ange modell explicit:
+python tools/train_vision.py --benchmark all --model-pt runs/detect/best.pt --version v3
+
+# Lägre confidence-tröskel (hittar fler element, fler false positives):
+python tools/train_vision.py --benchmark groundui-18k --benchmark-conf 0.15 --version v4
+
+# Rapport-katalog:
+python tools/train_vision.py --benchmark all --benchmark-report-dir reports/experiment-1/
+```
+
+### Rapportformat
+
+Varje körning genererar två filer:
+
+**`reports/benchmark-report-{version}.json`** — maskinläsbar:
+```json
+{
+  "version": "v1",
+  "model": "runs/detect/best.pt",
+  "overall_click_accuracy": 0.423,
+  "benchmarks": {
+    "screenspot-v2": {
+      "click_accuracy": 0.45,
+      "avg_iou": 0.31,
+      "iou_at_50": 0.28,
+      "iou_at_25": 0.52,
+      "platform_breakdown": {
+        "web": {"click_accuracy": 0.48, "avg_iou": 0.33, "total": 436},
+        "desktop": {"click_accuracy": 0.41, "avg_iou": 0.28, "total": 334},
+        "mobile": {"click_accuracy": 0.44, "avg_iou": 0.31, "total": 502}
+      },
+      "label_breakdown": {
+        "text": {"click_accuracy": 0.52, "avg_iou": 0.35, "total": 800},
+        "icon": {"click_accuracy": 0.35, "avg_iou": 0.24, "total": 472}
+      }
+    }
+  }
+}
+```
+
+**`reports/benchmark-report-{version}.md`** — visuell rapport med tabeller:
+- Sammanfattning per benchmark
+- Per plattform (web/desktop/mobile)
+- Per element-typ (text/icon)
+- Jämför enkelt mellan versioner
+
+### Metriker
+
+| Metric | Beskrivning | Varför |
+|--------|-------------|--------|
+| **Click Accuracy** | Andel där modellens center-punkt träffar GT bbox | Standard ScreenSpot-metric — mäter "kan agenten klicka rätt?" |
+| **Avg IoU** | Genomsnittlig Intersection over Union | Mäter bbox-precision — hur väl matchar detektionens storlek? |
+| **IoU ≥ 0.50** | Andel med IoU > 50% | COCO-standard, strikt bbox-match |
+| **IoU ≥ 0.25** | Andel med IoU > 25% | Tolerant — accepterar ungefärlig position |
+
+### Rekommenderad benchmark-loop
+
+```bash
+# 1. Träna
+python tools/train_vision.py --merge-datasets \
+  dataset/yashjain_raw dataset/showui-web_raw dataset/klarna_raw \
+  --version v1.004 --early-stop
+
+# 2. Benchmarka
+python tools/train_vision.py --benchmark all --version v1.004
+
+# 3. Jämför med förra versionen
+diff reports/benchmark-report-v1.003.json reports/benchmark-report-v1.004.json
+
+# 4. Läs Markdown-rapporten
+cat reports/benchmark-report-v1.004.md
+```
+
+### CLI-flaggor
+
+| Flagga | Default | Beskrivning |
+|--------|---------|-------------|
+| `--benchmark NAME [NAME ...]` | — | Benchmark-namn eller `all` |
+| `--model-pt PATH` | auto (senaste best.pt) | Sökväg till .pt modell |
+| `--benchmark-conf` | 0.25 | Confidence-tröskel |
+| `--benchmark-report-dir` | `reports/` | Rapport-katalog |
+| `--version` | v1 | Versionstagg i rapporter |
