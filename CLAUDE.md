@@ -190,3 +190,5 @@ Types:
 **Fas 14 (Complete)**: Workflow Orchestration — `orchestrator.rs`, multi-page workflow engine with auto-navigation, rollback/retry, step tracking. 8 HTTP endpoints.
 
 **Fas 15 (Complete)**: Streaming Parse — `streaming.rs`, `StreamingParser` with early-stopping at `max_nodes`, depth limiting, relevance filtering. WASM API: `parse_streaming`.
+
+**Fas 16 (Complete)**: Goal-Driven Adaptive DOM Streaming — `stream_state.rs` (StreamState, DecisionLayer, Directive enum), `stream_engine.rs` (StreamEngine with relevance-ranked chunked emission). LLM-directed branch expansion via directives: `expand(node_id)`, `stop`, `next_branch`, `lower_threshold(value)`. 95–99% token savings on real-world pages (10 noder av 372 på SVT-liknande sida). MCP tools: `stream_parse`, `stream_parse_directive`. HTTP endpoints: `/api/stream-parse`, `/api/fetch/stream-parse`, `/api/directive`. WASM API: `stream_parse_adaptive`, `stream_parse_with_directives`.

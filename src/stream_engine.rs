@@ -69,6 +69,9 @@ pub struct StreamParseResult {
     pub goal: String,
     /// URL som parsades
     pub url: String,
+    /// Rendering-tier (BUG-001: inkludera i varje event)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier_used: Option<String>,
 }
 
 /// Sammanfattning av en emitterad chunk
@@ -77,6 +80,28 @@ pub struct ChunkSummary {
     pub chunk_id: u32,
     pub node_count: usize,
     pub nodes_seen: usize,
+}
+
+/// Prioritetskö-entry: (score, index i all_nodes)
+/// Ord: högsta score först (BinaryHeap är max-heap)
+#[derive(PartialEq)]
+struct ScoredEntry {
+    score: f32,
+    index: usize,
+}
+
+impl Eq for ScoredEntry {}
+
+impl PartialOrd for ScoredEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoredEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.score.total_cmp(&other.score)
+    }
 }
 
 /// Stream Engine – kärnan i stream_parse-pipelinen
@@ -90,6 +115,8 @@ pub struct StreamEngine {
     all_nodes: Vec<SemanticNode>,
     /// Index: nod-id → position i all_nodes
     node_index: std::collections::HashMap<u32, usize>,
+    /// Prioritetskö med osända noder, sorterade efter relevans
+    priority_queue: std::collections::BinaryHeap<ScoredEntry>,
 }
 
 impl StreamEngine {
@@ -105,6 +132,7 @@ impl StreamEngine {
             next_id: 0,
             all_nodes: Vec::new(),
             node_index: std::collections::HashMap::new(),
+            priority_queue: std::collections::BinaryHeap::new(),
         }
     }
 
@@ -179,8 +207,16 @@ impl StreamEngine {
             emitted_nodes.extend(chunk_nodes);
         }
 
+        // Steg 4b: Fyll prioritetskön med osända noder
+        for &(idx, score) in &scored {
+            let node = &self.all_nodes[idx];
+            if !self.state.sent_nodes.contains(&node.id) {
+                self.priority_queue.push(ScoredEntry { score, index: idx });
+            }
+        }
+
         // Steg 5: Processa directives (expand etc.)
-        self.process_directives(&scored, &mut emitted_nodes, &mut chunks);
+        self.process_directives(&mut emitted_nodes, &mut chunks);
 
         let parse_ms = start.elapsed().as_millis() as u64;
 
@@ -200,13 +236,13 @@ impl StreamEngine {
             chunks,
             goal: self.decision.goal().to_string(),
             url: url.to_string(),
+            tier_used: None, // Sätts av anroparen vid fetch-pipeline (BUG-001)
         }
     }
 
     /// Processa alla direktiv i kön
     fn process_directives(
         &mut self,
-        scored: &[(usize, f32)],
         emitted: &mut Vec<SemanticNode>,
         chunks: &mut Vec<ChunkSummary>,
     ) {
@@ -223,7 +259,7 @@ impl StreamEngine {
                     self.expand_node(node_id, emitted, chunks);
                 }
                 Directive::NextBranch => {
-                    self.next_branch(scored, emitted, chunks);
+                    self.next_branch(emitted, chunks);
                 }
                 Directive::LowerThreshold { value } => {
                     self.state.relevance_threshold = value.clamp(0.0, 1.0);
@@ -285,27 +321,24 @@ impl StreamEngine {
         }
     }
 
-    /// Hoppa till nästa topprankade nod som inte redan emitterats
-    fn next_branch(
-        &mut self,
-        scored: &[(usize, f32)],
-        emitted: &mut Vec<SemanticNode>,
-        chunks: &mut Vec<ChunkSummary>,
-    ) {
+    /// Hoppa till nästa topprankade noder via prioritetskön (BinaryHeap)
+    fn next_branch(&mut self, emitted: &mut Vec<SemanticNode>, chunks: &mut Vec<ChunkSummary>) {
         let mut chunk_nodes: Vec<SemanticNode> = Vec::new();
-        for &(idx, score) in scored {
+
+        while let Some(entry) = self.priority_queue.pop() {
             if self.state.is_done() || chunk_nodes.len() >= self.config.chunk_size {
                 break;
             }
-            let node = &self.all_nodes[idx];
+            let node = &self.all_nodes[entry.index];
+            // Skippa redan emitterade (kan ha emitterats via expand)
             if self.state.sent_nodes.contains(&node.id) {
                 continue;
             }
-            if self.state.should_emit(score) {
+            if self.state.should_emit(entry.score) {
                 self.state.mark_sent(node.id);
-                self.state.update_top_relevance(score);
+                self.state.update_top_relevance(entry.score);
                 let mut n = node.clone();
-                n.relevance = score;
+                n.relevance = entry.score;
                 n.children = Vec::new();
                 chunk_nodes.push(n);
             }
