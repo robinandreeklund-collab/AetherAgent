@@ -266,20 +266,16 @@ Latency:        31ms
 > - `determine_tier_hint_with_url()` kollar URL mot kända SPA-domäner (vercel.app, etc.)
 > - `tier_hint_from_captures()` kollar XHR-URL:er efter `/api/chart`, `/api/graph`, `graphql`
 >
-> **`skip_blitz_count: 6`** bekräftar att RequiresJs-hinten triggas korrekt!
-> Men `cdp_available=false` i `TieredBackend::default()` eftersom Chrome inte
-> hittas via `std::process::Command::new("chromium")` i PATH.
+> **`skip_blitz_count: 6`** bekräftade att RequiresJs-hinten triggades korrekt.
 >
-> `warmup_cdp_background()` startar Chrome via `headless_chrome` crate (som
-> laddar ner sin egen Chromium-binary), men `global_tiered_backend()` (OnceLock)
-> initieras **innan** CDP-warmup hinner köra.
+> **FIXAT (commit 43dc11e):** `cdp_available` är nu `AtomicBool` med callback-pattern.
+> `register_cdp_ready_hook()` registrerar en callback innan `warmup_cdp_background()`.
+> När Chrome initialiserats anropas callbacken och sätter `cdp_available=true` på
+> den globala `TieredBackend`. Om backend inte initierats ännu kollar `default()`
+> `CDP_BROWSER` OnceLock direkt. Båda fallen ger korrekt `cdp_available=true`.
 >
-> **Fix:** Servern bör antingen:
-> 1. Initiera `global_tiered_backend` efter CDP warmup
-> 2. Eller lägga till en `set_cdp_available()` som uppdaterar runtime-state
->
-> **I produktion:** Blitz hanterar all server-rendered HTML (~40-70ms).
-> CDP aktiveras automatiskt när Chrome finns i PATH + feature flag.
+> **Resultat:** RequiresJs-requests routas nu till CDP (Headless Chrome) istället
+> för att falla tillbaka till Blitz.
 
 ---
 
@@ -448,9 +444,10 @@ Långsammaste: 2418ms (fetch-vision, inkl. full pipeline)
 ### CDP-status:
 - Feature-flagga `cdp` är **kompilerad** i servern
 - `warmup_cdp_background()` körs vid start → "Chrome ready"
-- **Känt problem:** `global_tiered_backend()` (OnceLock) initieras före CDP warmup → `cdp_available=false`
-- `skip_blitz_count=6` visar att RequiresJs-detektion fungerar korrekt
-- **Fix behövs:** Initiera TieredBackend efter CDP warmup, eller lazy-evaluera cdp_available
+- **FIXAT (commit 43dc11e):** `cdp_available` är nu `AtomicBool` som uppdateras via callback efter Chrome warmup
+- `register_cdp_ready_hook()` anropas före warmup i server-main
+- `TieredBackend::default()` kollar även `CDP_BROWSER` OnceLock direkt (fallback)
+- `skip_blitz_count` → RequiresJs-requests routas nu korrekt till CDP
 
 ### Vision-status:
 - YOLOv8-nano ONNX-modell finns: `aether-ui-latest.onnx`
@@ -462,9 +459,9 @@ Långsammaste: 2418ms (fetch-vision, inkl. full pipeline)
 
 | # | Prioritet | Issue | Status |
 |---|-----------|-------|--------|
-| 1 | HÖG | CDP OnceLock-timing: `cdp_available=false` trots Chrome ready | **Identifierat** |
+| 1 | ~~HÖG~~ | ~~CDP OnceLock-timing: `cdp_available=false` trots Chrome ready~~ | **FIXAT** (43dc11e) |
 | 2 | MEDEL | Vision-modell kräver manuell env-var | **By design** |
-| 3 | LÅG | `ERROR: Unexpected token` i MCP stdio | **Kosmetiskt** |
+| 3 | LÅG | `ERROR: Unexpected token` i MCP — klientsidan (ej serverbug) | **Kosmetiskt** |
 
 ---
 
