@@ -3453,6 +3453,7 @@ fn build_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
+        .route("/api/memory-stats", get(memory_stats_handler))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
@@ -3604,18 +3605,82 @@ fn build_router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
 }
 
-/// Logga aktuell RSS (Resident Set Size) från /proc/self/statm
-fn log_rss(label: &str) {
+/// Hämta aktuell minnesstatistik från /proc/self/statm och /proc/self/status
+fn get_memory_stats() -> MemoryStats {
+    let mut stats = MemoryStats::default();
+
+    // RSS + VSZ från /proc/self/statm (snabbast)
     if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
         let parts: Vec<&str> = statm.split_whitespace().collect();
         if parts.len() >= 2 {
-            // parts[1] = RSS i sidor (4 KB/sida på x86_64)
+            if let Ok(vsz_pages) = parts[0].parse::<u64>() {
+                stats.vsz_mb = vsz_pages * 4 / 1024;
+            }
             if let Ok(rss_pages) = parts[1].parse::<u64>() {
-                let rss_mb = rss_pages * 4 / 1024;
-                eprintln!("[MEM] {label}: {rss_mb} MB RSS");
+                stats.rss_mb = rss_pages * 4 / 1024;
             }
         }
     }
+
+    // Detaljerad info från /proc/self/status
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(val) = line.strip_prefix("VmHWM:") {
+                stats.peak_rss_mb = parse_kb_value(val) / 1024;
+            } else if let Some(val) = line.strip_prefix("VmSwap:") {
+                stats.swap_mb = parse_kb_value(val) / 1024;
+            } else if let Some(val) = line.strip_prefix("Threads:") {
+                stats.threads = val.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    stats
+}
+
+/// Parsa "   12345 kB" → 12345
+fn parse_kb_value(s: &str) -> u64 {
+    s.trim().trim_end_matches("kB").trim().parse().unwrap_or(0)
+}
+
+/// Logga aktuell RSS (Resident Set Size) från /proc/self/statm
+fn log_rss(label: &str) {
+    let stats = get_memory_stats();
+    eprintln!(
+        "[MEM] {label}: {rss} MB RSS, {peak} MB peak, {vsz} MB VSZ, {swap} MB swap, {threads} threads",
+        rss = stats.rss_mb,
+        peak = stats.peak_rss_mb,
+        vsz = stats.vsz_mb,
+        swap = stats.swap_mb,
+        threads = stats.threads,
+    );
+}
+
+/// Minnesstatistik som JSON
+#[derive(Default, Serialize)]
+struct MemoryStats {
+    rss_mb: u64,
+    peak_rss_mb: u64,
+    vsz_mb: u64,
+    swap_mb: u64,
+    threads: u64,
+}
+
+/// GET /api/memory-stats — returnera aktuell minnesanvändning
+async fn memory_stats_handler() -> impl IntoResponse {
+    let stats = get_memory_stats();
+    (StatusCode::OK, Json(stats))
+}
+
+/// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
+fn spawn_memory_monitor() {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            log_rss("periodic");
+        }
+    });
 }
 
 #[tokio::main]
@@ -3642,6 +3707,9 @@ async fn main() {
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
     log_rss("after vision model load");
+
+    // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
+    spawn_memory_monitor();
 
     let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
