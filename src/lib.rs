@@ -44,12 +44,12 @@ fn global_tiered_backend() -> &'static vision_backend::TieredBackend {
 /// Anropas före warmup_cdp_background() i server-main.
 pub fn register_cdp_ready_hook() {
     vision_backend::on_cdp_ready(|| {
-        // Om backend redan initierats → uppdatera cdp_available
-        if let Some(backend) = GLOBAL_TIERED_BACKEND.get() {
-            backend.set_cdp_available(true);
-            eprintln!("CDP: global_tiered_backend updated — cdp_available=true");
-        }
-        // Om inte initierad ännu → default() kommer se CDP_BROWSER.get().is_some() == true
+        // Force-initiera backend om den inte finns ännu, sedan sätt cdp_available.
+        // Vid detta läge har CDP_BROWSER precis satts → default() ser is_some()==true,
+        // men vi kör set_cdp_available(true) som säkerhetsnät ändå.
+        let backend = global_tiered_backend();
+        backend.set_cdp_available(true);
+        eprintln!("CDP: global_tiered_backend updated — cdp_available=true");
     });
 }
 
