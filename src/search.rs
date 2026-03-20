@@ -72,23 +72,34 @@ fn hex_digit(nibble: u8) -> char {
 // ─── Resultat-extraktion ─────────────────────────────────────────────────────
 
 /// Extrahera sökresultat från semantiska noder.
-/// DDG HTML-sidan har ett fast schema: heading/link med DDG-redirect-URL
-/// följt av text/cta med snippet.
+///
+/// DDG HTML har tre typer av noder per resultat:
+/// 1. heading/link med DDG redirect-URL → titel + riktig URL
+/// 2. link med samma redirect men label = display-URL → skip (duplikat)
+/// 3. text/paragraph nod → snippet
+///
+/// Depth-first traversering bevarar DDG:s ordning: title → display-url → snippet.
 pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResultEntry> {
-    let flat = flatten_nodes(nodes);
+    let flat = flatten_nodes_dfs(nodes);
     let mut results = Vec::new();
     let mut current: Option<SearchResultEntry> = None;
+    let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for node in &flat {
         let role = node.role.as_str();
         let value = node.value.as_deref().unwrap_or("");
+        let has_ddg_redirect = value.contains("duckduckgo.com/l/?uddg=");
 
-        // DDG-resultat har redirect-URLs i formatet //duckduckgo.com/l/?uddg=ENCODED
-        let is_ddg_link =
-            value.contains("duckduckgo.com/l/?uddg=") || node.label.is_empty() && role == "heading";
+        // Steg 1: Ny titel-länk med DDG redirect
+        if has_ddg_redirect && (role == "heading" || role == "link" || role == "cta") {
+            let real_url = decode_ddg_redirect(value);
 
-        if (role == "heading" || role == "link" || role == "cta") && is_ddg_link {
-            // Spara föregående resultat om vi har ett halvfärdigt
+            // Skip display-URL-dubblett (samma URL, label ser ut som en URL)
+            if seen_urls.contains(&real_url) {
+                continue;
+            }
+
+            // Spara föregående halvfärdigt resultat
             if let Some(prev) = current.take() {
                 if !prev.title.is_empty() {
                     results.push(prev);
@@ -97,7 +108,8 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
                     }
                 }
             }
-            let real_url = decode_ddg_redirect(value);
+
+            seen_urls.insert(real_url.clone());
             let domain = extract_domain(&real_url);
             current = Some(SearchResultEntry {
                 rank: results.len() + 1,
@@ -107,10 +119,20 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
                 snippet: String::new(),
                 confidence: node.relevance,
             });
-        } else if (role == "text" || role == "paragraph" || role == "cta") && current.is_some() {
-            if let Some(ref mut r) = current {
-                if r.snippet.is_empty() && !node.label.is_empty() {
-                    r.snippet = node.label.clone();
+            continue;
+        }
+
+        // Steg 2: Snippet-text (text/paragraph/link utan DDG-redirect)
+        if let Some(ref mut r) = current {
+            if r.snippet.is_empty() && !node.label.is_empty() {
+                let label = node.label.as_str();
+                // Ignorera korta display-URL-liknande labels
+                if label.len() > 20
+                    || (!label.contains("www.")
+                        && !label.contains(".se/")
+                        && !label.contains(".com/"))
+                {
+                    r.snippet = label.to_string();
                     results.push(r.clone());
                     current = None;
                     if results.len() >= top_n {
@@ -121,7 +143,7 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
         }
     }
 
-    // Pusha sista resultat om det finns
+    // Pusha sista resultat
     if let Some(r) = current {
         if !r.title.is_empty() {
             results.push(r);
@@ -131,15 +153,13 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
     results
 }
 
-/// Platta ut nod-träd till en flat lista (breadth-first)
-fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
+/// Platta ut nod-träd till en flat lista (depth-first, pre-order).
+/// Bevarar DOM-ordning: titel → display-url → snippet.
+fn flatten_nodes_dfs(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
     let mut flat = Vec::new();
-    let mut queue: std::collections::VecDeque<&SemanticNode> = nodes.iter().collect();
-    while let Some(node) = queue.pop_front() {
+    for node in nodes {
         flat.push(node);
-        for child in &node.children {
-            queue.push_back(child);
-        }
+        flat.extend(flatten_nodes_dfs(&node.children));
     }
     flat
 }
@@ -390,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flatten_nodes_depth() {
+    fn test_flatten_nodes_dfs_depth() {
         use crate::types::{NodeState, TrustLevel};
 
         let child = SemanticNode {
@@ -423,7 +443,7 @@ mod tests {
         };
 
         let nodes = [parent];
-        let flat = flatten_nodes(&nodes);
+        let flat = flatten_nodes_dfs(&nodes);
         assert_eq!(flat.len(), 2, "Flatten ska ge alla noder inkl barn");
         assert_eq!(flat[0].label, "förälder");
         assert_eq!(flat[1].label, "barn");

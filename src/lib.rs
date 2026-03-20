@@ -1819,16 +1819,12 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
 
     let ddg_url = search::build_ddg_url(query);
 
-    // Kör stream_parse med låg relevance-tröskel för sök-snippets
-    let config = stream_engine::StreamParseConfig {
-        chunk_size: 15,
-        min_relevance: 0.15,
-        max_nodes: 30,
-    };
-    let stream_result = stream_engine::stream_parse(html, &effective_goal, &ddg_url, config);
+    // Full parse — DDG HTML är ~250 noder, stream_parse filtrerar bort snippets
+    let tree = build_tree(html, &effective_goal, &ddg_url);
+    let total_nodes = collect_all_nodes(&tree.nodes).len();
 
-    // Extrahera strukturerade sökresultat
-    let results = search::extract_results(&stream_result.nodes, effective_top_n);
+    // Extrahera strukturerade sökresultat från hela trädet
+    let results = search::extract_results(&tree.nodes, effective_top_n);
 
     // Försök hitta direktsvar
     let (direct_answer, direct_answer_confidence) = search::detect_direct_answer(&results)
@@ -1842,8 +1838,8 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
         direct_answer_confidence,
         source_url: ddg_url,
         parse_ms: now_ms() - start,
-        nodes_seen: stream_result.total_dom_nodes,
-        nodes_emitted: stream_result.nodes_emitted,
+        nodes_seen: total_nodes,
+        nodes_emitted: total_nodes,
     };
 
     match serialize_json(&search_result, 10) {
