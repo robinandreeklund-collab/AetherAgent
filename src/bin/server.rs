@@ -8,7 +8,10 @@
 use axum::{
     extract::{DefaultBodyLimit, Json},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::{get, post},
     Router,
 };
@@ -28,6 +31,10 @@ struct AppState {
     vision_model: Arc<std::sync::Mutex<Option<ort::session::Session>>>,
     #[cfg(not(feature = "vision"))]
     vision_model: Arc<std::sync::Mutex<Option<()>>>,
+    /// Broadcast-kanal för MCP SSE-events (dashboard live feed)
+    mcp_events: Arc<tokio::sync::broadcast::Sender<String>>,
+    /// Ring-buffer med senaste MCP-events för polling-fallback
+    mcp_event_log: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -275,6 +282,7 @@ struct CollabRegisterRequest {
     store_json: String,
     agent_id: String,
     goal: String,
+    #[serde(default = "default_timestamp_ms")]
     timestamp_ms: u64,
 }
 
@@ -284,7 +292,15 @@ struct CollabPublishRequest {
     agent_id: String,
     url: String,
     delta_json: String,
+    #[serde(default = "default_timestamp_ms")]
     timestamp_ms: u64,
+}
+
+fn default_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Deserialize)]
@@ -309,6 +325,61 @@ struct ParseScreenshotRequest {
 struct ParseScreenshotServerModelRequest {
     png_base64: String,
     goal: String,
+}
+
+// ─── Fas 16: Stream Parse request types ─────────────────────────────────────
+
+#[derive(Deserialize)]
+struct StreamParseRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
+}
+
+fn default_top_n() -> usize {
+    10
+}
+
+fn default_min_relevance() -> f32 {
+    0.3
+}
+
+fn default_max_nodes() -> usize {
+    50
+}
+
+#[derive(Deserialize)]
+struct FetchStreamParseRequest {
+    url: String,
+    goal: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct DirectiveRequest {
+    directives: Vec<serde_json::Value>,
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
 }
 
 // ─── Fas 13: Session Management request types ──────────────────────────────
@@ -346,7 +417,17 @@ struct SessionSetTokenRequest {
 #[derive(Deserialize)]
 struct SessionOAuthRequest {
     session_json: String,
-    config: serde_json::Value,
+    /// OAuth config — antingen som nested objekt eller som individuella fält
+    #[serde(default)]
+    config: Option<serde_json::Value>,
+    #[serde(default)]
+    auth_url: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    #[serde(default)]
+    scopes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -669,6 +750,8 @@ async fn root() -> impl IntoResponse {
     <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/plan</span><span class="desc"> — fetch + plan</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/firewall/classify</span><span class="desc"> — L1/L2/L3</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/detect-xhr</span><span class="desc"> — XHR scan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/search</span><span class="desc"> — DDG search (pre-fetched HTML)</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/search</span><span class="desc"> — DDG search (auto-fetch)</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/parse-screenshot</span><span class="desc"> — vision</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/mcp</span><span class="desc"> — MCP endpoint</span></div>
     <div class="ep"><span class="method">GET</span><span class="route">/health</span><span class="desc"> — health check</span></div>
@@ -739,6 +822,8 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/collab/publish": "Publish semantic delta to collab store",
             "POST /api/collab/fetch": "Fetch new deltas for agent",
             "POST /api/detect-xhr": "Scan HTML for XHR/fetch/AJAX endpoints in scripts",
+            "POST /api/search": "Parse pre-fetched DDG HTML into structured search results",
+            "POST /api/fetch/search": "Search via DuckDuckGo: fetch + parse in one call",
             "POST /api/parse-screenshot": "Analyze screenshot with YOLOv8-nano vision model",
             "POST /api/session/create": "Create empty session manager",
             "POST /api/session/cookies/add": "Add cookies from Set-Cookie headers",
@@ -1007,6 +1092,7 @@ async fn fetch_raw(Json(req): Json<FetchRawRequest>) -> impl IntoResponse {
 }
 
 async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
+    log_rss(&format!("fetch_parse start: {}", req.url));
     let config = req.config.unwrap_or_default();
 
     if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
@@ -1041,6 +1127,12 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     let xhr_urls = aether_agent::detect_xhr_urls(&fetch_result.body);
 
     let total_time_ms = total_start.elapsed().as_millis() as u64;
+
+    log_rss(&format!(
+        "fetch_parse after parse: {} (body={}KB)",
+        req.url,
+        fetch_result.body_size_bytes / 1024
+    ));
 
     // Fas C.12: Per-steg timing i svaret
     let mut result_value = serde_json::json!({
@@ -1297,6 +1389,303 @@ async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+// ─── Fas 17: DDG Search handlers ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SearchRequest {
+    query: String,
+    html: String,
+    #[serde(default)]
+    top_n: Option<usize>,
+    #[serde(default)]
+    goal: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FetchSearchRequest {
+    query: String,
+    #[serde(default)]
+    top_n: Option<usize>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+    /// Deep fetch: hämta och parsa varje resultat-sida (default: true)
+    #[serde(default)]
+    deep: Option<bool>,
+    /// Max semantiska noder per resultat-sida (default: 5)
+    #[serde(default)]
+    max_nodes_per_result: Option<usize>,
+}
+
+async fn search_handler(Json(req): Json<SearchRequest>) -> impl IntoResponse {
+    let top_n = req.top_n.unwrap_or(3);
+    let goal = req.goal.as_deref().unwrap_or("");
+    let result = aether_agent::search_from_html(&req.query, &req.html, top_n, goal);
+    (StatusCode::OK, result)
+}
+
+async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+    let ddg_url = aether_agent::build_search_url(&req.query);
+
+    if let Err(e) = aether_agent::fetch::validate_url(&ddg_url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let html = match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+        Ok(r) => r.body,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let top_n = req.top_n.unwrap_or(3);
+    let goal = req.goal.as_deref().unwrap_or("");
+    let search_json = aether_agent::search_from_html(&req.query, &html, top_n, goal);
+
+    let deep = req.deep.unwrap_or(true);
+    let max_nodes_per_result = req.max_nodes_per_result.unwrap_or(5);
+
+    if !deep {
+        return (StatusCode::OK, search_json);
+    }
+
+    // Deep fetch: parsa DDG-resultat, fetcha varje URL parallellt
+    let mut search_result: aether_agent::search::SearchResult =
+        match serde_json::from_str(&search_json) {
+            Ok(r) => r,
+            Err(_) => return (StatusCode::OK, search_json),
+        };
+
+    if !search_result.results.is_empty() {
+        let deep_start = std::time::Instant::now();
+        let effective_goal = if goal.is_empty() {
+            format!("hitta svar på: {}", req.query)
+        } else {
+            goal.to_string()
+        };
+
+        // Begränsa parallella deep fetches till max 3 för att förhindra OOM
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
+        let mut join_set = tokio::task::JoinSet::new();
+        for (idx, entry) in search_result.results.iter().enumerate() {
+            let url = entry.url.clone();
+            let g = effective_goal.clone();
+            let mnpr = max_nodes_per_result;
+            let sem = semaphore.clone();
+            join_set.spawn(async move {
+                let _permit = sem.acquire().await;
+                let fetch_start = std::time::Instant::now();
+                let cfg = aether_agent::types::FetchConfig::default();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(8),
+                    aether_agent::fetch::fetch_page(&url, &cfg),
+                )
+                .await
+                {
+                    Ok(Ok(result)) => {
+                        // Hämta fler noder med låg tröskel — re-ranking i
+                        // deep_extract_page_nodes prioriterar text-innehåll
+                        let fetch_limit = (mnpr * 8).max(30);
+                        let stream_json = aether_agent::stream_parse_adaptive(
+                            &result.body,
+                            &g,
+                            &url,
+                            fetch_limit as u32,
+                            0.0,
+                            fetch_limit as u32,
+                        );
+                        let nodes = deep_extract_page_nodes(&stream_json, mnpr);
+                        (idx, nodes, fetch_start.elapsed().as_millis() as u64)
+                    }
+                    _ => (idx, Vec::new(), 0),
+                }
+            });
+        }
+
+        while let Some(Ok((idx, nodes, elapsed))) = join_set.join_next().await {
+            if idx < search_result.results.len() && !nodes.is_empty() {
+                search_result.results[idx].page_content = Some(nodes);
+                search_result.results[idx].fetch_ms = Some(elapsed);
+            }
+        }
+
+        search_result.deep = Some(true);
+        search_result.deep_fetch_ms = Some(deep_start.elapsed().as_millis() as u64);
+
+        // Berika snippets från page_content
+        for entry in &mut search_result.results {
+            if let Some(ref nodes) = entry.page_content {
+                let best_text: Vec<&str> = nodes
+                    .iter()
+                    .filter(|n| n.label.len() > 30)
+                    .take(2)
+                    .map(|n| n.label.as_str())
+                    .collect();
+                if !best_text.is_empty()
+                    && (entry.snippet.len() < 30 || entry.snippet.contains("www."))
+                {
+                    entry.snippet = best_text.join(" | ");
+                }
+            }
+        }
+
+        // Försök hitta direktsvar med berikade snippets
+        if search_result.direct_answer.is_none() {
+            let (direct_answer, confidence) =
+                aether_agent::search::detect_direct_answer(&search_result.results)
+                    .map(|(a, c)| (Some(a), c))
+                    .unwrap_or((None, 0.0));
+            if direct_answer.is_some() {
+                search_result.direct_answer = direct_answer;
+                search_result.direct_answer_confidence = confidence;
+            }
+        }
+    }
+
+    let final_json = serde_json::to_string(&search_result)
+        .unwrap_or_else(|e| format!(r#"{{"error": "serialize: {e}"}}"#));
+    (StatusCode::OK, final_json)
+}
+
+/// Extrahera PageNode:er från stream_parse JSON
+fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::PageNode> {
+    let parsed: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+
+    // Re-rank för informationsextraktion (inte interaktion).
+    // Text/heading med längre innehåll är mest värdefulla vid sökning.
+    let mut scored: Vec<aether_agent::search::PageNode> = nodes
+        .iter()
+        .filter_map(|n| {
+            let label = n.get("label")?.as_str()?.to_string();
+            if label.len() < 10 {
+                return None;
+            }
+            let role = n.get("role").and_then(|r| r.as_str()).unwrap_or("text");
+            let base_rel = n.get("relevance").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32;
+
+            // Sök-optimerad re-ranking:
+            // - text/paragraph med faktiskt innehåll → boost
+            // - heading → boost (rubriker sammanfattar)
+            // - link/button/cta/nav → nedprioritera (nav-brus)
+            let info_boost = match role {
+                "text" | "paragraph" => 0.35,
+                "heading" => 0.25,
+                "price" | "product_card" => 0.20,
+                "generic" => 0.10,
+                "link" => -0.20,
+                "button" | "cta" => -0.30,
+                "navigation" => -0.40,
+                _ => 0.0,
+            };
+            // Längre text = mer informationsrikt
+            let len_boost = (label.len() as f32 / 500.0).min(0.15);
+            let final_rel = (base_rel + info_boost + len_boost).clamp(0.0, 1.0);
+
+            Some(aether_agent::search::PageNode {
+                role: role.to_string(),
+                label,
+                relevance: final_rel,
+            })
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+    // Dedup: skippa noder vars label är substring av en redan vald nod
+    let mut selected: Vec<aether_agent::search::PageNode> = Vec::with_capacity(max);
+    for node in scored {
+        if selected.len() >= max {
+            break;
+        }
+        let dominated = selected
+            .iter()
+            .any(|s| s.label.contains(&node.label) || node.label.contains(&s.label));
+        if !dominated {
+            selected.push(node);
+        }
+    }
+    selected
+}
+
+// ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
+
+async fn stream_parse_handler(Json(req): Json<StreamParseRequest>) -> impl IntoResponse {
+    let result = aether_agent::stream_parse_adaptive(
+        &req.html,
+        &req.goal,
+        &req.url,
+        req.top_n as u32,
+        req.min_relevance,
+        req.max_nodes as u32,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn fetch_stream_parse(Json(req): Json<FetchStreamParseRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let result = aether_agent::stream_parse_adaptive(
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+        req.top_n as u32,
+        req.min_relevance,
+        req.max_nodes as u32,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn directive_handler(Json(req): Json<DirectiveRequest>) -> impl IntoResponse {
+    let config_json = serde_json::json!({
+        "top_n": req.top_n,
+        "min_relevance": req.min_relevance,
+        "max_nodes": req.max_nodes,
+    })
+    .to_string();
+    let directives_json =
+        serde_json::to_string(&req.directives).unwrap_or_else(|_| "[]".to_string());
+
+    let result = aether_agent::stream_parse_with_directives(
+        &req.html,
+        &req.goal,
+        &req.url,
+        &config_json,
+        &directives_json,
+    );
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 12: TieredBackend ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -1304,9 +1693,9 @@ struct TieredScreenshotRequest {
     html: String,
     url: String,
     goal: String,
-    #[serde(default = "default_width")]
+    #[serde(default = "default_width", alias = "viewport_width")]
     width: u32,
-    #[serde(default = "default_height")]
+    #[serde(default = "default_height", alias = "viewport_height")]
     height: u32,
     #[serde(default = "default_fast_render")]
     fast_render: bool,
@@ -1402,28 +1791,6 @@ async fn parse_screenshot_server_model(
 // [RTEN-ROLLBACK-ID:server-conversion] Gamla: is_onnx_format(), convert_onnx_to_rten(),
 // ensure_rten_format(), load_vision_model() med rten::Model, load_vision_model_bytes()
 // Se git-historik för fullständig implementering
-
-/// Ladda vision-modell från URL eller filsökväg vid serverstart.
-/// Returnerar en förladdad ORT Session (laddas en gång, återanvänds).
-#[cfg(feature = "vision")]
-async fn load_vision_model() -> Option<ort::session::Session> {
-    let model_bytes = load_vision_model_bytes().await?;
-    println!("Laddar ORT Session (ONNX Runtime)...");
-    let start = std::time::Instant::now();
-    match aether_agent::load_vision_model(&model_bytes) {
-        Ok(session) => {
-            println!(
-                "ORT Session laddad på {:.1}s — alla requests använder förladdad modell",
-                start.elapsed().as_secs_f64()
-            );
-            Some(session)
-        }
-        Err(e) => {
-            eprintln!("Kunde inte ladda ORT-modell: {e}");
-            None
-        }
-    }
-}
 
 /// Hämta modell-bytes från URL eller fil (ONNX-format direkt — ingen konvertering behövs)
 #[cfg(feature = "vision")]
@@ -1813,6 +2180,76 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["url", "goal"]
             }
+        },
+        {
+            "name": "search",
+            "description": "Build a DuckDuckGo search URL for a query. Returns the URL to fetch. For auto-fetch, use fetch_search instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search query"}
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "fetch_search",
+            "description": "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results with title, URL, snippet, domain, confidence, and optional direct_answer. Use this when you don't know which URL to visit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search query"},
+                    "top_n": {"type": "integer", "description": "Number of results (1-10, default: 3)", "default": 3},
+                    "goal": {"type": "string", "description": "Agent goal for relevance scoring (default: same as query)"}
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "stream_parse",
+            "description": "Goal-driven adaptive DOM streaming. Parses HTML and emits only the most relevant nodes for the given goal, with 90-99% token savings. Use instead of parse/parse_top when you want minimal output focused on what matters. Returns ranked nodes, token savings ratio, and chunk metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML to parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance ranking"},
+                    "url": {"type": "string", "description": "Source URL (for context)", "default": ""},
+                    "top_n": {"type": "integer", "description": "Max nodes per chunk (default: 10)", "default": 10},
+                    "min_relevance": {"type": "number", "description": "Minimum relevance threshold 0.0-1.0 (default: 0.3)", "default": 0.3},
+                    "max_nodes": {"type": "integer", "description": "Hard cap on total emitted nodes (default: 50)", "default": 50}
+                },
+                "required": ["html", "goal"]
+            }
+        },
+        {
+            "name": "fetch_stream_parse",
+            "description": "ALL-IN-ONE: Fetch a URL and run goal-driven adaptive DOM streaming. Combines fetch + stream_parse in one call. Returns only the most relevant nodes for the given goal with 90-99% token savings. Use this instead of fetch_parse when you want minimal, goal-focused output.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance ranking"},
+                    "top_n": {"type": "integer", "description": "Max nodes per chunk (default: 10)", "default": 10},
+                    "min_relevance": {"type": "number", "description": "Minimum relevance 0.0-1.0 (default: 0.3)", "default": 0.3},
+                    "max_nodes": {"type": "integer", "description": "Hard cap on total emitted nodes (default: 50)", "default": 50}
+                },
+                "required": ["url", "goal"]
+            }
+        },
+        {
+            "name": "stream_parse_directive",
+            "description": "Goal-driven adaptive DOM streaming with LLM directives. Like stream_parse but accepts directives to control traversal: expand(node_id) to get children, next_branch to jump to next top-ranked unsent nodes, lower_threshold(value) to reduce min_relevance, stop to halt immediately. Use for interactive multi-step exploration.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML to parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "Source URL", "default": ""},
+                    "directives_json": {"type": "string", "description": "JSON array of directives, e.g. [{\"action\":\"next_branch\"},{\"action\":\"expand\",\"node_id\":5}]"},
+                    "config_json": {"type": "string", "description": "JSON config: {\"top_n\":10,\"min_relevance\":0.3,\"max_nodes\":50}"}
+                },
+                "required": ["html", "goal"]
+            }
         }
     ])
 }
@@ -1985,62 +2422,6 @@ fn render_char_5x7(img: &mut image::RgbaImage, x: u32, y: u32, ch: char, color: 
 #[cfg(not(feature = "vision"))]
 fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<String, String> {
     Err("Vision feature inte aktiverad".to_string())
-}
-
-/// Hämta HTML från URL och rendera till PNG med Blitz (ren Rust, ingen extern binär).
-/// Returnerar PNG-bytes vid framgång.
-#[cfg(feature = "blitz")]
-async fn render_url_to_png(
-    url: &str,
-    width: u32,
-    height: u32,
-    fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    // Hämta HTML med reqwest
-    let config = aether_agent::types::FetchConfig::default();
-    let response = aether_agent::fetch::fetch_page(url, &config)
-        .await
-        .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
-    let base_url = url.to_string();
-
-    // Inlina extern CSS för Blitz-rendering (blitz_net hämtar inte CSS tillförlitligt)
-    let html = aether_agent::fetch::inline_external_css(&response.body, &base_url).await;
-
-    // Med inlinad CSS kan vi använda fast_render=true (inga externa resurser behövs)
-    let effective_fast_render = if !fast_render { true } else { fast_render };
-
-    // Rendera HTML → PNG i spawn_blocking (HtmlDocument är inte Send)
-    tokio::task::spawn_blocking(move || {
-        render_html_to_png(&html, &base_url, width, height, effective_fast_render)
-    })
-    .await
-    .map_err(|e| format!("Blitz render task error: {e}"))?
-}
-
-/// Ren-Rust HTML → PNG rendering med Blitz. Delegerar till lib-funktionen.
-///
-/// `fast_render=true`: ~50ms (skippar externa resurser).
-/// `fast_render=false`: ~5s cap (laddar CSS/fonter/bilder).
-#[cfg(feature = "blitz")]
-fn render_html_to_png(
-    html: &str,
-    base_url: &str,
-    width: u32,
-    height: u32,
-    fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    aether_agent::render_html_to_png(html, base_url, width, height, fast_render)
-}
-
-/// Fallback om Blitz inte är kompilerat
-#[cfg(not(feature = "blitz"))]
-async fn render_url_to_png(
-    _url: &str,
-    _width: u32,
-    _height: u32,
-    _fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    Err("Blitz feature inte aktiverad. Kompilera med --features blitz".to_string())
 }
 
 /// BUG-003 fix: Hämta HTML, analysera TierHint, rendera med rätt tier.
@@ -2330,6 +2711,32 @@ async fn mcp_dispatch_tool(
             let html = args["html"].as_str().unwrap_or("");
             text_ok(aether_agent::detect_xhr_urls(html))
         }
+        "search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let url = aether_agent::build_search_url(query);
+            text_ok(serde_json::json!({
+                "action": "fetch_required",
+                "ddg_url": url,
+                "query": query,
+                "message": "Fetch the ddg_url and pass HTML to search endpoint, or use fetch_search for auto-fetch."
+            }).to_string())
+        }
+        "fetch_search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+            let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let ddg_url = aether_agent::build_search_url(query);
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+                Ok(result) => text_ok(aether_agent::search_from_html(
+                    query,
+                    &result.body,
+                    top_n,
+                    goal,
+                )),
+                Err(e) => text_ok(format!(r#"{{"error": "DDG fetch failed: {e}"}}"#)),
+            }
+        }
         "parse_screenshot" => {
             #[cfg(feature = "vision")]
             {
@@ -2432,6 +2839,57 @@ async fn mcp_dispatch_tool(
                 Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
             }
         }
+        "fetch_stream_parse" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
+            let min_rel = args["min_relevance"].as_f64().unwrap_or(0.3) as f32;
+            let max_nodes = args["max_nodes"].as_u64().unwrap_or(50) as u32;
+
+            aether_agent::fetch::validate_url(url)?;
+            let config = aether_agent::types::FetchConfig::default();
+            let fetch_result = aether_agent::fetch::fetch_page(url, &config)
+                .await
+                .map_err(|e| format!("Fetch failed: {e}"))?;
+
+            let result = aether_agent::stream_parse_adaptive(
+                &fetch_result.body,
+                goal,
+                &fetch_result.final_url,
+                top_n,
+                min_rel,
+                max_nodes,
+            );
+            text_ok(result)
+        }
+        "stream_parse" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
+            let min_rel = args["min_relevance"].as_f64().unwrap_or(0.3) as f32;
+            let max_nodes = args["max_nodes"].as_u64().unwrap_or(50) as u32;
+
+            let result =
+                aether_agent::stream_parse_adaptive(html, goal, url, top_n, min_rel, max_nodes);
+            text_ok(result)
+        }
+        "stream_parse_directive" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let directives_json = args["directives_json"].as_str().unwrap_or("[]");
+            let config_json = args["config_json"].as_str().unwrap_or("{}");
+
+            let result = aether_agent::stream_parse_with_directives(
+                html,
+                goal,
+                url,
+                config_json,
+                directives_json,
+            );
+            text_ok(result)
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -2511,7 +2969,35 @@ async fn mcp_post(
         "tools/call" => {
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
-            match mcp_dispatch_tool(tool_name, arguments, &state).await {
+            let call_start = std::time::Instant::now();
+            let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+            let call_ms = call_start.elapsed().as_millis();
+
+            // Broadcast tool-anrop till SSE-dashboard
+            let event = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/tool_call",
+                "params": {
+                    "tool": tool_name,
+                    "duration_ms": call_ms,
+                    "success": result.is_ok(),
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                }
+            });
+            let event_str = event.to_string();
+            let _ = state.mcp_events.send(event_str.clone());
+            // Spara i ring-buffer för polling-fallback
+            if let Ok(mut log) = state.mcp_event_log.lock() {
+                if log.len() >= 100 {
+                    log.pop_front();
+                }
+                log.push_back(event_str);
+            }
+
+            match result {
                 Ok(content_blocks) => jsonrpc_result(
                     id,
                     serde_json::json!({
@@ -2549,14 +3035,286 @@ async fn mcp_post(
     )
 }
 
-/// MCP Streamable HTTP GET handler — SSE stream (returnerar tom 405 för nu)
-async fn mcp_get() -> impl IntoResponse {
-    // Server-initiated notifications behövs inte ännu
-    (
-        StatusCode::METHOD_NOT_ALLOWED,
-        "SSE stream not implemented — use POST",
-    )
+/// MCP Streamable HTTP GET handler — SSE stream eller browser-dashboard
+///
+/// Spec 2025-03-26: MCP-klienter öppnar GET /mcp för SSE-notifications.
+/// Webbläsare (Accept: text/html) får en live-dashboard som visar events.
+/// SSE-strömmen visar alla MCP tool-anrop i realtid via broadcast-kanal.
+async fn mcp_get(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    // Om webbläsare → returnera HTML-dashboard med EventSource
+    let accept = headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if accept.contains("text/html") {
+        return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
+    }
+
+    // MCP-klient / EventSource → SSE-ström med broadcast-events
+    let session_id = headers
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
+
+    // Skicka initial notification
+    let tx_init = tx.clone();
+    tokio::spawn(async move {
+        let server_info = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {
+                "serverInfo": {
+                    "name": "aether-agent",
+                    "version": "0.3.0"
+                },
+                "session": session_id
+            }
+        });
+        let _ = tx_init
+            .send(Ok(Event::default()
+                .event("message")
+                .data(server_info.to_string())))
+            .await;
+    });
+
+    // Prenumerera på broadcast-kanalen och vidarebefordra events till SSE
+    let mut broadcast_rx = state.mcp_events.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match broadcast_rx.recv().await {
+                Ok(event_data) => {
+                    if tx
+                        .send(Ok(Event::default().event("message").data(event_data)))
+                        .await
+                        .is_err()
+                    {
+                        break; // Klient stängde kopplingen
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // Klienten hann inte med — skicka varning
+                    let warning = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/warning",
+                        "params": {"message": format!("Missed {n} events (slow client)")}
+                    });
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("message")
+                            .data(warning.to_string())))
+                        .await;
+                }
+            }
+        }
+    });
+
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
+
+/// Polling-fallback: GET /mcp/events?since=<timestamp_ms>
+/// Returnerar senaste events som JSON-array. Cloudflare-tunnlar buffrar SSE,
+/// så dashboarden pollar denna endpoint istället.
+async fn mcp_events_poll(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Json<serde_json::Value> {
+    let since: u64 = params
+        .get("since")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let events: Vec<serde_json::Value> = if let Ok(log) = state.mcp_event_log.lock() {
+        log.iter()
+            .filter_map(|e| serde_json::from_str::<serde_json::Value>(e).ok())
+            .filter(|e| {
+                e["params"]["timestamp"]
+                    .as_u64()
+                    .is_some_and(|ts| ts > since)
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    axum::response::Json(serde_json::json!({ "events": events }))
+}
+
+/// Live HTML-dashboard för MCP-endpoint — visar SSE-events i webbläsaren
+const MCP_DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherAgent MCP</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e0e0e8;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:14px}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:24px 32px;border-bottom:1px solid #2a2a4a}
+.header h1{font-size:20px;color:#7c83ff;font-weight:600}
+.header p{color:#888;font-size:12px;margin-top:4px}
+.status{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:#444;transition:background .3s}
+.dot.connected{background:#4ade80;box-shadow:0 0 8px #4ade8066}
+.dot.error{background:#f87171}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:24px 32px;height:calc(100vh - 140px)}
+.panel{background:#111118;border:1px solid #2a2a4a;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+.panel-title{padding:12px 16px;border-bottom:1px solid #2a2a4a;font-size:12px;color:#7c83ff;text-transform:uppercase;letter-spacing:1px}
+.panel-body{flex:1;overflow-y:auto;padding:12px 16px}
+.event{margin-bottom:12px;padding:8px 12px;background:#0d0d14;border-radius:6px;border-left:3px solid #7c83ff}
+.event .time{color:#666;font-size:11px}
+.event .type{color:#4ade80;font-size:12px;margin:2px 0}
+.event pre{color:#ccc;font-size:12px;white-space:pre-wrap;word-break:break-all;margin-top:4px}
+.tools{list-style:none}
+.tools li{padding:6px 0;border-bottom:1px solid #1a1a2a;font-size:13px}
+.tools li span.name{color:#7c83ff}
+.tools li span.desc{color:#888;font-size:12px}
+.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1a1a2a;font-size:13px}
+.info-row .label{color:#888}
+.info-row .value{color:#e0e0e8}
+@media(max-width:768px){.panels{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>AetherAgent MCP Server</h1>
+  <p>Model Context Protocol — Streamable HTTP</p>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Connecting...</span>
+  </div>
+</div>
+<div class="panels">
+  <div class="panel">
+    <div class="panel-title">Live Events</div>
+    <div class="panel-body" id="events"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Server Info</div>
+    <div class="panel-body" id="info">
+      <div class="info-row"><span class="label">Endpoint</span><span class="value">POST /mcp</span></div>
+      <div class="info-row"><span class="label">Protocol</span><span class="value">MCP 2025-03-26</span></div>
+      <div class="info-row"><span class="label">Transport</span><span class="value">Streamable HTTP + SSE</span></div>
+      <div class="info-row"><span class="label">Events received</span><span class="value" id="eventCount">0</span></div>
+      <div style="margin-top:16px">
+        <div class="panel-title" style="padding:0 0 8px 0;border:none">Available Tools</div>
+        <ul class="tools" id="toolsList"><li style="color:#666">Loading tools...</li></ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let count = 0;
+const dot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const eventsDiv = document.getElementById('events');
+const eventCount = document.getElementById('eventCount');
+
+function addEvent(type, data) {
+  count++;
+  eventCount.textContent = count;
+  const div = document.createElement('div');
+  div.className = 'event';
+  const time = new Date().toLocaleTimeString();
+  let detail = '';
+  if (type === 'notifications/tool_call' && data.params) {
+    const p = data.params;
+    const icon = p.success ? '&#10003;' : '&#10007;';
+    const color = p.success ? '#4ade80' : '#f87171';
+    detail = `<div class="type" style="color:${color}">${icon} ${p.tool} <span style="color:#888">${p.duration_ms}ms</span></div>`;
+  } else {
+    detail = `<div class="type">${type}</div><pre>${JSON.stringify(data, null, 2)}</pre>`;
+  }
+  div.innerHTML = `<div class="time">${time}</div>${detail}`;
+  eventsDiv.prepend(div);
+  if (eventsDiv.children.length > 100) eventsDiv.lastChild.remove();
+}
+
+// SSE med polling-fallback (Cloudflare-tunnlar buffrar SSE)
+let sseGotMessage = false;
+let pollTimer = null;
+let lastSeenTs = 0;
+
+// Försök SSE först
+const sse = new EventSource('/mcp');
+sse.onopen = () => {
+  // onopen triggas av Cloudflare med 200 OK men data buffras —
+  // vänta tills ett riktigt message kommer innan vi litar på SSE
+  dot.className = 'dot connected';
+  statusText.textContent = 'SSE connected — waiting for first event...';
+};
+sse.addEventListener('message', (e) => {
+  if (!sseGotMessage) {
+    sseGotMessage = true;
+    // SSE funkar på riktigt — stäng av polling om den startade
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    statusText.textContent = 'Connected — live SSE stream';
+  }
+  try {
+    const data = JSON.parse(e.data);
+    if (data.params?.timestamp) lastSeenTs = Math.max(lastSeenTs, data.params.timestamp);
+    addEvent(data.method || 'event', data);
+  } catch {
+    addEvent('raw', e.data);
+  }
+});
+sse.onerror = () => {
+  if (!sseGotMessage) {
+    dot.className = 'dot error';
+    statusText.textContent = 'SSE failed — falling back to polling...';
+    if (!pollTimer) startPolling();
+  }
+};
+
+// Polling-fallback: hämta /mcp/events?since=<ts> var 2:a sekund
+function startPolling() {
+  dot.className = 'dot connected';
+  statusText.textContent = 'Connected — polling mode (2s)';
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/mcp/events?since=' + lastSeenTs);
+      const data = await r.json();
+      (data.events || []).forEach(ev => {
+        if (ev.params?.timestamp) lastSeenTs = Math.max(lastSeenTs, ev.params.timestamp);
+        addEvent(ev.method || 'event', ev);
+      });
+      dot.className = 'dot connected';
+      statusText.textContent = 'Connected — polling mode (2s) | Events: ' + count;
+    } catch {
+      dot.className = 'dot error';
+      statusText.textContent = 'Poll failed — retrying...';
+    }
+  }, 2000);
+}
+
+// Om inget SSE-message mottagits efter 5s → starta polling oavsett
+setTimeout(() => { if (!sseGotMessage && !pollTimer) startPolling(); }, 5000);
+
+// Hämta verktyg via MCP tools/list
+fetch('/mcp', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})
+}).then(r => r.json()).then(data => {
+  const tools = data?.result?.tools || [];
+  const list = document.getElementById('toolsList');
+  if (tools.length === 0) { list.innerHTML = '<li style="color:#666">No tools found</li>'; return; }
+  list.innerHTML = tools.map(t =>
+    `<li><span class="name">${t.name}</span><br><span class="desc">${t.description || ''}</span></li>`
+  ).join('');
+}).catch(() => {});
+</script>
+</body>
+</html>"##;
 
 /// MCP Streamable HTTP DELETE handler — avsluta session
 async fn mcp_delete() -> impl IntoResponse {
@@ -2596,7 +3354,20 @@ async fn session_set_token(Json(req): Json<SessionSetTokenRequest>) -> impl Into
 }
 
 async fn session_oauth_authorize(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
-    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    // Stöd både nested config-objekt och individuella fält
+    let config_json = if let Some(config) = &req.config {
+        serde_json::to_string(config).unwrap_or_default()
+    } else if req.auth_url.is_some() || req.client_id.is_some() {
+        serde_json::json!({
+            "auth_url": req.auth_url.as_deref().unwrap_or(""),
+            "client_id": req.client_id.as_deref().unwrap_or(""),
+            "redirect_uri": req.redirect_uri.as_deref().unwrap_or(""),
+            "scopes": req.scopes.as_deref().unwrap_or(&[]),
+        })
+        .to_string()
+    } else {
+        "{}".to_string()
+    };
     let result = aether_agent::session_oauth_authorize(&req.session_json, &config_json);
     (StatusCode::OK, result)
 }
@@ -2632,7 +3403,11 @@ async fn session_mark_login(Json(req): Json<SessionStatusRequest>) -> impl IntoR
 }
 
 async fn session_token_refresh(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
-    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let config_json = if let Some(config) = &req.config {
+        serde_json::to_string(config).unwrap_or_default()
+    } else {
+        "{}".to_string()
+    };
     let result = aether_agent::session_prepare_refresh(&req.session_json, &config_json);
     (StatusCode::OK, result)
 }
@@ -2698,6 +3473,7 @@ fn build_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
+        .route("/api/memory-stats", get(memory_stats_handler))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
@@ -2756,6 +3532,13 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
+        // Fas 17: DDG Search
+        .route("/api/search", post(search_handler))
+        .route("/api/fetch/search", post(fetch_search_handler))
+        // Fas 16: Stream Parse
+        .route("/api/stream-parse", post(stream_parse_handler))
+        .route("/api/fetch/stream-parse", post(fetch_stream_parse))
+        .route("/api/directive", post(directive_handler))
         // Fas 11: Vision (kräver --features vision)
         // 50 MB body limit — ONNX-modeller + screenshots i base64
         .route("/api/parse-screenshot", {
@@ -2835,14 +3618,96 @@ fn build_router(state: AppState) -> Router {
         .route("/api/workflow/status", post(workflow_status_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
+        .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
 }
 
+/// Hämta aktuell minnesstatistik från /proc/self/statm och /proc/self/status
+fn get_memory_stats() -> MemoryStats {
+    let mut stats = MemoryStats::default();
+
+    // RSS + VSZ från /proc/self/statm (snabbast)
+    if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
+        let parts: Vec<&str> = statm.split_whitespace().collect();
+        if parts.len() >= 2 {
+            if let Ok(vsz_pages) = parts[0].parse::<u64>() {
+                stats.vsz_mb = vsz_pages * 4 / 1024;
+            }
+            if let Ok(rss_pages) = parts[1].parse::<u64>() {
+                stats.rss_mb = rss_pages * 4 / 1024;
+            }
+        }
+    }
+
+    // Detaljerad info från /proc/self/status
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(val) = line.strip_prefix("VmHWM:") {
+                stats.peak_rss_mb = parse_kb_value(val) / 1024;
+            } else if let Some(val) = line.strip_prefix("VmSwap:") {
+                stats.swap_mb = parse_kb_value(val) / 1024;
+            } else if let Some(val) = line.strip_prefix("Threads:") {
+                stats.threads = val.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    stats
+}
+
+/// Parsa "   12345 kB" → 12345
+fn parse_kb_value(s: &str) -> u64 {
+    s.trim().trim_end_matches("kB").trim().parse().unwrap_or(0)
+}
+
+/// Logga aktuell RSS (Resident Set Size) från /proc/self/statm
+fn log_rss(label: &str) {
+    let stats = get_memory_stats();
+    eprintln!(
+        "[MEM] {label}: {rss} MB RSS, {peak} MB peak, {vsz} MB VSZ, {swap} MB swap, {threads} threads",
+        rss = stats.rss_mb,
+        peak = stats.peak_rss_mb,
+        vsz = stats.vsz_mb,
+        swap = stats.swap_mb,
+        threads = stats.threads,
+    );
+}
+
+/// Minnesstatistik som JSON
+#[derive(Default, Serialize)]
+struct MemoryStats {
+    rss_mb: u64,
+    peak_rss_mb: u64,
+    vsz_mb: u64,
+    swap_mb: u64,
+    threads: u64,
+}
+
+/// GET /api/memory-stats — returnera aktuell minnesanvändning
+async fn memory_stats_handler() -> impl IntoResponse {
+    let stats = get_memory_stats();
+    (StatusCode::OK, Json(stats))
+}
+
+/// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
+fn spawn_memory_monitor() {
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            log_rss("periodic");
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
+    eprintln!("=== AetherAgent Memory Startup Trace ===");
+    log_rss("1. process start");
+
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -2850,17 +3715,63 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    log_rss("2. before CDP hook registration");
+    // Registrera CDP ready-callback FÖRE warmup (så att global backend uppdateras)
+    aether_agent::register_cdp_ready_hook();
+    log_rss("3. after CDP hook registration");
+
     // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
     aether_agent::vision_backend::warmup_cdp_background();
+    log_rss("4. after CDP warmup init");
 
     // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
     #[cfg(feature = "vision")]
-    let vision_model = load_vision_model().await;
+    let vision_model = {
+        log_rss("5a. before vision model bytes load");
+        let vision_bytes = load_vision_model_bytes().await;
+        if let Some(ref bytes) = vision_bytes {
+            eprintln!(
+                "[MEM] 5b. vision model bytes loaded: {:.1} MB on disk",
+                bytes.len() as f64 / (1024.0 * 1024.0)
+            );
+            log_rss("5b. after vision model bytes in memory");
+        }
+        let model: Option<ort::session::Session> = match vision_bytes {
+            Some(bytes) => {
+                log_rss("5c. before ORT session create");
+                let result = aether_agent::load_vision_model(&bytes);
+                log_rss("5d. after ORT session create");
+                drop(bytes); // Frigör modell-bytes efter laddning
+                log_rss("5e. after dropping model bytes");
+                match result {
+                    Ok(session) => Some(session),
+                    Err(e) => {
+                        eprintln!("Kunde inte ladda ORT-modell: {e}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        log_rss("6. after complete vision setup");
+        model
+    };
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
+
+    log_rss("7. before router build");
+    // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
+    spawn_memory_monitor();
+
+    let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
+        mcp_events: Arc::new(mcp_tx),
+        mcp_event_log: Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::with_capacity(100),
+        )),
     };
+    log_rss("8. after AppState creation");
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
@@ -2901,15 +3812,22 @@ async fn main() {
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
     println!();
     println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
+    println!("  POST /api/search                 – DDG search (pre-fetched HTML)");
+    println!("  POST /api/fetch/search           – DDG search (auto-fetch)");
     println!(
         "  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision (client model)"
     );
     println!("  POST /api/vision/parse           – Analyze screenshot with server-loaded model");
     println!("  POST /api/fetch-vision           – URL → screenshot → YOLO vision → images + JSON");
+    println!("  POST /api/stream-parse           – Adaptive goal-driven DOM streaming");
+    println!("  POST /api/fetch/stream-parse     – Fetch URL → adaptive stream parse");
+    println!("  POST /api/directive              – Send directives (expand, stop, etc.)");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
-    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications, returns 405 — use POST)");
+    println!(
+        "  GET  /mcp                        – MCP SSE stream (server-initiated notifications)"
+    );
     println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)

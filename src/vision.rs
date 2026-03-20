@@ -25,9 +25,9 @@ pub const UI_CLASSES: &[&str] = &[
 pub struct UiDetection {
     /// Detekterad klass (t.ex. "button", "input", "link", "icon", "text", "image")
     pub class: String,
-    /// Konfidenspoang (0.0-1.0)
+    /// Konfidenspoang (0.0–1.0), sigmoid-normaliserad
     pub confidence: f32,
-    /// Bounding box i pixelkoordinater
+    /// Bounding box i normaliserade koordinater (0.0–1.0)
     pub bbox: BoundingBox,
 }
 
@@ -308,17 +308,19 @@ pub fn preprocess_image(png_bytes: &[u8], input_size: u32) -> Result<Vec<f32>, S
 /// Load an ONNX model into an ORT session (expensive — call once, reuse the result).
 ///
 /// Konfigurerar ONNX Runtime med:
-/// - Graph optimization level ALL (op fusion, constant folding)
-/// - Inter-op parallelism
-/// - Optimerad tråd-pool
+/// - Graph optimization Level1 (basic op fusion, låg minnesanvändning)
+/// - Minimal tråd-pool (1+1) — undviker ORT memory arena-explosion
+///
+/// Level3 + 4+2 trådar orsakade ~500MB+ ORT-allokering. Level1 + 1+1
+/// ger lägre latens-overhead men drastiskt lägre minnesfotavtryck.
 pub fn load_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
     let session = ort::session::Session::builder()
         .map_err(|e| format!("ORT session builder: {e}"))?
-        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level1)
         .map_err(|e| format!("ORT optimization level: {e}"))?
-        .with_intra_threads(4)
+        .with_intra_threads(1)
         .map_err(|e| format!("ORT intra threads: {e}"))?
-        .with_inter_threads(2)
+        .with_inter_threads(1)
         .map_err(|e| format!("ORT inter threads: {e}"))?
         .commit_from_memory(model_bytes)
         .map_err(|e| format!("ORT model load: {e}"))?;
@@ -374,12 +376,20 @@ pub fn run_inference_with_model(
     // Platt data-access: data har layout [1, num_attrs, num_preds] row-major
     let mut detections = Vec::new();
 
+    let inv_size = 1.0 / input_size as f32;
+
     for pred_idx in 0..num_preds {
         let mut best_class = 0;
         let mut best_conf = 0.0f32;
 
         for cls in 0..num_classes {
-            let conf = data[(4 + cls) * num_preds + pred_idx];
+            let raw = data[(4 + cls) * num_preds + pred_idx];
+            // Normalisera: om råvärdet ligger utanför [0,1] behövs sigmoid
+            let conf = if !(0.0..=1.0).contains(&raw) {
+                1.0 / (1.0 + (-raw).exp())
+            } else {
+                raw
+            };
             if conf > best_conf {
                 best_conf = conf;
                 best_class = cls;
@@ -392,17 +402,18 @@ pub fn run_inference_with_model(
             continue;
         }
 
-        let cx = data[pred_idx];
-        let cy = data[num_preds + pred_idx];
-        let w = data[2 * num_preds + pred_idx];
-        let h = data[3 * num_preds + pred_idx];
+        // Koordinater i modellens pixelrymd (0..input_size) → normalisera till 0..1
+        let cx = data[pred_idx] * inv_size;
+        let cy = data[num_preds + pred_idx] * inv_size;
+        let w = data[2 * num_preds + pred_idx] * inv_size;
+        let h = data[3 * num_preds + pred_idx] * inv_size;
 
         if config.min_detection_area > 0.0 && w * h < config.min_detection_area {
             continue;
         }
 
-        let x = cx - w / 2.0;
-        let y = cy - h / 2.0;
+        let x = (cx - w / 2.0).max(0.0);
+        let y = (cy - h / 2.0).max(0.0);
 
         detections.push(UiDetection {
             class: class_name.to_string(),
@@ -410,8 +421,8 @@ pub fn run_inference_with_model(
             bbox: BoundingBox {
                 x,
                 y,
-                width: w,
-                height: h,
+                width: w.min(1.0 - x),
+                height: h.min(1.0 - y),
             },
         });
     }
@@ -975,19 +986,24 @@ mod tests {
 
     #[test]
     fn test_min_detection_area_filters_artefacts() {
+        // Koordinater normaliserade till 0–1 efter fix, area också normaliserad
+        // 10px/640 ≈ 0.0156 → area ≈ 0.000244
+        // 120px/640 ≈ 0.1875, 40px/640 ≈ 0.0625 → area ≈ 0.01172
         let config = VisionConfig {
-            min_detection_area: 500.0,
+            min_detection_area: 0.001,
             ..VisionConfig::default()
         };
-        // Liten artefakt: 10×10 = 100px² < 500 → borde filtreras
+        // Liten artefakt: (10/640)² ≈ 0.000244 < 0.001 → borde filtreras
+        let small_area = (10.0_f32 / 640.0) * (10.0 / 640.0);
         assert!(
-            10.0 * 10.0 < config.min_detection_area,
-            "10×10 detektion borde filtreras av min_detection_area=500"
+            small_area < config.min_detection_area,
+            "10×10px detektion borde filtreras av min_detection_area=0.001"
         );
-        // Normal knapp: 120×40 = 4800px² > 500 → borde behållas
+        // Normal knapp: (120/640)*(40/640) ≈ 0.01172 > 0.001 → borde behållas
+        let button_area = (120.0_f32 / 640.0) * (40.0 / 640.0);
         assert!(
-            120.0 * 40.0 > config.min_detection_area,
-            "120×40 detektion borde passera min_detection_area=500"
+            button_area > config.min_detection_area,
+            "120×40px detektion borde passera min_detection_area=0.001"
         );
     }
 

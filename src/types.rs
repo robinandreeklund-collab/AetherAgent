@@ -375,6 +375,25 @@ impl SemanticNode {
         }
     }
 
+    /// Grund klon utan barn — undviker rekursiv deep-clone av hela subträdet.
+    /// Används i stream_engine där barn alltid rensas direkt efter clone.
+    pub fn clone_shallow(&self) -> Self {
+        SemanticNode {
+            id: self.id,
+            role: self.role.clone(),
+            label: self.label.clone(),
+            value: self.value.clone(),
+            state: self.state.clone(),
+            action: self.action.clone(),
+            relevance: self.relevance,
+            trust: self.trust.clone(),
+            children: Vec::new(),
+            html_id: self.html_id.clone(),
+            name: self.name.clone(),
+            bbox: self.bbox.clone(),
+        }
+    }
+
     /// Beräkna action baserat på roll
     pub fn infer_action(role: &str) -> Option<String> {
         match role {

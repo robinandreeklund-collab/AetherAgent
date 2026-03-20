@@ -25,11 +25,13 @@ static RATE_LIMITERS: std::sync::LazyLock<Mutex<HashMap<String, Arc<DomainLimite
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Återanvändbar HTTP-klient — undvik att bygga ny TLS-session per request.
-/// Konfigureras med rimliga defaults (10s timeout, cookies, gzip/brotli).
+/// Konfigureras med rimliga defaults (10s timeout, gzip/brotli).
+/// OBS: cookie_store(true) togs bort — den ackumulerade cookies från alla domäner
+/// utan eviction och orsakade OOM (49 MB → 23 GB). Cookies hanteras istället
+/// per-session via SessionManager.
 static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .cookie_store(true)
         .gzip(true)
         .brotli(true)
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -37,9 +39,21 @@ static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
+// Minnesgräns: max antal domäner i rate limiter cache
+const MAX_RATE_LIMITER_DOMAINS: usize = 1_000;
+
 /// Hämta eller skapa en rate limiter för en domän (default 2 req/s)
 fn get_rate_limiter(domain: &str, requests_per_second: u32) -> Arc<DomainLimiter> {
     let mut limiters = RATE_LIMITERS.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Evicta slumpmässig domän om vi når gränsen (billig operation)
+    if !limiters.contains_key(domain) && limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
+        // Ta bort en godtycklig entry (HashMap iteration order)
+        if let Some(old_key) = limiters.keys().next().cloned() {
+            limiters.remove(&old_key);
+        }
+    }
+
     limiters
         .entry(domain.to_string())
         .or_insert_with(|| {
@@ -130,12 +144,30 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         redirect_chain.push(final_url.clone());
     }
 
-    // Läs body
-    let body = response
-        .text()
+    // Läs body med storleksgräns (max 20 MB) för att förhindra OOM
+    const MAX_BODY_SIZE: usize = 20 * 1024 * 1024;
+
+    // Kolla Content-Length INNAN vi allokerar — avvisa tidigt om servern annonserar
+    // en body större än gränsen (förhindrar OOM vid stora filer)
+    if let Some(cl) = response.content_length() {
+        if cl as usize > MAX_BODY_SIZE {
+            return Err(format!(
+                "Svar för stort enligt Content-Length: {cl} bytes (max {MAX_BODY_SIZE})"
+            ));
+        }
+    }
+
+    let body_bytes = response
+        .bytes()
         .await
         .map_err(|e| format!("Kunde inte läsa body: {e}"))?;
-
+    if body_bytes.len() > MAX_BODY_SIZE {
+        return Err(format!(
+            "Svar för stort: {} bytes (max {MAX_BODY_SIZE})",
+            body_bytes.len()
+        ));
+    }
+    let body = String::from_utf8_lossy(&body_bytes).into_owned();
     let body_size_bytes = body.len();
     let fetch_time_ms = start.elapsed().as_millis() as u64;
 
@@ -254,25 +286,33 @@ fn extract_domain(url: &str) -> Option<String> {
 /// Returnerar modifierad HTML med inlinad CSS.
 pub async fn inline_external_css(html: &str, base_url: &str) -> String {
     // Hitta alla <link rel="stylesheet" href="...">
-    let css_links = extract_css_links(html, base_url);
+    let mut css_links = extract_css_links(html, base_url);
     if css_links.is_empty() {
         return html.to_string();
     }
 
-    // Hämta alla CSS-filer parallellt (max 3s per fil)
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    // Begränsa antal CSS-filer för att förhindra OOM vid sidor med hundratals <link>
+    const MAX_CSS_LINKS: usize = 50;
+    css_links.truncate(MAX_CSS_LINKS);
+
+    // Hämta alla CSS-filer parallellt (max 2 MB per fil)
+    // Återanvänd SHARED_CLIENT istället för att skapa ny klient per anrop
+    const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
 
     // Parallell CSS-hämtning med tokio tasks
     let mut handles = Vec::with_capacity(css_links.len());
     for link in &css_links {
-        let client = client.clone();
+        let client = SHARED_CLIENT.clone();
         let url = link.url.clone();
         handles.push(tokio::spawn(async move {
             match client.get(&url).send().await {
-                Ok(resp) => resp.text().await.ok(),
+                Ok(resp) => {
+                    let bytes = resp.bytes().await.ok()?;
+                    if bytes.len() > MAX_CSS_BYTES {
+                        return None;
+                    }
+                    String::from_utf8(bytes.to_vec()).ok()
+                }
                 Err(_) => None,
             }
         }));

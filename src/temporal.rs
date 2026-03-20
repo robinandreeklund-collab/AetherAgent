@@ -16,6 +16,10 @@ use crate::intercept::XhrResponseCache;
 use crate::types::{InjectionWarning, WarningSeverity};
 use crate::types::{SemanticDelta, SemanticTree};
 
+// Minnesgränser för att förhindra OOM
+const MAX_SNAPSHOTS: usize = 50;
+const MAX_NODE_HISTORY_ENTRIES: usize = 10_000;
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /// En tidsstämplad ögonblicksbild av sidtillståndet
@@ -184,6 +188,42 @@ impl TemporalMemory {
 
         self.snapshots.push(snapshot);
         self.last_tree_json = Some(tree_json.to_string());
+
+        // Begränsa antal snapshots – ta bort äldsta vid overflow
+        if self.snapshots.len() > MAX_SNAPSHOTS {
+            let drain_count = self.snapshots.len() - MAX_SNAPSHOTS;
+            self.snapshots.drain(..drain_count);
+        }
+
+        // Begränsa historik-HashMaps – rensa äldsta entries vid overflow
+        if self.warning_history.len() > MAX_NODE_HISTORY_ENTRIES {
+            self.trim_history_maps();
+        }
+    }
+
+    /// Trimma historik-maps till MAX_NODE_HISTORY_ENTRIES
+    fn trim_history_maps(&mut self) {
+        // Behåll bara noder som fortfarande finns i senaste snapshoten
+        let active_node_ids: std::collections::HashSet<u32> =
+            self.node_labels.keys().copied().collect();
+        // Om vi fortfarande har för många, behåll de med flest observationer
+        if active_node_ids.len() > MAX_NODE_HISTORY_ENTRIES {
+            let mut obs_vec: Vec<(u32, u32)> = self
+                .observation_history
+                .iter()
+                .map(|(&id, &count)| (id, count))
+                .collect();
+            obs_vec.sort_by(|a, b| b.1.cmp(&a.1));
+            let keep: std::collections::HashSet<u32> = obs_vec
+                .iter()
+                .take(MAX_NODE_HISTORY_ENTRIES)
+                .map(|(id, _)| *id)
+                .collect();
+            self.warning_history.retain(|id, _| keep.contains(id));
+            self.change_history.retain(|id, _| keep.contains(id));
+            self.observation_history.retain(|id, _| keep.contains(id));
+            self.node_labels.retain(|id, _| keep.contains(id));
+        }
     }
 
     /// Kör full temporal analys

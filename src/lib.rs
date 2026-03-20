@@ -16,8 +16,11 @@ mod js_eval;
 mod memory;
 mod orchestrator;
 mod parser;
+pub mod search;
 mod semantic;
 mod session;
+mod stream_engine;
+mod stream_state;
 mod streaming;
 mod temporal;
 mod trust;
@@ -36,6 +39,19 @@ static GLOBAL_TIERED_BACKEND: OnceLock<vision_backend::TieredBackend> = OnceLock
 
 fn global_tiered_backend() -> &'static vision_backend::TieredBackend {
     GLOBAL_TIERED_BACKEND.get_or_init(vision_backend::TieredBackend::default)
+}
+
+/// Registrera CDP ready-callback som uppdaterar global TieredBackend.
+/// Anropas före warmup_cdp_background() i server-main.
+pub fn register_cdp_ready_hook() {
+    vision_backend::on_cdp_ready(|| {
+        // Force-initiera backend om den inte finns ännu, sedan sätt cdp_available.
+        // Vid detta läge har CDP_BROWSER precis satts → default() ser is_some()==true,
+        // men vi kör set_cdp_available(true) som säkerhetsnät ändå.
+        let backend = global_tiered_backend();
+        backend.set_cdp_available(true);
+        eprintln!("CDP: global_tiered_backend updated — cdp_available=true");
+    });
 }
 
 use parser::parse_html;
@@ -173,6 +189,107 @@ pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> Str
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
     match serialize_json(&tree, tree.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+// ─── Fas 16: Goal-Driven Adaptive DOM Streaming ─────────────────────────────
+
+/// Adaptive goal-driven DOM streaming – emits only the most relevant nodes
+/// in ranked chunks, with support for LLM-directed expansion.
+///
+/// Returns JSON with `nodes`, `total_dom_nodes`, `nodes_emitted`,
+/// `token_savings_ratio`, `parse_ms`, `injection_warnings`, and `chunks`.
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal for relevance scoring
+/// * `url` - The page URL
+/// * `top_n` - Nodes per chunk (default: 10)
+/// * `min_relevance` - Minimum relevance for emission (default: 0.3)
+/// * `max_nodes` - Hard limit on total emitted nodes (default: 50)
+#[wasm_bindgen]
+pub fn stream_parse_adaptive(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    min_relevance: f32,
+    max_nodes: u32,
+) -> String {
+    let config = stream_engine::StreamParseConfig {
+        chunk_size: if top_n == 0 { 10 } else { top_n as usize },
+        min_relevance: if min_relevance <= 0.0 {
+            0.3
+        } else {
+            min_relevance
+        },
+        max_nodes: if max_nodes == 0 {
+            50
+        } else {
+            max_nodes as usize
+        },
+    };
+    let result = stream_engine::stream_parse(html, goal, url, config);
+    match serialize_json(&result, result.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Adaptive stream parse with pre-loaded directives (expand, stop, etc.)
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `config_json` - JSON config: `{"top_n": 10, "min_relevance": 0.3, "max_nodes": 50}`
+/// * `directives_json` - JSON array of directives: `[{"action": "expand", "node_id": 56}]`
+#[wasm_bindgen]
+pub fn stream_parse_with_directives(
+    html: &str,
+    goal: &str,
+    url: &str,
+    config_json: &str,
+    directives_json: &str,
+) -> String {
+    #[derive(serde::Deserialize)]
+    struct ConfigInput {
+        #[serde(default = "default_top_n")]
+        top_n: usize,
+        #[serde(default = "default_min_relevance")]
+        min_relevance: f32,
+        #[serde(default = "default_max_nodes")]
+        max_nodes: usize,
+    }
+    fn default_top_n() -> usize {
+        10
+    }
+    fn default_min_relevance() -> f32 {
+        0.3
+    }
+    fn default_max_nodes() -> usize {
+        50
+    }
+
+    let cfg: ConfigInput = serde_json::from_str(config_json).unwrap_or(ConfigInput {
+        top_n: 10,
+        min_relevance: 0.3,
+        max_nodes: 50,
+    });
+
+    let directives: Vec<stream_state::Directive> =
+        serde_json::from_str(directives_json).unwrap_or_default();
+
+    let config = stream_engine::StreamParseConfig {
+        chunk_size: cfg.top_n,
+        min_relevance: cfg.min_relevance,
+        max_nodes: cfg.max_nodes,
+    };
+
+    let result = stream_engine::stream_parse_with_directives(html, goal, url, config, directives);
+    match serialize_json(&result, result.nodes.len()) {
         Ok(json) => json,
         Err(e) => e,
     }
@@ -905,6 +1022,8 @@ pub fn load_vision_model(model_bytes: &[u8]) -> Result<ort::session::Session, St
 ///
 /// `fast_render=true`: skip external resources (~50ms). Good enough for YOLO.
 /// `fast_render=false`: load CSS/fonts/images with 5s timeout cap.
+///
+/// Max resolution: 4096×8192 (134 MB buffer). Larger values are clamped.
 #[cfg(feature = "blitz")]
 pub fn render_html_to_png(
     html: &str,
@@ -913,6 +1032,18 @@ pub fn render_html_to_png(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
+    // Säkerhetsgräns: förhindra OOM vid orimliga dimensioner
+    const MAX_WIDTH: u32 = 4096;
+    const MAX_HEIGHT: u32 = 8192;
+    const MAX_PIXELS: u64 = 4096 * 8192; // ~134 MB RGBA-buffer
+    let width = width.min(MAX_WIDTH);
+    let height = height.min(MAX_HEIGHT);
+    let total_pixels = width as u64 * height as u64;
+    if total_pixels > MAX_PIXELS {
+        return Err(format!(
+            "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
+        ));
+    }
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
     use blitz_html::HtmlDocument;
@@ -1663,6 +1794,65 @@ pub fn workflow_status(orchestrator_json: &str) -> String {
         "page_history": orch.page_history,
     }))
     .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+// ─── Fas 17: DDG Search Layer ────────────────────────────────────────────────
+
+/// Search the web via DuckDuckGo HTML and return structured results.
+///
+/// Combines DDG HTML fetch + stream_parse pipeline to extract
+/// title, URL, snippet, domain and optional direct answer.
+///
+/// # Arguments
+/// * `query` - Free-text search query
+/// * `top_n` - Number of results to return (1-10, default 3)
+/// * `goal` - Agent goal for relevance scoring (default: same as query)
+/// * `html` - Pre-fetched DDG HTML (if empty, returns error asking caller to fetch)
+pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> String {
+    let start = now_ms();
+    let effective_goal = if goal.is_empty() {
+        format!("hitta svar på: {}", query)
+    } else {
+        goal.to_string()
+    };
+    let effective_top_n = if top_n == 0 { 3 } else { top_n.min(10) };
+
+    let ddg_url = search::build_ddg_url(query);
+
+    // Full parse — DDG HTML är ~250 noder, stream_parse filtrerar bort snippets
+    let tree = build_tree(html, &effective_goal, &ddg_url);
+    let total_nodes = collect_all_nodes(&tree.nodes).len();
+
+    // Extrahera strukturerade sökresultat från hela trädet
+    let results = search::extract_results(&tree.nodes, effective_top_n);
+
+    // Försök hitta direktsvar
+    let (direct_answer, direct_answer_confidence) = search::detect_direct_answer(&results)
+        .map(|(a, c)| (Some(a), c))
+        .unwrap_or((None, 0.0));
+
+    let search_result = search::SearchResult {
+        query: query.to_string(),
+        results,
+        direct_answer,
+        direct_answer_confidence,
+        source_url: ddg_url,
+        parse_ms: now_ms() - start,
+        nodes_seen: total_nodes,
+        nodes_emitted: total_nodes,
+        deep: None,
+        deep_fetch_ms: None,
+    };
+
+    match serialize_json(&search_result, 10) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Convenience: build the DDG URL for a query so callers can fetch it
+pub fn build_search_url(query: &str) -> String {
+    search::build_ddg_url(query)
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────

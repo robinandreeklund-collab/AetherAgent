@@ -12,6 +12,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Minnesgränser för cookies
+const MAX_COOKIES_PER_DOMAIN: usize = 100;
+const MAX_COOKIE_DOMAINS: usize = 500;
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /// Persistent sessionshanterare
@@ -144,6 +148,19 @@ impl SessionManager {
     ///
     /// Parsar Set-Cookie-strängar och lagrar per domän.
     pub fn add_cookies_from_headers(&mut self, domain: &str, set_cookie_headers: &[String]) {
+        // Begränsa antal domäner
+        if !self.cookies.contains_key(domain) && self.cookies.len() >= MAX_COOKIE_DOMAINS {
+            // Evicta domänen med färst cookies
+            if let Some(smallest_domain) = self
+                .cookies
+                .iter()
+                .min_by_key(|(_, v)| v.len())
+                .map(|(k, _)| k.clone())
+            {
+                self.cookies.remove(&smallest_domain);
+            }
+        }
+
         let entries = self.cookies.entry(domain.to_string()).or_default();
 
         for header in set_cookie_headers {
@@ -152,6 +169,12 @@ impl SessionManager {
                 entries.retain(|c| c.name != cookie.name);
                 entries.push(cookie);
             }
+        }
+
+        // Begränsa antal cookies per domän – behåll de senaste
+        if entries.len() > MAX_COOKIES_PER_DOMAIN {
+            let drain_count = entries.len() - MAX_COOKIES_PER_DOMAIN;
+            entries.drain(..drain_count);
         }
     }
 

@@ -6,6 +6,9 @@ use std::collections::HashMap;
 
 use crate::types::{InjectionWarning, SemanticNode, SemanticTree, TrustLevel};
 
+// Minnesgräns: max antal cachade XHR-svar
+const MAX_XHR_CACHE_ENTRIES: usize = 500;
+
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
 /// A captured XHR/fetch request from JS analysis
@@ -107,7 +110,7 @@ impl XhrResponseCache {
         })
     }
 
-    /// Cacha ett svar
+    /// Cacha ett svar (med minnesgräns – evictar äldsta vid overflow)
     pub fn put(
         &mut self,
         url: &str,
@@ -126,6 +129,24 @@ impl XhrResponseCache {
                 ttl_ms,
             },
         );
+
+        // Evicta äldsta entries om cachen överskrider gränsen
+        if self.entries.len() > MAX_XHR_CACHE_ENTRIES {
+            self.evict_oldest(self.entries.len() - MAX_XHR_CACHE_ENTRIES);
+        }
+    }
+
+    /// Ta bort de N äldsta entries (baserat på cached_at_ms)
+    fn evict_oldest(&mut self, count: usize) {
+        let mut by_age: Vec<(String, u64)> = self
+            .entries
+            .iter()
+            .map(|(url, entry)| (url.clone(), entry.cached_at_ms))
+            .collect();
+        by_age.sort_by_key(|(_, ts)| *ts);
+        for (url, _) in by_age.into_iter().take(count) {
+            self.entries.remove(&url);
+        }
     }
 
     /// Ta bort expirerade entries
