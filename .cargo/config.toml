@@ -1,0 +1,7 @@
+# Begränsa byggparallelism för att förhindra OOM under kompilering.
+# Rust-kompilering med tunga crates (ort, blitz, reqwest, tokio) kan
+# använda 4-8 GB per parallell rustc-instans.
+# Med 4 CPUs × 6 GB = 24 GB → OOM på 32 GB-system.
+# Begränsa till 2 jobb → max ~12 GB peak under kompilering.
+[build]
+jobs = 2

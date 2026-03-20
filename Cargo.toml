@@ -108,3 +108,6 @@ codegen-units = 4  # snabbare kompilering, minimal perf-kostnad
 [profile.dev]
 opt-level = 0
 debug = true
+# Fler codegen-units → lägre peak-minnesanvändning vid länkning
+# (default 256 i dev, men explicit för tydlighet)
+codegen-units = 256
