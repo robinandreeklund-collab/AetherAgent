@@ -2,11 +2,12 @@
 **Datum:** 2026-03-20
 **Version:** 0.2.0
 **Server:** Cloudflare Tunnel → Rust binary (med `cdp` feature-flag)
-**Modell:** YOLOv8-nano (delvis tränad — se avsnitt 7)
+**Modell:** YOLOv8-nano (delvis tränad — se avsnitt 6)
+**Tunnel:** `girls-mins-navigate-lil.trycloudflare.com` (verifierad)
 
 ---
 
-## 1. Alla verktyg — Endpoint-testning (61 endpoints)
+## 1. Alla verktyg — Endpoint-testning (62 endpoints)
 
 ### Batch 1: Core Parsing + Trust + Intent (20 tester)
 
@@ -87,15 +88,27 @@
 
 **Batch 3: 20/20 PASS** (OAuth-testet behöver fullständig config inkl. `token_url` — fungerar korrekt med rätt input)
 
-### Sammanfattning alla endpoints
+### Sammanfattning alla endpoints (verifierad körning 2)
 ```
 ╔═══════════════════════════════════════════════════╗
-║  TOTALT: 59/59 PASS  (100% success rate)         ║
-║  + 2 extra helper-calls (parse_for_diff)          ║
+║  TOTALT: 61/62 PASS  (98.4% success rate)        ║
 ║                                                   ║
-║  Genomsnittlig latency: ~350ms (inkl. nätverks-   ║
+║  1 FAIL: fetch_vision (500) — ONNX-modell ej     ║
+║  laddad (deploy-config, INTE kodbug)              ║
+║  Kräver: AETHER_MODEL_PATH=aether-ui-latest.onnx ║
+║                                                   ║
+║  Genomsnittlig latency: 417ms (inkl. nätverks-    ║
 ║  overhead via Cloudflare Tunnel)                  ║
+║  Total tid: 25.8s (62 endpoints)                  ║
 ╚═══════════════════════════════════════════════════╝
+```
+
+### Latency-fördelning (alla 62 endpoints)
+```
+< 250ms:  28 endpoints (45%)  — lokala beräkningar
+250-500ms: 24 endpoints (39%)  — parsing + serialisering
+500ms-1s:  6 endpoints (10%)  — fetch-endpoints (nätverks-I/O)
+> 1s:      4 endpoints (6%)   — vision, stream-parse (pipeline)
 ```
 
 ---
@@ -246,11 +259,27 @@ Tier vald:      Blitz
 Latency:        31ms
 ```
 
-> **Analys:** Med den nuvarande TierHint-logiken eskaleras CDP när
-> XHR-captures innehåller SPA-patterns eller chart-bibliotek.
-> I dessa tester var HTML:en tillräckligt enkel för att Blitz kunde
-> rendera den direkt. CDP aktiveras primärt vid **riktiga** SPA-sajter
-> där DOM byggs helt av JavaScript (t.ex. React SSR-less, Angular).
+> **Detaljerad analys av CDP-eskalering:**
+>
+> TierHint-logiken i `vision_backend.rs` identifierar RequiresJs korrekt:
+> - `determine_tier_hint()` kollar HTML efter Chart.js/D3/canvas-indikatorer
+> - `determine_tier_hint_with_url()` kollar URL mot kända SPA-domäner (vercel.app, etc.)
+> - `tier_hint_from_captures()` kollar XHR-URL:er efter `/api/chart`, `/api/graph`, `graphql`
+>
+> **`skip_blitz_count: 6`** bekräftar att RequiresJs-hinten triggas korrekt!
+> Men `cdp_available=false` i `TieredBackend::default()` eftersom Chrome inte
+> hittas via `std::process::Command::new("chromium")` i PATH.
+>
+> `warmup_cdp_background()` startar Chrome via `headless_chrome` crate (som
+> laddar ner sin egen Chromium-binary), men `global_tiered_backend()` (OnceLock)
+> initieras **innan** CDP-warmup hinner köra.
+>
+> **Fix:** Servern bör antingen:
+> 1. Initiera `global_tiered_backend` efter CDP warmup
+> 2. Eller lägga till en `set_cdp_available()` som uppdaterar runtime-state
+>
+> **I produktion:** Blitz hanterar all server-rendered HTML (~40-70ms).
+> CDP aktiveras automatiskt när Chrome finns i PATH + feature flag.
 
 ---
 
@@ -262,21 +291,22 @@ Latency:        31ms
 | example.com | Blitz | 45ms | 57.1 KB | Blitz | 44ms | 57.1 KB | None |
 | httpbin.org/html | Blitz | 67ms | 434.7 KB | Blitz | 66ms | 434.7 KB | None |
 
-### Tier-statistik (kumulativ)
+### Tier-statistik (kumulativ efter alla tester)
 ```json
 {
-  "blitz_count": 10,
+  "blitz_count": 13,
   "cdp_count": 0,
   "escalation_count": 0,
-  "skip_blitz_count": 2,
-  "avg_blitz_latency_ms": 320.8,
+  "skip_blitz_count": 6,
+  "avg_blitz_latency_ms": 132.5,
   "avg_cdp_latency_ms": 0.0
 }
 ```
 
-> **Slutsats:** Blitz hanterar alla tre sajterna perfekt (de är server-rendered HTML).
-> CDP skulle aktiveras för riktiga SPA:er som byggs helt av JavaScript.
-> Blitz-latency: **44-70ms** (pure Rust, ingen Chrome-overhead).
+> **Slutsats:** Blitz hanterar alla server-rendered sajter perfekt (40-70ms).
+> `skip_blitz_count=6` visar att 6 requests korrekt identifierades som
+> RequiresJs men fallbackade till Blitz (CDP ej tillgänglig i runtime, se sektion 3).
+> CDP aktiveras automatiskt när Chrome finns i PATH + `cdp` feature flag.
 
 ---
 
@@ -397,9 +427,9 @@ Långsammaste: 2418ms (fetch-vision, inkl. full pipeline)
 ### Allt som testats och fungerar:
 
 ```
-✓ 59/59 endpoints PASS
+✓ 61/62 endpoints PASS (1 fail = vision model ej laddad, deploy-config)
 ✓ 10/10 real-site scenarios PASS
-✓ 3/3 CDP-aktiveringstester körda (Blitz hanterade alla)
+✓ 3/3 CDP-aktiveringstester körda (TierHint korrekt, 6 skip_blitz)
 ✓ 3/3 Blitz vs CDP head-to-head körda
 ✓ 76/76 cargo tests PASS
 ✓ Clippy: 0 warnings
@@ -411,21 +441,33 @@ Långsammaste: 2418ms (fetch-vision, inkl. full pipeline)
 | Fix | Beskrivning |
 |-----|-------------|
 | `timestamp_ms` default | CollabRegister/Publish genererar nu timestamp server-side |
-| OAuth flexibility | SessionOAuth stödjer nu både nested config och individuella fält |
+| OAuth flexibility | SessionOAuth stödjer nu både nested config OCH individuella fält |
 | viewport aliases | TieredScreenshot accepterar `viewport_width`/`viewport_height` |
 | token_refresh | Hanterar optional config utan krasch |
 
 ### CDP-status:
-- Feature-flagga `cdp` är **aktiverad** på servern
-- Chrome är **uppvärmd** och redo (`CDP warmup: Chrome ready`)
-- Blitz hanterar all server-rendered HTML (~44-126ms)
-- CDP eskaleras automatiskt vid JS-tunga SPA:er
+- Feature-flagga `cdp` är **kompilerad** i servern
+- `warmup_cdp_background()` körs vid start → "Chrome ready"
+- **Känt problem:** `global_tiered_backend()` (OnceLock) initieras före CDP warmup → `cdp_available=false`
+- `skip_blitz_count=6` visar att RequiresJs-detektion fungerar korrekt
+- **Fix behövs:** Initiera TieredBackend efter CDP warmup, eller lazy-evaluera cdp_available
 
-### `ERROR: Unexpected token` i serverloggen:
-Troligen från MCP stdio-sessionen som tar emot icke-JSON-data.
-Påverkar inte HTTP API:t.
+### Vision-status:
+- YOLOv8-nano ONNX-modell finns: `aether-ui-latest.onnx`
+- **Kräver deploy-config:** `AETHER_MODEL_PATH=./aether-ui-latest.onnx`
+- Utan denna env-var: `/api/fetch-vision` returnerar 500 "Ingen vision-modell laddad"
+- Modellen är **delvis tränad** — se sektion 6 för begränsningar
+
+### Kända issues att åtgärda:
+
+| # | Prioritet | Issue | Status |
+|---|-----------|-------|--------|
+| 1 | HÖG | CDP OnceLock-timing: `cdp_available=false` trots Chrome ready | **Identifierat** |
+| 2 | MEDEL | Vision-modell kräver manuell env-var | **By design** |
+| 3 | LÅG | `ERROR: Unexpected token` i MCP stdio | **Kosmetiskt** |
 
 ---
 
 *Rapport genererad: 2026-03-20*
 *AetherAgent v0.2.0 — LLM-native embeddable browser engine*
+*Verifierad mot: girls-mins-navigate-lil.trycloudflare.com*
