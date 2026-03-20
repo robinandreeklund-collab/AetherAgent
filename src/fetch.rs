@@ -130,12 +130,19 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         redirect_chain.push(final_url.clone());
     }
 
-    // Läs body
-    let body = response
-        .text()
+    // Läs body med storleksgräns (max 20 MB) för att förhindra OOM
+    const MAX_BODY_SIZE: usize = 20 * 1024 * 1024;
+    let body_bytes = response
+        .bytes()
         .await
         .map_err(|e| format!("Kunde inte läsa body: {e}"))?;
-
+    if body_bytes.len() > MAX_BODY_SIZE {
+        return Err(format!(
+            "Svar för stort: {} bytes (max {MAX_BODY_SIZE})",
+            body_bytes.len()
+        ));
+    }
+    let body = String::from_utf8_lossy(&body_bytes).into_owned();
     let body_size_bytes = body.len();
     let fetch_time_ms = start.elapsed().as_millis() as u64;
 
@@ -254,16 +261,22 @@ fn extract_domain(url: &str) -> Option<String> {
 /// Returnerar modifierad HTML med inlinad CSS.
 pub async fn inline_external_css(html: &str, base_url: &str) -> String {
     // Hitta alla <link rel="stylesheet" href="...">
-    let css_links = extract_css_links(html, base_url);
+    let mut css_links = extract_css_links(html, base_url);
     if css_links.is_empty() {
         return html.to_string();
     }
 
-    // Hämta alla CSS-filer parallellt (max 3s per fil)
+    // Begränsa antal CSS-filer för att förhindra OOM vid sidor med hundratals <link>
+    const MAX_CSS_LINKS: usize = 50;
+    css_links.truncate(MAX_CSS_LINKS);
+
+    // Hämta alla CSS-filer parallellt (max 3s per fil, max 2 MB per fil)
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
+
+    const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
 
     // Parallell CSS-hämtning med tokio tasks
     let mut handles = Vec::with_capacity(css_links.len());
@@ -272,7 +285,13 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
         let url = link.url.clone();
         handles.push(tokio::spawn(async move {
             match client.get(&url).send().await {
-                Ok(resp) => resp.text().await.ok(),
+                Ok(resp) => {
+                    let bytes = resp.bytes().await.ok()?;
+                    if bytes.len() > MAX_CSS_BYTES {
+                        return None;
+                    }
+                    String::from_utf8(bytes.to_vec()).ok()
+                }
                 Err(_) => None,
             }
         }));

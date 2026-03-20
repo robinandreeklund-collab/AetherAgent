@@ -182,10 +182,8 @@ impl StreamEngine {
                 NodeDecision::Emit => {
                     self.state.mark_sent(node.id);
                     self.state.update_top_relevance(score);
-                    let mut emitted = node.clone();
+                    let mut emitted = node.clone_shallow();
                     emitted.relevance = score;
-                    // Rensa barn — vi emitterar platt i chunks
-                    emitted.children = Vec::new();
                     chunk_nodes.push(emitted);
                     if chunk_nodes.len() >= self.config.chunk_size {
                         break;
@@ -286,7 +284,7 @@ impl StreamEngine {
                 .children
                 .iter()
                 .filter(|child| !self.state.sent_nodes.contains(&child.id))
-                .cloned()
+                .map(|child| child.clone_shallow())
                 .collect()
         } else {
             Vec::new()
@@ -304,9 +302,8 @@ impl StreamEngine {
             let score = self.decision.score(child);
             self.state.mark_sent(child.id);
             self.state.update_top_relevance(score);
-            let mut emitted_child = child.clone();
+            let mut emitted_child = child.clone_shallow();
             emitted_child.relevance = score;
-            emitted_child.children = Vec::new();
             chunk_nodes.push(emitted_child);
         }
 
@@ -337,9 +334,8 @@ impl StreamEngine {
             if self.state.should_emit(entry.score) {
                 self.state.mark_sent(node.id);
                 self.state.update_top_relevance(entry.score);
-                let mut n = node.clone();
+                let mut n = node.clone_shallow();
                 n.relevance = entry.score;
-                n.children = Vec::new();
                 chunk_nodes.push(n);
             }
         }

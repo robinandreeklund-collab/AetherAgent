@@ -1021,6 +1021,8 @@ pub fn load_vision_model(model_bytes: &[u8]) -> Result<ort::session::Session, St
 ///
 /// `fast_render=true`: skip external resources (~50ms). Good enough for YOLO.
 /// `fast_render=false`: load CSS/fonts/images with 5s timeout cap.
+///
+/// Max resolution: 4096×8192 (134 MB buffer). Larger values are clamped.
 #[cfg(feature = "blitz")]
 pub fn render_html_to_png(
     html: &str,
@@ -1029,6 +1031,18 @@ pub fn render_html_to_png(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
+    // Säkerhetsgräns: förhindra OOM vid orimliga dimensioner
+    const MAX_WIDTH: u32 = 4096;
+    const MAX_HEIGHT: u32 = 8192;
+    const MAX_PIXELS: u64 = 4096 * 8192; // ~134 MB RGBA-buffer
+    let width = width.min(MAX_WIDTH);
+    let height = height.min(MAX_HEIGHT);
+    let total_pixels = width as u64 * height as u64;
+    if total_pixels > MAX_PIXELS {
+        return Err(format!(
+            "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
+        ));
+    }
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
     use blitz_html::HtmlDocument;
