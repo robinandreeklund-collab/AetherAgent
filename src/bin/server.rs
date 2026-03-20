@@ -1750,28 +1750,6 @@ async fn parse_screenshot_server_model(
 // ensure_rten_format(), load_vision_model() med rten::Model, load_vision_model_bytes()
 // Se git-historik för fullständig implementering
 
-/// Ladda vision-modell från URL eller filsökväg vid serverstart.
-/// Returnerar en förladdad ORT Session (laddas en gång, återanvänds).
-#[cfg(feature = "vision")]
-async fn load_vision_model() -> Option<ort::session::Session> {
-    let model_bytes = load_vision_model_bytes().await?;
-    println!("Laddar ORT Session (ONNX Runtime)...");
-    let start = std::time::Instant::now();
-    match aether_agent::load_vision_model(&model_bytes) {
-        Ok(session) => {
-            println!(
-                "ORT Session laddad på {:.1}s — alla requests använder förladdad modell",
-                start.elapsed().as_secs_f64()
-            );
-            Some(session)
-        }
-        Err(e) => {
-            eprintln!("Kunde inte ladda ORT-modell: {e}");
-            None
-        }
-    }
-}
-
 /// Hämta modell-bytes från URL eller fil (ONNX-format direkt — ingen konvertering behövs)
 #[cfg(feature = "vision")]
 async fn load_vision_model_bytes() -> Option<Vec<u8>> {
@@ -3685,7 +3663,8 @@ fn spawn_memory_monitor() {
 
 #[tokio::main]
 async fn main() {
-    log_rss("startup");
+    eprintln!("=== AetherAgent Memory Startup Trace ===");
+    log_rss("1. process start");
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -3694,20 +3673,51 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    log_rss("2. before CDP hook registration");
     // Registrera CDP ready-callback FÖRE warmup (så att global backend uppdateras)
     aether_agent::register_cdp_ready_hook();
+    log_rss("3. after CDP hook registration");
 
     // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
     aether_agent::vision_backend::warmup_cdp_background();
-    log_rss("after CDP warmup init");
+    log_rss("4. after CDP warmup init");
 
     // Ladda vision-modell vid startup (om konfigurerad) — Model::load körs EN gång
     #[cfg(feature = "vision")]
-    let vision_model = load_vision_model().await;
+    let vision_model = {
+        log_rss("5a. before vision model bytes load");
+        let vision_bytes = load_vision_model_bytes().await;
+        if let Some(ref bytes) = vision_bytes {
+            eprintln!(
+                "[MEM] 5b. vision model bytes loaded: {:.1} MB on disk",
+                bytes.len() as f64 / (1024.0 * 1024.0)
+            );
+            log_rss("5b. after vision model bytes in memory");
+        }
+        let model: Option<ort::session::Session> = match vision_bytes {
+            Some(bytes) => {
+                log_rss("5c. before ORT session create");
+                let result = aether_agent::load_vision_model(&bytes);
+                log_rss("5d. after ORT session create");
+                drop(bytes); // Frigör modell-bytes efter laddning
+                log_rss("5e. after dropping model bytes");
+                match result {
+                    Ok(session) => Some(session),
+                    Err(e) => {
+                        eprintln!("Kunde inte ladda ORT-modell: {e}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        log_rss("6. after complete vision setup");
+        model
+    };
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
-    log_rss("after vision model load");
 
+    log_rss("7. before router build");
     // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
     spawn_memory_monitor();
 
@@ -3719,6 +3729,7 @@ async fn main() {
             std::collections::VecDeque::with_capacity(100),
         )),
     };
+    log_rss("8. after AppState creation");
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
