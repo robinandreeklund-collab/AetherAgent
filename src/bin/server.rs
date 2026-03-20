@@ -1562,25 +1562,60 @@ fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::
         Some(arr) => arr,
         None => return Vec::new(),
     };
-    nodes
+
+    // Re-rank för informationsextraktion (inte interaktion).
+    // Text/heading med längre innehåll är mest värdefulla vid sökning.
+    let mut scored: Vec<aether_agent::search::PageNode> = nodes
         .iter()
         .filter_map(|n| {
             let label = n.get("label")?.as_str()?.to_string();
-            if label.is_empty() {
+            if label.len() < 10 {
                 return None;
             }
+            let role = n.get("role").and_then(|r| r.as_str()).unwrap_or("text");
+            let base_rel = n.get("relevance").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32;
+
+            // Sök-optimerad re-ranking:
+            // - text/paragraph med faktiskt innehåll → boost
+            // - heading → boost (rubriker sammanfattar)
+            // - link/button/cta/nav → nedprioritera (nav-brus)
+            let info_boost = match role {
+                "text" | "paragraph" => 0.35,
+                "heading" => 0.25,
+                "price" | "product_card" => 0.20,
+                "generic" => 0.10,
+                "link" => -0.20,
+                "button" | "cta" => -0.30,
+                "navigation" => -0.40,
+                _ => 0.0,
+            };
+            // Längre text = mer informationsrikt
+            let len_boost = (label.len() as f32 / 500.0).min(0.15);
+            let final_rel = (base_rel + info_boost + len_boost).clamp(0.0, 1.0);
+
             Some(aether_agent::search::PageNode {
-                role: n
-                    .get("role")
-                    .and_then(|r| r.as_str())
-                    .unwrap_or("text")
-                    .to_string(),
+                role: role.to_string(),
                 label,
-                relevance: n.get("relevance").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32,
+                relevance: final_rel,
             })
         })
-        .take(max)
-        .collect()
+        .collect();
+
+    scored.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+    // Dedup: skippa noder vars label är substring av en redan vald nod
+    let mut selected: Vec<aether_agent::search::PageNode> = Vec::with_capacity(max);
+    for node in scored {
+        if selected.len() >= max {
+            break;
+        }
+        let dominated = selected
+            .iter()
+            .any(|s| s.label.contains(&node.label) || node.label.contains(&s.label));
+        if !dominated {
+            selected.push(node);
+        }
+    }
+    selected
 }
 
 // ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
