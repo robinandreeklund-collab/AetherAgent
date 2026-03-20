@@ -324,6 +324,28 @@ struct TieredScreenshotParams {
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct TierStatsParams {}
 
+// ─── Fas 17: Search parameter types ─────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct SearchParams {
+    /// Free-text search query (e.g. "hur många bor i Sverige 2026")
+    query: String,
+    /// Number of results to return (1-10, default: 3)
+    top_n: Option<usize>,
+    /// Agent goal for relevance scoring (default: same as query)
+    goal: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct FetchSearchParams {
+    /// Free-text search query
+    query: String,
+    /// Number of results to return (1-10, default: 3)
+    top_n: Option<usize>,
+    /// Agent goal for relevance scoring (default: same as query)
+    goal: Option<String>,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -653,6 +675,43 @@ impl AetherMcpServer {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks
         params.goal.clone()
     }
+
+    #[tool(
+        name = "search",
+        description = "Search the web via DuckDuckGo and return structured results with title, URL, snippet, domain, and optional direct answer. USE THIS TOOL WHEN: the agent has a free-text question but no URL — e.g. 'how many people live in Sweden?', 'what is the capital of France?', 'latest news about AI'. This is the entry point for web research: it searches DDG, parses results, and returns ranked hits. If a direct factual answer is found in snippets (numbers, dates), it is extracted as direct_answer. Use top_n=1 for quick lookups, top_n=5 for research. NOTE: This tool requires the server to fetch from DuckDuckGo — use fetch_search for the full pipeline, or provide pre-fetched DDG HTML."
+    )]
+    fn search(&self, Parameters(params): Parameters<SearchParams>) -> String {
+        // Returnera DDG-URL som klienten ska hämta — search_from_html behöver HTML
+        let url = aether_agent::build_search_url(&params.query);
+        serde_json::json!({
+            "action": "fetch_required",
+            "ddg_url": url,
+            "query": params.query,
+            "top_n": params.top_n.unwrap_or(3),
+            "goal": params.goal.unwrap_or_default(),
+            "message": "Fetch the ddg_url and call fetch_search, or pass pre-fetched HTML to parse this search."
+        }).to_string()
+    }
+
+    #[tool(
+        name = "fetch_search",
+        description = "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results — all in one call. USE THIS TOOL WHEN: you need to answer a question but don't know which URL to visit. Provide a free-text query like 'population of Sweden 2026' and get back ranked results with title, URL, snippet, domain, confidence score, and optional direct_answer. This is the recommended search tool — it handles fetching automatically. Returns up to top_n results (default 3, max 10). Example: query='best restaurants in Stockholm' → returns top restaurant listing URLs with snippets."
+    )]
+    fn fetch_search(&self, Parameters(params): Parameters<FetchSearchParams>) -> String {
+        // Bygg DDG URL och returnera instruktion att fetcha
+        // Async fetch hanteras i call_tool override
+        let url = aether_agent::build_search_url(&params.query);
+        let top_n = params.top_n.unwrap_or(3);
+        let goal = params.goal.unwrap_or_default();
+        serde_json::json!({
+            "action": "fetch_search_pending",
+            "ddg_url": url,
+            "query": params.query,
+            "top_n": top_n,
+            "goal": goal,
+        })
+        .to_string()
+    }
 }
 
 /// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
@@ -749,6 +808,54 @@ async fn render_url_to_png_mcp(
     _fast_render: bool,
 ) -> Result<Vec<u8>, String> {
     Err("Blitz feature inte aktiverad".to_string())
+}
+
+/// Hanterar fetch_search: hämta DDG HTML, parsa sökresultat, returnera strukturerad data
+async fn handle_fetch_search(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if query.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "query parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let ddg_url = aether_agent::build_search_url(query);
+    let config = aether_agent::types::FetchConfig::default();
+
+    // Hämta DDG HTML
+    let html = match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+        Ok(result) => result.body,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "DDG fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    // Parsa sökresultat
+    let result = aether_agent::search_from_html(query, &html, top_n, goal);
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
 }
 
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
@@ -1142,6 +1249,11 @@ impl ServerHandler for AetherMcpServer {
                 let result = handle_fetch_vision(args).await;
                 Ok(result)
             }
+            "fetch_search" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_search(args).await;
+                Ok(result)
+            }
             // Alla andra verktyg: delegera till router
             _ => {
                 let ctx = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
@@ -1174,6 +1286,9 @@ impl ServerHandler for AetherMcpServer {
              multi-agent workflows. Use grounding tools for vision-language integration.\n\n\
              XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
              in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
+             SEARCH: Use 'fetch_search' to search the web via DuckDuckGo — just provide a query. \
+             Returns ranked results with title, URL, snippet, and optional direct answer. \
+             Use this as the first step when you don't know which URL to visit.\n\n\
              VISION: Use 'fetch_vision' to analyze ANY web page visually — just give a URL and goal. \
              The server renders the page with Blitz (pure Rust browser engine), runs YOLOv8 detection, \
              and returns: the original screenshot, annotated image with bounding boxes, and detection JSON. \
@@ -1199,7 +1314,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
     eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
-    eprintln!("        tiered_screenshot, tier_stats");
+    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search");
 
     let server = AetherMcpServer::new();
 

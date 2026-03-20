@@ -750,6 +750,8 @@ async fn root() -> impl IntoResponse {
     <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/plan</span><span class="desc"> — fetch + plan</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/firewall/classify</span><span class="desc"> — L1/L2/L3</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/detect-xhr</span><span class="desc"> — XHR scan</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/search</span><span class="desc"> — DDG search (pre-fetched HTML)</span></div>
+    <div class="ep"><span class="method post">POST</span><span class="route">/api/fetch/search</span><span class="desc"> — DDG search (auto-fetch)</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/api/parse-screenshot</span><span class="desc"> — vision</span></div>
     <div class="ep"><span class="method post">POST</span><span class="route">/mcp</span><span class="desc"> — MCP endpoint</span></div>
     <div class="ep"><span class="method">GET</span><span class="route">/health</span><span class="desc"> — health check</span></div>
@@ -820,6 +822,8 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/collab/publish": "Publish semantic delta to collab store",
             "POST /api/collab/fetch": "Fetch new deltas for agent",
             "POST /api/detect-xhr": "Scan HTML for XHR/fetch/AJAX endpoints in scripts",
+            "POST /api/search": "Parse pre-fetched DDG HTML into structured search results",
+            "POST /api/fetch/search": "Search via DuckDuckGo: fetch + parse in one call",
             "POST /api/parse-screenshot": "Analyze screenshot with YOLOv8-nano vision model",
             "POST /api/session/create": "Create empty session manager",
             "POST /api/session/cookies/add": "Add cookies from Set-Cookie headers",
@@ -1382,6 +1386,63 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
 
 async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     let result = aether_agent::detect_xhr_urls(&req.html);
+    (StatusCode::OK, result)
+}
+
+// ─── Fas 17: DDG Search handlers ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SearchRequest {
+    query: String,
+    html: String,
+    #[serde(default)]
+    top_n: Option<usize>,
+    #[serde(default)]
+    goal: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FetchSearchRequest {
+    query: String,
+    #[serde(default)]
+    top_n: Option<usize>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+async fn search_handler(Json(req): Json<SearchRequest>) -> impl IntoResponse {
+    let top_n = req.top_n.unwrap_or(3);
+    let goal = req.goal.as_deref().unwrap_or("");
+    let result = aether_agent::search_from_html(&req.query, &req.html, top_n, goal);
+    (StatusCode::OK, result)
+}
+
+async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+    let ddg_url = aether_agent::build_search_url(&req.query);
+
+    if let Err(e) = aether_agent::fetch::validate_url(&ddg_url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let html = match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+        Ok(r) => r.body,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let top_n = req.top_n.unwrap_or(3);
+    let goal = req.goal.as_deref().unwrap_or("");
+    let result = aether_agent::search_from_html(&req.query, &html, top_n, goal);
     (StatusCode::OK, result)
 }
 
@@ -1968,6 +2029,30 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "search",
+            "description": "Build a DuckDuckGo search URL for a query. Returns the URL to fetch. For auto-fetch, use fetch_search instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search query"}
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "fetch_search",
+            "description": "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results with title, URL, snippet, domain, confidence, and optional direct_answer. Use this when you don't know which URL to visit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text search query"},
+                    "top_n": {"type": "integer", "description": "Number of results (1-10, default: 3)", "default": 3},
+                    "goal": {"type": "string", "description": "Agent goal for relevance scoring (default: same as query)"}
+                },
+                "required": ["query"]
+            }
+        },
+        {
             "name": "stream_parse",
             "description": "Goal-driven adaptive DOM streaming. Parses HTML and emits only the most relevant nodes for the given goal, with 90-99% token savings. Use instead of parse/parse_top when you want minimal output focused on what matters. Returns ranked nodes, token savings ratio, and chunk metadata.",
             "inputSchema": {
@@ -2472,6 +2557,32 @@ async fn mcp_dispatch_tool(
         "detect_xhr_urls" => {
             let html = args["html"].as_str().unwrap_or("");
             text_ok(aether_agent::detect_xhr_urls(html))
+        }
+        "search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let url = aether_agent::build_search_url(query);
+            text_ok(serde_json::json!({
+                "action": "fetch_required",
+                "ddg_url": url,
+                "query": query,
+                "message": "Fetch the ddg_url and pass HTML to search endpoint, or use fetch_search for auto-fetch."
+            }).to_string())
+        }
+        "fetch_search" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+            let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let ddg_url = aether_agent::build_search_url(query);
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+                Ok(result) => text_ok(aether_agent::search_from_html(
+                    query,
+                    &result.body,
+                    top_n,
+                    goal,
+                )),
+                Err(e) => text_ok(format!(r#"{{"error": "DDG fetch failed: {e}"}}"#)),
+            }
         }
         "parse_screenshot" => {
             #[cfg(feature = "vision")]
@@ -3267,6 +3378,9 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
+        // Fas 17: DDG Search
+        .route("/api/search", post(search_handler))
+        .route("/api/fetch/search", post(fetch_search_handler))
         // Fas 16: Stream Parse
         .route("/api/stream-parse", post(stream_parse_handler))
         .route("/api/fetch/stream-parse", post(fetch_stream_parse))
@@ -3444,6 +3558,8 @@ async fn main() {
     println!("  POST /api/collab/fetch           – Fetch new deltas for agent");
     println!();
     println!("  POST /api/detect-xhr              – Scan HTML for XHR/fetch/AJAX endpoints");
+    println!("  POST /api/search                 – DDG search (pre-fetched HTML)");
+    println!("  POST /api/fetch/search           – DDG search (auto-fetch)");
     println!(
         "  POST /api/parse-screenshot       – Analyze screenshot with YOLOv8 vision (client model)"
     );

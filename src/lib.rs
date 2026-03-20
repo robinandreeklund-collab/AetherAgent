@@ -16,6 +16,7 @@ mod js_eval;
 mod memory;
 mod orchestrator;
 mod parser;
+pub mod search;
 mod semantic;
 mod session;
 mod stream_engine;
@@ -1793,6 +1794,67 @@ pub fn workflow_status(orchestrator_json: &str) -> String {
         "page_history": orch.page_history,
     }))
     .unwrap_or_else(|e| format!(r#"{{"error": "{}"}}"#, e))
+}
+
+// ─── Fas 17: DDG Search Layer ────────────────────────────────────────────────
+
+/// Search the web via DuckDuckGo HTML and return structured results.
+///
+/// Combines DDG HTML fetch + stream_parse pipeline to extract
+/// title, URL, snippet, domain and optional direct answer.
+///
+/// # Arguments
+/// * `query` - Free-text search query
+/// * `top_n` - Number of results to return (1-10, default 3)
+/// * `goal` - Agent goal for relevance scoring (default: same as query)
+/// * `html` - Pre-fetched DDG HTML (if empty, returns error asking caller to fetch)
+pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> String {
+    let start = now_ms();
+    let effective_goal = if goal.is_empty() {
+        format!("hitta svar på: {}", query)
+    } else {
+        goal.to_string()
+    };
+    let effective_top_n = if top_n == 0 { 3 } else { top_n.min(10) };
+
+    let ddg_url = search::build_ddg_url(query);
+
+    // Kör stream_parse med låg relevance-tröskel för sök-snippets
+    let config = stream_engine::StreamParseConfig {
+        chunk_size: 15,
+        min_relevance: 0.15,
+        max_nodes: 30,
+    };
+    let stream_result = stream_engine::stream_parse(html, &effective_goal, &ddg_url, config);
+
+    // Extrahera strukturerade sökresultat
+    let results = search::extract_results(&stream_result.nodes, effective_top_n);
+
+    // Försök hitta direktsvar
+    let (direct_answer, direct_answer_confidence) = search::detect_direct_answer(&results)
+        .map(|(a, c)| (Some(a), c))
+        .unwrap_or((None, 0.0));
+
+    let search_result = search::SearchResult {
+        query: query.to_string(),
+        results,
+        direct_answer,
+        direct_answer_confidence,
+        source_url: ddg_url,
+        parse_ms: now_ms() - start,
+        nodes_seen: stream_result.total_dom_nodes,
+        nodes_emitted: stream_result.nodes_emitted,
+    };
+
+    match serialize_json(&search_result, 10) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Convenience: build the DDG URL for a query so callers can fetch it
+pub fn build_search_url(query: &str) -> String {
+    search::build_ddg_url(query)
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
