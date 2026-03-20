@@ -2972,3 +2972,47 @@ fn test_stream_parse_safe_content_no_warnings() {
         warnings
     );
 }
+
+/// Regressionstest: stream_parse på stor, djupt nästlad HTML
+/// får INTE allokera exponentiellt minne (BUG-7: children deep-clone).
+/// Verifierar att all_nodes lagras platt utan inbäddade barnträd.
+#[test]
+fn test_stream_parse_no_exponential_memory_on_deep_html() {
+    // Bygg sida med 500 element i 15 nivåer djup — simulerar verklig webbsida
+    let mut html = String::from("<html><body>");
+    for _ in 0..15 {
+        html.push_str("<div>");
+    }
+    for i in 0..500 {
+        html.push_str(&format!(r##"<a href="/page/{}">Länk nummer {}</a>"##, i, i));
+    }
+    for _ in 0..15 {
+        html.push_str("</div>");
+    }
+    html.push_str("</body></html>");
+
+    let start = std::time::Instant::now();
+    let result_json = stream_parse_adaptive(&html, "hitta länk", "https://big.se", 10, 0.0, 50);
+    let elapsed = start.elapsed();
+
+    let result: serde_json::Value = serde_json::from_str(&result_json).expect("Giltig JSON");
+    let total = result["total_dom_nodes"].as_u64().unwrap_or(0);
+    let emitted = result["nodes_emitted"].as_u64().unwrap_or(0);
+
+    assert!(
+        total > 100,
+        "Borde ha traverserat >100 DOM-noder, fick {}",
+        total
+    );
+    assert!(
+        emitted <= 50,
+        "Borde respektera max_nodes=50, fick {}",
+        emitted
+    );
+    // Parsning borde ta <500ms — exponentiell allokering tar sekunder/minuter
+    assert!(
+        elapsed.as_millis() < 500,
+        "Parsning tog {}ms — borde vara <500ms (minnesläcka?)",
+        elapsed.as_millis()
+    );
+}

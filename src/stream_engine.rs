@@ -111,10 +111,12 @@ pub struct StreamEngine {
     decision: DecisionLayer,
     warnings: Vec<InjectionWarning>,
     next_id: u32,
-    /// Alla noder från DOM (platta, med original-id:n)
+    /// Alla noder från DOM (platta, utan barn – barn lagras i children_map)
     all_nodes: Vec<SemanticNode>,
     /// Index: nod-id → position i all_nodes
     node_index: std::collections::HashMap<u32, usize>,
+    /// Barn-relation: nod all_nodes-index → barn all_nodes-index
+    children_map: std::collections::HashMap<usize, Vec<usize>>,
     /// Prioritetskö med osända noder, sorterade efter relevans
     priority_queue: std::collections::BinaryHeap<ScoredEntry>,
 }
@@ -132,6 +134,7 @@ impl StreamEngine {
             next_id: 0,
             all_nodes: Vec::new(),
             node_index: std::collections::HashMap::new(),
+            children_map: std::collections::HashMap::new(),
             priority_queue: std::collections::BinaryHeap::new(),
         }
     }
@@ -266,7 +269,7 @@ impl StreamEngine {
         }
     }
 
-    /// Expandera en specifik nod – emittera dess barn
+    /// Expandera en specifik nod – emittera dess barn via children_map
     fn expand_node(
         &mut self,
         node_id: u32,
@@ -278,27 +281,35 @@ impl StreamEngine {
         }
         self.state.mark_expanded(node_id);
 
-        // Hitta nodens barn i all_nodes via index
-        let children: Vec<SemanticNode> = if let Some(&idx) = self.node_index.get(&node_id) {
-            self.all_nodes[idx]
-                .children
-                .iter()
-                .filter(|child| !self.state.sent_nodes.contains(&child.id))
-                .map(|child| child.clone_shallow())
-                .collect()
+        // Hitta nodens barn via children_map (index-baserat, ingen deep clone)
+        let child_indices: Vec<usize> = if let Some(&parent_idx) = self.node_index.get(&node_id) {
+            self.children_map
+                .get(&parent_idx)
+                .cloned()
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
 
-        if children.is_empty() {
+        // Filtrera redan skickade
+        let child_indices: Vec<usize> = child_indices
+            .into_iter()
+            .filter(|&idx| {
+                idx < self.all_nodes.len()
+                    && !self.state.sent_nodes.contains(&self.all_nodes[idx].id)
+            })
+            .collect();
+
+        if child_indices.is_empty() {
             return;
         }
 
         let mut chunk_nodes: Vec<SemanticNode> = Vec::new();
-        for child in &children {
+        for &child_idx in &child_indices {
             if self.state.is_done() {
                 break;
             }
+            let child = &self.all_nodes[child_idx];
             let score = self.decision.score(child);
             self.state.mark_sent(child.id);
             self.state.update_top_relevance(score);
@@ -422,14 +433,13 @@ impl StreamEngine {
             if children_before == children_after {
                 return;
             }
-            // Skapa wrapper-nod med barn-referens
-            let child_nodes: Vec<SemanticNode> =
-                self.all_nodes[children_before..children_after].to_vec();
+            // Lagra barn-index separat istället för att deep-clona barnträd
+            let child_indices: Vec<usize> = (children_before..children_after).collect();
             let mut node = SemanticNode::new(id, &role, "");
-            node.children = child_nodes;
             node.trust = trust;
             let idx = self.all_nodes.len();
             self.node_index.insert(id, idx);
+            self.children_map.insert(idx, child_indices);
             self.all_nodes.push(node);
             return;
         }
@@ -467,9 +477,9 @@ impl StreamEngine {
 
         let action = SemanticNode::infer_action(&role);
 
-        // Samla barn som skapats under traversering
-        let child_nodes: Vec<SemanticNode> = if children_after > children_before {
-            self.all_nodes[children_before..children_after].to_vec()
+        // Lagra barn-index separat istället för att deep-clona barnträd
+        let child_indices: Vec<usize> = if children_after > children_before {
+            (children_before..children_after).collect()
         } else {
             Vec::new()
         };
@@ -480,12 +490,14 @@ impl StreamEngine {
         node.action = action;
         node.relevance = relevance;
         node.trust = trust;
-        node.children = child_nodes;
         node.html_id = html_id;
         node.name = name;
 
         let idx = self.all_nodes.len();
         self.node_index.insert(id, idx);
+        if !child_indices.is_empty() {
+            self.children_map.insert(idx, child_indices);
+        }
         self.all_nodes.push(node);
     }
 }
