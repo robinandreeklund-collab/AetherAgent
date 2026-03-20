@@ -1491,13 +1491,16 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
                 .await
                 {
                     Ok(Ok(result)) => {
+                        // Hämta fler noder med låg tröskel — re-ranking i
+                        // deep_extract_page_nodes prioriterar text-innehåll
+                        let fetch_limit = (mnpr * 8).max(30);
                         let stream_json = aether_agent::stream_parse_adaptive(
                             &result.body,
                             &g,
                             &url,
-                            mnpr as u32,
-                            0.1,
-                            (mnpr * 2) as u32,
+                            fetch_limit as u32,
+                            0.0,
+                            fetch_limit as u32,
                         );
                         let nodes = deep_extract_page_nodes(&stream_json, mnpr);
                         (idx, nodes, fetch_start.elapsed().as_millis() as u64)
