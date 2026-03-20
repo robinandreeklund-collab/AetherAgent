@@ -3171,7 +3171,9 @@ async fn main() {
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
-    println!("  GET  /mcp                        – MCP SSE stream (server-initiated notifications)");
+    println!(
+        "  GET  /mcp                        – MCP SSE stream (server-initiated notifications)"
+    );
     println!("  DELETE /mcp                      – Terminate MCP session");
 
     let listener = tokio::net::TcpListener::bind(addr)
