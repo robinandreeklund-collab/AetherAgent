@@ -1951,6 +1951,21 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "fetch_stream_parse",
+            "description": "ALL-IN-ONE: Fetch a URL and run goal-driven adaptive DOM streaming. Combines fetch + stream_parse in one call. Returns only the most relevant nodes for the given goal with 90-99% token savings. Use this instead of fetch_parse when you want minimal, goal-focused output.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance ranking"},
+                    "top_n": {"type": "integer", "description": "Max nodes per chunk (default: 10)", "default": 10},
+                    "min_relevance": {"type": "number", "description": "Minimum relevance 0.0-1.0 (default: 0.3)", "default": 0.3},
+                    "max_nodes": {"type": "integer", "description": "Hard cap on total emitted nodes (default: 50)", "default": 50}
+                },
+                "required": ["url", "goal"]
+            }
+        },
+        {
             "name": "stream_parse_directive",
             "description": "Goal-driven adaptive DOM streaming with LLM directives. Like stream_parse but accepts directives to control traversal: expand(node_id) to get children, next_branch to jump to next top-ranked unsent nodes, lower_threshold(value) to reduce min_relevance, stop to halt immediately. Use for interactive multi-step exploration.",
             "inputSchema": {
@@ -2136,62 +2151,6 @@ fn render_char_5x7(img: &mut image::RgbaImage, x: u32, y: u32, ch: char, color: 
 #[cfg(not(feature = "vision"))]
 fn render_annotated_screenshot(_png_bytes: &[u8], _result_json: &str) -> Result<String, String> {
     Err("Vision feature inte aktiverad".to_string())
-}
-
-/// Hämta HTML från URL och rendera till PNG med Blitz (ren Rust, ingen extern binär).
-/// Returnerar PNG-bytes vid framgång.
-#[cfg(feature = "blitz")]
-async fn render_url_to_png(
-    url: &str,
-    width: u32,
-    height: u32,
-    fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    // Hämta HTML med reqwest
-    let config = aether_agent::types::FetchConfig::default();
-    let response = aether_agent::fetch::fetch_page(url, &config)
-        .await
-        .map_err(|e| format!("Kunde inte hämta {url}: {e}"))?;
-    let base_url = url.to_string();
-
-    // Inlina extern CSS för Blitz-rendering (blitz_net hämtar inte CSS tillförlitligt)
-    let html = aether_agent::fetch::inline_external_css(&response.body, &base_url).await;
-
-    // Med inlinad CSS kan vi använda fast_render=true (inga externa resurser behövs)
-    let effective_fast_render = if !fast_render { true } else { fast_render };
-
-    // Rendera HTML → PNG i spawn_blocking (HtmlDocument är inte Send)
-    tokio::task::spawn_blocking(move || {
-        render_html_to_png(&html, &base_url, width, height, effective_fast_render)
-    })
-    .await
-    .map_err(|e| format!("Blitz render task error: {e}"))?
-}
-
-/// Ren-Rust HTML → PNG rendering med Blitz. Delegerar till lib-funktionen.
-///
-/// `fast_render=true`: ~50ms (skippar externa resurser).
-/// `fast_render=false`: ~5s cap (laddar CSS/fonter/bilder).
-#[cfg(feature = "blitz")]
-fn render_html_to_png(
-    html: &str,
-    base_url: &str,
-    width: u32,
-    height: u32,
-    fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    aether_agent::render_html_to_png(html, base_url, width, height, fast_render)
-}
-
-/// Fallback om Blitz inte är kompilerat
-#[cfg(not(feature = "blitz"))]
-async fn render_url_to_png(
-    _url: &str,
-    _width: u32,
-    _height: u32,
-    _fast_render: bool,
-) -> Result<Vec<u8>, String> {
-    Err("Blitz feature inte aktiverad. Kompilera med --features blitz".to_string())
 }
 
 /// BUG-003 fix: Hämta HTML, analysera TierHint, rendera med rätt tier.
@@ -2582,6 +2541,29 @@ async fn mcp_dispatch_tool(
             {
                 Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
             }
+        }
+        "fetch_stream_parse" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
+            let min_rel = args["min_relevance"].as_f64().unwrap_or(0.3) as f32;
+            let max_nodes = args["max_nodes"].as_u64().unwrap_or(50) as u32;
+
+            aether_agent::fetch::validate_url(url)?;
+            let config = aether_agent::types::FetchConfig::default();
+            let fetch_result = aether_agent::fetch::fetch_page(url, &config)
+                .await
+                .map_err(|e| format!("Fetch failed: {e}"))?;
+
+            let result = aether_agent::stream_parse_adaptive(
+                &fetch_result.body,
+                goal,
+                &fetch_result.final_url,
+                top_n,
+                min_rel,
+                max_nodes,
+            );
+            text_ok(result)
         }
         "stream_parse" => {
             let html = args["html"].as_str().unwrap_or("");
