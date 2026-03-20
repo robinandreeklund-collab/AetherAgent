@@ -215,6 +215,62 @@ Stop-directive respekteras korrekt.
 
 ---
 
+## Tester mot riktiga sajter
+
+### SVT.se (20KB av 514KB total HTML)
+
+Hämtat med `curl -sL https://www.svt.se`, skriptat/stil-rensat, forsta 20KB.
+
+```
+Total DOM: 127 | Emitterade: 15 | Savings: 88.2% | Parse: 864ms
+
+Topp-3:
+  1. [link    ] rel=0.62 [click]  Just nu Talesperson for revolutionsgardet dodad i attack
+  2. [heading ] rel=0.54         Just nu Lars Leijonborg kandiderar for Liberalerna
+  3. [heading ] rel=0.54         Just nu Cecilia Ronn utmanar inte Mohamsson
+```
+
+SVT:s "Just nu"-nyheter rankas #1-3. 88.2% token savings pa riktig sajt.
+
+### httpbin.org/html
+
+```
+Total DOM: 5 | Emitterade: 5 | Savings: 0.0% | Parse: 0ms
+
+  1. [text    ] rel=0.30  "Availing himself of the mild, summer-cool weather..."
+  3. [heading ] rel=0.29  "Herman Melville - Moby-Dick"
+```
+
+Korrekt: liten sida far ingen savings (alla noder emitteras).
+
+### HTTP MCP (stream_parse + stream_parse_directive)
+
+```
+stream_parse (SVT 10KB):
+  DOM: 48 | Emit: 5 | Savings: 89.6%
+  #1 [link] rel=0.62  "Nyheter"
+
+stream_parse_directive (next_branch):
+  DOM: 48 | Emit: 6 | Chunks: 2 | Savings: 87.5%
+
+stream_parse_directive (expand + lower_threshold):
+  DOM: 48 | Emit: 5 | Chunks: 1 | Savings: 89.6%
+```
+
+Alla HTTP MCP tool calls fungerar korrekt.
+
+### DN.se (SPA — JS-driven)
+
+```
+Total DOM: 2 | Emitterade: 1 | Savings: 50.0%
+  1. [generic] "Dagens Nyheter – senaste nyheterna fran Sverige och varlden"
+```
+
+DN.se levererar allt via JavaScript/React. Utan JS-exekvering syns bara <title>-taggen.
+Detta ar forväntat beteende — stream_parse opererar pa server-renderad HTML.
+
+---
+
 ## Sammanfattning
 
 Fas 16 ar fullt implementerad och testad. Karnfunktionaliteten — goal-driven adaptiv DOM streaming med LLM-styrda directives — fungerar korrekt over alla tre API-ytor (MCP stdio, HTTP server, WASM).

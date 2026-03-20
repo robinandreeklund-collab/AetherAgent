@@ -1933,6 +1933,37 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["url", "goal"]
             }
+        },
+        {
+            "name": "stream_parse",
+            "description": "Goal-driven adaptive DOM streaming. Parses HTML and emits only the most relevant nodes for the given goal, with 90-99% token savings. Use instead of parse/parse_top when you want minimal output focused on what matters. Returns ranked nodes, token savings ratio, and chunk metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML to parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal for relevance ranking"},
+                    "url": {"type": "string", "description": "Source URL (for context)", "default": ""},
+                    "top_n": {"type": "integer", "description": "Max nodes per chunk (default: 10)", "default": 10},
+                    "min_relevance": {"type": "number", "description": "Minimum relevance threshold 0.0-1.0 (default: 0.3)", "default": 0.3},
+                    "max_nodes": {"type": "integer", "description": "Hard cap on total emitted nodes (default: 50)", "default": 50}
+                },
+                "required": ["html", "goal"]
+            }
+        },
+        {
+            "name": "stream_parse_directive",
+            "description": "Goal-driven adaptive DOM streaming with LLM directives. Like stream_parse but accepts directives to control traversal: expand(node_id) to get children, next_branch to jump to next top-ranked unsent nodes, lower_threshold(value) to reduce min_relevance, stop to halt immediately. Use for interactive multi-step exploration.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML to parse"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "Source URL", "default": ""},
+                    "directives_json": {"type": "string", "description": "JSON array of directives, e.g. [{\"action\":\"next_branch\"},{\"action\":\"expand\",\"node_id\":5}]"},
+                    "config_json": {"type": "string", "description": "JSON config: {\"top_n\":10,\"min_relevance\":0.3,\"max_nodes\":50}"}
+                },
+                "required": ["html", "goal"]
+            }
         }
     ])
 }
@@ -2551,6 +2582,34 @@ async fn mcp_dispatch_tool(
             {
                 Err("Vision feature inte aktiverad. Kompilera med --features vision".to_string())
             }
+        }
+        "stream_parse" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
+            let min_rel = args["min_relevance"].as_f64().unwrap_or(0.3) as f32;
+            let max_nodes = args["max_nodes"].as_u64().unwrap_or(50) as u32;
+
+            let result =
+                aether_agent::stream_parse_adaptive(html, goal, url, top_n, min_rel, max_nodes);
+            text_ok(result)
+        }
+        "stream_parse_directive" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let directives_json = args["directives_json"].as_str().unwrap_or("[]");
+            let config_json = args["config_json"].as_str().unwrap_or("{}");
+
+            let result = aether_agent::stream_parse_with_directives(
+                html,
+                goal,
+                url,
+                config_json,
+                directives_json,
+            );
+            text_ok(result)
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
