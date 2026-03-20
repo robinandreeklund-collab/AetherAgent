@@ -2732,24 +2732,30 @@ async fn mcp_post(
     )
 }
 
-/// MCP Streamable HTTP GET handler — SSE stream för server-initiated notifications
+/// MCP Streamable HTTP GET handler — SSE stream eller browser-dashboard
 ///
-/// Spec 2025-03-26: Klienten öppnar GET /mcp för att ta emot server-pushade
-/// notifications (t.ex. tools/listChanged). Strömmen hålls öppen med keepalive.
-/// Meddelanden skickas som JSON-RPC notifications via SSE `event: message`.
-async fn mcp_get(
-    headers: HeaderMap,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+/// Spec 2025-03-26: MCP-klienter öppnar GET /mcp för SSE-notifications.
+/// Webbläsare (Accept: text/html) får en live-dashboard som visar events.
+async fn mcp_get(headers: HeaderMap) -> axum::response::Response {
+    // Om webbläsare → returnera HTML-dashboard med EventSource
+    let accept = headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if accept.contains("text/html") {
+        return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
+    }
+
+    // MCP-klient → SSE-ström
     let session_id = headers
         .get("mcp-session-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("anonymous")
         .to_string();
 
-    // Bygg SSE-ström via mpsc-kanal
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(32);
 
-    // Skicka initial serverInfo-notification
     let tx_init = tx.clone();
     tokio::spawn(async move {
         let server_info = serde_json::json!({
@@ -2770,7 +2776,6 @@ async fn mcp_get(
             .await;
     });
 
-    // Håll kanalen öppen — framtida server-pushade events skickas här
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
@@ -2790,8 +2795,127 @@ async fn mcp_get(
         }
     });
 
-    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx)).keep_alive(KeepAlive::default())
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
+
+/// Live HTML-dashboard för MCP-endpoint — visar SSE-events i webbläsaren
+const MCP_DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherAgent MCP</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e0e0e8;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:14px}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:24px 32px;border-bottom:1px solid #2a2a4a}
+.header h1{font-size:20px;color:#7c83ff;font-weight:600}
+.header p{color:#888;font-size:12px;margin-top:4px}
+.status{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:#444;transition:background .3s}
+.dot.connected{background:#4ade80;box-shadow:0 0 8px #4ade8066}
+.dot.error{background:#f87171}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:24px 32px;height:calc(100vh - 140px)}
+.panel{background:#111118;border:1px solid #2a2a4a;border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+.panel-title{padding:12px 16px;border-bottom:1px solid #2a2a4a;font-size:12px;color:#7c83ff;text-transform:uppercase;letter-spacing:1px}
+.panel-body{flex:1;overflow-y:auto;padding:12px 16px}
+.event{margin-bottom:12px;padding:8px 12px;background:#0d0d14;border-radius:6px;border-left:3px solid #7c83ff}
+.event .time{color:#666;font-size:11px}
+.event .type{color:#4ade80;font-size:12px;margin:2px 0}
+.event pre{color:#ccc;font-size:12px;white-space:pre-wrap;word-break:break-all;margin-top:4px}
+.tools{list-style:none}
+.tools li{padding:6px 0;border-bottom:1px solid #1a1a2a;font-size:13px}
+.tools li span.name{color:#7c83ff}
+.tools li span.desc{color:#888;font-size:12px}
+.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1a1a2a;font-size:13px}
+.info-row .label{color:#888}
+.info-row .value{color:#e0e0e8}
+@media(max-width:768px){.panels{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>AetherAgent MCP Server</h1>
+  <p>Model Context Protocol — Streamable HTTP</p>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Connecting...</span>
+  </div>
+</div>
+<div class="panels">
+  <div class="panel">
+    <div class="panel-title">Live Events</div>
+    <div class="panel-body" id="events"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Server Info</div>
+    <div class="panel-body" id="info">
+      <div class="info-row"><span class="label">Endpoint</span><span class="value">POST /mcp</span></div>
+      <div class="info-row"><span class="label">Protocol</span><span class="value">MCP 2025-03-26</span></div>
+      <div class="info-row"><span class="label">Transport</span><span class="value">Streamable HTTP + SSE</span></div>
+      <div class="info-row"><span class="label">Events received</span><span class="value" id="eventCount">0</span></div>
+      <div style="margin-top:16px">
+        <div class="panel-title" style="padding:0 0 8px 0;border:none">Available Tools</div>
+        <ul class="tools" id="toolsList"><li style="color:#666">Loading tools...</li></ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let count = 0;
+const dot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const eventsDiv = document.getElementById('events');
+const eventCount = document.getElementById('eventCount');
+
+function addEvent(type, data) {
+  count++;
+  eventCount.textContent = count;
+  const div = document.createElement('div');
+  div.className = 'event';
+  const time = new Date().toLocaleTimeString();
+  div.innerHTML = `<div class="time">${time}</div><div class="type">${type}</div><pre>${JSON.stringify(data, null, 2)}</pre>`;
+  eventsDiv.prepend(div);
+  if (eventsDiv.children.length > 50) eventsDiv.lastChild.remove();
+}
+
+// SSE-koppling
+const sse = new EventSource('/mcp');
+sse.onopen = () => {
+  dot.className = 'dot connected';
+  statusText.textContent = 'Connected — listening for events';
+};
+sse.addEventListener('message', (e) => {
+  try {
+    const data = JSON.parse(e.data);
+    addEvent(data.method || 'event', data);
+  } catch {
+    addEvent('raw', e.data);
+  }
+});
+sse.onerror = () => {
+  dot.className = 'dot error';
+  statusText.textContent = 'Disconnected — reconnecting...';
+};
+
+// Hämta verktyg via MCP tools/list
+fetch('/mcp', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})
+}).then(r => r.json()).then(data => {
+  const tools = data?.result?.tools || [];
+  const list = document.getElementById('toolsList');
+  if (tools.length === 0) { list.innerHTML = '<li style="color:#666">No tools found</li>'; return; }
+  list.innerHTML = tools.map(t =>
+    `<li><span class="name">${t.name}</span><br><span class="desc">${t.description || ''}</span></li>`
+  ).join('');
+}).catch(() => {});
+</script>
+</body>
+</html>"##;
 
 /// MCP Streamable HTTP DELETE handler — avsluta session
 async fn mcp_delete() -> impl IntoResponse {
