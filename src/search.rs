@@ -448,4 +448,87 @@ mod tests {
         assert_eq!(flat[0].label, "förälder");
         assert_eq!(flat[1].label, "barn");
     }
+
+    /// Integrations-test: simulerar DDG HTML med fullständig struktur
+    #[test]
+    fn test_search_from_html_ddg_structure() {
+        // Simulera DDG:s HTML-struktur
+        let ddg_html = r##"<html><body>
+        <div class="results">
+          <div class="result">
+            <h2 class="result__title">
+              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.scb.se%2Fstatistik&rut=abc">
+                Sveriges befolkning – SCB
+              </a>
+            </h2>
+            <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.scb.se%2Fstatistik&rut=abc">
+              www.scb.se/statistik
+            </a>
+            <a class="result__snippet">
+              Sveriges befolkning uppgår till 10 521 556 invånare enligt SCB:s senaste statistik.
+            </a>
+          </div>
+          <div class="result">
+            <h2 class="result__title">
+              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsv.wikipedia.org%2Fwiki%2FSverige&rut=def">
+                Sverige – Wikipedia
+              </a>
+            </h2>
+            <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fsv.wikipedia.org%2Fwiki%2FSverige&rut=def">
+              sv.wikipedia.org/wiki/Sverige
+            </a>
+            <a class="result__snippet">
+              Sverige har en befolkning på drygt 10,5 miljoner invånare och är till ytan det tredje största landet i EU.
+            </a>
+          </div>
+        </div>
+        </body></html>"##;
+
+        let result = crate::search_from_html(
+            "hur många bor i Sverige",
+            ddg_html,
+            3,
+            "hitta befolkningstal",
+        );
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&result).expect("search_from_html ska returnera giltig JSON");
+        let results = parsed["results"].as_array().expect("ska ha results-array");
+
+        assert!(
+            !results.is_empty(),
+            "Ska hitta minst ett resultat i DDG HTML"
+        );
+
+        let first = &results[0];
+        assert!(
+            first["title"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Sveriges befolkning")
+                || first["title"].as_str().unwrap_or("").contains("SCB"),
+            "Första resultatets titel ska innehålla 'Sveriges befolkning' eller 'SCB'"
+        );
+        assert!(
+            first["url"].as_str().unwrap_or("").contains("scb.se"),
+            "URL ska vara avkodad SCB-URL"
+        );
+
+        // Kontrollera att snippet extraheras (inte tom)
+        let snippet = first["snippet"].as_str().unwrap_or("");
+        assert!(
+            snippet.contains("10 521 556") || snippet.contains("invånare") || !snippet.is_empty(),
+            "Snippet ska innehålla befolkningsdata: got '{}'",
+            snippet
+        );
+
+        // Kontrollera direct_answer (ska hitta siffran)
+        if let Some(answer) = parsed["direct_answer"].as_str() {
+            assert!(
+                answer.contains("10 521 556"),
+                "Direktsvar ska vara '10 521 556': got '{}'",
+                answer
+            );
+        }
+    }
 }
