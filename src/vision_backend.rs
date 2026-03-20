@@ -8,8 +8,8 @@
 /// JS-renderat innehåll) eskaleras till CDP. XHR-interceptorn kan
 /// skippa Blitz direkt via TierHint::RequiresJs.
 ///
-/// Chrome startar bara om CDP-requests faktiskt inträffar.
-/// De flesta agent-sessioner slutar utan att Chrome startats.
+/// Chrome startas i bakgrunden vid serverstart (warmup_cdp_background).
+/// Första CDP-request väntar bara om Chrome inte hunnit klart (~1-2s).
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -18,16 +18,32 @@ use std::time::Instant;
 static CDP_BROWSER: std::sync::OnceLock<std::sync::Mutex<Option<headless_chrome::Browser>>> =
     std::sync::OnceLock::new();
 
-/// Registrera CDP som tillgängligt — Chrome startas LAZY vid första CDP-request.
+// Signalerar att bakgrunds-warmup har startats (undvik dubbla starter)
+#[cfg(feature = "cdp")]
+static CDP_WARMUP_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Starta Chrome i en bakgrundstråd — anropa vid serverstart.
 ///
-/// Tidigare startades Chrome eagerly vid serverstart, vilket allokerade ~1-2GB
-/// (Chrome-processer med ~1.4TB virtuellt minne) och orsakade OOM på begränsade
-/// system. Nu startas Chrome först när `get_or_init_browser()` anropas.
+/// Servern startar direkt och börjar lyssna medan Chrome
+/// initieras parallellt. Första CDP-request väntar bara om
+/// Chrome inte hunnit klart (sällan, ~1-2s).
 #[cfg(feature = "cdp")]
 pub fn warmup_cdp_background() {
-    // Markera att CDP-feature är aktiverat men starta INTE Chrome ännu.
-    // Chrome startas lazy vid första get_or_init_browser()-anrop.
-    eprintln!("CDP: lazy mode — Chrome startas vid första CDP-request");
+    // Undvik att starta flera gånger
+    if CDP_WARMUP_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        eprintln!("CDP warmup: starting Chrome in background...");
+        match init_chrome_browser() {
+            Ok(_) => {
+                eprintln!("CDP warmup: Chrome ready");
+                notify_cdp_ready();
+            }
+            Err(e) => eprintln!("CDP warmup: Chrome failed: {e}"),
+        }
+    });
 }
 
 /// Callback efter CDP-warmup: sätt cdp_available=true på global backend
