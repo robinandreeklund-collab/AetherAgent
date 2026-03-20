@@ -13,9 +13,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-// Global Chrome browser — initieras i bakgrunden vid serverstart
+// Global Chrome browser — kan omstartas vid WebSocket-disconnect
 #[cfg(feature = "cdp")]
-static CDP_BROWSER: std::sync::OnceLock<std::sync::Mutex<headless_chrome::Browser>> =
+static CDP_BROWSER: std::sync::OnceLock<std::sync::Mutex<Option<headless_chrome::Browser>>> =
     std::sync::OnceLock::new();
 
 // Signalerar att bakgrunds-warmup har startats (undvik dubbla starter)
@@ -81,14 +81,10 @@ pub fn on_cdp_ready(_f: impl Fn() + Send + Sync + 'static) {
     // CDP inte kompilerad — noop
 }
 
-/// Intern: starta Chrome och sätt globalt
+/// Skapa Chrome LaunchOptions (återanvänds av init + restart)
 #[cfg(feature = "cdp")]
-fn init_chrome_browser() -> Result<(), String> {
-    if CDP_BROWSER.get().is_some() {
-        return Ok(());
-    }
-    use headless_chrome::{Browser, LaunchOptions};
-    let options = LaunchOptions {
+fn chrome_launch_options() -> headless_chrome::LaunchOptions<'static> {
+    headless_chrome::LaunchOptions {
         headless: true,
         sandbox: false,
         window_size: Some((1280, 900)),
@@ -101,16 +97,39 @@ fn init_chrome_browser() -> Result<(), String> {
             // BUG-5 fix: Dölj automation-flaggor för bot-detection (Cloudflare m.fl.)
             std::ffi::OsStr::new("--disable-blink-features=AutomationControlled"),
         ],
-        ..LaunchOptions::default()
-    };
-    let browser = Browser::new(options).map_err(|e| format!("Chrome start failed: {e}"))?;
-    let _ = CDP_BROWSER.set(std::sync::Mutex::new(browser));
+        ..headless_chrome::LaunchOptions::default()
+    }
+}
+
+/// Intern: starta Chrome och sätt globalt
+#[cfg(feature = "cdp")]
+fn init_chrome_browser() -> Result<(), String> {
+    let browser = headless_chrome::Browser::new(chrome_launch_options())
+        .map_err(|e| format!("Chrome start failed: {e}"))?;
+    let _ = CDP_BROWSER.get_or_init(|| std::sync::Mutex::new(Some(browser)));
     Ok(())
+}
+
+/// Starta om Chrome efter WebSocket-disconnect
+#[cfg(feature = "cdp")]
+fn restart_chrome_browser() -> Result<(), String> {
+    eprintln!("CDP: restarting Chrome (WebSocket disconnected)...");
+    let browser = headless_chrome::Browser::new(chrome_launch_options())
+        .map_err(|e| format!("Chrome restart failed: {e}"))?;
+    if let Some(mutex) = CDP_BROWSER.get() {
+        if let Ok(mut guard) = mutex.lock() {
+            *guard = Some(browser);
+            eprintln!("CDP: Chrome restarted successfully");
+            return Ok(());
+        }
+    }
+    Err("CDP_BROWSER mutex unavailable".to_string())
 }
 
 /// Hämta Chrome-browser (väntar om warmup pågår, startar om ej startad)
 #[cfg(feature = "cdp")]
-fn get_or_init_browser() -> Result<&'static std::sync::Mutex<headless_chrome::Browser>, String> {
+fn get_or_init_browser(
+) -> Result<&'static std::sync::Mutex<Option<headless_chrome::Browser>>, String> {
     // Snabbväg: redan klar
     if let Some(browser) = CDP_BROWSER.get() {
         return Ok(browser);
@@ -537,16 +556,34 @@ impl TieredBackend {
     /// CDP-rendering (Tier 2) — headless Chrome via headless_chrome crate
     ///
     /// Lazy Chrome-init: browser startas vid första anropet och återanvänds.
-    /// Om HTML finns i request: sätter Page.setDocumentContent direkt (undviker nätverksnavigering).
-    /// Annars: navigerar till URL och väntar på page load.
+    /// Om HTML finns i request: sätter Page.setDocumentContent direkt.
+    /// Auto-restart: vid WebSocket-disconnect startas Chrome om automatiskt.
     #[cfg(feature = "cdp")]
     fn screenshot_cdp(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
+        // Försök en gång, om WebSocket-disconnect → starta om och försök igen
+        match self.screenshot_cdp_inner(req) {
+            Ok(result) => Ok(result),
+            Err(e) if e.contains("connection is closed") || e.contains("disconnected") => {
+                // Chrome-processen tappade WebSocket → starta om
+                restart_chrome_browser()?;
+                self.screenshot_cdp_inner(req)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Intern CDP-rendering (anropas av screenshot_cdp med retry-logik)
+    #[cfg(feature = "cdp")]
+    fn screenshot_cdp_inner(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
         let start = Instant::now();
 
         let browser_mutex = get_or_init_browser().map_err(|e| format!("CDP browser init: {e}"))?;
-        let browser = browser_mutex
+        let guard = browser_mutex
             .lock()
             .map_err(|e| format!("CDP browser lock: {e}"))?;
+        let browser = guard
+            .as_ref()
+            .ok_or_else(|| "CDP browser not initialized".to_string())?;
 
         // Skapa ny tab och navigera
         let tab = browser.new_tab().map_err(|e| format!("CDP new tab: {e}"))?;
