@@ -311,6 +311,61 @@ struct ParseScreenshotServerModelRequest {
     goal: String,
 }
 
+// ─── Fas 16: Stream Parse request types ─────────────────────────────────────
+
+#[derive(Deserialize)]
+struct StreamParseRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
+}
+
+fn default_top_n() -> usize {
+    10
+}
+
+fn default_min_relevance() -> f32 {
+    0.3
+}
+
+fn default_max_nodes() -> usize {
+    50
+}
+
+#[derive(Deserialize)]
+struct FetchStreamParseRequest {
+    url: String,
+    goal: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+#[derive(Deserialize)]
+struct DirectiveRequest {
+    directives: Vec<serde_json::Value>,
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_top_n")]
+    top_n: usize,
+    #[serde(default = "default_min_relevance")]
+    min_relevance: f32,
+    #[serde(default = "default_max_nodes")]
+    max_nodes: usize,
+}
+
 // ─── Fas 13: Session Management request types ──────────────────────────────
 
 #[derive(Deserialize)]
@@ -1294,6 +1349,71 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
 
 async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     let result = aether_agent::detect_xhr_urls(&req.html);
+    (StatusCode::OK, result)
+}
+
+/// ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
+
+async fn stream_parse_handler(Json(req): Json<StreamParseRequest>) -> impl IntoResponse {
+    let result = aether_agent::stream_parse_adaptive(
+        &req.html,
+        &req.goal,
+        &req.url,
+        req.top_n as u32,
+        req.min_relevance,
+        req.max_nodes as u32,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn fetch_stream_parse(Json(req): Json<FetchStreamParseRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let result = aether_agent::stream_parse_adaptive(
+        &fetch_result.body,
+        &req.goal,
+        &fetch_result.final_url,
+        req.top_n as u32,
+        req.min_relevance,
+        req.max_nodes as u32,
+    );
+    (StatusCode::OK, result)
+}
+
+async fn directive_handler(Json(req): Json<DirectiveRequest>) -> impl IntoResponse {
+    let config_json = serde_json::json!({
+        "top_n": req.top_n,
+        "min_relevance": req.min_relevance,
+        "max_nodes": req.max_nodes,
+    })
+    .to_string();
+    let directives_json =
+        serde_json::to_string(&req.directives).unwrap_or_else(|_| "[]".to_string());
+
+    let result = aether_agent::stream_parse_with_directives(
+        &req.html,
+        &req.goal,
+        &req.url,
+        &config_json,
+        &directives_json,
+    );
     (StatusCode::OK, result)
 }
 
@@ -2756,6 +2876,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
+        // Fas 16: Stream Parse
+        .route("/api/stream-parse", post(stream_parse_handler))
+        .route("/api/fetch/stream-parse", post(fetch_stream_parse))
+        .route("/api/directive", post(directive_handler))
         // Fas 11: Vision (kräver --features vision)
         // 50 MB body limit — ONNX-modeller + screenshots i base64
         .route("/api/parse-screenshot", {
@@ -2906,6 +3030,9 @@ async fn main() {
     );
     println!("  POST /api/vision/parse           – Analyze screenshot with server-loaded model");
     println!("  POST /api/fetch-vision           – URL → screenshot → YOLO vision → images + JSON");
+    println!("  POST /api/stream-parse           – Adaptive goal-driven DOM streaming");
+    println!("  POST /api/fetch/stream-parse     – Fetch URL → adaptive stream parse");
+    println!("  POST /api/directive              – Send directives (expand, stop, etc.)");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");

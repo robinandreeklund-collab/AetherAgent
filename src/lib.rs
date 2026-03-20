@@ -18,6 +18,8 @@ mod orchestrator;
 mod parser;
 mod semantic;
 mod session;
+mod stream_engine;
+mod stream_state;
 mod streaming;
 mod temporal;
 mod trust;
@@ -173,6 +175,107 @@ pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> Str
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
     match serialize_json(&tree, tree.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+// ─── Fas 16: Goal-Driven Adaptive DOM Streaming ─────────────────────────────
+
+/// Adaptive goal-driven DOM streaming – emits only the most relevant nodes
+/// in ranked chunks, with support for LLM-directed expansion.
+///
+/// Returns JSON with `nodes`, `total_dom_nodes`, `nodes_emitted`,
+/// `token_savings_ratio`, `parse_ms`, `injection_warnings`, and `chunks`.
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal for relevance scoring
+/// * `url` - The page URL
+/// * `top_n` - Nodes per chunk (default: 10)
+/// * `min_relevance` - Minimum relevance for emission (default: 0.3)
+/// * `max_nodes` - Hard limit on total emitted nodes (default: 50)
+#[wasm_bindgen]
+pub fn stream_parse_adaptive(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    min_relevance: f32,
+    max_nodes: u32,
+) -> String {
+    let config = stream_engine::StreamParseConfig {
+        chunk_size: if top_n == 0 { 10 } else { top_n as usize },
+        min_relevance: if min_relevance <= 0.0 {
+            0.3
+        } else {
+            min_relevance
+        },
+        max_nodes: if max_nodes == 0 {
+            50
+        } else {
+            max_nodes as usize
+        },
+    };
+    let result = stream_engine::stream_parse(html, goal, url, config);
+    match serialize_json(&result, result.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Adaptive stream parse with pre-loaded directives (expand, stop, etc.)
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's current goal
+/// * `url` - The page URL
+/// * `config_json` - JSON config: `{"top_n": 10, "min_relevance": 0.3, "max_nodes": 50}`
+/// * `directives_json` - JSON array of directives: `[{"action": "expand", "node_id": 56}]`
+#[wasm_bindgen]
+pub fn stream_parse_with_directives(
+    html: &str,
+    goal: &str,
+    url: &str,
+    config_json: &str,
+    directives_json: &str,
+) -> String {
+    #[derive(serde::Deserialize)]
+    struct ConfigInput {
+        #[serde(default = "default_top_n")]
+        top_n: usize,
+        #[serde(default = "default_min_relevance")]
+        min_relevance: f32,
+        #[serde(default = "default_max_nodes")]
+        max_nodes: usize,
+    }
+    fn default_top_n() -> usize {
+        10
+    }
+    fn default_min_relevance() -> f32 {
+        0.3
+    }
+    fn default_max_nodes() -> usize {
+        50
+    }
+
+    let cfg: ConfigInput = serde_json::from_str(config_json).unwrap_or(ConfigInput {
+        top_n: 10,
+        min_relevance: 0.3,
+        max_nodes: 50,
+    });
+
+    let directives: Vec<stream_state::Directive> =
+        serde_json::from_str(directives_json).unwrap_or_default();
+
+    let config = stream_engine::StreamParseConfig {
+        chunk_size: cfg.top_n,
+        min_relevance: cfg.min_relevance,
+        max_nodes: cfg.max_nodes,
+    };
+
+    let result = stream_engine::stream_parse_with_directives(html, goal, url, config, directives);
+    match serialize_json(&result, result.nodes.len()) {
         Ok(json) => json,
         Err(e) => e,
     }

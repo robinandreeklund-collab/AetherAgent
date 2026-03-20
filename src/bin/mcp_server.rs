@@ -268,6 +268,39 @@ struct FetchVisionParams {
     obey_robots: Option<bool>,
 }
 
+// ─── Fas 16: Stream Parse parameter types ───────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct StreamParseParams {
+    /// Raw HTML string from the web page
+    html: String,
+    /// The agent's current goal for goal-relevance scoring
+    goal: String,
+    /// The page URL
+    url: String,
+    /// Nodes per chunk (default: 10). Controls how many top-relevant nodes are returned in the initial batch.
+    top_n: Option<u32>,
+    /// Minimum relevance score for emission (default: 0.3, range: 0.0–1.0). Nodes below this threshold are pruned.
+    min_relevance: Option<f32>,
+    /// Hard limit on total emitted nodes (default: 50). Stream stops when reached.
+    max_nodes: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct StreamParseDirectiveParams {
+    /// Raw HTML string from the web page
+    html: String,
+    /// The agent's current goal
+    goal: String,
+    /// The page URL
+    url: String,
+    /// JSON config: {"top_n": 10, "min_relevance": 0.3, "max_nodes": 50}
+    #[serde(default)]
+    config_json: Option<String>,
+    /// JSON array of directives: [{"action": "expand", "node_id": 56}, {"action": "stop"}]
+    directives_json: String,
+}
+
 // ─── Fas 12 parameter types ─────────────────────────────────────────────────
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -543,6 +576,43 @@ impl AetherMcpServer {
     )]
     fn tier_stats(&self, Parameters(_params): Parameters<TierStatsParams>) -> String {
         aether_agent::tier_stats()
+    }
+
+    // ─── Fas 16: Stream Parse – Goal-Driven Adaptive DOM Streaming ─────────────
+
+    #[tool(
+        name = "stream_parse",
+        description = "Goal-driven adaptive DOM streaming – parses HTML and emits ONLY the most goal-relevant nodes in ranked chunks, achieving 95-99% token savings vs full parse. USE THIS TOOL WHEN: (1) you want to understand a large page without consuming your entire context window, (2) you need the most relevant 10-20 nodes from a page with hundreds of elements, (3) you want to explore a page incrementally — get top nodes first, then expand specific branches. Returns: nodes (ranked by relevance), total_dom_nodes, nodes_emitted, token_savings_ratio, chunks summary. Prefer this over 'parse' for ANY page with >50 elements. Use stream_parse_directive to expand specific nodes after initial results."
+    )]
+    fn stream_parse(&self, Parameters(params): Parameters<StreamParseParams>) -> String {
+        aether_agent::stream_parse_adaptive(
+            &params.html,
+            &params.goal,
+            &params.url,
+            params.top_n.unwrap_or(10),
+            params.min_relevance.unwrap_or(0.3),
+            params.max_nodes.unwrap_or(50),
+        )
+    }
+
+    #[tool(
+        name = "stream_parse_directive",
+        description = "Send directives to refine a stream_parse result. USE THIS TOOL WHEN: you already called stream_parse and want to (1) expand a specific node's children — e.g. after seeing node 56 is relevant, get its child nodes, (2) get the next batch of top-ranked nodes, (3) lower the relevance threshold to see more results. Pass the SAME html/goal/url as the original stream_parse call plus directives. Directive types: {\"action\":\"expand\",\"node_id\":56} — expand node's children, {\"action\":\"next_branch\"} — get next top-ranked batch, {\"action\":\"lower_threshold\",\"value\":0.1} — lower min_relevance, {\"action\":\"stop\"} — stop streaming."
+    )]
+    fn stream_parse_directive(
+        &self,
+        Parameters(params): Parameters<StreamParseDirectiveParams>,
+    ) -> String {
+        let config_json = params
+            .config_json
+            .unwrap_or_else(|| r#"{"top_n":10,"min_relevance":0.3,"max_nodes":50}"#.to_string());
+        aether_agent::stream_parse_with_directives(
+            &params.html,
+            &params.goal,
+            &params.url,
+            &config_json,
+            &params.directives_json,
+        )
     }
 
     // ─── Fas 11: Vision – YOLOv8 Screenshot Analysis ──────────────────────────
