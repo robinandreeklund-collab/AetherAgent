@@ -18,33 +18,16 @@ use std::time::Instant;
 static CDP_BROWSER: std::sync::OnceLock<std::sync::Mutex<Option<headless_chrome::Browser>>> =
     std::sync::OnceLock::new();
 
-// Signalerar att bakgrunds-warmup har startats (undvik dubbla starter)
-#[cfg(feature = "cdp")]
-static CDP_WARMUP_STARTED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// Starta Chrome i en bakgrundstråd — anropa vid serverstart.
+/// Registrera CDP som tillgängligt — Chrome startas LAZY vid första CDP-request.
 ///
-/// Servern startar direkt och börjar lyssna medan Chrome
-/// initieras parallellt. Första CDP-request väntar bara om
-/// Chrome inte hunnit klart (sällan, ~1-2s).
+/// Tidigare startades Chrome eagerly vid serverstart, vilket allokerade ~1-2GB
+/// (Chrome-processer med ~1.4TB virtuellt minne) och orsakade OOM på begränsade
+/// system. Nu startas Chrome först när `get_or_init_browser()` anropas.
 #[cfg(feature = "cdp")]
 pub fn warmup_cdp_background() {
-    // Undvik att starta flera gånger
-    if CDP_WARMUP_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return;
-    }
-    std::thread::spawn(|| {
-        eprintln!("CDP warmup: starting Chrome in background...");
-        match init_chrome_browser() {
-            Ok(_) => {
-                eprintln!("CDP warmup: Chrome ready");
-                // Uppdatera global TieredBackend om den redan initierats
-                notify_cdp_ready();
-            }
-            Err(e) => eprintln!("CDP warmup: Chrome failed: {e}"),
-        }
-    });
+    // Markera att CDP-feature är aktiverat men starta INTE Chrome ännu.
+    // Chrome startas lazy vid första get_or_init_browser()-anrop.
+    eprintln!("CDP: lazy mode — Chrome startas vid första CDP-request");
 }
 
 /// Callback efter CDP-warmup: sätt cdp_available=true på global backend
@@ -126,7 +109,7 @@ fn restart_chrome_browser() -> Result<(), String> {
     Err("CDP_BROWSER mutex unavailable".to_string())
 }
 
-/// Hämta Chrome-browser (väntar om warmup pågår, startar om ej startad)
+/// Hämta Chrome-browser (startar Chrome lazy vid första anrop)
 #[cfg(feature = "cdp")]
 fn get_or_init_browser(
 ) -> Result<&'static std::sync::Mutex<Option<headless_chrome::Browser>>, String> {
@@ -135,20 +118,13 @@ fn get_or_init_browser(
         return Ok(browser);
     }
 
-    // Warmup pågår — vänta max 15s
-    let deadline = Instant::now() + std::time::Duration::from_secs(15);
-    while Instant::now() < deadline {
-        if let Some(browser) = CDP_BROWSER.get() {
-            return Ok(browser);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    // Timeout — försök starta själv som fallback
+    // Lazy start: Chrome startas här vid första CDP-request
+    eprintln!("CDP: starting Chrome on first use...");
     init_chrome_browser()?;
+    notify_cdp_ready();
     CDP_BROWSER
         .get()
-        .ok_or_else(|| "CDP browser init failed after timeout".to_string())
+        .ok_or_else(|| "CDP browser init failed".to_string())
 }
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
