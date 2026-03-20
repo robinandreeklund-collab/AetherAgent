@@ -1472,12 +1472,16 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
             goal.to_string()
         };
 
+        // Begränsa parallella deep fetches till max 3 för att förhindra OOM
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
         let mut join_set = tokio::task::JoinSet::new();
         for (idx, entry) in search_result.results.iter().enumerate() {
             let url = entry.url.clone();
             let g = effective_goal.clone();
             let mnpr = max_nodes_per_result;
+            let sem = semaphore.clone();
             join_set.spawn(async move {
+                let _permit = sem.acquire().await;
                 let fetch_start = std::time::Instant::now();
                 let cfg = aether_agent::types::FetchConfig::default();
                 match tokio::time::timeout(

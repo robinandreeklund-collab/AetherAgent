@@ -25,11 +25,13 @@ static RATE_LIMITERS: std::sync::LazyLock<Mutex<HashMap<String, Arc<DomainLimite
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Återanvändbar HTTP-klient — undvik att bygga ny TLS-session per request.
-/// Konfigureras med rimliga defaults (10s timeout, cookies, gzip/brotli).
+/// Konfigureras med rimliga defaults (10s timeout, gzip/brotli).
+/// OBS: cookie_store(true) togs bort — den ackumulerade cookies från alla domäner
+/// utan eviction och orsakade OOM (49 MB → 23 GB). Cookies hanteras istället
+/// per-session via SessionManager.
 static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .cookie_store(true)
         .gzip(true)
         .brotli(true)
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -144,6 +146,17 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
 
     // Läs body med storleksgräns (max 20 MB) för att förhindra OOM
     const MAX_BODY_SIZE: usize = 20 * 1024 * 1024;
+
+    // Kolla Content-Length INNAN vi allokerar — avvisa tidigt om servern annonserar
+    // en body större än gränsen (förhindrar OOM vid stora filer)
+    if let Some(cl) = response.content_length() {
+        if cl as usize > MAX_BODY_SIZE {
+            return Err(format!(
+                "Svar för stort enligt Content-Length: {cl} bytes (max {MAX_BODY_SIZE})"
+            ));
+        }
+    }
+
     let body_bytes = response
         .bytes()
         .await
@@ -282,18 +295,14 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
     const MAX_CSS_LINKS: usize = 50;
     css_links.truncate(MAX_CSS_LINKS);
 
-    // Hämta alla CSS-filer parallellt (max 3s per fil, max 2 MB per fil)
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
+    // Hämta alla CSS-filer parallellt (max 2 MB per fil)
+    // Återanvänd SHARED_CLIENT istället för att skapa ny klient per anrop
     const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
 
     // Parallell CSS-hämtning med tokio tasks
     let mut handles = Vec::with_capacity(css_links.len());
     for link in &css_links {
-        let client = client.clone();
+        let client = SHARED_CLIENT.clone();
         let url = link.url.clone();
         handles.push(tokio::spawn(async move {
             match client.get(&url).send().await {
