@@ -275,6 +275,7 @@ struct CollabRegisterRequest {
     store_json: String,
     agent_id: String,
     goal: String,
+    #[serde(default = "default_timestamp_ms")]
     timestamp_ms: u64,
 }
 
@@ -284,7 +285,15 @@ struct CollabPublishRequest {
     agent_id: String,
     url: String,
     delta_json: String,
+    #[serde(default = "default_timestamp_ms")]
     timestamp_ms: u64,
+}
+
+fn default_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Deserialize)]
@@ -401,7 +410,17 @@ struct SessionSetTokenRequest {
 #[derive(Deserialize)]
 struct SessionOAuthRequest {
     session_json: String,
-    config: serde_json::Value,
+    /// OAuth config — antingen som nested objekt eller som individuella fält
+    #[serde(default)]
+    config: Option<serde_json::Value>,
+    #[serde(default)]
+    auth_url: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    redirect_uri: Option<String>,
+    #[serde(default)]
+    scopes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -1424,9 +1443,9 @@ struct TieredScreenshotRequest {
     html: String,
     url: String,
     goal: String,
-    #[serde(default = "default_width")]
+    #[serde(default = "default_width", alias = "viewport_width")]
     width: u32,
-    #[serde(default = "default_height")]
+    #[serde(default = "default_height", alias = "viewport_height")]
     height: u32,
     #[serde(default = "default_fast_render")]
     fast_render: bool,
@@ -2757,7 +2776,20 @@ async fn session_set_token(Json(req): Json<SessionSetTokenRequest>) -> impl Into
 }
 
 async fn session_oauth_authorize(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
-    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    // Stöd både nested config-objekt och individuella fält
+    let config_json = if let Some(config) = &req.config {
+        serde_json::to_string(config).unwrap_or_default()
+    } else if req.auth_url.is_some() || req.client_id.is_some() {
+        serde_json::json!({
+            "auth_url": req.auth_url.as_deref().unwrap_or(""),
+            "client_id": req.client_id.as_deref().unwrap_or(""),
+            "redirect_uri": req.redirect_uri.as_deref().unwrap_or(""),
+            "scopes": req.scopes.as_deref().unwrap_or(&[]),
+        })
+        .to_string()
+    } else {
+        "{}".to_string()
+    };
     let result = aether_agent::session_oauth_authorize(&req.session_json, &config_json);
     (StatusCode::OK, result)
 }
@@ -2793,7 +2825,11 @@ async fn session_mark_login(Json(req): Json<SessionStatusRequest>) -> impl IntoR
 }
 
 async fn session_token_refresh(Json(req): Json<SessionOAuthRequest>) -> impl IntoResponse {
-    let config_json = serde_json::to_string(&req.config).unwrap_or_default();
+    let config_json = if let Some(config) = &req.config {
+        serde_json::to_string(config).unwrap_or_default()
+    } else {
+        "{}".to_string()
+    };
     let result = aether_agent::session_prepare_refresh(&req.session_json, &config_json);
     (StatusCode::OK, result)
 }
