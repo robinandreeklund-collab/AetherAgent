@@ -33,6 +33,8 @@ struct AppState {
     vision_model: Arc<std::sync::Mutex<Option<()>>>,
     /// Broadcast-kanal för MCP SSE-events (dashboard live feed)
     mcp_events: Arc<tokio::sync::broadcast::Sender<String>>,
+    /// Ring-buffer med senaste MCP-events för polling-fallback
+    mcp_event_log: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -2714,7 +2716,15 @@ async fn mcp_post(
                         .as_millis() as u64,
                 }
             });
-            let _ = state.mcp_events.send(event.to_string());
+            let event_str = event.to_string();
+            let _ = state.mcp_events.send(event_str.clone());
+            // Spara i ring-buffer för polling-fallback
+            if let Ok(mut log) = state.mcp_event_log.lock() {
+                if log.len() >= 100 {
+                    log.pop_front();
+                }
+                log.push_back(event_str);
+            }
 
             match result {
                 Ok(content_blocks) => jsonrpc_result(
@@ -2840,6 +2850,34 @@ async fn mcp_get(
         .into_response()
 }
 
+/// Polling-fallback: GET /mcp/events?since=<timestamp_ms>
+/// Returnerar senaste events som JSON-array. Cloudflare-tunnlar buffrar SSE,
+/// så dashboarden pollar denna endpoint istället.
+async fn mcp_events_poll(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Json<serde_json::Value> {
+    let since: u64 = params
+        .get("since")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let events: Vec<serde_json::Value> = if let Ok(log) = state.mcp_event_log.lock() {
+        log.iter()
+            .filter_map(|e| serde_json::from_str::<serde_json::Value>(e).ok())
+            .filter(|e| {
+                e["params"]["timestamp"]
+                    .as_u64()
+                    .map_or(false, |ts| ts > since)
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    axum::response::Json(serde_json::json!({ "events": events }))
+}
+
 /// Live HTML-dashboard för MCP-endpoint — visar SSE-events i webbläsaren
 const MCP_DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
 <html lang="en">
@@ -2930,15 +2968,24 @@ function addEvent(type, data) {
   if (eventsDiv.children.length > 100) eventsDiv.lastChild.remove();
 }
 
-// SSE-koppling
+// SSE med polling-fallback (Cloudflare-tunnlar buffrar SSE)
+let sseOk = false;
+let pollTimer = null;
+let lastSeenTs = 0;
+
+// Försök SSE först
 const sse = new EventSource('/mcp');
 sse.onopen = () => {
+  sseOk = true;
   dot.className = 'dot connected';
-  statusText.textContent = 'Connected — listening for events';
+  statusText.textContent = 'Connected — live SSE stream';
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 };
 sse.addEventListener('message', (e) => {
+  sseOk = true;
   try {
     const data = JSON.parse(e.data);
+    if (data.params?.timestamp) lastSeenTs = Math.max(lastSeenTs, data.params.timestamp);
     addEvent(data.method || 'event', data);
   } catch {
     addEvent('raw', e.data);
@@ -2946,8 +2993,33 @@ sse.addEventListener('message', (e) => {
 });
 sse.onerror = () => {
   dot.className = 'dot error';
-  statusText.textContent = 'Disconnected — reconnecting...';
+  statusText.textContent = 'SSE failed — falling back to polling...';
+  if (!pollTimer) startPolling();
 };
+
+// Polling-fallback: hämta /mcp/events?since=<ts> var 2:a sekund
+function startPolling() {
+  dot.className = 'dot connected';
+  statusText.textContent = 'Connected — polling mode (2s)';
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/mcp/events?since=' + lastSeenTs);
+      const data = await r.json();
+      (data.events || []).forEach(ev => {
+        if (ev.params?.timestamp) lastSeenTs = Math.max(lastSeenTs, ev.params.timestamp);
+        addEvent(ev.method || 'event', ev);
+      });
+      dot.className = 'dot connected';
+      statusText.textContent = 'Connected — polling mode (2s) | Events: ' + count;
+    } catch {
+      dot.className = 'dot error';
+      statusText.textContent = 'Poll failed — retrying...';
+    }
+  }, 2000);
+}
+
+// Om SSE inte fungerar efter 5s → starta polling
+setTimeout(() => { if (!sseOk && !pollTimer) startPolling(); }, 5000);
 
 // Hämta verktyg via MCP tools/list
 fetch('/mcp', {
@@ -3264,6 +3336,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/workflow/status", post(workflow_status_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
+        .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
@@ -3294,6 +3367,9 @@ async fn main() {
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
         mcp_events: Arc::new(mcp_tx),
+        mcp_event_log: Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::with_capacity(100),
+        )),
     };
 
     println!("AetherAgent API server starting on http://{}", addr);
