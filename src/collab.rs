@@ -12,6 +12,11 @@ use std::collections::HashMap;
 
 use crate::types::SemanticDelta;
 
+// Minnesgränser för att förhindra OOM
+const MAX_CACHED_DELTAS: usize = 5_000;
+const MAX_CONSUMPTION_LOG_PER_AGENT: usize = 10_000;
+const MAX_AGENTS: usize = 500;
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /// En registrerad agent
@@ -85,6 +90,22 @@ impl SharedDiffStore {
             return;
         }
 
+        // Begränsa antal agenter
+        if self.agents.len() >= MAX_AGENTS {
+            // Ta bort äldst inaktiva agent
+            if let Some(oldest_idx) = self
+                .agents
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, a)| a.last_active_ms)
+                .map(|(i, _)| i)
+            {
+                let removed_id = self.agents[oldest_idx].agent_id.clone();
+                self.agents.remove(oldest_idx);
+                self.consumption_log.remove(&removed_id);
+            }
+        }
+
         self.agents.push(AgentRegistration {
             agent_id: agent_id.to_string(),
             goal: goal.to_string(),
@@ -116,6 +137,20 @@ impl SharedDiffStore {
             },
         );
 
+        // Evicta äldsta deltan om vi överskrider gränsen
+        if self.deltas.len() > MAX_CACHED_DELTAS {
+            let excess = self.deltas.len() - MAX_CACHED_DELTAS;
+            let mut by_age: Vec<(String, u64)> = self
+                .deltas
+                .iter()
+                .map(|(url, d)| (url.clone(), d.timestamp_ms))
+                .collect();
+            by_age.sort_by_key(|(_, ts)| *ts);
+            for (old_url, _) in by_age.into_iter().take(excess) {
+                self.deltas.remove(&old_url);
+            }
+        }
+
         // Uppdatera agentens publish_count
         if let Some(agent) = self.agents.iter_mut().find(|a| a.agent_id == agent_id) {
             agent.publish_count += 1;
@@ -142,9 +177,14 @@ impl SharedDiffStore {
             .cloned()
             .collect();
 
-        // Markera som konsumerade
+        // Markera som konsumerade (med gräns)
         for delta in &new_deltas {
             consumed.push(delta.url.clone());
+        }
+        // Trimma loggen om den blir för stor
+        if consumed.len() > MAX_CONSUMPTION_LOG_PER_AGENT {
+            let drain_count = consumed.len() - MAX_CONSUMPTION_LOG_PER_AGENT;
+            consumed.drain(..drain_count);
         }
 
         // Uppdatera agentens consume_count
@@ -182,10 +222,21 @@ impl SharedDiffStore {
         self.deltas.get(url)
     }
 
-    /// Ta bort inaktiva agenter (äldre än max_age_ms)
+    /// Ta bort inaktiva agenter (äldre än max_age_ms) + rensa deras data
     pub fn cleanup_inactive(&mut self, now_ms: u64, max_age_ms: u64) {
+        let removed: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|a| now_ms - a.last_active_ms >= max_age_ms)
+            .map(|a| a.agent_id.clone())
+            .collect();
         self.agents
             .retain(|a| now_ms - a.last_active_ms < max_age_ms);
+        // Rensa deltan och loggar från borttagna agenter
+        for agent_id in &removed {
+            self.deltas.retain(|_, d| d.publisher_agent_id != *agent_id);
+            self.consumption_log.remove(agent_id);
+        }
     }
 
     /// Statistik

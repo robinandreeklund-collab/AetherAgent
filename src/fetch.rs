@@ -37,9 +37,21 @@ static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
+// Minnesgräns: max antal domäner i rate limiter cache
+const MAX_RATE_LIMITER_DOMAINS: usize = 1_000;
+
 /// Hämta eller skapa en rate limiter för en domän (default 2 req/s)
 fn get_rate_limiter(domain: &str, requests_per_second: u32) -> Arc<DomainLimiter> {
     let mut limiters = RATE_LIMITERS.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Evicta slumpmässig domän om vi når gränsen (billig operation)
+    if !limiters.contains_key(domain) && limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
+        // Ta bort en godtycklig entry (HashMap iteration order)
+        if let Some(old_key) = limiters.keys().next().cloned() {
+            limiters.remove(&old_key);
+        }
+    }
+
     limiters
         .entry(domain.to_string())
         .or_insert_with(|| {
