@@ -40,6 +40,19 @@ fn global_tiered_backend() -> &'static vision_backend::TieredBackend {
     GLOBAL_TIERED_BACKEND.get_or_init(vision_backend::TieredBackend::default)
 }
 
+/// Registrera CDP ready-callback som uppdaterar global TieredBackend.
+/// Anropas före warmup_cdp_background() i server-main.
+pub fn register_cdp_ready_hook() {
+    vision_backend::on_cdp_ready(|| {
+        // Om backend redan initierats → uppdatera cdp_available
+        if let Some(backend) = GLOBAL_TIERED_BACKEND.get() {
+            backend.set_cdp_available(true);
+            eprintln!("CDP: global_tiered_backend updated — cdp_available=true");
+        }
+        // Om inte initierad ännu → default() kommer se CDP_BROWSER.get().is_some() == true
+    });
+}
+
 use parser::parse_html;
 use semantic::{extract_title, SemanticBuilder};
 use types::{SemanticTree, WorkflowMemory};

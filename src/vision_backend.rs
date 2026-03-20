@@ -37,14 +37,47 @@ pub fn warmup_cdp_background() {
     std::thread::spawn(|| {
         eprintln!("CDP warmup: starting Chrome in background...");
         match init_chrome_browser() {
-            Ok(_) => eprintln!("CDP warmup: Chrome ready"),
+            Ok(_) => {
+                eprintln!("CDP warmup: Chrome ready");
+                // Uppdatera global TieredBackend om den redan initierats
+                notify_cdp_ready();
+            }
             Err(e) => eprintln!("CDP warmup: Chrome failed: {e}"),
         }
     });
 }
 
+/// Callback efter CDP-warmup: sätt cdp_available=true på global backend
+#[cfg(feature = "cdp")]
+fn notify_cdp_ready() {
+    // Om GLOBAL_TIERED_BACKEND i lib.rs redan initierats, uppdatera den.
+    // Annars kommer default() se CDP_BROWSER.get().is_some() == true.
+    // Vi exponerar en publik funktion som lib.rs kan koppla in.
+    if let Some(cb) = CDP_READY_CALLBACK.get() {
+        cb();
+    }
+}
+
+/// Callback-register för CDP ready notification
+#[cfg(feature = "cdp")]
+static CDP_READY_CALLBACK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Registrera callback som anropas när CDP är redo
+#[cfg(feature = "cdp")]
+pub fn on_cdp_ready(f: impl Fn() + Send + Sync + 'static) {
+    let _ = CDP_READY_CALLBACK.set(Box::new(f));
+}
+
+#[cfg(feature = "cdp")]
+use std::sync::OnceLock;
+
 #[cfg(not(feature = "cdp"))]
 pub fn warmup_cdp_background() {
+    // CDP inte kompilerad — noop
+}
+
+#[cfg(not(feature = "cdp"))]
+pub fn on_cdp_ready(_f: impl Fn() + Send + Sync + 'static) {
     // CDP inte kompilerad — noop
 }
 
@@ -394,8 +427,8 @@ fn strip_tags(html: &str) -> String {
 
 /// TieredBackend — konfiguration och tillstånd
 pub struct TieredBackend {
-    /// Om CDP är tillgänglig
-    cdp_available: bool,
+    /// Om CDP är tillgänglig (AtomicBool för att kunna uppdateras efter warmup)
+    cdp_available: std::sync::atomic::AtomicBool,
     /// Statistik
     stats: std::sync::Mutex<TierStats>,
 }
@@ -412,9 +445,20 @@ impl TieredBackend {
     /// `cdp_available`: true om Chrome/CDP finns i miljön
     pub fn new(cdp_available: bool) -> Self {
         TieredBackend {
-            cdp_available,
+            cdp_available: std::sync::atomic::AtomicBool::new(cdp_available),
             stats: std::sync::Mutex::new(TierStats::default()),
         }
+    }
+
+    /// Sätt CDP-tillgänglighet (anropas efter warmup lyckats)
+    pub fn set_cdp_available(&self, available: bool) {
+        self.cdp_available
+            .store(available, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Kontrollera om CDP är tillgänglig
+    fn is_cdp_available(&self) -> bool {
+        self.cdp_available.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Kör screenshot med intelligent tier-val
@@ -423,7 +467,7 @@ impl TieredBackend {
     /// 2. Annars: Blitz först → validera → eskalera vid behov
     pub fn screenshot(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
         // Om XHR/HTML-hints indikerar JS → skippa Blitz
-        if matches!(req.tier_hint, TierHint::RequiresJs { .. }) && self.cdp_available {
+        if matches!(req.tier_hint, TierHint::RequiresJs { .. }) && self.is_cdp_available() {
             self.update_stats_skip_blitz();
             return self.screenshot_cdp(req);
         }
@@ -438,7 +482,7 @@ impl TieredBackend {
                     return Ok(result);
                 }
                 // Blitz-resultat ogiltigt → eskalera
-                if self.cdp_available {
+                if self.is_cdp_available() {
                     self.update_stats_escalation();
                     let mut cdp_result = self.screenshot_cdp(req)?;
                     cdp_result.escalation_reason =
@@ -449,7 +493,7 @@ impl TieredBackend {
                 Ok(result)
             }
             Err(e) => {
-                if self.cdp_available {
+                if self.is_cdp_available() {
                     self.update_stats_escalation();
                     let mut cdp_result = self.screenshot_cdp(req)?;
                     cdp_result.escalation_reason = Some(format!("Blitz failed: {}", e));
@@ -669,21 +713,20 @@ impl TieredBackend {
 
 impl Default for TieredBackend {
     fn default() -> Self {
-        // Auto-detect CDP: feature-flagga + kolla att Chrome-binär finns
+        // Starta med cdp_available=false. warmup_cdp_background() sätter true
+        // efter Chrome initierats. OnceLock + binärnamn-check funkar inte
+        // i alla miljöer (Playwright, snap, flatpak etc.) — headless_chrome
+        // har egen Chrome-detection som är mer robust.
         let cdp_available = if cfg!(feature = "cdp") {
-            // Verifiera att Chrome faktiskt finns i PATH
-            std::process::Command::new("chromium")
-                .arg("--version")
-                .output()
-                .is_ok()
-                || std::process::Command::new("chromium-browser")
-                    .arg("--version")
-                    .output()
-                    .is_ok()
-                || std::process::Command::new("google-chrome")
-                    .arg("--version")
-                    .output()
-                    .is_ok()
+            // Kolla om CDP_BROWSER redan initierats av warmup
+            #[cfg(feature = "cdp")]
+            {
+                CDP_BROWSER.get().is_some()
+            }
+            #[cfg(not(feature = "cdp"))]
+            {
+                false
+            }
         } else {
             false
         };
@@ -957,7 +1000,10 @@ mod tests {
     #[test]
     fn test_tiered_backend_no_cdp() {
         let backend = TieredBackend::new(false);
-        assert!(!backend.cdp_available, "CDP borde inte vara tillgänglig");
+        assert!(
+            !backend.is_cdp_available(),
+            "CDP borde inte vara tillgänglig"
+        );
     }
 
     #[test]

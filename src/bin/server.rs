@@ -3051,6 +3051,9 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    // Registrera CDP ready-callback FÖRE warmup (så att global backend uppdateras)
+    aether_agent::register_cdp_ready_hook();
+
     // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
     aether_agent::vision_backend::warmup_cdp_background();
 
