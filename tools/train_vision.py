@@ -382,6 +382,33 @@ _DATASET_REGISTRY = {
         "description": "Direkt YOLO-format med train/val/test splits. Klasser: buttons, links, "
                        "inputs, checkboxes, radios, dropdowns, sliders, toggles, labels, icons. Okt 2025.",
     },
+    # ── Nya datasets (2026) ──────────────────────────────────────────
+    "klarna": {
+        "name": "Klarna Product Page Dataset — 51.7K e-handelssidor",
+        "github_repo": "klarna/product-page-dataset",
+        "screenshots_url": "https://klarna-product-page-dataset.s3.eu-west-1.amazonaws.com/screenshots.zip",
+        "wtl_url": "https://klarna-product-page-dataset.s3.eu-west-1.amazonaws.com/klarna-product-page-dataset-wtl.zip",
+        "size_hint": "~8 GB (screenshots) + ~15 GB (WTL metadata)",
+        "description": "51.7K e-handelssidor från 8175 sajter. Annoterade element: Price, Name, "
+                       "Main picture, Add to cart, Cart. WTL-metadata med bboxar.",
+    },
+    "webclick": {
+        "name": "Hcompany/WebClick — 1639 web-screenshots, intent-annoterat",
+        "hf_dataset": "Hcompany/WebClick",
+        "size_hint": "~500 MB",
+        "description": "1639 engelska web-screenshots från 100+ sajter. ScreenSpot-format: "
+                       "bild + naturligt språk-instruktion + exakt bbox (HTML-gränser). "
+                       "Intent-annoterat för agent-navigation.",
+    },
+    "roboflow-ui": {
+        "name": "Roboflow UI Screenshots — 1800 bilder, 8 klasser",
+        "roboflow_workspace": "webuiproject",
+        "roboflow_project": "ui-screenshots",
+        "roboflow_version": 1,
+        "size_hint": "~300 MB",
+        "description": "1800 web-UI screenshots med 8 klasser: button, field, heading, iframe, "
+                       "image, label, link, text. YOLO-format, MIT-licens.",
+    },
 }
 
 
@@ -495,6 +522,12 @@ def download_dataset(fmt: str, output_dir: Path) -> Path:
         return _download_coco(info, dl_dir, extract_dir)
     elif fmt == "webui":
         return _download_webui(info, dl_dir, extract_dir)
+    elif fmt == "klarna":
+        return _download_klarna(info, dl_dir, extract_dir)
+    elif fmt == "webclick":
+        return _download_webclick(info, extract_dir)
+    elif fmt == "roboflow-ui":
+        return _download_roboflow_ui(info, extract_dir)
     elif "hf_repo" in info:
         return _download_hf_repo(info, extract_dir)
     elif "hf_dataset" in info:
@@ -603,6 +636,133 @@ def _download_webui(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
             return child
 
     return extract_dir
+
+
+def _download_klarna(info: dict, dl_dir: Path, extract_dir: Path) -> Path:
+    """Ladda ner Klarna Product Page Dataset (screenshots + WTL metadata med bboxar).
+
+    Datasetet innehåller 51.7K e-handelssidor. WTL-snapshots har elementmetadata
+    med bounding boxes och klarna-ai-label attribut (Price, Name, Main picture,
+    Add to cart, Cart).
+    """
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    marker = extract_dir / ".download_complete"
+    if marker.exists():
+        log(f"Klarna-dataset redan nedladdat: {extract_dir}", "OK")
+        return extract_dir
+
+    screenshots_archive = dl_dir / "klarna_screenshots.zip"
+    wtl_archive = dl_dir / "klarna_wtl.zip"
+
+    _download_file(info["screenshots_url"], screenshots_archive, "Klarna screenshots")
+    _download_file(info["wtl_url"], wtl_archive, "Klarna WTL metadata")
+
+    screenshots_dir = extract_dir / "screenshots"
+    wtl_dir = extract_dir / "wtl"
+
+    if not screenshots_dir.exists():
+        _extract_archive(screenshots_archive, screenshots_dir)
+    if not wtl_dir.exists():
+        _extract_archive(wtl_archive, wtl_dir)
+
+    marker.touch()
+    return extract_dir
+
+
+def _download_webclick(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner Hcompany/WebClick och konvertera till YOLO.
+
+    WebClick är i ScreenSpot-format: bild + instruktion + bbox.
+    Vi laddar ner via HuggingFace och konverterar direkt med
+    _convert_webclick_to_yolo().
+    """
+    hf_name = info["hf_dataset"]
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    marker = extract_dir / ".hf_download_complete"
+    if marker.exists():
+        log(f"WebClick redan nedladdat: {extract_dir}", "OK")
+        return extract_dir
+
+    log(f"Laddar ner {hf_name} från HuggingFace...", "STEP")
+
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        log("Installerar 'datasets' (HuggingFace)...", "INFO")
+        run(f"{sys.executable} -m pip install datasets")
+        from datasets import load_dataset
+
+    try:
+        ds = load_dataset(hf_name, trust_remote_code=True)
+    except Exception as e:
+        log(f"Kunde inte ladda {hf_name}: {e}", "ERR")
+        sys.exit(1)
+
+    _convert_webclick_to_yolo(ds, extract_dir)
+
+    marker.touch()
+    log(f"WebClick-dataset klart: {extract_dir}", "OK")
+    return extract_dir
+
+
+def _download_roboflow_ui(info: dict, extract_dir: Path) -> Path:
+    """Ladda ner Roboflow UI Screenshots dataset (YOLO-format).
+
+    Försöker via Roboflow API (om API-nyckel finns), annars snapshot_download
+    från HuggingFace-mirror.
+    """
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    marker = extract_dir / ".download_complete"
+    if marker.exists():
+        log(f"Roboflow UI-dataset redan nedladdat: {extract_dir}", "OK")
+        return _find_yolo_root(extract_dir)
+
+    workspace = info["roboflow_workspace"]
+    project = info["roboflow_project"]
+    version = info["roboflow_version"]
+
+    api_key = os.environ.get("ROBOFLOW_API_KEY", "")
+
+    if api_key:
+        log(f"Laddar ner {workspace}/{project} v{version} via Roboflow API...", "STEP")
+        try:
+            from roboflow import Roboflow
+        except ImportError:
+            log("Installerar 'roboflow'...", "INFO")
+            run(f"{sys.executable} -m pip install roboflow")
+            from roboflow import Roboflow
+
+        rf = Roboflow(api_key=api_key)
+        rf_project = rf.workspace(workspace).project(project)
+        rf_dataset = rf_project.version(version).download("yolov8", location=str(extract_dir))
+        log(f"Roboflow-dataset nedladdat: {rf_dataset.location if rf_dataset else extract_dir}", "OK")
+    else:
+        log("Ingen ROBOFLOW_API_KEY — laddar ner via URL-export...", "STEP")
+        log("  Sätt ROBOFLOW_API_KEY i miljön för automatisk nedladdning.", "INFO")
+        log(f"  Skapa gratis konto på roboflow.com, gå till {workspace}/{project}", "INFO")
+
+        # Roboflow offentliga dataset har en publik export-URL
+        export_url = (
+            f"https://universe.roboflow.com/ds/"
+            f"{workspace}/{project}/{version}/yolov8"
+        )
+        archive = extract_dir / "roboflow_ui.zip"
+        try:
+            _download_file(export_url, archive, "Roboflow UI Screenshots (YOLO)")
+            _extract_archive(archive, extract_dir)
+        except Exception as e:
+            log(f"Nedladdning utan API-nyckel misslyckades: {e}", "ERR")
+            log("Sätt ROBOFLOW_API_KEY eller ladda ner manuellt:", "INFO")
+            log(f"  1. Gå till https://universe.roboflow.com/{workspace}/{project}", "INFO")
+            log("  2. Klicka 'Download Dataset' → YOLOv8 format", "INFO")
+            log(f"  3. Packa upp i {extract_dir}/", "INFO")
+            sys.exit(1)
+
+    marker.touch()
+    yolo_root = _find_yolo_root(extract_dir)
+    log(f"Roboflow YOLO-dataset klart: {yolo_root}", "OK")
+    return yolo_root
 
 
 def _download_hf_repo(info: dict, extract_dir: Path) -> Path:
@@ -2546,6 +2706,427 @@ def _remap_yashjain_labels(source_path: Path, extended: bool = False):
     log(f"data.yaml genererad: nc={nc}, train={train_rel}", "OK")
 
 
+def convert_klarna_to_yolo(klarna_dir: Path, output_dir: Path,
+                           extended: bool = False) -> Path:
+    """Konverterar Klarna Product Page Dataset till YOLO-format.
+
+    Klarna-datasetet har WTL-snapshots med JSON-metadata som innehåller
+    elementkoordinater (bounding boxes) och klarna-ai-label attribut:
+    Price, Name, Main picture, Add to cart, Cart.
+
+    Mappning till UI_CLASSES:
+      Price       → text (4) / price (10 extended)
+      Name        → heading (9)
+      Main picture → img (5)
+      Add to cart  → button (0) / cta (11 extended)
+      Cart         → button (0) / cta (11 extended)
+    """
+    import json
+    import shutil
+
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
+
+    # Klarna-label → class-id
+    _klarna_label_map = {
+        "Price": 10 if extended else 4,           # price / text
+        "Name": 9,                                 # heading
+        "Main picture": 5,                         # img
+        "Add to cart": 11 if extended else 0,      # cta / button
+        "Cart": 11 if extended else 0,             # cta / button
+    }
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hitta screenshots och WTL-metadata
+    screenshots_dir = klarna_dir / "screenshots"
+    wtl_dir = klarna_dir / "wtl"
+
+    # WTL-snapshots har JSON-filer med elementmetadata
+    # Struktur: wtl/<id>/snapshot.json eller wtl/<id>.json
+    json_files = list(wtl_dir.rglob("*.json")) if wtl_dir.exists() else []
+    log(f"Klarna: hittade {len(json_files)} WTL JSON-filer", "INFO")
+
+    # Hitta alla screenshot-bilder
+    screenshot_files = {}
+    if screenshots_dir.exists():
+        for img_path in screenshots_dir.rglob("*.png"):
+            screenshot_files[img_path.stem] = img_path
+        for img_path in screenshots_dir.rglob("*.jpg"):
+            screenshot_files[img_path.stem] = img_path
+
+    log(f"Klarna: hittade {len(screenshot_files)} screenshots", "INFO")
+
+    saved = 0
+    skipped = 0
+
+    for json_path in json_files:
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1
+            continue
+
+        # Hitta matchande screenshot
+        page_id = json_path.stem
+        if page_id == "snapshot":
+            page_id = json_path.parent.name
+
+        img_path = screenshot_files.get(page_id)
+        if img_path is None:
+            # Sök med varianter
+            for variant in [page_id.replace("-", "_"), page_id.replace("_", "-")]:
+                if variant in screenshot_files:
+                    img_path = screenshot_files[variant]
+                    break
+        if img_path is None:
+            skipped += 1
+            continue
+
+        # Hämta bilddimensioner
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(img_path) as pil_img:
+                img_w, img_h = pil_img.size
+        except Exception:
+            skipped += 1
+            continue
+
+        if img_w < 10 or img_h < 10:
+            skipped += 1
+            continue
+
+        # Extrahera annoterade element från WTL-metadata
+        yolo_lines = []
+        elements = data.get("elements", data.get("nodes", []))
+
+        # WTL-format: element har "attributes" dict med "klarna-ai-label"
+        # och "location" dict med x, y, width, height
+        for elem in elements:
+            attrs = elem.get("attributes", {})
+            klarna_label = attrs.get("klarna-ai-label")
+            if not klarna_label:
+                continue
+
+            class_id = _klarna_label_map.get(klarna_label)
+            if class_id is None:
+                continue
+
+            # Verifiera att class_id finns i aktiva klasser
+            if class_id >= len(active_classes):
+                # Fallback för extended klasser i standard-läge
+                if klarna_label == "Price":
+                    class_id = 4   # text
+                else:
+                    class_id = 0   # button
+                if class_id >= len(active_classes):
+                    continue
+
+            loc = elem.get("location", elem.get("rect", elem.get("bbox", {})))
+            if not loc:
+                continue
+
+            x = loc.get("x", loc.get("left", 0))
+            y = loc.get("y", loc.get("top", 0))
+            w = loc.get("width", loc.get("w", 0))
+            h = loc.get("height", loc.get("h", 0))
+
+            if w <= 0 or h <= 0:
+                continue
+
+            # Normalisera till YOLO-format
+            x_center = (x + w / 2) / img_w
+            y_center = (y + h / 2) / img_h
+            nw = w / img_w
+            nh = h / img_h
+
+            # Klipp till [0, 1]
+            x_center = max(0.0, min(1.0, x_center))
+            y_center = max(0.0, min(1.0, y_center))
+            nw = max(0.001, min(1.0, nw))
+            nh = max(0.001, min(1.0, nh))
+
+            yolo_lines.append(
+                f"{class_id} {x_center:.6f} {y_center:.6f} {nw:.6f} {nh:.6f}"
+            )
+
+        if not yolo_lines:
+            skipped += 1
+            continue
+
+        # Kopiera bild och spara labels
+        dst_img = images_dir / f"klarna_{page_id}.png"
+        shutil.copy2(str(img_path), str(dst_img))
+        (labels_dir / f"klarna_{page_id}.txt").write_text("\n".join(yolo_lines))
+        saved += 1
+
+        if saved % 1000 == 0:
+            log(f"  {saved} sidor konverterade...", "INFO")
+
+    log(f"Klarna: konverterat {saved} sidor ({skipped} överhoppade)", "OK")
+
+    # Auto-split
+    auto_split_dataset(output_dir)
+
+    return output_dir
+
+
+def _convert_webclick_to_yolo(ds, output_dir: Path):
+    """Konverterar Hcompany/WebClick dataset (ScreenSpot-format) till YOLO.
+
+    Varje rad har: image (screenshot), instruction (text), bbox [x, y, w, h].
+    Varje bild har exakt en annoterad element — vi mappar instruktionen till
+    en UI-klass baserat på nyckelord.
+    """
+    from PIL import Image as PILImage
+
+    images_dir = output_dir / "images" / "train"
+    labels_dir = output_dir / "labels" / "train"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    _class_map = {name: i for i, name in enumerate(UI_CLASSES)}
+
+    # Instruktions-nyckelord → UI-klass
+    _intent_to_class = {
+        "click": 0,          # button
+        "button": 0,
+        "submit": 0,
+        "press": 0,
+        "tap": 0,
+        "type": 1,           # textbox
+        "enter": 1,
+        "input": 1,
+        "search": 1,
+        "fill": 1,
+        "write": 1,
+        "link": 2,           # link
+        "navigate": 2,
+        "go to": 2,
+        "open": 2,
+        "select": 8,         # combobox
+        "dropdown": 8,
+        "choose": 8,
+        "check": 6,          # checkbox
+        "toggle": 6,
+        "image": 5,          # img
+        "photo": 5,
+        "picture": 5,
+        "heading": 9,        # heading
+        "title": 9,
+        "menu": 2,           # link (navigation)
+        "tab": 0,            # button
+        "close": 0,
+        "icon": 3,           # icon
+        "logo": 3,
+    }
+
+    # Hämta split
+    split_name = "test" if "test" in ds else ("train" if "train" in ds else list(ds.keys())[0])
+    split = ds[split_name]
+    columns = split.column_names
+    log(f"WebClick: {len(split)} samples (split: {split_name})", "STEP")
+    log(f"  Kolumner: {columns}", "INFO")
+
+    # Detektera kolumnnamn
+    img_col = None
+    for c in ("image", "screenshot", "img"):
+        if c in columns:
+            img_col = c
+            break
+
+    bbox_col = None
+    for c in ("bbox", "bounding_box", "box", "target"):
+        if c in columns:
+            bbox_col = c
+            break
+
+    instruction_col = None
+    for c in ("instruction", "intent", "text", "query", "command"):
+        if c in columns:
+            instruction_col = c
+            break
+
+    saved = 0
+    skipped = 0
+    import io
+
+    for idx, row in enumerate(split):
+        if idx % 500 == 0 and idx > 0:
+            log(f"  {idx}/{len(split)} konverterade...", "INFO")
+
+        # Extrahera bild
+        img = None
+        if img_col and row.get(img_col) is not None:
+            val = row[img_col]
+            if isinstance(val, PILImage.Image):
+                img = val
+            elif isinstance(val, dict) and "bytes" in val:
+                img = PILImage.open(io.BytesIO(val["bytes"]))
+            elif isinstance(val, bytes):
+                img = PILImage.open(io.BytesIO(val))
+        if img is None:
+            skipped += 1
+            continue
+
+        img_w, img_h = img.size
+        if img_w < 10 or img_h < 10:
+            skipped += 1
+            continue
+
+        # Extrahera bbox
+        bbox = row.get(bbox_col) if bbox_col else None
+        if bbox is None or len(bbox) < 4:
+            skipped += 1
+            continue
+
+        # Bestäm UI-klass från instruktion
+        instruction = row.get(instruction_col, "") if instruction_col else ""
+        class_id = _classify_webclick_instruction(instruction, _intent_to_class)
+
+        # Tolka bbox — ScreenSpot-format: [x, y, w, h] (pixlar)
+        bx, by, bw, bh = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+
+        # Kolla om det är [x1, y1, x2, y2] (om w/h > img dimensions)
+        if bw > img_w or bh > img_h or (bw > bx and bh > by and bw < img_w * 2):
+            # Troligen [x1, y1, x2, y2]
+            x1, y1, x2, y2 = bx, by, bw, bh
+            bw = x2 - x1
+            bh = y2 - y1
+            bx = x1
+
+        # Normalisera till YOLO
+        x_center = (bx + bw / 2) / img_w
+        y_center = (by + bh / 2) / img_h
+        nw = bw / img_w
+        nh = bh / img_h
+
+        # Klipp till [0, 1]
+        x_center = max(0.0, min(1.0, x_center))
+        y_center = max(0.0, min(1.0, y_center))
+        nw = max(0.001, min(1.0, nw))
+        nh = max(0.001, min(1.0, nh))
+
+        # Spara
+        img_name = f"webclick_{idx:06d}.png"
+        img.save(str(images_dir / img_name))
+        label_name = f"webclick_{idx:06d}.txt"
+        (labels_dir / label_name).write_text(
+            f"{class_id} {x_center:.6f} {y_center:.6f} {nw:.6f} {nh:.6f}"
+        )
+        saved += 1
+
+    log(f"WebClick: konverterat {saved} bilder ({skipped} överhoppade)", "OK")
+
+    auto_split_dataset(output_dir)
+
+
+def _classify_webclick_instruction(instruction: str, intent_map: dict) -> int:
+    """Klassificera en WebClick-instruktion till UI-klass baserat på nyckelord."""
+    text = instruction.lower()
+    for keyword, class_id in intent_map.items():
+        if keyword in text:
+            return class_id
+    # Default: button (mest troligt klick-mål)
+    return 0
+
+
+def _remap_roboflow_ui_labels(source_path: Path, extended: bool = False):
+    """Mappa Roboflow UI Screenshots klasser till AetherAgent UI_CLASSES.
+
+    Roboflow-klasser: button, field, heading, iframe, image, label, link, text
+    → AetherAgent: button(0), textbox(1), link(2), icon(3), text(4),
+                   img(5), checkbox(6), radio(7), combobox(8), heading(9)
+    """
+    active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
+    nc = len(active_classes)
+
+    # Roboflow klass-index → AetherAgent klass-index
+    # Roboflow ordning: 0=button, 1=field, 2=heading, 3=iframe, 4=image, 5=label, 6=link, 7=text
+    _roboflow_to_ui = {
+        0: 0,   # button → button
+        1: 1,   # field → textbox
+        2: 9,   # heading → heading
+        3: 5,   # iframe → img (visuellt block)
+        4: 5,   # image → img
+        5: 4,   # label → text
+        6: 2,   # link → link
+        7: 4,   # text → text
+    }
+
+    log("Roboflow UI: omklassificerar labels till AetherAgent-klasser", "STEP")
+    total_remapped = 0
+    total_dropped = 0
+
+    for split in ("train", "val", "test"):
+        labels_path = None
+        for pattern in [
+            source_path / "labels" / split,
+            source_path / split / "labels",
+        ]:
+            if pattern.exists():
+                labels_path = pattern
+                break
+
+        if labels_path is None:
+            continue
+
+        txt_files = list(labels_path.glob("*.txt"))
+        for txt_file in txt_files:
+            if txt_file.name == "classes.txt":
+                continue
+            lines = txt_file.read_text().strip().splitlines()
+            new_lines = []
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) < 5:
+                    continue
+                old_cls = int(parts[0])
+                new_cls = _roboflow_to_ui.get(old_cls)
+                if new_cls is None or new_cls >= nc:
+                    total_dropped += 1
+                    continue
+                parts[0] = str(new_cls)
+                new_lines.append(" ".join(parts))
+                total_remapped += 1
+            txt_file.write_text("\n".join(new_lines) + "\n" if new_lines else "")
+
+        log(f"  {split}: {len(txt_files)} label-filer behandlade", "INFO")
+
+    log(f"Roboflow ommappning klar: {total_remapped} behållna, {total_dropped} borttagna", "OK")
+
+    # Generera korrekt data.yaml
+    yaml_dst = source_path / "data.yaml"
+    train_rel = val_rel = test_rel = None
+    for t, v, te in [
+        ("train/images", "val/images", "test/images"),
+        ("images/train", "images/val", "images/test"),
+    ]:
+        td = source_path / t
+        if td.exists() and (any(td.rglob("*.jpg")) or any(td.rglob("*.png"))):
+            train_rel = t
+            val_rel = v if (source_path / v).exists() else t
+            test_rel = te if (source_path / te).exists() else ""
+            break
+
+    if train_rel:
+        import yaml
+        data = {
+            "path": str(source_path.resolve()),
+            "train": train_rel,
+            "val": val_rel,
+            "test": test_rel,
+            "nc": nc,
+            "names": {i: name for i, name in enumerate(active_classes)},
+        }
+        with open(yaml_dst, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+        log(f"data.yaml genererad: nc={nc}, train={train_rel}", "OK")
+
+
 def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
                     extended: bool = False) -> Path:
     """Huvudfunktion: konverterar dataset från givet format till YOLO.
@@ -2609,6 +3190,21 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
         _remap_yashjain_labels(source_path, extended=extended)
         return source_path
 
+    # klarna — WTL-metadata med bboxar + screenshots
+    if fmt == "klarna":
+        return convert_klarna_to_yolo(source_path, output_dir, extended=extended)
+
+    # webclick — HuggingFace ScreenSpot-format, konverteras vid nedladdning
+    if fmt == "webclick":
+        log("WebClick-dataset konverterades vid nedladdning", "OK")
+        return source_path
+
+    # roboflow-ui — YOLO-format, kräver klassommappning
+    if fmt == "roboflow-ui":
+        log("Roboflow UI: omklassificerar labels till AetherAgent-klasser", "STEP")
+        _remap_roboflow_ui_labels(source_path, extended=extended)
+        return source_path
+
     # HuggingFace-datasets konverteras redan vid nedladdning (_convert_hf_to_yolo)
     hf_formats = ("osatlas", "guiactor", "showui-web", "waveui")
     if fmt in hf_formats:
@@ -2616,7 +3212,7 @@ def convert_dataset(source_path: Path, output_dir: Path, fmt: str,
         return source_path
 
     log(f"Okänt format: {fmt}. Stödda: rico, coco, webui, osatlas, guiactor, "
-        f"showui-web, waveui, yashjain, yolo", "ERR")
+        f"showui-web, waveui, yashjain, klarna, webclick, roboflow-ui, yolo", "ERR")
     sys.exit(1)
 
 
@@ -3507,6 +4103,9 @@ Examples:
   python tools/train_vision.py --download --format showui-web --version v7  # ShowUI Web (576K element)
   python tools/train_vision.py --download --format waveui --version v8      # WaveUI-25K (curated)
   python tools/train_vision.py --download --format yashjain --version v9    # YOLO-format direkt
+  python tools/train_vision.py --download --format klarna --version v10     # Klarna e-handel (51.7K)
+  python tools/train_vision.py --download --format webclick --version v11   # WebClick intent-annoterat
+  python tools/train_vision.py --download --format roboflow-ui --version v12 # Roboflow UI (1800, YOLO)
 
   # Full pipeline with your own local dataset:
   python tools/train_vision.py --dataset ./my-labeled-data
@@ -3531,9 +4130,11 @@ Examples:
     parser.add_argument("--dataset", type=Path, help="Path to labeled dataset directory")
     parser.add_argument("--format", type=str, default="yolo",
                         choices=["yolo", "rico", "coco", "webui",
-                                 "osatlas", "guiactor", "showui-web", "waveui", "yashjain"],
+                                 "osatlas", "guiactor", "showui-web", "waveui", "yashjain",
+                                 "klarna", "webclick", "roboflow-ui"],
                         help="Dataset format (default: yolo). Converts to YOLO automatically. "
-                             "2026 datasets: osatlas, guiactor, showui-web, waveui, yashjain.")
+                             "2026 datasets: osatlas, guiactor, showui-web, waveui, yashjain, "
+                             "klarna, webclick, roboflow-ui.")
     parser.add_argument("--extended-classes", action="store_true",
                         help="Use 16 agent-semantic classes (price, cta, product_card, nav, search, form) "
                              "instead of standard 10. Enables text heuristics for class upgrades.")

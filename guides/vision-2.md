@@ -173,16 +173,34 @@ För produktionsmodeller med bättre data (osatlas + showui-web merged): sätt `
 
 ---
 
+## Nyligen integrerade datasets
+
+| Dataset | Storlek | Format | Kommando |
+|---------|---------|--------|----------|
+| Klarna Product Pages | 51.7K e-handelssidor | WTL+screenshots → YOLO | `--download --format klarna` |
+| Hcompany/WebClick | 1639 screenshots, 100+ sajter | ScreenSpot → YOLO | `--download --format webclick` |
+| Roboflow UI Screenshots | 1800 bilder, 8 klasser | YOLO (native) | `--download --format roboflow-ui` |
+
+```bash
+# Ladda ner alla tre + träna merged:
+python tools/train_vision.py --download-only --format klarna
+python tools/train_vision.py --download-only --format webclick
+python tools/train_vision.py --download-only --format roboflow-ui
+
+python tools/train_vision.py --merge-datasets \
+  dataset/klarna_raw \
+  dataset/webclick_raw \
+  dataset/roboflow-ui_raw \
+  --version v_new
+```
+
 ## Övriga datasets (ej integrerade, för manuell användning)
 
 | Dataset | Storlek | HuggingFace | Användning |
 |---------|---------|-------------|------------|
 | UGround | 10M element, 95% web | ICLR 2025 Oral | Störst web-grounding |
 | AGUVis Stage 1 | 4.2M samples | `xlangai/aguvis-stage1` | +41% på ScreenSpot-v2 |
-| Klarna Product Pages | 51.7K e-handelssidor | `klarna/product-page-dataset` | price/cta/product_card |
-| Hcompany/WebClick | 100+ sajter | `Hcompany/WebClick` | Intent-annoterat |
 | Explorer-Web | 720K screenshots, 33M element | ACL 2025 | Massivt trajectory-data |
-| Roboflow Screenshots | 1K+ web | `public.roboflow.com` | 8 klasser, YOLO-format |
 
 ### Benchmarks (validering, ej träning)
 
