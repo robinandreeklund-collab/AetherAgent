@@ -2969,20 +2969,25 @@ function addEvent(type, data) {
 }
 
 // SSE med polling-fallback (Cloudflare-tunnlar buffrar SSE)
-let sseOk = false;
+let sseGotMessage = false;
 let pollTimer = null;
 let lastSeenTs = 0;
 
 // Försök SSE först
 const sse = new EventSource('/mcp');
 sse.onopen = () => {
-  sseOk = true;
+  // onopen triggas av Cloudflare med 200 OK men data buffras —
+  // vänta tills ett riktigt message kommer innan vi litar på SSE
   dot.className = 'dot connected';
-  statusText.textContent = 'Connected — live SSE stream';
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  statusText.textContent = 'SSE connected — waiting for first event...';
 };
 sse.addEventListener('message', (e) => {
-  sseOk = true;
+  if (!sseGotMessage) {
+    sseGotMessage = true;
+    // SSE funkar på riktigt — stäng av polling om den startade
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    statusText.textContent = 'Connected — live SSE stream';
+  }
   try {
     const data = JSON.parse(e.data);
     if (data.params?.timestamp) lastSeenTs = Math.max(lastSeenTs, data.params.timestamp);
@@ -2992,9 +2997,11 @@ sse.addEventListener('message', (e) => {
   }
 });
 sse.onerror = () => {
-  dot.className = 'dot error';
-  statusText.textContent = 'SSE failed — falling back to polling...';
-  if (!pollTimer) startPolling();
+  if (!sseGotMessage) {
+    dot.className = 'dot error';
+    statusText.textContent = 'SSE failed — falling back to polling...';
+    if (!pollTimer) startPolling();
+  }
 };
 
 // Polling-fallback: hämta /mcp/events?since=<ts> var 2:a sekund
@@ -3018,8 +3025,8 @@ function startPolling() {
   }, 2000);
 }
 
-// Om SSE inte fungerar efter 5s → starta polling
-setTimeout(() => { if (!sseOk && !pollTimer) startPolling(); }, 5000);
+// Om inget SSE-message mottagits efter 5s → starta polling oavsett
+setTimeout(() => { if (!sseGotMessage && !pollTimer) startPolling(); }, 5000);
 
 // Hämta verktyg via MCP tools/list
 fetch('/mcp', {
