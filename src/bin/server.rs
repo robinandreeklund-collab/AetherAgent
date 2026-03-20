@@ -31,6 +31,8 @@ struct AppState {
     vision_model: Arc<std::sync::Mutex<Option<ort::session::Session>>>,
     #[cfg(not(feature = "vision"))]
     vision_model: Arc<std::sync::Mutex<Option<()>>>,
+    /// Broadcast-kanal för MCP SSE-events (dashboard live feed)
+    mcp_events: Arc<tokio::sync::broadcast::Sender<String>>,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -2694,7 +2696,27 @@ async fn mcp_post(
         "tools/call" => {
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
-            match mcp_dispatch_tool(tool_name, arguments, &state).await {
+            let call_start = std::time::Instant::now();
+            let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+            let call_ms = call_start.elapsed().as_millis();
+
+            // Broadcast tool-anrop till SSE-dashboard
+            let event = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/tool_call",
+                "params": {
+                    "tool": tool_name,
+                    "duration_ms": call_ms,
+                    "success": result.is_ok(),
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                }
+            });
+            let _ = state.mcp_events.send(event.to_string());
+
+            match result {
                 Ok(content_blocks) => jsonrpc_result(
                     id,
                     serde_json::json!({
@@ -2736,7 +2758,11 @@ async fn mcp_post(
 ///
 /// Spec 2025-03-26: MCP-klienter öppnar GET /mcp för SSE-notifications.
 /// Webbläsare (Accept: text/html) får en live-dashboard som visar events.
-async fn mcp_get(headers: HeaderMap) -> axum::response::Response {
+/// SSE-strömmen visar alla MCP tool-anrop i realtid via broadcast-kanal.
+async fn mcp_get(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
+) -> axum::response::Response {
     // Om webbläsare → returnera HTML-dashboard med EventSource
     let accept = headers
         .get("accept")
@@ -2747,15 +2773,16 @@ async fn mcp_get(headers: HeaderMap) -> axum::response::Response {
         return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
     }
 
-    // MCP-klient → SSE-ström
+    // MCP-klient / EventSource → SSE-ström med broadcast-events
     let session_id = headers
         .get("mcp-session-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("anonymous")
         .to_string();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(32);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
 
+    // Skicka initial notification
     let tx_init = tx.clone();
     tokio::spawn(async move {
         let server_info = serde_json::json!({
@@ -2776,21 +2803,34 @@ async fn mcp_get(headers: HeaderMap) -> axum::response::Response {
             .await;
     });
 
+    // Prenumerera på broadcast-kanalen och vidarebefordra events till SSE
+    let mut broadcast_rx = state.mcp_events.subscribe();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-            if tx
-                .send(Ok(Event::default().event("message").data(
-                    serde_json::json!({
+            match broadcast_rx.recv().await {
+                Ok(event_data) => {
+                    if tx
+                        .send(Ok(Event::default().event("message").data(event_data)))
+                        .await
+                        .is_err()
+                    {
+                        break; // Klient stängde kopplingen
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // Klienten hann inte med — skicka varning
+                    let warning = serde_json::json!({
                         "jsonrpc": "2.0",
-                        "method": "notifications/ping"
-                    })
-                    .to_string(),
-                )))
-                .await
-                .is_err()
-            {
-                break;
+                        "method": "notifications/warning",
+                        "params": {"message": format!("Missed {n} events (slow client)")}
+                    });
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("message")
+                            .data(warning.to_string())))
+                        .await;
+                }
             }
         }
     });
@@ -2876,9 +2916,18 @@ function addEvent(type, data) {
   const div = document.createElement('div');
   div.className = 'event';
   const time = new Date().toLocaleTimeString();
-  div.innerHTML = `<div class="time">${time}</div><div class="type">${type}</div><pre>${JSON.stringify(data, null, 2)}</pre>`;
+  let detail = '';
+  if (type === 'notifications/tool_call' && data.params) {
+    const p = data.params;
+    const icon = p.success ? '&#10003;' : '&#10007;';
+    const color = p.success ? '#4ade80' : '#f87171';
+    detail = `<div class="type" style="color:${color}">${icon} ${p.tool} <span style="color:#888">${p.duration_ms}ms</span></div>`;
+  } else {
+    detail = `<div class="type">${type}</div><pre>${JSON.stringify(data, null, 2)}</pre>`;
+  }
+  div.innerHTML = `<div class="time">${time}</div>${detail}`;
   eventsDiv.prepend(div);
-  if (eventsDiv.children.length > 50) eventsDiv.lastChild.remove();
+  if (eventsDiv.children.length > 100) eventsDiv.lastChild.remove();
 }
 
 // SSE-koppling
@@ -3241,8 +3290,10 @@ async fn main() {
     let vision_model = load_vision_model().await;
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
+    let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
+        mcp_events: Arc::new(mcp_tx),
     };
 
     println!("AetherAgent API server starting on http://{}", addr);
