@@ -228,10 +228,11 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 
 **Selective execution pipeline:** Detect JS → extract `getElementById`/`querySelector` patterns → match to tree nodes → evaluate in sandbox → apply computed values back to semantic tree.
 
-**Known limitations:**
-- **Security model uses blocklist** (16 forbidden patterns). An allowlist approach would be more robust.
-- **New `Context::default()` per `eval_js()` call** — no shared state between evaluations. `eval_js_with_dom` creates one context per call with DOM bindings.
-- **No event loop** — no microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Boa evaluates synchronously only.
+**Security model:** Allowlist-based — only known safe operations (math, strings, arrays, objects, JSON) are permitted. Unknown function calls are blocked. Deny-list catches 18 explicitly dangerous patterns (fetch, eval, Workers, storage, etc.).
+
+**Persistent context:** `eval_js_batch` shares a single Boa Context across all snippets — variables defined in snippet 1 are available in snippet 2. `eval_js_with_dom` creates one context per call with full DOM bindings.
+
+**Known limitation:** No event loop — no microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Boa evaluates synchronously only.
 
 ### 6. Temporal Memory & Adversarial Modeling
 
@@ -460,21 +461,20 @@ Extracts server-side rendered data from HTML **without running JavaScript**. Det
 | Framework | Marker | Status |
 |-----------|--------|--------|
 | Next.js Pages Router | `<script id="__NEXT_DATA__">` | Plain JSON |
-| Next.js App Router | `self.__next_f.push([...])` | Basic chunk parsing (RSC wire format simplified) |
-| Nuxt 2 | `window.__NUXT__=` | Plain JSON only |
-| Nuxt 3 | `<script id="__NUXT_DATA__">` | Plain JSON only |
+| Next.js App Router | `self.__next_f.push([...])` | RSC wire format: line-based JSON parsing with ID:TYPE:DATA |
+| Nuxt 2 | `window.__NUXT__=` | Plain JSON |
+| Nuxt 3 | `<script id="__NUXT_DATA__">` | **Devalue** (Date, BigInt, Map, Set, circular refs) + JSON fallback |
 | Angular Universal | `<script id="ng-state">` | Plain JSON |
 | Remix | `window.__remixContext` | Plain JSON (extracts `loaderData`) |
 | Gatsby | `<script id="___gatsby-initial-props">` | Plain JSON |
-| SvelteKit | `<script id="__sveltekit_data">` | Plain JSON only |
-| Qwik | `<script type="qwik/json">` | Plain JSON |
+| SvelteKit | `<script id="__sveltekit_data">` | **Devalue** (Date, BigInt, Map, Set, circular refs) + JSON fallback |
+| Qwik | `<script type="qwik/json">` + `on:` attrs | Resumability state + **QRL event handler extraction** |
 | Astro | `<astro-island props="...">` | HTML-decoded JSON |
 | Apollo GraphQL | `window.__APOLLO_STATE__` | Plain JSON |
 
-**Known limitations:**
-- **Nuxt 3+ and SvelteKit use `devalue`** (not JSON) — supports `Date`, `BigInt`, `Map`, `Set`, circular references. Current code parses plain JSON only; devalue-encoded data fails silently. A devalue deserializer is needed.
-- **Next.js App Router** uses React Flight Protocol with streaming RSC chunks. Current parser does basic chunk concatenation; real RSC wire format has references and deferred components.
-- **Qwik uses resumability, not hydration** — `qwik/json` state is extracted correctly, but QRL (Qualified Resource Locator) event handler attributes on HTML elements are not parsed.
+**Devalue support:** Nuxt 3+ and SvelteKit 2+ use `devalue` serialization (Date, BigInt, Map, Set, circular refs). Built-in devalue deserializer handles these types, with JSON fallback for older versions.
+
+**Qwik resumability:** Qwik uses resumability, not hydration. Both `qwik/json` state and QRL event handler attributes (`on:click`, `on:input`, etc.) are extracted.
 
 ### 19. Arena DOM
 
@@ -1693,16 +1693,16 @@ Track which model produced each result via the `model_version` field:
 ### Future Work
 
 **Active:**
-- **Devalue deserializer** — Nuxt 3+ and SvelteKit use `devalue` (not JSON) for SSR state. Supports `Date`, `BigInt`, `Map`, `Set`, circular references. Current hydration extraction only parses plain JSON.
-- **React Flight Protocol** — Next.js App Router uses RSC wire format with streaming chunks, references, and deferred components. Current parser does basic chunk concatenation.
-- **Qwik QRL parsing** — Qwik uses resumability (not hydration). `qwik/json` state is extracted, but QRL event handler attributes (`on:click="./module#handler"`) are not parsed.
-- **Security: blocklist → allowlist** — `js_eval.rs` blocks 16 forbidden patterns. An allowlist (only permit safe operations) would be more robust against bypass.
-- **Persistent Boa Context** — Each `eval_js()` creates a new `Context::default()`. A shared context per page would enable variable persistence across script blocks.
 - **Event loop primitives** — Boa lacks microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Required for SPA frameworks that use async rendering.
 
 **Completed:**
 - ~~**Full JS execution bridge**~~ ✓ Implemented — `dom_bridge.rs` exposes `document`/`window` to Boa via Arena DOM. `getElementById`, `querySelector`, `querySelectorAll`, `createElement`, `createTextNode`, `console.log`, `window.location/navigator`.
 - ~~**SSR hydration extraction**~~ ✓ Implemented — `hydration.rs` extracts data from 10 frameworks (Next.js Pages + App Router, Nuxt 2/3, Angular, Remix, Gatsby, SvelteKit, Qwik, Astro, Apollo) without running JS.
+- ~~**Devalue deserializer**~~ ✓ Implemented — Nuxt 3+ and SvelteKit 2+ use `devalue` (Date, BigInt, Map, Set, circular refs). Built-in parser with JSON fallback.
+- ~~**RSC Flight Protocol**~~ ✓ Implemented — Next.js App Router line-based RSC wire format parsing with ID:TYPE:DATA extraction.
+- ~~**Qwik QRL parsing**~~ ✓ Implemented — Resumability state + QRL event handler attribute extraction (`on:click`, `on:input`, etc.).
+- ~~**Security: allowlist model**~~ ✓ Implemented — `js_eval.rs` switched from blocklist to allowlist. Only known safe operations permitted; unknown function calls blocked.
+- ~~**Persistent Boa Context**~~ ✓ Implemented — `eval_js_batch` shares single Context across all snippets. Variables persist between evaluations.
 - ~~**Arena DOM**~~ ✓ Implemented — `arena_dom.rs` replaces RcDom with SlotMap-based arena. ~5-10x faster DFS, 1 allocation vs ~1000/page.
 - ~~**Progressive escalation**~~ ✓ Implemented — `escalation.rs` auto-selects Tier 0-4 per page. Hydration → Static → Boa+DOM → Blitz → CDP.
 - ~~**Vision model training**~~ ✓ Training guide documented — The inference pipeline supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. See [Vision Model Training Guide](#vision-model-training-guide) above

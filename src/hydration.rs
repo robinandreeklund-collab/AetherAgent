@@ -177,6 +177,10 @@ fn extract_next_data(html: &str) -> Option<HydrationData> {
 }
 
 /// Next.js App Router (React Flight Protocol): `self.__next_f.push([...])`
+///
+/// RSC wire format: radbaserat med typ-prefix per rad.
+/// Typ 0 = bootstrap, typ 1 = string data, typ 2 = chunk ref.
+/// Varje rad i data-chunks kan vara: JSON-objekt, JSON-array, eller RSC-reference ("$Lxx").
 fn extract_next_flight(html: &str) -> Option<HydrationData> {
     let marker = "self.__next_f.push(";
     if !html.contains(marker) {
@@ -189,13 +193,10 @@ fn extract_next_flight(html: &str) -> Option<HydrationData> {
     while let Some(pos) = html[search_from..].find(marker) {
         let abs_pos = search_from + pos;
         let rest = html.get(abs_pos + marker.len()..)?;
-        // Hitta matchande )
         if let Some(end) = find_balanced_paren(rest) {
             let chunk = rest.get(..end)?;
-            // Parsea som JSON-array [typ, data]
             if let Ok(arr) = serde_json::from_str::<Value>(chunk) {
                 if let Some(arr) = arr.as_array() {
-                    // Typ 1 = data-chunk
                     if arr.len() >= 2 {
                         if let Some(s) = arr[1].as_str() {
                             collected.push(s.to_string());
@@ -213,11 +214,64 @@ fn extract_next_flight(html: &str) -> Option<HydrationData> {
         return None;
     }
 
-    // Försök parsea ihopslagna chunks som JSON
+    // RSC wire format: parsea radvis — varje rad kan vara JSON
     let combined = collected.join("");
-    let props = match serde_json::from_str::<Value>(&combined) {
-        Ok(v) => v,
-        Err(_) => Value::String(combined),
+    let mut rsc_data = serde_json::Map::new();
+    let mut rsc_index = 0u32;
+
+    for line in combined.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // RSC-rader: "ID:TYPE:DATA" — t.ex. "0:{"key":"val"}" eller bara JSON
+        // Försök parsea som JSON direkt
+        if let Ok(val) = serde_json::from_str::<Value>(line) {
+            match &val {
+                Value::Object(map) => {
+                    // Slå samman objekt-data i toppnivå
+                    for (k, v) in map {
+                        rsc_data.insert(k.clone(), v.clone());
+                    }
+                }
+                Value::Array(_) => {
+                    rsc_data.insert(format!("_rsc_{}", rsc_index), val);
+                    rsc_index += 1;
+                }
+                _ => {
+                    rsc_data.insert(format!("_rsc_{}", rsc_index), val);
+                    rsc_index += 1;
+                }
+            }
+            continue;
+        }
+        // RSC radformat: "ID:TYPECHAR:DATA" — extrahera JSON-delen
+        if let Some(colon_pos) = line.find(':') {
+            let after_id = line.get(colon_pos + 1..)?;
+            // Skippa typ-tecken om det finns
+            let data_str = if after_id.len() > 1 && after_id.as_bytes()[1] == b':' {
+                after_id.get(2..)?
+            } else {
+                after_id
+            };
+            if let Ok(val) = serde_json::from_str::<Value>(data_str) {
+                if let Value::Object(map) = &val {
+                    for (k, v) in map {
+                        rsc_data.insert(k.clone(), v.clone());
+                    }
+                } else {
+                    rsc_data.insert(format!("_rsc_{}", rsc_index), val);
+                    rsc_index += 1;
+                }
+            }
+        }
+    }
+
+    let props = if rsc_data.is_empty() {
+        // Fallback: hela strängen som Value
+        Value::String(combined)
+    } else {
+        Value::Object(rsc_data)
     };
 
     Some(HydrationData {
@@ -227,10 +281,14 @@ fn extract_next_flight(html: &str) -> Option<HydrationData> {
 }
 
 /// Nuxt.js: `window.__NUXT__=` eller `<script id="__NUXT_DATA__">`
+///
+/// Nuxt 3+ använder devalue-format (inte ren JSON) som stöder Date, BigInt,
+/// Map, Set och cykliska referenser. Vi parsar devalue via parse_devalue().
 fn extract_nuxt_data(html: &str) -> Option<HydrationData> {
-    // Nuxt 3: id="__NUXT_DATA__"
+    // Nuxt 3: id="__NUXT_DATA__" — ofta devalue-kodat
     if let Some(data) = extract_script_by_id(html, "__NUXT_DATA__") {
-        let props = serde_json::from_str::<Value>(&data).ok()?;
+        // Försök devalue först, sedan ren JSON
+        let props = parse_devalue(&data).or_else(|| serde_json::from_str::<Value>(&data).ok())?;
         return Some(HydrationData {
             framework: Framework::Nuxt,
             props,
@@ -304,12 +362,14 @@ fn extract_gatsby_data(html: &str) -> Option<HydrationData> {
 }
 
 /// SvelteKit: `<script id="__sveltekit_data" type="application/json">`
+///
+/// SvelteKit 2+ använder devalue-format. Försöker devalue först, sedan ren JSON.
 fn extract_sveltekit_data(html: &str) -> Option<HydrationData> {
-    // SvelteKit använder __sveltekit_data eller sveltekit:data
     let data = extract_script_by_id(html, "__sveltekit_data")
         .or_else(|| extract_script_by_id(html, "svelte-announcer"))?;
 
-    let props = serde_json::from_str::<Value>(&data).ok()?;
+    // Försök devalue först, sedan ren JSON
+    let props = parse_devalue(&data).or_else(|| serde_json::from_str::<Value>(&data).ok())?;
 
     Some(HydrationData {
         framework: Framework::SvelteKit,
@@ -317,7 +377,10 @@ fn extract_sveltekit_data(html: &str) -> Option<HydrationData> {
     })
 }
 
-/// Qwik: `<script type="qwik/json">`
+/// Qwik: `<script type="qwik/json">` + QRL event handlers
+///
+/// Qwik använder resumability — inte hydration. State lagras i qwik/json,
+/// event handlers i QRL-attribut (on:click, on:input, etc.).
 fn extract_qwik_state(html: &str) -> Option<HydrationData> {
     let marker = r#"type="qwik/json""#;
     let pos = html.find(marker)?;
@@ -329,12 +392,110 @@ fn extract_qwik_state(html: &str) -> Option<HydrationData> {
     let end = after_tag.find("</script>")?;
     let json_str = after_tag.get(..end)?.trim();
 
-    let props = serde_json::from_str::<Value>(json_str).ok()?;
+    let mut props = serde_json::from_str::<Value>(json_str).ok()?;
+
+    // Extrahera QRL event handlers från HTML-attribut
+    let qrl_handlers = extract_qwik_qrl_handlers(html);
+    if !qrl_handlers.is_empty() {
+        if let Value::Object(ref mut map) = props {
+            let qrl_arr: Vec<Value> = qrl_handlers
+                .into_iter()
+                .map(|(event, handler)| {
+                    serde_json::json!({
+                        "event": event,
+                        "handler": handler
+                    })
+                })
+                .collect();
+            map.insert("_qrl_handlers".to_string(), Value::Array(qrl_arr));
+        }
+    }
 
     Some(HydrationData {
         framework: Framework::Qwik,
         props,
     })
+}
+
+/// Extrahera Qwik QRL event handler-attribut från HTML
+///
+/// QRL-format: `on:click="./module.js#handler_fn"` eller `on:input="..."`
+fn extract_qwik_qrl_handlers(html: &str) -> Vec<(String, String)> {
+    let mut handlers = Vec::new();
+    // Sök efter on:EVENT="HANDLER" mönster
+    let mut search_from = 0;
+    while let Some(pos) = html[search_from..].find("on:") {
+        let abs_pos = search_from + pos;
+        let rest = match html.get(abs_pos + 3..) {
+            Some(r) => r,
+            None => break,
+        };
+
+        // Extrahera event-namn (fram till =)
+        let eq_pos = match rest.find('=') {
+            Some(p) => p,
+            None => {
+                search_from = abs_pos + 3;
+                continue;
+            }
+        };
+
+        let event_name = rest.get(..eq_pos).unwrap_or("").trim();
+        // Validera att det är ett rimligt event-namn (inga mellanslag/specialtecken)
+        if event_name.is_empty()
+            || event_name.len() > 30
+            || event_name.contains(|c: char| c.is_whitespace())
+        {
+            search_from = abs_pos + 3;
+            continue;
+        }
+
+        // Extrahera handler-värde (citattecken)
+        let after_eq = match rest.get(eq_pos + 1..) {
+            Some(r) => r.trim_start(),
+            None => break,
+        };
+        let (handler_value, skip) = if after_eq.starts_with('"') {
+            let inner = match after_eq.get(1..) {
+                Some(s) => s,
+                None => {
+                    search_from = abs_pos + 3;
+                    continue;
+                }
+            };
+            match inner.find('"') {
+                Some(end) => (after_eq.get(1..end + 1).unwrap_or(""), end + 2),
+                None => {
+                    search_from = abs_pos + 3;
+                    continue;
+                }
+            }
+        } else if after_eq.starts_with('\'') {
+            let inner = match after_eq.get(1..) {
+                Some(s) => s,
+                None => {
+                    search_from = abs_pos + 3;
+                    continue;
+                }
+            };
+            match inner.find('\'') {
+                Some(end) => (after_eq.get(1..end + 1).unwrap_or(""), end + 2),
+                None => {
+                    search_from = abs_pos + 3;
+                    continue;
+                }
+            }
+        } else {
+            search_from = abs_pos + 3;
+            continue;
+        };
+
+        if !handler_value.is_empty() {
+            handlers.push((event_name.to_string(), handler_value.to_string()));
+        }
+        search_from = abs_pos + 3 + eq_pos + skip;
+    }
+    handlers
 }
 
 /// Astro: `<script type="application/json" data-astro-transition>`
@@ -387,6 +548,131 @@ fn extract_apollo_state(html: &str) -> Option<HydrationData> {
         framework: Framework::Apollo,
         props,
     })
+}
+
+// ─── Devalue-parser ─────────────────────────────────────────────────────────
+
+/// Parsea devalue-kodat data (Nuxt 3+, SvelteKit 2+)
+///
+/// Devalue-format: JSON-array med två delar: [references, ...values]
+/// Stöder: Date, BigInt, Map, Set, cykliska refs, undefined, -0, Infinity, NaN.
+///
+/// Format-varianter:
+/// - Nuxt 3: `[[refs], val1, val2, ...]` — array av referenced values
+/// - SvelteKit: `{"type":"data","nodes":[{"type":"data","data":[refs, ...]}]}`
+fn parse_devalue(input: &str) -> Option<Value> {
+    let input = input.trim();
+
+    // Försök parsea som JSON först — om det lyckas kan vi kolla efter devalue-struktur
+    let parsed: Value = serde_json::from_str(input).ok()?;
+
+    // SvelteKit-variant: wrappat i {"type":"data","nodes":[...]}
+    if let Some(nodes) = parsed.get("nodes").and_then(|n| n.as_array()) {
+        for node in nodes {
+            if let Some(data) = node.get("data") {
+                if let Some(decoded) = decode_devalue_payload(data) {
+                    return Some(decoded);
+                }
+                // Redan giltig JSON — returnera som-den-är
+                return Some(data.clone());
+            }
+        }
+        // Om vi hittat nodes men ingen data, returnera hela strukturen
+        return Some(parsed);
+    }
+
+    // Nuxt-variant: ren array [refs, val1, val2, ...]
+    if let Some(arr) = parsed.as_array() {
+        if let Some(decoded) = decode_devalue_array(arr) {
+            return Some(decoded);
+        }
+    }
+
+    // Redan giltig JSON-struktur — returnera som-den-är
+    Some(parsed)
+}
+
+/// Dekoda devalue-payload som kan vara en array med refs + values
+fn decode_devalue_payload(data: &Value) -> Option<Value> {
+    let arr = data.as_array()?;
+    decode_devalue_array(arr)
+}
+
+/// Dekoda devalue-array: [referens-map, value1, value2, ...]
+///
+/// Devalue referens-format:
+/// - Heltal → index till annan value i arrayen
+/// - Sträng med prefix: "Date:ISO", "BigInt:123", "Set:size", "Map:entries"
+/// - Vanliga JSON-värden: passera genom
+fn decode_devalue_array(arr: &[Value]) -> Option<Value> {
+    if arr.is_empty() {
+        return None;
+    }
+
+    // Första elementet kan vara en referens-tabell (object/array) eller direkt data
+    let first = &arr[0];
+
+    // Om det är en array av heltal/objekt → referens-tabell
+    if first.is_array() || first.is_object() {
+        // Samla alla efterföljande values
+        let mut result = serde_json::Map::new();
+
+        for (i, val) in arr.iter().enumerate().skip(1) {
+            let resolved = resolve_devalue_node(val, arr);
+            result.insert(format!("_{}", i), resolved);
+        }
+
+        // Om bara en value, returnera den direkt
+        if result.len() == 1 {
+            return result.into_iter().next().map(|(_, v)| v);
+        }
+
+        return Some(Value::Object(result));
+    }
+
+    // Inte devalue-format
+    None
+}
+
+/// Resolva en devalue-nod — hanterar specialtyper
+fn resolve_devalue_node(node: &Value, _all: &[Value]) -> Value {
+    match node {
+        // Sträng med devalue-prefix
+        Value::String(s) => {
+            if let Some(date_str) = s.strip_prefix("Date:") {
+                // Bevara Date som sträng med prefix
+                Value::String(date_str.to_string())
+            } else if let Some(bigint_str) = s.strip_prefix("BigInt:") {
+                Value::String(format!("{}n", bigint_str))
+            } else if s == "undefined" {
+                Value::Null
+            } else if s == "-0" {
+                Value::from(0)
+            } else if s == "Infinity" {
+                Value::String("Infinity".to_string())
+            } else if s == "NaN" {
+                Value::String("NaN".to_string())
+            } else if s == "-Infinity" {
+                Value::String("-Infinity".to_string())
+            } else {
+                node.clone()
+            }
+        }
+        // Objekt — rekursivt resolva values
+        Value::Object(map) => {
+            let resolved: serde_json::Map<String, Value> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), resolve_devalue_node(v, _all)))
+                .collect();
+            Value::Object(resolved)
+        }
+        // Array — rekursivt
+        Value::Array(arr) => {
+            let resolved: Vec<Value> = arr.iter().map(|v| resolve_devalue_node(v, _all)).collect();
+            Value::Array(resolved)
+        }
+        _ => node.clone(),
+    }
 }
 
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
@@ -929,5 +1215,146 @@ mod tests {
         let goal_words: Vec<&str> = vec![];
         let score = score_entry_relevance("anything", "whatever", &goal_words);
         assert!((score - 0.5).abs() < f32::EPSILON, "Tomt mål borde ge 0.5");
+    }
+
+    // === Devalue-parser ===
+
+    #[test]
+    fn test_parse_devalue_plain_json() {
+        let input = r#"{"key":"value","count":42}"#;
+        let result = parse_devalue(input);
+        assert!(result.is_some(), "Borde parsea ren JSON via devalue");
+        let val = result.unwrap();
+        assert_eq!(val.get("key").and_then(|v| v.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn test_parse_devalue_sveltekit_format() {
+        let input =
+            r#"{"type":"data","nodes":[{"type":"data","data":{"items":["a","b"],"count":2}}]}"#;
+        let result = parse_devalue(input);
+        assert!(result.is_some(), "Borde parsea SvelteKit devalue-format");
+        let val = result.unwrap();
+        assert!(
+            val.get("items").is_some() || val.get("count").is_some(),
+            "Borde extrahera data från SvelteKit nodes: got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn test_parse_devalue_date_type() {
+        let input = r#"[[], "Date:2026-03-21T00:00:00.000Z"]"#;
+        let result = parse_devalue(input);
+        assert!(result.is_some(), "Borde hantera Date-typ i devalue");
+        let val = result.unwrap();
+        let s = val.to_string();
+        assert!(s.contains("2026-03-21"), "Date borde bevaras: got {}", s);
+    }
+
+    #[test]
+    fn test_parse_devalue_bigint() {
+        let input = r#"[[], "BigInt:123456789"]"#;
+        let result = parse_devalue(input);
+        assert!(result.is_some(), "Borde hantera BigInt i devalue");
+        let val = result.unwrap();
+        let s = val.to_string();
+        assert!(
+            s.contains("123456789n"),
+            "BigInt borde konverteras: got {}",
+            s
+        );
+    }
+
+    #[test]
+    fn test_parse_devalue_special_values() {
+        let input = r#"[[], "undefined", "-0", "Infinity", "NaN"]"#;
+        let result = parse_devalue(input);
+        assert!(result.is_some(), "Borde hantera specialvärden");
+    }
+
+    #[test]
+    fn test_nuxt3_devalue() {
+        let html = r##"
+        <script id="__NUXT_DATA__" type="application/json">
+        {"type":"data","nodes":[{"type":"data","data":{"message":"hej","timestamp":"Date:2026-03-21"}}]}
+        </script>
+        "##;
+        let result = extract_nuxt_data(html);
+        assert!(
+            result.is_some(),
+            "Borde parsea Nuxt 3 med devalue-liknande data"
+        );
+    }
+
+    #[test]
+    fn test_sveltekit_devalue() {
+        let html = r##"
+        <script id="__sveltekit_data" type="application/json">
+        {"type":"data","nodes":[{"type":"data","data":{"items":["x","y"],"big":"BigInt:99"}}]}
+        </script>
+        "##;
+        let result = extract_sveltekit_data(html);
+        assert!(result.is_some(), "Borde parsea SvelteKit med devalue");
+    }
+
+    // === Qwik QRL ===
+
+    #[test]
+    fn test_qwik_qrl_extraction() {
+        let html = r#"
+        <button on:click="./counter_s_increment_1_abc123">Count</button>
+        <input on:input="./search_s_handler_xyz789" />
+        <script type="qwik/json">{"ctx":{}}</script>
+        "#;
+        let result = extract_qwik_state(html);
+        assert!(result.is_some(), "Borde hitta Qwik state");
+        let data = result.unwrap();
+        // QRL handlers borde finnas i props
+        let handlers = data.props.get("_qrl_handlers");
+        assert!(handlers.is_some(), "Borde extrahera QRL handlers");
+        let arr = handlers.unwrap().as_array().unwrap();
+        assert_eq!(arr.len(), 2, "Borde hitta 2 QRL handlers");
+        assert_eq!(
+            arr[0].get("event").and_then(|v| v.as_str()),
+            Some("click"),
+            "Första handler borde vara click"
+        );
+    }
+
+    #[test]
+    fn test_qwik_qrl_empty() {
+        let html = r#"
+        <div>Ingen QRL</div>
+        <script type="qwik/json">{"ctx":{}}</script>
+        "#;
+        let result = extract_qwik_state(html);
+        assert!(result.is_some(), "Borde hitta Qwik state");
+        let data = result.unwrap();
+        // Inga QRL handlers
+        assert!(
+            data.props.get("_qrl_handlers").is_none(),
+            "Borde inte ha QRL handlers utan on:-attribut"
+        );
+    }
+
+    // === RSC Flight Protocol ===
+
+    #[test]
+    fn test_next_flight_rsc_lines() {
+        // Simulera RSC wire format med JSON per rad
+        let html = r#"
+        <script>self.__next_f.push([1,"{\"title\":\"Hem\",\"count\":42}\n{\"items\":[1,2,3]}"])</script>
+        "#;
+        let result = extract_next_flight(html);
+        assert!(result.is_some(), "Borde parsea RSC Flight data");
+        let data = result.unwrap();
+        assert_eq!(data.framework, Framework::NextFlight);
+        // Borde ha extraherat data från raderna
+        assert!(
+            data.props.get("title").is_some() || data.props.get("items").is_some(),
+            "Borde extrahera data från RSC-rader: got {:?}",
+            data.props
+        );
     }
 }
