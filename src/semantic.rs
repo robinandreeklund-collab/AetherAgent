@@ -388,6 +388,30 @@ mod tests {
     use super::*;
     use crate::parser::parse_html;
 
+    /// Rekursiv samling av alla noder i trädet
+    fn collect_nodes(node: &SemanticNode) -> Vec<&SemanticNode> {
+        let mut result = vec![node];
+        for child in &node.children {
+            result.extend(collect_nodes(child));
+        }
+        result
+    }
+
+    /// Samla alla noder från alla top-level noder
+    fn all_nodes(tree: &SemanticTree) -> Vec<&SemanticNode> {
+        tree.nodes.iter().flat_map(|n| collect_nodes(n)).collect()
+    }
+
+    /// Hitta nod med specifik roll
+    fn find_by_role<'a>(tree: &'a SemanticTree, role: &str) -> Vec<&'a SemanticNode> {
+        all_nodes(tree)
+            .into_iter()
+            .filter(|n| n.role == role)
+            .collect()
+    }
+
+    // === Relevansscoring ===
+
     #[test]
     fn test_button_gets_high_relevance() {
         let html = r#"<html><body>
@@ -397,21 +421,60 @@ mod tests {
         let mut builder = SemanticBuilder::new("köp billigaste flyg");
         let tree = builder.build(&dom, "https://example.com", "Test");
 
-        // Hitta button/cta-noder (CTA-heuristik kan ge "cta" för "Köp"-knappar)
-        let buttons: Vec<&SemanticNode> = tree
-            .nodes
-            .iter()
-            .flat_map(|n| collect_nodes(n))
+        let buttons: Vec<&SemanticNode> = all_nodes(&tree)
+            .into_iter()
             .filter(|n| n.role == "button" || n.role == "cta")
             .collect();
 
         assert!(!buttons.is_empty(), "Borde hitta minst en button/cta");
-        let btn = &buttons[0];
         assert!(
-            btn.relevance > 0.7,
-            "Button med matchande text borde ha hög relevans"
+            buttons[0].relevance > 0.7,
+            "Button med matchande text borde ha hög relevans, got {}",
+            buttons[0].relevance
         );
     }
+
+    #[test]
+    fn test_irrelevant_content_gets_low_relevance() {
+        let html = r#"<html><body>
+            <p>Cookie policy och juridisk information</p>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("köp billigaste flyg");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let texts = find_by_role(&tree, "text");
+        for t in &texts {
+            if t.label.contains("Cookie") {
+                assert!(
+                    t.relevance < 0.5,
+                    "Irrelevant text borde ha låg relevans, got {}",
+                    t.relevance
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_heading_role_priority() {
+        let html = r#"<html><body>
+            <h1>Flygresor till London</h1>
+            <p>Boka din resa idag</p>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("flygresor");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let headings = find_by_role(&tree, "heading");
+        assert!(!headings.is_empty(), "Borde hitta minst en heading");
+        assert!(
+            headings[0].relevance > 0.5,
+            "Heading med matchande text borde ha hög relevans, got {}",
+            headings[0].relevance
+        );
+    }
+
+    // === Injection-detektion ===
 
     #[test]
     fn test_injection_detected() {
@@ -428,11 +491,292 @@ mod tests {
         );
     }
 
-    fn collect_nodes(node: &SemanticNode) -> Vec<&SemanticNode> {
-        let mut result = vec![node];
-        for child in &node.children {
-            result.extend(collect_nodes(child));
+    #[test]
+    fn test_safe_content_no_warnings() {
+        let html = r#"<html><body>
+            <h1>Välkommen till vår butik</h1>
+            <p>Vi säljer produkter av hög kvalitet</p>
+            <button>Köp nu</button>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("köp produkter");
+        let tree = builder.build(&dom, "https://shop.example.com", "Test");
+
+        assert!(
+            tree.injection_warnings.is_empty(),
+            "Säker sida ska INTE ge injection-varningar, got {} varningar",
+            tree.injection_warnings.len()
+        );
+    }
+
+    // === Trädstruktur ===
+
+    #[test]
+    fn test_skip_tags_excluded() {
+        let html = r#"<html><body>
+            <script>var x = 1;</script>
+            <style>.foo { color: red; }</style>
+            <noscript>JS krävs</noscript>
+            <p>Synlig text</p>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("text");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let nodes = all_nodes(&tree);
+        for n in &nodes {
+            assert!(
+                n.role != "generic" || !n.label.contains("var x"),
+                "script-innehåll ska INTE finnas i semantiska trädet"
+            );
         }
-        result
+    }
+
+    #[test]
+    fn test_invisible_elements_excluded() {
+        let html = r#"<html><body>
+            <div style="display:none"><button>Dold knapp</button></div>
+            <button>Synlig knapp</button>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("knapp");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let buttons: Vec<&SemanticNode> = all_nodes(&tree)
+            .into_iter()
+            .filter(|n| n.role == "button" || n.role == "cta")
+            .collect();
+
+        // Bara den synliga knappen ska finnas
+        for btn in &buttons {
+            assert!(
+                !btn.label.contains("Dold"),
+                "Osynlig button ska INTE finnas i trädet"
+            );
+        }
+    }
+
+    #[test]
+    fn test_structural_wrapper_collapse() {
+        let html = r#"<html><body>
+            <div><div><div><button>Djup knapp</button></div></div></div>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("knapp");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        // Knappen ska finnas trots djupt nästlade wrappers
+        let buttons: Vec<&SemanticNode> = all_nodes(&tree)
+            .into_iter()
+            .filter(|n| n.role == "button" || n.role == "cta")
+            .collect();
+        assert!(
+            !buttons.is_empty(),
+            "Knapp inuti nästlade wrappers ska fortfarande hittas"
+        );
+    }
+
+    // === Rolldetektering via SemanticBuilder ===
+
+    #[test]
+    fn test_form_elements_detected() {
+        let html = r##"<html><body>
+            <form>
+                <input type="text" placeholder="Namn" />
+                <input type="checkbox" />
+                <select><option>Val 1</option></select>
+                <textarea>Text</textarea>
+            </form>
+        </body></html>"##;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("fyll i formulär");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let nodes = all_nodes(&tree);
+        let roles: Vec<&str> = nodes.iter().map(|n| n.role.as_str()).collect();
+
+        assert!(roles.contains(&"form"), "Borde hitta form-roll");
+        assert!(
+            roles.contains(&"textbox"),
+            "Borde hitta textbox-roll, got roles: {:?}",
+            roles
+        );
+    }
+
+    #[test]
+    fn test_link_with_href() {
+        let html = r##"<html><body>
+            <a href="https://example.com/page">Klicka här</a>
+        </body></html>"##;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("navigera");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let links = find_by_role(&tree, "link");
+        assert!(!links.is_empty(), "Borde hitta minst en länk");
+        assert!(links[0].value.is_some(), "Länk ska ha value (href)");
+    }
+
+    // === Node state ===
+
+    #[test]
+    fn test_disabled_state_detected() {
+        let html = r#"<html><body>
+            <button disabled>Inaktiv</button>
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("knappar");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let buttons: Vec<&SemanticNode> = all_nodes(&tree)
+            .into_iter()
+            .filter(|n| n.role == "button" || n.role == "cta")
+            .collect();
+        assert!(!buttons.is_empty(), "Borde hitta button");
+        assert!(
+            buttons[0].state.disabled,
+            "Disabled-button ska ha state.disabled = true"
+        );
+    }
+
+    #[test]
+    fn test_aria_checked_state() {
+        let html = r#"<html><body>
+            <input type="checkbox" aria-checked="true" />
+        </body></html>"#;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("checkbox");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let checkboxes = find_by_role(&tree, "checkbox");
+        assert!(!checkboxes.is_empty(), "Borde hitta checkbox");
+        assert_eq!(
+            checkboxes[0].state.checked,
+            Some(true),
+            "aria-checked='true' ska ge state.checked = Some(true)"
+        );
+    }
+
+    // === text_similarity ===
+
+    #[test]
+    fn test_text_similarity_exact_match() {
+        let score = text_similarity("köp biljett", "Köp biljett till konserten");
+        assert!(
+            score > 0.9,
+            "Exakt substring-match borde ge hög score, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_text_similarity_partial_match() {
+        let score = text_similarity("köp biljett", "Biljettpriser");
+        assert!(
+            score > 0.0 && score < 1.0,
+            "Delvis match ska ge mellanscore, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_text_similarity_no_match() {
+        let score = text_similarity("köp biljett", "Om oss kontakt");
+        assert!(score < 0.3, "Ingen match ska ge låg score, got {}", score);
+    }
+
+    #[test]
+    fn test_text_similarity_empty_query() {
+        let score = text_similarity("", "Någon text");
+        assert!(
+            (score - 0.0).abs() < f32::EPSILON,
+            "Tom query ska ge 0.0, got {}",
+            score
+        );
+    }
+
+    // === extract_title ===
+
+    #[test]
+    fn test_extract_title() {
+        let html = r#"<html><head><title>Min Sida - Produkter</title></head><body></body></html>"#;
+        let dom = parse_html(html);
+        let title = extract_title(&dom);
+        assert_eq!(
+            title, "Min Sida - Produkter",
+            "Ska extrahera sidtitel korrekt"
+        );
+    }
+
+    #[test]
+    fn test_extract_title_missing() {
+        let html = r#"<html><head></head><body><p>Ingen titel</p></body></html>"#;
+        let dom = parse_html(html);
+        let title = extract_title(&dom);
+        assert!(
+            title.is_empty(),
+            "Saknad title ska ge tom sträng, got '{}'",
+            title
+        );
+    }
+
+    // === Pruning ===
+
+    #[test]
+    fn test_prune_respects_max_limit() {
+        // Generera HTML med 400+ element
+        let mut html = String::from("<html><body>");
+        for i in 0..350 {
+            html.push_str(&format!(r#"<p>Paragraf nummer {}</p>"#, i));
+        }
+        html.push_str("</body></html>");
+
+        let dom = parse_html(&html);
+        let mut builder = SemanticBuilder::new("test");
+        let tree = builder.build(&dom, "https://example.com", "Test");
+
+        let total = all_nodes(&tree).len();
+        assert!(
+            total <= MAX_TREE_NODES,
+            "Trädet ska beskäras till max {} noder, got {}",
+            MAX_TREE_NODES,
+            total
+        );
+    }
+
+    // === E-commerce helscenario ===
+
+    #[test]
+    fn test_ecommerce_page_structure() {
+        let html = r##"<html><body>
+            <nav><a href="/home">Hem</a> <a href="/products">Produkter</a></nav>
+            <main>
+                <h1>Vinterjacka Premium</h1>
+                <span class="price">1 299 kr</span>
+                <button>Lägg i varukorg</button>
+                <div itemtype="https://schema.org/Product" data-product-id="123" class="product-card">
+                    <p>Varm och skön vinterjacka</p>
+                </div>
+            </main>
+        </body></html>"##;
+        let dom = parse_html(html);
+        let mut builder = SemanticBuilder::new("köp vinterjacka");
+        let tree = builder.build(&dom, "https://shop.se", "Vinterjacka");
+
+        let nodes = all_nodes(&tree);
+        let roles: Vec<&str> = nodes.iter().map(|n| n.role.as_str()).collect();
+
+        assert!(roles.contains(&"heading"), "Borde hitta heading");
+        assert!(
+            roles.contains(&"price"),
+            "Borde hitta price, got roles: {:?}",
+            roles
+        );
+        assert!(
+            roles.contains(&"cta"),
+            "Borde hitta CTA (Lägg i varukorg), got roles: {:?}",
+            roles
+        );
+        assert!(roles.contains(&"navigation"), "Borde hitta navigation");
     }
 }
