@@ -1,6 +1,7 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod arena_dom;
 mod causal;
 mod collab;
 mod compiler;
@@ -56,17 +57,21 @@ pub fn register_cdp_ready_hook() {
 }
 
 use parser::parse_html;
-use semantic::{extract_title, SemanticBuilder};
+use semantic::SemanticBuilder;
 use types::{SemanticTree, WorkflowMemory};
 
 // ─── Intern hjälpfunktion ────────────────────────────────────────────────────
 
-/// Gemensam parse-pipeline: HTML -> DOM -> SemanticTree
+/// Gemensam parse-pipeline: HTML -> ArenaDom -> SemanticTree
+///
+/// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
+/// ~5-10x snabbare traversering och cache-friendly minnesallokering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    let dom = parse_html(html);
-    let title = extract_title(&dom);
+    let rcdom = parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    let title = arena.extract_title();
     let mut builder = SemanticBuilder::new(goal);
-    let mut tree = builder.build(&dom, url, &title);
+    let mut tree = builder.build_from_arena(&arena, url, &title);
 
     // Tier 0: Hydration extraction — berika trädet med SSR-data om tillgängligt
     if let Some(hydration_data) = hydration::extract_hydration_state(html) {
