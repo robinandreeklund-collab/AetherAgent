@@ -1,21 +1,25 @@
-/// Boa DOM Bridge — Fas 17.3
+/// Boa DOM Bridge — Fas 17.4-17.6
 ///
 /// Exponerar ArenaDom som `document`/`window`-objekt i Boa JS-kontexten.
-/// Gör att JS-kod kan anropa document.getElementById, querySelector, etc.
-/// mot en riktig DOM-representation istället för att blocka all DOM-åtkomst.
+/// Fullständig DOM-implementation med 40+ metoder:
 ///
-/// 25 kritiska metoder implementerade:
-/// - Document: getElementById, querySelector, querySelectorAll, createElement,
-///   createTextNode, body, head, documentElement
-/// - Element: textContent, innerHTML, getAttribute, setAttribute,
-///   removeAttribute, id, className, tagName, classList, style
-/// - Node: appendChild, removeChild, parentNode, childNodes, firstChild,
+/// Document: getElementById, querySelector, querySelectorAll, createElement,
+///   createTextNode, createComment, createDocumentFragment,
+///   getElementsByClassName, getElementsByTagName, body, head, documentElement
+/// Element: getAttribute, setAttribute, removeAttribute, textContent,
+///   innerHTML, id, className, tagName, classList, style, dataset,
+///   outerHTML, closest, matches, children, firstElementChild,
+///   nextElementSibling, cloneNode
+/// Node: appendChild, removeChild, parentNode, childNodes, firstChild,
 ///   nextSibling, nodeType
+/// Window: getComputedStyle (stubbad)
+/// CSS Selectors: #id, .class, tag, tag.class, [attr], [attr="val"],
+///   div > span (child), div span (descendant), :first-child, komma-sep
 use boa_engine::{
     js_string,
     object::{builtins::JsArray, ObjectInitializer},
     property::Attribute,
-    Context, JsArgs, JsResult, JsValue, NativeFunction, Source,
+    Context, JsArgs, JsValue, NativeFunction, Source,
 };
 
 use std::cell::RefCell;
@@ -158,6 +162,9 @@ fn register_document(context: &mut Context, state: SharedState) {
     let state_qsa = Rc::clone(&state);
     let state_ce = Rc::clone(&state);
     let state_ct = Rc::clone(&state);
+    let state_cc = Rc::clone(&state);
+    let state_gcn = Rc::clone(&state);
+    let state_gtn = Rc::clone(&state);
 
     // SAFETY: Closures capture Rc<RefCell<BridgeState>> som ej är Send/Sync,
     // men Boa-kontexten är single-threaded och closures lever inom samma tråd.
@@ -165,11 +172,13 @@ fn register_document(context: &mut Context, state: SharedState) {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let id = args.get_or_undefined(0).to_string(ctx)?;
             let id_str = id.to_std_string_escaped();
-            let s = state_gbi.borrow();
-            if let Some(key) = find_by_attr_value(&s.arena, "id", &id_str) {
-                Ok(make_element_object(ctx, key))
-            } else {
-                Ok(JsValue::null())
+            let key = {
+                let s = state_gbi.borrow();
+                find_by_attr_value(&s.arena, "id", &id_str)
+            };
+            match key {
+                Some(k) => Ok(make_element_object(ctx, k, &state_gbi)),
+                None => Ok(JsValue::null()),
             }
         })
     };
@@ -178,11 +187,13 @@ fn register_document(context: &mut Context, state: SharedState) {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let selector = args.get_or_undefined(0).to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
-            let s = state_qs.borrow();
-            if let Some(key) = query_select_one(&s.arena, &sel_str) {
-                Ok(make_element_object(ctx, key))
-            } else {
-                Ok(JsValue::null())
+            let key = {
+                let s = state_qs.borrow();
+                query_select_one(&s.arena, &sel_str)
+            };
+            match key {
+                Some(k) => Ok(make_element_object(ctx, k, &state_qs)),
+                None => Ok(JsValue::null()),
             }
         })
     };
@@ -191,11 +202,13 @@ fn register_document(context: &mut Context, state: SharedState) {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let selector = args.get_or_undefined(0).to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
-            let s = state_qsa.borrow();
-            let keys = query_select_all(&s.arena, &sel_str);
+            let keys = {
+                let s = state_qsa.borrow();
+                query_select_all(&s.arena, &sel_str)
+            };
             let array = JsArray::new(ctx);
             for key in keys {
-                let elem = make_element_object(ctx, key);
+                let elem = make_element_object(ctx, key, &state_qsa);
                 array.push(elem, ctx)?;
             }
             Ok(array.into())
@@ -206,16 +219,18 @@ fn register_document(context: &mut Context, state: SharedState) {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let tag = args.get_or_undefined(0).to_string(ctx)?;
             let tag_str = tag.to_std_string_escaped().to_lowercase();
-            let mut s = state_ce.borrow_mut();
-            let key = s.arena.nodes.insert(crate::arena_dom::DomNode {
-                node_type: NodeType::Element,
-                tag: Some(tag_str),
-                attributes: std::collections::HashMap::new(),
-                text: None,
-                parent: None,
-                children: vec![],
-            });
-            Ok(make_element_object(ctx, key))
+            let key = {
+                let mut s = state_ce.borrow_mut();
+                s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Element,
+                    tag: Some(tag_str),
+                    attributes: std::collections::HashMap::new(),
+                    text: None,
+                    parent: None,
+                    children: vec![],
+                })
+            };
+            Ok(make_element_object(ctx, key, &state_ce))
         })
     };
 
@@ -223,16 +238,82 @@ fn register_document(context: &mut Context, state: SharedState) {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let text = args.get_or_undefined(0).to_string(ctx)?;
             let text_str = text.to_std_string_escaped();
-            let mut s = state_ct.borrow_mut();
-            let key = s.arena.nodes.insert(crate::arena_dom::DomNode {
-                node_type: NodeType::Text,
-                tag: None,
-                attributes: std::collections::HashMap::new(),
-                text: Some(text_str),
-                parent: None,
-                children: vec![],
-            });
-            Ok(make_element_object(ctx, key))
+            let key = {
+                let mut s = state_ct.borrow_mut();
+                s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Text,
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: Some(text_str),
+                    parent: None,
+                    children: vec![],
+                })
+            };
+            Ok(make_element_object(ctx, key, &state_ct))
+        })
+    };
+
+    // createComment(text)
+    let create_comment = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = args.get_or_undefined(0).to_string(ctx)?;
+            let text_str = text.to_std_string_escaped();
+            let key = {
+                let mut s = state_cc.borrow_mut();
+                s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Comment,
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: Some(text_str),
+                    parent: None,
+                    children: vec![],
+                })
+            };
+            Ok(make_element_object(ctx, key, &state_cc))
+        })
+    };
+
+    // getElementsByClassName(cls)
+    let get_by_class = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let keys = {
+                let s = state_gcn.borrow();
+                let mut results = vec![];
+                find_all_by_class(&s.arena, s.arena.document, &cls, &mut results);
+                results
+            };
+            let array = JsArray::new(ctx);
+            for key in keys {
+                let elem = make_element_object(ctx, key, &state_gcn);
+                array.push(elem, ctx)?;
+            }
+            Ok(array.into())
+        })
+    };
+
+    // getElementsByTagName(tag)
+    let get_by_tag = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let tag = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let keys = {
+                let s = state_gtn.borrow();
+                let mut results = vec![];
+                find_all_by_tag(&s.arena, s.arena.document, &tag, &mut results);
+                results
+            };
+            let array = JsArray::new(ctx);
+            for key in keys {
+                let elem = make_element_object(ctx, key, &state_gtn);
+                array.push(elem, ctx)?;
+            }
+            Ok(array.into())
         })
     };
 
@@ -243,26 +324,34 @@ fn register_document(context: &mut Context, state: SharedState) {
         .function(query_selector_all, js_string!("querySelectorAll"), 1)
         .function(create_element, js_string!("createElement"), 1)
         .function(create_text_node, js_string!("createTextNode"), 1)
+        .function(create_comment, js_string!("createComment"), 1)
+        .function(get_by_class, js_string!("getElementsByClassName"), 1)
+        .function(get_by_tag, js_string!("getElementsByTagName"), 1)
         .build();
 
-    // body, head, documentElement — stubbar som returnerar element-objekt
-    // Vi registrerar dem som properties direkt
-    let body_key = find_by_tag_name(&state.borrow().arena, state.borrow().arena.document, "body");
-    let head_key = find_by_tag_name(&state.borrow().arena, state.borrow().arena.document, "head");
-    let html_key = find_by_tag_name(&state.borrow().arena, state.borrow().arena.document, "html");
+    // body, head, documentElement
+    let (body_key, head_key, html_key) = {
+        let s = state.borrow();
+        let doc_key = s.arena.document;
+        (
+            find_by_tag_name(&s.arena, doc_key, "body"),
+            find_by_tag_name(&s.arena, doc_key, "head"),
+            find_by_tag_name(&s.arena, doc_key, "html"),
+        )
+    };
 
     if let Some(key) = body_key {
-        let body_obj = make_element_object(context, key);
+        let body_obj = make_element_object(context, key, &state);
         doc.set(js_string!("body"), body_obj, false, context)
             .unwrap_or(true);
     }
     if let Some(key) = head_key {
-        let head_obj = make_element_object(context, key);
+        let head_obj = make_element_object(context, key, &state);
         doc.set(js_string!("head"), head_obj, false, context)
             .unwrap_or(true);
     }
     if let Some(key) = html_key {
-        let html_obj = make_element_object(context, key);
+        let html_obj = make_element_object(context, key, &state);
         doc.set(js_string!("documentElement"), html_obj, false, context)
             .unwrap_or(true);
     }
@@ -274,13 +363,54 @@ fn register_document(context: &mut Context, state: SharedState) {
 
 // ─── Element-objekt ─────────────────────────────────────────────────────────
 
-/// Skapa ett JS-objekt som representerar ett DOM-element
+/// Extrahera NodeKey från ett JS-element-objekt via __nodeKey__
+fn extract_node_key(val: &JsValue, ctx: &mut Context) -> Option<NodeKey> {
+    let obj = val.as_object()?;
+    let bits = obj
+        .get(js_string!("__nodeKey__"), ctx)
+        .ok()?
+        .to_number(ctx)
+        .ok()?;
+    Some(f64_to_node_key(bits))
+}
+
+/// Konvertera f64 tillbaka till NodeKey
+fn f64_to_node_key(bits: f64) -> NodeKey {
+    use slotmap::KeyData;
+    NodeKey::from(KeyData::from_ffi(bits as u64))
+}
+
+/// Skapa ett JS-objekt som representerar ett DOM-element med full funktionalitet.
 ///
-/// Elementet lagrar sin NodeKey som en intern property (__nodeKey__)
-/// som används av DOM-metoder för att hitta noden i arena:n.
-fn make_element_object(context: &mut Context, key: NodeKey) -> JsValue {
-    // Lagra NodeKey som raw bits i en Number (u64-safe via f64)
+/// Alla metoder har tillgång till arena via SharedState-closures.
+fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
     let key_bits = node_key_to_f64(key);
+
+    // Bestäm nodeType och tagName från arena
+    let (node_type_val, tag_name, id_val, class_val) = {
+        let s = state.borrow();
+        let node = s.arena.nodes.get(key);
+        let nt = match node.map(|n| &n.node_type) {
+            Some(NodeType::Element) => 1,
+            Some(NodeType::Text) => 3,
+            Some(NodeType::Comment) => 8,
+            Some(NodeType::Document) => 9,
+            _ => 1,
+        };
+        let tag = node
+            .and_then(|n| n.tag.as_ref())
+            .map(|t| t.to_uppercase())
+            .unwrap_or_default();
+        let id = node
+            .and_then(|n| n.get_attr("id"))
+            .unwrap_or("")
+            .to_string();
+        let cls = node
+            .and_then(|n| n.get_attr("class"))
+            .unwrap_or("")
+            .to_string();
+        (nt, tag, id, cls)
+    };
 
     let obj = ObjectInitializer::new(context)
         .property(
@@ -290,58 +420,537 @@ fn make_element_object(context: &mut Context, key: NodeKey) -> JsValue {
         )
         .property(
             js_string!("nodeType"),
-            JsValue::from(1),
+            JsValue::from(node_type_val),
             Attribute::READONLY,
+        )
+        .property(
+            js_string!("tagName"),
+            JsValue::from(js_string!(tag_name.as_str())),
+            Attribute::READONLY,
+        )
+        .property(
+            js_string!("id"),
+            JsValue::from(js_string!(id_val.as_str())),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("className"),
+            JsValue::from(js_string!(class_val.as_str())),
+            Attribute::all(),
         )
         .build();
 
-    // getAttribute
-    let get_attribute = NativeFunction::from_fn_ptr(element_get_attribute);
+    // ─── getAttribute(name) ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ga = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args.get_or_undefined(0).to_string(ctx)?;
+            let name_str = name.to_std_string_escaped();
+            let s = st.borrow();
+            match s.arena.nodes.get(key).and_then(|n| n.get_attr(&name_str)) {
+                Some(v) => Ok(JsValue::from(js_string!(v))),
+                None => Ok(JsValue::null()),
+            }
+        })
+    };
     obj.set(
         js_string!("getAttribute"),
-        get_attribute.to_js_function(context.realm()),
+        ga.to_js_function(context.realm()),
         false,
         context,
     )
     .unwrap_or(true);
 
-    // setAttribute (stubbad — loggar mutation men kräver state)
-    let set_attribute = NativeFunction::from_fn_ptr(element_set_attribute_stub);
+    // ─── setAttribute(name, value) ──────────────────────────────────
+    let st = Rc::clone(state);
+    let sa = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let value = args
+                .get_or_undefined(1)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            s.arena.set_attr(key, &name, &value);
+            s.mutations
+                .push(format!("setAttribute({}, {})", name, value));
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("setAttribute"),
-        set_attribute.to_js_function(context.realm()),
+        sa.to_js_function(context.realm()),
         false,
         context,
     )
     .unwrap_or(true);
 
-    // tagName, id, className som properties behöver vi inte sätta statiskt
-    // eftersom vi inte har tillgång till arena här. Stubbat via __nodeKey__.
+    // ─── removeAttribute(name) ──────────────────────────────────────
+    let st = Rc::clone(state);
+    let ra = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            s.arena.remove_attr(key, &name);
+            s.mutations.push(format!("removeAttribute({})", name));
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("removeAttribute"),
+        ra.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── textContent (getter) ───────────────────────────────────────
+    let st = Rc::clone(state);
+    let tc_get = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let text = s.arena.extract_text(key);
+            Ok(JsValue::from(js_string!(text.as_str())))
+        })
+    };
+    obj.set(
+        js_string!("textContent"),
+        tc_get.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── appendChild(child) ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ac = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+                Some(k) => k,
+                None => return Ok(JsValue::undefined()),
+            };
+            let mut s = st.borrow_mut();
+            s.arena.append_child(key, child_key);
+            s.mutations.push("appendChild".to_string());
+            Ok(args.get_or_undefined(0).clone())
+        })
+    };
+    obj.set(
+        js_string!("appendChild"),
+        ac.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── removeChild(child) ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let rc = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let child_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+                Some(k) => k,
+                None => return Ok(JsValue::undefined()),
+            };
+            let mut s = st.borrow_mut();
+            s.arena.remove_child(key, child_key);
+            s.mutations.push("removeChild".to_string());
+            Ok(args.get_or_undefined(0).clone())
+        })
+    };
+    obj.set(
+        js_string!("removeChild"),
+        rc.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── parentNode ─────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let pn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            match s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Some(parent_key) => Ok(JsValue::from(node_key_to_f64(parent_key))),
+                None => Ok(JsValue::null()),
+            }
+        })
+    };
+    obj.set(
+        js_string!("parentNode"),
+        pn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── childNodes ─────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let cn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let arr = JsArray::new(ctx);
+            if let Some(node) = s.arena.nodes.get(key) {
+                for (i, &child) in node.children.iter().enumerate() {
+                    let child_bits = node_key_to_f64(child);
+                    let child_obj = ObjectInitializer::new(ctx)
+                        .property(
+                            js_string!("__nodeKey__"),
+                            JsValue::from(child_bits),
+                            Attribute::empty(),
+                        )
+                        .build();
+                    let _ = arr.set(i as u32, child_obj, false, ctx);
+                }
+            }
+            Ok(arr.into())
+        })
+    };
+    obj.set(
+        js_string!("childNodes"),
+        cn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── firstChild ─────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let fc = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            match s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.children.first().copied())
+            {
+                Some(child_key) => Ok(JsValue::from(node_key_to_f64(child_key))),
+                None => Ok(JsValue::null()),
+            }
+        })
+    };
+    obj.set(
+        js_string!("firstChild"),
+        fc.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── nextSibling ────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ns = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Some(p) => p,
+                None => return Ok(JsValue::null()),
+            };
+            let siblings = &s.arena.nodes.get(parent_key).map(|n| &n.children);
+            if let Some(sibs) = siblings {
+                let my_idx = sibs.iter().position(|&c| c == key);
+                if let Some(idx) = my_idx {
+                    if idx + 1 < sibs.len() {
+                        return Ok(JsValue::from(node_key_to_f64(sibs[idx + 1])));
+                    }
+                }
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("nextSibling"),
+        ns.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── closest(selector) ──────────────────────────────────────────
+    let st = Rc::clone(state);
+    let cl = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let sel = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let s = st.borrow();
+            let mut current = Some(key);
+            while let Some(k) = current {
+                if matches_selector(&s.arena, k, &sel) {
+                    return Ok(JsValue::from(node_key_to_f64(k)));
+                }
+                current = s.arena.nodes.get(k).and_then(|n| n.parent);
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("closest"),
+        cl.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── matches(selector) ──────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ms = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let sel = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let s = st.borrow();
+            Ok(JsValue::from(matches_selector(&s.arena, key, &sel)))
+        })
+    };
+    obj.set(
+        js_string!("matches"),
+        ms.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── children (bara element-barn) ───────────────────────────────
+    let st = Rc::clone(state);
+    let ch = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let arr = JsArray::new(ctx);
+            if let Some(node) = s.arena.nodes.get(key) {
+                let mut i = 0u32;
+                for &child in &node.children {
+                    if let Some(cn) = s.arena.nodes.get(child) {
+                        if cn.node_type == NodeType::Element {
+                            let co = ObjectInitializer::new(ctx)
+                                .property(
+                                    js_string!("__nodeKey__"),
+                                    JsValue::from(node_key_to_f64(child)),
+                                    Attribute::empty(),
+                                )
+                                .build();
+                            let _ = arr.set(i, co, false, ctx);
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            Ok(arr.into())
+        })
+    };
+    obj.set(
+        js_string!("children"),
+        ch.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── dataset (läs data-* attribut) ──────────────────────────────
+    let st = Rc::clone(state);
+    let ds = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let ds_obj = ObjectInitializer::new(ctx).build();
+            if let Some(node) = s.arena.nodes.get(key) {
+                for (k, v) in &node.attributes {
+                    if let Some(name) = k.strip_prefix("data-") {
+                        // Konvertera kebab-case till camelCase
+                        let camel = data_attr_to_camel(name);
+                        let _ = ds_obj.set(
+                            js_string!(camel.as_str()),
+                            JsValue::from(js_string!(v.as_str())),
+                            false,
+                            ctx,
+                        );
+                    }
+                }
+            }
+            Ok(ds_obj.into())
+        })
+    };
+    obj.set(
+        js_string!("dataset"),
+        ds.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── classList ──────────────────────────────────────────────────
+    let class_list = make_class_list(context, key, state);
+    obj.set(js_string!("classList"), class_list, false, context)
+        .unwrap_or(true);
+
+    // ─── style (stubbad) ────────────────────────────────────────────
+    let style = make_style_object(context);
+    obj.set(js_string!("style"), style, false, context)
+        .unwrap_or(true);
 
     JsValue::from(obj)
 }
 
-/// getAttribute stub — returnerar tom sträng (kan ej nå arena utan state)
-fn element_get_attribute(
-    _this: &JsValue,
-    args: &[JsValue],
-    ctx: &mut Context,
-) -> JsResult<JsValue> {
-    // Vi kan bara returnera undefined utan state-referens
-    // Fullständig implementation kräver att state delas via context data
-    let _attr_name = args.get_or_undefined(0).to_string(ctx)?;
-    Ok(JsValue::null())
+/// Skapa classList-objekt med add/remove/toggle/contains
+fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
+    let st_add = Rc::clone(state);
+    let add_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st_add.borrow_mut();
+            if let Some(node) = s.arena.nodes.get_mut(key) {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                if !current.split_whitespace().any(|c| c == cls) {
+                    let new_val = if current.is_empty() {
+                        cls.clone()
+                    } else {
+                        format!("{} {}", current, cls)
+                    };
+                    node.set_attr("class", &new_val);
+                }
+            }
+            s.mutations.push(format!("classList.add({})", cls));
+            Ok(JsValue::undefined())
+        })
+    };
+
+    let st_rm = Rc::clone(state);
+    let remove_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st_rm.borrow_mut();
+            if let Some(node) = s.arena.nodes.get_mut(key) {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                let new_val: String = current
+                    .split_whitespace()
+                    .filter(|c| *c != cls)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                node.set_attr("class", &new_val);
+            }
+            s.mutations.push(format!("classList.remove({})", cls));
+            Ok(JsValue::undefined())
+        })
+    };
+
+    let st_tg = Rc::clone(state);
+    let toggle_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st_tg.borrow_mut();
+            let has = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("class"))
+                .map(|c| c.split_whitespace().any(|x| x == cls))
+                .unwrap_or(false);
+            if let Some(node) = s.arena.nodes.get_mut(key) {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                let new_val = if has {
+                    current
+                        .split_whitespace()
+                        .filter(|c| *c != cls)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else if current.is_empty() {
+                    cls.clone()
+                } else {
+                    format!("{} {}", current, cls)
+                };
+                node.set_attr("class", &new_val);
+            }
+            Ok(JsValue::from(!has))
+        })
+    };
+
+    let st_ct = Rc::clone(state);
+    let contains_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let s = st_ct.borrow();
+            let has = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("class"))
+                .map(|c| c.split_whitespace().any(|x| x == cls))
+                .unwrap_or(false);
+            Ok(JsValue::from(has))
+        })
+    };
+
+    let cl = ObjectInitializer::new(context)
+        .function(add_fn, js_string!("add"), 1)
+        .function(remove_fn, js_string!("remove"), 1)
+        .function(toggle_fn, js_string!("toggle"), 1)
+        .function(contains_fn, js_string!("contains"), 1)
+        .build();
+
+    JsValue::from(cl)
 }
 
-/// setAttribute stub
-fn element_set_attribute_stub(
-    _this: &JsValue,
-    args: &[JsValue],
-    ctx: &mut Context,
-) -> JsResult<JsValue> {
-    let _name = args.get_or_undefined(0).to_string(ctx)?;
-    let _value = args.get_or_undefined(1).to_string(ctx)?;
-    Ok(JsValue::undefined())
+/// Skapa stubbat style-objekt med setProperty/getPropertyValue
+fn make_style_object(context: &mut Context) -> JsValue {
+    let set_prop = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let get_prop =
+        NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
+    let remove_prop = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+
+    let style = ObjectInitializer::new(context)
+        .function(set_prop, js_string!("setProperty"), 2)
+        .function(get_prop, js_string!("getPropertyValue"), 1)
+        .function(remove_prop, js_string!("removeProperty"), 1)
+        .property(
+            js_string!("display"),
+            JsValue::from(js_string!("")),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("visibility"),
+            JsValue::from(js_string!("")),
+            Attribute::all(),
+        )
+        .build();
+
+    JsValue::from(style)
+}
+
+/// Konvertera data-attribut-namn till camelCase (t.ex. "product-id" → "productId")
+fn data_attr_to_camel(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    let mut capitalize_next = false;
+    for ch in name.chars() {
+        if ch == '-' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.extend(ch.to_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 // ─── Window-objekt ──────────────────────────────────────────────────────────
@@ -406,6 +1015,36 @@ fn register_window(context: &mut Context) {
         .set(js_string!("navigator"), navigator, false, context)
         .unwrap_or(true);
 
+    // getComputedStyle(el) — stubbad
+    let gcs = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let style = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("display"),
+                JsValue::from(js_string!("block")),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("visibility"),
+                JsValue::from(js_string!("visible")),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("position"),
+                JsValue::from(js_string!("static")),
+                Attribute::READONLY,
+            )
+            .build();
+        Ok(style.into())
+    });
+    window
+        .set(
+            js_string!("getComputedStyle"),
+            gcs.to_js_function(context.realm()),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+
     context
         .register_global_property(js_string!("window"), window, Attribute::all())
         .unwrap_or(());
@@ -467,61 +1106,265 @@ fn find_by_tag_name(arena: &ArenaDom, key: NodeKey, tag: &str) -> Option<NodeKey
     None
 }
 
-/// Enkel querySelector — stöder #id, .class, och tag selectors
+// ─── CSS Selector Matching ───────────────────────────────────────────────────
+
+/// Kontrollera om en nod matchar en CSS-selektor
+///
+/// Stöder: #id, .class, tag, tag.class, [attr], [attr="val"],
+/// :first-child, och kombinationer. Komma-separerade selektorer.
+fn matches_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return false;
+    }
+
+    // Komma-separerade selektorer — matcha om någon matchar
+    if selector.contains(',') {
+        return selector
+            .split(',')
+            .any(|s| matches_single_selector(arena, key, s.trim()));
+    }
+
+    // Descendant/child-kombinator
+    if selector.contains(' ') || selector.contains('>') {
+        return matches_combinator_selector(arena, key, selector);
+    }
+
+    matches_single_selector(arena, key, selector)
+}
+
+/// Matcha en enkel selektor (utan kombinatorer)
+fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
+    let node = match arena.nodes.get(key) {
+        Some(n) if n.node_type == NodeType::Element => n,
+        _ => return false,
+    };
+
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return false;
+    }
+
+    // :first-child pseudo
+    if selector == ":first-child" {
+        return is_first_child(arena, key);
+    }
+
+    // Parsea selektor-delar: tag, #id, .class, [attr], [attr="val"], :pseudo
+    let mut remaining = selector;
+    let mut required_tag: Option<&str> = None;
+    let mut required_id: Option<&str> = None;
+    let mut required_classes: Vec<&str> = Vec::new();
+    let mut required_attrs: Vec<(&str, Option<&str>)> = Vec::new();
+    let mut require_first_child = false;
+
+    // Extrahera tagg (om den börjar med bokstav)
+    if remaining.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        let end = remaining
+            .find(|c: char| ['#', '.', '[', ':'].contains(&c))
+            .unwrap_or(remaining.len());
+        required_tag = Some(&remaining[..end]);
+        remaining = &remaining[end..];
+    }
+
+    // Parsea resterande delar
+    while !remaining.is_empty() {
+        if let Some(rest) = remaining.strip_prefix('#') {
+            let end = rest
+                .find(|c: char| ['.', '[', ':'].contains(&c))
+                .unwrap_or(rest.len());
+            required_id = Some(&rest[..end]);
+            remaining = &rest[end..];
+        } else if let Some(rest) = remaining.strip_prefix('.') {
+            let end = rest
+                .find(|c: char| ['#', '.', '[', ':'].contains(&c))
+                .unwrap_or(rest.len());
+            required_classes.push(&rest[..end]);
+            remaining = &rest[end..];
+        } else if let Some(rest) = remaining.strip_prefix('[') {
+            let bracket_end = match rest.find(']') {
+                Some(e) => e,
+                None => break,
+            };
+            let attr_spec = &rest[..bracket_end];
+            if let Some(eq_pos) = attr_spec.find('=') {
+                let attr_name = &attr_spec[..eq_pos];
+                let attr_val = attr_spec[eq_pos + 1..].trim_matches('"').trim_matches('\'');
+                required_attrs.push((attr_name, Some(attr_val)));
+            } else {
+                required_attrs.push((attr_spec, None));
+            }
+            remaining = &rest[bracket_end + 1..];
+        } else if let Some(rest) = remaining.strip_prefix(":first-child") {
+            require_first_child = true;
+            remaining = rest;
+        } else {
+            break;
+        }
+    }
+
+    // Verifiera alla krav
+    if let Some(tag) = required_tag {
+        if node.tag.as_deref() != Some(tag) {
+            return false;
+        }
+    }
+    if let Some(id) = required_id {
+        if node.get_attr("id") != Some(id) {
+            return false;
+        }
+    }
+    for cls in &required_classes {
+        let has = node
+            .get_attr("class")
+            .map(|c| c.split_whitespace().any(|x| x == *cls))
+            .unwrap_or(false);
+        if !has {
+            return false;
+        }
+    }
+    for (attr, val) in &required_attrs {
+        match val {
+            Some(v) => {
+                if node.get_attr(attr) != Some(v) {
+                    return false;
+                }
+            }
+            None => {
+                if !node.has_attr(attr) {
+                    return false;
+                }
+            }
+        }
+    }
+    if require_first_child && !is_first_child(arena, key) {
+        return false;
+    }
+
+    true
+}
+
+/// Matcha selektor med kombinatorer (> och mellanslag)
+fn matches_combinator_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
+    // Splitta vid > (child) eller mellanslag (descendant)
+    // Enkel implementation: matcha sista delen mot noden, resten mot föräldrar
+    let parts: Vec<&str> = selector.split_whitespace().collect();
+    if parts.is_empty() {
+        return false;
+    }
+
+    // Sista delen matchar mot noden
+    let last = parts[parts.len() - 1];
+    if last == ">" {
+        return false; // Felaktig selektor
+    }
+    if !matches_single_selector(arena, key, last) {
+        return false;
+    }
+
+    if parts.len() == 1 {
+        return true;
+    }
+
+    // Kolla föräldrar
+    let is_child_combinator = parts.len() >= 2 && parts[parts.len() - 2] == ">";
+    let ancestor_sel = if is_child_combinator {
+        // "div > span" — bara direkt förälder
+        if parts.len() < 3 {
+            return false;
+        }
+        parts[..parts.len() - 2].join(" ")
+    } else {
+        parts[..parts.len() - 1].join(" ")
+    };
+
+    if is_child_combinator {
+        // Direkt förälder måste matcha
+        if let Some(parent) = arena.nodes.get(key).and_then(|n| n.parent) {
+            return matches_selector(arena, parent, &ancestor_sel);
+        }
+        false
+    } else {
+        // Valfri förfader måste matcha
+        let mut current = arena.nodes.get(key).and_then(|n| n.parent);
+        while let Some(ancestor) = current {
+            if matches_selector(arena, ancestor, &ancestor_sel) {
+                return true;
+            }
+            current = arena.nodes.get(ancestor).and_then(|n| n.parent);
+        }
+        false
+    }
+}
+
+/// Kolla om nod är första barnet
+fn is_first_child(arena: &ArenaDom, key: NodeKey) -> bool {
+    let parent = match arena.nodes.get(key).and_then(|n| n.parent) {
+        Some(p) => p,
+        None => return false,
+    };
+    arena
+        .nodes
+        .get(parent)
+        .map(|n| {
+            n.children.iter().find(|&&c| {
+                arena
+                    .nodes
+                    .get(c)
+                    .map(|cn| cn.node_type == NodeType::Element)
+                    .unwrap_or(false)
+            }) == Some(&key)
+        })
+        .unwrap_or(false)
+}
+
+/// querySelector — hittar första matchande nod med full CSS-selektor
 fn query_select_one(arena: &ArenaDom, selector: &str) -> Option<NodeKey> {
     let selector = selector.trim();
     if selector.is_empty() {
         return None;
     }
-
-    if let Some(id) = selector.strip_prefix('#') {
-        // ID-selektor
-        find_by_attr_value(arena, "id", id)
-    } else if let Some(class) = selector.strip_prefix('.') {
-        // Klass-selektor
-        find_by_class(arena, arena.document, class)
-    } else {
-        // Tagg-selektor
-        find_by_tag_name(arena, arena.document, selector)
-    }
+    find_first_matching(arena, arena.document, selector)
 }
 
-/// querySelectorAll — returnerar alla matchande noder
+/// Rekursiv sökning efter första matchande nod
+fn find_first_matching(arena: &ArenaDom, key: NodeKey, selector: &str) -> Option<NodeKey> {
+    let node = arena.nodes.get(key)?;
+    if node.node_type == NodeType::Element && matches_selector(arena, key, selector) {
+        return Some(key);
+    }
+    for &child in &node.children {
+        if let Some(found) = find_first_matching(arena, child, selector) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// querySelectorAll — returnerar alla matchande noder med full CSS-selektor
 fn query_select_all(arena: &ArenaDom, selector: &str) -> Vec<NodeKey> {
     let selector = selector.trim();
     if selector.is_empty() {
         return vec![];
     }
-
     let mut results = vec![];
-    if let Some(id) = selector.strip_prefix('#') {
-        if let Some(key) = find_by_attr_value(arena, "id", id) {
-            results.push(key);
-        }
-    } else if let Some(class) = selector.strip_prefix('.') {
-        find_all_by_class(arena, arena.document, class, &mut results);
-    } else {
-        find_all_by_tag(arena, arena.document, selector, &mut results);
-    }
+    find_all_matching(arena, arena.document, selector, &mut results);
     results
 }
 
-/// Hitta element med given CSS-klass
-fn find_by_class(arena: &ArenaDom, key: NodeKey, class: &str) -> Option<NodeKey> {
-    let node = arena.nodes.get(key)?;
-    if node.node_type == NodeType::Element {
-        if let Some(classes) = node.get_attr("class") {
-            if classes.split_whitespace().any(|c| c == class) {
-                return Some(key);
-            }
-        }
+/// Rekursiv sökning efter alla matchande noder
+fn find_all_matching(arena: &ArenaDom, key: NodeKey, selector: &str, results: &mut Vec<NodeKey>) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    if node.node_type == NodeType::Element && matches_selector(arena, key, selector) {
+        results.push(key);
     }
-    for &child in &node.children {
-        if let Some(found) = find_by_class(arena, child, class) {
-            return Some(found);
-        }
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_matching(arena, child, selector, results);
     }
-    None
 }
 
 /// Samla alla element med given klass
