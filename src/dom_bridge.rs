@@ -50,9 +50,22 @@ pub type DomMutation = String;
 
 // ─── Delad state mellan JS-callbacks ────────────────────────────────────────
 
+/// En registrerad event listener på ett DOM-element
+struct EventListener {
+    event_type: String,
+    callback: JsValue,
+    capture: bool,
+}
+
 struct BridgeState {
     arena: ArenaDom,
     mutations: Vec<DomMutation>,
+    /// Event listeners per nod (NodeKey ffi-index → listeners)
+    event_listeners: std::collections::HashMap<u64, Vec<EventListener>>,
+    /// Vilken nod har fokus (NodeKey ffi-index)
+    focused_element: Option<u64>,
+    /// Scroll-positioner per nod (NodeKey ffi-index → (scrollTop, scrollLeft))
+    scroll_positions: std::collections::HashMap<u64, (f64, f64)>,
 }
 
 type SharedState = Rc<RefCell<BridgeState>>;
@@ -98,6 +111,9 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
     let state: SharedState = Rc::new(RefCell::new(BridgeState {
         arena,
         mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
     }));
 
     let mut context = crate::js_eval::create_sandboxed_context();
@@ -109,8 +125,8 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
     // Registrera document-objekt
     register_document(&mut context, Rc::clone(&state));
 
-    // Registrera window-objekt (stubbat)
-    register_window(&mut context);
+    // Registrera window-objekt
+    register_window(&mut context, Rc::clone(&state));
 
     // Registrera console.log (no-op, fångar inte output)
     register_console(&mut context);
@@ -375,6 +391,42 @@ fn register_document(context: &mut Context, state: SharedState) {
         doc.set(js_string!("documentElement"), html_obj, false, context)
             .unwrap_or(true);
     }
+
+    // activeElement — returnerar det element som har fokus (default: body)
+    let st_ae = Rc::clone(&state);
+    let active_element_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let focused = st_ae.borrow().focused_element;
+            match focused {
+                Some(key_u64) => {
+                    let nk = f64_to_node_key(key_u64 as f64);
+                    let exists = st_ae.borrow().arena.nodes.get(nk).is_some();
+                    if exists {
+                        Ok(make_element_object(ctx, nk, &st_ae))
+                    } else {
+                        Ok(JsValue::null())
+                    }
+                }
+                None => {
+                    let body_key = {
+                        let s = st_ae.borrow();
+                        find_by_tag_name(&s.arena, s.arena.document, "body")
+                    };
+                    match body_key {
+                        Some(bk) => Ok(make_element_object(ctx, bk, &st_ae)),
+                        None => Ok(JsValue::null()),
+                    }
+                }
+            }
+        })
+    };
+    doc.set(
+        js_string!("activeElement"),
+        active_element_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
 
     context
         .register_global_property(js_string!("document"), doc, Attribute::all())
@@ -996,8 +1048,32 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── addEventListener / removeEventListener / dispatchEvent ─────
-    let ael = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    // ─── addEventListener(type, callback, capture) ────────────────
+    let st = Rc::clone(state);
+    let ael = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let event_type = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let callback = args.get_or_undefined(1).clone();
+            if !callback.is_callable() {
+                return Ok(JsValue::undefined());
+            }
+            let capture = args.get_or_undefined(2).to_boolean();
+            let mut s = st.borrow_mut();
+            let listeners = s
+                .event_listeners
+                .entry(key_bits as u64)
+                .or_insert_with(Vec::new);
+            listeners.push(EventListener {
+                event_type,
+                callback,
+                capture,
+            });
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("addEventListener"),
         ael.to_js_function(context.realm()),
@@ -1006,7 +1082,25 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    let rel = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    // ─── removeEventListener(type, callback) ────────────────────
+    let st = Rc::clone(state);
+    let rel = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let event_type = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let key_u64 = key_bits as u64;
+            let mut s = st.borrow_mut();
+            if let Some(listeners) = s.event_listeners.get_mut(&key_u64) {
+                // Ta bort senast tillagda med matchande typ
+                if let Some(pos) = listeners.iter().rposition(|l| l.event_type == event_type) {
+                    listeners.remove(pos);
+                }
+            }
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("removeEventListener"),
         rel.to_js_function(context.realm()),
@@ -1015,7 +1109,109 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    let de = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(true)));
+    // ─── dispatchEvent(event) ───────────────────────────────────
+    let st = Rc::clone(state);
+    let de = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let event_val = args.get_or_undefined(0).clone();
+            let event_type = event_val
+                .as_object()
+                .and_then(|o| o.get(js_string!("type"), ctx).ok())
+                .and_then(|v| v.to_string(ctx).ok())
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default();
+            if event_type.is_empty() {
+                return Ok(JsValue::from(false));
+            }
+            let bubbles = event_val
+                .as_object()
+                .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
+                .map(|v| v.to_boolean())
+                .unwrap_or(true);
+
+            // Sätt target
+            if let Some(obj) = event_val.as_object() {
+                let _ = obj.set(js_string!("target"), JsValue::from(key_bits), false, ctx);
+            }
+
+            // Samla ancestors för bubbling
+            let ancestors = {
+                let s = st.borrow();
+                let mut chain = Vec::new();
+                let mut current = s.arena.nodes.get(key).and_then(|n| n.parent);
+                while let Some(ancestor_key) = current {
+                    chain.push(node_key_to_f64(ancestor_key) as u64);
+                    current = s.arena.nodes.get(ancestor_key).and_then(|n| n.parent);
+                }
+                chain
+            };
+
+            // Target phase
+            let target_listeners: Vec<JsValue> = {
+                let s = st.borrow();
+                s.event_listeners
+                    .get(&(key_bits as u64))
+                    .map(|ls| {
+                        ls.iter()
+                            .filter(|l| l.event_type == event_type)
+                            .map(|l| l.callback.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            for cb in &target_listeners {
+                if let Some(callable) = cb.as_callable() {
+                    let _ = callable.call(&JsValue::undefined(), &[event_val.clone()], ctx);
+                }
+            }
+
+            // Bubble phase
+            if bubbles {
+                for &ancestor_u64 in &ancestors {
+                    let stopped = event_val
+                        .as_object()
+                        .and_then(|o| o.get(js_string!("__stopped__"), ctx).ok())
+                        .map(|v| v.to_boolean())
+                        .unwrap_or(false);
+                    if stopped {
+                        break;
+                    }
+                    if let Some(obj) = event_val.as_object() {
+                        let _ = obj.set(
+                            js_string!("currentTarget"),
+                            JsValue::from(ancestor_u64 as f64),
+                            false,
+                            ctx,
+                        );
+                    }
+                    let ancestor_listeners: Vec<JsValue> = {
+                        let s = st.borrow();
+                        s.event_listeners
+                            .get(&ancestor_u64)
+                            .map(|ls| {
+                                ls.iter()
+                                    .filter(|l| l.event_type == event_type && !l.capture)
+                                    .map(|l| l.callback.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    };
+                    for cb in &ancestor_listeners {
+                        if let Some(callable) = cb.as_callable() {
+                            let _ = callable.call(&JsValue::undefined(), &[event_val.clone()], ctx);
+                        }
+                    }
+                }
+            }
+
+            let prevented = event_val
+                .as_object()
+                .and_then(|o| o.get(js_string!("defaultPrevented"), ctx).ok())
+                .map(|v| v.to_boolean())
+                .unwrap_or(false);
+            Ok(JsValue::from(!prevented))
+        })
+    };
     obj.set(
         js_string!("dispatchEvent"),
         de.to_js_function(context.realm()),
@@ -1024,9 +1220,16 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── focus() / blur() ───────────────────────────────────────────
-    let focus_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let blur_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    // ─── focus() ────────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let focus_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let mut s = st.borrow_mut();
+            s.focused_element = Some(key_bits as u64);
+            s.mutations.push("focus".to_string());
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("focus"),
         focus_fn.to_js_function(context.realm()),
@@ -1034,6 +1237,19 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
         context,
     )
     .unwrap_or(true);
+
+    // ─── blur() ─────────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let blur_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let mut s = st.borrow_mut();
+            if s.focused_element == Some(key_bits as u64) {
+                s.focused_element = None;
+            }
+            s.mutations.push("blur".to_string());
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("blur"),
         blur_fn.to_js_function(context.realm()),
@@ -1042,8 +1258,25 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── scrollIntoView() ───────────────────────────────────────────
-    let siv = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    // ─── scrollIntoView(options) ────────────────────────────────────
+    let st = Rc::clone(state);
+    let siv = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let y = {
+                let s = st.borrow();
+                let (_, y, _, _) = estimate_layout_rect(&s.arena, key);
+                y
+            };
+            let mut s = st.borrow_mut();
+            // Scrollar dokumentroten till elementets y-position
+            let doc_key = find_by_tag_name(&s.arena, s.arena.document, "body")
+                .map(|k| node_key_to_f64(k) as u64)
+                .unwrap_or(0);
+            s.scroll_positions.insert(doc_key, (y, 0.0));
+            s.mutations.push(format!("scrollIntoView(y={})", y));
+            Ok(JsValue::undefined())
+        })
+    };
     obj.set(
         js_string!("scrollIntoView"),
         siv.to_js_function(context.realm()),
@@ -1053,19 +1286,40 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     .unwrap_or(true);
 
     // ─── getBoundingClientRect() ────────────────────────────────────
-    let gbcr = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let rect = ObjectInitializer::new(ctx)
-            .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
-            .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
-            .property(js_string!("width"), JsValue::from(100), Attribute::READONLY)
-            .property(js_string!("height"), JsValue::from(30), Attribute::READONLY)
-            .property(js_string!("top"), JsValue::from(0), Attribute::READONLY)
-            .property(js_string!("right"), JsValue::from(100), Attribute::READONLY)
-            .property(js_string!("bottom"), JsValue::from(30), Attribute::READONLY)
-            .property(js_string!("left"), JsValue::from(0), Attribute::READONLY)
-            .build();
-        Ok(rect.into())
-    });
+    let st = Rc::clone(state);
+    let gbcr = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
+            let rect = ObjectInitializer::new(ctx)
+                .property(js_string!("x"), JsValue::from(x), Attribute::READONLY)
+                .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
+                .property(
+                    js_string!("width"),
+                    JsValue::from(width),
+                    Attribute::READONLY,
+                )
+                .property(
+                    js_string!("height"),
+                    JsValue::from(height),
+                    Attribute::READONLY,
+                )
+                .property(js_string!("top"), JsValue::from(y), Attribute::READONLY)
+                .property(
+                    js_string!("right"),
+                    JsValue::from(x + width),
+                    Attribute::READONLY,
+                )
+                .property(
+                    js_string!("bottom"),
+                    JsValue::from(y + height),
+                    Attribute::READONLY,
+                )
+                .property(js_string!("left"), JsValue::from(x), Attribute::READONLY)
+                .build();
+            Ok(rect.into())
+        })
+    };
     obj.set(
         js_string!("getBoundingClientRect"),
         gbcr.to_js_function(context.realm()),
@@ -1075,17 +1329,30 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     .unwrap_or(true);
 
     // ─── getClientRects() ───────────────────────────────────────────
-    let gcr = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let arr = JsArray::new(ctx);
-        let rect = ObjectInitializer::new(ctx)
-            .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
-            .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
-            .property(js_string!("width"), JsValue::from(100), Attribute::READONLY)
-            .property(js_string!("height"), JsValue::from(30), Attribute::READONLY)
-            .build();
-        let _ = arr.push(rect, ctx);
-        Ok(arr.into())
-    });
+    let st = Rc::clone(state);
+    let gcr = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
+            let arr = JsArray::new(ctx);
+            let rect = ObjectInitializer::new(ctx)
+                .property(js_string!("x"), JsValue::from(x), Attribute::READONLY)
+                .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
+                .property(
+                    js_string!("width"),
+                    JsValue::from(width),
+                    Attribute::READONLY,
+                )
+                .property(
+                    js_string!("height"),
+                    JsValue::from(height),
+                    Attribute::READONLY,
+                )
+                .build();
+            let _ = arr.push(rect, ctx);
+            Ok(arr.into())
+        })
+    };
     obj.set(
         js_string!("getClientRects"),
         gcr.to_js_function(context.realm()),
@@ -1094,69 +1361,109 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── offset* properties ─────────────────────────────────────────
-    obj.set(js_string!("offsetTop"), JsValue::from(0), false, context)
+    // ─── offset* / client* / scroll* properties ─────────────────────
+    {
+        let s = state.borrow();
+        let (_, y_pos, w, h) = estimate_layout_rect(&s.arena, key);
+        let (scroll_top, scroll_left) = s
+            .scroll_positions
+            .get(&(key_bits as u64))
+            .copied()
+            .unwrap_or((0.0, 0.0));
+        let content_h = s
+            .arena
+            .nodes
+            .get(key)
+            .map(|n| (n.children.len() as f64) * 30.0)
+            .unwrap_or(h)
+            .max(h);
+        let content_w = w.max(1024.0);
+        obj.set(
+            js_string!("offsetTop"),
+            JsValue::from(y_pos),
+            false,
+            context,
+        )
         .unwrap_or(true);
-    obj.set(js_string!("offsetLeft"), JsValue::from(0), false, context)
+        obj.set(js_string!("offsetLeft"), JsValue::from(0), false, context)
+            .unwrap_or(true);
+        obj.set(js_string!("offsetWidth"), JsValue::from(w), false, context)
+            .unwrap_or(true);
+        obj.set(js_string!("offsetHeight"), JsValue::from(h), false, context)
+            .unwrap_or(true);
+        obj.set(
+            js_string!("scrollTop"),
+            JsValue::from(scroll_top),
+            false,
+            context,
+        )
         .unwrap_or(true);
-    obj.set(
-        js_string!("offsetWidth"),
-        JsValue::from(100),
-        false,
-        context,
-    )
-    .unwrap_or(true);
-    obj.set(
-        js_string!("offsetHeight"),
-        JsValue::from(30),
-        false,
-        context,
-    )
-    .unwrap_or(true);
-    obj.set(js_string!("scrollTop"), JsValue::from(0), false, context)
+        obj.set(
+            js_string!("scrollLeft"),
+            JsValue::from(scroll_left),
+            false,
+            context,
+        )
         .unwrap_or(true);
-    obj.set(js_string!("scrollLeft"), JsValue::from(0), false, context)
+        obj.set(
+            js_string!("scrollWidth"),
+            JsValue::from(content_w),
+            false,
+            context,
+        )
         .unwrap_or(true);
-    obj.set(
-        js_string!("scrollWidth"),
-        JsValue::from(1024),
-        false,
-        context,
-    )
-    .unwrap_or(true);
-    obj.set(
-        js_string!("scrollHeight"),
-        JsValue::from(768),
-        false,
-        context,
-    )
-    .unwrap_or(true);
-    obj.set(
-        js_string!("clientWidth"),
-        JsValue::from(100),
-        false,
-        context,
-    )
-    .unwrap_or(true);
-    obj.set(
-        js_string!("clientHeight"),
-        JsValue::from(30),
-        false,
-        context,
-    )
-    .unwrap_or(true);
+        obj.set(
+            js_string!("scrollHeight"),
+            JsValue::from(content_h),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+        obj.set(js_string!("clientWidth"), JsValue::from(w), false, context)
+            .unwrap_or(true);
+        obj.set(js_string!("clientHeight"), JsValue::from(h), false, context)
+            .unwrap_or(true);
+    }
 
-    // ─── shadowRoot (null — Shadow DOM traversal stöd) ──────────────
-    obj.set(js_string!("shadowRoot"), JsValue::null(), false, context)
-        .unwrap_or(true);
+    // ─── shadowRoot (read-only traversal av deklarativ Shadow DOM) ──
+    {
+        let shadow_key = {
+            let s = state.borrow();
+            s.arena
+                .nodes
+                .get(key)
+                .and_then(|node| {
+                    // Deklarativ Shadow DOM: <template shadowrootmode="open">
+                    node.children.iter().find(|&&child| {
+                        s.arena
+                            .nodes
+                            .get(child)
+                            .map(|cn| {
+                                cn.tag.as_deref() == Some("template")
+                                    && (cn.has_attr("shadowrootmode") || cn.has_attr("shadowroot"))
+                            })
+                            .unwrap_or(false)
+                    })
+                })
+                .copied()
+        };
+        if let Some(template_key) = shadow_key {
+            let shadow = make_element_object(context, template_key, state);
+            obj.set(js_string!("shadowRoot"), shadow, false, context)
+                .unwrap_or(true);
+        } else {
+            obj.set(js_string!("shadowRoot"), JsValue::null(), false, context)
+                .unwrap_or(true);
+        }
+    }
 
     // ─── classList ──────────────────────────────────────────────────
     let class_list = make_class_list(context, key, state);
     obj.set(js_string!("classList"), class_list, false, context)
         .unwrap_or(true);
 
-    // ─── style (stubbad) ────────────────────────────────────────────
-    let style = make_style_object(context);
+    // ─── style (inline CSS-stilar med setProperty/getPropertyValue) ─
+    let style = make_style_object(context, key, state);
     obj.set(js_string!("style"), style, false, context)
         .unwrap_or(true);
 
@@ -1343,28 +1650,158 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
     JsValue::from(cl)
 }
 
-/// Skapa stubbat style-objekt med setProperty/getPropertyValue
-fn make_style_object(context: &mut Context) -> JsValue {
-    let set_prop = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let get_prop =
-        NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
-    let remove_prop = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+/// Skapa style-objekt med inline CSS-stöd kopplat till arena
+fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
+    // Läs initiala stilar från style-attributet
+    let initial_styles = {
+        let s = state.borrow();
+        let style_str = s
+            .arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.get_attr("style"))
+            .unwrap_or("");
+        parse_inline_styles(style_str)
+    };
+
+    // setProperty(prop, value)
+    let st = Rc::clone(state);
+    let set_prop = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let prop = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let value = args
+                .get_or_undefined(1)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            let style_str = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("style"))
+                .unwrap_or("")
+                .to_string();
+            let mut styles = parse_inline_styles(&style_str);
+            if value.is_empty() {
+                styles.remove(&prop);
+            } else {
+                styles.insert(prop.clone(), value.clone());
+            }
+            let new_style = serialize_inline_styles(&styles);
+            s.arena.set_attr(key, "style", &new_style);
+            s.mutations
+                .push(format!("style.setProperty({}, {})", prop, value));
+            Ok(JsValue::undefined())
+        })
+    };
+
+    // getPropertyValue(prop)
+    let st = Rc::clone(state);
+    let get_prop = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let prop = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let s = st.borrow();
+            let style_str = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("style"))
+                .unwrap_or("");
+            let styles = parse_inline_styles(style_str);
+            let val = styles.get(&prop).cloned().unwrap_or_default();
+            Ok(JsValue::from(js_string!(val.as_str())))
+        })
+    };
+
+    // removeProperty(prop)
+    let st = Rc::clone(state);
+    let remove_prop = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let prop = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let mut s = st.borrow_mut();
+            let style_str = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("style"))
+                .unwrap_or("")
+                .to_string();
+            let mut styles = parse_inline_styles(&style_str);
+            let old_val = styles.remove(&prop).unwrap_or_default();
+            let new_style = serialize_inline_styles(&styles);
+            s.arena.set_attr(key, "style", &new_style);
+            Ok(JsValue::from(js_string!(old_val.as_str())))
+        })
+    };
+
+    // cssText getter
+    let st = Rc::clone(state);
+    let css_text_get = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let style_str = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("style"))
+                .unwrap_or("");
+            Ok(JsValue::from(js_string!(style_str)))
+        })
+    };
 
     let style = ObjectInitializer::new(context)
         .function(set_prop, js_string!("setProperty"), 2)
         .function(get_prop, js_string!("getPropertyValue"), 1)
         .function(remove_prop, js_string!("removeProperty"), 1)
-        .property(
-            js_string!("display"),
-            JsValue::from(js_string!("")),
-            Attribute::all(),
-        )
-        .property(
-            js_string!("visibility"),
-            JsValue::from(js_string!("")),
-            Attribute::all(),
-        )
+        .function(css_text_get, js_string!("cssText"), 0)
         .build();
+
+    // Populera vanliga CSS-egenskaper från inline style
+    let common_props = [
+        "display",
+        "visibility",
+        "position",
+        "opacity",
+        "overflow",
+        "width",
+        "height",
+        "margin",
+        "padding",
+        "color",
+        "background-color",
+        "font-size",
+        "z-index",
+        "pointer-events",
+        "top",
+        "left",
+        "right",
+        "bottom",
+        "transform",
+        "transition",
+        "border",
+    ];
+    for prop in &common_props {
+        let val = initial_styles.get(*prop).cloned().unwrap_or_default();
+        let camel = data_attr_to_camel(prop);
+        let _ = style.set(
+            js_string!(camel.as_str()),
+            JsValue::from(js_string!(val.as_str())),
+            false,
+            context,
+        );
+    }
 
     JsValue::from(style)
 }
@@ -1388,7 +1825,7 @@ fn data_attr_to_camel(name: &str) -> String {
 
 // ─── Window-objekt ──────────────────────────────────────────────────────────
 
-fn register_window(context: &mut Context) {
+fn register_window(context: &mut Context, state: SharedState) {
     let window = ObjectInitializer::new(context)
         .property(
             js_string!("innerWidth"),
@@ -1448,68 +1885,66 @@ fn register_window(context: &mut Context) {
         .set(js_string!("navigator"), navigator, false, context)
         .unwrap_or(true);
 
-    // getComputedStyle(el) — full stubb med vanliga CSS-properties
-    let gcs = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let get_pv = NativeFunction::from_fn_ptr(|_this, args, ctx2| {
-            let prop = args
-                .get_or_undefined(0)
-                .to_string(ctx2)
-                .map(|s| s.to_std_string_escaped())
-                .unwrap_or_default();
-            let val = match prop.as_str() {
-                "display" => "block",
-                "visibility" => "visible",
-                "position" => "static",
-                "opacity" => "1",
-                "overflow" => "visible",
-                "font-size" => "16px",
-                "color" => "rgb(0, 0, 0)",
-                "background-color" => "rgba(0, 0, 0, 0)",
-                "width" => "auto",
-                "height" => "auto",
-                "margin" => "0px",
-                "padding" => "0px",
-                "z-index" => "auto",
-                "pointer-events" => "auto",
-                _ => "",
+    // getComputedStyle(el) — mergar inline styles med tag-defaults
+    let st_gcs = Rc::clone(&state);
+    let gcs = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let elem = args.get_or_undefined(0);
+            let node_key = extract_node_key(elem, ctx);
+
+            let (inline_styles, tag_name) = match node_key {
+                Some(k) => {
+                    let s = st_gcs.borrow();
+                    let style_str = s
+                        .arena
+                        .nodes
+                        .get(k)
+                        .and_then(|n| n.get_attr("style"))
+                        .unwrap_or("");
+                    let tag = s.arena.tag_name(k).unwrap_or("div").to_string();
+                    (parse_inline_styles(style_str), tag)
+                }
+                None => (std::collections::HashMap::new(), "div".to_string()),
             };
-            Ok(JsValue::from(js_string!(val)))
-        });
-        let style = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("display"),
-                JsValue::from(js_string!("block")),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("visibility"),
-                JsValue::from(js_string!("visible")),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("position"),
-                JsValue::from(js_string!("static")),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("opacity"),
-                JsValue::from(js_string!("1")),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("overflow"),
-                JsValue::from(js_string!("visible")),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("pointerEvents"),
-                JsValue::from(js_string!("auto")),
-                Attribute::READONLY,
-            )
-            .function(get_pv, js_string!("getPropertyValue"), 1)
-            .build();
-        Ok(style.into())
-    });
+
+            // Merge: inline overridar tag-defaults
+            let mut merged = get_tag_style_defaults(&tag_name);
+            for (k, v) in &inline_styles {
+                merged.insert(k.clone(), v.clone());
+            }
+
+            let merged_for_closure = merged.clone();
+            let get_pv = unsafe {
+                NativeFunction::from_closure(move |_this, args, ctx2| {
+                    let prop = args
+                        .get_or_undefined(0)
+                        .to_string(ctx2)
+                        .map(|s| s.to_std_string_escaped())
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    let val = merged_for_closure.get(&prop).cloned().unwrap_or_default();
+                    Ok(JsValue::from(js_string!(val.as_str())))
+                })
+            };
+
+            let style = ObjectInitializer::new(ctx)
+                .function(get_pv, js_string!("getPropertyValue"), 1)
+                .build();
+
+            // Sätt alla properties som egenskaper (camelCase + kebab)
+            for (prop, val) in &merged {
+                let camel = data_attr_to_camel(prop);
+                let _ = style.set(
+                    js_string!(camel.as_str()),
+                    JsValue::from(js_string!(val.as_str())),
+                    false,
+                    ctx,
+                );
+            }
+
+            Ok(style.into())
+        })
+    };
     window
         .set(
             js_string!("getComputedStyle"),
@@ -1519,39 +1954,75 @@ fn register_window(context: &mut Context) {
         )
         .unwrap_or(true);
 
-    // IntersectionObserver — stubbad (rapporterar allt som synligt)
-    let io_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
-        let callback = args.get_or_undefined(0).clone();
-        let observe_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let unobserve_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let disconnect_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let observer = ObjectInitializer::new(ctx)
-            .function(observe_fn, js_string!("observe"), 1)
-            .function(unobserve_fn, js_string!("unobserve"), 1)
-            .function(disconnect_fn, js_string!("disconnect"), 0)
-            .build();
-        // Trigga callback direkt — allt rapporteras som synligt (lazy-load triggas)
-        if let Some(callable) = callback.as_callable() {
-            let entry = ObjectInitializer::new(ctx)
-                .property(
-                    js_string!("isIntersecting"),
-                    JsValue::from(true),
-                    Attribute::READONLY,
-                )
-                .property(
-                    js_string!("intersectionRatio"),
-                    JsValue::from(1.0),
-                    Attribute::READONLY,
-                )
+    // IntersectionObserver — fires per-element on observe() med layoutdata
+    let st_io = Rc::clone(&state);
+    let io_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let callback = args.get_or_undefined(0).clone();
+            let cb_clone = callback.clone();
+            let st_observe = Rc::clone(&st_io);
+
+            let observe_fn = unsafe {
+                NativeFunction::from_closure(move |_this, args, ctx2| {
+                    let target = args.get_or_undefined(0);
+                    let target_key = extract_node_key(target, ctx2);
+
+                    if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                        let (y, w, h) = {
+                            let s = st_observe.borrow();
+                            let (_, y, w, h) = estimate_layout_rect(&s.arena, k);
+                            (y, w, h)
+                        };
+
+                        let is_visible = y < 768.0 && w > 0.0 && h > 0.0;
+                        let ratio = if is_visible { 1.0 } else { 0.0 };
+
+                        let bounds = ObjectInitializer::new(ctx2)
+                            .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
+                            .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
+                            .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
+                            .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
+                            .build();
+
+                        let entry = ObjectInitializer::new(ctx2)
+                            .property(
+                                js_string!("isIntersecting"),
+                                JsValue::from(is_visible),
+                                Attribute::READONLY,
+                            )
+                            .property(
+                                js_string!("intersectionRatio"),
+                                JsValue::from(ratio),
+                                Attribute::READONLY,
+                            )
+                            .property(
+                                js_string!("boundingClientRect"),
+                                bounds,
+                                Attribute::READONLY,
+                            )
+                            .property(js_string!("target"), target.clone(), Attribute::READONLY)
+                            .build();
+
+                        let entries = JsArray::new(ctx2);
+                        let _ = entries.push(entry, ctx2);
+                        let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                    }
+                    Ok(JsValue::undefined())
+                })
+            };
+
+            let unobserve_fn =
+                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            let disconnect_fn =
+                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            let observer = ObjectInitializer::new(ctx)
+                .function(observe_fn, js_string!("observe"), 1)
+                .function(unobserve_fn, js_string!("unobserve"), 1)
+                .function(disconnect_fn, js_string!("disconnect"), 0)
                 .build();
-            let entries = JsArray::new(ctx);
-            let _ = entries.push(entry, ctx);
-            let _ = callable.call(&JsValue::from(observer.clone()), &[entries.into()], ctx);
-        }
-        Ok(observer.into())
-    });
+            Ok(observer.into())
+        })
+    };
     window
         .set(
             js_string!("IntersectionObserver"),
@@ -1561,20 +2032,74 @@ fn register_window(context: &mut Context) {
         )
         .unwrap_or(true);
 
-    // ResizeObserver — stubbad
-    let ro_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let observe_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let unobserve_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let disconnect_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let observer = ObjectInitializer::new(ctx)
-            .function(observe_fn, js_string!("observe"), 1)
-            .function(unobserve_fn, js_string!("unobserve"), 1)
-            .function(disconnect_fn, js_string!("disconnect"), 0)
-            .build();
-        Ok(observer.into())
-    });
+    // ResizeObserver — fires callback on observe() med element-dimensioner
+    let st_ro = Rc::clone(&state);
+    let ro_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let callback = args.get_or_undefined(0).clone();
+            let cb_clone = callback.clone();
+            let st_observe = Rc::clone(&st_ro);
+
+            let observe_fn = unsafe {
+                NativeFunction::from_closure(move |_this, args, ctx2| {
+                    let target = args.get_or_undefined(0);
+                    let target_key = extract_node_key(target, ctx2);
+
+                    if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                        let (w, h) = {
+                            let s = st_observe.borrow();
+                            let (_, _, w, h) = estimate_layout_rect(&s.arena, k);
+                            (w, h)
+                        };
+
+                        let content_rect = ObjectInitializer::new(ctx2)
+                            .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
+                            .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
+                            .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
+                            .property(js_string!("y"), JsValue::from(0.0), Attribute::READONLY)
+                            .build();
+
+                        let border_size = ObjectInitializer::new(ctx2)
+                            .property(
+                                js_string!("inlineSize"),
+                                JsValue::from(w),
+                                Attribute::READONLY,
+                            )
+                            .property(
+                                js_string!("blockSize"),
+                                JsValue::from(h),
+                                Attribute::READONLY,
+                            )
+                            .build();
+                        let border_arr = JsArray::new(ctx2);
+                        let _ = border_arr.push(border_size, ctx2);
+
+                        let entry = ObjectInitializer::new(ctx2)
+                            .property(js_string!("contentRect"), content_rect, Attribute::READONLY)
+                            .property(js_string!("borderBoxSize"), border_arr, Attribute::READONLY)
+                            .property(js_string!("target"), target.clone(), Attribute::READONLY)
+                            .build();
+
+                        let entries = JsArray::new(ctx2);
+                        let _ = entries.push(entry, ctx2);
+                        let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                    }
+                    Ok(JsValue::undefined())
+                })
+            };
+
+            let unobserve_fn =
+                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            let disconnect_fn =
+                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            let observer = ObjectInitializer::new(ctx)
+                .function(observe_fn, js_string!("observe"), 1)
+                .function(unobserve_fn, js_string!("unobserve"), 1)
+                .function(disconnect_fn, js_string!("disconnect"), 0)
+                .build();
+            Ok(observer.into())
+        })
+    };
     window
         .set(
             js_string!("ResizeObserver"),
@@ -1605,6 +2130,167 @@ fn register_window(context: &mut Context) {
     context
         .register_global_property(js_string!("window"), window, Attribute::all())
         .unwrap_or(());
+
+    // Event konstruktor — new Event('click', {bubbles: true})
+    let event_ctor = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let type_str = args
+            .get_or_undefined(0)
+            .to_string(ctx)?
+            .to_std_string_escaped();
+        let options = args.get_or_undefined(1);
+        let bubbles = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
+        let cancelable = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("cancelable"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
+
+        let stop_prop = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+            if let Some(obj) = this.as_object() {
+                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+            }
+            Ok(JsValue::undefined())
+        });
+        let prevent_default = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+            if let Some(obj) = this.as_object() {
+                let _ = obj.set(
+                    js_string!("defaultPrevented"),
+                    JsValue::from(true),
+                    false,
+                    ctx2,
+                );
+            }
+            Ok(JsValue::undefined())
+        });
+        let stop_imm = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+            if let Some(obj) = this.as_object() {
+                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+            }
+            Ok(JsValue::undefined())
+        });
+
+        let event = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("type"),
+                JsValue::from(js_string!(type_str.as_str())),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("bubbles"),
+                JsValue::from(bubbles),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("cancelable"),
+                JsValue::from(cancelable),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("defaultPrevented"),
+                JsValue::from(false),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("__stopped__"),
+                JsValue::from(false),
+                Attribute::all(),
+            )
+            .property(js_string!("target"), JsValue::null(), Attribute::all())
+            .property(
+                js_string!("currentTarget"),
+                JsValue::null(),
+                Attribute::all(),
+            )
+            .function(stop_prop, js_string!("stopPropagation"), 0)
+            .function(prevent_default, js_string!("preventDefault"), 0)
+            .function(stop_imm, js_string!("stopImmediatePropagation"), 0)
+            .build();
+
+        Ok(event.into())
+    });
+    context
+        .register_global_property(
+            js_string!("Event"),
+            event_ctor.to_js_function(context.realm()),
+            Attribute::all(),
+        )
+        .unwrap_or(());
+
+    // CustomEvent konstruktor — new CustomEvent('my-event', {detail: data})
+    let custom_event_ctor = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let type_str = args
+            .get_or_undefined(0)
+            .to_string(ctx)?
+            .to_std_string_escaped();
+        let options = args.get_or_undefined(1);
+        let bubbles = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
+        let detail = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("detail"), ctx).ok())
+            .unwrap_or(JsValue::null());
+
+        let stop_prop = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+            if let Some(obj) = this.as_object() {
+                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+            }
+            Ok(JsValue::undefined())
+        });
+        let prevent_default = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+            if let Some(obj) = this.as_object() {
+                let _ = obj.set(
+                    js_string!("defaultPrevented"),
+                    JsValue::from(true),
+                    false,
+                    ctx2,
+                );
+            }
+            Ok(JsValue::undefined())
+        });
+
+        let event = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("type"),
+                JsValue::from(js_string!(type_str.as_str())),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("bubbles"),
+                JsValue::from(bubbles),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("defaultPrevented"),
+                JsValue::from(false),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("__stopped__"),
+                JsValue::from(false),
+                Attribute::all(),
+            )
+            .property(js_string!("detail"), detail, Attribute::READONLY)
+            .property(js_string!("target"), JsValue::null(), Attribute::all())
+            .function(stop_prop, js_string!("stopPropagation"), 0)
+            .function(prevent_default, js_string!("preventDefault"), 0)
+            .build();
+
+        Ok(event.into())
+    });
+    context
+        .register_global_property(
+            js_string!("CustomEvent"),
+            custom_event_ctor.to_js_function(context.realm()),
+            Attribute::all(),
+        )
+        .unwrap_or(());
 }
 
 // ─── Console-objekt ─────────────────────────────────────────────────────────
@@ -1622,6 +2308,144 @@ fn register_console(context: &mut Context) {
     context
         .register_global_property(js_string!("console"), console, Attribute::all())
         .unwrap_or(());
+}
+
+// ─── Style & Layout Helpers ─────────────────────────────────────────────────
+
+/// Parsea inline CSS-stilar från style-attribut till HashMap
+fn parse_inline_styles(style_attr: &str) -> std::collections::HashMap<String, String> {
+    let mut styles = std::collections::HashMap::new();
+    for part in style_attr.split(';') {
+        let part = part.trim();
+        if let Some(colon_pos) = part.find(':') {
+            let prop = part[..colon_pos].trim().to_lowercase();
+            let val = part[colon_pos + 1..].trim().to_string();
+            if !prop.is_empty() {
+                styles.insert(prop, val);
+            }
+        }
+    }
+    styles
+}
+
+/// Serialisera inline CSS-stilar till style-attribut-sträng
+fn serialize_inline_styles(styles: &std::collections::HashMap<String, String>) -> String {
+    let mut parts: Vec<String> = styles
+        .iter()
+        .map(|(k, v)| format!("{}: {}", k, v))
+        .collect();
+    parts.sort();
+    parts.join("; ")
+}
+
+/// Parsea px-värde från CSS-egenskap
+fn parse_px_value(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .strip_suffix("px")
+        .unwrap_or(value.trim())
+        .parse::<f64>()
+        .ok()
+}
+
+/// Estimera layout-rect baserat på tagg + inline styles
+fn estimate_layout_rect(arena: &ArenaDom, key: NodeKey) -> (f64, f64, f64, f64) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return (0.0, 0.0, 100.0, 30.0),
+    };
+    let style_str = node.get_attr("style").unwrap_or("");
+    let styles = parse_inline_styles(style_str);
+    let tag = node.tag.as_deref().unwrap_or("");
+    let (default_w, default_h) = match tag {
+        "div" | "section" | "main" | "article" | "header" | "footer" | "nav" | "form" => {
+            (1024.0, 50.0)
+        }
+        "p" => (1024.0, 20.0),
+        "h1" => (1024.0, 40.0),
+        "h2" => (1024.0, 36.0),
+        "h3" => (1024.0, 32.0),
+        "h4" | "h5" | "h6" => (1024.0, 28.0),
+        "button" => (80.0, 36.0),
+        "input" => (200.0, 36.0),
+        "select" => (200.0, 36.0),
+        "textarea" => (300.0, 80.0),
+        "a" | "span" | "label" => (60.0, 20.0),
+        "img" => {
+            let iw = node
+                .get_attr("width")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(300.0);
+            let ih = node
+                .get_attr("height")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(200.0);
+            (iw, ih)
+        }
+        "li" => (1024.0, 24.0),
+        "ul" | "ol" => (1024.0, 100.0),
+        "table" => (1024.0, 200.0),
+        "tr" => (1024.0, 30.0),
+        "td" | "th" => (200.0, 30.0),
+        _ => (100.0, 30.0),
+    };
+
+    let width = styles
+        .get("width")
+        .and_then(|v| parse_px_value(v))
+        .unwrap_or(default_w);
+    let height = styles
+        .get("height")
+        .and_then(|v| parse_px_value(v))
+        .unwrap_or(default_h);
+    // Estimera y-position från syskon-ordning
+    let y = match node.parent.and_then(|p| arena.nodes.get(p)) {
+        Some(parent) => {
+            let my_idx = parent.children.iter().position(|&c| c == key).unwrap_or(0);
+            (my_idx as f64) * 30.0
+        }
+        None => 0.0,
+    };
+
+    (0.0, y, width, height)
+}
+
+/// Tag-baserade CSS-defaults för getComputedStyle
+fn get_tag_style_defaults(tag: &str) -> std::collections::HashMap<String, String> {
+    let mut defaults = std::collections::HashMap::new();
+    let display = match tag {
+        "span" | "a" | "strong" | "em" | "b" | "i" | "label" | "img" => "inline",
+        "button" | "input" | "select" | "textarea" => "inline-block",
+        _ => "block",
+    };
+    let font_size = match tag {
+        "h1" => "32px",
+        "h2" => "24px",
+        "h3" => "18.72px",
+        "h4" => "16px",
+        "h5" => "13.28px",
+        "h6" => "10.72px",
+        _ => "16px",
+    };
+    defaults.insert("display".to_string(), display.to_string());
+    defaults.insert("visibility".to_string(), "visible".to_string());
+    defaults.insert("position".to_string(), "static".to_string());
+    defaults.insert("opacity".to_string(), "1".to_string());
+    defaults.insert("overflow".to_string(), "visible".to_string());
+    defaults.insert("font-size".to_string(), font_size.to_string());
+    defaults.insert("color".to_string(), "rgb(0, 0, 0)".to_string());
+    defaults.insert(
+        "background-color".to_string(),
+        "rgba(0, 0, 0, 0)".to_string(),
+    );
+    defaults.insert("width".to_string(), "auto".to_string());
+    defaults.insert("height".to_string(), "auto".to_string());
+    defaults.insert("margin".to_string(), "0px".to_string());
+    defaults.insert("padding".to_string(), "0px".to_string());
+    defaults.insert("z-index".to_string(), "auto".to_string());
+    defaults.insert("pointer-events".to_string(), "auto".to_string());
+    defaults.insert("box-sizing".to_string(), "content-box".to_string());
+    defaults
 }
 
 // ─── DOM Query Helpers ──────────────────────────────────────────────────────

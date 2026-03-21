@@ -289,20 +289,23 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | `classList.replace(old, new)` | Full | Replaces class, returns boolean |
 | `classList.value()` | Full | Returns full class string |
 | `classList.length()` | Full | Returns class count |
-| `addEventListener(type, fn)` | Stub | No-op (accepts call without error) |
-| `removeEventListener(type, fn)` | Stub | No-op |
-| `dispatchEvent(event)` | Stub | Returns `true` |
-| `focus()` / `blur()` | Stub | No-op |
-| `scrollIntoView()` | Stub | No-op |
-| `getBoundingClientRect()` | Stub | Returns `{x:0, y:0, width:100, height:30}` |
-| `getClientRects()` | Stub | Returns array with one rect |
-| `style.setProperty(k, v)` | Stub | No-op |
-| `style.getPropertyValue(k)` | Stub | Returns `""` |
-| `style.removeProperty(k)` | Stub | No-op |
-| `shadowRoot` | Stub | Returns `null` (ready for Shadow DOM traversal) |
-| `offsetTop/Left/Width/Height` | Stub | 0/0/100/30 |
-| `scrollTop/Left/Width/Height` | Stub | 0/0/1024/768 |
-| `clientWidth/Height` | Stub | 100/30 |
+| `addEventListener(type, fn, capture)` | Full | Stores callbacks per node per event type |
+| `removeEventListener(type, fn)` | Full | Removes last matching listener by type |
+| `dispatchEvent(event)` | Full | Fires listeners + ancestor bubbling + stopPropagation |
+| `focus()` | Full | Tracks focused element in BridgeState |
+| `blur()` | Full | Clears focus if this element was focused |
+| `scrollIntoView(options)` | Full | Updates scroll position on document body |
+| `getBoundingClientRect()` | Full | Returns tag+style estimated rect (x, y, width, height, top, right, bottom, left) |
+| `getClientRects()` | Full | Returns array with estimated rect |
+| `style.setProperty(k, v)` | Full | Writes to style attribute on arena node |
+| `style.getPropertyValue(k)` | Full | Reads from parsed style attribute |
+| `style.removeProperty(k)` | Full | Removes property, returns old value |
+| `style.cssText()` | Full | Returns raw style attribute string |
+| `style.[property]` | Full | 21 CSS properties as direct camelCase accessors |
+| `shadowRoot` | Full | Reads `<template shadowrootmode>` children for declarative Shadow DOM |
+| `offsetTop/Left/Width/Height` | Full | Computed from tag defaults + inline style + sibling position |
+| `scrollTop/Left/Width/Height` | Full | Tracked per node, content size from children count |
+| `clientWidth/Height` | Full | Same as offsetWidth/Height |
 
 **Window & global methods:**
 
@@ -311,9 +314,12 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | `window.innerWidth/innerHeight` | Stub | 1024/768 |
 | `window.location.*` | Stub | href, hostname, pathname, protocol |
 | `window.navigator.*` | Stub | userAgent="AetherAgent/0.1", language="en" |
-| `getComputedStyle(el)` | Stub | 14 CSS properties + `getPropertyValue()` |
-| `IntersectionObserver` | Stub | Triggers callback immediately (all visible) — lazy-load works |
-| `ResizeObserver` | Stub | observe/unobserve/disconnect (no-op) |
+| `getComputedStyle(el)` | Full | Merges inline styles + tag-based defaults, 15 CSS properties + `getPropertyValue()` |
+| `IntersectionObserver` | Full | Fires callback per element on `observe()` with estimated rect + visibility |
+| `ResizeObserver` | Full | Fires callback on `observe()` with contentRect + borderBoxSize |
+| `Event` constructor | Full | `new Event('click', {bubbles, cancelable})` with stopPropagation/preventDefault |
+| `CustomEvent` constructor | Full | `new CustomEvent('x', {detail, bubbles})` with detail property |
+| `document.activeElement` | Full | Returns focused element or body (default) |
 | `MutationObserver` | Full | observe/disconnect via event loop |
 | `customElements.define/get/whenDefined` | Stub | Web Components registration (no-op) |
 | `setTimeout/setInterval` | Full | Virtual clock, max 100 timers, 5s delay |
@@ -345,18 +351,18 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 
 | Framework / Scenario | Coverage | Notes |
 |---------------------|----------|-------|
-| **React SSR hydration** | ~90% | getElementById, textContent, classList, appendChild — covers most hydration scripts |
-| **Vue 3 mount + reactivity** | ~85% | querySelector, classList, createComment (v-if anchors), setAttribute |
-| **Svelte compiled output** | ~90% | Direct DOM manipulation via createElement, appendChild, textContent |
-| **Angular Universal** | ~75% | querySelector, classList, setAttribute — some template bindings need full event system |
-| **Vanilla JS / jQuery** | ~95% | All query + manipulation methods, event stubs prevent crashes |
-| **Next.js App Router** | ~80% | RSC Flight Protocol extraction (Tier 0) + DOM bridge for client components |
-| **Nuxt 3 / SvelteKit** | ~85% | Devalue hydration (Tier 0) + DOM bridge for interactive parts |
-| **Web Components (Lit, Stencil)** | ~60% | customElements.define stubbed, shadowRoot=null — content inside shadow DOM invisible |
-| **Lazy-loaded content** | ~90% | IntersectionObserver stub triggers immediately — all lazy content loads |
-| **Infinite scroll** | ~70% | IntersectionObserver works, but no real scroll position |
-| **Form validation** | ~85% | getAttribute, setAttribute, classList, focus/blur stubs |
-| **CSS-dependent visibility** | ~80% | getComputedStyle returns defaults — hidden elements may appear visible |
+| **React SSR hydration** | ~95% | getElementById, textContent, classList, appendChild, addEventListener, Event constructor |
+| **Vue 3 mount + reactivity** | ~92% | querySelector, classList, createComment, setAttribute, addEventListener, dispatchEvent |
+| **Svelte compiled output** | ~95% | Direct DOM manipulation + full event system + style.setProperty |
+| **Angular Universal** | ~88% | querySelector, classList, setAttribute, full event system, getComputedStyle |
+| **Vanilla JS / jQuery** | ~98% | All query + manipulation + event + style methods |
+| **Next.js App Router** | ~88% | RSC Flight Protocol (Tier 0) + DOM bridge + events for client components |
+| **Nuxt 3 / SvelteKit** | ~90% | Devalue hydration (Tier 0) + DOM bridge + events for interactive parts |
+| **Web Components (Lit, Stencil)** | ~75% | customElements stubbed, shadowRoot reads declarative Shadow DOM children |
+| **Lazy-loaded content** | ~95% | IntersectionObserver fires per-element with estimated visibility |
+| **Infinite scroll** | ~80% | IntersectionObserver + scroll position tracking via scrollIntoView |
+| **Form validation** | ~92% | getAttribute, setAttribute, classList, focus/blur/activeElement tracking |
+| **CSS-dependent visibility** | ~88% | getComputedStyle merges inline styles + tag defaults, style.display/visibility |
 | **Chart.js / D3** | ~30% | Requires SVG/Canvas + layout — escalate to Tier 3 (Blitz) or Tier 4 (CDP) |
 | **WebGL / Canvas apps** | ~5% | No Canvas API — must use Tier 4 (CDP) |
 
