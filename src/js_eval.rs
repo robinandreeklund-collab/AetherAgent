@@ -9,6 +9,34 @@
 #[cfg(feature = "js-eval")]
 use boa_engine::{Context, Source};
 
+// ─── Sandbox-begränsningar ──────────────────────────────────────────────────
+
+/// Max loop-iterationer (förhindrar while(true) och for(;;))
+#[cfg(feature = "js-eval")]
+const MAX_LOOP_ITERATIONS: u64 = 100_000;
+
+/// Max stack-storlek (förhindrar djup rekursion)
+#[cfg(feature = "js-eval")]
+const MAX_STACK_SIZE: usize = 256;
+
+/// Max rekursionsdjup
+#[cfg(feature = "js-eval")]
+const MAX_RECURSION_DEPTH: usize = 64;
+
+/// Skapa en sandboxad Boa-kontext med runtime-begränsningar
+///
+/// Sätter loop-iterations-limit, stack-storlek och rekursionslimit
+/// för att förhindra denial-of-service i JS-sandboxen.
+#[cfg(feature = "js-eval")]
+pub(crate) fn create_sandboxed_context() -> Context {
+    let mut ctx = Context::default();
+    let limits = ctx.runtime_limits_mut();
+    limits.set_loop_iteration_limit(MAX_LOOP_ITERATIONS);
+    limits.set_stack_size_limit(MAX_STACK_SIZE);
+    limits.set_recursion_limit(MAX_RECURSION_DEPTH);
+    ctx
+}
+
 use serde::{Deserialize, Serialize};
 
 /// Resultat från en JS-evaluering
@@ -449,7 +477,7 @@ pub fn eval_js(code: &str) -> JsEvalResult {
         };
     }
 
-    let mut context = Context::default();
+    let mut context = create_sandboxed_context();
 
     match context.eval(Source::from_bytes(code)) {
         Ok(result) => {
@@ -463,12 +491,21 @@ pub fn eval_js(code: &str) -> JsEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
-        Err(e) => JsEvalResult {
-            value: None,
-            error: Some(format!("{}", e)),
-            timed_out: false,
-            eval_time_us: start.elapsed().as_micros() as u64,
-        },
+        Err(e) => {
+            // Kolla om felet beror på runtime-begränsning
+            let err_str = format!("{}", e);
+            let err_lower = err_str.to_lowercase();
+            let timed_out = err_lower.contains("loop iteration limit")
+                || err_lower.contains("stack overflow")
+                || err_lower.contains("recursion limit")
+                || err_lower.contains("runtime limit");
+            JsEvalResult {
+                value: None,
+                error: Some(err_str),
+                timed_out,
+                eval_time_us: start.elapsed().as_micros() as u64,
+            }
+        }
     }
 }
 
@@ -480,8 +517,8 @@ pub fn eval_js(code: &str) -> JsEvalResult {
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
-    // Persistent kontext — delad mellan alla snippets
-    let mut context = Context::default();
+    // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
+    let mut context = create_sandboxed_context();
     let mut results = Vec::with_capacity(snippets.len());
 
     for code in snippets {
@@ -954,6 +991,73 @@ mod tests {
             urls,
             vec!["https://api.shop.se/cart"],
             "Borde hitta $.ajax URL"
+        );
+    }
+
+    // === Runtime-begränsningar ===
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_infinite_loop_aborts() {
+        let result = eval_js("var x=0; while(x<200000) { x++; } x");
+        assert!(
+            result.error.is_some(),
+            "Loop som överskrider limit borde ge fel: value={:?}",
+            result.value
+        );
+        assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_large_for_loop_aborts() {
+        let result = eval_js("var s=0; for(var i=0; i<200000; i++) { s+=i; } s");
+        assert!(
+            result.error.is_some(),
+            "Stor loop borde ge fel: value={:?}",
+            result.value
+        );
+        assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_deep_recursion_aborts() {
+        let result = eval_js("function f(n) { return f(n+1); } f(0)");
+        assert!(result.error.is_some(), "Djup rekursion borde ge fel");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_normal_loop_works() {
+        let result = eval_js("var s=0; for(var i=0;i<100;i++){s+=i;} s");
+        assert!(
+            result.error.is_none(),
+            "Normal loop borde fungera: {:?}",
+            result.error
+        );
+        assert_eq!(result.value.as_deref(), Some("4950"));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_sandboxed_context_limits() {
+        let ctx = create_sandboxed_context();
+        let limits = ctx.runtime_limits();
+        assert_eq!(
+            limits.loop_iteration_limit(),
+            MAX_LOOP_ITERATIONS,
+            "Loop-limit borde vara satt"
+        );
+        assert_eq!(
+            limits.stack_size_limit(),
+            MAX_STACK_SIZE,
+            "Stack-limit borde vara satt"
+        );
+        assert_eq!(
+            limits.recursion_limit(),
+            MAX_RECURSION_DEPTH,
+            "Recursion-limit borde vara satt"
         );
     }
 }

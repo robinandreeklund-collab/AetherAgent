@@ -96,7 +96,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         mutations: vec![],
     }));
 
-    let mut context = Context::default();
+    let mut context = crate::js_eval::create_sandboxed_context();
 
     // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
     let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
@@ -210,7 +210,7 @@ fn register_document(context: &mut Context, state: SharedState) {
             let key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
                 tag: Some(tag_str),
-                attributes: vec![],
+                attributes: std::collections::HashMap::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -227,7 +227,7 @@ fn register_document(context: &mut Context, state: SharedState) {
             let key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
-                attributes: vec![],
+                attributes: std::collections::HashMap::new(),
                 text: Some(text_str),
                 parent: None,
                 children: vec![],

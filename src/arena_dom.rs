@@ -4,6 +4,8 @@
 /// Generational indices ger stale-reference safety utan Rc-overhead.
 ///
 /// Prestanda: ~5-10x snabbare DFS, 1 allokering istället för ~1000/sida.
+use std::collections::HashMap;
+
 use markup5ever_rcdom::{Handle, NodeData};
 use slotmap::{new_key_type, SlotMap};
 
@@ -27,24 +29,33 @@ pub enum NodeType {
 pub struct DomNode {
     pub node_type: NodeType,
     pub tag: Option<String>,
-    pub attributes: Vec<(String, String)>,
+    pub attributes: HashMap<String, String>,
     pub text: Option<String>,
     pub parent: Option<NodeKey>,
     pub children: Vec<NodeKey>,
 }
 
 impl DomNode {
-    /// Hämta attributvärde
+    /// Hämta attributvärde — O(1) via HashMap
     pub fn get_attr(&self, name: &str) -> Option<&str> {
-        self.attributes
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.as_str())
+        self.attributes.get(name).map(|v| v.as_str())
     }
 
-    /// Kolla om attribut finns (oavsett värde)
+    /// Kolla om attribut finns (oavsett värde) — O(1) via HashMap
     pub fn has_attr(&self, name: &str) -> bool {
-        self.attributes.iter().any(|(k, _)| k == name)
+        self.attributes.contains_key(name)
+    }
+
+    /// Sätt attribut — O(1) via HashMap. Används av DOM Bridge.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn set_attr(&mut self, name: &str, value: &str) {
+        self.attributes.insert(name.to_string(), value.to_string());
+    }
+
+    /// Ta bort attribut — O(1) via HashMap. Används av DOM Bridge.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn remove_attr(&mut self, name: &str) -> bool {
+        self.attributes.remove(name).is_some()
     }
 }
 
@@ -62,7 +73,7 @@ impl ArenaDom {
         let doc_key = nodes.insert(DomNode {
             node_type: NodeType::Document,
             tag: None,
-            attributes: vec![],
+            attributes: HashMap::new(),
             text: None,
             parent: None,
             children: vec![],
@@ -91,10 +102,10 @@ impl ArenaDom {
     /// Rekursiv konvertering av en Handle till arena-noder
     fn convert_handle(&mut self, handle: &Handle) -> NodeKey {
         let (node_type, tag, text, attrs) = match &handle.data {
-            NodeData::Document => (NodeType::Document, None, None, vec![]),
+            NodeData::Document => (NodeType::Document, None, None, HashMap::new()),
             NodeData::Element { name, attrs, .. } => {
                 let tag = name.local.to_string();
-                let attributes: Vec<(String, String)> = attrs
+                let attributes: HashMap<String, String> = attrs
                     .borrow()
                     .iter()
                     .map(|a| (a.name.local.to_string(), a.value.to_string()))
@@ -103,13 +114,13 @@ impl ArenaDom {
             }
             NodeData::Text { contents } => {
                 let t = contents.borrow().to_string();
-                (NodeType::Text, None, Some(t), vec![])
+                (NodeType::Text, None, Some(t), HashMap::new())
             }
             NodeData::Comment { contents } => {
                 let t = contents.to_string();
-                (NodeType::Comment, None, Some(t), vec![])
+                (NodeType::Comment, None, Some(t), HashMap::new())
             }
-            _ => (NodeType::Other, None, None, vec![]),
+            _ => (NodeType::Other, None, None, HashMap::new()),
         };
 
         let key = self.nodes.insert(DomNode {
@@ -149,6 +160,62 @@ impl ArenaDom {
             .get(key)
             .map(|n| n.has_attr(attr_name))
             .unwrap_or(false)
+    }
+
+    /// Sätt attribut på en nod — O(1) via HashMap.
+    /// Används av DOM Bridge (js-eval) för setAttribute-anrop.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn set_attr(&mut self, key: NodeKey, attr_name: &str, value: &str) {
+        if let Some(node) = self.nodes.get_mut(key) {
+            node.set_attr(attr_name, value);
+        }
+    }
+
+    /// Ta bort attribut från en nod — O(1) via HashMap.
+    /// Används av DOM Bridge (js-eval) för removeAttribute-anrop.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn remove_attr(&mut self, key: NodeKey, attr_name: &str) -> bool {
+        self.nodes
+            .get_mut(key)
+            .map(|n| n.remove_attr(attr_name))
+            .unwrap_or(false)
+    }
+
+    /// Lägg till barn-nod. Uppdaterar parent-referens.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn append_child(&mut self, parent: NodeKey, child: NodeKey) {
+        // Ta bort från tidigare förälder
+        if let Some(old_parent) = self.nodes.get(child).and_then(|n| n.parent) {
+            if let Some(old_p) = self.nodes.get_mut(old_parent) {
+                old_p.children.retain(|c| *c != child);
+            }
+        }
+        // Lägg till som barn
+        if let Some(p) = self.nodes.get_mut(parent) {
+            p.children.push(child);
+        }
+        if let Some(c) = self.nodes.get_mut(child) {
+            c.parent = Some(parent);
+        }
+    }
+
+    /// Ta bort barn-nod. Returnerar true om barnet hittades och togs bort.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn remove_child(&mut self, parent: NodeKey, child: NodeKey) -> bool {
+        let found = self
+            .nodes
+            .get(parent)
+            .map(|n| n.children.contains(&child))
+            .unwrap_or(false);
+        if found {
+            if let Some(p) = self.nodes.get_mut(parent) {
+                p.children.retain(|c| *c != child);
+            }
+            if let Some(c) = self.nodes.get_mut(child) {
+                c.parent = None;
+            }
+        }
+        found
     }
 
     /// Hämta barn-nycklar
@@ -531,6 +598,42 @@ mod tests {
             Some("nav"),
             "class borde bevaras"
         );
+    }
+
+    #[test]
+    fn test_set_attr_and_remove_attr() {
+        let mut arena =
+            make_arena(r##"<html><body><div id="target" class="old">X</div></body></html>"##);
+        let div = find_by_tag(&arena, arena.document, "div").expect("Borde hitta <div>");
+
+        // set_attr — nytt attribut
+        arena.nodes[div].set_attr("data-x", "123");
+        assert_eq!(
+            arena.get_attr(div, "data-x"),
+            Some("123"),
+            "Nytt attribut borde sättas"
+        );
+
+        // set_attr — uppdatera existerande
+        arena.nodes[div].set_attr("class", "new");
+        assert_eq!(
+            arena.get_attr(div, "class"),
+            Some("new"),
+            "Existerande attribut borde uppdateras"
+        );
+
+        // remove_attr
+        let removed = arena.nodes[div].remove_attr("data-x");
+        assert!(removed, "remove_attr borde returnera true");
+        assert_eq!(
+            arena.get_attr(div, "data-x"),
+            None,
+            "Borttaget attribut borde vara None"
+        );
+
+        // remove_attr — obefintligt
+        let removed = arena.nodes[div].remove_attr("nonexistent");
+        assert!(!removed, "remove_attr på obefintligt borde returnera false");
     }
 
     #[test]
