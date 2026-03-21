@@ -234,6 +234,132 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 
 **Event loop (Fas 18):** Full event loop with microtask queue (Promise.then, queueMicrotask), setTimeout/setInterval (capped: max 100 timers, 5000ms delay, virtual clock), requestAnimationFrame (simulated 16ms ticks), MutationObserver (tied to ArenaDom). Safety: max 1000 ticks, 50ms wall time. Integrated into `eval_js_with_dom` — all evals drain the event loop automatically.
 
+#### DOM API Coverage
+
+55+ DOM methods exposed to the Boa JS sandbox. Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return realistic defaults without real behavior.
+
+**Document methods:**
+
+| Method | Status | Details |
+|--------|--------|---------|
+| `getElementById(id)` | Full | O(n) recursive search by `id` attribute |
+| `querySelector(sel)` | Full | Full CSS selector matching (see below) |
+| `querySelectorAll(sel)` | Full | Returns JsArray of all matches |
+| `createElement(tag)` | Full | Inserts new Element node into arena |
+| `createTextNode(text)` | Full | Inserts new Text node into arena |
+| `createComment(text)` | Full | Inserts new Comment node (Vue support) |
+| `createDocumentFragment()` | Full | Creates fragment node for batch operations |
+| `getElementsByClassName(cls)` | Full | Recursive class search, returns JsArray |
+| `getElementsByTagName(tag)` | Full | Recursive tag search, returns JsArray |
+| `document.body` | Full | Resolved from arena at init |
+| `document.head` | Full | Resolved from arena at init |
+| `document.documentElement` | Full | Resolved from arena at init |
+
+**Element methods:**
+
+| Method | Status | Details |
+|--------|--------|---------|
+| `getAttribute(name)` | Full | Reads from HashMap attributes, O(1) |
+| `setAttribute(name, value)` | Full | Writes to arena, logs mutation |
+| `removeAttribute(name)` | Full | Removes from arena, logs mutation |
+| `textContent` (getter) | Full | Recursive text extraction from arena |
+| `setTextContent(text)` | Full | Clears children, creates new text node |
+| `innerHTML` (getter) | Full | Serializes children to HTML string |
+| `outerHTML` (getter) | Full | Serializes element + children to HTML |
+| `appendChild(child)` | Full | Moves node in arena, updates parent refs |
+| `removeChild(child)` | Full | Removes from arena, clears parent ref |
+| `insertBefore(new, ref)` | Full | Index-based insertion in children vec |
+| `cloneNode(deep)` | Full | Recursive deep copy in arena |
+| `parentNode` | Full | Returns parent key from arena |
+| `childNodes` | Full | Returns JsArray of all children |
+| `children` | Full | Returns JsArray of element children only |
+| `firstChild` | Full | First child key |
+| `firstElementChild` | Full | First Element child (skips text nodes) |
+| `nextSibling` | Full | Next sibling key from parent's children |
+| `nextElementSibling` | Full | Next Element sibling (skips text nodes) |
+| `closest(selector)` | Full | Traverses ancestors, matches CSS selector |
+| `matches(selector)` | Full | Tests if element matches CSS selector |
+| `dataset` | Full | Reads `data-*` attributes, kebab→camelCase |
+| `id` / `className` / `tagName` | Full | Set as properties from arena at creation |
+| `nodeType` | Full | 1=Element, 3=Text, 8=Comment, 9=Document |
+| `classList.add(cls)` | Full | Adds class to arena attribute |
+| `classList.remove(cls)` | Full | Removes class from arena attribute |
+| `classList.toggle(cls)` | Full | Toggles class, returns boolean |
+| `classList.contains(cls)` | Full | Checks class presence |
+| `classList.replace(old, new)` | Full | Replaces class, returns boolean |
+| `classList.value()` | Full | Returns full class string |
+| `classList.length()` | Full | Returns class count |
+| `addEventListener(type, fn)` | Stub | No-op (accepts call without error) |
+| `removeEventListener(type, fn)` | Stub | No-op |
+| `dispatchEvent(event)` | Stub | Returns `true` |
+| `focus()` / `blur()` | Stub | No-op |
+| `scrollIntoView()` | Stub | No-op |
+| `getBoundingClientRect()` | Stub | Returns `{x:0, y:0, width:100, height:30}` |
+| `getClientRects()` | Stub | Returns array with one rect |
+| `style.setProperty(k, v)` | Stub | No-op |
+| `style.getPropertyValue(k)` | Stub | Returns `""` |
+| `style.removeProperty(k)` | Stub | No-op |
+| `shadowRoot` | Stub | Returns `null` (ready for Shadow DOM traversal) |
+| `offsetTop/Left/Width/Height` | Stub | 0/0/100/30 |
+| `scrollTop/Left/Width/Height` | Stub | 0/0/1024/768 |
+| `clientWidth/Height` | Stub | 100/30 |
+
+**Window & global methods:**
+
+| Method | Status | Details |
+|--------|--------|---------|
+| `window.innerWidth/innerHeight` | Stub | 1024/768 |
+| `window.location.*` | Stub | href, hostname, pathname, protocol |
+| `window.navigator.*` | Stub | userAgent="AetherAgent/0.1", language="en" |
+| `getComputedStyle(el)` | Stub | 14 CSS properties + `getPropertyValue()` |
+| `IntersectionObserver` | Stub | Triggers callback immediately (all visible) — lazy-load works |
+| `ResizeObserver` | Stub | observe/unobserve/disconnect (no-op) |
+| `MutationObserver` | Full | observe/disconnect via event loop |
+| `customElements.define/get/whenDefined` | Stub | Web Components registration (no-op) |
+| `setTimeout/setInterval` | Full | Virtual clock, max 100 timers, 5s delay |
+| `clearTimeout/clearInterval` | Full | Cancel by ID |
+| `requestAnimationFrame` | Full | Simulated 16ms ticks |
+| `cancelAnimationFrame` | Full | Cancel by ID |
+| `queueMicrotask` | Full | Delegates to Boa job queue |
+| `Promise.then/catch/finally` | Full | Via Boa's SimpleJobExecutor + run_jobs() |
+| `console.log/warn/error/info` | Stub | No-op (accepts calls without error) |
+
+**CSS Selector support** (used by `querySelector`, `querySelectorAll`, `closest`, `matches`):
+
+| Selector | Example | Status |
+|----------|---------|--------|
+| ID | `#myid` | Full |
+| Class | `.myclass` | Full |
+| Tag | `div` | Full |
+| Combined | `div.cls` | Full |
+| Attribute presence | `[data-id]` | Full |
+| Attribute value | `[type="text"]` | Full |
+| Tag + attribute | `input[type="text"]` | Full |
+| Child combinator | `div > span` | Full |
+| Descendant combinator | `div span` | Full |
+| Pseudo-class | `:first-child` | Full |
+| Multiple selectors | `h1, h2, h3` | Full |
+| Complex combination | `div.container > a.link` | Full |
+
+**Expected framework coverage with this DOM API:**
+
+| Framework / Scenario | Coverage | Notes |
+|---------------------|----------|-------|
+| **React SSR hydration** | ~90% | getElementById, textContent, classList, appendChild — covers most hydration scripts |
+| **Vue 3 mount + reactivity** | ~85% | querySelector, classList, createComment (v-if anchors), setAttribute |
+| **Svelte compiled output** | ~90% | Direct DOM manipulation via createElement, appendChild, textContent |
+| **Angular Universal** | ~75% | querySelector, classList, setAttribute — some template bindings need full event system |
+| **Vanilla JS / jQuery** | ~95% | All query + manipulation methods, event stubs prevent crashes |
+| **Next.js App Router** | ~80% | RSC Flight Protocol extraction (Tier 0) + DOM bridge for client components |
+| **Nuxt 3 / SvelteKit** | ~85% | Devalue hydration (Tier 0) + DOM bridge for interactive parts |
+| **Web Components (Lit, Stencil)** | ~60% | customElements.define stubbed, shadowRoot=null — content inside shadow DOM invisible |
+| **Lazy-loaded content** | ~90% | IntersectionObserver stub triggers immediately — all lazy content loads |
+| **Infinite scroll** | ~70% | IntersectionObserver works, but no real scroll position |
+| **Form validation** | ~85% | getAttribute, setAttribute, classList, focus/blur stubs |
+| **CSS-dependent visibility** | ~80% | getComputedStyle returns defaults — hidden elements may appear visible |
+| **Chart.js / D3** | ~30% | Requires SVG/Canvas + layout — escalate to Tier 3 (Blitz) or Tier 4 (CDP) |
+| **WebGL / Canvas apps** | ~5% | No Canvas API — must use Tier 4 (CDP) |
+
 ### 6. Temporal Memory & Adversarial Modeling
 
 **Module:** `temporal.rs`, `memory.rs`
