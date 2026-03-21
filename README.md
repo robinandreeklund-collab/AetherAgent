@@ -232,7 +232,7 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 
 **Persistent context:** `eval_js_batch` shares a single Boa Context across all snippets — variables defined in snippet 1 are available in snippet 2. `eval_js_with_dom` creates one context per call with full DOM bindings.
 
-**Known limitation:** No event loop — no microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Boa evaluates synchronously only.
+**Event loop (Fas 18):** Full event loop with microtask queue (Promise.then, queueMicrotask), setTimeout/setInterval (capped: max 100 timers, 5000ms delay, virtual clock), requestAnimationFrame (simulated 16ms ticks), MutationObserver (tied to ArenaDom). Safety: max 1000 ticks, 50ms wall time. Integrated into `eval_js_with_dom` — all evals drain the event loop automatically.
 
 ### 6. Temporal Memory & Adversarial Modeling
 
@@ -1692,10 +1692,8 @@ Track which model produced each result via the `model_version` field:
 
 ### Future Work
 
-**Active:**
-- **Event loop primitives** — Boa lacks microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Required for SPA frameworks that use async rendering.
-
 **Completed:**
+- ~~**Event loop**~~ ✓ Implemented — `event_loop.rs`: microtask queue (Promise.then, queueMicrotask), setTimeout/setInterval (max 100 timers, 5s delay, virtual clock), requestAnimationFrame (16ms ticks), MutationObserver. Safety-capped at 1000 ticks / 50ms wall time.
 - ~~**Full JS execution bridge**~~ ✓ Implemented — `dom_bridge.rs` exposes `document`/`window` to Boa via Arena DOM. `getElementById`, `querySelector`, `querySelectorAll`, `createElement`, `createTextNode`, `console.log`, `window.location/navigator`.
 - ~~**SSR hydration extraction**~~ ✓ Implemented — `hydration.rs` extracts data from 10 frameworks (Next.js Pages + App Router, Nuxt 2/3, Angular, Remix, Gatsby, SvelteKit, Qwik, Astro, Apollo) without running JS.
 - ~~**Devalue deserializer**~~ ✓ Implemented — Nuxt 3+ and SvelteKit 2+ use `devalue` (Date, BigInt, Map, Set, circular refs). Built-in parser with JSON fallback.

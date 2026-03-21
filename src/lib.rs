@@ -9,6 +9,8 @@ mod diff;
 #[cfg(feature = "js-eval")]
 mod dom_bridge;
 mod escalation;
+#[cfg(feature = "js-eval")]
+mod event_loop;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
@@ -220,6 +222,8 @@ pub fn eval_js_with_dom(html: &str, code: &str) -> String {
         error: Option<String>,
         mutation_count: usize,
         eval_time_us: u64,
+        event_loop_ticks: usize,
+        timers_fired: usize,
     }
 
     let output = DomEvalOutput {
@@ -227,6 +231,8 @@ pub fn eval_js_with_dom(html: &str, code: &str) -> String {
         error: result.error,
         mutation_count: result.mutations.len(),
         eval_time_us: result.eval_time_us,
+        event_loop_ticks: result.event_loop_ticks,
+        timers_fired: result.timers_fired,
     };
 
     match serialize_json(&output, 1) {

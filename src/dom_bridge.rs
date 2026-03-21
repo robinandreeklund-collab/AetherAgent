@@ -22,6 +22,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::arena_dom::{ArenaDom, NodeKey, NodeType};
+use crate::event_loop::{self, EventLoopState, SharedEventLoop};
 
 /// Resultat från DOM-medveten JS-evaluering
 #[derive(Debug, Clone)]
@@ -34,6 +35,10 @@ pub struct DomEvalResult {
     pub mutations: Vec<DomMutation>,
     /// Exekveringstid i mikrosekunder
     pub eval_time_us: u64,
+    /// Event-loop-statistik (ticks, timers, rAF)
+    pub event_loop_ticks: usize,
+    /// Antal timer-callbacks som kördes
+    pub timers_fired: usize,
 }
 
 /// En mutation som JS-koden utförde på DOM:en (placeholder för framtida mutation-tracking)
@@ -57,7 +62,8 @@ type SharedState = Rc<RefCell<BridgeState>>;
 pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
     let start = std::time::Instant::now();
 
-    // Säkerhetskontroll: blockera farliga operationer (behåll nätverks-block)
+    // Säkerhetskontroll: blockera farliga operationer
+    // setTimeout/setInterval tillåts nu — hanteras av event-loopen med begränsningar
     let lower = code.to_lowercase();
     for forbidden in &[
         "fetch(",
@@ -65,8 +71,6 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         "import(",
         "require(",
         "eval(",
-        "settimeout",
-        "setinterval",
         "new worker",
         "indexeddb",
         "localstorage",
@@ -81,6 +85,8 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 )),
                 mutations: vec![],
                 eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: 0,
+                timers_fired: 0,
             };
         }
     }
@@ -91,6 +97,10 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
     }));
 
     let mut context = Context::default();
+
+    // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
+    let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+    event_loop::register_event_loop(&mut context, Rc::clone(&el));
 
     // Registrera document-objekt
     register_document(&mut context, Rc::clone(&state));
@@ -107,6 +117,13 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 .to_string(&mut context)
                 .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
 
+            // Kör event-loopen: dränera microtasks, timers, rAF, MutationObservers
+            let loop_stats = event_loop::run_event_loop(&mut context, &el);
+            let (ticks, timers) = match &loop_stats {
+                Ok(s) => (s.ticks, s.timers_fired),
+                Err(_) => (0, 0),
+            };
+
             let mutations = state.borrow().mutations.clone();
 
             DomEvalResult {
@@ -115,9 +132,11 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 } else {
                     Some(value_str)
                 },
-                error: None,
+                error: loop_stats.err(),
                 mutations,
                 eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: ticks,
+                timers_fired: timers,
             }
         }
         Err(e) => DomEvalResult {
@@ -125,6 +144,8 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
             error: Some(format!("{}", e)),
             mutations: state.borrow().mutations.clone(),
             eval_time_us: start.elapsed().as_micros() as u64,
+            event_loop_ticks: 0,
+            timers_fired: 0,
         },
     }
 }
@@ -758,6 +779,52 @@ mod tests {
             result.value.as_deref(),
             Some("59.98"),
             "Matematik borde fungera med DOM-kontext"
+        );
+    }
+
+    // === Event Loop Integration ===
+
+    #[test]
+    fn test_setTimeout_in_dom_context() {
+        let arena = make_arena(r#"<html><body><div id="t">A</div></body></html>"#);
+        let code = r#"
+            var x = 0;
+            setTimeout(function() { x = 42; }, 1);
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(
+            result.error.is_none(),
+            "setTimeout borde inte ge fel: {:?}",
+            result.error
+        );
+        assert!(
+            result.event_loop_ticks > 0,
+            "Event loop borde ha kört: ticks={}",
+            result.event_loop_ticks
+        );
+        assert!(
+            result.timers_fired > 0,
+            "Timer borde ha körts: fired={}",
+            result.timers_fired
+        );
+    }
+
+    #[test]
+    fn test_promise_in_dom_context() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var resolved = false;
+            Promise.resolve(1).then(function(v) { resolved = true; });
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(
+            result.error.is_none(),
+            "Promise borde inte ge fel: {:?}",
+            result.error
+        );
+        assert!(
+            result.event_loop_ticks > 0,
+            "Event loop borde ha dränerat microtasks"
         );
     }
 }
