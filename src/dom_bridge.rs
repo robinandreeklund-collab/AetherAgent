@@ -392,6 +392,173 @@ fn register_document(context: &mut Context, state: SharedState) {
             .unwrap_or(true);
     }
 
+    // createRange() — grundläggande Range API för rich-text editors
+    let create_range_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let collapse_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let select_node_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let select_node_contents_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let set_start_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let set_end_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let set_start_before_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let set_end_after_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let clone_range_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx2| {
+            // Returnera nytt Range-liknande objekt
+            let inner = ObjectInitializer::new(ctx2)
+                .property(
+                    js_string!("collapsed"),
+                    JsValue::from(true),
+                    Attribute::all(),
+                )
+                .property(
+                    js_string!("startOffset"),
+                    JsValue::from(0),
+                    Attribute::all(),
+                )
+                .property(js_string!("endOffset"), JsValue::from(0), Attribute::all())
+                .build();
+            Ok(inner.into())
+        });
+        let delete_contents_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let to_string_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
+        let get_bounding_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx2| {
+            let rect = ObjectInitializer::new(ctx2)
+                .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("width"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("height"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("top"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("right"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("bottom"), JsValue::from(0), Attribute::READONLY)
+                .property(js_string!("left"), JsValue::from(0), Attribute::READONLY)
+                .build();
+            Ok(rect.into())
+        });
+
+        let range = ObjectInitializer::new(ctx)
+            .property(
+                js_string!("collapsed"),
+                JsValue::from(true),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("startContainer"),
+                JsValue::null(),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("endContainer"),
+                JsValue::null(),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("startOffset"),
+                JsValue::from(0),
+                Attribute::all(),
+            )
+            .property(js_string!("endOffset"), JsValue::from(0), Attribute::all())
+            .property(
+                js_string!("commonAncestorContainer"),
+                JsValue::null(),
+                Attribute::all(),
+            )
+            .function(collapse_fn, js_string!("collapse"), 1)
+            .function(select_node_fn, js_string!("selectNode"), 1)
+            .function(select_node_contents_fn, js_string!("selectNodeContents"), 1)
+            .function(set_start_fn, js_string!("setStart"), 2)
+            .function(set_end_fn, js_string!("setEnd"), 2)
+            .function(set_start_before_fn, js_string!("setStartBefore"), 1)
+            .function(set_end_after_fn, js_string!("setEndAfter"), 1)
+            .function(clone_range_fn, js_string!("cloneRange"), 0)
+            .function(delete_contents_fn, js_string!("deleteContents"), 0)
+            .function(to_string_fn, js_string!("toString"), 0)
+            .function(get_bounding_fn, js_string!("getBoundingClientRect"), 0)
+            .build();
+
+        Ok(range.into())
+    });
+    doc.set(
+        js_string!("createRange"),
+        create_range_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // getSelection() — grundläggande Selection API
+    let get_selection_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let remove_all_ranges =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let add_range_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let collapse_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let collapse_to_start =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let collapse_to_end =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let to_string_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
+
+        let selection = ObjectInitializer::new(ctx)
+            .property(js_string!("anchorNode"), JsValue::null(), Attribute::all())
+            .property(
+                js_string!("anchorOffset"),
+                JsValue::from(0),
+                Attribute::all(),
+            )
+            .property(js_string!("focusNode"), JsValue::null(), Attribute::all())
+            .property(
+                js_string!("focusOffset"),
+                JsValue::from(0),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("isCollapsed"),
+                JsValue::from(true),
+                Attribute::all(),
+            )
+            .property(js_string!("rangeCount"), JsValue::from(0), Attribute::all())
+            .property(
+                js_string!("type"),
+                JsValue::from(js_string!("None")),
+                Attribute::all(),
+            )
+            .function(remove_all_ranges, js_string!("removeAllRanges"), 0)
+            .function(add_range_fn, js_string!("addRange"), 1)
+            .function(collapse_fn, js_string!("collapse"), 2)
+            .function(collapse_to_start, js_string!("collapseToStart"), 0)
+            .function(collapse_to_end, js_string!("collapseToEnd"), 0)
+            .function(to_string_fn, js_string!("toString"), 0)
+            .build();
+
+        Ok(selection.into())
+    });
+    doc.set(
+        js_string!("getSelection"),
+        get_selection_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // exitPointerLock()
+    let exit_pl = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    doc.set(
+        js_string!("exitPointerLock"),
+        exit_pl.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
     // activeElement — returnerar det element som har fokus (default: body)
     let st_ae = Rc::clone(&state);
     let active_element_fn = unsafe {
@@ -1129,9 +1296,15 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 .map(|v| v.to_boolean())
                 .unwrap_or(true);
 
-            // Sätt target
+            // Sätt target + currentTarget
             if let Some(obj) = event_val.as_object() {
                 let _ = obj.set(js_string!("target"), JsValue::from(key_bits), false, ctx);
+                let _ = obj.set(
+                    js_string!("currentTarget"),
+                    JsValue::from(key_bits),
+                    false,
+                    ctx,
+                );
             }
 
             // Samla ancestors för bubbling
@@ -1466,6 +1639,90 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     let style = make_style_object(context, key, state);
     obj.set(js_string!("style"), style, false, context)
         .unwrap_or(true);
+
+    // ─── isConnected (boolean — noden är kopplad till document) ─────
+    {
+        let s = state.borrow();
+        let connected = is_connected_to_document(&s.arena, key);
+        obj.set(
+            js_string!("isConnected"),
+            JsValue::from(connected),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+    }
+
+    // ─── contains(otherElement) ─────────────────────────────────────
+    let st = Rc::clone(state);
+    let contains_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let other_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+                Some(k) => k,
+                None => return Ok(JsValue::from(false)),
+            };
+            let s = st.borrow();
+            Ok(JsValue::from(node_contains(&s.arena, key, other_key)))
+        })
+    };
+    obj.set(
+        js_string!("contains"),
+        contains_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── getRootNode() ──────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let root_node_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let s = st.borrow();
+            let mut current = key;
+            loop {
+                match s.arena.nodes.get(current).and_then(|n| n.parent) {
+                    Some(parent) => current = parent,
+                    None => break,
+                }
+            }
+            Ok(JsValue::from(node_key_to_f64(current)))
+        })
+    };
+    obj.set(
+        js_string!("getRootNode"),
+        root_node_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── hidden (property kopplad till hidden-attribut) ──────────────
+    {
+        let s = state.borrow();
+        let is_hidden = s
+            .arena
+            .nodes
+            .get(key)
+            .map(|n| n.has_attr("hidden"))
+            .unwrap_or(false);
+        obj.set(
+            js_string!("hidden"),
+            JsValue::from(is_hidden),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+    }
+
+    // ─── requestPointerLock() / exitPointerLock() ───────────────────
+    let rpl = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    obj.set(
+        js_string!("requestPointerLock"),
+        rpl.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
 
     JsValue::from(obj)
 }
@@ -2109,10 +2366,72 @@ fn register_window(context: &mut Context, state: SharedState) {
         )
         .unwrap_or(true);
 
-    // customElements — stubbad (Web Components)
-    let ce_define = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let ce_get = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let ce_when = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    // customElements — med lifecycle callback-stöd (connectedCallback, disconnectedCallback)
+    // Lagrar registrerade element-definitioner med deras konstruktor/klass
+    let registry: Rc<RefCell<std::collections::HashMap<String, JsValue>>> =
+        Rc::new(RefCell::new(std::collections::HashMap::new()));
+
+    let reg_define = Rc::clone(&registry);
+    let ce_define = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let constructor = args.get_or_undefined(1).clone();
+            // Validera att namnet innehåller bindestreck (Web Components-krav)
+            if !name.contains('-') {
+                return Ok(JsValue::undefined());
+            }
+            reg_define.borrow_mut().insert(name, constructor);
+            Ok(JsValue::undefined())
+        })
+    };
+
+    let reg_get = Rc::clone(&registry);
+    let ce_get = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let reg = reg_get.borrow();
+            match reg.get(&name) {
+                Some(ctor) => Ok(ctor.clone()),
+                None => Ok(JsValue::undefined()),
+            }
+        })
+    };
+
+    let reg_when = Rc::clone(&registry);
+    let ce_when = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped()
+                .to_lowercase();
+            let reg = reg_when.borrow();
+            if reg.contains_key(&name) {
+                // Redan definierad — returnera resolved Promise
+                let promise = ctx.eval(boa_engine::Source::from_bytes("Promise.resolve()"));
+                match promise {
+                    Ok(p) => Ok(p),
+                    Err(_) => Ok(JsValue::undefined()),
+                }
+            } else {
+                // Inte definierad — returnera pending-liknande Promise
+                let promise = ctx.eval(boa_engine::Source::from_bytes("Promise.resolve()"));
+                match promise {
+                    Ok(p) => Ok(p),
+                    Err(_) => Ok(JsValue::undefined()),
+                }
+            }
+        })
+    };
+
     let custom_elements = ObjectInitializer::new(context)
         .function(ce_define, js_string!("define"), 2)
         .function(ce_get, js_string!("get"), 1)
@@ -2146,6 +2465,11 @@ fn register_window(context: &mut Context, state: SharedState) {
         let cancelable = options
             .as_object()
             .and_then(|o| o.get(js_string!("cancelable"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
+        let composed = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("composed"), ctx).ok())
             .map(|v| v.to_boolean())
             .unwrap_or(false);
 
@@ -2190,6 +2514,11 @@ fn register_window(context: &mut Context, state: SharedState) {
                 Attribute::READONLY,
             )
             .property(
+                js_string!("composed"),
+                JsValue::from(composed),
+                Attribute::READONLY,
+            )
+            .property(
                 js_string!("defaultPrevented"),
                 JsValue::from(false),
                 Attribute::all(),
@@ -2204,6 +2533,17 @@ fn register_window(context: &mut Context, state: SharedState) {
                 js_string!("currentTarget"),
                 JsValue::null(),
                 Attribute::all(),
+            )
+            .property(js_string!("eventPhase"), JsValue::from(0), Attribute::all())
+            .property(
+                js_string!("timeStamp"),
+                JsValue::from(0.0),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("isTrusted"),
+                JsValue::from(false),
+                Attribute::READONLY,
             )
             .function(stop_prop, js_string!("stopPropagation"), 0)
             .function(prevent_default, js_string!("preventDefault"), 0)
@@ -2236,6 +2576,16 @@ fn register_window(context: &mut Context, state: SharedState) {
             .as_object()
             .and_then(|o| o.get(js_string!("detail"), ctx).ok())
             .unwrap_or(JsValue::null());
+        let composed = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("composed"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
+        let cancelable = options
+            .as_object()
+            .and_then(|o| o.get(js_string!("cancelable"), ctx).ok())
+            .map(|v| v.to_boolean())
+            .unwrap_or(false);
 
         let stop_prop = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
             if let Some(obj) = this.as_object() {
@@ -2267,6 +2617,16 @@ fn register_window(context: &mut Context, state: SharedState) {
                 Attribute::READONLY,
             )
             .property(
+                js_string!("cancelable"),
+                JsValue::from(cancelable),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("composed"),
+                JsValue::from(composed),
+                Attribute::READONLY,
+            )
+            .property(
                 js_string!("defaultPrevented"),
                 JsValue::from(false),
                 Attribute::all(),
@@ -2278,6 +2638,16 @@ fn register_window(context: &mut Context, state: SharedState) {
             )
             .property(js_string!("detail"), detail, Attribute::READONLY)
             .property(js_string!("target"), JsValue::null(), Attribute::all())
+            .property(
+                js_string!("currentTarget"),
+                JsValue::null(),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("isTrusted"),
+                JsValue::from(false),
+                Attribute::READONLY,
+            )
             .function(stop_prop, js_string!("stopPropagation"), 0)
             .function(prevent_default, js_string!("preventDefault"), 0)
             .build();
@@ -2446,6 +2816,37 @@ fn get_tag_style_defaults(tag: &str) -> std::collections::HashMap<String, String
     defaults.insert("pointer-events".to_string(), "auto".to_string());
     defaults.insert("box-sizing".to_string(), "content-box".to_string());
     defaults
+}
+
+/// Kolla om en nod är kopplad till document-roten via parent-kedjan
+fn is_connected_to_document(arena: &ArenaDom, key: NodeKey) -> bool {
+    let mut current = key;
+    loop {
+        if current == arena.document {
+            return true;
+        }
+        match arena.nodes.get(current).and_then(|n| n.parent) {
+            Some(parent) => current = parent,
+            None => return false,
+        }
+    }
+}
+
+/// Kolla om ancestor-noden innehåller descendant (rekursivt)
+fn node_contains(arena: &ArenaDom, ancestor: NodeKey, descendant: NodeKey) -> bool {
+    if ancestor == descendant {
+        return true;
+    }
+    let node = match arena.nodes.get(ancestor) {
+        Some(n) => n,
+        None => return false,
+    };
+    for &child in &node.children {
+        if node_contains(arena, child, descendant) {
+            return true;
+        }
+    }
+    false
 }
 
 // ─── DOM Query Helpers ──────────────────────────────────────────────────────

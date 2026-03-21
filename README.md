@@ -254,6 +254,10 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | `document.body` | Full | Resolved from arena at init |
 | `document.head` | Full | Resolved from arena at init |
 | `document.documentElement` | Full | Resolved from arena at init |
+| `document.activeElement` | Full | Returns focused element or body (default) |
+| `document.createRange()` | Full | Range with collapse, selectNode, setStart/End, cloneRange, getBoundingClientRect |
+| `document.getSelection()` | Full | Selection with anchorNode, focusNode, removeAllRanges, addRange, collapse |
+| `document.exitPointerLock()` | Stub | No-op |
 
 **Element methods:**
 
@@ -282,6 +286,11 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | `dataset` | Full | Reads `data-*` attributes, kebab→camelCase |
 | `id` / `className` / `tagName` | Full | Set as properties from arena at creation |
 | `nodeType` | Full | 1=Element, 3=Text, 8=Comment, 9=Document |
+| `isConnected` | Full | Traverses parent chain to check document connection |
+| `contains(otherElement)` | Full | Recursive descendant check via arena hierarchy |
+| `getRootNode()` | Full | Walks parent chain to root (document or shadow root) |
+| `hidden` | Full | Bound to `hidden` HTML attribute |
+| `requestPointerLock()` | Stub | No-op (accepts call without error) |
 | `classList.add(cls)` | Full | Adds class to arena attribute |
 | `classList.remove(cls)` | Full | Removes class from arena attribute |
 | `classList.toggle(cls)` | Full | Toggles class, returns boolean |
@@ -317,9 +326,11 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | `getComputedStyle(el)` | Full | Merges inline styles + tag-based defaults, 15 CSS properties + `getPropertyValue()` |
 | `IntersectionObserver` | Full | Fires callback per element on `observe()` with estimated rect + visibility |
 | `ResizeObserver` | Full | Fires callback on `observe()` with contentRect + borderBoxSize |
-| `Event` constructor | Full | `new Event('click', {bubbles, cancelable})` with stopPropagation/preventDefault |
-| `CustomEvent` constructor | Full | `new CustomEvent('x', {detail, bubbles})` with detail property |
-| `document.activeElement` | Full | Returns focused element or body (default) |
+| `Event` constructor | Full | `new Event('click', {bubbles, cancelable, composed})` with stopPropagation/preventDefault/stopImmediatePropagation, eventPhase, timeStamp, isTrusted |
+| `CustomEvent` constructor | Full | `new CustomEvent('x', {detail, bubbles, cancelable, composed})` with all Event fields + detail |
+| `customElements.define(name, ctor)` | Full | Stores constructor in registry, validates name contains hyphen |
+| `customElements.get(name)` | Full | Returns registered constructor or undefined |
+| `customElements.whenDefined(name)` | Full | Returns resolved Promise |
 | `MutationObserver` | Full | observe/disconnect via event loop |
 | `customElements.define/get/whenDefined` | Stub | Web Components registration (no-op) |
 | `setTimeout/setInterval` | Full | Virtual clock, max 100 timers, 5s delay |
@@ -358,7 +369,7 @@ Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluati
 | **Vanilla JS / jQuery** | ~98% | All query + manipulation + event + style methods |
 | **Next.js App Router** | ~88% | RSC Flight Protocol (Tier 0) + DOM bridge + events for client components |
 | **Nuxt 3 / SvelteKit** | ~90% | Devalue hydration (Tier 0) + DOM bridge + events for interactive parts |
-| **Web Components (Lit, Stencil)** | ~75% | customElements stubbed, shadowRoot reads declarative Shadow DOM children |
+| **Web Components (Lit, Stencil)** | ~82% | customElements.define med registry, shadowRoot traversal, isConnected/getRootNode |
 | **Lazy-loaded content** | ~95% | IntersectionObserver fires per-element with estimated visibility |
 | **Infinite scroll** | ~80% | IntersectionObserver + scroll position tracking via scrollIntoView |
 | **Form validation** | ~92% | getAttribute, setAttribute, classList, focus/blur/activeElement tracking |
