@@ -8,6 +8,7 @@ mod compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
 mod dom_bridge;
+mod escalation;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
@@ -185,6 +186,19 @@ pub fn extract_hydration(html: &str, goal: &str) -> String {
         }
     } else {
         r#"{"found":false}"#.to_string()
+    }
+}
+
+/// Analyze HTML and select optimal parse tier (Fas 17.4)
+///
+/// Returns JSON with tier decision: Hydration (0), StaticParse (1),
+/// BoaDom (2), BlitzRender (3), or ChromeCdp (4).
+#[wasm_bindgen]
+pub fn select_parse_tier(html: &str, url: &str) -> String {
+    let decision = escalation::select_tier(html, url);
+    match serialize_json(&decision, 1) {
+        Ok(json) => json,
+        Err(e) => e,
     }
 }
 
