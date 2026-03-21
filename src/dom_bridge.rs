@@ -317,6 +317,25 @@ fn register_document(context: &mut Context, state: SharedState) {
         })
     };
 
+    // createDocumentFragment
+    let state_cdf = Rc::clone(&state);
+    let create_doc_fragment = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let key = {
+                let mut s = state_cdf.borrow_mut();
+                s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Other, // Fragment
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: None,
+                    parent: None,
+                    children: vec![],
+                })
+            };
+            Ok(make_element_object(ctx, key, &state_cdf))
+        })
+    };
+
     // Bygg document-objektet
     let doc = ObjectInitializer::new(context)
         .function(get_element_by_id, js_string!("getElementById"), 1)
@@ -325,6 +344,7 @@ fn register_document(context: &mut Context, state: SharedState) {
         .function(create_element, js_string!("createElement"), 1)
         .function(create_text_node, js_string!("createTextNode"), 1)
         .function(create_comment, js_string!("createComment"), 1)
+        .function(create_doc_fragment, js_string!("createDocumentFragment"), 0)
         .function(get_by_class, js_string!("getElementsByClassName"), 1)
         .function(get_by_tag, js_string!("getElementsByTagName"), 1)
         .build();
@@ -786,6 +806,350 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
+    // ─── insertBefore(newChild, refChild) ─────────────────────────
+    let st = Rc::clone(state);
+    let ib = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let new_child = match extract_node_key(args.get_or_undefined(0), ctx) {
+                Some(k) => k,
+                None => return Ok(JsValue::undefined()),
+            };
+            let ref_child = extract_node_key(args.get_or_undefined(1), ctx);
+            let mut s = st.borrow_mut();
+            s.arena.insert_before(key, new_child, ref_child);
+            s.mutations.push("insertBefore".to_string());
+            Ok(args.get_or_undefined(0).clone())
+        })
+    };
+    obj.set(
+        js_string!("insertBefore"),
+        ib.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── cloneNode(deep) ────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let cn_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let mut s = st.borrow_mut();
+            match s.arena.clone_node_deep(key) {
+                Some(clone_key) => {
+                    let bits = node_key_to_f64(clone_key);
+                    let clone_obj = ObjectInitializer::new(ctx)
+                        .property(
+                            js_string!("__nodeKey__"),
+                            JsValue::from(bits),
+                            Attribute::empty(),
+                        )
+                        .property(
+                            js_string!("nodeType"),
+                            JsValue::from(1),
+                            Attribute::READONLY,
+                        )
+                        .build();
+                    Ok(clone_obj.into())
+                }
+                None => Ok(JsValue::null()),
+            }
+        })
+    };
+    obj.set(
+        js_string!("cloneNode"),
+        cn_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── outerHTML (getter) ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let oh = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            Ok(JsValue::from(js_string!(s
+                .arena
+                .serialize_html(key)
+                .as_str())))
+        })
+    };
+    obj.set(
+        js_string!("outerHTML"),
+        oh.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── innerHTML (getter/setter) ──────────────────────────────────
+    let st = Rc::clone(state);
+    let ih = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            Ok(JsValue::from(js_string!(s
+                .arena
+                .serialize_inner_html(key)
+                .as_str())))
+        })
+    };
+    obj.set(
+        js_string!("innerHTML"),
+        ih.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── textContent setter (via setTextContent) ────────────────────
+    let st = Rc::clone(state);
+    let tc_set = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let text = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            // Rensa barn
+            if let Some(node) = s.arena.nodes.get(key) {
+                let children: Vec<NodeKey> = node.children.clone();
+                for child in children {
+                    s.arena.remove_child(key, child);
+                }
+            }
+            // Skapa ny textnod
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: std::collections::HashMap::new(),
+                text: Some(text),
+                parent: None,
+                children: vec![],
+            });
+            s.arena.append_child(key, text_key);
+            s.mutations.push("setTextContent".to_string());
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("setTextContent"),
+        tc_set.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── firstElementChild ──────────────────────────────────────────
+    let st = Rc::clone(state);
+    let fec = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            if let Some(node) = s.arena.nodes.get(key) {
+                for &child in &node.children {
+                    if let Some(cn) = s.arena.nodes.get(child) {
+                        if cn.node_type == NodeType::Element {
+                            return Ok(JsValue::from(node_key_to_f64(child)));
+                        }
+                    }
+                }
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("firstElementChild"),
+        fec.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── nextElementSibling ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let nes = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Some(p) => p,
+                None => return Ok(JsValue::null()),
+            };
+            if let Some(parent) = s.arena.nodes.get(parent_key) {
+                let my_idx = parent.children.iter().position(|&c| c == key);
+                if let Some(idx) = my_idx {
+                    for &sib in &parent.children[idx + 1..] {
+                        if let Some(sn) = s.arena.nodes.get(sib) {
+                            if sn.node_type == NodeType::Element {
+                                return Ok(JsValue::from(node_key_to_f64(sib)));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("nextElementSibling"),
+        nes.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── addEventListener / removeEventListener / dispatchEvent ─────
+    let ael = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    obj.set(
+        js_string!("addEventListener"),
+        ael.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    let rel = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    obj.set(
+        js_string!("removeEventListener"),
+        rel.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    let de = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(true)));
+    obj.set(
+        js_string!("dispatchEvent"),
+        de.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── focus() / blur() ───────────────────────────────────────────
+    let focus_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let blur_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    obj.set(
+        js_string!("focus"),
+        focus_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(
+        js_string!("blur"),
+        blur_fn.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── scrollIntoView() ───────────────────────────────────────────
+    let siv = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    obj.set(
+        js_string!("scrollIntoView"),
+        siv.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── getBoundingClientRect() ────────────────────────────────────
+    let gbcr = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let rect = ObjectInitializer::new(ctx)
+            .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
+            .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
+            .property(js_string!("width"), JsValue::from(100), Attribute::READONLY)
+            .property(js_string!("height"), JsValue::from(30), Attribute::READONLY)
+            .property(js_string!("top"), JsValue::from(0), Attribute::READONLY)
+            .property(js_string!("right"), JsValue::from(100), Attribute::READONLY)
+            .property(js_string!("bottom"), JsValue::from(30), Attribute::READONLY)
+            .property(js_string!("left"), JsValue::from(0), Attribute::READONLY)
+            .build();
+        Ok(rect.into())
+    });
+    obj.set(
+        js_string!("getBoundingClientRect"),
+        gbcr.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── getClientRects() ───────────────────────────────────────────
+    let gcr = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let arr = JsArray::new(ctx);
+        let rect = ObjectInitializer::new(ctx)
+            .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
+            .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
+            .property(js_string!("width"), JsValue::from(100), Attribute::READONLY)
+            .property(js_string!("height"), JsValue::from(30), Attribute::READONLY)
+            .build();
+        let _ = arr.push(rect, ctx);
+        Ok(arr.into())
+    });
+    obj.set(
+        js_string!("getClientRects"),
+        gcr.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── offset* properties ─────────────────────────────────────────
+    obj.set(js_string!("offsetTop"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+    obj.set(js_string!("offsetLeft"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+    obj.set(
+        js_string!("offsetWidth"),
+        JsValue::from(100),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(
+        js_string!("offsetHeight"),
+        JsValue::from(30),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(js_string!("scrollTop"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+    obj.set(js_string!("scrollLeft"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+    obj.set(
+        js_string!("scrollWidth"),
+        JsValue::from(1024),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(
+        js_string!("scrollHeight"),
+        JsValue::from(768),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(
+        js_string!("clientWidth"),
+        JsValue::from(100),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+    obj.set(
+        js_string!("clientHeight"),
+        JsValue::from(30),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── shadowRoot (null — Shadow DOM traversal stöd) ──────────────
+    obj.set(js_string!("shadowRoot"), JsValue::null(), false, context)
+        .unwrap_or(true);
+
     // ─── classList ──────────────────────────────────────────────────
     let class_list = make_class_list(context, key, state);
     obj.set(js_string!("classList"), class_list, false, context)
@@ -900,11 +1264,80 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
         })
     };
 
+    // replace(old, new) — byt klass
+    let st_rp = Rc::clone(state);
+    let replace_fn = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let old_cls = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let new_cls = args
+                .get_or_undefined(1)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st_rp.borrow_mut();
+            let had = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("class"))
+                .map(|c| c.split_whitespace().any(|x| x == old_cls))
+                .unwrap_or(false);
+            if had {
+                if let Some(node) = s.arena.nodes.get_mut(key) {
+                    let current = node.get_attr("class").unwrap_or("").to_string();
+                    let new_val: String = current
+                        .split_whitespace()
+                        .map(|c| if c == old_cls { new_cls.as_str() } else { c })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    node.set_attr("class", &new_val);
+                }
+            }
+            Ok(JsValue::from(had))
+        })
+    };
+
+    // value — hela class-strängen
+    let st_val = Rc::clone(state);
+    let value_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st_val.borrow();
+            let val = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("class"))
+                .unwrap_or("");
+            Ok(JsValue::from(js_string!(val)))
+        })
+    };
+
+    // length — antal klasser
+    let st_len = Rc::clone(state);
+    let length_fn = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st_len.borrow();
+            let count = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("class"))
+                .map(|c| c.split_whitespace().count())
+                .unwrap_or(0);
+            Ok(JsValue::from(count as i32))
+        })
+    };
+
     let cl = ObjectInitializer::new(context)
         .function(add_fn, js_string!("add"), 1)
         .function(remove_fn, js_string!("remove"), 1)
         .function(toggle_fn, js_string!("toggle"), 1)
         .function(contains_fn, js_string!("contains"), 1)
+        .function(replace_fn, js_string!("replace"), 2)
+        .function(value_fn, js_string!("value"), 0)
+        .function(length_fn, js_string!("length"), 0)
         .build();
 
     JsValue::from(cl)
@@ -1015,8 +1448,33 @@ fn register_window(context: &mut Context) {
         .set(js_string!("navigator"), navigator, false, context)
         .unwrap_or(true);
 
-    // getComputedStyle(el) — stubbad
+    // getComputedStyle(el) — full stubb med vanliga CSS-properties
     let gcs = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let get_pv = NativeFunction::from_fn_ptr(|_this, args, ctx2| {
+            let prop = args
+                .get_or_undefined(0)
+                .to_string(ctx2)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default();
+            let val = match prop.as_str() {
+                "display" => "block",
+                "visibility" => "visible",
+                "position" => "static",
+                "opacity" => "1",
+                "overflow" => "visible",
+                "font-size" => "16px",
+                "color" => "rgb(0, 0, 0)",
+                "background-color" => "rgba(0, 0, 0, 0)",
+                "width" => "auto",
+                "height" => "auto",
+                "margin" => "0px",
+                "padding" => "0px",
+                "z-index" => "auto",
+                "pointer-events" => "auto",
+                _ => "",
+            };
+            Ok(JsValue::from(js_string!(val)))
+        });
         let style = ObjectInitializer::new(ctx)
             .property(
                 js_string!("display"),
@@ -1033,6 +1491,22 @@ fn register_window(context: &mut Context) {
                 JsValue::from(js_string!("static")),
                 Attribute::READONLY,
             )
+            .property(
+                js_string!("opacity"),
+                JsValue::from(js_string!("1")),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("overflow"),
+                JsValue::from(js_string!("visible")),
+                Attribute::READONLY,
+            )
+            .property(
+                js_string!("pointerEvents"),
+                JsValue::from(js_string!("auto")),
+                Attribute::READONLY,
+            )
+            .function(get_pv, js_string!("getPropertyValue"), 1)
             .build();
         Ok(style.into())
     });
@@ -1040,6 +1514,89 @@ fn register_window(context: &mut Context) {
         .set(
             js_string!("getComputedStyle"),
             gcs.to_js_function(context.realm()),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+
+    // IntersectionObserver — stubbad (rapporterar allt som synligt)
+    let io_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        let callback = args.get_or_undefined(0).clone();
+        let observe_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let unobserve_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let disconnect_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let observer = ObjectInitializer::new(ctx)
+            .function(observe_fn, js_string!("observe"), 1)
+            .function(unobserve_fn, js_string!("unobserve"), 1)
+            .function(disconnect_fn, js_string!("disconnect"), 0)
+            .build();
+        // Trigga callback direkt — allt rapporteras som synligt (lazy-load triggas)
+        if let Some(callable) = callback.as_callable() {
+            let entry = ObjectInitializer::new(ctx)
+                .property(
+                    js_string!("isIntersecting"),
+                    JsValue::from(true),
+                    Attribute::READONLY,
+                )
+                .property(
+                    js_string!("intersectionRatio"),
+                    JsValue::from(1.0),
+                    Attribute::READONLY,
+                )
+                .build();
+            let entries = JsArray::new(ctx);
+            let _ = entries.push(entry, ctx);
+            let _ = callable.call(&JsValue::from(observer.clone()), &[entries.into()], ctx);
+        }
+        Ok(observer.into())
+    });
+    window
+        .set(
+            js_string!("IntersectionObserver"),
+            io_fn.to_js_function(context.realm()),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+
+    // ResizeObserver — stubbad
+    let ro_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+        let observe_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let unobserve_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let disconnect_fn =
+            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+        let observer = ObjectInitializer::new(ctx)
+            .function(observe_fn, js_string!("observe"), 1)
+            .function(unobserve_fn, js_string!("unobserve"), 1)
+            .function(disconnect_fn, js_string!("disconnect"), 0)
+            .build();
+        Ok(observer.into())
+    });
+    window
+        .set(
+            js_string!("ResizeObserver"),
+            ro_fn.to_js_function(context.realm()),
+            false,
+            context,
+        )
+        .unwrap_or(true);
+
+    // customElements — stubbad (Web Components)
+    let ce_define = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let ce_get = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let ce_when = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let custom_elements = ObjectInitializer::new(context)
+        .function(ce_define, js_string!("define"), 2)
+        .function(ce_get, js_string!("get"), 1)
+        .function(ce_when, js_string!("whenDefined"), 1)
+        .build();
+    window
+        .set(
+            js_string!("customElements"),
+            custom_elements,
             false,
             context,
         )

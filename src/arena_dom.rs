@@ -218,6 +218,127 @@ impl ArenaDom {
         found
     }
 
+    /// Infoga barn-nod före en referensnod. Om ref_child är None → appendChild.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn insert_before(
+        &mut self,
+        parent: NodeKey,
+        new_child: NodeKey,
+        ref_child: Option<NodeKey>,
+    ) {
+        // Ta bort från tidigare förälder
+        if let Some(old_parent) = self.nodes.get(new_child).and_then(|n| n.parent) {
+            if let Some(old_p) = self.nodes.get_mut(old_parent) {
+                old_p.children.retain(|c| *c != new_child);
+            }
+        }
+        // Infoga på rätt position
+        if let Some(p) = self.nodes.get_mut(parent) {
+            match ref_child {
+                Some(ref_key) => {
+                    let pos = p
+                        .children
+                        .iter()
+                        .position(|&c| c == ref_key)
+                        .unwrap_or(p.children.len());
+                    p.children.insert(pos, new_child);
+                }
+                None => p.children.push(new_child),
+            }
+        }
+        if let Some(c) = self.nodes.get_mut(new_child) {
+            c.parent = Some(parent);
+        }
+    }
+
+    /// Djup-klona en nod och alla dess barn. Returnerar nyckeln till klonen.
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn clone_node_deep(&mut self, key: NodeKey) -> Option<NodeKey> {
+        let node = self.nodes.get(key)?.clone();
+        let children_to_clone: Vec<NodeKey> = node.children.clone();
+        let clone_key = self.nodes.insert(DomNode {
+            node_type: node.node_type,
+            tag: node.tag,
+            attributes: node.attributes,
+            text: node.text,
+            parent: None,
+            children: vec![],
+        });
+        // Rekursivt klona barn
+        for child in children_to_clone {
+            if let Some(child_clone) = self.clone_node_deep(child) {
+                self.append_child(clone_key, child_clone);
+            }
+        }
+        Some(clone_key)
+    }
+
+    /// Serialisera en nod till HTML-sträng (outerHTML)
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn serialize_html(&self, key: NodeKey) -> String {
+        let node = match self.nodes.get(key) {
+            Some(n) => n,
+            None => return String::new(),
+        };
+        match &node.node_type {
+            NodeType::Text => node.text.clone().unwrap_or_default(),
+            NodeType::Comment => format!("<!--{}-->", node.text.as_deref().unwrap_or("")),
+            NodeType::Element => {
+                let tag = node.tag.as_deref().unwrap_or("div");
+                let mut attrs = String::new();
+                // Sortera attribut för deterministisk output
+                let mut attr_pairs: Vec<(&str, &str)> = node
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str()))
+                    .collect();
+                attr_pairs.sort_by_key(|(k, _)| *k);
+                for (k, v) in &attr_pairs {
+                    attrs.push_str(&format!(" {}=\"{}\"", k, v));
+                }
+                let children_html: String = node
+                    .children
+                    .iter()
+                    .map(|&c| self.serialize_html(c))
+                    .collect();
+                // Void elements
+                if matches!(
+                    tag,
+                    "br" | "hr"
+                        | "img"
+                        | "input"
+                        | "meta"
+                        | "link"
+                        | "area"
+                        | "base"
+                        | "col"
+                        | "embed"
+                        | "source"
+                        | "track"
+                        | "wbr"
+                ) {
+                    format!("<{}{} />", tag, attrs)
+                } else {
+                    format!("<{}{}>{}</{}>", tag, attrs, children_html, tag)
+                }
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Serialisera barn av en nod till HTML (innerHTML)
+    #[cfg(any(feature = "js-eval", test))]
+    pub fn serialize_inner_html(&self, key: NodeKey) -> String {
+        let node = match self.nodes.get(key) {
+            Some(n) => n,
+            None => return String::new(),
+        };
+        node.children
+            .iter()
+            .map(|&c| self.serialize_html(c))
+            .collect()
+    }
+
     /// Hämta barn-nycklar
     pub fn children(&self, key: NodeKey) -> &[NodeKey] {
         self.nodes
