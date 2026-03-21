@@ -9,6 +9,7 @@ mod diff;
 pub mod fetch;
 pub mod firewall;
 mod grounding;
+mod hydration;
 mod intent;
 pub mod intercept;
 mod js_bridge;
@@ -66,6 +67,19 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     let title = extract_title(&dom);
     let mut builder = SemanticBuilder::new(goal);
     let mut tree = builder.build(&dom, url, &title);
+
+    // Tier 0: Hydration extraction — berika trädet med SSR-data om tillgängligt
+    if let Some(hydration_data) = hydration::extract_hydration_state(html) {
+        let hydration_result = hydration::hydration_to_nodes(&hydration_data, goal);
+        // Lägg till hydration-noder som saknar motsvarighet i DOM-trädet
+        let existing_count = tree.nodes.len() as u32;
+        for mut node in hydration_result.nodes {
+            node.id += existing_count; // Undvik id-konflikter
+            tree.nodes.push(node);
+        }
+        tree.injection_warnings.extend(hydration_result.warnings);
+    }
+
     tree.parse_time_ms = 0; // sätts av anroparen
     tree
 }
@@ -125,6 +139,45 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     match serialize_json(&tree, tree.nodes.len()) {
         Ok(json) => json,
         Err(e) => e,
+    }
+}
+
+/// Extract SSR hydration data without running JavaScript (Tier 0)
+///
+/// Returns JSON with framework name, extracted props, and semantic nodes.
+/// Returns `{"found": false}` if no hydration data is detected.
+#[wasm_bindgen]
+pub fn extract_hydration(html: &str, goal: &str) -> String {
+    let start = now_ms();
+
+    if let Some(data) = hydration::extract_hydration_state(html) {
+        let result = hydration::hydration_to_nodes(&data, goal);
+        let framework = format!("{:?}", result.data.framework);
+        let node_count = result.nodes.len();
+
+        #[derive(serde::Serialize)]
+        struct HydrationOutput {
+            found: bool,
+            framework: String,
+            nodes: Vec<types::SemanticNode>,
+            warnings: Vec<types::InjectionWarning>,
+            extract_time_ms: u64,
+        }
+
+        let output = HydrationOutput {
+            found: true,
+            framework,
+            nodes: result.nodes,
+            warnings: result.warnings,
+            extract_time_ms: now_ms() - start,
+        };
+
+        match serialize_json(&output, node_count) {
+            Ok(json) => json,
+            Err(e) => e,
+        }
+    } else {
+        r#"{"found":false}"#.to_string()
     }
 }
 
