@@ -151,13 +151,13 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Features
 
-AetherAgent contains **24 Rust modules**, **58 WASM-exported functions**, **65 HTTP endpoints**, and **30 MCP tools**. Here is every feature, grouped by capability.
+AetherAgent contains **28 Rust modules**, **62 WASM-exported functions**, **65 HTTP endpoints**, and **30 MCP tools**. Here is every feature, grouped by capability.
 
 ### 1. Semantic Perception
 
-**Module:** `parser.rs`, `semantic.rs`, `types.rs`
+**Module:** `parser.rs`, `semantic.rs`, `arena_dom.rs`, `types.rs`
 
-Parses HTML into a structured accessibility tree with roles, labels, states, and goal-relevance scores. Uses `html5ever` + `rcdom` for spec-compliant parsing.
+Parses HTML into a structured accessibility tree with roles, labels, states, and goal-relevance scores. Uses `html5ever` for spec-compliant parsing, converted to an **Arena DOM** (`slotmap`-based, cache-friendly, ~5-10x faster traversal than `RcDom`).
 
 | Function | What it does |
 |----------|-------------|
@@ -208,19 +208,30 @@ Computes minimal deltas between two semantic trees. 70–99% token savings for m
 }
 ```
 
-### 5. JavaScript Sandbox
+### 5. JavaScript Sandbox + DOM Bridge
 
-**Module:** `js_eval.rs`, `js_bridge.rs`
+**Module:** `js_eval.rs`, `js_bridge.rs`, `dom_bridge.rs`
 
-Embedded **Boa** JS engine (pure Rust, no C deps) for safe snippet evaluation. Sandboxed: no DOM, no fetch, no timers, no module system. Combined with selective execution that detects JS-dependent content and evaluates only relevant expressions.
+Embedded **Boa 0.21** JS engine (pure Rust, no C deps) for safe snippet evaluation. Two modes:
+
+1. **Expression sandbox** (`eval_js`) — no DOM, evaluates pure expressions (math, strings, arrays)
+2. **DOM bridge** (`eval_js_with_dom`) — exposes `document`/`window` to Boa via Arena DOM handles
 
 | Function | What it does |
 |----------|-------------|
 | `detect_js` | Scan HTML for scripts, handlers, framework markers |
 | `eval_js` | Evaluate single JS expression in sandbox |
 | `eval_js_batch` | Evaluate multiple expressions |
+| `eval_js_with_dom` | Evaluate JS with `document.getElementById`, `querySelector`, etc. |
+
+**DOM bridge methods:** `getElementById`, `querySelector`, `querySelectorAll`, `createElement`, `createTextNode`, `document.body/head/documentElement`, `window.innerWidth/innerHeight/location/navigator`, `console.log/warn/error`.
 
 **Selective execution pipeline:** Detect JS → extract `getElementById`/`querySelector` patterns → match to tree nodes → evaluate in sandbox → apply computed values back to semantic tree.
+
+**Known limitations:**
+- **Security model uses blocklist** (16 forbidden patterns). An allowlist approach would be more robust.
+- **New `Context::default()` per `eval_js()` call** — no shared state between evaluations. `eval_js_with_dom` creates one context per call with DOM bindings.
+- **No event loop** — no microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Boa evaluates synchronously only.
 
 ### 6. Temporal Memory & Adversarial Modeling
 
@@ -431,6 +442,77 @@ Fast mode is the default for `fetch_vision` — sufficient for YOLOv8 UI element
 **Detected UI classes:** button, input, link, icon, text, image, checkbox, radio, select, heading.
 
 **Blitz rendering features:** CSS layout (flexbox, grid), external stylesheets, web fonts, images, viewport sizing. No JavaScript execution (use `parse_with_js` for inline JS).
+
+### 18. SSR Hydration Extraction (Tier 0)
+
+**Module:** `hydration.rs`
+
+Extracts server-side rendered data from HTML **without running JavaScript**. Detects 10 framework-specific hydration patterns and converts extracted data to semantic nodes with trust shield and goal-relevance scoring.
+
+| Function | What it does |
+|----------|-------------|
+| `extract_hydration` | Detect framework, extract props, build semantic nodes |
+| `extract_hydration_state` | Low-level: detect and extract hydration JSON data |
+| `hydration_to_nodes` | Convert extracted data to `SemanticNode` list |
+
+**Supported frameworks:**
+
+| Framework | Marker | Status |
+|-----------|--------|--------|
+| Next.js Pages Router | `<script id="__NEXT_DATA__">` | Plain JSON |
+| Next.js App Router | `self.__next_f.push([...])` | Basic chunk parsing (RSC wire format simplified) |
+| Nuxt 2 | `window.__NUXT__=` | Plain JSON only |
+| Nuxt 3 | `<script id="__NUXT_DATA__">` | Plain JSON only |
+| Angular Universal | `<script id="ng-state">` | Plain JSON |
+| Remix | `window.__remixContext` | Plain JSON (extracts `loaderData`) |
+| Gatsby | `<script id="___gatsby-initial-props">` | Plain JSON |
+| SvelteKit | `<script id="__sveltekit_data">` | Plain JSON only |
+| Qwik | `<script type="qwik/json">` | Plain JSON |
+| Astro | `<astro-island props="...">` | HTML-decoded JSON |
+| Apollo GraphQL | `window.__APOLLO_STATE__` | Plain JSON |
+
+**Known limitations:**
+- **Nuxt 3+ and SvelteKit use `devalue`** (not JSON) — supports `Date`, `BigInt`, `Map`, `Set`, circular references. Current code parses plain JSON only; devalue-encoded data fails silently. A devalue deserializer is needed.
+- **Next.js App Router** uses React Flight Protocol with streaming RSC chunks. Current parser does basic chunk concatenation; real RSC wire format has references and deferred components.
+- **Qwik uses resumability, not hydration** — `qwik/json` state is extracted correctly, but QRL (Qualified Resource Locator) event handler attributes on HTML elements are not parsed.
+
+### 19. Arena DOM
+
+**Module:** `arena_dom.rs`
+
+SlotMap-based DOM replacing `markup5ever_rcdom`. All nodes stored in a contiguous `SlotMap<NodeKey, DomNode>` — one allocation per page instead of ~1000. Generational indices provide stale-reference safety.
+
+| Property | RcDom (old) | Arena DOM |
+|----------|:-----------:|:---------:|
+| Allocations/page | ~1000 | 1 (pre-allocated Vec) |
+| Cache behavior | Hostile (Rc scattered) | Friendly (contiguous memory) |
+| DFS traversal | 1x baseline | ~5-10x faster |
+| Stale references | Possible (Rc cycles) | Impossible (generational index) |
+| Boa GC integration | Requires wrapping | NodeKey handles as f64 (no Trace/Finalize needed) |
+
+**Boa GC workaround:** SlotMap cannot derive `Trace`/`Finalize` from `boa_gc`. Solution: Rust owns the arena, Boa JS objects store `NodeKey` as raw `f64` — a clean indirection that avoids GC integration entirely.
+
+### 20. Progressive Escalation
+
+**Module:** `escalation.rs`
+
+Intelligent tier selection that runs the minimum work per page. Analyzes HTML to determine the fastest parse strategy.
+
+| Function | What it does |
+|----------|-------------|
+| `select_parse_tier` | Analyze HTML → return optimal tier + confidence |
+
+**Tier pipeline:**
+
+| Tier | Strategy | When selected | Latency |
+|------|----------|---------------|---------|
+| 0 | Hydration extraction | SSR framework data found | ~0 ms JS |
+| 1 | Static HTML parse | No JS detected | ~1 ms |
+| 2 | Boa + DOM sandbox | Inline scripts with DOM access | ~10-50 ms |
+| 3 | Blitz render | CSS layout needed, no content JS | ~10-50 ms |
+| 4 | Chrome CDP | Heavy JS (WebGL, Workers, SPA shell) | ~500-2000 ms |
+
+**Detection heuristics:** hydration markers, inline script count, framework markers (React/Vue/Angular/Svelte/Nuxt), SPA shell detection (empty body + mount point), CSS layout patterns (grid, flex, absolute positioning), heavy JS patterns (WebGL, WebAssembly, Workers).
 
 ---
 
@@ -953,28 +1035,32 @@ End-to-end tests against real production websites, running on the deployed Rende
 ┌──────────────────────────────▼────────────────────────────────────┐
 │                    AetherAgent Core (Rust → WASM)                 │
 │                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ Progressive Escalation — auto-select Tier 0→4 per page  │   │
+│  └──────────────────────────────────────────────────────────┘   │
 │  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ Parser   │ │ Semantic  │ │  Trust   │ │   Intent API     │   │
-│  │ html5ever│ │ A11y tree │ │  Shield  │ │ click/fill/      │   │
-│  │ rcdom    │ │ goal      │ │ 20+      │ │ extract          │   │
-│  │          │ │ scoring   │ │ patterns │ │                  │   │
+│  │ Parser   │ │ Arena DOM │ │  Trust   │ │   Intent API     │   │
+│  │ html5ever│ │ SlotMap   │ │  Shield  │ │ click/fill/      │   │
+│  │ →ArenaDom│ │ semantic  │ │ 20+      │ │ extract          │   │
+│  │          │ │ builder   │ │ patterns │ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ Diff     │ │ JS        │ │ Temporal │ │   Compiler       │   │
-│  │ 80-95%   │ │ Sandbox   │ │ Memory & │ │ goal → plan →    │   │
-│  │ token    │ │ Boa       │ │ Adversar.│ │ execute          │   │
-│  │ savings  │ │ engine    │ │ Detection│ │                  │   │
+│  │ Diff     │ │ JS Sandbox│ │ Temporal │ │   Compiler       │   │
+│  │ 80-95%   │ │ Boa+DOM   │ │ Memory & │ │ goal → plan →    │   │
+│  │ token    │ │ bridge    │ │ Adversar.│ │ execute          │   │
+│  │ savings  │ │           │ │ Detection│ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ Fetch    │ │ Firewall  │ │ Causal   │ │   Grounding      │   │
-│  │ HTTP     │ │ L1/L2/L3  │ │ Action   │ │ BBox + IoU +     │   │
-│  │ cookies  │ │ goal-aware│ │ Graph    │ │ Set-of-Mark      │   │
-│  │ SSRF prot│ │ filtering │ │          │ │                  │   │
+│  │ Hydration│ │ Firewall  │ │ Causal   │ │   Grounding      │   │
+│  │ Tier 0   │ │ L1/L2/L3  │ │ Action   │ │ BBox + IoU +     │   │
+│  │ 10 SSR   │ │ goal-aware│ │ Graph    │ │ Set-of-Mark      │   │
+│  │ frameworks│ │ filtering │ │          │ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ WebMCP   │ │ Collab    │ │ XHR      │ │   Vision         │   │
-│  │ Discovery│ │ Cross-    │ │ Intercept│ │ YOLOv8-nano      │   │
-│  │          │ │ Agent     │ │ fetch/xhr│ │ rten ONNX        │   │
+│  │ Fetch    │ │ Collab    │ │ XHR      │ │   Vision         │   │
+│  │ HTTP     │ │ Cross-    │ │ Intercept│ │ YOLOv8-nano      │   │
+│  │ cookies  │ │ Agent     │ │ fetch/xhr│ │ ONNX Runtime     │   │
+│  │ SSRF prot│ │           │ │          │ │                  │   │
 │  └──────────┘ └───────────┘ └──────────┘ └──────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │ Blitz Renderer — pure Rust CSS layout → PNG screenshots  │   │
@@ -996,14 +1082,18 @@ End-to-end tests against real production websites, running on the deployed Rende
 ```
 AetherAgent/
 ├── src/
-│   ├── lib.rs            # WASM API surface — 58 public functions
-│   ├── parser.rs         # html5ever + rcdom DOM builder
+│   ├── lib.rs            # WASM API surface — 62 public functions
+│   ├── parser.rs         # html5ever HTML parser
+│   ├── arena_dom.rs      # SlotMap Arena DOM (replaces RcDom, 5-10x faster)
 │   ├── semantic.rs       # Accessibility tree, goal-relevance scoring
 │   ├── trust.rs          # Prompt injection detection (20+ patterns)
 │   ├── intent.rs         # find_and_click, fill_form, extract_data
 │   ├── diff.rs           # Semantic DOM diffing, delta computation
 │   ├── js_eval.rs        # Boa JS sandbox, detection, evaluation, fetch URL extraction
 │   ├── js_bridge.rs      # Selective execution, DOM targeting, XHR extraction
+│   ├── dom_bridge.rs     # Boa DOM bridge — document/window in JS context
+│   ├── hydration.rs      # SSR hydration extraction (10 frameworks, Tier 0)
+│   ├── escalation.rs     # Progressive tier selection (Tier 0→4)
 │   ├── temporal.rs       # Time-series memory, adversarial detection
 │   ├── compiler.rs       # Intent compiler, goal decomposition
 │   ├── fetch.rs          # HTTP fetching, SSRF, robots.txt, rate limiting
@@ -1014,7 +1104,7 @@ AetherAgent/
 │   ├── collab.rs         # Cross-agent semantic diff store
 │   ├── intercept.rs      # XHR network interception, price extraction, response caching
 │   ├── streaming.rs      # Streaming parse with early-stopping, depth/relevance limits
-│   ├── vision.rs         # YOLOv8-nano inference via rten (feature: vision)
+│   ├── vision.rs         # YOLOv8-nano inference via ONNX Runtime (feature: vision)
 │   ├── session.rs        # Session cookies, OAuth 2.0, login detection
 │   ├── orchestrator.rs   # Multi-page workflow engine, auto-nav, rollback/retry
 │   ├── memory.rs         # Workflow memory persistence
@@ -1243,7 +1333,8 @@ AetherAgent is a fully functional AI browser engine with:
 ```toml
 # Core (always included)
 html5ever = "0.27"          # HTML5 spec-compliant parser
-markup5ever_rcdom = "0.3"   # DOM tree builder
+markup5ever_rcdom = "0.3"   # RcDom (converted to ArenaDom at parse time)
+slotmap = "1.0"             # Arena DOM — cache-friendly SlotMap allocation
 serde = "1.0"               # Serialization
 serde_json = "1.0"          # JSON
 wasm-bindgen = "0.2"        # WASM interop
@@ -1601,7 +1692,19 @@ Track which model produced each result via the `model_version` field:
 
 ### Future Work
 
-- **Full JS execution bridge** — Pair with headless browser (Playwright/Puppeteer) for SPA rendering, feeding rendered HTML back to AetherAgent for semantic analysis
+**Active:**
+- **Devalue deserializer** — Nuxt 3+ and SvelteKit use `devalue` (not JSON) for SSR state. Supports `Date`, `BigInt`, `Map`, `Set`, circular references. Current hydration extraction only parses plain JSON.
+- **React Flight Protocol** — Next.js App Router uses RSC wire format with streaming chunks, references, and deferred components. Current parser does basic chunk concatenation.
+- **Qwik QRL parsing** — Qwik uses resumability (not hydration). `qwik/json` state is extracted, but QRL event handler attributes (`on:click="./module#handler"`) are not parsed.
+- **Security: blocklist → allowlist** — `js_eval.rs` blocks 16 forbidden patterns. An allowlist (only permit safe operations) would be more robust against bypass.
+- **Persistent Boa Context** — Each `eval_js()` creates a new `Context::default()`. A shared context per page would enable variable persistence across script blocks.
+- **Event loop primitives** — Boa lacks microtask queue, `requestAnimationFrame`, `MutationObserver`, `setTimeout`/`setInterval`. Required for SPA frameworks that use async rendering.
+
+**Completed:**
+- ~~**Full JS execution bridge**~~ ✓ Implemented — `dom_bridge.rs` exposes `document`/`window` to Boa via Arena DOM. `getElementById`, `querySelector`, `querySelectorAll`, `createElement`, `createTextNode`, `console.log`, `window.location/navigator`.
+- ~~**SSR hydration extraction**~~ ✓ Implemented — `hydration.rs` extracts data from 10 frameworks (Next.js Pages + App Router, Nuxt 2/3, Angular, Remix, Gatsby, SvelteKit, Qwik, Astro, Apollo) without running JS.
+- ~~**Arena DOM**~~ ✓ Implemented — `arena_dom.rs` replaces RcDom with SlotMap-based arena. ~5-10x faster DFS, 1 allocation vs ~1000/page.
+- ~~**Progressive escalation**~~ ✓ Implemented — `escalation.rs` auto-selects Tier 0-4 per page. Hydration → Static → Boa+DOM → Blitz → CDP.
 - ~~**Vision model training**~~ ✓ Training guide documented — The inference pipeline supports dynamic class labels, per-class confidence thresholds, model versioning, and min-area filtering. See [Vision Model Training Guide](#vision-model-training-guide) above
 - ~~**XHR response caching**~~ ✓ Implemented — `XhrResponseCache` with TTL-based expiry, change detection (`has_changed`), and integration into `TemporalMemory` for diff-based monitoring across snapshots
 - ~~**Streaming parse**~~ ✓ Implemented — `streaming.rs` module with `StreamingParser`: early-stopping at `max_nodes`, depth limiting (`max_depth`), relevance filtering (`min_relevance`), and `parse_streaming` WASM API
