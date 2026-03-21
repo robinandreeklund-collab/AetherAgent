@@ -49,7 +49,7 @@ impl DomNode {
 }
 
 /// Arena-allokerad DOM. Alla noder lagras i en kontiguös SlotMap.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArenaDom {
     pub nodes: SlotMap<NodeKey, DomNode>,
     pub document: NodeKey,

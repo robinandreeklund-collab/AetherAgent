@@ -6,6 +6,8 @@ mod causal;
 mod collab;
 mod compiler;
 mod diff;
+#[cfg(feature = "js-eval")]
+mod dom_bridge;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
@@ -183,6 +185,39 @@ pub fn extract_hydration(html: &str, goal: &str) -> String {
         }
     } else {
         r#"{"found":false}"#.to_string()
+    }
+}
+
+/// Evaluate JavaScript with DOM access (Fas 17.3)
+///
+/// Creates a full DOM bridge with document/window objects in Boa context.
+/// Returns JSON with evaluation result and any DOM mutations.
+#[cfg(feature = "js-eval")]
+#[wasm_bindgen]
+pub fn eval_js_with_dom(html: &str, code: &str) -> String {
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+
+    let result = dom_bridge::eval_js_with_dom(code, arena);
+
+    #[derive(serde::Serialize)]
+    struct DomEvalOutput {
+        value: Option<String>,
+        error: Option<String>,
+        mutation_count: usize,
+        eval_time_us: u64,
+    }
+
+    let output = DomEvalOutput {
+        value: result.value,
+        error: result.error,
+        mutation_count: result.mutations.len(),
+        eval_time_us: result.eval_time_us,
+    };
+
+    match serialize_json(&output, 1) {
+        Ok(json) => json,
+        Err(e) => e,
     }
 }
 
