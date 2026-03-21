@@ -3207,3 +3207,130 @@ fn test_pipeline_injection_through_full_pipeline() {
         "Injection-text ska detekteras genom fullständig pipeline"
     );
 }
+
+// ─── Fas 17.5: Adaptive Parse Pipeline ──────────────────────────────────────
+
+#[test]
+fn test_adaptive_parse_static_page() {
+    let html = r#"<html><body><h1>Statisk sida</h1><p>Innehåll</p></body></html>"#;
+    let result_json = parse_adaptive(html, "hitta innehåll", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    assert_eq!(
+        result["tier_used"].as_str(),
+        Some("static"),
+        "Statisk sida borde ge tier 'static'"
+    );
+    assert!(
+        result["tree"]["nodes"].as_array().is_some(),
+        "Borde ha noder i trädet"
+    );
+}
+
+#[test]
+fn test_adaptive_parse_nextjs_hydration() {
+    let html = r##"
+    <html><head></head><body>
+    <div id="__next"><h1>Produkt</h1></div>
+    <script id="__NEXT_DATA__" type="application/json">
+    {"props":{"pageProps":{"title":"Produkt","price":299}},"page":"/product"}
+    </script>
+    </body></html>
+    "##;
+
+    let result_json = parse_adaptive(html, "köp produkt", "https://shop.example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    assert_eq!(
+        result["tier_used"].as_str(),
+        Some("hydration"),
+        "Next.js-sida borde ge tier 'hydration'"
+    );
+
+    // Borde ha tier_decision med framework
+    assert!(
+        result["tier_decision"]["tier"]
+            .as_object()
+            .map(|o| o.contains_key("Hydration"))
+            .unwrap_or(false),
+        "tier_decision borde nämna Hydration"
+    );
+}
+
+#[test]
+fn test_adaptive_parse_js_with_dom() {
+    let html = r##"
+    <html><body>
+    <span id="total">0</span>
+    <script>
+        document.getElementById('total').textContent = (100 * 3).toString();
+    </script>
+    </body></html>
+    "##;
+
+    let result_json = parse_adaptive(html, "beräkna total", "https://shop.example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    assert!(
+        result["tier_used"].as_str() == Some("boa_dom")
+            || result["tier_used"].as_str() == Some("static"),
+        "JS med DOM borde ge tier 'boa_dom' eller 'static', fick {:?}",
+        result["tier_used"]
+    );
+}
+
+#[test]
+fn test_adaptive_parse_tier_decision_present() {
+    let html = r#"<html><body><p>Test</p></body></html>"#;
+    let result_json = parse_adaptive(html, "test", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    assert!(
+        result["tier_decision"]["reason"].is_string(),
+        "tier_decision borde ha en 'reason'"
+    );
+    assert!(
+        result["tier_decision"]["confidence"].is_number(),
+        "tier_decision borde ha 'confidence'"
+    );
+}
+
+#[test]
+fn test_adaptive_parse_returns_valid_tree() {
+    let html = r#"<html><body>
+        <h1>Rubrik</h1>
+        <button>Köp</button>
+        <a href="/kontakt">Kontakt</a>
+    </body></html>"#;
+
+    let result_json = parse_adaptive(html, "köp", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    let nodes = result["tree"]["nodes"].as_array().expect("Borde ha noder");
+    assert!(!nodes.is_empty(), "Noder borde inte vara tomma");
+
+    // Hitta button/cta
+    let has_button = find_node_recursive(nodes, &|n| {
+        n["role"].as_str() == Some("button") || n["role"].as_str() == Some("cta")
+    });
+    assert!(
+        has_button.is_some(),
+        "Borde hitta button/cta i adaptive parse"
+    );
+}
+
+#[test]
+fn test_select_parse_tier_returns_json() {
+    let html = r#"<html><body><p>Test</p></body></html>"#;
+    let result_json = select_parse_tier(html, "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    assert!(
+        result["tier"].is_object() || result["tier"].is_string(),
+        "Borde ha 'tier' i resultatet"
+    );
+    assert!(
+        result["reason"].is_string(),
+        "Borde ha 'reason' i resultatet"
+    );
+}

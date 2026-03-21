@@ -235,6 +235,72 @@ pub fn eval_js_with_dom(html: &str, code: &str) -> String {
     }
 }
 
+/// Adaptive parse — automatically selects the optimal pipeline tier (Fas 17.5)
+///
+/// Analyzes HTML to determine the fastest sufficient approach:
+/// - Tier 0 (Hydration): Extracts SSR data directly, 0 ms JS
+/// - Tier 1 (Static): Standard HTML parse via ArenaDom
+/// - Tier 2 (BoaDom): Runs inline JS with DOM bridge (requires js-eval feature)
+/// - Tier 3/4: Returns tier recommendation (Blitz/CDP handled externally)
+///
+/// Returns JSON with SemanticTree + tier metadata.
+#[wasm_bindgen]
+pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
+    let start = now_ms();
+    let decision = escalation::select_tier(html, url);
+
+    let (mut tree, tier_used) = match &decision.tier {
+        // Tier 0: Hydration — bygger träd från SSR-data + DOM
+        escalation::ParseTier::Hydration { .. } => {
+            let t = build_tree(html, goal, url);
+            (t, "hydration")
+        }
+
+        // Tier 1: Statisk parse — standard ArenaDom pipeline
+        escalation::ParseTier::StaticParse => {
+            let t = build_tree(html, goal, url);
+            (t, "static")
+        }
+
+        // Tier 2: Boa + DOM — kör inline JS mot ArenaDom
+        escalation::ParseTier::BoaDom { .. } => {
+            let t = build_tree(html, goal, url);
+            let result = js_bridge::selective_exec(&t, html);
+            (result.tree, "boa_dom")
+        }
+
+        // Tier 3/4: Behöver extern rendering — fallback till statisk parse
+        escalation::ParseTier::BlitzRender | escalation::ParseTier::ChromeCdp { .. } => {
+            let t = build_tree(html, goal, url);
+            (t, "static_fallback")
+        }
+    };
+
+    tree.parse_time_ms = now_ms() - start;
+
+    // Sortera noder efter relevance
+    tree.nodes
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    #[derive(serde::Serialize)]
+    struct AdaptiveResult {
+        tree: SemanticTree,
+        tier_used: String,
+        tier_decision: escalation::TierDecision,
+    }
+
+    let output = AdaptiveResult {
+        tier_used: tier_used.to_string(),
+        tier_decision: decision,
+        tree,
+    };
+
+    match serialize_json(&output, output.tree.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
 /// Snabbversion – returnerar bara de mest relevanta noderna
 ///
 /// # Arguments
