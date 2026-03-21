@@ -25,6 +25,8 @@ pub enum Framework {
     Qwik,
     Astro,
     Apollo,
+    Eleventy,
+    StaticHtml,
 }
 
 /// Extraherad hydration-data
@@ -76,6 +78,12 @@ pub fn extract_hydration_state(html: &str) -> Option<HydrationData> {
         return Some(data);
     }
     if let Some(data) = extract_apollo_state(html) {
+        return Some(data);
+    }
+    if let Some(data) = extract_eleventy_data(html) {
+        return Some(data);
+    }
+    if let Some(data) = extract_static_html_data(html) {
         return Some(data);
     }
     None
@@ -548,6 +556,202 @@ fn extract_apollo_state(html: &str) -> Option<HydrationData> {
         framework: Framework::Apollo,
         props,
     })
+}
+
+/// Eleventy/Hugo/Jekyll: Statiska sidgeneratorer med `<script type="application/ld+json">`
+///
+/// Dessa ramverk renderar ren HTML utan hydration, men strukturerad data
+/// (JSON-LD, OpenGraph meta) kan extraheras som semantisk kontext.
+/// Detekteras via generator-meta-tag eller 11ty-specifika mönster.
+fn extract_eleventy_data(html: &str) -> Option<HydrationData> {
+    // Kolla generator-meta: <meta name="generator" content="Eleventy">
+    let is_eleventy = html.contains("generator\" content=\"Eleventy")
+        || html.contains("generator\" content=\"eleventy")
+        || html.contains("generator\" content=\"11ty")
+        || html.contains("data-11ty");
+    let is_hugo = html.contains("generator\" content=\"Hugo");
+    let is_jekyll = html.contains("generator\" content=\"Jekyll");
+
+    if !is_eleventy && !is_hugo && !is_jekyll {
+        return None;
+    }
+
+    // Extrahera JSON-LD om det finns
+    let mut props = serde_json::Map::new();
+
+    if let Some(ld_json) = extract_json_ld(html) {
+        props.insert("jsonLd".to_string(), ld_json);
+    }
+
+    // Extrahera OpenGraph meta-taggar
+    let og_data = extract_meta_tags(html, "og:");
+    if !og_data.is_empty() {
+        let og_obj: serde_json::Map<String, Value> = og_data
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        props.insert("openGraph".to_string(), Value::Object(og_obj));
+    }
+
+    // Extrahera standard meta-taggar (description, author, etc.)
+    let meta_data = extract_standard_meta(html);
+    if !meta_data.is_empty() {
+        let meta_obj: serde_json::Map<String, Value> = meta_data
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        props.insert("meta".to_string(), Value::Object(meta_obj));
+    }
+
+    if props.is_empty() {
+        return None;
+    }
+
+    Some(HydrationData {
+        framework: Framework::Eleventy,
+        props: Value::Object(props),
+    })
+}
+
+/// Statisk HTML: Extrahera strukturerad data från ren HTML utan ramverk
+///
+/// Fångar JSON-LD, OpenGraph, meta-description — täcker sidor som inte
+/// använder något JS-ramverk alls men ändå har maskinläsbar data.
+fn extract_static_html_data(html: &str) -> Option<HydrationData> {
+    let mut props = serde_json::Map::new();
+
+    // JSON-LD
+    if let Some(ld_json) = extract_json_ld(html) {
+        props.insert("jsonLd".to_string(), ld_json);
+    }
+
+    // OpenGraph
+    let og_data = extract_meta_tags(html, "og:");
+    if !og_data.is_empty() {
+        let og_obj: serde_json::Map<String, Value> = og_data
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        props.insert("openGraph".to_string(), Value::Object(og_obj));
+    }
+
+    // Standard meta
+    let meta_data = extract_standard_meta(html);
+    if !meta_data.is_empty() {
+        let meta_obj: serde_json::Map<String, Value> = meta_data
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        props.insert("meta".to_string(), Value::Object(meta_obj));
+    }
+
+    // Twitter Card
+    let twitter_data = extract_meta_tags(html, "twitter:");
+    if !twitter_data.is_empty() {
+        let tw_obj: serde_json::Map<String, Value> = twitter_data
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        props.insert("twitter".to_string(), Value::Object(tw_obj));
+    }
+
+    // Kräv minst 2 datapunkter — annars är det inte värt att returnera
+    let total_keys: usize = props
+        .values()
+        .map(|v| v.as_object().map_or(1, |m| m.len()))
+        .sum();
+    if total_keys < 2 {
+        return None;
+    }
+
+    Some(HydrationData {
+        framework: Framework::StaticHtml,
+        props: Value::Object(props),
+    })
+}
+
+/// Extrahera JSON-LD från `<script type="application/ld+json">`
+fn extract_json_ld(html: &str) -> Option<Value> {
+    let marker = r#"type="application/ld+json""#;
+    let pos = html.find(marker)?;
+    let rest = html.get(pos..)?;
+    let tag_end = rest.find('>')?;
+    let after_tag = rest.get(tag_end + 1..)?;
+    let end = after_tag.find("</script>")?;
+    let json_str = after_tag.get(..end)?.trim();
+    serde_json::from_str::<Value>(json_str).ok()
+}
+
+/// Extrahera meta-taggar med givet prefix (t.ex. "og:", "twitter:")
+fn extract_meta_tags(html: &str, prefix: &str) -> Vec<(String, String)> {
+    let mut tags = Vec::new();
+    // Sök efter property="og:... eller name="twitter:...
+    let property_pattern = format!(r#"property="{}"#, prefix);
+    let name_pattern = format!(r#"name="{}"#, prefix);
+
+    let mut search_from = 0;
+    while search_from < html.len() {
+        let meta_pos = match html[search_from..].find("<meta") {
+            Some(p) => search_from + p,
+            None => break,
+        };
+
+        let tag_end = match html[meta_pos..].find('>') {
+            Some(p) => meta_pos + p,
+            None => break,
+        };
+        let tag = match html.get(meta_pos..=tag_end) {
+            Some(t) => t,
+            None => break,
+        };
+
+        let has_prefix = tag.contains(&property_pattern) || tag.contains(&name_pattern);
+        if has_prefix {
+            let key =
+                extract_attr_value(tag, "property").or_else(|| extract_attr_value(tag, "name"));
+            let value = extract_attr_value(tag, "content");
+
+            if let (Some(key), Some(value)) = (key, value) {
+                let clean_key = key.strip_prefix(prefix).unwrap_or(&key).to_string();
+                tags.push((clean_key, value));
+            }
+        }
+
+        search_from = tag_end + 1;
+    }
+    tags
+}
+
+/// Extrahera standard meta-taggar (description, author, keywords)
+fn extract_standard_meta(html: &str) -> Vec<(String, String)> {
+    let interesting = ["description", "author", "keywords", "robots", "viewport"];
+    let mut tags = Vec::new();
+
+    for name in &interesting {
+        let pattern = format!(r#"name="{}"#, name);
+        if let Some(pos) = html.find(&pattern) {
+            let tag_start = html[..pos].rfind('<').unwrap_or(pos);
+            let tag_end = match html[tag_start..].find('>') {
+                Some(p) => tag_start + p,
+                None => continue,
+            };
+            if let Some(tag) = html.get(tag_start..=tag_end) {
+                if let Some(content) = extract_attr_value(tag, "content") {
+                    tags.push((name.to_string(), content));
+                }
+            }
+        }
+    }
+    tags
+}
+
+/// Extrahera ett attributvärde ur en HTML-tagg
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let pattern = format!("{}=\"", attr);
+    let pos = tag.find(&pattern)?;
+    let after = tag.get(pos + pattern.len()..)?;
+    let end = after.find('"')?;
+    after.get(..end).map(|s| s.to_string())
 }
 
 // ─── Devalue-parser ─────────────────────────────────────────────────────────
@@ -1356,5 +1560,156 @@ mod tests {
             "Borde extrahera data från RSC-rader: got {:?}",
             data.props
         );
+    }
+
+    // === Eleventy/Hugo/Jekyll ===
+
+    #[test]
+    fn test_eleventy_with_json_ld() {
+        let html = r##"
+        <html><head>
+        <meta name="generator" content="Eleventy">
+        <meta name="description" content="En blogg">
+        <script type="application/ld+json">
+        {"@type":"BlogPosting","headline":"Min artikel","author":"Anna"}
+        </script>
+        </head><body><p>Innehåll</p></body></html>
+        "##;
+        let result = extract_eleventy_data(html);
+        assert!(result.is_some(), "Borde hitta Eleventy data");
+        let data = result.unwrap();
+        assert_eq!(data.framework, Framework::Eleventy);
+        assert!(data.props.get("jsonLd").is_some(), "Borde ha JSON-LD");
+        assert!(data.props.get("meta").is_some(), "Borde ha meta-taggar");
+    }
+
+    #[test]
+    fn test_hugo_generator() {
+        let html = r##"
+        <html><head>
+        <meta name="generator" content="Hugo 0.123">
+        <meta property="og:title" content="Hugo-sida">
+        <meta property="og:type" content="article">
+        </head><body></body></html>
+        "##;
+        let result = extract_eleventy_data(html);
+        assert!(result.is_some(), "Borde hitta Hugo data");
+        let data = result.unwrap();
+        assert_eq!(data.framework, Framework::Eleventy);
+        assert!(
+            data.props.get("openGraph").is_some(),
+            "Borde ha OpenGraph-data"
+        );
+    }
+
+    #[test]
+    fn test_jekyll_generator() {
+        let html = r##"
+        <html><head>
+        <meta name="generator" content="Jekyll v4.3">
+        <meta name="description" content="Jekyll-blogg">
+        <meta name="author" content="Erik">
+        </head><body></body></html>
+        "##;
+        let result = extract_eleventy_data(html);
+        assert!(result.is_some(), "Borde hitta Jekyll data");
+    }
+
+    #[test]
+    fn test_eleventy_without_data() {
+        let html = r#"
+        <html><head>
+        <meta name="generator" content="Eleventy">
+        </head><body></body></html>
+        "#;
+        let result = extract_eleventy_data(html);
+        assert!(
+            result.is_none(),
+            "Borde returnera None utan strukturerad data"
+        );
+    }
+
+    // === Static HTML ===
+
+    #[test]
+    fn test_static_html_json_ld() {
+        let html = r##"
+        <html><head>
+        <meta name="description" content="En produkt">
+        <meta property="og:title" content="Produkt A">
+        <script type="application/ld+json">
+        {"@type":"Product","name":"Produkt A","price":"299 SEK"}
+        </script>
+        </head><body></body></html>
+        "##;
+        let result = extract_static_html_data(html);
+        assert!(result.is_some(), "Borde hitta statisk HTML data");
+        let data = result.unwrap();
+        assert_eq!(data.framework, Framework::StaticHtml);
+        assert!(data.props.get("jsonLd").is_some(), "Borde ha JSON-LD");
+    }
+
+    #[test]
+    fn test_static_html_opengraph_twitter() {
+        let html = r##"
+        <html><head>
+        <meta property="og:title" content="Sida">
+        <meta property="og:description" content="Beskrivning">
+        <meta name="twitter:card" content="summary">
+        <meta name="twitter:title" content="Sida">
+        </head><body></body></html>
+        "##;
+        let result = extract_static_html_data(html);
+        assert!(result.is_some(), "Borde hitta OG + Twitter data");
+        let data = result.unwrap();
+        assert!(data.props.get("openGraph").is_some(), "Borde ha OpenGraph");
+        assert!(data.props.get("twitter").is_some(), "Borde ha Twitter");
+    }
+
+    #[test]
+    fn test_static_html_too_little_data() {
+        let html = r#"
+        <html><head></head><body><p>Bara text</p></body></html>
+        "#;
+        let result = extract_static_html_data(html);
+        assert!(result.is_none(), "Borde returnera None med för lite data");
+    }
+
+    #[test]
+    fn test_extract_json_ld() {
+        let html = r##"
+        <script type="application/ld+json">{"@type":"Organization","name":"Acme"}</script>
+        "##;
+        let result = extract_json_ld(html);
+        assert!(result.is_some(), "Borde parsea JSON-LD");
+        let val = result.unwrap();
+        assert_eq!(
+            val.get("name").and_then(|v| v.as_str()),
+            Some("Acme"),
+            "Borde extrahera name"
+        );
+    }
+
+    #[test]
+    fn test_extract_meta_tags_og() {
+        let html = r##"
+        <meta property="og:title" content="Min titel">
+        <meta property="og:description" content="Beskrivning">
+        <meta property="og:image" content="https://example.com/img.jpg">
+        "##;
+        let tags = extract_meta_tags(html, "og:");
+        assert_eq!(tags.len(), 3, "Borde hitta 3 OG-taggar");
+        assert_eq!(tags[0].0, "title");
+        assert_eq!(tags[0].1, "Min titel");
+    }
+
+    #[test]
+    fn test_extract_standard_meta() {
+        let html = r##"
+        <meta name="description" content="En sida om saker">
+        <meta name="author" content="Anna Svensson">
+        "##;
+        let tags = extract_standard_meta(html);
+        assert!(tags.len() >= 2, "Borde hitta 2 meta-taggar");
     }
 }
