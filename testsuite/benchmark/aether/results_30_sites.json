@@ -1,0 +1,270 @@
+[
+  {
+    "site": "example.com",
+    "url": "https://example.com",
+    "ms": 283,
+    "png_bytes": 61530,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "news.ycombinator.com",
+    "url": "https://news.ycombinator.com",
+    "ms": 753,
+    "png_bytes": 422646,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  },
+  {
+    "site": "books.toscrape.com",
+    "url": "https://books.toscrape.com",
+    "ms": 1089,
+    "png_bytes": 142532,
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "www.aftonbladet.se",
+    "url": "https://www.aftonbladet.se",
+    "ms": 2265,
+    "png_bytes": 53800,
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "www.di.se",
+    "url": "https://www.di.se",
+    "ms": 5358,
+    "png_bytes": 490145,
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "www.expressen.se",
+    "url": "https://www.expressen.se",
+    "ms": 2184,
+    "png_bytes": 105159,
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "www.apple.com",
+    "url": "https://www.apple.com",
+    "ms": 1762,
+    "png_bytes": 279762,
+    "css_found": 7,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "github.com",
+    "url": "https://github.com",
+    "ms": 733,
+    "status": "fail",
+    "error": "Render failed: Blitz failed and CDP unavailable: Blitz rendering kraschade (catc"
+  },
+  {
+    "site": "x.com",
+    "url": "https://x.com",
+    "ms": 694,
+    "png_bytes": 102098,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "www.bbc.com",
+    "url": "https://www.bbc.com",
+    "ms": 325,
+    "png_bytes": 27465,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "egress"
+  },
+  {
+    "site": "docs.python.org",
+    "url": "https://docs.python.org/3/",
+    "ms": 738,
+    "png_bytes": 330930,
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "cnn.com",
+    "url": "https://www.cnn.com",
+    "ms": 739,
+    "png_bytes": 215081,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "linkedin.com",
+    "url": "https://www.linkedin.com",
+    "ms": 1055,
+    "png_bytes": 217328,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  },
+  {
+    "site": "svt.se",
+    "url": "https://www.svt.se",
+    "ms": 3064,
+    "png_bytes": 306647,
+    "css_found": 8,
+    "css_loaded": 8,
+    "status": "ok"
+  },
+  {
+    "site": "dn.se",
+    "url": "https://www.dn.se",
+    "ms": 4142,
+    "png_bytes": 657628,
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "google.com",
+    "url": "https://www.google.com",
+    "ms": 516,
+    "png_bytes": 65823,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "rust-lang.org",
+    "url": "https://www.rust-lang.org",
+    "ms": 1233,
+    "png_bytes": 146579,
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "mozilla.org",
+    "url": "https://www.mozilla.org",
+    "ms": 2248,
+    "png_bytes": 177530,
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "cloudflare.com",
+    "url": "https://www.cloudflare.com",
+    "ms": 1030,
+    "png_bytes": 99745,
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "vercel.com",
+    "url": "https://vercel.com",
+    "ms": 1084,
+    "png_bytes": 232712,
+    "css_found": 11,
+    "css_loaded": 11,
+    "status": "ok"
+  },
+  {
+    "site": "python.org",
+    "url": "https://www.python.org",
+    "ms": 1151,
+    "png_bytes": 169927,
+    "css_found": 4,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "httpbin.org",
+    "url": "https://httpbin.org/html",
+    "ms": 289,
+    "png_bytes": 447859,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "quotes.toscrape.com",
+    "url": "https://quotes.toscrape.com",
+    "ms": 1116,
+    "png_bytes": 246475,
+    "css_found": 2,
+    "css_loaded": 2,
+    "status": "ok"
+  },
+  {
+    "site": "svd.se",
+    "url": "https://www.svd.se",
+    "ms": 1375,
+    "png_bytes": 493188,
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "ebay.com",
+    "url": "https://www.ebay.com",
+    "ms": 1389,
+    "png_bytes": 100053,
+    "css_found": 2,
+    "css_loaded": 2,
+    "status": "ok"
+  },
+  {
+    "site": "w3schools.com",
+    "url": "https://www.w3schools.com",
+    "ms": 1426,
+    "png_bytes": 165926,
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "hn.algolia.com",
+    "url": "https://hn.algolia.com",
+    "ms": 1133,
+    "png_bytes": 30185,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  },
+  {
+    "site": "dev.to",
+    "url": "https://dev.to",
+    "ms": 1620,
+    "png_bytes": 888718,
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "npr.org",
+    "url": "https://www.npr.org",
+    "ms": 1237,
+    "png_bytes": 326966,
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "dw.com",
+    "url": "https://www.dw.com",
+    "ms": 828,
+    "png_bytes": 30398,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  }
+]

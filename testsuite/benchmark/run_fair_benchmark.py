@@ -20,7 +20,7 @@ os.makedirs(AETHER_DIR, exist_ok=True)
 os.makedirs(LP_DIR, exist_ok=True)
 
 SITES = [
-    # Befintliga 10
+    # Original 10
     ("example.com", "https://example.com"),
     ("news.ycombinator.com", "https://news.ycombinator.com"),
     ("books.toscrape.com", "https://books.toscrape.com"),
@@ -31,7 +31,7 @@ SITES = [
     ("github.com", "https://github.com"),
     ("x.com", "https://x.com"),
     ("www.bbc.com", "https://www.bbc.com"),
-    # Nya 10 (blandad JS-intensitet)
+    # Batch 2: JS-tunga sajter
     ("docs.python.org", "https://docs.python.org/3/"),
     ("cnn.com", "https://www.cnn.com"),
     ("linkedin.com", "https://www.linkedin.com"),
@@ -42,6 +42,17 @@ SITES = [
     ("mozilla.org", "https://www.mozilla.org"),
     ("cloudflare.com", "https://www.cloudflare.com"),
     ("vercel.com", "https://vercel.com"),
+    # Batch 3: blandad komplexitet
+    ("python.org", "https://www.python.org"),
+    ("httpbin.org", "https://httpbin.org/html"),
+    ("quotes.toscrape.com", "https://quotes.toscrape.com"),
+    ("svd.se", "https://www.svd.se"),
+    ("ebay.com", "https://www.ebay.com"),
+    ("w3schools.com", "https://www.w3schools.com"),
+    ("hn.algolia.com", "https://hn.algolia.com"),
+    ("dev.to", "https://dev.to"),
+    ("npr.org", "https://www.npr.org"),
+    ("dw.com", "https://www.dw.com"),
 ]
 
 def ae_api(endpoint, payload, timeout=30):
