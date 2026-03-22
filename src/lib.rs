@@ -7,6 +7,8 @@ mod collab;
 mod compiler;
 #[cfg(feature = "js-eval")]
 mod css_cascade;
+#[cfg(feature = "blitz")]
+pub mod css_compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
 mod dom_bridge;
@@ -1235,16 +1237,41 @@ pub fn render_html_to_png(
             "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
         ));
     }
-    // OBS: CSS cascade (css_cascade.rs) appliceras INTE här.
-    // Blitz har en egen full CSS-motor som hanterar <style>-taggar, specificitet och arv.
-    // Extern CSS hämtas av inline_external_css() och läggs som <style>-taggar som Blitz
-    // parsear nativt — det ger bättre resultat än vår förenklade cascade.
-    // css_cascade.rs används istället av JS-sandboxen (window.getComputedStyle).
+    // CSS Compiler Pipeline (Fas 19):
+    // 1. LightningCSS — resolve CSS vars, downlevel nesting/:is()/color functions
+    // 2. Media Query Filter — evaluera @media mot viewport, strippa icke-matchande
+    // 3. css-inline — flattena ALL CSS till style="" på varje element, ta bort <style>
+    //
+    // Resultat: Blitz ser bara inline styles — ingen selektor-matchning behövs,
+    // inga CSS-ambiguiteter, inga var()/calc()/@media-problem.
+    let viewport = css_compiler::ViewportConfig {
+        width,
+        height,
+        color_scheme: css_compiler::ColorScheme::Light,
+    };
+    let compiled = css_compiler::compile_css(html, &viewport);
+    let use_compiled = compiled.fully_compiled;
+    let compiled_html = compiled.html;
 
-    // Kör hela Blitz-renderingen i catch_unwind — Blitz kan panika vid tunga/felaktiga sidor
+    // Försök 1: rendera med CSS-compiled HTML
+    if use_compiled {
+        let html_owned = compiled_html.clone();
+        let base_url_owned = base_url.to_string();
+        let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            render_html_to_png_inner(&html_owned, &base_url_owned, width, height, fast_render)
+        }));
+
+        match render_result {
+            Ok(Ok(png)) => return Ok(png),
+            Ok(Err(_)) | Err(_) => {
+                // CSS-compiled HTML kraschade Blitz — fallback till original
+            }
+        }
+    }
+
+    // Försök 2 (fallback): rendera med original HTML (utan CSS Compiler)
     let html_owned = html.to_string();
     let base_url_owned = base_url.to_string();
-
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         render_html_to_png_inner(&html_owned, &base_url_owned, width, height, fast_render)
     }));

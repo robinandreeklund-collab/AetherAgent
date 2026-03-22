@@ -146,6 +146,7 @@ impl CssContext {
     /// Blitz (which only sees inline/HTML styles) renders with full cascade.
     ///
     /// Returns the number of nodes that got style attributes updated.
+    #[cfg(test)]
     pub fn apply_computed_styles_inline(&mut self, arena: &mut ArenaDom) -> usize {
         // Samla alla element-nycklar först (undvik borrow-konflikt med mutable arena)
         let element_keys: Vec<NodeKey> = arena
@@ -756,6 +757,7 @@ fn get_tag_defaults(tag: &str) -> HashMap<String, String> {
 }
 
 /// Parsa inline style-sträng till HashMap (prop → value)
+#[cfg(test)]
 fn parse_inline_style(style: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for part in style.split(';') {
@@ -772,6 +774,7 @@ fn parse_inline_style(style: &str) -> HashMap<String, String> {
 }
 
 /// CSS-properties som påverkar visuell rendering (filtrera bort inherited defaults)
+#[cfg(test)]
 fn is_render_relevant(prop: &str) -> bool {
     matches!(
         prop,
@@ -855,6 +858,7 @@ fn is_render_relevant(prop: &str) -> bool {
 ///
 /// Returns the modified HTML with inlined computed styles and
 /// the number of nodes updated.
+#[cfg(test)]
 pub fn apply_cascade_to_html(html: &str) -> (String, usize) {
     let rcdom = crate::parser::parse_html(html);
     let mut arena = ArenaDom::from_rcdom(&rcdom);
