@@ -2154,6 +2154,138 @@ pub fn build_search_url(query: &str) -> String {
     search::build_ddg_url(query)
 }
 
+// ─── Markdown-konvertering ────────────────────────────────────────────────────
+
+/// Convert a semantic tree to clean Markdown for LLM consumption
+///
+/// Renders SemanticNode tree as structured Markdown:
+/// headings for landmarks, bullet points for links/buttons,
+/// text for content, tables for forms.
+#[wasm_bindgen]
+pub fn semantic_tree_to_markdown(tree_json: &str) -> String {
+    let tree: types::SemanticTree = match serde_json::from_str(tree_json) {
+        Ok(t) => t,
+        Err(e) => return format!("{{\"error\":\"Invalid tree JSON: {e}\"}}"),
+    };
+
+    let mut md = String::with_capacity(tree.nodes.len() * 80);
+
+    if !tree.title.is_empty() {
+        md.push_str(&format!("# {}\n\n", tree.title));
+    }
+
+    for node in &tree.nodes {
+        node_to_markdown(node, &mut md, 0);
+    }
+
+    if !tree.injection_warnings.is_empty() {
+        md.push_str("\n---\n\n**Injection Warnings:**\n\n");
+        for w in &tree.injection_warnings {
+            md.push_str(&format!(
+                "- Node {}: {} (severity: {:?})\n",
+                w.node_id, w.reason, w.severity
+            ));
+        }
+    }
+
+    md
+}
+
+/// Convert HTML directly to Markdown (parse → semantic tree → markdown)
+#[wasm_bindgen]
+pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
+    let tree_json = parse_to_semantic_tree(html, goal, url);
+    semantic_tree_to_markdown(&tree_json)
+}
+
+/// Intern: konvertera en nod till markdown rekursivt
+fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
+    let role = node.role.as_str();
+    let label = node.label.trim();
+
+    if label.is_empty() && node.children.is_empty() {
+        return;
+    }
+
+    match role {
+        "heading" => {
+            // Bestäm heading-nivå baserat på djup (h1-h6)
+            let level = (depth + 1).min(6);
+            let prefix = "#".repeat(level);
+            if !label.is_empty() {
+                md.push_str(&format!("{prefix} {label}\n\n"));
+            }
+        }
+        "link" => {
+            let href = node.action.as_deref().unwrap_or("#");
+            if !label.is_empty() {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}- [{label}]({href})\n"));
+            }
+        }
+        "button" => {
+            let indent = "  ".repeat(depth);
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- **[{label}]** (button)\n"));
+            }
+        }
+        "input" | "textbox" | "textarea" => {
+            let indent = "  ".repeat(depth);
+            let value = node.value.as_deref().unwrap_or("");
+            let name = node.name.as_deref().unwrap_or("");
+            if !label.is_empty() || !name.is_empty() {
+                let display = if !label.is_empty() { label } else { name };
+                if value.is_empty() {
+                    md.push_str(&format!("{indent}- `{display}`: _(input)_\n"));
+                } else {
+                    md.push_str(&format!("{indent}- `{display}`: {value}\n"));
+                }
+            }
+        }
+        "select" | "combobox" => {
+            let indent = "  ".repeat(depth);
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- `{label}`: _(dropdown)_\n"));
+            }
+        }
+        "checkbox" | "radio" => {
+            let indent = "  ".repeat(depth);
+            let checked = node
+                .state
+                .checked
+                .map(|c| if c { "[x]" } else { "[ ]" })
+                .unwrap_or("[ ]");
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- {checked} {label}\n"));
+            }
+        }
+        "image" | "img" => {
+            if !label.is_empty() {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}![{label}](image)\n"));
+            }
+        }
+        "navigation" | "nav" => {
+            if !label.is_empty() {
+                md.push_str(&format!("\n**{label}**\n\n"));
+            }
+        }
+        "list" | "group" => {
+            // Bara rendera children
+        }
+        _ => {
+            if !label.is_empty() && label.len() > 2 {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}{label}\n\n"));
+            }
+        }
+    }
+
+    for child in &node.children {
+        node_to_markdown(child, md, depth + 1);
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -277,29 +277,65 @@ fn extract_domain(url: &str) -> Option<String> {
 
 // ─── CSS Inlining för Blitz-rendering ──────────────────────────────────────
 
+/// Resultat av CSS-inlining med detaljerad felrapportering
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CssInlineResult {
+    /// Modifierad HTML med inlinad CSS
+    pub html: String,
+    /// Antal CSS-filer som hittades
+    pub css_found: usize,
+    /// Antal CSS-filer som laddades OK
+    pub css_loaded: usize,
+    /// Antal CSS-filer som misslyckades
+    pub css_failed: usize,
+    /// Detaljer per CSS-fil
+    pub css_details: Vec<CssFileStatus>,
+    /// Totalt antal CSS-bytes som inlinades
+    pub css_bytes_added: usize,
+}
+
+/// Status för en enskild CSS-fil
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CssFileStatus {
+    /// CSS-filens URL
+    pub url: String,
+    /// Om filen laddades OK
+    pub loaded: bool,
+    /// Storlek i bytes (0 om misslyckad)
+    pub size_bytes: usize,
+    /// Felmeddelande (None om OK)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Hämta externa CSS-filer (<link rel="stylesheet">) och inlina dem som <style>-taggar.
 ///
 /// Blitz (ren Rust-renderer) kan inte ladda externa resurser tillförlitligt.
 /// Denna funktion prefetchar alla CSS-länkar parallellt och ersätter
 /// <link>-taggarna med <style>-block i HTML:en.
 ///
-/// Returnerar modifierad HTML med inlinad CSS.
-pub async fn inline_external_css(html: &str, base_url: &str) -> String {
-    // Hitta alla <link rel="stylesheet" href="...">
+/// Returnerar CssInlineResult med modifierad HTML och detaljerad felrapportering.
+pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInlineResult {
     let mut css_links = extract_css_links(html, base_url);
+    let css_found = css_links.len();
+
     if css_links.is_empty() {
-        return html.to_string();
+        return CssInlineResult {
+            html: html.to_string(),
+            css_found: 0,
+            css_loaded: 0,
+            css_failed: 0,
+            css_details: vec![],
+            css_bytes_added: 0,
+        };
     }
 
-    // Begränsa antal CSS-filer för att förhindra OOM vid sidor med hundratals <link>
     const MAX_CSS_LINKS: usize = 50;
     css_links.truncate(MAX_CSS_LINKS);
 
-    // Hämta alla CSS-filer parallellt (max 2 MB per fil)
-    // Återanvänd SHARED_CLIENT istället för att skapa ny klient per anrop
     const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
 
-    // Parallell CSS-hämtning med tokio tasks
+    // Parallell CSS-hämtning med tokio tasks — nu med felrapportering
     let mut handles = Vec::with_capacity(css_links.len());
     for link in &css_links {
         let client = SHARED_CLIENT.clone();
@@ -307,47 +343,93 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
         handles.push(tokio::spawn(async move {
             match client.get(&url).send().await {
                 Ok(resp) => {
-                    let bytes = resp.bytes().await.ok()?;
-                    if bytes.len() > MAX_CSS_BYTES {
-                        return None;
+                    let status = resp.status();
+                    if !status.is_success() {
+                        return Err(format!("HTTP {status}"));
                     }
-                    String::from_utf8(bytes.to_vec()).ok()
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            if bytes.len() > MAX_CSS_BYTES {
+                                return Err(format!(
+                                    "För stor: {} bytes (max {MAX_CSS_BYTES})",
+                                    bytes.len()
+                                ));
+                            }
+                            match String::from_utf8(bytes.to_vec()) {
+                                Ok(s) => Ok(s),
+                                Err(_) => Err("Ej giltig UTF-8".to_string()),
+                            }
+                        }
+                        Err(e) => Err(format!("Body-läsning misslyckades: {e}")),
+                    }
                 }
-                Err(_) => None,
+                Err(e) => Err(format!("Nätverksfel: {e}")),
             }
         }));
     }
 
-    let mut results: Vec<Option<String>> = Vec::with_capacity(handles.len());
+    let mut results: Vec<Result<String, String>> = Vec::with_capacity(handles.len());
     for handle in handles {
-        results.push(handle.await.ok().flatten());
+        match handle.await {
+            Ok(r) => results.push(r),
+            Err(e) => results.push(Err(format!("Task-fel: {e}"))),
+        }
     }
 
-    // Bygg inlinad CSS (pre-allokera för typisk CSS-storlek)
+    let mut css_details = Vec::with_capacity(results.len());
+    let mut css_loaded = 0usize;
+    let mut css_failed = 0usize;
+    let mut css_bytes_added = 0usize;
+
     let estimated_size: usize = results
         .iter()
-        .filter_map(|r| r.as_ref())
+        .filter_map(|r| r.as_ref().ok())
         .map(|s| s.len() + 80)
         .sum();
     let mut inlined_css = String::with_capacity(estimated_size);
-    for (i, css_text) in results.iter().enumerate() {
-        if let Some(css) = css_text {
-            // Begränsa storlek (max 500KB per fil)
-            if css.len() <= 512_000 {
-                inlined_css.push_str(&format!(
-                    "\n<style data-inlined-from=\"{}\">\n{}\n</style>\n",
-                    css_links[i].url, css
-                ));
+
+    for (i, css_result) in results.iter().enumerate() {
+        match css_result {
+            Ok(css) => {
+                if css.len() <= 512_000 {
+                    inlined_css.push_str(&format!(
+                        "\n<style data-inlined-from=\"{}\">\n{}\n</style>\n",
+                        css_links[i].url, css
+                    ));
+                    css_bytes_added += css.len();
+                    css_details.push(CssFileStatus {
+                        url: css_links[i].url.clone(),
+                        loaded: true,
+                        size_bytes: css.len(),
+                        error: None,
+                    });
+                    css_loaded += 1;
+                } else {
+                    css_details.push(CssFileStatus {
+                        url: css_links[i].url.clone(),
+                        loaded: false,
+                        size_bytes: css.len(),
+                        error: Some(format!("Trunkerad: {} bytes > 512KB", css.len())),
+                    });
+                    css_failed += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("[CSS] Misslyckad: {} — {}", css_links[i].url, e);
+                css_details.push(CssFileStatus {
+                    url: css_links[i].url.clone(),
+                    loaded: false,
+                    size_bytes: 0,
+                    error: Some(e.clone()),
+                });
+                css_failed += 1;
             }
         }
     }
 
-    if inlined_css.is_empty() {
-        return html.to_string();
-    }
-
-    // Injicera inlinad CSS före </head> (eller i början av <body>)
-    let result = if let Some(pos) = html.find("</head>") {
+    let html_out = if inlined_css.is_empty() {
+        html.to_string()
+    } else if let Some(pos) = html.find("</head>") {
         format!("{}{}{}", &html[..pos], inlined_css, &html[pos..])
     } else if let Some(pos) = html.find("<body") {
         format!("{}{}{}", &html[..pos], inlined_css, &html[pos..])
@@ -355,7 +437,19 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
         format!("{}{}", inlined_css, html)
     };
 
-    result
+    CssInlineResult {
+        html: html_out,
+        css_found,
+        css_loaded,
+        css_failed,
+        css_details,
+        css_bytes_added,
+    }
+}
+
+/// Bakåtkompatibel wrapper — returnerar bara HTML-strängen
+pub async fn inline_external_css(html: &str, base_url: &str) -> String {
+    inline_external_css_detailed(html, base_url).await.html
 }
 
 /// Intern: extrahera CSS-länk-URLer från HTML
