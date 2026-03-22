@@ -93,6 +93,10 @@ required-features = ["mcp"]
 name = "aether-bench"
 path = "benches/bench_main.rs"
 
+[[example]]
+name = "render_demo"
+required-features = ["js-eval", "blitz"]
+
 [profile.release]
 opt-level = "z"    # minimera binärstorlek
 lto = true

@@ -1761,6 +1761,122 @@ async fn render_with_js_handler(Json(req): Json<RenderWithJsRequest>) -> impl In
     (StatusCode::OK, result)
 }
 
+/// Fetch URL → inline CSS → Blitz full render (med bilder + CSS)
+#[derive(Deserialize)]
+struct FetchRenderRequest {
+    url: String,
+    #[serde(default)]
+    js_code: String,
+    #[serde(default = "default_width")]
+    width: u32,
+    #[serde(default = "default_height")]
+    height: u32,
+}
+
+#[cfg(all(feature = "fetch", feature = "blitz"))]
+async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoResponse {
+    use aether_agent::fetch;
+
+    // Steg 1: Fetcha HTML
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Fetch failed: {e}"}}"#),
+            )
+        }
+    };
+
+    let html = &fetch_result.body;
+    let final_url = &fetch_result.final_url;
+
+    if html.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                r#"{{"error":"Empty response from {}", "status": {}}}"#,
+                final_url, fetch_result.status_code
+            ),
+        );
+    }
+
+    // Steg 2: Inline extern CSS (konverterar <link rel=stylesheet> → <style>)
+    let html_with_css = fetch::inline_external_css(html, final_url).await;
+
+    // Steg 3: Rendera med Blitz (full mode = laddar bilder)
+    #[cfg(feature = "js-eval")]
+    let result = {
+        if req.js_code.is_empty() {
+            // Ingen JS — ren render med full resource loading
+            match aether_agent::render_html_to_png(
+                &html_with_css,
+                final_url,
+                req.width,
+                req.height,
+                false, // full render: ladda bilder
+            ) {
+                Ok(png_bytes) => {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    serde_json::json!({
+                        "png_base64": b64,
+                        "png_size_bytes": png_bytes.len(),
+                        "url": final_url,
+                        "status_code": fetch_result.status_code,
+                        "html_length": html_with_css.len(),
+                        "css_inlined": html_with_css.len() > html.len(),
+                        "css_added_bytes": html_with_css.len() as i64 - html.len() as i64,
+                    })
+                    .to_string()
+                }
+                Err(e) => {
+                    serde_json::json!({"error": format!("Render failed: {e}"), "url": final_url})
+                        .to_string()
+                }
+            }
+        } else {
+            // JS + full render
+            aether_agent::render_with_js_full(
+                &html_with_css,
+                &req.js_code,
+                final_url,
+                req.width,
+                req.height,
+            )
+        }
+    };
+
+    #[cfg(not(feature = "js-eval"))]
+    let result = {
+        match aether_agent::render_html_to_png(
+            &html_with_css,
+            final_url,
+            req.width,
+            req.height,
+            false,
+        ) {
+            Ok(png_bytes) => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                serde_json::json!({
+                    "png_base64": b64,
+                    "png_size_bytes": png_bytes.len(),
+                    "url": final_url,
+                    "status_code": fetch_result.status_code,
+                    "html_length": html_with_css.len(),
+                })
+                .to_string()
+            }
+            Err(e) => serde_json::json!({"error": format!("Render failed: {e}"), "url": final_url})
+                .to_string(),
+        }
+    };
+
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
 
 #[cfg(feature = "vision")]
@@ -3675,6 +3791,22 @@ fn build_router(state: AppState) -> Router {
                     (
                         StatusCode::NOT_IMPLEMENTED,
                         r#"{"error":"js-eval + blitz features inte aktiverade"}"#,
+                    )
+                })
+            }
+        })
+        // Fetch + CSS inline + full Blitz render (med bilder)
+        .route("/api/fetch/render", {
+            #[cfg(all(feature = "fetch", feature = "blitz"))]
+            {
+                post(fetch_render_handler)
+            }
+            #[cfg(not(all(feature = "fetch", feature = "blitz")))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"fetch + blitz features inte aktiverade"}"#,
                     )
                 })
             }

@@ -1345,6 +1345,32 @@ pub fn render_with_js(
     width: u32,
     height: u32,
 ) -> String {
+    render_with_js_opts(html, js_code, base_url, width, height, true)
+}
+
+/// Render with JS — full mode (loads external CSS, fonts, images via blitz-net)
+///
+/// Kräver tokio runtime. Använd från HTTP-server eller async-kontext.
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+pub fn render_with_js_full(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> String {
+    render_with_js_opts(html, js_code, base_url, width, height, false)
+}
+
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+fn render_with_js_opts(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> String {
     let start = now_ms();
 
     // Steg 1: Parsa HTML → ArenaDom
@@ -1360,8 +1386,8 @@ pub fn render_with_js(
     // Document-noden är typ Document, inte Element — serialisera dess barn (innerHTML)
     let modified_html = modified_arena.serialize_inner_html(modified_arena.document);
 
-    // Steg 4: Rendera med Blitz (fast_render=true för snabbhet)
-    let render_result = render_html_to_png(&modified_html, base_url, width, height, true);
+    // Steg 4: Rendera med Blitz
+    let render_result = render_html_to_png(&modified_html, base_url, width, height, fast_render);
 
     let total_ms = now_ms() - start;
 

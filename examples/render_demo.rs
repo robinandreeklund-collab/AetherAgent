@@ -1,5 +1,6 @@
 /// Demo: Fetch real websites → Boa JS eval → Blitz render → PNG
 /// Bevisar end-to-end att JS-modifierad DOM renderas korrekt av Blitz
+use base64::Engine as _;
 use std::fs;
 use std::process::Command;
 
@@ -47,8 +48,9 @@ fn main() {
     }
     if let Some(b64) = result["png_base64"].as_str() {
         if !b64.is_empty() {
-            use base64::Engine;
-            let png = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            let png: Vec<u8> = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap();
             let path = format!("{}/02_example_com_js_modified.png", out_dir);
             fs::write(&path, &png).unwrap();
             println!("✓ Sparade {} ({} bytes)", path, png.len());
@@ -60,7 +62,13 @@ fn main() {
     let hn_html = fetch_html("https://news.ycombinator.com");
     println!("Hämtade {} tecken HTML", hn_html.len());
 
-    match aether_agent::render_html_to_png(&hn_html, "https://news.ycombinator.com", 1280, 900, true) {
+    match aether_agent::render_html_to_png(
+        &hn_html,
+        "https://news.ycombinator.com",
+        1280,
+        900,
+        true,
+    ) {
         Ok(png) => {
             let path = format!("{}/03_hackernews.png", out_dir);
             fs::write(&path, &png).unwrap();
@@ -77,7 +85,8 @@ fn main() {
             title.setAttribute("style", "background: yellow; padding: 10px; font-size: 24px;");
         }
     "#;
-    let hn_result_json = aether_agent::render_with_js(&hn_html, hn_js, "https://news.ycombinator.com", 1280, 900);
+    let hn_result_json =
+        aether_agent::render_with_js(&hn_html, hn_js, "https://news.ycombinator.com", 1280, 900);
     let hn_result: serde_json::Value = serde_json::from_str(&hn_result_json).unwrap();
     println!(
         "Mutationer: {}, JS-tid: {}µs, Total: {}ms",
@@ -85,8 +94,9 @@ fn main() {
     );
     if let Some(b64) = hn_result["png_base64"].as_str() {
         if !b64.is_empty() {
-            use base64::Engine;
-            let png = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            let png: Vec<u8> = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap();
             let path = format!("{}/04_hackernews_js_highlight.png", out_dir);
             fs::write(&path, &png).unwrap();
             println!("✓ Sparade {} ({} bytes)", path, png.len());
@@ -98,7 +108,13 @@ fn main() {
     let books_html = fetch_html("https://books.toscrape.com");
     println!("Hämtade {} tecken HTML", books_html.len());
 
-    match aether_agent::render_html_to_png(&books_html, "https://books.toscrape.com", 1280, 900, true) {
+    match aether_agent::render_html_to_png(
+        &books_html,
+        "https://books.toscrape.com",
+        1280,
+        900,
+        true,
+    ) {
         Ok(png) => {
             let path = format!("{}/05_books_toscrape.png", out_dir);
             fs::write(&path, &png).unwrap();
@@ -118,7 +134,13 @@ fn main() {
         var h1 = document.querySelector("h1");
         if (h1) { h1.textContent = "BOA JS ENGINE — ALL BOOKS ON SALE!"; }
     "#;
-    let books_result_json = aether_agent::render_with_js(&books_html, books_js, "https://books.toscrape.com", 1280, 900);
+    let books_result_json = aether_agent::render_with_js(
+        &books_html,
+        books_js,
+        "https://books.toscrape.com",
+        1280,
+        900,
+    );
     let books_result: serde_json::Value = serde_json::from_str(&books_result_json).unwrap();
     println!(
         "Mutationer: {}, JS-tid: {}µs, Total: {}ms, Modifierad HTML: {} tecken",
@@ -129,8 +151,9 @@ fn main() {
     );
     if let Some(b64) = books_result["png_base64"].as_str() {
         if !b64.is_empty() {
-            use base64::Engine;
-            let png = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            let png: Vec<u8> = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap();
             let path = format!("{}/06_books_toscrape_js_sale.png", out_dir);
             fs::write(&path, &png).unwrap();
             println!("✓ Sparade {} ({} bytes)", path, png.len());
@@ -182,7 +205,8 @@ fn main() {
             app.appendChild(card);
         }
     "#;
-    let spa_result_json = aether_agent::render_with_js(empty_html, spa_js, "https://shop.example.com", 1280, 900);
+    let spa_result_json =
+        aether_agent::render_with_js(empty_html, spa_js, "https://shop.example.com", 1280, 900);
     let spa_result: serde_json::Value = serde_json::from_str(&spa_result_json).unwrap();
     println!(
         "Mutationer: {}, JS-tid: {}µs, Total: {}ms, Modifierad HTML: {} tecken",
@@ -196,8 +220,9 @@ fn main() {
     }
     if let Some(b64) = spa_result["png_base64"].as_str() {
         if !b64.is_empty() {
-            use base64::Engine;
-            let png = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            let png: Vec<u8> = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap();
             let path = format!("{}/07_spa_built_by_js.png", out_dir);
             fs::write(&path, &png).unwrap();
             println!("✓ Sparade {} ({} bytes)", path, png.len());
