@@ -1253,6 +1253,7 @@ pub fn render_html_to_png(
     let use_compiled = compiled.fully_compiled;
     let compiled_html = compiled.html;
 
+<<<<<<< HEAD
     // Försök 1: rendera med CSS-compiled HTML
     if use_compiled {
         let html_owned = compiled_html.clone();
@@ -1298,6 +1299,20 @@ pub fn render_html_to_png(
     }
 
     // Fallback: rendera med original HTML (utan CSS Compiler)
+=======
+    // Säkerhetsgräns: Blitz/Vello kraschar (panik i GradientLut) på sidor med
+    // väldigt stora CSS-gradienter (t.ex. github.com ~3.7MB CSS). Skippa rendering
+    // för extremt stora HTML-dokument som triggar denna bugg.
+    const MAX_HTML_FOR_BLITZ: usize = 3 * 1024 * 1024; // 3 MB
+    if html.len() > MAX_HTML_FOR_BLITZ {
+        return Err(format!(
+            "HTML för stort för Blitz ({:.1} MB > 3 MB max) — använd CDP-tier istället",
+            html.len() as f64 / (1024.0 * 1024.0)
+        ));
+    }
+
+    // Kör Blitz-renderingen med catch_unwind — Blitz kan panika vid tunga sidor
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
     let html_owned = html.to_string();
     let base_url_owned = base_url.to_string();
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -1319,6 +1334,30 @@ pub fn render_html_to_png(
     }
 }
 
+/// Strippa <noscript>-element från HTML innan Blitz-rendering.
+/// Blitz kör ingen JS, så noscript-innehåll visas felaktigt som "Enable JavaScript".
+#[cfg(feature = "blitz")]
+fn strip_noscript(html: &str) -> String {
+    // Regex-fri stripping — hanterar nested tags korrekt
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+    while let Some(start) = remaining.to_ascii_lowercase().find("<noscript") {
+        result.push_str(&remaining[..start]);
+        // Hitta matchande </noscript>
+        let after_tag = &remaining[start..];
+        if let Some(end) = after_tag.to_ascii_lowercase().find("</noscript>") {
+            let close_end = end + "</noscript>".len();
+            remaining = &after_tag[close_end..];
+        } else {
+            // Inget sluttagg — skippa resten
+            remaining = "";
+            break;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
 /// Intern Blitz-rendering — separerad för catch_unwind
 #[cfg(feature = "blitz")]
 fn render_html_to_png_inner(
@@ -1334,6 +1373,9 @@ fn render_html_to_png_inner(
     use blitz_traits::shell::{ColorScheme, Viewport};
 
     let scale: f32 = 1.0;
+
+    // Strippa <noscript> — Blitz kör ingen JS, så dessa visar "enable javascript"-meddelanden
+    let html = &strip_noscript(html);
 
     let mut document = if fast_render {
         HtmlDocument::from_html(
@@ -1363,10 +1405,10 @@ fn render_html_to_png_inner(
             },
         );
 
-        // Vänta kort så att Blitz hinner starta alla resurshämtningar
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Vänta lite längre så att Blitz hinner starta alla resurshämtningar (bilder, CSS, fonter)
+        std::thread::sleep(std::time::Duration::from_millis(100));
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         let mut idle_rounds = 0u32;
         loop {
             let mut loaded_any = false;
@@ -1376,10 +1418,10 @@ fn render_html_to_png_inner(
             }
             doc.as_mut().resolve(0.0);
 
-            // Kräv minst 3 tomma rundor i rad innan vi avslutar
+            // Kräv minst 5 tomma rundor (100ms idle) innan vi avslutar — ger bilder tid att ladda
             if net.is_empty() && !loaded_any {
                 idle_rounds += 1;
-                if idle_rounds >= 3 {
+                if idle_rounds >= 5 {
                     break;
                 }
             } else {
@@ -3089,5 +3131,49 @@ mod tests {
     fn test_workflow_invalid_json() {
         let result = workflow_provide_page("bad json", "<html></html>", "url");
         assert!(result.contains("error"));
+    }
+
+    #[cfg(feature = "blitz")]
+    mod strip_noscript_tests {
+        use super::super::strip_noscript;
+
+        #[test]
+        fn test_strip_noscript_basic() {
+            let html = "<html><body><noscript>Enable JS</noscript><p>Visible</p></body></html>";
+            let result = strip_noscript(html);
+            assert!(
+                !result.contains("Enable JS"),
+                "Noscript-innehåll ska strippas"
+            );
+            assert!(result.contains("Visible"), "Synligt innehåll ska bevaras");
+        }
+
+        #[test]
+        fn test_strip_noscript_multiple() {
+            let html = "<noscript>A</noscript>hello<noscript>B</noscript>world";
+            let result = strip_noscript(html);
+            assert_eq!(result, "helloworld");
+        }
+
+        #[test]
+        fn test_strip_noscript_case_insensitive() {
+            let html = "<NOSCRIPT>hidden</NOSCRIPT>visible<NoScript>also hidden</NoScript>ok";
+            let result = strip_noscript(html);
+            assert_eq!(result, "visibleok");
+        }
+
+        #[test]
+        fn test_strip_noscript_with_attributes() {
+            let html = r#"<noscript class="js-fallback">JS required</noscript><p>OK</p>"#;
+            let result = strip_noscript(html);
+            assert!(!result.contains("JS required"), "Noscript med attribut ska strippas");
+            assert!(result.contains("<p>OK</p>"), "Innehåll utanför ska bevaras");
+        }
+
+        #[test]
+        fn test_strip_noscript_empty_html() {
+            assert_eq!(strip_noscript(""), "");
+            assert_eq!(strip_noscript("no noscript here"), "no noscript here");
+        }
     }
 }
