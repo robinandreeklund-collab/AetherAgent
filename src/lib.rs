@@ -1262,14 +1262,42 @@ pub fn render_html_to_png(
         }));
 
         match render_result {
-            Ok(Ok(png)) => return Ok(png),
+            Ok(Ok(compiled_png)) => {
+                // Blank-detection: en helt vit 1280x900 sida ≈ 25-28KB.
+                // Om compiled-PNG:en är liten, testa om fallback ger bättre resultat.
+                const BLANK_THRESHOLD: usize = 30_000;
+                if compiled_png.len() >= BLANK_THRESHOLD {
+                    return Ok(compiled_png);
+                }
+
+                // Suspekt liten — rendera fallback och jämför
+                let html_owned2 = html.to_string();
+                let base_url_owned2 = base_url.to_string();
+                let fallback_result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                        render_html_to_png_inner(
+                            &html_owned2,
+                            &base_url_owned2,
+                            width,
+                            height,
+                            fast_render,
+                        )
+                    }));
+
+                match fallback_result {
+                    Ok(Ok(fallback_png)) if fallback_png.len() > compiled_png.len() => {
+                        return Ok(fallback_png);
+                    }
+                    _ => return Ok(compiled_png),
+                }
+            }
             Ok(Err(_)) | Err(_) => {
                 // CSS-compiled HTML kraschade Blitz — fallback till original
             }
         }
     }
 
-    // Försök 2 (fallback): rendera med original HTML (utan CSS Compiler)
+    // Fallback: rendera med original HTML (utan CSS Compiler)
     let html_owned = html.to_string();
     let base_url_owned = base_url.to_string();
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {

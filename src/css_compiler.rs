@@ -64,42 +64,20 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
         };
     }
 
-    // Mät total CSS-storlek — om CSS > 200KB, låt Blitz hantera det nativt.
-    // Blitz nativa CSS-motor hanterar stora stylesheets bättre än css-inline
-    // för komplexa sajter (apple.com: 1.3MB CSS, 1347 @media).
-    let total_css_bytes: usize = extract_style_blocks(html)
-        .iter()
-        .map(|b| b.css_content.len())
-        .sum();
-    const MAX_CSS_FOR_INLINE: usize = 200 * 1024; // 200 KB
-    if total_css_bytes > MAX_CSS_FOR_INLINE {
-        // Fortfarande kör steg 1+2 (LightningCSS transform + @media-filter)
-        // men INTE steg 3 (css-inline). Blitz renderar <style>-block nativt.
-        let (html_with_transformed_css, blocks_processed, rules_count) =
-            transform_and_filter_css(html, viewport);
-        let elapsed = start.elapsed().as_micros() as u64;
-        return CssCompilerResult {
-            html: html_with_transformed_css,
-            style_blocks_processed: blocks_processed,
-            rules_after_filter: rules_count,
-            compile_time_us: elapsed,
-            fully_compiled: true,
-        };
-    }
-
     // Steg 1+2: Extrahera <style>-block, transform med LightningCSS, filtrera @media
     let (html_with_transformed_css, blocks_processed, rules_count) =
         transform_and_filter_css(html, viewport);
 
-    // Steg 3: Inline all CSS till style="" med css-inline (bara för < 200KB CSS)
+    // Steg 3: Inline all CSS till style="" med css-inline
     let final_html = inline_css_to_attributes(&html_with_transformed_css);
 
-    // Validering: om css-inline producerade en sida som verkar tom (inga synliga element),
-    // fallback till transformerad HTML med <style>-block intakta
-    let has_visible_content = final_html.contains("style=\"") || final_html.len() > html.len() / 2;
-    let result_html = if has_visible_content {
+    // Validering: css-inline kan producera trasig output för extremt komplex CSS.
+    // Snabb check: output borde inte vara dramatiskt mindre än input (indikerar att
+    // css-inline strippade bort allt innehåll).
+    let result_html = if final_html.len() >= html.len() / 5 {
         final_html
     } else {
+        // css-inline producerade suspekt liten output — fallback till steg 1+2
         html_with_transformed_css
     };
 
@@ -716,5 +694,200 @@ mod tests {
         let html = r#"<html><head><style>.red { color: red; }</style></head><body><div class="red">Hi</div></body></html>"#;
         let result = inline_css_to_attributes(html);
         assert!(result.contains("style="), "Borde ha inline style");
+    }
+
+    #[test]
+    fn test_heavy_media_queries_dont_corrupt_css() {
+        // Simulera apple.com-scenario: CSS med många @media-regler
+        let mut css = String::from(".base { color: black; }\n");
+        for i in 0..100 {
+            css.push_str(&format!(
+                "@media (min-width: {}px) {{ .item-{} {{ color: blue; }} }}\n",
+                400 + i * 10,
+                i
+            ));
+        }
+        let vp = ViewportConfig::default(); // 1280x900
+        let transformed = transform_single_css(&css, &vp);
+
+        // Transformerad CSS ska vara giltig (inte korrumperad)
+        assert!(
+            transformed.contains(".base"),
+            "Borde behålla .base: {}",
+            &transformed[..transformed.len().min(200)]
+        );
+
+        // @media (min-width: 400..1280) borde matcha → inner CSS behålls
+        let filtered = filter_media_queries(&transformed, &vp);
+        assert!(
+            filtered.contains(".item-0"),
+            "item-0 (min-width:400) borde matcha 1280"
+        );
+
+        // @media (min-width: 1390+) borde INTE matcha
+        assert!(
+            !filtered.contains(".item-99"),
+            "item-99 (min-width:1390) borde INTE matcha 1280"
+        );
+    }
+
+    #[test]
+    fn test_css_inline_with_complex_selectors() {
+        // Testa css-inline med typiska sajt-mönster
+        let html = r##"<html><head><style>
+            .nav { display: flex; background: #333; }
+            .nav a { color: white; padding: 10px; }
+            .hero { background: linear-gradient(to right, #1a1a2e, #16213e); }
+            .hero h1 { font-size: 48px; color: white; }
+            .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+            .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        </style></head><body>
+            <nav class="nav"><a href="/">Home</a><a href="/about">About</a></nav>
+            <div class="hero"><h1>Welcome</h1></div>
+            <div class="card"><p>Content</p></div>
+        </body></html>"##;
+
+        let result = compile_css(html, &ViewportConfig::default());
+        assert!(result.fully_compiled, "Borde kompilera");
+        // Nav borde ha flex + bakgrund
+        assert!(
+            result.html.contains("display: flex") || result.html.contains("display:flex"),
+            "Nav borde ha display:flex efter inline: {}",
+            &result.html[..result.html.len().min(500)]
+        );
+        // Hero h1 borde ha font-size
+        assert!(
+            result.html.contains("font-size"),
+            "Hero h1 borde ha font-size"
+        );
+    }
+
+    #[test]
+    fn test_large_css_with_many_media_queries() {
+        // Simulera apple.com: 1MB+ CSS, 500 @media, 100 element
+        // Steg 1: Bygg stor CSS
+        let mut css = String::new();
+        // Grundläggande styles
+        css.push_str("body { margin: 0; font-family: -apple-system, sans-serif; }\n");
+        css.push_str(".nav { display: flex; background: #333; padding: 10px; }\n");
+        css.push_str(".nav a { color: white; text-decoration: none; padding: 8px 16px; }\n");
+        css.push_str(".hero { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 80px 0; text-align: center; }\n");
+        css.push_str(".hero h1 { color: white; font-size: 56px; font-weight: 700; }\n");
+        css.push_str(".grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 1200px; margin: 0 auto; padding: 40px 20px; }\n");
+        css.push_str(".card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }\n");
+        css.push_str(".card h2 { font-size: 24px; margin: 0 0 12px; }\n");
+        css.push_str(".card p { color: #666; line-height: 1.6; }\n");
+        css.push_str(".footer { background: #f5f5f7; padding: 40px 20px; text-align: center; color: #86868b; }\n");
+
+        // 500 @media-regler (realistiskt — apple har 1347)
+        for i in 0..500 {
+            let bp = 320 + i * 2; // breakpoints 320..1320
+            css.push_str(&format!(
+                "@media only screen and (min-width: {}px) {{ .responsive-{} {{ width: {}px; margin: 0 auto; }} }}\n",
+                bp, i, bp - 40
+            ));
+        }
+
+        // Extra CSS-block (padding)
+        for i in 0..200 {
+            css.push_str(&format!(
+                ".component-{} {{ padding: {}px; background-color: #f{}f{}f{}; }}\n",
+                i,
+                10 + i % 30,
+                i % 10,
+                (i + 3) % 10,
+                (i + 7) % 10
+            ));
+        }
+
+        eprintln!("CSS size: {} bytes", css.len());
+
+        // Steg 2: Bygg HTML med element
+        let mut html = String::from("<html><head><style>");
+        html.push_str(&css);
+        html.push_str("</style></head><body>\n");
+        html.push_str("<nav class=\"nav\"><a href=\"/\">Home</a><a href=\"/store\">Store</a><a href=\"/mac\">Mac</a></nav>\n");
+        html.push_str(
+            "<div class=\"hero\"><h1>iPhone 16 Pro</h1><p>Incredible from every angle.</p></div>\n",
+        );
+        html.push_str("<div class=\"grid\">\n");
+        for i in 0..30 {
+            html.push_str(&format!(
+                "<div class=\"card component-{}\"><h2>Product {}</h2><p>Description for item {}.</p></div>\n",
+                i, i, i
+            ));
+        }
+        html.push_str("</div>\n");
+        html.push_str("<footer class=\"footer\">Copyright 2024 Apple Inc.</footer>\n");
+        html.push_str("</body></html>");
+
+        eprintln!("HTML size: {} bytes", html.len());
+
+        // Steg 3: Kör CSS Compiler
+        let vp = ViewportConfig::default(); // 1280x900
+        let result = compile_css(&html, &vp);
+
+        eprintln!("Output HTML: {} bytes", result.html.len());
+        eprintln!("Blocks processed: {}", result.style_blocks_processed);
+        eprintln!("Rules: {}", result.rules_after_filter);
+        eprintln!("Time: {} µs", result.compile_time_us);
+        eprintln!("Fully compiled: {}", result.fully_compiled);
+
+        let style_attr_count = result.html.matches("style=\"").count();
+        eprintln!("Inline style= count: {}", style_attr_count);
+
+        let remaining_style_blocks = result.html.matches("<style").count();
+        eprintln!("Remaining <style> blocks: {}", remaining_style_blocks);
+
+        // ASSERTIONS: CSS Compiler ska INTE producera blank output
+        assert!(
+            result.html.contains("iPhone 16 Pro"),
+            "Borde bevara 'iPhone 16 Pro' text"
+        );
+        assert!(
+            result.html.contains("Product 0"),
+            "Borde bevara 'Product 0' text"
+        );
+        assert!(
+            result.html.contains("style=") || result.html.contains("<style"),
+            "Borde ha antingen inline styles eller <style> block"
+        );
+
+        // Kontrollera att @media (max-width:318) inte matchar (1280 > 318)
+        // men @media (min-width:320) matchar (1280 >= 320)
+        // Kolla att responsive-klasser finns (de som matchar)
+        assert!(
+            result.html.contains("responsive-0") || result.html.contains("display: flex"),
+            "Borde ha kvar matchande responsive-styles eller nav flex"
+        );
+    }
+
+    #[test]
+    fn test_compile_does_not_produce_blank_output() {
+        // Regressiontest: CSS Compiler ska aldrig producera blank HTML
+        let html = r##"<html><head><style>
+            body { margin: 0; font-family: sans-serif; }
+            .header { background: #000; color: #fff; padding: 20px; }
+            .main { max-width: 1200px; margin: 0 auto; }
+            @media (max-width: 768px) { .main { padding: 10px; } }
+        </style></head><body>
+            <div class="header"><h1>Site Title</h1></div>
+            <div class="main"><p>Content here</p></div>
+        </body></html>"##;
+
+        let result = compile_css(html, &ViewportConfig::default());
+        assert!(result.fully_compiled, "Borde kompilera");
+
+        // Output ska ha synligt innehåll
+        assert!(
+            result.html.contains("Site Title"),
+            "Borde bevara textinnehåll"
+        );
+        assert!(
+            result.html.contains("Content here"),
+            "Borde bevara paragraf"
+        );
+        // Ska ha inline styles
+        assert!(result.html.contains("style="), "Borde ha inline styles");
     }
 }
