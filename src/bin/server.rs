@@ -2143,6 +2143,31 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "tiered_screenshot",
+            "description": "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. Returns: tier_used, latency_ms, size_bytes, and escalation_reason if tier switching occurred.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "width": {"type": "integer", "description": "Viewport width (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height (default: 800)", "default": 800},
+                    "fast_render": {"type": "boolean", "description": "Skip external resources (default: true)", "default": true},
+                    "xhr_captures_json": {"type": "string", "description": "Optional XHR captures JSON for tier selection"}
+                },
+                "required": ["html", "url", "goal"]
+            }
+        },
+        {
+            "name": "tier_stats",
+            "description": "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
             "name": "parse_screenshot",
             "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag.",
             "inputSchema": {
@@ -2711,6 +2736,25 @@ async fn mcp_dispatch_tool(
             let html = args["html"].as_str().unwrap_or("");
             text_ok(aether_agent::detect_xhr_urls(html))
         }
+        "tiered_screenshot" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+            let fast_render = args["fast_render"].as_bool().unwrap_or(true);
+            let xhr_json = args["xhr_captures_json"].as_str().unwrap_or("[]");
+            text_ok(aether_agent::tiered_screenshot(
+                html,
+                url,
+                goal,
+                width,
+                height,
+                fast_render,
+                xhr_json,
+            ))
+        }
+        "tier_stats" => text_ok(aether_agent::tier_stats()),
         "search" => {
             let query = args["query"].as_str().unwrap_or("");
             let url = aether_agent::build_search_url(query);
