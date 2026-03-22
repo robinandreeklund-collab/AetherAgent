@@ -1,0 +1,99 @@
+[
+  {
+    "site": "example.com",
+    "url": "https://example.com",
+    "ms": 1445,
+    "png_bytes": 61530,
+    "css_found": 0,
+    "css_loaded": 0,
+    "css_bytes": 0,
+    "status": "ok"
+  },
+  {
+    "site": "news.ycombinator.com",
+    "url": "https://news.ycombinator.com",
+    "ms": 2922,
+    "png_bytes": 413958,
+    "css_found": 1,
+    "css_loaded": 1,
+    "css_bytes": 7350,
+    "status": "ok"
+  },
+  {
+    "site": "books.toscrape.com",
+    "url": "https://books.toscrape.com",
+    "ms": 4098,
+    "png_bytes": 129170,
+    "css_found": 3,
+    "css_loaded": 3,
+    "css_bytes": 227803,
+    "status": "ok"
+  },
+  {
+    "site": "www.aftonbladet.se",
+    "url": "https://www.aftonbladet.se",
+    "ms": 4293,
+    "png_bytes": 55729,
+    "css_found": 4,
+    "css_loaded": 4,
+    "css_bytes": 154958,
+    "status": "ok"
+  },
+  {
+    "site": "www.di.se",
+    "url": "https://www.di.se",
+    "ms": 8643,
+    "png_bytes": 626671,
+    "css_found": 3,
+    "css_loaded": 3,
+    "css_bytes": 147150,
+    "status": "ok"
+  },
+  {
+    "site": "www.expressen.se",
+    "url": "https://www.expressen.se",
+    "ms": 6350,
+    "png_bytes": 105159,
+    "css_found": 5,
+    "css_loaded": 5,
+    "css_bytes": 382559,
+    "status": "ok"
+  },
+  {
+    "site": "www.apple.com",
+    "url": "https://www.apple.com",
+    "ms": 8332,
+    "png_bytes": 279762,
+    "css_found": 7,
+    "css_loaded": 5,
+    "css_bytes": 662574,
+    "status": "ok"
+  },
+  {
+    "site": "github.com",
+    "url": "https://github.com",
+    "ms": 2338,
+    "status": "fail",
+    "error": "Render failed: Blitz failed and CDP unavailable: Blitz rendering kraschade (catch_unwind): range end index 4 out of rang"
+  },
+  {
+    "site": "x.com",
+    "url": "https://x.com",
+    "ms": 1273,
+    "png_bytes": 102098,
+    "css_found": 0,
+    "css_loaded": 0,
+    "css_bytes": 0,
+    "status": "ok"
+  },
+  {
+    "site": "www.bbc.com",
+    "url": "https://www.bbc.com",
+    "ms": 782,
+    "png_bytes": 27465,
+    "css_found": 0,
+    "css_loaded": 0,
+    "css_bytes": 0,
+    "status": "ok"
+  }
+]
