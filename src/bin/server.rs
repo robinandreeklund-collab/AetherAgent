@@ -2534,6 +2534,21 @@ fn mcp_tool_definitions() -> serde_json::Value {
                 },
                 "required": ["html", "goal"]
             }
+        },
+        {
+            "name": "render_with_js",
+            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via Boa sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "js_code": {"type": "string", "description": "JavaScript code to evaluate against the DOM"},
+                    "base_url": {"type": "string", "description": "Base URL for resolving relative paths"},
+                    "width": {"type": "integer", "description": "Viewport width (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height (default: 800)", "default": 800}
+                },
+                "required": ["html", "js_code", "base_url", "width", "height"]
+            }
         }
     ])
 }
@@ -3192,6 +3207,16 @@ async fn mcp_dispatch_tool(
                 directives_json,
             );
             text_ok(result)
+        }
+        "render_with_js" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let js_code = args["js_code"].as_str().unwrap_or("");
+            let base_url = args["base_url"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+            text_ok(aether_agent::render_with_js(
+                html, js_code, base_url, width, height,
+            ))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
