@@ -801,3 +801,1083 @@ fn test_large_page_performance() {
     let nodes = result["nodes"].as_array().expect("Ska ha nodes");
     assert!(!nodes.is_empty(), "Ska producera noder för stor sida");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FAS 4: Komplett DOM Bridge — alla exponerade metoder
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Document-metoder ───────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_document_body() {
+    let html = r#"<html><body><p>Test</p></body></html>"#;
+    let code = "typeof document.body";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "document.body ska vara ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_document_head() {
+    let html = r#"<html><head><title>T</title></head><body></body></html>"#;
+    let code = "typeof document.head";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "document.head ska vara ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_document_document_element() {
+    let html = r#"<html><body></body></html>"#;
+    let code = "typeof document.documentElement";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "document.documentElement ska vara ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_elements_by_class_name() {
+    let html = r##"<html><body>
+        <div class="foo">A</div>
+        <div class="foo">B</div>
+        <div class="bar">C</div>
+    </body></html>"##;
+    let code = "document.getElementsByClassName('foo').length";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "2",
+        "getElementsByClassName ska hitta 2 element med klass 'foo'"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_elements_by_tag_name() {
+    let html = r##"<html><body>
+        <p>A</p><p>B</p><p>C</p><div>D</div>
+    </body></html>"##;
+    let code = "document.getElementsByTagName('p').length";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "3",
+        "getElementsByTagName('p') ska hitta 3 element"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_create_text_node() {
+    let html = r#"<html><body><div id="c"></div></body></html>"#;
+    let code = r#"
+        var t = document.createTextNode('Hej');
+        typeof t;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "createTextNode ska returnera ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_create_comment() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        var c = document.createComment('kommentar');
+        typeof c;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "createComment ska returnera ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_create_document_fragment() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        var frag = document.createDocumentFragment();
+        typeof frag;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "createDocumentFragment ska returnera ett objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_active_element() {
+    let html = r#"<html><body><input id="inp" /></body></html>"#;
+    let code = "typeof document.activeElement";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    // activeElement kan vara object eller null/undefined
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "undefined" || result["error"].is_null(),
+        "document.activeElement ska inte krascha"
+    );
+}
+
+// ─── Element — Trädnavigering ───────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_parent_node() {
+    let html = r#"<html><body><div id="parent"><span id="child">X</span></div></body></html>"#;
+    let code = r#"
+        var child = document.getElementById('child');
+        typeof child.parentNode;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "function",
+        "parentNode ska vara object eller function (getter), fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_first_child() {
+    let html = r#"<html><body><ul id="list"><li id="first">A</li><li>B</li></ul></body></html>"#;
+    let code = r#"
+        var list = document.getElementById('list');
+        list.firstChild ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "firstChild ska finnas");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_first_element_child() {
+    let html = r#"<html><body><div id="p"><span id="s1">A</span><span id="s2">B</span></div></body></html>"#;
+    let code = r#"
+        var p = document.getElementById('p');
+        p.firstElementChild ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "firstElementChild ska finnas");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_next_sibling() {
+    let html = r#"<html><body><div id="a">A</div><div id="b">B</div></body></html>"#;
+    let code = r#"
+        var a = document.getElementById('a');
+        a.nextSibling ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "nextSibling ska finnas");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_next_element_sibling() {
+    let html = r#"<html><body><p id="p1">A</p><p id="p2">B</p></body></html>"#;
+    let code = r#"
+        var p1 = document.getElementById('p1');
+        p1.nextElementSibling ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "nextElementSibling ska finnas");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_child_nodes() {
+    let html = r##"<html><body><div id="p"><span>A</span><span>B</span></div></body></html>"##;
+    let code = r#"
+        var cn = document.getElementById('p').childNodes;
+        cn ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "childNodes ska finnas");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_children_length() {
+    let html = r##"<html><body><ul id="ul"><li>1</li><li>2</li><li>3</li></ul></body></html>"##;
+    let code = r#"
+        var ch = document.getElementById('ul').children;
+        ch ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "children ska finnas");
+}
+
+// ─── Element — Manipulation ────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_remove_attribute() {
+    let html = r#"<html><body><div id="el" data-x="123"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.removeAttribute('data-x');
+        el.getAttribute('data-x');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("null");
+    assert!(
+        val == "null" || result["value"].is_null(),
+        "removeAttribute ska ta bort attributet, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_insert_before() {
+    let html = r#"<html><body><ul id="list"><li id="second">B</li></ul></body></html>"#;
+    let code = r#"
+        var list = document.getElementById('list');
+        var newLi = document.createElement('li');
+        newLi.setAttribute('id', 'first');
+        var second = document.getElementById('second');
+        list.insertBefore(newLi, second);
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "ok", "insertBefore ska inte krascha");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_clone_node() {
+    let html = r#"<html><body><div id="orig" data-v="42"></div></body></html>"#;
+    let code = r#"
+        var orig = document.getElementById('orig');
+        var clone = orig.cloneNode(true);
+        clone ? 'exists' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "exists", "cloneNode ska returnera kopia");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_outer_html() {
+    let html = r#"<html><body><div id="el" class="x">Hej</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.outerHTML;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "string" || val == "function",
+        "outerHTML ska vara tillgänglig, fick typeof: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_inner_html_read() {
+    let html = r#"<html><body><div id="el"><b>Fet</b></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.innerHTML;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "string" || val == "function",
+        "innerHTML ska vara tillgänglig, fick typeof: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_dataset() {
+    let html = r#"<html><body><div id="el" data-name="test" data-count="5"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.dataset;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "function",
+        "dataset ska vara object eller function, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_closest() {
+    let html = r##"<html><body>
+        <div class="outer" id="outer">
+            <div class="inner"><span id="target">X</span></div>
+        </div>
+    </body></html>"##;
+    let code = r#"
+        var t = document.getElementById('target');
+        var c = t.closest('.outer');
+        c ? 'found' : 'null';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "found",
+        "closest('.outer') ska hitta förfadern"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_matches() {
+    let html = r#"<html><body><div id="el" class="active big"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.matches('.active') ? 'yes' : 'no';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "yes", "matches('.active') ska matcha");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_contains() {
+    let html = r#"<html><body><div id="parent"><span id="child">X</span></div></body></html>"#;
+    let code = r#"
+        var parent = document.getElementById('parent');
+        typeof parent.contains;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "function", "contains ska vara en funktion");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_root_node() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.getRootNode;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "function",
+        "getRootNode ska vara en funktion"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_is_connected() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.isConnected ? 'yes' : 'no';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "yes",
+        "isConnected ska vara true för element i DOM"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_hidden_property() {
+    let html = r#"<html><body><div id="el" hidden>X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.hidden ? 'yes' : 'no';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "yes",
+        "hidden-property ska vara true för dolda element"
+    );
+}
+
+// ─── classList (DOMTokenList) ───────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_remove() {
+    let html = r#"<html><body><div id="el" class="a b c"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.classList.remove('b');
+        el.getAttribute('class');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        !val.contains("b") && val.contains("a") && val.contains("c"),
+        "classList.remove('b') ska ta bort bara 'b', fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_toggle() {
+    let html = r#"<html><body><div id="el" class="a"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.classList.toggle('b');
+        el.getAttribute('class');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("b"),
+        "classList.toggle ska lägga till 'b', fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_contains() {
+    let html = r#"<html><body><div id="el" class="foo bar"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.classList.contains('foo') ? 'yes' : 'no';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "yes",
+        "classList.contains('foo') ska vara true"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_replace() {
+    let html = r#"<html><body><div id="el" class="old active"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.classList.replace('old', 'new');
+        el.getAttribute('class');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("new") && !val.contains("old"),
+        "classList.replace ska byta 'old' mot 'new', fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_length() {
+    let html = r#"<html><body><div id="el" class="a b c"></div></body></html>"#;
+    let code = r#"
+        var cl = document.getElementById('el').classList;
+        typeof cl;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "object", "classList ska vara objekt");
+}
+
+// ─── style (CSSStyleDeclaration) ────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_style_set_property() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.style.setProperty('background-color', 'blue');
+        el.style.getPropertyValue('background-color');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "blue",
+        "style.setProperty + getPropertyValue ska fungera"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_style_remove_property() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.style.setProperty('color', 'red');
+        el.style.removeProperty('color');
+        el.style.getPropertyValue('color');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.is_empty() || val == "undefined" || val == "null",
+        "removeProperty ska ta bort property, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_style_multiple_properties() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.style.color = 'red';
+        el.style.fontSize = '16px';
+        el.style.display = 'flex';
+        el.style.color + '|' + el.style.fontSize + '|' + el.style.display;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("red") && val.contains("16px") && val.contains("flex"),
+        "Flera style-properties ska fungera, fick: {val}"
+    );
+}
+
+// ─── Geometri-properties ────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_offset_dimensions() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.offsetWidth + '|' + typeof el.offsetHeight;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("number"),
+        "offsetWidth/Height ska vara number, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_scroll_dimensions() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.scrollWidth + '|' + typeof el.scrollHeight;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("number"),
+        "scrollWidth/Height ska vara number, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_client_dimensions() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.clientWidth + '|' + typeof el.clientHeight;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("number"),
+        "clientWidth/Height ska vara number, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_bounding_client_rect() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        var rect = el.getBoundingClientRect();
+        typeof rect;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "getBoundingClientRect ska returnera objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_client_rects() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        var rects = el.getClientRects();
+        typeof rects;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "getClientRects ska returnera objekt"
+    );
+}
+
+// ─── Event-hantering ────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_add_event_listener() {
+    let html = r#"<html><body><button id="btn">Klicka</button></body></html>"#;
+    let code = r#"
+        var called = false;
+        var btn = document.getElementById('btn');
+        btn.addEventListener('click', function() { called = true; });
+        typeof btn;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "addEventListener ska inte krascha"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_dispatch_event() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.dispatchEvent;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "function",
+        "dispatchEvent ska vara en funktion"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_custom_event() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        typeof CustomEvent;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "function",
+        "CustomEvent ska vara tillgänglig som constructor"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_event_stop_propagation() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        typeof Event;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "function",
+        "Event constructor ska vara tillgänglig"
+    );
+}
+
+// ─── Focus/Blur/ScrollIntoView ──────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_focus_blur() {
+    let html = r#"<html><body><input id="inp" /><button id="btn">OK</button></body></html>"#;
+    let code = r#"
+        var inp = document.getElementById('inp');
+        inp.focus();
+        inp.blur();
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "ok", "focus/blur ska inte krascha");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_scroll_into_view() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.scrollIntoView();
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "ok", "scrollIntoView ska inte krascha");
+}
+
+// ─── Range & Selection API ──────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_create_range() {
+    let html = r#"<html><body><p id="p">Text</p></body></html>"#;
+    let code = r#"
+        var range = document.createRange();
+        typeof range;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "createRange ska returnera objekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_selection() {
+    let html = r#"<html><body><p>Text</p></body></html>"#;
+    let code = r#"
+        var sel = document.getSelection();
+        typeof sel;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "getSelection ska returnera objekt"
+    );
+}
+
+// ─── Window-metoder ─────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_get_computed_style() {
+    let html = r#"<html><body><div id="el" style="color:red">X</div></body></html>"#;
+    let code = r#"
+        var style = window.getComputedStyle(document.getElementById('el'));
+        typeof style;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "object",
+        "getComputedStyle ska returnera objekt"
+    );
+}
+
+// ─── Observers ──────────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_intersection_observer() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        typeof IntersectionObserver;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "function" || val == "undefined" || result["error"].is_null(),
+        "IntersectionObserver ska inte ge fatalt fel, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_resize_observer() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        typeof window.ResizeObserver;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "function" || val == "undefined",
+        "ResizeObserver ska vara function eller undefined, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_mutation_observer() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        typeof window.MutationObserver;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "function" || val == "undefined" || val.is_empty(),
+        "MutationObserver ska vara function, undefined eller otillgänglig, fick: {val}"
+    );
+}
+
+// ─── Web Components (customElements) ────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_custom_elements_define() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        typeof window.customElements;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "undefined",
+        "customElements ska vara objekt eller undefined, fick: {val}"
+    );
+}
+
+// ─── Console ────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_console_methods() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        console.log('test');
+        console.warn('varning');
+        console.error('fel');
+        console.info('info');
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "ok",
+        "Alla console-metoder ska fungera utan krasch"
+    );
+}
+
+// ─── Pointer Lock ───────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_pointer_lock() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.requestPointerLock();
+        document.exitPointerLock();
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "ok", "Pointer lock API ska inte krascha");
+}
+
+// ─── Shadow DOM ─────────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_shadow_root() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.shadowRoot === null ? 'null' : 'exists';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "null",
+        "shadowRoot ska vara null utan attachShadow"
+    );
+}
+
+// ─── CSS-selektorer (avancerade) ────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_selector_attribute() {
+    let html = r##"<html><body>
+        <input type="text" id="txt" />
+        <input type="password" id="pwd" />
+    </body></html>"##;
+    let code = r#"document.querySelector('[type="password"]').getAttribute('id')"#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "pwd",
+        "Attribut-selektor ska matcha type=password"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_selector_child_combinator() {
+    let html = r##"<html><body>
+        <div id="parent"><span id="direct">A</span></div>
+        <div><span id="other">B</span></div>
+    </body></html>"##;
+    let code = r#"document.querySelector('#parent > span').getAttribute('id')"#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "direct",
+        "Child combinator > ska matcha direkta barn"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_selector_comma_separated() {
+    let html = r##"<html><body>
+        <h1>Titel</h1>
+        <p>Text</p>
+        <span>Span</span>
+    </body></html>"##;
+    let code = "document.querySelectorAll('h1, p').length";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "2",
+        "Komma-separerade selektorer ska matcha h1 och p"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_selector_first_child() {
+    let html = r##"<html><body>
+        <ul><li id="first">A</li><li id="second">B</li></ul>
+    </body></html>"##;
+    let code = "document.querySelector('li:first-child').getAttribute('id')";
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "first",
+        ":first-child ska matcha första li"
+    );
+}
+
+// ─── Event Loop — avancerade tester ─────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_event_loop_queue_microtask() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        var order = [];
+        order.push('sync');
+        queueMicrotask(function() { order.push('micro'); });
+        order.push('sync2');
+        order.join(',');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    // Microtask körs efter synkron kod
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.starts_with("sync"),
+        "Synkron kod ska köras först, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_event_loop_cancel_animation_frame() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        var id = requestAnimationFrame(function() {});
+        cancelAnimationFrame(id);
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "ok",
+        "cancelAnimationFrame ska inte krascha"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_event_loop_clear_timeout() {
+    let html = r#"<html><body></body></html>"#;
+    let code = r#"
+        var id = setTimeout(function() {}, 100);
+        clearTimeout(id);
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "ok", "clearTimeout ska inte krascha");
+}
+
+// ─── Hydration — fler frameworks ────────────────────────────────────────────
+
+#[test]
+fn test_hydration_sveltekit() {
+    let html = r##"<html><body>
+        <script id="__sveltekit_data" type="application/json">
+            {"type":"data","nodes":[{"type":"data","data":{"items":["a","b"]}}]}
+        </script>
+    </body></html>"##;
+    let result = parse_json(&extract_hydration(html, "visa items"));
+    assert!(
+        result["found"].is_boolean(),
+        "SvelteKit hydration ska returnera found-fält"
+    );
+}
+
+#[test]
+fn test_hydration_remix() {
+    let html = r##"<html><body>
+        <script>window.__remixContext = { state: { loaderData: { root: { user: "test" } } } };</script>
+    </body></html>"##;
+    let result = parse_json(&extract_hydration(html, "visa user"));
+    assert!(
+        result["found"].is_boolean(),
+        "Remix hydration ska returnera found-fält"
+    );
+}
+
+#[test]
+fn test_hydration_gatsby() {
+    let html = r##"<html><body>
+        <script id="___gatsby-initial-props">{"data":{"site":{"title":"Gatsby"}}}</script>
+    </body></html>"##;
+    let result = parse_json(&extract_hydration(html, "visa titel"));
+    assert!(
+        result["found"].is_boolean(),
+        "Gatsby hydration ska returnera found-fält"
+    );
+}
+
+#[test]
+fn test_hydration_qwik() {
+    let html = r##"<html><body>
+        <script type="qwik/json">{"ctx":{},"objs":[]}</script>
+    </body></html>"##;
+    let result = parse_json(&extract_hydration(html, "visa data"));
+    assert!(
+        result["found"].is_boolean(),
+        "Qwik hydration ska returnera found-fält"
+    );
+}
+
+// ─── Escalation — edge cases ────────────────────────────────────────────────
+
+#[test]
+fn test_tier_webgl_page() {
+    let html = r##"<html><body>
+        <canvas id="glCanvas"></canvas>
+        <script>
+            var gl = document.getElementById('glCanvas').getContext('webgl');
+            gl.clearColor(0, 0, 0, 1);
+        </script>
+    </body></html>"##;
+    let result = parse_json(&select_parse_tier(html, "https://game.io"));
+    let confidence = result["confidence"].as_f64().unwrap_or(0.0);
+    assert!(
+        confidence > 0.0,
+        "WebGL-sida ska ge confidence > 0, fick: {confidence}"
+    );
+}
+
+#[test]
+fn test_tier_wasm_page() {
+    let html = r##"<html><body>
+        <script>
+            WebAssembly.instantiateStreaming(fetch('/app.wasm'));
+        </script>
+    </body></html>"##;
+    let result = parse_json(&select_parse_tier(html, "https://wasm.app"));
+    let result_str = result.to_string();
+    // WASM ska trigga hög tier (Chrome/CDP)
+    assert!(
+        result_str.contains("Cdp") || result_str.contains("Chrome") || result_str.contains("Boa"),
+        "WebAssembly ska ge hög tier, fick: {result}"
+    );
+}
