@@ -919,7 +919,7 @@ async fn fetch_and_render_tiered(
     _height: u32,
     _fast_render: bool,
 ) -> Result<(Vec<u8>, String), String> {
-    Err("Blitz feature inte aktiverad".to_string())
+    Err("Blitz rendering is disabled. Compile with: cargo build --features blitz".to_string())
 }
 
 /// Ren-Rust HTML → PNG med Blitz. Delegerar till lib-funktionen.
@@ -941,7 +941,7 @@ async fn render_url_to_png_mcp(
     _height: u32,
     _fast_render: bool,
 ) -> Result<Vec<u8>, String> {
-    Err("Blitz feature inte aktiverad".to_string())
+    Err("Blitz rendering is disabled. Compile with: cargo build --features blitz".to_string())
 }
 
 /// Hanterar fetch_search: hämta DDG HTML, parsa sökresultat, deep-fetcha varje resultat-sida
@@ -952,7 +952,7 @@ async fn handle_fetch_search(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_search: 'arguments' object required. Expected: {query, goal, top_n?, deep?, max_nodes_per_result?}".to_string(),
             )]);
         }
     };
@@ -986,7 +986,10 @@ async fn handle_fetch_search(
         Ok(result) => result.body,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                r#"{{"error": "DDG fetch failed: {e}"}}"#
+                format!(
+                    r#"{{"error": "fetch_search: DuckDuckGo fetch failed for query '{}': {}"}}"#,
+                    query, e
+                )
             ))]);
         }
     };
@@ -1143,7 +1146,7 @@ async fn handle_fetch_parse(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_parse: 'arguments' object required. Expected: {url, goal}".to_string(),
             )]);
         }
     };
@@ -1167,7 +1170,8 @@ async fn handle_fetch_parse(
         Ok(r) => r,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                r#"{{"error": "fetch failed: {e}"}}"#
+                r#"{{"error": "fetch_parse: failed to fetch '{}': {}"}}"#,
+                url, e
             ))]);
         }
     };
@@ -1213,7 +1217,8 @@ async fn handle_fetch_click(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_click: 'arguments' object required. Expected: {url, goal, target_label}"
+                    .to_string(),
             )]);
         }
     };
@@ -1241,7 +1246,8 @@ async fn handle_fetch_click(
         Ok(r) => r,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                r#"{{"error": "fetch failed: {e}"}}"#
+                r#"{{"error": "fetch_click: failed to fetch '{}': {}"}}"#,
+                url, e
             ))]);
         }
     };
@@ -1278,7 +1284,8 @@ async fn handle_fetch_extract(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_extract: 'arguments' object required. Expected: {url, goal, fields}"
+                    .to_string(),
             )]);
         }
     };
@@ -1311,7 +1318,8 @@ async fn handle_fetch_extract(
         Ok(r) => r,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                r#"{{"error": "fetch failed: {e}"}}"#
+                r#"{{"error": "fetch_extract: failed to fetch '{}': {}"}}"#,
+                url, e
             ))]);
         }
     };
@@ -1349,7 +1357,7 @@ async fn handle_fetch_stream_parse(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_stream_parse: 'arguments' object required. Expected: {url, goal, max_nodes?, threshold?}".to_string(),
             )]);
         }
     };
@@ -1379,7 +1387,8 @@ async fn handle_fetch_stream_parse(
         Ok(r) => r,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                r#"{{"error": "fetch failed: {e}"}}"#
+                r#"{{"error": "fetch_stream_parse: failed to fetch '{}': {}"}}"#,
+                url, e
             ))]);
         }
     };
@@ -1421,7 +1430,7 @@ async fn handle_fetch_vision(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                "fetch_vision: 'arguments' object required. Expected: {url, goal?, width?, height?}".to_string(),
             )]);
         }
     };
@@ -1433,7 +1442,7 @@ async fn handle_fetch_vision(
 
     if url.is_empty() {
         return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-            "URL krävs".to_string(),
+            r#"{"error": "fetch_vision: 'url' parameter is required"}"#.to_string(),
         )]);
     }
 
@@ -1482,14 +1491,15 @@ async fn handle_fetch_vision(
     let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
     if model_path.is_empty() {
         return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-            "Ingen vision-modell tillgänglig. Sätt AETHER_MODEL_PATH.".to_string(),
+            "Vision model not available. Set AETHER_MODEL_PATH env var to your .onnx model file, or pass model_base64 in request.".to_string(),
         )]);
     }
     let model_bytes = match std::fs::read(&model_path) {
         Ok(b) => b,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                "Kunde inte läsa modell: {e}"
+                "Failed to load vision model from '{}': {} (check file path and permissions)",
+                model_path, e
             ))]);
         }
     };
@@ -1526,7 +1536,7 @@ fn handle_vision_tool(
         Some(a) => a,
         None => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Saknar arguments".to_string(),
+                format!("{tool_name}: 'arguments' object required. Expected: {{image_base64 or model_base64}}"),
             )]);
         }
     };
@@ -1566,14 +1576,14 @@ fn handle_vision_tool(
         let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
         if model_path.is_empty() {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Ingen vision-modell tillgänglig. Sätt AETHER_MODEL_PATH.".to_string(),
+                "Vision model not available. Set AETHER_MODEL_PATH env var to your .onnx model file, or pass model_base64 in request.".to_string(),
             )]);
         }
         match std::fs::read(&model_path) {
             Ok(b) => b,
             Err(e) => {
                 return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                    format!("Kunde inte läsa modell {model_path}: {e}"),
+                    format!("Failed to load vision model from '{}': {} (check file path and permissions)", model_path, e),
                 )]);
             }
         }
@@ -1767,7 +1777,7 @@ fn render_annotated_screenshot_mcp(
     _png_bytes: &[u8],
     _result_json: &str,
 ) -> Result<String, String> {
-    Err("Vision feature inte aktiverad".to_string())
+    Err("Vision/ONNX feature is disabled. Compile with: cargo build --features vision".to_string())
 }
 
 impl ServerHandler for AetherMcpServer {

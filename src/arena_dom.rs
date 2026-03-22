@@ -348,20 +348,29 @@ impl ArenaDom {
     }
 
     /// Kontrollera om elementet sannolikt är synligt (speglar parser::is_likely_visible)
+    ///
+    /// Detekterar: display:none, visibility:hidden, opacity:0, aria-hidden="true",
+    /// HTML hidden-attribut, off-screen positioning.
     pub fn is_likely_visible(&self, key: NodeKey) -> bool {
         let node = match self.nodes.get(key) {
             Some(n) => n,
             None => return false,
         };
 
-        // Kolla style-attribut
+        // Kolla style-attribut för osynlighet
         if let Some(style) = node.get_attr("style") {
             let normalized: String = style
                 .to_lowercase()
                 .chars()
                 .filter(|c| !c.is_whitespace())
                 .collect();
-            if normalized.contains("display:none") || normalized.contains("visibility:hidden") {
+            if normalized.contains("display:none")
+                || normalized.contains("visibility:hidden")
+                || normalized.contains("opacity:0")
+                || normalized.contains("left:-9999")
+                || normalized.contains("left:-10000")
+                || normalized.contains("clip:rect(0")
+            {
                 return false;
             }
         }
@@ -369,6 +378,13 @@ impl ArenaDom {
         // Kolla hidden-attribut
         if node.has_attr("hidden") {
             return false;
+        }
+
+        // aria-hidden="true" — semantiskt dold
+        if let Some(aria) = node.get_attr("aria-hidden") {
+            if aria.trim().eq_ignore_ascii_case("true") {
+                return false;
+            }
         }
 
         true

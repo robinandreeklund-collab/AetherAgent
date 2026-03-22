@@ -66,30 +66,47 @@ pub fn get_tag_name(handle: &Handle) -> Option<String> {
     }
 }
 
-/// Kontrollera om elementet är synligt (enkel heuristik)
+/// Kontrollera om elementet är synligt (utökad heuristik)
+///
+/// Detekterar: display:none, visibility:hidden, opacity:0, aria-hidden="true",
+/// HTML hidden-attribut, off-screen positioning (left:-9999px).
 pub fn is_likely_visible(handle: &Handle) -> bool {
-    // Kolla style-attribut för display:none / visibility:hidden
+    // Kolla style-attribut för osynlighet
     if let Some(style) = get_attr(handle, "style") {
-        let normalized: String = style
-            .to_lowercase()
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        if normalized.contains("display:none") || normalized.contains("visibility:hidden") {
+        if is_style_hidden(&style) {
             return false;
         }
     }
 
-    // Kolla hidden-attribut
     if let NodeData::Element { attrs, .. } = &handle.data {
         for attr in attrs.borrow().iter() {
+            // HTML5 hidden-attribut
             if &attr.name.local == "hidden" {
+                return false;
+            }
+            // aria-hidden="true" — semantiskt dold
+            if &attr.name.local == "aria-hidden" && attr.value.trim().eq_ignore_ascii_case("true") {
                 return false;
             }
         }
     }
 
     true
+}
+
+/// Avgör om en inline style-sträng döljer elementet
+fn is_style_hidden(style: &str) -> bool {
+    let normalized: String = style
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    normalized.contains("display:none")
+        || normalized.contains("visibility:hidden")
+        || normalized.contains("opacity:0")
+        || normalized.contains("left:-9999")
+        || normalized.contains("left:-10000")
+        || normalized.contains("clip:rect(0")
 }
 
 /// CTA-nyckelord som indikerar call-to-action-knappar
@@ -529,6 +546,50 @@ mod tests {
         assert!(
             !is_likely_visible(&div),
             "hidden-attribut ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_aria_hidden_true() {
+        let html = r#"<html><body><div aria-hidden="true">Osynlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "aria-hidden=true ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_opacity_zero() {
+        let html = r#"<html><body><div style="opacity: 0;">Osynlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "opacity:0 ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_offscreen_left() {
+        let html = r#"<html><body><div style="position:absolute;left:-9999px">Offscreen</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "left:-9999px ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_aria_hidden_false_is_visible() {
+        let html = r#"<html><body><div aria-hidden="false">Synlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            is_likely_visible(&div),
+            "aria-hidden=false ska vara synligt"
         );
     }
 
