@@ -2,163 +2,163 @@
   "fetch": [
     {
       "site": "example.com",
-      "ae_ms": 207,
+      "ae_ms": 127,
       "ae_size": 528,
-      "lp_ms": 508,
+      "lp_ms": 170,
       "lp_size": 529,
       "winner": "AE"
     },
     {
       "site": "news.ycombinator.com",
-      "ae_ms": 290,
-      "ae_size": 34337,
-      "lp_ms": 654,
-      "lp_size": 34381,
+      "ae_ms": 246,
+      "ae_size": 34261,
+      "lp_ms": 290,
+      "lp_size": 34312,
       "winner": "AE"
     },
     {
       "site": "books.toscrape.com",
-      "ae_ms": 1711,
+      "ae_ms": 183,
       "ae_size": 51294,
-      "lp_ms": 983,
+      "lp_ms": 706,
       "lp_size": 51276,
-      "winner": "LP"
+      "winner": "AE"
     },
     {
       "site": "www.aftonbladet.se",
-      "ae_ms": 522,
-      "ae_size": 450575,
-      "lp_ms": 18170,
-      "lp_size": 887253,
+      "ae_ms": 589,
+      "ae_size": 461885,
+      "lp_ms": 12553,
+      "lp_size": 871733,
       "winner": "AE"
     },
     {
       "site": "www.di.se",
-      "ae_ms": 1022,
-      "ae_size": 521376,
-      "lp_ms": 5244,
-      "lp_size": 521350,
+      "ae_ms": 1304,
+      "ae_size": 504247,
+      "lp_ms": 5634,
+      "lp_size": 616521,
       "winner": "AE"
     },
     {
       "site": "www.expressen.se",
-      "ae_ms": 1016,
-      "ae_size": 274467,
-      "lp_ms": 5208,
-      "lp_size": 276059,
+      "ae_ms": 948,
+      "ae_size": 277306,
+      "lp_ms": 5267,
+      "lp_size": 391293,
       "winner": "AE"
     },
     {
       "site": "www.apple.com",
-      "ae_ms": 636,
+      "ae_ms": 207,
       "ae_size": 234910,
-      "lp_ms": 1984,
+      "lp_ms": 1810,
       "lp_size": 312476,
       "winner": "AE"
     },
     {
       "site": "github.com",
-      "ae_ms": 223,
+      "ae_ms": 68,
       "ae_size": 568996,
-      "lp_ms": 5275,
+      "lp_ms": 5346,
       "lp_size": 543643,
       "winner": "AE"
     },
     {
       "site": "x.com",
-      "ae_ms": 229,
+      "ae_ms": 203,
       "ae_size": 245053,
-      "lp_ms": 1417,
+      "lp_ms": 1154,
       "lp_size": 248301,
       "winner": "AE"
     },
     {
       "site": "www.bbc.com",
-      "ae_ms": 289,
+      "ae_ms": 245,
       "ae_size": 24,
-      "lp_ms": 262,
+      "lp_ms": 533,
       "lp_size": 111,
-      "winner": "LP"
+      "winner": "AE"
     }
   ],
   "parse": [
     {
       "site": "example.com",
-      "ae_ms": 28,
+      "ae_ms": 57,
       "ae_nodes": 6,
-      "lp_ms": 623,
+      "lp_ms": 172,
       "lp_lines": 6,
       "winner": "AE"
     },
     {
       "site": "news.ycombinator.com",
-      "ae_ms": 69,
-      "ae_nodes": 494,
-      "lp_ms": 724,
-      "lp_lines": 518,
+      "ae_ms": 103,
+      "ae_nodes": 492,
+      "lp_ms": 293,
+      "lp_lines": 515,
       "winner": "AE"
     },
     {
       "site": "books.toscrape.com",
-      "ae_ms": 83,
+      "ae_ms": 128,
       "ae_nodes": 312,
-      "lp_ms": 794,
+      "lp_ms": 803,
       "lp_lines": 272,
       "winner": "AE"
     },
     {
       "site": "www.aftonbladet.se",
-      "ae_ms": 75,
-      "ae_nodes": 352,
-      "lp_ms": 15440,
-      "lp_lines": 626,
+      "ae_ms": 209,
+      "ae_nodes": 368,
+      "lp_ms": 13964,
+      "lp_lines": 648,
       "winner": "AE"
     },
     {
       "site": "www.di.se",
-      "ae_ms": 281,
-      "ae_nodes": 1069,
-      "lp_ms": 5205,
-      "lp_lines": 617,
+      "ae_ms": 492,
+      "ae_nodes": 1008,
+      "lp_ms": 5648,
+      "lp_lines": 590,
       "winner": "AE"
     },
     {
       "site": "www.expressen.se",
-      "ae_ms": 279,
-      "ae_nodes": 1176,
-      "lp_ms": 6918,
-      "lp_lines": 524,
+      "ae_ms": 392,
+      "ae_nodes": 1184,
+      "lp_ms": 5246,
+      "lp_lines": 597,
       "winner": "AE"
     },
     {
       "site": "www.apple.com",
-      "ae_ms": 94,
+      "ae_ms": 185,
       "ae_nodes": 445,
-      "lp_ms": 1963,
+      "lp_ms": 1848,
       "lp_lines": 515,
       "winner": "AE"
     },
     {
       "site": "github.com",
-      "ae_ms": 106,
+      "ae_ms": 260,
       "ae_nodes": 594,
-      "lp_ms": 5272,
+      "lp_ms": 5348,
       "lp_lines": 369,
       "winner": "AE"
     },
     {
       "site": "x.com",
-      "ae_ms": 157,
+      "ae_ms": 170,
       "ae_nodes": 12,
-      "lp_ms": 1451,
+      "lp_ms": 958,
       "lp_lines": 8,
       "winner": "AE"
     },
     {
       "site": "www.bbc.com",
-      "ae_ms": 4,
+      "ae_ms": 6,
       "ae_nodes": 1,
-      "lp_ms": 180,
+      "lp_ms": 515,
       "lp_lines": 2,
       "winner": "AE"
     }
@@ -166,44 +166,50 @@
   "render": [
     {
       "site": "example.com",
-      "ms": 341,
-      "png_bytes": 61530,
+      "ms": 1765,
+      "png_bytes": 42874,
       "css_inlined": false
     },
     {
       "site": "news.ycombinator.com",
-      "ms": 5428,
-      "png_bytes": 412953,
-      "css_inlined": false
-    },
-    {
-      "site": "books.toscrape.com",
-      "ms": 5711,
-      "png_bytes": 129170,
-      "css_inlined": false
+      "ms": 3317,
+      "png_bytes": 604212,
+      "css_inlined": true
     },
     {
       "site": "www.aftonbladet.se",
-      "ms": 5425,
-      "png_bytes": 55729,
-      "css_inlined": false
+      "ms": 1593,
+      "png_bytes": 54989,
+      "css_inlined": true
     },
     {
       "site": "www.di.se",
-      "ms": 6212,
-      "png_bytes": 609065,
-      "css_inlined": false
+      "ms": 3915,
+      "png_bytes": 285761,
+      "css_inlined": true
     },
     {
       "site": "www.expressen.se",
-      "ms": 6250,
+      "ms": 3576,
       "png_bytes": 105159,
-      "css_inlined": false
+      "css_inlined": true
     },
     {
       "site": "www.apple.com",
-      "ms": 6059,
-      "png_bytes": 279762,
+      "ms": 3084,
+      "png_bytes": 176044,
+      "css_inlined": true
+    },
+    {
+      "site": "x.com",
+      "ms": 644,
+      "png_bytes": 102098,
+      "css_inlined": false
+    },
+    {
+      "site": "www.bbc.com",
+      "ms": 812,
+      "png_bytes": 27465,
       "css_inlined": false
     }
   ]
