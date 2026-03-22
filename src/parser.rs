@@ -66,30 +66,47 @@ pub fn get_tag_name(handle: &Handle) -> Option<String> {
     }
 }
 
-/// Kontrollera om elementet är synligt (enkel heuristik)
+/// Kontrollera om elementet är synligt (utökad heuristik)
+///
+/// Detekterar: display:none, visibility:hidden, opacity:0, aria-hidden="true",
+/// HTML hidden-attribut, off-screen positioning (left:-9999px).
 pub fn is_likely_visible(handle: &Handle) -> bool {
-    // Kolla style-attribut för display:none / visibility:hidden
+    // Kolla style-attribut för osynlighet
     if let Some(style) = get_attr(handle, "style") {
-        let normalized: String = style
-            .to_lowercase()
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        if normalized.contains("display:none") || normalized.contains("visibility:hidden") {
+        if is_style_hidden(&style) {
             return false;
         }
     }
 
-    // Kolla hidden-attribut
     if let NodeData::Element { attrs, .. } = &handle.data {
         for attr in attrs.borrow().iter() {
+            // HTML5 hidden-attribut
             if &attr.name.local == "hidden" {
+                return false;
+            }
+            // aria-hidden="true" — semantiskt dold
+            if &attr.name.local == "aria-hidden" && attr.value.trim().eq_ignore_ascii_case("true") {
                 return false;
             }
         }
     }
 
     true
+}
+
+/// Avgör om en inline style-sträng döljer elementet
+fn is_style_hidden(style: &str) -> bool {
+    let normalized: String = style
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    normalized.contains("display:none")
+        || normalized.contains("visibility:hidden")
+        || normalized.contains("opacity:0")
+        || normalized.contains("left:-9999")
+        || normalized.contains("left:-10000")
+        || normalized.contains("clip:rect(0")
 }
 
 /// CTA-nyckelord som indikerar call-to-action-knappar
@@ -215,10 +232,10 @@ fn looks_like_price(handle: &Handle) -> bool {
     if !trimmed.chars().any(|c| c.is_ascii_digit()) {
         return false;
     }
-    // Kontrollera valutaindikatorer i texten
+    // Kontrollera valutaindikatorer i texten (case-insensitive)
     let upper = trimmed.to_uppercase();
     for indicator in PRICE_INDICATORS {
-        if upper.contains(indicator) {
+        if upper.contains(&indicator.to_uppercase()) {
             return true;
         }
     }
@@ -296,38 +313,506 @@ pub fn extract_label(handle: &Handle) -> String {
 mod tests {
     use super::*;
 
+    // === Hjälpfunktioner ===
+
+    /// Rekursiv sökning efter element med specifik tagg
+    fn find_element(handle: &Handle, target_tag: &str) -> Option<Handle> {
+        if let Some(tag) = get_tag_name(handle) {
+            if tag == target_tag {
+                return Some(handle.clone());
+            }
+        }
+        for child in handle.children.borrow().iter() {
+            if let Some(found) = find_element(child, target_tag) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Rekursiv sökning efter element med specifikt attribut
+    fn find_element_by_attr(handle: &Handle, attr: &str, val: &str) -> Option<Handle> {
+        if let Some(v) = get_attr(handle, attr) {
+            if v == val {
+                return Some(handle.clone());
+            }
+        }
+        for child in handle.children.borrow().iter() {
+            if let Some(found) = find_element_by_attr(child, attr, val) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    // === parse_html ===
+
     #[test]
     fn test_parse_simple_html() {
         let html = r#"<html><body><button>Klicka här</button></body></html>"#;
         let dom = parse_html(html);
-        assert!(dom.document.children.borrow().len() > 0);
+        assert!(
+            dom.document.children.borrow().len() > 0,
+            "Tomt dokument efter parse"
+        );
     }
+
+    #[test]
+    fn test_parse_malformed_html() {
+        // html5ever ska hantera trasig HTML utan panik
+        let html = r#"<html><body><div><p>Unclosed div<span>Nested</body>"#;
+        let dom = parse_html(html);
+        assert!(
+            dom.document.children.borrow().len() > 0,
+            "Malformed HTML ska ändå producera ett DOM-träd"
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_html() {
+        let dom = parse_html("");
+        assert!(
+            dom.document.children.borrow().len() > 0,
+            "Tom HTML ska ge default DOM (html5ever lägger till html/head/body)"
+        );
+    }
+
+    #[test]
+    fn test_parse_utf8_multibyte() {
+        let html = r#"<html><body><p>日本語テキスト 🎯 Ñoño</p></body></html>"#;
+        let dom = parse_html(html);
+        let p = find_element(&dom.document, "p").expect("Borde hitta <p>");
+        let text = extract_text(&p);
+        assert!(
+            text.contains("日本語テキスト"),
+            "Japansk text ska bevaras: got '{}'",
+            text
+        );
+        assert!(text.contains("🎯"), "Emoji ska bevaras: got '{}'", text);
+        assert!(
+            text.contains("Ñoño"),
+            "Latin-extended ska bevaras: got '{}'",
+            text
+        );
+    }
+
+    // === extract_text ===
+
+    #[test]
+    fn test_extract_text_nested() {
+        let html = r#"<html><body><div>Yttre <span>inre</span> text</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        let text = extract_text(&div);
+        assert!(
+            text.contains("Yttre") && text.contains("inre") && text.contains("text"),
+            "Ska extrahera text från alla nivåer: got '{}'",
+            text
+        );
+    }
+
+    #[test]
+    fn test_extract_text_skips_script() {
+        let html =
+            r#"<html><body><div>Synlig text<script>var x = "dold";</script></div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        let text = extract_text(&div);
+        assert!(
+            text.contains("Synlig text"),
+            "Synlig text ska finnas: got '{}'",
+            text
+        );
+        assert!(
+            !text.contains("dold"),
+            "Script-innehåll ska INTE inkluderas: got '{}'",
+            text
+        );
+    }
+
+    #[test]
+    fn test_extract_text_skips_style() {
+        let html = r#"<html><body><div>Synlig<style>.hidden { display:none; }</style></div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        let text = extract_text(&div);
+        assert!(
+            !text.contains("display"),
+            "Style-innehåll ska INTE inkluderas: got '{}'",
+            text
+        );
+    }
+
+    #[test]
+    fn test_extract_text_whitespace_handling() {
+        let html = r#"<html><body><p>   Massa    mellanslag   </p></body></html>"#;
+        let dom = parse_html(html);
+        let p = find_element(&dom.document, "p").expect("Borde hitta <p>");
+        let text = extract_text(&p);
+        let trimmed = text.trim();
+        assert!(
+            !trimmed.is_empty(),
+            "Text ska extraheras trots extra whitespace"
+        );
+        assert!(
+            trimmed.contains("Massa"),
+            "Textinnehåll ska bevaras: got '{}'",
+            trimmed
+        );
+    }
+
+    // === get_attr ===
+
+    #[test]
+    fn test_get_attr_exists() {
+        let html = r##"<html><body><a href="#top" class="nav-link">Länk</a></body></html>"##;
+        let dom = parse_html(html);
+        let a = find_element(&dom.document, "a").expect("Borde hitta <a>");
+        assert_eq!(
+            get_attr(&a, "href"),
+            Some("#top".to_string()),
+            "href ska extraheras korrekt"
+        );
+        assert_eq!(
+            get_attr(&a, "class"),
+            Some("nav-link".to_string()),
+            "class ska extraheras korrekt"
+        );
+    }
+
+    #[test]
+    fn test_get_attr_missing() {
+        let html = r#"<html><body><div>Ingen attr</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert_eq!(
+            get_attr(&div, "id"),
+            None,
+            "Saknat attribut ska returnera None"
+        );
+    }
+
+    // === get_tag_name ===
+
+    #[test]
+    fn test_get_tag_name() {
+        let html = r#"<html><body><nav>Menu</nav></body></html>"#;
+        let dom = parse_html(html);
+        let nav = find_element(&dom.document, "nav").expect("Borde hitta <nav>");
+        assert_eq!(
+            get_tag_name(&nav),
+            Some("nav".to_string()),
+            "Taggnamn ska vara 'nav'"
+        );
+    }
+
+    // === is_likely_visible ===
+
+    #[test]
+    fn test_visible_normal_element() {
+        let html = r#"<html><body><button>Synlig</button></body></html>"#;
+        let dom = parse_html(html);
+        let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
+        assert!(is_likely_visible(&btn), "Normal button ska vara synlig");
+    }
+
+    #[test]
+    fn test_hidden_display_none() {
+        let html = r#"<html><body><div style="display:none">Dold</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "display:none ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_visibility_hidden() {
+        let html = r#"<html><body><div style="visibility: hidden">Dold</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "visibility:hidden ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_attribute() {
+        let html = r#"<html><body><div hidden>Dold</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "hidden-attribut ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_aria_hidden_true() {
+        let html = r#"<html><body><div aria-hidden="true">Osynlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "aria-hidden=true ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_opacity_zero() {
+        let html = r#"<html><body><div style="opacity: 0;">Osynlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "opacity:0 ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_hidden_offscreen_left() {
+        let html = r#"<html><body><div style="position:absolute;left:-9999px">Offscreen</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            !is_likely_visible(&div),
+            "left:-9999px ska markera element som osynligt"
+        );
+    }
+
+    #[test]
+    fn test_aria_hidden_false_is_visible() {
+        let html = r#"<html><body><div aria-hidden="false">Synlig</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            is_likely_visible(&div),
+            "aria-hidden=false ska vara synligt"
+        );
+    }
+
+    // === infer_role ===
+
+    #[test]
+    fn test_infer_role_aria_override() {
+        let html = r#"<html><body><div role="navigation">Nav</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert_eq!(
+            infer_role(&div),
+            "navigation",
+            "ARIA role ska ha högst prioritet"
+        );
+    }
+
+    #[test]
+    fn test_infer_role_input_types() {
+        let cases = [
+            ("checkbox", "checkbox"),
+            ("radio", "radio"),
+            ("submit", "button"),
+            ("search", "searchbox"),
+            ("text", "textbox"),
+        ];
+        for (input_type, expected_role) in cases {
+            let html = format!(
+                r#"<html><body><input type="{}" /></body></html>"#,
+                input_type
+            );
+            let dom = parse_html(&html);
+            let input = find_element(&dom.document, "input")
+                .unwrap_or_else(|| panic!("Borde hitta <input type=\"{}\">", input_type));
+            assert_eq!(
+                infer_role(&input),
+                expected_role,
+                "input type='{}' ska ge roll '{}'",
+                input_type,
+                expected_role
+            );
+        }
+    }
+
+    #[test]
+    fn test_infer_role_semantic_tags() {
+        let cases = [
+            ("nav", "navigation"),
+            ("main", "main"),
+            ("header", "banner"),
+            ("footer", "contentinfo"),
+            ("form", "form"),
+            ("table", "table"),
+            ("select", "combobox"),
+            ("textarea", "textarea"),
+        ];
+        for (tag, expected_role) in cases {
+            let html = format!(r#"<html><body><{}>Innehåll</{}></body></html>"#, tag, tag);
+            let dom = parse_html(&html);
+            let elem =
+                find_element(&dom.document, tag).unwrap_or_else(|| panic!("Borde hitta <{}>", tag));
+            assert_eq!(
+                infer_role(&elem),
+                expected_role,
+                "<{}> ska ge roll '{}'",
+                tag,
+                expected_role
+            );
+        }
+    }
+
+    #[test]
+    fn test_infer_role_headings() {
+        for level in 1..=6 {
+            let tag = format!("h{}", level);
+            let html = format!(r#"<html><body><{}>Rubrik</{}></body></html>"#, tag, tag);
+            let dom = parse_html(&html);
+            let heading = find_element(&dom.document, &tag)
+                .unwrap_or_else(|| panic!("Borde hitta <{}>", tag));
+            assert_eq!(
+                infer_role(&heading),
+                "heading",
+                "<{}> ska ge roll 'heading'",
+                tag
+            );
+        }
+    }
+
+    #[test]
+    fn test_infer_role_cta_keyword() {
+        let html = r#"<html><body><button>Köp nu</button></body></html>"#;
+        let dom = parse_html(html);
+        let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
+        assert_eq!(
+            infer_role(&btn),
+            "cta",
+            "Button med CTA-nyckelord 'köp' ska ge roll 'cta'"
+        );
+    }
+
+    #[test]
+    fn test_infer_role_price_detection() {
+        let html = r#"<html><body><span>199 kr</span></body></html>"#;
+        let dom = parse_html(html);
+        let span = find_element(&dom.document, "span").expect("Borde hitta <span>");
+        assert_eq!(
+            infer_role(&span),
+            "price",
+            "Text med valutaindikator ska ge roll 'price'"
+        );
+    }
+
+    #[test]
+    fn test_infer_role_product_card() {
+        let html =
+            r#"<html><body><div itemtype="https://schema.org/Product">Produkt</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert_eq!(
+            infer_role(&div),
+            "product_card",
+            "Schema.org Product ska ge roll 'product_card'"
+        );
+    }
+
+    // === extract_label (WCAG-kedja) ===
 
     #[test]
     fn test_aria_label_priority() {
         let html = r#"<html><body><button aria-label="Stäng dialog">X</button></body></html>"#;
         let dom = parse_html(html);
-
-        // Hitta button-elementet via rekursiv sökning
-        fn find_button(handle: &Handle) -> Option<Handle> {
-            if let Some(tag) = get_tag_name(handle) {
-                if tag == "button" {
-                    return Some(handle.clone());
-                }
-            }
-            for child in handle.children.borrow().iter() {
-                if let Some(found) = find_button(child) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-
-        let button = find_button(&dom.document).expect("Borde hitta button");
+        let button = find_element(&dom.document, "button").expect("Borde hitta button");
         let label = extract_label(&button);
         assert_eq!(
             label, "Stäng dialog",
             "aria-label ska ha prioritet över inner text"
+        );
+    }
+
+    #[test]
+    fn test_label_aria_labelledby() {
+        let html = r#"<html><body><button aria-labelledby="lbl1">X</button></body></html>"#;
+        let dom = parse_html(html);
+        let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
+        let label = extract_label(&btn);
+        assert_eq!(label, "[ref:lbl1]", "aria-labelledby ska ge ref-format");
+    }
+
+    #[test]
+    fn test_label_placeholder_fallback() {
+        let html = r#"<html><body><input placeholder="Sök produkter..." /></body></html>"#;
+        let dom = parse_html(html);
+        let input = find_element(&dom.document, "input").expect("Borde hitta <input>");
+        let label = extract_label(&input);
+        assert_eq!(
+            label, "Sök produkter...",
+            "placeholder ska användas som fallback-label"
+        );
+    }
+
+    #[test]
+    fn test_label_alt_text() {
+        let html = r#"<html><body><img alt="Produktbild av stol" /></body></html>"#;
+        let dom = parse_html(html);
+        let img = find_element(&dom.document, "img").expect("Borde hitta <img>");
+        let label = extract_label(&img);
+        assert_eq!(
+            label, "Produktbild av stol",
+            "alt-text ska användas som label för bilder"
+        );
+    }
+
+    #[test]
+    fn test_label_title_fallback() {
+        let html = r#"<html><body><div title="Verktygstips">...</div></body></html>"#;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        let label = extract_label(&div);
+        assert_eq!(
+            label, "Verktygstips",
+            "title-attribut ska vara fallback-label"
+        );
+    }
+
+    #[test]
+    fn test_label_inner_text_fallback() {
+        let html = r#"<html><body><button>Skicka formulär</button></body></html>"#;
+        let dom = parse_html(html);
+        let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
+        let label = extract_label(&btn);
+        assert!(
+            label.contains("Skicka formulär"),
+            "Inner text ska vara sista label-fallback: got '{}'",
+            label
+        );
+    }
+
+    #[test]
+    fn test_label_name_attribute_last_resort() {
+        let html = r#"<html><body><input name="email" /></body></html>"#;
+        let dom = parse_html(html);
+        let input = find_element(&dom.document, "input").expect("Borde hitta <input>");
+        let label = extract_label(&input);
+        assert_eq!(
+            label, "email",
+            "name-attribut ska vara sista utväg för label"
+        );
+    }
+
+    #[test]
+    fn test_label_truncation_80_chars() {
+        let long_text = "A".repeat(120);
+        let html = format!(
+            r#"<html><body><button>{}</button></body></html>"#,
+            long_text
+        );
+        let dom = parse_html(&html);
+        let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
+        let label = extract_label(&btn);
+        assert!(
+            label.len() <= 80,
+            "Label ska trunkeras till max 80 tecken, got {} tecken",
+            label.len()
         );
     }
 }

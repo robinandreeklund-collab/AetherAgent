@@ -148,12 +148,20 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
         if let Some(ref mut r) = current {
             if r.snippet.is_empty() && !node.label.is_empty() {
                 let label = node.label.as_str();
-                // Ignorera korta display-URL-liknande labels
-                if label.len() > 20
-                    || (!label.contains("www.")
-                        && !label.contains(".se/")
-                        && !label.contains(".com/"))
-                {
+                // Ignorera display-URL-liknande labels (oavsett längd)
+                let looks_like_url = label.contains("www.")
+                    || label.contains("http")
+                    || label.contains(".com/")
+                    || label.contains(".se/")
+                    || label.contains(".org/")
+                    || label.contains(".net/")
+                    || label.contains(".io/")
+                    || label.contains(".de/")
+                    || label.contains(".uk/")
+                    || label.contains(".no/")
+                    || label.contains(".dk/")
+                    || label.contains(".fi/");
+                if !looks_like_url && label.len() > 10 {
                     r.snippet = label.to_string();
                     results.push(r.clone());
                     current = None;

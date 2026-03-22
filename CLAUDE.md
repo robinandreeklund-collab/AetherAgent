@@ -192,3 +192,33 @@ Types:
 **Fas 15 (Complete)**: Streaming Parse — `streaming.rs`, `StreamingParser` with early-stopping at `max_nodes`, depth limiting, relevance filtering. WASM API: `parse_streaming`.
 
 **Fas 16 (Complete)**: Goal-Driven Adaptive DOM Streaming — `stream_state.rs` (StreamState, DecisionLayer, Directive enum), `stream_engine.rs` (StreamEngine with relevance-ranked chunked emission). LLM-directed branch expansion via directives: `expand(node_id)`, `stop`, `next_branch`, `lower_threshold(value)`. 95–99% token savings on real-world pages (10 noder av 372 på SVT-liknande sida). MCP tools: `stream_parse`, `stream_parse_directive`. HTTP endpoints: `/api/stream-parse`, `/api/fetch/stream-parse`, `/api/directive`. WASM API: `stream_parse_adaptive`, `stream_parse_with_directives`.
+
+**Fas 17 (Complete)**: Boa JS Hardening — Arena DOM (`arena_dom.rs`), DOM Bridge (`dom_bridge.rs`), SSR Hydration (`hydration.rs`: 10 ramverk inkl. devalue-parser för Nuxt 3+/SvelteKit, RSC Flight Protocol, Qwik QRL), Progressive Escalation (`escalation.rs`: Tier 0-4), allowlist-säkerhet i `js_eval.rs`, persistent Boa Context i `eval_js_batch`.
+
+**Fas 18 (Complete)**: Event Loop — `event_loop.rs`: microtask-kö (Promise.then, queueMicrotask via Boas SimpleJobExecutor), setTimeout/setInterval (begränsade: max 100 timers, max 5000ms delay, virtuell klocka), requestAnimationFrame/cancelAnimationFrame (simulerad 16ms tick), MutationObserver (kopplad till ArenaDom med observe/disconnect). Säkerhetsbegränsningar: max 1000 ticks, max 50ms väggklocka. Integrerat i `dom_bridge.rs` — alla eval-anrop dränerar event-loopen automatiskt.
+
+## Roadmap (ej påbörjad)
+
+<!-- Fas 19: Produktionshärdning — de flesta punkterna redan adresserade:
+     - .unwrap()-audit: GJORD (alla non-test unwrap har fallbacks)
+     - MCP felmeddelanden: GJORD (tool-specifika, engelska, med parametertips)
+     - WASM <4MB: REDAN UPPFYLLT (1.8MB)
+     - Parse-profilering: REDAN SNABB (0-30ms)
+     - stream_engine 1000+ noder: REDAN TESTAD
+     - Timeout fetch-kedjan: REDAN 10s default
+     - SSRF-audit: REDAN SOLID (validate_url blockerar privata IP)
+     Kvar att överväga:
+     - Pen-testa trust shield med nya injektionsvektorer (encoding-evasion, polyglot)
+     - Rate limiter-stresstester under hög last
+-->
+
+**Fas 19 (Planned)**: Utökad Webbförståelse
+- CSS-medveten parsing: `display:none`/`visibility:hidden`/`opacity:0`/`aria-hidden` filtrering (IMPLEMENTERAD). Framtida: computed styles, flexbox/grid-semantik.
+- iframe-hantering: rekursiv parsing av iframe-innehåll, trust-nivå per iframe-origin, sandboxad JS per frame.
+<!-- Shadow DOM: Stöd för open shadow roots + semantisk sammanslagning. LÅG PRIO — sällsynt i scraping-kontext. -->
+
+<!-- Fas 20: Agent-protokoll & Ekosystem — AVVAKTA
+     - A2A (Google Agent-to-Agent): Protokollet mognar fortfarande. Implementera agent card + task lifecycle när spec stabiliseras.
+     - MCP 2.0: Vi har redan Streamable HTTP. Uppgradera bara vid breaking changes. OAuth 2.1 kan bli relevant.
+     - Plugin-system: Prematur abstraktion. Bygg inte innan det behövs. Dynamisk parser-laddning, custom trust-regler, webhooks.
+-->

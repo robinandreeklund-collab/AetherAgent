@@ -1,0 +1,8 @@
+1 RootWebArea
+ 7 'Loading…'
+ 9 form
+  13 'Something went wrong, but don’t fret — let’s give it another shot.'
+  14 LineBreak
+  16 button 'Try again'
+  18 image '⚠️'
+  20 'Some privacy related extensions may cause issues on x.com. Please disable them and try again.'

@@ -1,0 +1,223 @@
+[
+  {
+    "site": "example.com",
+    "url": "https://example.com",
+    "aether": {
+      "png_size": 61530,
+      "screenshot": true,
+      "html_length": 528,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 470,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 529,
+      "html_ms": 801,
+      "tree_lines": 6,
+      "tree_ms": 665,
+      "total_ms": 801,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "news.ycombinator.com",
+    "url": "https://news.ycombinator.com",
+    "aether": {
+      "png_size": 403165,
+      "screenshot": true,
+      "html_length": 41786,
+      "css_inlined": true,
+      "css_added_bytes": 7448,
+      "total_ms": 5648,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 34366,
+      "html_ms": 273,
+      "tree_lines": 518,
+      "tree_ms": 512,
+      "total_ms": 273,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.aftonbladet.se",
+    "url": "https://www.aftonbladet.se",
+    "aether": {
+      "png_size": 87314,
+      "screenshot": true,
+      "html_length": 608489,
+      "css_inlined": true,
+      "css_added_bytes": 155401,
+      "total_ms": 6957,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 892837,
+      "html_ms": 16553,
+      "tree_lines": 665,
+      "tree_ms": 14952,
+      "total_ms": 16553,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false,
+      "errors": "$time=1774179684110 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
+    }
+  },
+  {
+    "site": "www.di.se",
+    "url": "https://www.di.se",
+    "aether": {
+      "png_size": 790796,
+      "screenshot": true,
+      "html_length": 659735,
+      "css_inlined": true,
+      "css_added_bytes": 147529,
+      "total_ms": 7637,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 624286,
+      "html_ms": 5288,
+      "tree_lines": 599,
+      "tree_ms": 5330,
+      "total_ms": 5288,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.expressen.se",
+    "url": "https://www.expressen.se",
+    "aether": {
+      "png_size": 105159,
+      "screenshot": true,
+      "html_length": 654881,
+      "css_inlined": true,
+      "css_added_bytes": 383345,
+      "total_ms": 7380,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 273124,
+      "html_ms": 5506,
+      "tree_lines": 567,
+      "tree_ms": 5221,
+      "total_ms": 5506,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.apple.com",
+    "url": "https://www.apple.com",
+    "aether": {
+      "png_size": 279762,
+      "screenshot": true,
+      "html_length": 898144,
+      "css_inlined": true,
+      "css_added_bytes": 663234,
+      "total_ms": 6698,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 312476,
+      "html_ms": 1780,
+      "tree_lines": 515,
+      "tree_ms": 1556,
+      "total_ms": 1780,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.bbc.com",
+    "url": "https://www.bbc.com",
+    "aether": {
+      "png_size": 27465,
+      "screenshot": true,
+      "html_length": 24,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 427,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 111,
+      "html_ms": 450,
+      "tree_lines": 2,
+      "tree_ms": 136,
+      "total_ms": 450,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "github.com",
+    "url": "https://github.com",
+    "aether": {
+      "error": "Remote end closed connection without response"
+    },
+    "lightpanda": {
+      "html_length": 547173,
+      "html_ms": 5276,
+      "tree_lines": 369,
+      "tree_ms": 5290,
+      "total_ms": 5276,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "x.com",
+    "url": "https://x.com",
+    "aether": {
+      "error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    "lightpanda": {
+      "html_length": 248301,
+      "html_ms": 1867,
+      "tree_lines": 8,
+      "tree_ms": 2525,
+      "total_ms": 1867,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "books.toscrape.com",
+    "url": "https://books.toscrape.com",
+    "aether": {
+      "error": "<urlopen error [Errno 111] Connection refused>"
+    },
+    "lightpanda": {
+      "html_length": 51276,
+      "html_ms": 1255,
+      "tree_lines": 272,
+      "tree_ms": 1107,
+      "total_ms": 1255,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false,
+      "errors": "$time=1774179783973 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
+    }
+  }
+]

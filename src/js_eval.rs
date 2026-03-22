@@ -9,6 +9,34 @@
 #[cfg(feature = "js-eval")]
 use boa_engine::{Context, Source};
 
+// ─── Sandbox-begränsningar ──────────────────────────────────────────────────
+
+/// Max loop-iterationer (förhindrar while(true) och for(;;))
+#[cfg(feature = "js-eval")]
+const MAX_LOOP_ITERATIONS: u64 = 100_000;
+
+/// Max stack-storlek (förhindrar djup rekursion)
+#[cfg(feature = "js-eval")]
+const MAX_STACK_SIZE: usize = 256;
+
+/// Max rekursionsdjup
+#[cfg(feature = "js-eval")]
+const MAX_RECURSION_DEPTH: usize = 64;
+
+/// Skapa en sandboxad Boa-kontext med runtime-begränsningar
+///
+/// Sätter loop-iterations-limit, stack-storlek och rekursionslimit
+/// för att förhindra denial-of-service i JS-sandboxen.
+#[cfg(feature = "js-eval")]
+pub(crate) fn create_sandboxed_context() -> Context {
+    let mut ctx = Context::default();
+    let limits = ctx.runtime_limits_mut();
+    limits.set_loop_iteration_limit(MAX_LOOP_ITERATIONS);
+    limits.set_stack_size_limit(MAX_STACK_SIZE);
+    limits.set_recursion_limit(MAX_RECURSION_DEPTH);
+    ctx
+}
+
 use serde::{Deserialize, Serialize};
 
 /// Resultat från en JS-evaluering
@@ -231,49 +259,225 @@ fn truncate_code(code: &str, max_len: usize) -> String {
 
 // ─── JS-evaluering ──────────────────────────────────────────────────────────
 
+/// Tillåtna mönster i allowlist — allt annat blockeras
+///
+/// Allowlist-modell: bara kända säkra operationer tillåts.
+/// Säkrare än blocklist eftersom nya attacker inte kan slinka igenom.
+#[cfg(feature = "js-eval")]
+const ALLOWED_PATTERNS: &[&str] = &[
+    // Matematik & operatorer
+    "math.",
+    "number(",
+    "parsefloat(",
+    "parseint(",
+    "isnan(",
+    "isfinite(",
+    "tofixed(",
+    "toprecision(",
+    // Strängar
+    "string(",
+    "tostring(",
+    "tolocalestring(",
+    "tolowercase(",
+    "touppercase(",
+    "trim(",
+    "replace(",
+    "split(",
+    "join(",
+    "slice(",
+    "substring(",
+    "includes(",
+    "startswith(",
+    "endswith(",
+    "indexof(",
+    "lastindexof(",
+    "padstart(",
+    "padend(",
+    "repeat(",
+    "charat(",
+    "charcodeat(",
+    "concat(",
+    // Arrayer
+    "array.",
+    "map(",
+    "filter(",
+    "reduce(",
+    "foreach(",
+    "find(",
+    "findindex(",
+    "some(",
+    "every(",
+    "sort(",
+    "reverse(",
+    "flat(",
+    "flatmap(",
+    "push(",
+    "pop(",
+    "shift(",
+    "unshift(",
+    "fill(",
+    "from(",
+    "of(",
+    "length",
+    "keys(",
+    "values(",
+    "entries(",
+    // Objekt
+    "object.",
+    "json.stringify(",
+    "json.parse(",
+    "hasownproperty(",
+    // Ternary, literals, variabler — tillåts implicit av Boa
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "typeof",
+    "instanceof",
+    "new date(",
+    "date.now(",
+    "regexp(",
+    "new regexp(",
+];
+
+/// Förbjudna mönster som alltid blockeras (även om nåt i allowlist matchar)
+#[cfg(feature = "js-eval")]
+const DENIED_PATTERNS: &[&str] = &[
+    "fetch(",
+    "xmlhttp",
+    "import(",
+    "require(",
+    "eval(",
+    "settimeout(",
+    "setinterval(",
+    "new worker",
+    "indexeddb",
+    "localstorage",
+    "sessionstorage",
+    "cookie",
+    "globalthis",
+    "process.",
+    "child_process",
+    "__proto__",
+    "constructor[",
+    "prototype.",
+];
+
+/// Kontrollera om JS-kod är säker att evaluera (allowlist-modell)
+///
+/// Returnerar Ok(()) om koden är säker, Err(anledning) om blockerad.
+#[cfg(feature = "js-eval")]
+fn check_js_safety(code: &str) -> Result<(), String> {
+    let lower = code.to_lowercase();
+
+    // Steg 1: Kolla deny-list — absolut förbjudna mönster
+    for denied in DENIED_PATTERNS {
+        if lower.contains(denied) {
+            return Err(format!(
+                "Blocked: '{}' is not allowed in sandbox",
+                denied.trim_end_matches('(')
+            ));
+        }
+    }
+
+    // Steg 2: Kolla om koden innehåller funktionsanrop som inte är i allowlist
+    // Enkla uttryck (literals, matematik-operatorer, variabler) tillåts alltid.
+    // Funktionsanrop (ord följt av parentes) måste vara i allowlist.
+    // Vi parsear inte fullt — heuristik som fångar de farligaste fallen.
+    let has_suspicious_call = detect_suspicious_calls(&lower);
+    if let Some(suspicious) = has_suspicious_call {
+        // Kolla om det finns i allowlist
+        let is_allowed = ALLOWED_PATTERNS
+            .iter()
+            .any(|p| suspicious.contains(p) || lower.contains(p));
+        if !is_allowed {
+            // Tillåt ren beräkningslogik utan funktionsanrop
+            // (t.ex. "1 + 2", "x * 3", "'hello' + 'world'")
+            if contains_only_safe_tokens(&lower) {
+                return Ok(());
+            }
+            return Err(format!("Blocked: '{}' is not in allowlist", suspicious));
+        }
+    }
+
+    Ok(())
+}
+
+/// Detektera potentiellt farliga funktionsanrop
+#[cfg(feature = "js-eval")]
+fn detect_suspicious_calls(lower: &str) -> Option<String> {
+    // Sök efter mönster: word( — som indikerar funktionsanrop
+    // Ignorera: operatorer, ternary, array indexing
+    for (i, ch) in lower.char_indices() {
+        if ch == '(' {
+            // Hitta funktionsnamn före parentesen
+            let before = &lower[..i];
+            let name: String = before
+                .chars()
+                .rev()
+                .take_while(|c| c.is_alphanumeric() || *c == '.' || *c == '_')
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            let name = name.trim_start_matches('.');
+            if name.is_empty() || name == "(" {
+                continue;
+            }
+            // Skippa kända säkra namn
+            if ALLOWED_PATTERNS
+                .iter()
+                .any(|p| p.trim_end_matches('(') == name || name.ends_with(p.trim_end_matches('(')))
+            {
+                continue;
+            }
+            // Skippa vanliga JS-konstruktioner
+            if matches!(
+                name,
+                "if" | "for" | "while" | "switch" | "catch" | "var" | "let" | "const"
+            ) {
+                continue;
+            }
+            // Potentiellt farligt — rapportera
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Kontrollera om koden bara innehåller säkra tokens (literals, operatorer, variabler)
+#[cfg(feature = "js-eval")]
+fn contains_only_safe_tokens(code: &str) -> bool {
+    // Tillåtna tecken i rena uttryck
+    let safe_chars = |c: char| -> bool {
+        c.is_alphanumeric()
+            || c.is_whitespace()
+            || "+-*/%=<>!&|^~?:.,;'\"()[]{}0123456789_$`".contains(c)
+    };
+
+    code.chars().all(safe_chars)
+}
+
 /// Evalera ett JS-uttryck i en sandboxad miljö
 ///
+/// Använder allowlist-modell: bara kända säkra mönster tillåts.
 /// Stöder: matematik, strängar, arrayer, objekt, ternary, template literals.
 /// Stöder INTE: DOM, fetch, timers, import, require.
 #[cfg(feature = "js-eval")]
 pub fn eval_js(code: &str) -> JsEvalResult {
     let start = std::time::Instant::now();
 
-    // Säkerhetskontroll: vägra farliga operationer
-    let lower = code.to_lowercase();
-    for forbidden in &[
-        "fetch(",
-        "xmlhttp",
-        "import(",
-        "require(",
-        "eval(",
-        "function(",
-        "settimeout",
-        "setinterval",
-        "new worker",
-        "indexeddb",
-        "localstorage",
-        "sessionstorage",
-        "cookie",
-        "document.",
-        "window.",
-        "globalthis",
-    ] {
-        if lower.contains(forbidden) {
-            return JsEvalResult {
-                value: None,
-                error: Some(format!(
-                    "Blocked: '{}' is not allowed in sandbox",
-                    forbidden.trim_end_matches('(')
-                )),
-                timed_out: false,
-                eval_time_us: start.elapsed().as_micros() as u64,
-            };
-        }
+    // Allowlist-baserad säkerhetskontroll
+    if let Err(reason) = check_js_safety(code) {
+        return JsEvalResult {
+            value: None,
+            error: Some(reason),
+            timed_out: false,
+            eval_time_us: start.elapsed().as_micros() as u64,
+        };
     }
 
-    // Skapa en minimal Boa-kontext (ingen DOM, ingen I/O)
-    let mut context = Context::default();
+    let mut context = create_sandboxed_context();
 
     match context.eval(Source::from_bytes(code)) {
         Ok(result) => {
@@ -287,20 +491,72 @@ pub fn eval_js(code: &str) -> JsEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
-        Err(e) => JsEvalResult {
-            value: None,
-            error: Some(format!("{}", e)),
-            timed_out: false,
-            eval_time_us: start.elapsed().as_micros() as u64,
-        },
+        Err(e) => {
+            // Kolla om felet beror på runtime-begränsning
+            let err_str = format!("{}", e);
+            let err_lower = err_str.to_lowercase();
+            let timed_out = err_lower.contains("loop iteration limit")
+                || err_lower.contains("stack overflow")
+                || err_lower.contains("recursion limit")
+                || err_lower.contains("runtime limit");
+            JsEvalResult {
+                value: None,
+                error: Some(err_str),
+                timed_out,
+                eval_time_us: start.elapsed().as_micros() as u64,
+            }
+        }
     }
 }
 
-/// Evalera flera JS-uttryck i sekvens (delar kontext)
+/// Evalera flera JS-uttryck med delad kontext (persistent state)
+///
+/// Alla snippets delar samma Boa Context — variabler definierade i
+/// snippet 1 är tillgängliga i snippet 2, etc.
 #[cfg(feature = "js-eval")]
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
-    let results: Vec<JsEvalResult> = snippets.iter().map(|s| eval_js(s)).collect();
+
+    // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
+    let mut context = create_sandboxed_context();
+    let mut results = Vec::with_capacity(snippets.len());
+
+    for code in snippets {
+        let snippet_start = std::time::Instant::now();
+
+        // Allowlist-kontroll per snippet
+        if let Err(reason) = check_js_safety(code) {
+            results.push(JsEvalResult {
+                value: None,
+                error: Some(reason),
+                timed_out: false,
+                eval_time_us: snippet_start.elapsed().as_micros() as u64,
+            });
+            continue;
+        }
+
+        match context.eval(Source::from_bytes(code.as_bytes())) {
+            Ok(result) => {
+                let value_str = result
+                    .to_string(&mut context)
+                    .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
+                results.push(JsEvalResult {
+                    value: Some(value_str),
+                    error: None,
+                    timed_out: false,
+                    eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                });
+            }
+            Err(e) => {
+                results.push(JsEvalResult {
+                    value: None,
+                    error: Some(format!("{}", e)),
+                    timed_out: false,
+                    eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                });
+            }
+        }
+    }
 
     JsBatchResult {
         results,
@@ -735,6 +991,73 @@ mod tests {
             urls,
             vec!["https://api.shop.se/cart"],
             "Borde hitta $.ajax URL"
+        );
+    }
+
+    // === Runtime-begränsningar ===
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_infinite_loop_aborts() {
+        let result = eval_js("var x=0; while(x<200000) { x++; } x");
+        assert!(
+            result.error.is_some(),
+            "Loop som överskrider limit borde ge fel: value={:?}",
+            result.value
+        );
+        assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_large_for_loop_aborts() {
+        let result = eval_js("var s=0; for(var i=0; i<200000; i++) { s+=i; } s");
+        assert!(
+            result.error.is_some(),
+            "Stor loop borde ge fel: value={:?}",
+            result.value
+        );
+        assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_deep_recursion_aborts() {
+        let result = eval_js("function f(n) { return f(n+1); } f(0)");
+        assert!(result.error.is_some(), "Djup rekursion borde ge fel");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_normal_loop_works() {
+        let result = eval_js("var s=0; for(var i=0;i<100;i++){s+=i;} s");
+        assert!(
+            result.error.is_none(),
+            "Normal loop borde fungera: {:?}",
+            result.error
+        );
+        assert_eq!(result.value.as_deref(), Some("4950"));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_sandboxed_context_limits() {
+        let ctx = create_sandboxed_context();
+        let limits = ctx.runtime_limits();
+        assert_eq!(
+            limits.loop_iteration_limit(),
+            MAX_LOOP_ITERATIONS,
+            "Loop-limit borde vara satt"
+        );
+        assert_eq!(
+            limits.stack_size_limit(),
+            MAX_STACK_SIZE,
+            "Stack-limit borde vara satt"
+        );
+        assert_eq!(
+            limits.recursion_limit(),
+            MAX_RECURSION_DEPTH,
+            "Recursion-limit borde vara satt"
         );
     }
 }

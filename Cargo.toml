@@ -17,6 +17,7 @@ serde_json = "1.0"
 html5ever = "0.27"
 aho-corasick = "1.1"
 markup5ever_rcdom = "0.3"
+slotmap = "1.0"
 
 # Server dependencies (only for native binary, not WASM)
 axum = { version = "0.7", optional = true }
@@ -65,6 +66,7 @@ png = { version = "0.17", optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+base64 = "0.22"
 
 [features]
 default = []
@@ -74,7 +76,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
-blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
+blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64"]
 cdp = ["headless_chrome"]
 
 [[bin]]
@@ -90,6 +92,10 @@ required-features = ["mcp"]
 [[bin]]
 name = "aether-bench"
 path = "benches/bench_main.rs"
+
+[[example]]
+name = "render_demo"
+required-features = ["js-eval", "blitz"]
 
 [profile.release]
 opt-level = "z"    # minimera binärstorlek

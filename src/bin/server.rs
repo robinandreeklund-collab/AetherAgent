@@ -806,6 +806,8 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/execute-plan": "Execute plan against page state",
             "POST /api/fetch": "Fetch URL and return HTML + metadata",
             "POST /api/fetch/parse": "Fetch URL → parse to semantic tree",
+            "POST /api/fetch/markdown": "Fetch URL → convert to Markdown",
+            "POST /api/markdown": "Convert HTML to Markdown",
             "POST /api/fetch/click": "Fetch URL → find clickable element",
             "POST /api/fetch/extract": "Fetch URL → extract structured data",
             "POST /api/fetch/plan": "Fetch URL → compile goal → execute plan",
@@ -1157,6 +1159,92 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         serde_json::to_string(&result_value).unwrap_or_default(),
     )
 }
+
+// ─── Markdown endpoints ──────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct MarkdownRequest {
+    html: String,
+    #[serde(default)]
+    goal: String,
+    #[serde(default)]
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct FetchMarkdownRequest {
+    url: String,
+    #[serde(default)]
+    goal: String,
+    #[serde(default)]
+    config: Option<aether_agent::types::FetchConfig>,
+}
+
+async fn parse_markdown(Json(req): Json<MarkdownRequest>) -> impl IntoResponse {
+    let start = std::time::Instant::now();
+    let md = aether_agent::html_to_markdown(&req.html, &req.goal, &req.url);
+    let ms = start.elapsed().as_millis() as u64;
+
+    let result = serde_json::json!({
+        "markdown": md,
+        "markdown_length": md.len(),
+        "parse_time_ms": ms,
+    });
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
+async fn fetch_markdown(Json(req): Json<FetchMarkdownRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let total_start = std::time::Instant::now();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+    let fetch_ms = fetch_result.fetch_time_ms;
+
+    let parse_start = std::time::Instant::now();
+    let md = aether_agent::html_to_markdown(&fetch_result.body, &req.goal, &fetch_result.final_url);
+    let parse_ms = parse_start.elapsed().as_millis() as u64;
+    let total_ms = total_start.elapsed().as_millis() as u64;
+
+    let result = serde_json::json!({
+        "markdown": md,
+        "markdown_length": md.len(),
+        "url": fetch_result.final_url,
+        "status_code": fetch_result.status_code,
+        "html_size": fetch_result.body_size_bytes,
+        "timing": {
+            "fetch_ms": fetch_ms,
+            "parse_ms": parse_ms,
+            "total_ms": total_ms,
+        }
+    });
+
+    (
+        StatusCode::OK,
+        serde_json::to_string(&result).unwrap_or_default(),
+    )
+}
+
+// ─── Fas 7: Fetch click handler ─────────────────────────────────────────────
 
 async fn fetch_click(Json(req): Json<FetchClickRequest>) -> impl IntoResponse {
     let config = req.config.unwrap_or_default();
@@ -1731,6 +1819,177 @@ async fn tier_stats_handler() -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+// ─── Boa+Blitz: render_with_js ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenderWithJsRequest {
+    html: String,
+    js_code: String,
+    #[serde(default = "default_base_url")]
+    base_url: String,
+    #[serde(default = "default_width")]
+    width: u32,
+    #[serde(default = "default_height")]
+    height: u32,
+}
+
+fn default_base_url() -> String {
+    "https://localhost".to_string()
+}
+
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+async fn render_with_js_handler(Json(req): Json<RenderWithJsRequest>) -> impl IntoResponse {
+    let result = aether_agent::render_with_js(
+        &req.html,
+        &req.js_code,
+        &req.base_url,
+        req.width,
+        req.height,
+    );
+    (StatusCode::OK, result)
+}
+
+/// Fetch URL → inline CSS → Blitz full render (med bilder + CSS)
+#[derive(Deserialize)]
+struct FetchRenderRequest {
+    url: String,
+    #[serde(default)]
+    js_code: String,
+    #[serde(default = "default_width")]
+    width: u32,
+    #[serde(default = "default_height")]
+    height: u32,
+}
+
+#[cfg(all(feature = "fetch", feature = "blitz"))]
+async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoResponse {
+    use aether_agent::fetch;
+
+    // Steg 1: Fetcha HTML
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(r#"{{"error":"Fetch failed: {e}"}}"#),
+            )
+        }
+    };
+
+    let html = &fetch_result.body;
+    let final_url = &fetch_result.final_url;
+
+    if html.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                r#"{{"error":"Empty response from {}", "status": {}}}"#,
+                final_url, fetch_result.status_code
+            ),
+        );
+    }
+
+    // Steg 2: Inline extern CSS med detaljerad felrapportering
+    let css_result = fetch::inline_external_css_detailed(html, final_url).await;
+    let html_with_css = &css_result.html;
+
+    // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback)
+    #[cfg(feature = "js-eval")]
+    let result = {
+        if req.js_code.is_empty() {
+            // Ingen JS — render med tiered backend (CDP-fallback vid dålig Blitz)
+            match aether_agent::screenshot_with_tier(
+                html_with_css,
+                final_url,
+                req.width,
+                req.height,
+                false, // full render: ladda bilder
+            ) {
+                Ok((png_bytes, tier_used)) => {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    serde_json::json!({
+                        "png_base64": b64,
+                        "png_size_bytes": png_bytes.len(),
+                        "url": final_url,
+                        "status_code": fetch_result.status_code,
+                        "html_length": html_with_css.len(),
+                        "css_inlined": css_result.css_loaded > 0,
+                        "css_found": css_result.css_found,
+                        "css_loaded": css_result.css_loaded,
+                        "css_failed": css_result.css_failed,
+                        "css_bytes_added": css_result.css_bytes_added,
+                        "css_details": css_result.css_details,
+                        "tier_used": format!("{:?}", tier_used),
+                    })
+                    .to_string()
+                }
+                Err(e) => serde_json::json!({
+                    "error": format!("Render failed: {e}"),
+                    "url": final_url,
+                    "css_found": css_result.css_found,
+                    "css_loaded": css_result.css_loaded,
+                    "css_failed": css_result.css_failed,
+                    "css_details": css_result.css_details,
+                })
+                .to_string(),
+            }
+        } else {
+            // JS + full render
+            aether_agent::render_with_js_full(
+                html_with_css,
+                &req.js_code,
+                final_url,
+                req.width,
+                req.height,
+            )
+        }
+    };
+
+    #[cfg(not(feature = "js-eval"))]
+    let result = {
+        match aether_agent::screenshot_with_tier(
+            html_with_css,
+            final_url,
+            req.width,
+            req.height,
+            false,
+        ) {
+            Ok((png_bytes, tier_used)) => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                serde_json::json!({
+                    "png_base64": b64,
+                    "png_size_bytes": png_bytes.len(),
+                    "url": final_url,
+                    "status_code": fetch_result.status_code,
+                    "html_length": html_with_css.len(),
+                    "css_inlined": css_result.css_loaded > 0,
+                    "css_found": css_result.css_found,
+                    "css_loaded": css_result.css_loaded,
+                    "css_failed": css_result.css_failed,
+                    "css_bytes_added": css_result.css_bytes_added,
+                    "css_details": css_result.css_details,
+                    "tier_used": format!("{:?}", tier_used),
+                })
+                .to_string()
+            }
+            Err(e) => serde_json::json!({
+                "error": format!("Render failed: {e}"),
+                "url": final_url,
+                "css_found": css_result.css_found,
+                "css_loaded": css_result.css_loaded,
+                "css_failed": css_result.css_failed,
+                "css_details": css_result.css_details,
+            })
+            .to_string(),
+        }
+    };
+
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
 
 #[cfg(feature = "vision")]
@@ -2143,6 +2402,31 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "tiered_screenshot",
+            "description": "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. Returns: tier_used, latency_ms, size_bytes, and escalation_reason if tier switching occurred.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "width": {"type": "integer", "description": "Viewport width (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height (default: 800)", "default": 800},
+                    "fast_render": {"type": "boolean", "description": "Skip external resources (default: true)", "default": true},
+                    "xhr_captures_json": {"type": "string", "description": "Optional XHR captures JSON for tier selection"}
+                },
+                "required": ["html", "url", "goal"]
+            }
+        },
+        {
+            "name": "tier_stats",
+            "description": "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
             "name": "parse_screenshot",
             "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag.",
             "inputSchema": {
@@ -2249,6 +2533,21 @@ fn mcp_tool_definitions() -> serde_json::Value {
                     "config_json": {"type": "string", "description": "JSON config: {\"top_n\":10,\"min_relevance\":0.3,\"max_nodes\":50}"}
                 },
                 "required": ["html", "goal"]
+            }
+        },
+        {
+            "name": "render_with_js",
+            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via Boa sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "js_code": {"type": "string", "description": "JavaScript code to evaluate against the DOM"},
+                    "base_url": {"type": "string", "description": "Base URL for resolving relative paths"},
+                    "width": {"type": "integer", "description": "Viewport width (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height (default: 800)", "default": 800}
+                },
+                "required": ["html", "js_code", "base_url", "width", "height"]
             }
         }
     ])
@@ -2711,6 +3010,25 @@ async fn mcp_dispatch_tool(
             let html = args["html"].as_str().unwrap_or("");
             text_ok(aether_agent::detect_xhr_urls(html))
         }
+        "tiered_screenshot" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+            let fast_render = args["fast_render"].as_bool().unwrap_or(true);
+            let xhr_json = args["xhr_captures_json"].as_str().unwrap_or("[]");
+            text_ok(aether_agent::tiered_screenshot(
+                html,
+                url,
+                goal,
+                width,
+                height,
+                fast_render,
+                xhr_json,
+            ))
+        }
+        "tier_stats" => text_ok(aether_agent::tier_stats()),
         "search" => {
             let query = args["query"].as_str().unwrap_or("");
             let url = aether_agent::build_search_url(query);
@@ -2889,6 +3207,16 @@ async fn mcp_dispatch_tool(
                 directives_json,
             );
             text_ok(result)
+        }
+        "render_with_js" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let js_code = args["js_code"].as_str().unwrap_or("");
+            let base_url = args["base_url"].as_str().unwrap_or("");
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(800) as u32;
+            text_ok(aether_agent::render_with_js(
+                html, js_code, base_url, width, height,
+            ))
         }
         _ => Err(format!("Unknown tool: {name}")),
     }
@@ -3513,6 +3841,8 @@ fn build_router(state: AppState) -> Router {
         // Fas 7: HTTP Fetch
         .route("/api/fetch", post(fetch_raw))
         .route("/api/fetch/parse", post(fetch_parse))
+        .route("/api/fetch/markdown", post(fetch_markdown))
+        .route("/api/markdown", post(parse_markdown))
         .route("/api/fetch/click", post(fetch_click))
         .route("/api/fetch/extract", post(fetch_extract))
         .route("/api/fetch/plan", post(fetch_plan))
@@ -3589,6 +3919,38 @@ fn build_router(state: AppState) -> Router {
         // Fas 12: TieredBackend
         .route("/api/tiered-screenshot", post(tiered_screenshot_handler))
         .route("/api/tier-stats", get(tier_stats_handler))
+        // Boa+Blitz: render med JS
+        .route("/api/render-with-js", {
+            #[cfg(all(feature = "js-eval", feature = "blitz"))]
+            {
+                post(render_with_js_handler)
+            }
+            #[cfg(not(all(feature = "js-eval", feature = "blitz")))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"js-eval + blitz features inte aktiverade"}"#,
+                    )
+                })
+            }
+        })
+        // Fetch + CSS inline + full Blitz render (med bilder)
+        .route("/api/fetch/render", {
+            #[cfg(all(feature = "fetch", feature = "blitz"))]
+            {
+                post(fetch_render_handler)
+            }
+            #[cfg(not(all(feature = "fetch", feature = "blitz")))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"fetch + blitz features inte aktiverade"}"#,
+                    )
+                })
+            }
+        })
         // Fas 13: Session Management
         .route("/api/session/create", post(session_create))
         .route("/api/session/cookies/add", post(session_add_cookies))
@@ -3795,6 +4157,8 @@ async fn main() {
     println!("  POST /api/execute-plan    – Execute plan against page state");
     println!("  POST /api/fetch           – Fetch URL → HTML + metadata");
     println!("  POST /api/fetch/parse     – Fetch URL → semantic tree");
+    println!("  POST /api/fetch/markdown  – Fetch URL → Markdown");
+    println!("  POST /api/markdown        – HTML → Markdown");
     println!("  POST /api/fetch/click     – Fetch URL → find element");
     println!("  POST /api/fetch/extract   – Fetch URL → extract data");
     println!("  POST /api/fetch/plan      – Fetch URL → compile + execute plan");

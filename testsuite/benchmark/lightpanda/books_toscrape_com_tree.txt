@@ -1,0 +1,272 @@
+1 RootWebArea 'All products | Books to Scrape - Sandbox'
+ 3
+  8 link 'Books to Scrape'
+  10 'We love being scraped!'
+  15 link 'Home'
+  17 'All products'
+  19 complementary
+   24 link 'Books'
+   27 link 'Travel'
+   29 link 'Mystery'
+   31 link 'Historical Fiction'
+   33 link 'Sequential Art'
+   35 link 'Classics'
+   37 link 'Philosophy'
+   39 link 'Romance'
+   41 link 'Womens Fiction'
+   43 link 'Fiction'
+   45 link 'Childrens'
+   47 link 'Religion'
+   49 link 'Nonfiction'
+   51 link 'Music'
+   53 link 'Default'
+   55 link 'Science Fiction'
+   57 link 'Sports and Games'
+   59 link 'Add a comment'
+   61 link 'Fantasy'
+   63 link 'New Adult'
+   65 link 'Young Adult'
+   67 link 'Science'
+   69 link 'Poetry'
+   71 link 'Paranormal'
+   73 link 'Art'
+   75 link 'Psychology'
+   77 link 'Autobiography'
+   79 link 'Parenting'
+   81 link 'Adult Fiction'
+   83 link 'Humor'
+   85 link 'Horror'
+   87 link 'History'
+   89 link 'Food and Drink'
+   91 link 'Christian Fiction'
+   93 link 'Business'
+   95 link 'Biography'
+   97 link 'Thriller'
+   99 link 'Contemporary'
+   101 link 'Spirituality'
+   103 link 'Academic'
+   105 link 'Self Help'
+   107 link 'Historical'
+   109 link 'Christian'
+   111 link 'Suspense'
+   113 link 'Short Stories'
+   115 link 'Novels'
+   117 link 'Health'
+   119 link 'Politics'
+   121 link 'Cultural'
+   123 link 'Erotica'
+   125 link 'Crime'
+  128 heading 'All products'
+  131 form
+   133 strong '1000'
+   135 'results - showing'
+   136 strong '1'
+   138 'to'
+   139 strong '20'
+   141 '.'
+  143 alert
+   144 strong 'Warning!'
+   146 'This is a demo website for web scraping purposes. Prices and ratings here were randomly assigned and have no real meaning.'
+  150 article
+   152 link 'A Light in the Attic'
+   153 paragraph
+   159 heading 'A Light in the ...'
+   161 paragraph
+    162 '£51.77'
+   163 paragraph
+    165 'In stock'
+   166 form
+    167 button 'Add to basket'
+  169 article
+   171 link 'Tipping the Velvet'
+   172 paragraph
+   178 heading 'Tipping the Velvet'
+   180 paragraph
+    181 '£53.74'
+   182 paragraph
+    184 'In stock'
+   185 form
+    186 button 'Add to basket'
+  188 article
+   190 link 'Soumission'
+   191 paragraph
+   197 heading 'Soumission'
+   199 paragraph
+    200 '£50.10'
+   201 paragraph
+    203 'In stock'
+   204 form
+    205 button 'Add to basket'
+  207 article
+   209 link 'Sharp Objects'
+   210 paragraph
+   216 heading 'Sharp Objects'
+   218 paragraph
+    219 '£47.82'
+   220 paragraph
+    222 'In stock'
+   223 form
+    224 button 'Add to basket'
+  226 article
+   228 link 'Sapiens: A Brief History of Humankind'
+   229 paragraph
+   235 heading 'Sapiens: A Brief History ...'
+   237 paragraph
+    238 '£54.23'
+   239 paragraph
+    241 'In stock'
+   242 form
+    243 button 'Add to basket'
+  245 article
+   247 link 'The Requiem Red'
+   248 paragraph
+   254 heading 'The Requiem Red'
+   256 paragraph
+    257 '£22.65'
+   258 paragraph
+    260 'In stock'
+   261 form
+    262 button 'Add to basket'
+  264 article
+   266 link 'The Dirty Little Secrets of Getting Your Dream Job'
+   267 paragraph
+   273 heading 'The Dirty Little Secrets ...'
+   275 paragraph
+    276 '£33.34'
+   277 paragraph
+    279 'In stock'
+   280 form
+    281 button 'Add to basket'
+  283 article
+   285 link 'The Coming Woman: A Novel Based on the Life of the Infamous Feminist, Victoria Woodhull'
+   286 paragraph
+   292 heading 'The Coming Woman: A ...'
+   294 paragraph
+    295 '£17.93'
+   296 paragraph
+    298 'In stock'
+   299 form
+    300 button 'Add to basket'
+  302 article
+   304 link 'The Boys in the Boat: Nine Americans and Their Epic Quest for Gold at the 1936 Berlin Olympics'
+   305 paragraph
+   311 heading 'The Boys in the ...'
+   313 paragraph
+    314 '£22.60'
+   315 paragraph
+    317 'In stock'
+   318 form
+    319 button 'Add to basket'
+  321 article
+   323 link 'The Black Maria'
+   324 paragraph
+   330 heading 'The Black Maria'
+   332 paragraph
+    333 '£52.15'
+   334 paragraph
+    336 'In stock'
+   337 form
+    338 button 'Add to basket'
+  340 article
+   342 link 'Starving Hearts (Triangular Trade Trilogy, #1)'
+   343 paragraph
+   349 heading 'Starving Hearts (Triangular Trade ...'
+   351 paragraph
+    352 '£13.99'
+   353 paragraph
+    355 'In stock'
+   356 form
+    357 button 'Add to basket'
+  359 article
+   361 link 'Shakespeare's Sonnets'
+   362 paragraph
+   368 heading 'Shakespeare's Sonnets'
+   370 paragraph
+    371 '£20.66'
+   372 paragraph
+    374 'In stock'
+   375 form
+    376 button 'Add to basket'
+  378 article
+   380 link 'Set Me Free'
+   381 paragraph
+   387 heading 'Set Me Free'
+   389 paragraph
+    390 '£17.46'
+   391 paragraph
+    393 'In stock'
+   394 form
+    395 button 'Add to basket'
+  397 article
+   399 link 'Scott Pilgrim's Precious Little Life (Scott Pilgrim #1)'
+   400 paragraph
+   406 heading 'Scott Pilgrim's Precious Little ...'
+   408 paragraph
+    409 '£52.29'
+   410 paragraph
+    412 'In stock'
+   413 form
+    414 button 'Add to basket'
+  416 article
+   418 link 'Rip it Up and Start Again'
+   419 paragraph
+   425 heading 'Rip it Up and ...'
+   427 paragraph
+    428 '£35.02'
+   429 paragraph
+    431 'In stock'
+   432 form
+    433 button 'Add to basket'
+  435 article
+   437 link 'Our Band Could Be Your Life: Scenes from the American Indie Underground, 1981-1991'
+   438 paragraph
+   444 heading 'Our Band Could Be ...'
+   446 paragraph
+    447 '£57.25'
+   448 paragraph
+    450 'In stock'
+   451 form
+    452 button 'Add to basket'
+  454 article
+   456 link 'Olio'
+   457 paragraph
+   463 heading 'Olio'
+   465 paragraph
+    466 '£23.88'
+   467 paragraph
+    469 'In stock'
+   470 form
+    471 button 'Add to basket'
+  473 article
+   475 link 'Mesaerion: The Best Science Fiction Stories 1800-1849'
+   476 paragraph
+   482 heading 'Mesaerion: The Best Science ...'
+   484 paragraph
+    485 '£37.59'
+   486 paragraph
+    488 'In stock'
+   489 form
+    490 button 'Add to basket'
+  492 article
+   494 link 'Libertarianism for Beginners'
+   495 paragraph
+   501 heading 'Libertarianism for Beginners'
+   503 paragraph
+    504 '£51.33'
+   505 paragraph
+    507 'In stock'
+   508 form
+    509 button 'Add to basket'
+  511 article
+   513 link 'It's Only the Himalayas'
+   514 paragraph
+   520 heading 'It's Only the Himalayas'
+   522 paragraph
+    523 '£45.17'
+   524 paragraph
+    526 'In stock'
+   527 form
+    528 button 'Add to basket'
+  532 'Page 1 of 50'
+  534 link 'next'
+  535 contentinfo

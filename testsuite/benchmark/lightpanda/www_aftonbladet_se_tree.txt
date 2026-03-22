@@ -1,0 +1,665 @@
+1 RootWebArea 'Aftonbladet'
+ 2
+  5 button
+   7 image
+  11 image 'Stäng annonsen'
+  14 image
+  16 image 'Stäng annonsen'
+  19 image
+  28 button 'Hoppa till innehåll'
+  29 link 'Till Aftonbladets startsida'
+  30 link 'Till Sportbladets startsida'
+  33 time 'söndag 22 mars 2026'
+  35 paragraph
+   36 'Dagens namn: Kennet, Kent'
+  38 link 'Köp Plus Plus'
+  41 button 'user-circle-filled Logga in'
+  42 button 'Logga in'
+  43 button 'user-alt-filled-2'
+  45 button 'Öppna kontoinformation'
+  46 button 'Öppna kontoinformation'
+  47 navigation 'Kontoinformation'
+   48 button 'Stäng kontoinformation'
+   51 '?'
+   59 'Mitt Aftonbladet'
+   60 link 'Följer'
+   61 link 'Sparade artiklar'
+   62 link 'Läshistorik'
+   63 link 'Nyhetsbrev'
+   67 'Plus'
+   68 link 'Översikt'
+   69 link 'Digitala magasin'
+   70 link 'Erbjudanden'
+   71 link 'Historiska arkivet'
+   72 link 'Hantera prenumeration'
+   73 link 'Kundsupport'
+   77 'Inställningar'
+   78 link 'Kontoinställningar'
+   80 button 'Ljust läge sun'
+   82 button 'Inställningar för cookies'
+   87 'Fortsätt som utloggad?'
+   89 button 'Nej'
+   90 button 'Ja'
+   92 button 'Logga ut'
+   96 'Plussa upp dig!'
+   98 'Plussa upp dig och få hela bilden på nyheter och sport!'
+   99 button 'Testa Plus'
+  102 navigation 'Huvudmeny'
+   103 link 'Gå till Start'
+   104 link 'Gå till Sport'
+   105 link 'Gå till Nöje'
+   106 link 'Gå till Hej'
+   107 link 'Gå till Plus'
+   108 link 'Gå till Tipsa'
+   109 link 'Gå till TV'
+   110 link 'Gå till Kultur'
+   111 link 'Gå till Ledare'
+  113 button 'Öppna meny'
+  114 link 'Sök'
+  117
+   118 button 'Expandera meny för Nyheter'
+   120 link 'Aftonbladet Direkt'
+   121 link 'Aftonbladet Klimat'
+   122 link 'Kolumnister'
+   123 link 'Min ekonomi'
+   124 link 'Svenska hjältar'
+   125 link 'TV'
+  126
+   127 button 'Expandera meny för Sport'
+   129 link 'F1-bloggen'
+   130 link 'Fotboll'
+   131 link 'Fotbollsresan'
+   132 link 'Hockey'
+   133 link 'Hockeyresan'
+   134 link 'Kampsport'
+   135 link 'Live-TV'
+   136 link 'Managerspel'
+   137 link 'Motorsport'
+   138 link 'NHL-bloggen'
+   139 link 'Podcasts'
+   140 link 'Silly Season'
+   141 link 'Speltips'
+   142 link 'Sportbladet Live'
+   143 link 'TV-guide'
+   144 link 'Trav'
+  145
+   146 button 'Expandera meny för Nöje'
+   148 link 'Film'
+   149 link 'Melodifestivalen'
+   150 link 'Musik'
+   151 link 'Rockbjörnen'
+   152 link 'Schlagerbloggen'
+   153 link 'Spela'
+   154 link 'Så gick det sen'
+   155 link 'Tv & serier'
+  156
+   157 button 'Expandera meny för Plus'
+   159 link 'Dagens E-tidning'
+   160 link 'Erbjudanden'
+   161 link 'Historiska arkivet'
+   162 link 'Magasin'
+   163 link 'Minispel'
+   164 link 'Nyhetsbrev'
+   165 link 'Plusartiklar'
+   166 link 'Podcasts'
+   167 link 'Quiz'
+   168 link 'Reseguider'
+   169 link 'Tester & guider'
+  170
+   171 button 'Expandera meny för Feature'
+   173 link 'Bil'
+   174 link 'Family'
+   175 link 'Hemma'
+   176 link 'Horoskop'
+   177 link 'Klart'
+   178 link 'Kungligt'
+   179 link 'Köket'
+   180 link 'Mode'
+   181 link 'Resa'
+   182 link 'Skönhet'
+   183 link 'Tv.nu'
+   184 link 'Wellobe'
+  185
+   186 button 'Expandera meny för Kultur & opinion  '
+   188 link 'Debatt'
+   189 link 'Kultur'
+   190 link 'Ledare'
+  191
+   192 link 'A-Ö'
+  196 button 'LOGGA IN'
+  197 button 'Ljust läge sun'
+  199 button 'Inställningar för cookies'
+  200 link 'Tipsa Aftonbladet'
+  201 link 'Om Aftonbladet'
+  202 link 'Kontakta redaktionen'
+  203 link 'Kundsupport'
+  205 'Mer från Schibsted'
+  206 link 'Omni'
+  207 link 'Omni Ekonomi'
+  208 link 'Podme'
+  209 link 'Svd Näringsliv'
+  210 link 'Svenska Dagbladet'
+  211 link 'TV4 Play'
+  212 link 'KÖP PLUS! abplus-medium'
+  219 'Aftonbladet är en del av Schibsted Media.'
+  220 'Schibsted News Media AB är ansvarig för dina data på denna webbplats.'
+  221 link 'Läs mer'
+  233 article
+   234 link 'JUST NU: Svensk i mätkaos Jätteblunder i VM-finalen ✓ Dubbla fel'
+  241 article
+   242 link 'Hittad skjuten vid parkering – ung man död Man i 20-årsåldern träffad ✓ ”Flera skott”'
+  246 article
+   247 link '0:27 ”Flera skott hördes i området” Poliser kvar på platsen'
+  249 image
+  252 'MAGNUS SANDBERG & LINNEA BLOMBERG'
+  253 paragraph
+   255 'PÅ PLATS I ÖREBRO'
+  264 article
+   265 link 'Nancy, 59, om USA:s attack: ”Älskade det” I ”Tehrangeles” älskar många Trump: ”MIGA”'
+  269 article
+   270 link 'JUST NU: Irans uppmaning Behöver ”garantier” för att avsluta kriget'
+  274 article
+   275 link 'Hus kollapsade av jättebomben Kom förbi Iron Dome'
+  278 article
+   279 link 'Pluss-ikon Donald Trumps ”frestande” mål före fredssamtal Minst tre veckor kvar'
+  280
+   283 article
+    284 link 'Pluss-ikon ”Vi får en drömsemi – och sedan superfinal” Tippar hela slutspelet i SHL ✓ Varnar: ”Två klubbar kan röra om rejält” ✓ Synar alla lag'
+  285
+   291 article
+    292 link 'Khaddis tårar efter finalen ”Tror inte människor förstår”'
+   296 article
+    297 link 'VM-krattastrofen: ”Väldigt besviken” Arrangörsmiss i finalen'
+  304
+   307 article
+    308 link 'Pluss-ikon Det är bästa surfplattan för pengarna: ”Kvalitet” TEST: Experten imponerad'
+  309
+   312 article
+    313 link 'Pluss-ikon Så lever Linda, 37, i sin husbil – året runt ”Grannarna” hon irriterar sig på'
+  320
+   323 article
+    324 link '0:43 Otäcka ”vattnet” forsar ner i skolan ”Det där är 90 procent skit”'
+  325
+   328 'Artikeln innehåller annonslänkar'
+   330 article
+    331 link 'Superfina kjolar som passar vardag och fest SHOPPING Vi listar vårens tjusiga modeller'
+  332
+  337
+   340 article
+    341 link '”Fan, det ska inte lukta så här” Borg ångrar ingreppet ✓ Komplikationerna'
+  342
+   345 article
+    346 link 'Pluss-ikon Då granskas du extra noga av Skatteverket 7 områden pekas ut ✓ ”Helt ny ruta i år”'
+  347
+   350 article
+    351 link 'Säger vad som helst till vem som helst IRENA POŽAR Intet nytt i ”Manosfären”'
+  352
+   355 article
+    356 link '’Usch’ eller ’Äsch’ – räkans rumpa lyckas dela folket GODARE Mästerkocksvinnaren: ”Gör inget”'
+  360
+   363 heading 'Klippen du inte får missa'
+   365
+    366 link 'Folkmassan fyller Prag – upp till 200 000 i protest Folkmassan fyller Prag – upp till 200 000 i protest'
+    367 link 'Ung man död i Örebro – Aftonbladet på plats Ung man död i Örebro – Aftonbladet på plats'
+    368 link 'Bajsvatten sprutar från skolans tak: ”Helvete!” Bajsvatten sprutar från skolans tak: ”Helvete!”'
+    369 link 'Nancy, 59, om Trumps bombningar: ”Älskade det” Nancy, 59, om Trumps bombningar: ”Älskade det”'
+    370 link 'Man död efter skjutning i Örebro Man död efter skjutning i Örebro'
+    371 link 'Cassandra, 22, mötte serieblottaren – och filmade honom Cassandra, 22, mötte serieblottaren – och filmade honom'
+    372 link 'Stora översvämningar på Hawaii – värsta på 20 år Stora översvämningar på Hawaii – värsta på 20 år'
+    373 link 'Minst 100 skadade efter robotattacker i Israel Minst 100 skadade efter robotattacker i Israel'
+    374 link 'Khaddi Sagnia: ”Känner mig så ung och fräsch” Khaddi Sagnia: ”Känner mig så ung och fräsch”'
+    375 link 'Mondo: ”Behöver en Guinness” Mondo: ”Behöver en Guinness”'
+    376 link 'Här får ungdomar spela fotboll på natten Här får ungdomar spela fotboll på natten'
+    377 link 'Känslosam Frondell: ”Tårögt i omklädningsrummet” Känslosam Frondell: ”Tårögt i omklädningsrummet”'
+    378 link 'Krüger om säsongen: ”Tuffast i karriären” Krüger om säsongen: ”Tuffast i karriären”'
+    379 link 'Nya bilder: Så blir Minecraftparken Nya bilder: Så blir Minecraftparken'
+    380 link 'Serverar alkohol till frukost – är först i Sverige Serverar alkohol till frukost – är först i Sverige'
+    381 link 'Se förödelsen efter jordskredet på Hisingen Se förödelsen efter jordskredet på Hisingen'
+    382 link 'Sonen var död i 29 minuter – vård dygnet runt Sonen var död i 29 minuter – vård dygnet runt'
+    383 link 'Här grips världsstjärnan för rattfylla Här grips världsstjärnan för rattfylla'
+    384 link 'Här kör Kim Jong Uns dotter stridsvagn Här kör Kim Jong Uns dotter stridsvagn'
+    385 link '\"Bedrövligt\" – Gotlänningarna om vattenbristen \"Bedrövligt\" – Gotlänningarna om vattenbristen'
+    386 link 'Trump: \"Ingen vapenvila – vi krossar dem\" Trump: \"Ingen vapenvila – vi krossar dem\'
+    387 link 'Chuck Norris är död – blev 86 år Chuck Norris är död – blev 86 år'
+    388 link 'Vildsvinsproblem på kyrkogårdar – förstör gravplatser Vildsvinsproblem på kyrkogårdar – förstör gravplatser'
+    389 link 'Molly Sandén inför sitt livs största konsert. Molly Sandén inför sitt livs största konsert.'
+    390 link 'Mondo och Desiré har gift sig Mondo och Desiré har gift sig'
+    391 link 'Eid Mubarak - nu blir det fest Eid Mubarak - nu blir det fest'
+    392 link 'LIB-Niklas: \"Har sagt kärring på skoj\" LIB-Niklas: \"Har sagt kärring på skoj\'
+    393 link 'Kritiken: \"Kommer aldrig förlåta\" Kritiken: \"Kommer aldrig förlåta\'
+    394 link 'Lars Leijonborg: ”SD har ändrat sig” Lars Leijonborg: ”SD har ändrat sig”'
+    395 link 'Norrmännen om kungahuset: ”Pinsamt” Norrmännen om kungahuset: ”Pinsamt”'
+    396 link 'Veckans snackisar: Jonna Lundell ryter ifrån Veckans snackisar: Jonna Lundell ryter ifrån'
+    397 link 'Vill öppna knutbyfallet: ”Missvisande” Vill öppna knutbyfallet: ”Missvisande”'
+    398 link 'Se kungaparets dans – och puss Se kungaparets dans – och puss'
+    399 link 'Känsliga skämtet – från Trump Känsliga skämtet – från Trump'
+    400 link 'Jägaren filmar själv misstänkta jaktbrottet Jägaren filmar själv misstänkta jaktbrottet'
+    401 link 'Bonusprinsen får sin dom i juni Bonusprinsen får sin dom i juni'
+    402 link 'Pål Jonssons svar på danska uppgifterna Pål Jonssons svar på danska uppgifterna'
+    403 link 'Barn dog i brand – mamman häktad Barn dog i brand – mamman häktad'
+    404 link 'Polis död i skottlossning i Thailand Polis död i skottlossning i Thailand'
+    405 link '”Liberalerna har sjabblat bort sin chans” ”Liberalerna har sjabblat bort sin chans”'
+    406 link 'Tre nya deltagare i \"Förrädarna\" avslöjas Tre nya deltagare i \"Förrädarna\" avslöjas'
+    407 link 'Därför ser vi inte fler bilder från Iran Därför ser vi inte fler bilder från Iran'
+    408 link 'Så påverkar räntebeskedet semesterkassan Så påverkar räntebeskedet semesterkassan'
+    409 link 'Styrräntan oförändrad – öppnar för höjning Styrräntan oförändrad – öppnar för höjning'
+    410 link 'Riktar pistol – sedan brottas han ner Riktar pistol – sedan brottas han ner'
+    411 link 'Barerna i Kent efter smittan: \"Inget pussande\" Barerna i Kent efter smittan: \"Inget pussande\'
+    412 link 'Crimson Desert recension: \"Är världsklass\" Crimson Desert recension: \"Är världsklass\'
+    413 link 'Israelisk robot slår ner vid bussen Israelisk robot slår ner vid bussen'
+    414 link 'Fler röster från Kent: \"Svårt att fatta\" Fler röster från Kent: \"Svårt att fatta\'
+    415 link '\"Spökstad\" – Aftonbladet på plats i Kent \"Spökstad\" – Aftonbladet på plats i Kent'
+   416 button
+   417 button
+  418
+   424 article
+    425 link 'Mohamssons ljusglimt efter Åkessonkramen Ny mätning: Hon tar över sistaplatsen'
+   429 article
+    430 link 'Sågas: ”Skjuter ner sig själva” PODD Hårda kritiken efter uppgörelsen'
+   433 article
+    434 link 'Pluss-ikon Interna kritiken: ”Hur kunde du?” Hemlig inspelning från Liberalernas möte'
+  435
+   441 article
+    442 link 'Ledare Jimmiepriser tar dina pengar till semestern ANDERS LINDBERG Har ägnat 4 år till att blåsa de som trodde honom'
+   446 article
+    447 link 'Ledare Vilgot: a–kassan SERIE Robert Nyberg om Rusta AB'
+  448
+   452 article
+    453 link 'Åkte taxi – med mammans huvud PODD Chauffören märkte att påsen luktade'
+  454
+   457 article
+    458 link 'Galet firande – efter 18:e-plats Duschades i champagne'
+  459
+   465 article
+    466 link 'Letar spår i högtiden: ”Är otroligt konstigt” Inga bevis'
+   469 article
+    470 link 'Pluss-ikon Saddam-taktiken sågas: ”Nej tack” Experten reder ut'
+  474
+   477 article
+    478 link 'Pluss-ikon En av de mest menlösa klänningarna jag har sett ELMEGÅRD Bäst & sämst klädda på Golden Globe'
+  480 'Hej aftonbladet'
+  481
+   487 article
+    488 link '34:23 Netflix regler satte stopp för outfits Kläderna de inte fick ha på sig'
+   492 article
+    493 link 'Pluss-ikon ”Love is blind”-paren som har gift sig – eller gått isär SPOILER! Så gick det efter Netflix-serien'
+  494
+   497 article
+    498 link 'Debatt En bråkig subkultur som strävar efter oberoende En bred folkrörelse som misstänkliggörs'
+  499
+   505 article
+    506 link 'Backar Nilsson: ”Rimligt ibland” Ministern biter ifrån: ”Egoism”'
+   507 contentinfo
+    508 '[object Object]'
+     509 'widget'
+   513 article
+    514 link 'Pluss-ikon ”Klart jag räddar mina hundar först” Före en treåring ✓ Kritiken mot influencern'
+  518
+   521 article
+    522 link 'Vilken smörgåstårta är äkta – ser du skillnad? GODARE Detaljerna som avslöjar fejkmaten'
+  524 'Redaktionens val'
+  525
+   528 article
+    529 link 'Pluss-ikon Lågprissylten skräller – får toppbetyg: ”Alla rätt” TEST Lingonsylt ✓ 6 (!) av 16 sågas'
+  530
+   533 article
+    534 link 'Debatt Fler lösningar – inte förenklade etiketter Replik om kostnaderna i svensk djursjukvård'
+  539
+   542 article
+    543 link 'Turister kommer och vandaliserar Paret som satsar'
+   544 contentinfo
+    546 image
+    549 'ANNA SJÖGREN & MAGNUS SANDBERG'
+    550 paragraph
+     552 'PÅ PLATS I STÄLLDALEN'
+  555 'Svd näringsliv'
+  556
+   561 'VÄDER:'
+   562 paragraph
+    563 'Stockholm'
+   564 button 'klart.se'
+   567 region 'Weather forecast'
+    571 '12:00'
+    573 image '12 grader'
+    575 '12'
+    576 '°'
+    580 '13:00'
+    582 image '12 grader'
+    584 '12'
+    585 '°'
+    589 '14:00'
+    591 image '11 grader'
+    593 '11'
+    594 '°'
+    598 '15:00'
+    600 image '11 grader'
+    602 '11'
+    603 '°'
+    607 '16:00'
+    609 image '9 grader'
+    611 '9'
+    612 '°'
+    616 '17:00'
+    618 image '8 grader'
+    620 '8'
+    621 '°'
+    625 '18:00'
+    627 image '7 grader'
+    629 '7'
+    630 '°'
+    634 '19:00'
+    636 image '6 grader'
+    638 '6'
+    639 '°'
+    642 paragraph
+     643 'Hela prognosen:'
+    644 button 'TILL KLART'
+  651
+   655 article
+    656 link 'Misstänkt mord – en anhållen En anhållen ✓ Insats vid bostad'
+  660
+   663 'Artikeln innehåller annonslänkar'
+   665 article
+    666 link 'Unna dig en minisemester – 12 populära hotellpaket SHOPPING Njut av spa, god mat och sovmorgon ✓ Från lantlig relax till cityliv'
+  667
+   670 article
+    671 link 'Pluss-ikon NY LISTA: Populäraste namnen – där du bor Sök själv kommun för kommun'
+  672
+   675 article
+    676 link 'Ilskan: Fick min dotter att gråta ”Hon förtjänar inte er kärlek”'
+  677
+   680 'Artikeln innehåller annonslänkar'
+   682 article
+    683 link 'Vårens superheta trend: Krispigt babyblått mode SHOPPING Karin Wittur tipsar om snygga ljusblå plagg'
+  687
+   693 article
+    694 link 'Kultur ”Jag har känslan att det här är det sista jag gör” INTERVJU Lukas Moodysson om nya boken ”Rebellerna”'
+   698 article
+    699 link 'Kultur Konst för bokälskare – men inget går att läsa KARL KATZ LYDÉN Snart fullbordas Marja-Leena Sillanpääs bibliotek'
+  700
+   703 article
+    704 link 'Pluss-ikon NK:s beslut efter tonåringens köp Dras till lyxvaruhuset ✓  ”Vill inte prata om det”'
+  705
+   708 article
+    709 link 'Fem svenska män i barnporrhärvan Noa: ”Alla vet inte om det än”'
+  710
+   713 article
+    714 link 'Fixar nattfotboll för unga – med en exnazist Sara: Behöver visa ungdomarna'
+  718
+   721 article
+    722 link 'Amatörens saga: ”Det är helt sjukt” Från oduglig – till stjärna ✓ Vann på V85'
+  723
+   726 article
+    727 link 'Debatt Ren lögn – du har inte stoppat utvisningarna Haddou (V): En röst från ditt parti hade räckt'
+  728
+   731 article
+    732 link 'Pluss-ikon Fick mystiskt paket från Epstein LISTA: Kungligheterna i dokumenten'
+  733
+   736 article
+    737 link '1:00:05 Kultur ”Det är en skam att jag inte blir årets skåning” CAFÉ BAMBINO Nicki Minaj-apologist & Ulf Kristerssons podd'
+  744
+   747 'Artikeln innehåller annonslänkar'
+   749 article
+    750 link 'Utemöblerna som gör dig redo för vårsolen SHOPPING Karin listar årets härligaste möbler för balkong och trädgård'
+  751
+   754 article
+    755 link 'Får 100 000 kronor för att flytta semestern Sjukvårdsdirektören: ”Vi är för få ”'
+  756
+   759 article
+    760 link 'Pluss-ikon ”Robinson”-Robban: Så har jag blivit förmögen Stor intervju ✓ Kärleken ✓ Punggroggen'
+  764
+   767 article
+    768 link '2:59 ”Jag svär väldigt mycket – satan!” Susanne, 60: ”Här är min tant-cave”'
+  769
+   772 article
+    773 link 'Varför sa hon inte bara som det var? JAN GUILLOU Sagan om L:s självmord'
+  774
+   780 article
+    781 link '4:27 Nya bilder: Så blir Minecraft-parken INTERVJU med teamen bakom satsningen'
+   785 article
+    786 link '”Det är block åt alla håll du kollar” Teamet avslöjar'
+  787
+   790 article
+    791 link 'Pluss-ikon Därför blev kändisparet särbor – efter 32 år ihop ”Lever våra egna liv fast bredvid varandra”'
+  795
+   801 article
+    802 link 'Gården ligger utspridd efter massiva skredet Häst saknas ✓ Stora avspärrningar'
+   806 article
+    807 link '0:42 Se förödelsen 4 000 kvadratmeter rasade'
+   811 article
+    812 link 'Pluss-ikon Larmet: Då kan ditt hus bli omöjligt att försäkra Kommunerna som sticker ut ✓ LISTA'
+  813
+   816 article
+    817 link '”Det finns en plan med allt” Därför har rekordvärvningen bänkats'
+  818
+   821 article
+    822 link 'Pluss-ikon Tio EU-alternativ till de amerikanska it-jättarna Ersätter Google, Instagram och Whatsapp'
+  823
+   826 article
+    827 link 'GUIDE: Kom i toppform med oss – utan att träna WELLOBE Dietisten och motivationsexperten guidar dig i 9 veckor ✓ Kosten ✓ Det mentala'
+   828 contentinfo
+    829 link 'GÅ MED I DAG: Nå din målvikt snabbt och enkelt'
+  833
+   836 article
+    837 link '2:31 Hör dagens viktigaste nyheter – på 2 minuter LYSSNA PÅ UPDATE HÄR'
+  838
+   841 'Artikeln innehåller annonslänkar'
+   843 article
+    844 link 'Snygga mockajackor – vårens trendplagg SHOPPING Ida listar klädkedjornas urval av både äkta och fuskig mocka'
+  845
+   848 article
+    849 link 'Pluss-ikon Så lever ”USA:s mest inavlade familj” i dag Gömdes undan – fick en miljon'
+  850
+   853 article
+    854 link 'Förvånade över uppståndelsen Premiär för alkohol på morgonen'
+   855 contentinfo
+    856 '[object Object]'
+     857 'widget'
+  861
+   867 article
+    868 link 'Oväntad attack mot avlägsen ö Uppgifter: Missiler mot känslig bas'
+   872 article
+    873 link 'Vittnar om total skräck ombord Attackerades i sundet'
+  874
+   877 article
+    878 link 'Pluss-ikon Rättsläkaren: Epstein dog inte av hängning Flyttades i smyg ✓ Orangefärgad skepnad'
+  879
+   882 article
+    883 link 'Dagens horoskop Astrologen: ”Vad säger stjärnorna om dig?”'
+  884
+   887 article
+    888 link 'Pluss-ikon Kliar sig i handen och tittar åt sidan Experten om kroppsspråket'
+  889
+   895 article
+    896 link 'Tre frågor klipptes bort från intervjun Spelet bakom ✓ Hovets krav'
+   900 article
+    901 link 'Pluss-ikon Hela intervjun – ord för ord'
+  908
+   911 article
+    912 link '”Tyckte jag var dum i huvudet” Misstanken bekräftad – 32 år senare'
+  913
+   916 article
+    917 link 'Kändisdottern släpper musik – med svensk låt Samplar 00-talsfenomenet'
+  921
+   924 article
+    925 link 'Pluss-ikon Den misstänkta tidigare dömd Kidnappade ung flicka – lyckades fly'
+  926
+   929 article
+    930 link 'Mondos kritik: ”Gillar inte det” Påverkad av rivalens plan: ”Fungerade”'
+  931
+   934 article
+    935 link 'Hänför fansen igen: ”Otroligt” I samma form som 2017 – hyllas'
+  936
+   939 article
+    940 link 'Dumpades – efter en och en halv dag ”Ångrar inte beslutet” ✓ Relationen i dag'
+  944
+   947 article
+    948 link 'Spelet bakom avtalet: Fick 8 minuter på sig Nyinköpt klocka från Clas Ohlson, enligt SvD'
+  949
+   952 article
+    953 link 'Stoppades av pappa: ”Sluta” Ordern efter guldet – inget rekord'
+  954
+   957 article
+    958 link 'Kommer tillbaka – kan krypa söderut Experten: Då har du chansen'
+  959
+   962 article
+    963 link 'Pluss-ikon Putin kräver skydd efter bombskräck Jagat villebråd ✓ ”Hot inifrån och utifrån”'
+  967
+   970 article
+    971 link 'Avslöjar gåtan i SVT-succén PODD ”Har undrat”'
+  972
+   975 article
+    976 link 'Hon hittade det farliga i renbajs Kan ha blåst in från Ryssland'
+  977
+   980 article
+    981 link 'Rövrepliken till Maja: ”Är liten” ”Spanade in” ✓ Svensk trippel'
+  982
+   985 article
+    986 link 'Pluss-ikon Misstänker kuslig plan: Döda dottern för makten Utpekade efterträdaren ✓ Hotet från kvinnan'
+  990
+   993 article
+    994 link 'Mueller är död Trump jublar: ”Bra, jag är glad”'
+  995
+   998 article
+    999 link 'Dubbelmördare gripna: ”Vidrigt” Grannens skräck på Karmøy'
+  1000
+   1003 article
+    1004 link 'Pluss-ikon Därför ska du sälja din XC60 – och köpa denna ”Kan knocka tyskarna”'
+  1005
+   1008 article
+    1009 link 'Tårögt slut (?): ”Det är oklart” Ser ut att lämna: ”Jag får se, ni också”'
+  1013
+   1016 article
+    1017 link 'Räddade straff – i landslagsdebuten Storebror Roganovic fick chansen'
+  1018
+   1021 article
+    1022 link 'Skräckkrasch – föll flera meter Flög över vägräcke ✓ Till sjukhus'
+  1023
+   1026 article
+    1027 link 'Pluss-ikon Märta, 20, våldtogs av taxichaufför: ”Panik” Agerade direkt – bevisen som fick mannen fälld'
+  1028
+   1031 article
+    1032 link 'Säsongen över: Käkade upp oss Avgjort – utan domarmisstag'
+  1033
+   1036 article
+    1037 link 'Stjärnan om Norris: ”Väldigt sympatisk” Dolph efter dödsfallet ✓ Jobbade ihop'
+  1041
+   1044 article
+    1045 link 'Profilens bebislycka: ”Vårt mirakel är här” Fått en dotter ✓ ”Akut kejsarsnitt”'
+  1046
+   1049 article
+    1050 link 'Stjärnans sorg: ”Såg dig, Nicky” Buffystjärnans ord om döde kollegan'
+  1051
+   1054 article
+    1055 link 'Influencer hade knark i hemmet – får fängelse Narkotikabrott och häleri ✓ Kvinnan förnekar'
+  1056
+   1059 article
+    1060 link '”Min terapi – hade inte klarat av det” Pappa Fredrik ensam i bilen – i 300 timmar'
+   1061 contentinfo
+    1063 image
+    1066 'PONTUS ORRE OCH MARCUS LEIFBY'
+    1067 paragraph
+     1069 'PÅ PLATS I RÄTTVIK OCH LJUNGBY'
+  1070
+   1073 article
+    1074 link 'CHATT: Hur njuter du av passa på-vädret? Skicka in din bild på vårtecknen'
+  1078
+   1081 article
+    1082 link 'Svenskt rekord – på 225 (!) meter Nya succén ✓ Klipp!'
+  1083
+   1086 article
+    1087 link '0:57 Försöker att gå rakt inför polisen Stjärnan greps för rattfylla'
+  1088
+   1091 article
+    1092 link 'Succé för BTS: ”Vi är tillbaka” K-popbandets stora comeback'
+  1093
+   1096 article
+    1097 link '17-årige Mathias dog i sjukdomen Mamman: Utbrottet väcker minnen'
+  1101
+   1104 article
+    1105 link 'Pluss-ikon Ny pensionsålder börjar gälla – så påverkas du Årskull för årskull – då får du sluta jobba'
+   1106 contentinfo
+    1107 '[object Object]'
+     1108 'widget'
+  1109
+   1112 article
+    1113 link 'Blodiga bilder i Norge – sågas Experten kritisk: ”Det är skitsnack”'
+  1120
+  1121 complementary
+   1124 heading 'AFTONBLADET DIREKT'
+   1127 link 'Svensk dotter klassas som terroroffer i Brysseldåd, publicerad 11.36'
+   1129 link 'Färre fall av hjärnhinneinflammation, publicerad 10.39'
+   1131 link 'Uppgifter: Valet av Mohamsson sker med klubbslag, publicerad 10.20'
+   1133 link 'Misstänkt mord i Avesta, publicerad 09.35'
+   1135 link 'Dubbelmordet i Karmøya: Hittades i olika bostäder, publicerad 09.05'
+   1137 link 'VISA FLER'
+   1143 article
+    1144 link 'Vet du mer? Har du ett nyhetstips? Hör av dig!'
+   1147 heading 'MEST LÄST'
+   1150 link 'Nyheter, Ung man död – skjuten till döds i Örebro, publicerad 00.14,'
+   1152 link 'Nyheter, Asal, 21, flydde Iran – hyllar Trump: ”Maktspel – men bättre än inget”, publicerad 08.30,'
+   1154 link 'Nyheter, Liverapport: Irankriget, publicerad 28 februari,'
+   1156 link 'Nyheter, Över 100 skadade efter attacker i Israel, publicerad i går,'
+   1158 link 'Nyheter, Simona Mohamssons ljusglimt: Ökar i förtroendemätning, publicerad 06.30,'
+   1162 article
+    1163 image 'Aftonbladets e-tidning'
+    1166 'Dagens tidning'
+    1167 heading 'Söndag 22 mars'
+    1168 link 'Läs dagens tidning'
+    1170 'Ingår i din PLUS-prenumeration och i din tidningsprenumeration'
+   1176 heading 'MEST LÄST SPORT'
+   1179 link 'Sportbladet, Stor förvirring i brittiskans debuthopp på VM, publicerad 10.50,'
+   1181 link 'Sportbladet, Avslöjar planen mot Mondo: ”Fungerade”, publicerad i går,'
+   1183 link 'Sportbladet, Forsberg: Han tyckte att jag var dum i huvudet, publicerad 00.03,'
+   1185 link 'Sportbladet, Mondo gick inte för världsrekord: ”Sa åt honom”, publicerad i går,'
+   1187 link 'Sportbladet, Svahns nya succé i Lake Placid, publicerad i går,'
+   1193 article
+    1194 link 'Missa inte succéspelet: Dagens ordsvans NYTT SPEL: Gratis ✓ Utmana dina vänner ✓ Hitta rätt ord snabbast'
+   1200 'ANNONS'
+   1203 heading 'CASINOGUIDEN'
+   1206 link 'Jämför casino: CASINOGUIDEN Svenska folkets casino guide – Jämför casino online'
+   1208 link 'Casinobonusar: BONUSAR Hitta bästa bonus som passar just för dig'
+   1210 link 'Free spins: CASINOGUIDEN Samla massvis av Free Spins – Se casinon här'
+   1212 link 'Casino: CASINOGUIDEN Spela direkt med e-Leg & snabba uttag'
+   1214 link 'Casinobonus: BETINIA Hämta din välkomstbonus och testa ett grymt spelutbud.'
+  1220
+  1221 contentinfo
+   1225 link 'Tjänstgörande redaktörer'
+   1227 'Tipsa oss: SMS 71000, Mejl'
+   1228 link 'tipsa@aftonbladet.se'
+   1229 link 'Kontakta kundtjänst'
+   1230 link 'Rapportera fel'
+   1231 separator
+   1233 button 'Inställningar för cookies'
+   1234 link 'Personuppgiftspolicy'
+   1235 link 'Cookiepolicy'
+   1236 separator
+   1238 link 'Om Aftonbladet'
+   1239 link 'Om Sportbladet'
+   1240 link 'Om Nöjesbladet'
+   1241 link 'Om Plus'
+   1242 link 'Om Kultur'
+   1243 link 'Om Ledare'
+   1244 link 'Om Debatt'
+   1245 separator
+   1248 term 'Chefredaktör, vd och ansvarig utgivare:'
+   1250 definition 'Lotta Folcker'
+   1253 term 'Stf ansvariga utgivare:'
+   1255 definition 'Karin Schmidt, Magnus Herbertsson, Martin Schori'
+   1258 term 'Redaktionschef:'
+   1260 definition 'Karin Schmidt'
+   1263 term 'Sportchef:'
+   1265 definition 'Magnus Herbertsson'
+   1268 term 'Politisk chefredaktör:'
+   1270 definition 'Anders Lindberg'
+   1273 term 'Nöjeschef:'
+   1275 definition 'Nathalie Mark'
+   1278 term 'Pluschef:'
+   1280 definition 'Helena Utter'
+   1283 term 'Kulturchef:'
+   1285 definition 'Karin Pettersson'
+   1288 term 'Debattredaktör:'
+   1290 definition 'Jim Jaber'
+    1291 link 'Jim Jaber'
+   1295 link 'Relief av Aftonbladets grundare Lars Johan Hierta'
+  1298

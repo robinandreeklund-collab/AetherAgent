@@ -1,14 +1,21 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
+mod arena_dom;
 mod causal;
 mod collab;
 mod compiler;
 mod diff;
+#[cfg(feature = "js-eval")]
+mod dom_bridge;
+mod escalation;
+#[cfg(feature = "js-eval")]
+mod event_loop;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
 mod grounding;
+mod hydration;
 mod intent;
 pub mod intercept;
 mod js_bridge;
@@ -55,17 +62,34 @@ pub fn register_cdp_ready_hook() {
 }
 
 use parser::parse_html;
-use semantic::{extract_title, SemanticBuilder};
+use semantic::SemanticBuilder;
 use types::{SemanticTree, WorkflowMemory};
 
 // ─── Intern hjälpfunktion ────────────────────────────────────────────────────
 
-/// Gemensam parse-pipeline: HTML -> DOM -> SemanticTree
+/// Gemensam parse-pipeline: HTML -> ArenaDom -> SemanticTree
+///
+/// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
+/// ~5-10x snabbare traversering och cache-friendly minnesallokering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    let dom = parse_html(html);
-    let title = extract_title(&dom);
+    let rcdom = parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    let title = arena.extract_title();
     let mut builder = SemanticBuilder::new(goal);
-    let mut tree = builder.build(&dom, url, &title);
+    let mut tree = builder.build_from_arena(&arena, url, &title);
+
+    // Tier 0: Hydration extraction — berika trädet med SSR-data om tillgängligt
+    if let Some(hydration_data) = hydration::extract_hydration_state(html) {
+        let hydration_result = hydration::hydration_to_nodes(&hydration_data, goal);
+        // Lägg till hydration-noder som saknar motsvarighet i DOM-trädet
+        let existing_count = tree.nodes.len() as u32;
+        for mut node in hydration_result.nodes {
+            node.id += existing_count; // Undvik id-konflikter
+            tree.nodes.push(node);
+        }
+        tree.injection_warnings.extend(hydration_result.warnings);
+    }
+
     tree.parse_time_ms = 0; // sätts av anroparen
     tree
 }
@@ -123,6 +147,161 @@ pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
     match serialize_json(&tree, tree.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Extract SSR hydration data without running JavaScript (Tier 0)
+///
+/// Returns JSON with framework name, extracted props, and semantic nodes.
+/// Returns `{"found": false}` if no hydration data is detected.
+#[wasm_bindgen]
+pub fn extract_hydration(html: &str, goal: &str) -> String {
+    let start = now_ms();
+
+    if let Some(data) = hydration::extract_hydration_state(html) {
+        let result = hydration::hydration_to_nodes(&data, goal);
+        let framework = format!("{:?}", result.data.framework);
+        let node_count = result.nodes.len();
+
+        #[derive(serde::Serialize)]
+        struct HydrationOutput {
+            found: bool,
+            framework: String,
+            nodes: Vec<types::SemanticNode>,
+            warnings: Vec<types::InjectionWarning>,
+            extract_time_ms: u64,
+        }
+
+        let output = HydrationOutput {
+            found: true,
+            framework,
+            nodes: result.nodes,
+            warnings: result.warnings,
+            extract_time_ms: now_ms() - start,
+        };
+
+        match serialize_json(&output, node_count) {
+            Ok(json) => json,
+            Err(e) => e,
+        }
+    } else {
+        r#"{"found":false}"#.to_string()
+    }
+}
+
+/// Analyze HTML and select optimal parse tier (Fas 17.4)
+///
+/// Returns JSON with tier decision: Hydration (0), StaticParse (1),
+/// BoaDom (2), BlitzRender (3), or ChromeCdp (4).
+#[wasm_bindgen]
+pub fn select_parse_tier(html: &str, url: &str) -> String {
+    let decision = escalation::select_tier(html, url);
+    match serialize_json(&decision, 1) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Evaluate JavaScript with DOM access (Fas 17.3)
+///
+/// Creates a full DOM bridge with document/window objects in Boa context.
+/// Returns JSON with evaluation result and any DOM mutations.
+#[cfg(feature = "js-eval")]
+#[wasm_bindgen]
+pub fn eval_js_with_dom(html: &str, code: &str) -> String {
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+
+    let result = dom_bridge::eval_js_with_dom(code, arena);
+
+    #[derive(serde::Serialize)]
+    struct DomEvalOutput {
+        value: Option<String>,
+        error: Option<String>,
+        mutation_count: usize,
+        eval_time_us: u64,
+        event_loop_ticks: usize,
+        timers_fired: usize,
+    }
+
+    let output = DomEvalOutput {
+        value: result.value,
+        error: result.error,
+        mutation_count: result.mutations.len(),
+        eval_time_us: result.eval_time_us,
+        event_loop_ticks: result.event_loop_ticks,
+        timers_fired: result.timers_fired,
+    };
+
+    match serialize_json(&output, 1) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
+/// Adaptive parse — automatically selects the optimal pipeline tier (Fas 17.5)
+///
+/// Analyzes HTML to determine the fastest sufficient approach:
+/// - Tier 0 (Hydration): Extracts SSR data directly, 0 ms JS
+/// - Tier 1 (Static): Standard HTML parse via ArenaDom
+/// - Tier 2 (BoaDom): Runs inline JS with DOM bridge (requires js-eval feature)
+/// - Tier 3/4: Returns tier recommendation (Blitz/CDP handled externally)
+///
+/// Returns JSON with SemanticTree + tier metadata.
+#[wasm_bindgen]
+pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
+    let start = now_ms();
+    let decision = escalation::select_tier(html, url);
+
+    let (mut tree, tier_used) = match &decision.tier {
+        // Tier 0: Hydration — bygger träd från SSR-data + DOM
+        escalation::ParseTier::Hydration { .. } => {
+            let t = build_tree(html, goal, url);
+            (t, "hydration")
+        }
+
+        // Tier 1: Statisk parse — standard ArenaDom pipeline
+        escalation::ParseTier::StaticParse => {
+            let t = build_tree(html, goal, url);
+            (t, "static")
+        }
+
+        // Tier 2: Boa + DOM — kör inline JS mot ArenaDom
+        escalation::ParseTier::BoaDom { .. } => {
+            let t = build_tree(html, goal, url);
+            let result = js_bridge::selective_exec(&t, html);
+            (result.tree, "boa_dom")
+        }
+
+        // Tier 3/4: Behöver extern rendering — fallback till statisk parse
+        escalation::ParseTier::BlitzRender | escalation::ParseTier::ChromeCdp { .. } => {
+            let t = build_tree(html, goal, url);
+            (t, "static_fallback")
+        }
+    };
+
+    tree.parse_time_ms = now_ms() - start;
+
+    // Sortera noder efter relevance
+    tree.nodes
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    #[derive(serde::Serialize)]
+    struct AdaptiveResult {
+        tree: SemanticTree,
+        tier_used: String,
+        tier_decision: escalation::TierDecision,
+    }
+
+    let output = AdaptiveResult {
+        tier_used: tier_used.to_string(),
+        tier_decision: decision,
+        tree,
+    };
+
+    match serialize_json(&output, output.tree.nodes.len()) {
         Ok(json) => json,
         Err(e) => e,
     }
@@ -1032,10 +1211,20 @@ pub fn render_html_to_png(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
+    // Säkerhetsgräns: förhindra OOM vid orimligt stor HTML
+    const MAX_HTML_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    if html.len() > MAX_HTML_SIZE {
+        return Err(format!(
+            "HTML för stor för rendering: {} bytes (max {MAX_HTML_SIZE})",
+            html.len()
+        ));
+    }
+
     // Säkerhetsgräns: förhindra OOM vid orimliga dimensioner
-    const MAX_WIDTH: u32 = 4096;
-    const MAX_HEIGHT: u32 = 8192;
-    const MAX_PIXELS: u64 = 4096 * 8192; // ~134 MB RGBA-buffer
+    // Sänkt från 4096×8192 (134MB) till 2048×4096 (33MB) för stabilitet
+    const MAX_WIDTH: u32 = 2048;
+    const MAX_HEIGHT: u32 = 4096;
+    const MAX_PIXELS: u64 = 2048 * 4096; // ~33 MB RGBA-buffer
     let width = width.min(MAX_WIDTH);
     let height = height.min(MAX_HEIGHT);
     let total_pixels = width as u64 * height as u64;
@@ -1151,6 +1340,124 @@ pub fn render_html_to_png(
     }
 
     Ok(png_bytes)
+}
+
+/// Render HTML with JS evaluation — Boa modifies DOM, then Blitz renders
+///
+/// Pipeline: HTML → parse → ArenaDom → Boa JS eval → serialize modified HTML → Blitz render → PNG
+/// Returns JSON with base64-encoded PNG, mutation count, eval stats.
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[wasm_bindgen]
+pub fn render_with_js(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> String {
+    render_with_js_opts(html, js_code, base_url, width, height, true)
+}
+
+/// Render with JS — full mode (loads external CSS, fonts, images via blitz-net)
+///
+/// Kräver tokio runtime. Använd från HTTP-server eller async-kontext.
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+pub fn render_with_js_full(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> String {
+    render_with_js_opts(html, js_code, base_url, width, height, false)
+}
+
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+fn render_with_js_opts(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> String {
+    let start = now_ms();
+
+    // Steg 1: Parsa HTML → ArenaDom
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+
+    // Steg 2: Evaluera JS mot DOM (modifierar arena in-place)
+    let eval_result = dom_bridge::eval_js_with_dom_and_arena(js_code, arena);
+    let modified_arena = eval_result.arena;
+    let dom_result = eval_result.result;
+
+    // Steg 3: Serialisera modifierad DOM tillbaka till HTML
+    // Document-noden är typ Document, inte Element — serialisera dess barn (innerHTML)
+    let modified_html = modified_arena.serialize_inner_html(modified_arena.document);
+
+    // Steg 4: Rendera med Blitz
+    let render_result = render_html_to_png(&modified_html, base_url, width, height, fast_render);
+
+    let total_ms = now_ms() - start;
+
+    #[derive(serde::Serialize)]
+    struct RenderWithJsOutput {
+        /// Base64-kodad PNG
+        png_base64: String,
+        /// Antal DOM-mutationer JS utförde
+        mutation_count: usize,
+        /// JS-evalueringstid i µs
+        eval_time_us: u64,
+        /// Event-loop-ticks
+        event_loop_ticks: usize,
+        /// Timers som avfyrades
+        timers_fired: usize,
+        /// JS-returvärde
+        js_value: Option<String>,
+        /// JS-fel
+        js_error: Option<String>,
+        /// Render-fel
+        render_error: Option<String>,
+        /// Total tid i ms
+        total_ms: u64,
+        /// Storlek på modifierad HTML (tecken)
+        modified_html_length: usize,
+        /// Storlek på PNG (bytes)
+        png_size_bytes: usize,
+    }
+
+    let (png_b64, render_error, png_size) = match render_result {
+        Ok(bytes) => {
+            use base64::Engine;
+            let size = bytes.len();
+            (
+                base64::engine::general_purpose::STANDARD.encode(&bytes),
+                None,
+                size,
+            )
+        }
+        Err(e) => (String::new(), Some(e), 0),
+    };
+
+    let output = RenderWithJsOutput {
+        png_base64: png_b64,
+        mutation_count: dom_result.mutations.len(),
+        eval_time_us: dom_result.eval_time_us,
+        event_loop_ticks: dom_result.event_loop_ticks,
+        timers_fired: dom_result.timers_fired,
+        js_value: dom_result.value,
+        js_error: dom_result.error,
+        render_error,
+        total_ms,
+        modified_html_length: modified_html.len(),
+        png_size_bytes: png_size,
+    };
+
+    match serialize_json(&output, 2) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
 }
 
 // ─── Fas 12: TieredBackend – Blitz/CDP tier-val ─────────────────────────────
@@ -1808,6 +2115,7 @@ pub fn workflow_status(orchestrator_json: &str) -> String {
 /// * `top_n` - Number of results to return (1-10, default 3)
 /// * `goal` - Agent goal for relevance scoring (default: same as query)
 /// * `html` - Pre-fetched DDG HTML (if empty, returns error asking caller to fetch)
+#[wasm_bindgen]
 pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> String {
     let start = now_ms();
     let effective_goal = if goal.is_empty() {
@@ -1851,8 +2159,141 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
 }
 
 /// Convenience: build the DDG URL for a query so callers can fetch it
+#[wasm_bindgen]
 pub fn build_search_url(query: &str) -> String {
     search::build_ddg_url(query)
+}
+
+// ─── Markdown-konvertering ────────────────────────────────────────────────────
+
+/// Convert a semantic tree to clean Markdown for LLM consumption
+///
+/// Renders SemanticNode tree as structured Markdown:
+/// headings for landmarks, bullet points for links/buttons,
+/// text for content, tables for forms.
+#[wasm_bindgen]
+pub fn semantic_tree_to_markdown(tree_json: &str) -> String {
+    let tree: types::SemanticTree = match serde_json::from_str(tree_json) {
+        Ok(t) => t,
+        Err(e) => return format!("{{\"error\":\"Invalid tree JSON: {e}\"}}"),
+    };
+
+    let mut md = String::with_capacity(tree.nodes.len() * 80);
+
+    if !tree.title.is_empty() {
+        md.push_str(&format!("# {}\n\n", tree.title));
+    }
+
+    for node in &tree.nodes {
+        node_to_markdown(node, &mut md, 0);
+    }
+
+    if !tree.injection_warnings.is_empty() {
+        md.push_str("\n---\n\n**Injection Warnings:**\n\n");
+        for w in &tree.injection_warnings {
+            md.push_str(&format!(
+                "- Node {}: {} (severity: {:?})\n",
+                w.node_id, w.reason, w.severity
+            ));
+        }
+    }
+
+    md
+}
+
+/// Convert HTML directly to Markdown (parse → semantic tree → markdown)
+#[wasm_bindgen]
+pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
+    let tree_json = parse_to_semantic_tree(html, goal, url);
+    semantic_tree_to_markdown(&tree_json)
+}
+
+/// Intern: konvertera en nod till markdown rekursivt
+fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
+    let role = node.role.as_str();
+    let label = node.label.trim();
+
+    if label.is_empty() && node.children.is_empty() {
+        return;
+    }
+
+    match role {
+        "heading" => {
+            // Bestäm heading-nivå baserat på djup (h1-h6)
+            let level = (depth + 1).min(6);
+            let prefix = "#".repeat(level);
+            if !label.is_empty() {
+                md.push_str(&format!("{prefix} {label}\n\n"));
+            }
+        }
+        "link" => {
+            let href = node.action.as_deref().unwrap_or("#");
+            if !label.is_empty() {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}- [{label}]({href})\n"));
+            }
+        }
+        "button" => {
+            let indent = "  ".repeat(depth);
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- **[{label}]** (button)\n"));
+            }
+        }
+        "input" | "textbox" | "textarea" => {
+            let indent = "  ".repeat(depth);
+            let value = node.value.as_deref().unwrap_or("");
+            let name = node.name.as_deref().unwrap_or("");
+            if !label.is_empty() || !name.is_empty() {
+                let display = if !label.is_empty() { label } else { name };
+                if value.is_empty() {
+                    md.push_str(&format!("{indent}- `{display}`: _(input)_\n"));
+                } else {
+                    md.push_str(&format!("{indent}- `{display}`: {value}\n"));
+                }
+            }
+        }
+        "select" | "combobox" => {
+            let indent = "  ".repeat(depth);
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- `{label}`: _(dropdown)_\n"));
+            }
+        }
+        "checkbox" | "radio" => {
+            let indent = "  ".repeat(depth);
+            let checked = node
+                .state
+                .checked
+                .map(|c| if c { "[x]" } else { "[ ]" })
+                .unwrap_or("[ ]");
+            if !label.is_empty() {
+                md.push_str(&format!("{indent}- {checked} {label}\n"));
+            }
+        }
+        "image" | "img" => {
+            if !label.is_empty() {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}![{label}](image)\n"));
+            }
+        }
+        "navigation" | "nav" => {
+            if !label.is_empty() {
+                md.push_str(&format!("\n**{label}**\n\n"));
+            }
+        }
+        "list" | "group" => {
+            // Bara rendera children
+        }
+        _ => {
+            if !label.is_empty() && label.len() > 2 {
+                let indent = "  ".repeat(depth);
+                md.push_str(&format!("{indent}{label}\n\n"));
+            }
+        }
+    }
+
+    for child in &node.children {
+        node_to_markdown(child, md, depth + 1);
+    }
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
