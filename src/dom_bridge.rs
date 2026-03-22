@@ -294,6 +294,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 event_listeners: std::collections::HashMap::new(),
                 focused_element: borrowed.focused_element,
                 scroll_positions: std::collections::HashMap::new(),
+                css_context: None,
+                local_storage: std::collections::HashMap::new(),
+                session_storage: std::collections::HashMap::new(),
+                console_output: Vec::new(),
             }
         }
     };

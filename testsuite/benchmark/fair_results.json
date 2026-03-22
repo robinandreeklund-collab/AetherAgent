@@ -1,0 +1,210 @@
+{
+  "fetch": [
+    {
+      "site": "example.com",
+      "ae_ms": 207,
+      "ae_size": 528,
+      "lp_ms": 508,
+      "lp_size": 529,
+      "winner": "AE"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 290,
+      "ae_size": 34337,
+      "lp_ms": 654,
+      "lp_size": 34381,
+      "winner": "AE"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 1711,
+      "ae_size": 51294,
+      "lp_ms": 983,
+      "lp_size": 51276,
+      "winner": "LP"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 522,
+      "ae_size": 450575,
+      "lp_ms": 18170,
+      "lp_size": 887253,
+      "winner": "AE"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 1022,
+      "ae_size": 521376,
+      "lp_ms": 5244,
+      "lp_size": 521350,
+      "winner": "AE"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 1016,
+      "ae_size": 274467,
+      "lp_ms": 5208,
+      "lp_size": 276059,
+      "winner": "AE"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 636,
+      "ae_size": 234910,
+      "lp_ms": 1984,
+      "lp_size": 312476,
+      "winner": "AE"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 223,
+      "ae_size": 568996,
+      "lp_ms": 5275,
+      "lp_size": 543643,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 229,
+      "ae_size": 245053,
+      "lp_ms": 1417,
+      "lp_size": 248301,
+      "winner": "AE"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 289,
+      "ae_size": 24,
+      "lp_ms": 262,
+      "lp_size": 111,
+      "winner": "LP"
+    }
+  ],
+  "parse": [
+    {
+      "site": "example.com",
+      "ae_ms": 28,
+      "ae_nodes": 6,
+      "lp_ms": 623,
+      "lp_lines": 6,
+      "winner": "AE"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 69,
+      "ae_nodes": 494,
+      "lp_ms": 724,
+      "lp_lines": 518,
+      "winner": "AE"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 83,
+      "ae_nodes": 312,
+      "lp_ms": 794,
+      "lp_lines": 272,
+      "winner": "AE"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 75,
+      "ae_nodes": 352,
+      "lp_ms": 15440,
+      "lp_lines": 626,
+      "winner": "AE"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 281,
+      "ae_nodes": 1069,
+      "lp_ms": 5205,
+      "lp_lines": 617,
+      "winner": "AE"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 279,
+      "ae_nodes": 1176,
+      "lp_ms": 6918,
+      "lp_lines": 524,
+      "winner": "AE"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 94,
+      "ae_nodes": 445,
+      "lp_ms": 1963,
+      "lp_lines": 515,
+      "winner": "AE"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 106,
+      "ae_nodes": 594,
+      "lp_ms": 5272,
+      "lp_lines": 369,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 157,
+      "ae_nodes": 12,
+      "lp_ms": 1451,
+      "lp_lines": 8,
+      "winner": "AE"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 4,
+      "ae_nodes": 1,
+      "lp_ms": 180,
+      "lp_lines": 2,
+      "winner": "AE"
+    }
+  ],
+  "render": [
+    {
+      "site": "example.com",
+      "ms": 341,
+      "png_bytes": 61530,
+      "css_inlined": false
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ms": 5428,
+      "png_bytes": 412953,
+      "css_inlined": false
+    },
+    {
+      "site": "books.toscrape.com",
+      "ms": 5711,
+      "png_bytes": 129170,
+      "css_inlined": false
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ms": 5425,
+      "png_bytes": 55729,
+      "css_inlined": false
+    },
+    {
+      "site": "www.di.se",
+      "ms": 6212,
+      "png_bytes": 609065,
+      "css_inlined": false
+    },
+    {
+      "site": "www.expressen.se",
+      "ms": 6250,
+      "png_bytes": 105159,
+      "css_inlined": false
+    },
+    {
+      "site": "www.apple.com",
+      "ms": 6059,
+      "png_bytes": 279762,
+      "css_inlined": false
+    }
+  ]
+}

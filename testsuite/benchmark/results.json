@@ -8,16 +8,16 @@
       "html_length": 528,
       "css_inlined": false,
       "css_added_bytes": 0,
-      "total_ms": 470,
+      "total_ms": 419,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
       "html_length": 529,
-      "html_ms": 801,
+      "html_ms": 372,
       "tree_lines": 6,
-      "tree_ms": 665,
-      "total_ms": 801,
+      "tree_ms": 176,
+      "total_ms": 372,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -27,21 +27,21 @@
     "site": "news.ycombinator.com",
     "url": "https://news.ycombinator.com",
     "aether": {
-      "png_size": 403165,
+      "png_size": 412953,
       "screenshot": true,
-      "html_length": 41786,
+      "html_length": 41785,
       "css_inlined": true,
-      "css_added_bytes": 7448,
-      "total_ms": 5648,
+      "css_added_bytes": 0,
+      "total_ms": 5633,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 34366,
-      "html_ms": 273,
+      "html_length": 34381,
+      "html_ms": 181,
       "tree_lines": 518,
-      "tree_ms": 512,
-      "total_ms": 273,
+      "tree_ms": 283,
+      "total_ms": 181,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -51,46 +51,46 @@
     "site": "www.aftonbladet.se",
     "url": "https://www.aftonbladet.se",
     "aether": {
-      "png_size": 87314,
+      "png_size": 55729,
       "screenshot": true,
-      "html_length": 608489,
+      "html_length": 605892,
       "css_inlined": true,
-      "css_added_bytes": 155401,
-      "total_ms": 6957,
+      "css_added_bytes": 0,
+      "total_ms": 5796,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 892837,
-      "html_ms": 16553,
-      "tree_lines": 665,
-      "tree_ms": 14952,
-      "total_ms": 16553,
+      "html_length": 882746,
+      "html_ms": 16588,
+      "tree_lines": 657,
+      "tree_ms": 16735,
+      "total_ms": 16588,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false,
-      "errors": "$time=1774179684110 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
+      "errors": "$time=1774197951302 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
     }
   },
   {
     "site": "www.di.se",
     "url": "https://www.di.se",
     "aether": {
-      "png_size": 790796,
+      "png_size": 609042,
       "screenshot": true,
-      "html_length": 659735,
+      "html_length": 668970,
       "css_inlined": true,
-      "css_added_bytes": 147529,
-      "total_ms": 7637,
+      "css_added_bytes": 0,
+      "total_ms": 9141,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 624286,
-      "html_ms": 5288,
-      "tree_lines": 599,
-      "tree_ms": 5330,
-      "total_ms": 5288,
+      "html_length": 523262,
+      "html_ms": 5730,
+      "tree_lines": 578,
+      "tree_ms": 6414,
+      "total_ms": 5730,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -102,19 +102,19 @@
     "aether": {
       "png_size": 105159,
       "screenshot": true,
-      "html_length": 654881,
+      "html_length": 657782,
       "css_inlined": true,
-      "css_added_bytes": 383345,
-      "total_ms": 7380,
+      "css_added_bytes": 0,
+      "total_ms": 7070,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 273124,
-      "html_ms": 5506,
-      "tree_lines": 567,
-      "tree_ms": 5221,
-      "total_ms": 5506,
+      "html_length": 276011,
+      "html_ms": 5206,
+      "tree_lines": 534,
+      "tree_ms": 5217,
+      "total_ms": 5206,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -126,19 +126,19 @@
     "aether": {
       "png_size": 279762,
       "screenshot": true,
-      "html_length": 898144,
+      "html_length": 898038,
       "css_inlined": true,
-      "css_added_bytes": 663234,
-      "total_ms": 6698,
+      "css_added_bytes": 0,
+      "total_ms": 6189,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
       "html_length": 312476,
-      "html_ms": 1780,
+      "html_ms": 2614,
       "tree_lines": 515,
-      "tree_ms": 1556,
-      "total_ms": 1780,
+      "tree_ms": 1931,
+      "total_ms": 2614,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -153,16 +153,16 @@
       "html_length": 24,
       "css_inlined": false,
       "css_added_bytes": 0,
-      "total_ms": 427,
+      "total_ms": 436,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
       "html_length": 111,
-      "html_ms": 450,
+      "html_ms": 200,
       "tree_lines": 2,
-      "tree_ms": 136,
-      "total_ms": 450,
+      "tree_ms": 498,
+      "total_ms": 200,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -175,11 +175,11 @@
       "error": "Remote end closed connection without response"
     },
     "lightpanda": {
-      "html_length": 547173,
-      "html_ms": 5276,
-      "tree_lines": 369,
-      "tree_ms": 5290,
-      "total_ms": 5276,
+      "html_length": 543643,
+      "html_ms": 5310,
+      "tree_lines": 359,
+      "tree_ms": 5278,
+      "total_ms": 5310,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -193,10 +193,10 @@
     },
     "lightpanda": {
       "html_length": 248301,
-      "html_ms": 1867,
+      "html_ms": 1640,
       "tree_lines": 8,
-      "tree_ms": 2525,
-      "total_ms": 1867,
+      "tree_ms": 1604,
+      "total_ms": 1640,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -210,14 +210,14 @@
     },
     "lightpanda": {
       "html_length": 51276,
-      "html_ms": 1255,
+      "html_ms": 888,
       "tree_lines": 272,
-      "tree_ms": 1107,
-      "total_ms": 1255,
+      "tree_ms": 557,
+      "total_ms": 888,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false,
-      "errors": "$time=1774179783973 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
+      "errors": "$time=1774198056024 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
     }
   }
 ]
