@@ -1,0 +1,6 @@
+1 RootWebArea 'Example Domain'
+ 5 heading 'Example Domain'
+ 6 paragraph
+  7 'This domain is for use in documentation examples without needing permission. Avoid use in operations.'
+ 8 paragraph
+  9 link 'Learn more'
