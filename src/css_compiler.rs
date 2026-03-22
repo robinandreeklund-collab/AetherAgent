@@ -64,17 +64,49 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
         };
     }
 
+    // Mät total CSS-storlek — om CSS > 200KB, låt Blitz hantera det nativt.
+    // Blitz nativa CSS-motor hanterar stora stylesheets bättre än css-inline
+    // för komplexa sajter (apple.com: 1.3MB CSS, 1347 @media).
+    let total_css_bytes: usize = extract_style_blocks(html)
+        .iter()
+        .map(|b| b.css_content.len())
+        .sum();
+    const MAX_CSS_FOR_INLINE: usize = 200 * 1024; // 200 KB
+    if total_css_bytes > MAX_CSS_FOR_INLINE {
+        // Fortfarande kör steg 1+2 (LightningCSS transform + @media-filter)
+        // men INTE steg 3 (css-inline). Blitz renderar <style>-block nativt.
+        let (html_with_transformed_css, blocks_processed, rules_count) =
+            transform_and_filter_css(html, viewport);
+        let elapsed = start.elapsed().as_micros() as u64;
+        return CssCompilerResult {
+            html: html_with_transformed_css,
+            style_blocks_processed: blocks_processed,
+            rules_after_filter: rules_count,
+            compile_time_us: elapsed,
+            fully_compiled: true,
+        };
+    }
+
     // Steg 1+2: Extrahera <style>-block, transform med LightningCSS, filtrera @media
     let (html_with_transformed_css, blocks_processed, rules_count) =
         transform_and_filter_css(html, viewport);
 
-    // Steg 3: Inline all CSS till style="" med css-inline
+    // Steg 3: Inline all CSS till style="" med css-inline (bara för < 200KB CSS)
     let final_html = inline_css_to_attributes(&html_with_transformed_css);
+
+    // Validering: om css-inline producerade en sida som verkar tom (inga synliga element),
+    // fallback till transformerad HTML med <style>-block intakta
+    let has_visible_content = final_html.contains("style=\"") || final_html.len() > html.len() / 2;
+    let result_html = if has_visible_content {
+        final_html
+    } else {
+        html_with_transformed_css
+    };
 
     let elapsed = start.elapsed().as_micros() as u64;
 
     CssCompilerResult {
-        html: final_html,
+        html: result_html,
         style_blocks_processed: blocks_processed,
         rules_after_filter: rules_count,
         compile_time_us: elapsed,
