@@ -1235,6 +1235,47 @@ pub fn render_html_to_png(
             "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
         ));
     }
+    // Applicera CSS cascade → inline styles innan Blitz-rendering
+    // Blitz renderar bara inline/HTML-styles — detta kopplar computed styles till rendering
+    #[cfg(feature = "js-eval")]
+    let html = {
+        let (cascaded, _count) = css_cascade::apply_cascade_to_html(html);
+        cascaded
+    };
+    #[cfg(not(feature = "js-eval"))]
+    let html = html.to_string();
+
+    // Kör hela Blitz-renderingen i catch_unwind — Blitz kan panika vid tunga/felaktiga sidor
+    let base_url_owned = base_url.to_string();
+
+    let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        render_html_to_png_inner(&html, &base_url_owned, width, height, fast_render)
+    }));
+
+    match render_result {
+        Ok(inner) => inner,
+        Err(panic_info) => {
+            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "okänd panik".to_string()
+            };
+            Err(format!("Blitz rendering kraschade (catch_unwind): {msg}"))
+        }
+    }
+}
+
+/// Intern Blitz-rendering — separerad för catch_unwind
+#[cfg(feature = "blitz")]
+fn render_html_to_png_inner(
+    html: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+    fast_render: bool,
+) -> Result<Vec<u8>, String> {
     use anyrender::{ImageRenderer, PaintScene as _};
     use blitz_dom::DocumentConfig;
     use blitz_html::HtmlDocument;

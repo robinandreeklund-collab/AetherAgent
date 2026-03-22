@@ -139,6 +139,67 @@ impl CssContext {
         result
     }
 
+    /// Apply computed styles as inline `style` attributes on all element nodes.
+    ///
+    /// Walks the DOM, computes cascade for each element, and merges
+    /// the resolved properties into the node's `style` attribute so that
+    /// Blitz (which only sees inline/HTML styles) renders with full cascade.
+    ///
+    /// Returns the number of nodes that got style attributes updated.
+    pub fn apply_computed_styles_inline(&mut self, arena: &mut ArenaDom) -> usize {
+        // Samla alla element-nycklar först (undvik borrow-konflikt med mutable arena)
+        let element_keys: Vec<NodeKey> = arena
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.node_type == NodeType::Element)
+            .map(|(k, _)| k)
+            .collect();
+
+        let mut updated = 0usize;
+        for key in element_keys {
+            let style = self.get_computed_style(key, arena);
+
+            // Filtrera bort tomma/default-värden — vi vill bara injecta
+            // properties som faktiskt har en effekt
+            let style_str: String = style
+                .properties
+                .iter()
+                .filter(|(prop, val)| !val.is_empty() && is_render_relevant(prop))
+                .map(|(prop, val)| format!("{prop}: {val}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+
+            if !style_str.is_empty() {
+                // Merga med existerande inline style (befintliga har högre prio)
+                let existing = arena
+                    .nodes
+                    .get(key)
+                    .and_then(|n| n.get_attr("style"))
+                    .unwrap_or("")
+                    .to_string();
+
+                let final_style = if existing.is_empty() {
+                    style_str
+                } else {
+                    // Existerande inline-styles overridar computed
+                    let mut merged = parse_inline_style(&style_str);
+                    for (k, v) in parse_inline_style(&existing) {
+                        merged.insert(k, v);
+                    }
+                    merged
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v}"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                };
+
+                arena.set_attr(key, "style", &final_style);
+                updated += 1;
+            }
+        }
+        updated
+    }
+
     // ─── Intern: samla <style>-taggar ────────────────────────────────────────
 
     fn collect_style_tags(
@@ -694,6 +755,121 @@ fn get_tag_defaults(tag: &str) -> HashMap<String, String> {
     d
 }
 
+/// Parsa inline style-sträng till HashMap (prop → value)
+fn parse_inline_style(style: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for part in style.split(';') {
+        let part = part.trim();
+        if let Some(colon) = part.find(':') {
+            let prop = part[..colon].trim().to_lowercase();
+            let val = part[colon + 1..].trim().to_string();
+            if !prop.is_empty() {
+                map.insert(prop, val);
+            }
+        }
+    }
+    map
+}
+
+/// CSS-properties som påverkar visuell rendering (filtrera bort inherited defaults)
+fn is_render_relevant(prop: &str) -> bool {
+    matches!(
+        prop,
+        "display"
+            | "visibility"
+            | "opacity"
+            | "color"
+            | "background-color"
+            | "background"
+            | "background-image"
+            | "font-size"
+            | "font-weight"
+            | "font-family"
+            | "font-style"
+            | "text-align"
+            | "text-decoration"
+            | "text-transform"
+            | "line-height"
+            | "letter-spacing"
+            | "word-spacing"
+            | "margin"
+            | "margin-top"
+            | "margin-right"
+            | "margin-bottom"
+            | "margin-left"
+            | "padding"
+            | "padding-top"
+            | "padding-right"
+            | "padding-bottom"
+            | "padding-left"
+            | "border"
+            | "border-top"
+            | "border-right"
+            | "border-bottom"
+            | "border-left"
+            | "border-radius"
+            | "border-color"
+            | "border-width"
+            | "border-style"
+            | "width"
+            | "height"
+            | "min-width"
+            | "min-height"
+            | "max-width"
+            | "max-height"
+            | "position"
+            | "top"
+            | "right"
+            | "bottom"
+            | "left"
+            | "z-index"
+            | "overflow"
+            | "overflow-x"
+            | "overflow-y"
+            | "float"
+            | "clear"
+            | "flex"
+            | "flex-direction"
+            | "flex-wrap"
+            | "justify-content"
+            | "align-items"
+            | "align-self"
+            | "gap"
+            | "grid-template-columns"
+            | "grid-template-rows"
+            | "box-shadow"
+            | "text-shadow"
+            | "transform"
+            | "transition"
+            | "cursor"
+            | "white-space"
+            | "list-style-type"
+    )
+}
+
+/// Apply CSS cascade computed styles as inline styles on HTML.
+///
+/// Parses the HTML into an ArenaDom, resolves the CSS cascade
+/// (specificity, inheritance), and writes computed properties as
+/// inline `style` attributes so that Blitz rendering picks them up.
+///
+/// Returns the modified HTML with inlined computed styles and
+/// the number of nodes updated.
+pub fn apply_cascade_to_html(html: &str) -> (String, usize) {
+    let rcdom = crate::parser::parse_html(html);
+    let mut arena = ArenaDom::from_rcdom(&rcdom);
+    let mut ctx = CssContext::from_arena(&arena);
+
+    // Applicera bara om det finns CSS-regler
+    if ctx.rules.is_empty() {
+        return (html.to_string(), 0);
+    }
+
+    let updated = ctx.apply_computed_styles_inline(&mut arena);
+    let result_html = arena.serialize_inner_html(arena.document);
+    (result_html, updated)
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -862,5 +1038,92 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn test_apply_computed_styles_inline() {
+        let html = r##"<html><head><style>
+            .red { color: red; font-size: 16px; }
+            p { margin: 10px; }
+        </style></head><body>
+            <p class="red">Hello</p>
+        </body></html>"##;
+
+        let rcdom = parse_html(html);
+        let mut arena = ArenaDom::from_rcdom(&rcdom);
+        let mut ctx = CssContext::from_arena(&arena);
+
+        let updated = ctx.apply_computed_styles_inline(&mut arena);
+        assert!(
+            updated > 0,
+            "Borde ha uppdaterat minst en nod med inline styles"
+        );
+
+        // Hitta <p>-elementet och verifiera att det har inline styles
+        let p_key = find_element(&arena, arena.document, "p");
+        assert!(p_key.is_some(), "Borde hitta p-element");
+        if let Some(k) = p_key {
+            let style_attr = arena.nodes.get(k).and_then(|n| n.get_attr("style"));
+            assert!(
+                style_attr.is_some(),
+                "p-element borde ha style-attribut efter cascade"
+            );
+            let style = style_attr.unwrap();
+            assert!(
+                style.contains("color: red"),
+                "Style borde innehålla 'color: red', fick: {style}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_apply_cascade_to_html() {
+        let html = r##"<html><head><style>
+            h1 { color: blue; font-weight: bold; }
+        </style></head><body>
+            <h1>Rubrik</h1>
+        </body></html>"##;
+
+        let (result, updated) = apply_cascade_to_html(html);
+        assert!(updated > 0, "Borde ha uppdaterat noder");
+        assert!(
+            result.contains("color: blue"),
+            "Resultat-HTML borde innehålla 'color: blue', fick: {}",
+            &result[..result.len().min(500)]
+        );
+    }
+
+    #[test]
+    fn test_apply_cascade_no_rules() {
+        let html = "<html><body><p>No CSS</p></body></html>";
+        let (result, updated) = apply_cascade_to_html(html);
+        assert_eq!(updated, 0, "Utan CSS-regler ska inget uppdateras");
+        assert_eq!(result, html, "HTML ska vara oförändrad utan CSS-regler");
+    }
+
+    #[test]
+    fn test_is_render_relevant() {
+        assert!(is_render_relevant("color"), "color ska vara relevant");
+        assert!(is_render_relevant("display"), "display ska vara relevant");
+        assert!(
+            is_render_relevant("font-size"),
+            "font-size ska vara relevant"
+        );
+        assert!(
+            !is_render_relevant("animation"),
+            "animation ska inte vara relevant"
+        );
+        assert!(
+            !is_render_relevant("content"),
+            "content ska inte vara relevant"
+        );
+    }
+
+    #[test]
+    fn test_parse_inline_style() {
+        let parsed = parse_inline_style("color: red; font-size: 14px; margin: 0");
+        assert_eq!(parsed.get("color").map(|s| s.as_str()), Some("red"));
+        assert_eq!(parsed.get("font-size").map(|s| s.as_str()), Some("14px"));
+        assert_eq!(parsed.get("margin").map(|s| s.as_str()), Some("0"));
     }
 }

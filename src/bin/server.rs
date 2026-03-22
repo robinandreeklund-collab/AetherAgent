@@ -23,6 +23,9 @@ use std::sync::Arc;
 // [RTEN-ROLLBACK-ID:server-rwlock] Gamla: use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
+/// Max render-tid i sekunder — förhindrar att tunga sidor (t.ex. github.com ~569KB) hänger servern
+const RENDER_TIMEOUT_SECS: u64 = 10;
+
 /// Delat server-state med förladdad vision-modell (ORT session med Mutex för &mut run)
 // [RTEN-ROLLBACK-ID:server-state] Gamla: vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>
 #[derive(Clone)]
@@ -1802,16 +1805,36 @@ fn default_fast_render() -> bool {
 }
 
 async fn tiered_screenshot_handler(Json(req): Json<TieredScreenshotRequest>) -> impl IntoResponse {
-    let result = aether_agent::tiered_screenshot(
-        &req.html,
-        &req.url,
-        &req.goal,
-        req.width,
-        req.height,
-        req.fast_render,
-        &req.xhr_captures_json,
-    );
-    (StatusCode::OK, result)
+    let render_future = tokio::task::spawn_blocking(move || {
+        aether_agent::tiered_screenshot(
+            &req.html,
+            &req.url,
+            &req.goal,
+            req.width,
+            req.height,
+            req.fast_render,
+            &req.xhr_captures_json,
+        )
+    });
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(RENDER_TIMEOUT_SECS),
+        render_future,
+    )
+    .await
+    {
+        Ok(Ok(result)) => (StatusCode::OK, result),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(r#"{{"error":"Render task kraschade: {e}"}}"#),
+        ),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                r#"{{"error":"Render timeout: screenshot tog längre än {RENDER_TIMEOUT_SECS}s"}}"#
+            ),
+        ),
+    }
 }
 
 async fn tier_stats_handler() -> impl IntoResponse {
@@ -1839,14 +1862,34 @@ fn default_base_url() -> String {
 
 #[cfg(all(feature = "js-eval", feature = "blitz"))]
 async fn render_with_js_handler(Json(req): Json<RenderWithJsRequest>) -> impl IntoResponse {
-    let result = aether_agent::render_with_js(
-        &req.html,
-        &req.js_code,
-        &req.base_url,
-        req.width,
-        req.height,
-    );
-    (StatusCode::OK, result)
+    let render_future = tokio::task::spawn_blocking(move || {
+        aether_agent::render_with_js(
+            &req.html,
+            &req.js_code,
+            &req.base_url,
+            req.width,
+            req.height,
+        )
+    });
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(RENDER_TIMEOUT_SECS),
+        render_future,
+    )
+    .await
+    {
+        Ok(Ok(result)) => (StatusCode::OK, result),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(r#"{{"error":"Render task kraschade: {e}"}}"#),
+        ),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                r#"{{"error":"Render timeout: render_with_js tog längre än {RENDER_TIMEOUT_SECS}s"}}"#
+            ),
+        ),
+    }
 }
 
 /// Fetch URL → inline CSS → Blitz full render (med bilder + CSS)
@@ -1894,17 +1937,77 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     let css_result = fetch::inline_external_css_detailed(html, final_url).await;
     let html_with_css = &css_result.html;
 
-    // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback)
-    #[cfg(feature = "js-eval")]
-    let result = {
-        if req.js_code.is_empty() {
-            // Ingen JS — render med tiered backend (CDP-fallback vid dålig Blitz)
+    // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
+    let html_for_render = html_with_css.clone();
+    let url_for_render = final_url.clone();
+    let status_code = fetch_result.status_code;
+    let js_code = req.js_code.clone();
+    let render_width = req.width;
+    let render_height = req.height;
+    let css_found = css_result.css_found;
+    let css_loaded_count = css_result.css_loaded;
+    let css_failed_count = css_result.css_failed;
+    let css_bytes = css_result.css_bytes_added;
+    let css_details_clone = css_result.css_details.clone();
+
+    let render_future = tokio::task::spawn_blocking(move || {
+        #[cfg(feature = "js-eval")]
+        {
+            if js_code.is_empty() {
+                match aether_agent::screenshot_with_tier(
+                    &html_for_render,
+                    &url_for_render,
+                    render_width,
+                    render_height,
+                    false,
+                ) {
+                    Ok((png_bytes, tier_used)) => {
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        serde_json::json!({
+                            "png_base64": b64,
+                            "png_size_bytes": png_bytes.len(),
+                            "url": url_for_render,
+                            "status_code": status_code,
+                            "html_length": html_for_render.len(),
+                            "css_inlined": css_loaded_count > 0,
+                            "css_found": css_found,
+                            "css_loaded": css_loaded_count,
+                            "css_failed": css_failed_count,
+                            "css_bytes_added": css_bytes,
+                            "css_details": css_details_clone,
+                            "tier_used": format!("{:?}", tier_used),
+                        })
+                        .to_string()
+                    }
+                    Err(e) => serde_json::json!({
+                        "error": format!("Render failed: {e}"),
+                        "url": url_for_render,
+                        "css_found": css_found,
+                        "css_loaded": css_loaded_count,
+                        "css_failed": css_failed_count,
+                        "css_details": css_details_clone,
+                    })
+                    .to_string(),
+                }
+            } else {
+                aether_agent::render_with_js_full(
+                    &html_for_render,
+                    &js_code,
+                    &url_for_render,
+                    render_width,
+                    render_height,
+                )
+            }
+        }
+        #[cfg(not(feature = "js-eval"))]
+        {
             match aether_agent::screenshot_with_tier(
-                html_with_css,
-                final_url,
-                req.width,
-                req.height,
-                false, // full render: ladda bilder
+                &html_for_render,
+                &url_for_render,
+                render_width,
+                render_height,
+                false,
             ) {
                 Ok((png_bytes, tier_used)) => {
                     use base64::Engine;
@@ -1912,82 +2015,62 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                     serde_json::json!({
                         "png_base64": b64,
                         "png_size_bytes": png_bytes.len(),
-                        "url": final_url,
-                        "status_code": fetch_result.status_code,
-                        "html_length": html_with_css.len(),
-                        "css_inlined": css_result.css_loaded > 0,
-                        "css_found": css_result.css_found,
-                        "css_loaded": css_result.css_loaded,
-                        "css_failed": css_result.css_failed,
-                        "css_bytes_added": css_result.css_bytes_added,
-                        "css_details": css_result.css_details,
+                        "url": url_for_render,
+                        "status_code": status_code,
+                        "html_length": html_for_render.len(),
+                        "css_inlined": css_loaded_count > 0,
+                        "css_found": css_found,
+                        "css_loaded": css_loaded_count,
+                        "css_failed": css_failed_count,
+                        "css_bytes_added": css_bytes,
+                        "css_details": css_details_clone,
                         "tier_used": format!("{:?}", tier_used),
                     })
                     .to_string()
                 }
                 Err(e) => serde_json::json!({
                     "error": format!("Render failed: {e}"),
-                    "url": final_url,
-                    "css_found": css_result.css_found,
-                    "css_loaded": css_result.css_loaded,
-                    "css_failed": css_result.css_failed,
-                    "css_details": css_result.css_details,
+                    "url": url_for_render,
+                    "css_found": css_found,
+                    "css_loaded": css_loaded_count,
+                    "css_failed": css_failed_count,
+                    "css_details": css_details_clone,
                 })
                 .to_string(),
             }
-        } else {
-            // JS + full render
-            aether_agent::render_with_js_full(
-                html_with_css,
-                &req.js_code,
-                final_url,
-                req.width,
-                req.height,
-            )
         }
-    };
+    });
 
-    #[cfg(not(feature = "js-eval"))]
-    let result = {
-        match aether_agent::screenshot_with_tier(
-            html_with_css,
-            final_url,
-            req.width,
-            req.height,
-            false,
-        ) {
-            Ok((png_bytes, tier_used)) => {
-                use base64::Engine;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                serde_json::json!({
-                    "png_base64": b64,
-                    "png_size_bytes": png_bytes.len(),
-                    "url": final_url,
-                    "status_code": fetch_result.status_code,
-                    "html_length": html_with_css.len(),
-                    "css_inlined": css_result.css_loaded > 0,
-                    "css_found": css_result.css_found,
-                    "css_loaded": css_result.css_loaded,
-                    "css_failed": css_result.css_failed,
-                    "css_bytes_added": css_result.css_bytes_added,
-                    "css_details": css_result.css_details,
-                    "tier_used": format!("{:?}", tier_used),
-                })
-                .to_string()
-            }
-            Err(e) => serde_json::json!({
-                "error": format!("Render failed: {e}"),
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(RENDER_TIMEOUT_SECS),
+        render_future,
+    )
+    .await
+    {
+        Ok(Ok(result)) => (StatusCode::OK, result),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({
+                "error": format!("Render task kraschade: {e}"),
                 "url": final_url,
                 "css_found": css_result.css_found,
                 "css_loaded": css_result.css_loaded,
                 "css_failed": css_result.css_failed,
-                "css_details": css_result.css_details,
             })
             .to_string(),
-        }
-    };
-
-    (StatusCode::OK, result)
+        ),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            serde_json::json!({
+                "error": format!("Render timeout: rendering tog längre än {RENDER_TIMEOUT_SECS}s"),
+                "url": final_url,
+                "css_found": css_result.css_found,
+                "css_loaded": css_result.css_loaded,
+                "css_failed": css_result.css_failed,
+            })
+            .to_string(),
+        ),
+    }
 }
 
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
@@ -2741,14 +2824,25 @@ async fn render_url_tiered(
     let html = aether_agent::fetch::inline_external_css(&response.body, &base_url).await;
 
     let url_owned = url.to_string();
-    tokio::task::spawn_blocking(move || {
+    let render_future = tokio::task::spawn_blocking(move || {
         let (png_bytes, tier) =
             aether_agent::screenshot_with_tier(&html, &url_owned, width, height, fast_render)?;
         let tier_label = format!("{:?}", tier);
         Ok((png_bytes, tier_label))
-    })
+    });
+
+    // Render-timeout: max 10s — förhindra att tunga sidor hänger servern
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(RENDER_TIMEOUT_SECS),
+        render_future,
+    )
     .await
-    .map_err(|e| format!("Render task: {e}"))?
+    {
+        Ok(join_result) => join_result.map_err(|e| format!("Render task: {e}"))?,
+        Err(_) => Err(format!(
+            "Render timeout: rendering tog längre än {RENDER_TIMEOUT_SECS}s"
+        )),
+    }
 }
 
 #[cfg(not(feature = "blitz"))]
