@@ -66,6 +66,7 @@ png = { version = "0.17", optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+base64 = "0.22"
 
 [features]
 default = []
@@ -75,7 +76,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
-blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png"]
+blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64"]
 cdp = ["headless_chrome"]
 
 [[bin]]

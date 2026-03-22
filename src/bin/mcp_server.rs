@@ -235,6 +235,20 @@ struct DetectXhrParams {
 // ─── Fas 11 parameter types ─────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RenderWithJsParams {
+    /// HTML content to render
+    html: String,
+    /// JavaScript code to execute against the DOM before rendering
+    js_code: String,
+    /// Base URL for resolving relative resources
+    base_url: String,
+    /// Viewport width in pixels
+    width: u32,
+    /// Viewport height in pixels
+    height: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ParseScreenshotParams {
     /// PNG image bytes (base64-encoded)
     png_base64: String,
@@ -759,6 +773,20 @@ impl AetherMcpServer {
             "goal": goal,
         })
         .to_string()
+    }
+
+    #[tool(
+        name = "render_with_js",
+        description = "Render HTML with JavaScript execution: evaluates JS code against the DOM (via Boa sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). USE THIS TOOL WHEN: you need to see what a page looks like AFTER JavaScript modifies the DOM (e.g., dynamic content, computed values, DOM manipulation). Returns: base64-encoded PNG, mutation count, JS eval stats, timing. The JS sandbox supports: getElementById, querySelector, textContent, innerHTML, setAttribute, createElement, appendChild, setTimeout, and more."
+    )]
+    fn render_with_js(&self, Parameters(params): Parameters<RenderWithJsParams>) -> String {
+        aether_agent::render_with_js(
+            &params.html,
+            &params.js_code,
+            &params.base_url,
+            params.width,
+            params.height,
+        )
     }
 
     #[tool(
@@ -1858,7 +1886,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
     eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
-    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search");
+    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js");
 
     let server = AetherMcpServer::new();
 

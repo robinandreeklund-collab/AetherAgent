@@ -1332,6 +1332,98 @@ pub fn render_html_to_png(
     Ok(png_bytes)
 }
 
+/// Render HTML with JS evaluation — Boa modifies DOM, then Blitz renders
+///
+/// Pipeline: HTML → parse → ArenaDom → Boa JS eval → serialize modified HTML → Blitz render → PNG
+/// Returns JSON with base64-encoded PNG, mutation count, eval stats.
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+#[wasm_bindgen]
+pub fn render_with_js(
+    html: &str,
+    js_code: &str,
+    base_url: &str,
+    width: u32,
+    height: u32,
+) -> String {
+    let start = now_ms();
+
+    // Steg 1: Parsa HTML → ArenaDom
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+
+    // Steg 2: Evaluera JS mot DOM (modifierar arena in-place)
+    let eval_result = dom_bridge::eval_js_with_dom_and_arena(js_code, arena);
+    let modified_arena = eval_result.arena;
+    let dom_result = eval_result.result;
+
+    // Steg 3: Serialisera modifierad DOM tillbaka till HTML
+    // Document-noden är typ Document, inte Element — serialisera dess barn (innerHTML)
+    let modified_html = modified_arena.serialize_inner_html(modified_arena.document);
+
+    // Steg 4: Rendera med Blitz (fast_render=true för snabbhet)
+    let render_result = render_html_to_png(&modified_html, base_url, width, height, true);
+
+    let total_ms = now_ms() - start;
+
+    #[derive(serde::Serialize)]
+    struct RenderWithJsOutput {
+        /// Base64-kodad PNG
+        png_base64: String,
+        /// Antal DOM-mutationer JS utförde
+        mutation_count: usize,
+        /// JS-evalueringstid i µs
+        eval_time_us: u64,
+        /// Event-loop-ticks
+        event_loop_ticks: usize,
+        /// Timers som avfyrades
+        timers_fired: usize,
+        /// JS-returvärde
+        js_value: Option<String>,
+        /// JS-fel
+        js_error: Option<String>,
+        /// Render-fel
+        render_error: Option<String>,
+        /// Total tid i ms
+        total_ms: u64,
+        /// Storlek på modifierad HTML (tecken)
+        modified_html_length: usize,
+        /// Storlek på PNG (bytes)
+        png_size_bytes: usize,
+    }
+
+    let (png_b64, render_error, png_size) = match render_result {
+        Ok(bytes) => {
+            use base64::Engine;
+            let size = bytes.len();
+            (
+                base64::engine::general_purpose::STANDARD.encode(&bytes),
+                None,
+                size,
+            )
+        }
+        Err(e) => (String::new(), Some(e), 0),
+    };
+
+    let output = RenderWithJsOutput {
+        png_base64: png_b64,
+        mutation_count: dom_result.mutations.len(),
+        eval_time_us: dom_result.eval_time_us,
+        event_loop_ticks: dom_result.event_loop_ticks,
+        timers_fired: dom_result.timers_fired,
+        js_value: dom_result.value,
+        js_error: dom_result.error,
+        render_error,
+        total_ms,
+        modified_html_length: modified_html.len(),
+        png_size_bytes: png_size,
+    };
+
+    match serialize_json(&output, 2) {
+        Ok(json) => json,
+        Err(e) => e,
+    }
+}
+
 // ─── Fas 12: TieredBackend – Blitz/CDP tier-val ─────────────────────────────
 
 /// Screenshot with intelligent tier selection (Blitz → CDP fallback)

@@ -18,7 +18,7 @@
 use boa_engine::{
     js_string,
     object::{builtins::JsArray, ObjectInitializer},
-    property::Attribute,
+    property::{Attribute, PropertyDescriptor},
     Context, JsArgs, JsValue, NativeFunction, Source,
 };
 
@@ -167,6 +167,128 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
             event_loop_ticks: 0,
             timers_fired: 0,
         },
+    }
+}
+
+/// Resultat med modifierad ArenaDom — för render_with_js-pipeline
+#[cfg(feature = "blitz")]
+pub struct DomEvalWithArena {
+    pub result: DomEvalResult,
+    pub arena: ArenaDom,
+}
+
+/// Evaluera JS med DOM-access och returnera den modifierade ArenaDom
+///
+/// Samma som `eval_js_with_dom` men ger tillbaka arena efter JS-evaluering
+/// så att anroparen kan serialisera den modifierade DOM:en.
+#[cfg(feature = "blitz")]
+pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithArena {
+    let start = std::time::Instant::now();
+
+    // Säkerhetskontroll
+    let lower = code.to_lowercase();
+    for forbidden in &[
+        "fetch(",
+        "xmlhttp",
+        "import(",
+        "require(",
+        "eval(",
+        "new worker",
+        "indexeddb",
+        "localstorage",
+        "sessionstorage",
+    ] {
+        if lower.contains(forbidden) {
+            return DomEvalWithArena {
+                result: DomEvalResult {
+                    value: None,
+                    error: Some(format!(
+                        "Blocked: '{}' is not allowed in sandbox",
+                        forbidden.trim_end_matches('(')
+                    )),
+                    mutations: vec![],
+                    eval_time_us: start.elapsed().as_micros() as u64,
+                    event_loop_ticks: 0,
+                    timers_fired: 0,
+                },
+                arena,
+            };
+        }
+    }
+
+    let state: SharedState = Rc::new(RefCell::new(BridgeState {
+        arena,
+        mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
+    }));
+
+    let mut context = crate::js_eval::create_sandboxed_context();
+    let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+    event_loop::register_event_loop(&mut context, Rc::clone(&el));
+    register_document(&mut context, Rc::clone(&state));
+    register_window(&mut context, Rc::clone(&state));
+    register_console(&mut context);
+
+    let result = match context.eval(Source::from_bytes(code)) {
+        Ok(res) => {
+            let value_str = res
+                .to_string(&mut context)
+                .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
+
+            let loop_stats = event_loop::run_event_loop(&mut context, &el);
+            let (ticks, timers) = match &loop_stats {
+                Ok(s) => (s.ticks, s.timers_fired),
+                Err(_) => (0, 0),
+            };
+
+            let mutations = state.borrow().mutations.clone();
+
+            DomEvalResult {
+                value: if value_str == "undefined" {
+                    None
+                } else {
+                    Some(value_str)
+                },
+                error: loop_stats.err(),
+                mutations,
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: ticks,
+                timers_fired: timers,
+            }
+        }
+        Err(e) => DomEvalResult {
+            value: None,
+            error: Some(format!("{}", e)),
+            mutations: state.borrow().mutations.clone(),
+            eval_time_us: start.elapsed().as_micros() as u64,
+            event_loop_ticks: 0,
+            timers_fired: 0,
+        },
+    };
+
+    // Extrahera arena från SharedState — ta tillbaka ägandet
+    // Rc::try_unwrap fungerar eftersom context (med alla Rc-kloner) droppas ovan
+    drop(context);
+    let bridge = match Rc::try_unwrap(state) {
+        Ok(cell) => cell.into_inner(),
+        Err(rc) => {
+            // Fallback: klona arena om det finns kvarvarande referenser
+            let borrowed = rc.borrow();
+            BridgeState {
+                arena: borrowed.arena.clone(),
+                mutations: borrowed.mutations.clone(),
+                event_listeners: std::collections::HashMap::new(),
+                focused_element: borrowed.focused_element,
+                scroll_positions: std::collections::HashMap::new(),
+            }
+        }
+    };
+
+    DomEvalWithArena {
+        result,
+        arena: bridge.arena,
     }
 }
 
@@ -749,22 +871,58 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── textContent (getter) ───────────────────────────────────────
-    let st = Rc::clone(state);
-    let tc_get = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
-            let s = st.borrow();
-            let text = s.arena.extract_text(key);
-            Ok(JsValue::from(js_string!(text.as_str())))
-        })
-    };
-    obj.set(
-        js_string!("textContent"),
-        tc_get.to_js_function(context.realm()),
-        false,
-        context,
-    )
-    .unwrap_or(true);
+    // ─── textContent (accessor property: getter + setter) ──────────
+    {
+        let st_get = Rc::clone(state);
+        let tc_get = unsafe {
+            NativeFunction::from_closure(move |_this, _args, _ctx| {
+                let s = st_get.borrow();
+                let text = s.arena.extract_text(key);
+                Ok(JsValue::from(js_string!(text.as_str())))
+            })
+        };
+        let st_set = Rc::clone(state);
+        let tc_set = unsafe {
+            NativeFunction::from_closure(move |_this, args, ctx| {
+                let text = args
+                    .get_or_undefined(0)
+                    .to_string(ctx)?
+                    .to_std_string_escaped();
+                let mut s = st_set.borrow_mut();
+                // Rensa befintliga barn
+                if let Some(node) = s.arena.nodes.get(key) {
+                    let children: Vec<NodeKey> = node.children.clone();
+                    for child in children {
+                        s.arena.remove_child(key, child);
+                    }
+                }
+                // Skapa ny textnod
+                let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Text,
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: Some(text),
+                    parent: None,
+                    children: vec![],
+                });
+                s.arena.append_child(key, text_key);
+                s.mutations.push("setTextContent".to_string());
+                Ok(JsValue::undefined())
+            })
+        };
+        let getter_fn = tc_get.to_js_function(context.realm());
+        let setter_fn = tc_set.to_js_function(context.realm());
+        let _ = obj.define_property_or_throw(
+            js_string!("textContent"),
+            PropertyDescriptor::builder()
+                .get(getter_fn)
+                .set(setter_fn)
+                .enumerable(true)
+                .configurable(true)
+                .build(),
+            context,
+        );
+    }
 
     // ─── appendChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1146,43 +1304,80 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── innerHTML (getter/setter) ──────────────────────────────────
-    let st = Rc::clone(state);
-    let ih = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
-            let s = st.borrow();
-            Ok(JsValue::from(js_string!(s
-                .arena
-                .serialize_inner_html(key)
-                .as_str())))
-        })
-    };
-    obj.set(
-        js_string!("innerHTML"),
-        ih.to_js_function(context.realm()),
-        false,
-        context,
-    )
-    .unwrap_or(true);
+    // ─── innerHTML (accessor property: getter + setter) ────────────
+    {
+        let st_get = Rc::clone(state);
+        let ih_get = unsafe {
+            NativeFunction::from_closure(move |_this, _args, _ctx| {
+                let s = st_get.borrow();
+                Ok(JsValue::from(js_string!(s
+                    .arena
+                    .serialize_inner_html(key)
+                    .as_str())))
+            })
+        };
+        let st_set = Rc::clone(state);
+        let ih_set = unsafe {
+            NativeFunction::from_closure(move |_this, args, ctx| {
+                let html_str = args
+                    .get_or_undefined(0)
+                    .to_string(ctx)?
+                    .to_std_string_escaped();
+                let mut s = st_set.borrow_mut();
+                // Rensa alla barn
+                if let Some(node) = s.arena.nodes.get(key) {
+                    let children: Vec<NodeKey> = node.children.clone();
+                    for child in children {
+                        s.arena.remove_child(key, child);
+                    }
+                }
+                // Förenklad: lagra som textnod (full HTML-parsning kräver markup5ever)
+                let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Text,
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: Some(html_str.clone()),
+                    parent: Some(key),
+                    children: Vec::new(),
+                });
+                if let Some(node) = s.arena.nodes.get_mut(key) {
+                    node.children.push(text_key);
+                }
+                s.mutations
+                    .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
+                Ok(JsValue::undefined())
+            })
+        };
+        let getter_fn = ih_get.to_js_function(context.realm());
+        let setter_fn = ih_set.to_js_function(context.realm());
+        let _ = obj.define_property_or_throw(
+            js_string!("innerHTML"),
+            PropertyDescriptor::builder()
+                .get(getter_fn)
+                .set(setter_fn)
+                .enumerable(true)
+                .configurable(true)
+                .build(),
+            context,
+        );
+    }
 
-    // ─── innerHTML setter (via setInnerHTML) ──────────────────────
+    // ─── Bakåtkompatibla metoder: setInnerHTML / setTextContent ──────
+    // Behåller dessa som explicita metoder för befintlig kod
     let st = Rc::clone(state);
-    let ih_set = unsafe {
+    let ih_set_compat = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let html_str = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let mut s = st.borrow_mut();
-            // Rensa alla barn
             if let Some(node) = s.arena.nodes.get(key) {
                 let children: Vec<NodeKey> = node.children.clone();
                 for child in children {
                     s.arena.remove_child(key, child);
                 }
             }
-            // Skapa en textnod med HTML-strängen (förenklad — full HTML-parsning
-            // skulle kräva markup5ever, men vi lagrar det som mutation istället)
             let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
@@ -1201,29 +1396,26 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     };
     obj.set(
         js_string!("setInnerHTML"),
-        ih_set.to_js_function(context.realm()),
+        ih_set_compat.to_js_function(context.realm()),
         false,
         context,
     )
     .unwrap_or(true);
 
-    // ─── textContent setter (via setTextContent) ────────────────────
     let st = Rc::clone(state);
-    let tc_set = unsafe {
+    let tc_set_compat = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
             let text = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let mut s = st.borrow_mut();
-            // Rensa barn
             if let Some(node) = s.arena.nodes.get(key) {
                 let children: Vec<NodeKey> = node.children.clone();
                 for child in children {
                     s.arena.remove_child(key, child);
                 }
             }
-            // Skapa ny textnod
             let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
@@ -1239,7 +1431,7 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     };
     obj.set(
         js_string!("setTextContent"),
-        tc_set.to_js_function(context.realm()),
+        tc_set_compat.to_js_function(context.realm()),
         false,
         context,
     )

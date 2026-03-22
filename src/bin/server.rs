@@ -1731,6 +1731,36 @@ async fn tier_stats_handler() -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+// ─── Boa+Blitz: render_with_js ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenderWithJsRequest {
+    html: String,
+    js_code: String,
+    #[serde(default = "default_base_url")]
+    base_url: String,
+    #[serde(default = "default_width")]
+    width: u32,
+    #[serde(default = "default_height")]
+    height: u32,
+}
+
+fn default_base_url() -> String {
+    "https://localhost".to_string()
+}
+
+#[cfg(all(feature = "js-eval", feature = "blitz"))]
+async fn render_with_js_handler(Json(req): Json<RenderWithJsRequest>) -> impl IntoResponse {
+    let result = aether_agent::render_with_js(
+        &req.html,
+        &req.js_code,
+        &req.base_url,
+        req.width,
+        req.height,
+    );
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 11: Vision ─────────────────────────────────────────────────────────
 
 #[cfg(feature = "vision")]
@@ -3633,6 +3663,22 @@ fn build_router(state: AppState) -> Router {
         // Fas 12: TieredBackend
         .route("/api/tiered-screenshot", post(tiered_screenshot_handler))
         .route("/api/tier-stats", get(tier_stats_handler))
+        // Boa+Blitz: render med JS
+        .route("/api/render-with-js", {
+            #[cfg(all(feature = "js-eval", feature = "blitz"))]
+            {
+                post(render_with_js_handler)
+            }
+            #[cfg(not(all(feature = "js-eval", feature = "blitz")))]
+            {
+                post(|| async {
+                    (
+                        StatusCode::NOT_IMPLEMENTED,
+                        r#"{"error":"js-eval + blitz features inte aktiverade"}"#,
+                    )
+                })
+            }
+        })
         // Fas 13: Session Management
         .route("/api/session/create", post(session_create))
         .route("/api/session/cookies/add", post(session_add_cookies))
