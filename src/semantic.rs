@@ -100,6 +100,12 @@ impl SemanticBuilder {
         output: &mut Vec<SemanticNode>,
         depth: u32,
     ) {
+        // Skydda mot stack overflow vid djupt nästlad HTML (t.ex. 10000+ nästlade <div>)
+        const MAX_TRAVERSAL_DEPTH: u32 = 512;
+        if depth > MAX_TRAVERSAL_DEPTH {
+            return;
+        }
+
         let node = match arena.nodes.get(key) {
             Some(n) => n,
             None => return,
