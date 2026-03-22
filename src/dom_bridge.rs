@@ -1048,6 +1048,51 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
+    // ─── insertAdjacentHTML(position, html) ────────────────────────
+    // Förenklad: loggar mutation, parsning av HTML stöds ej (kräver full parser)
+    let st = Rc::clone(state);
+    let iah = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let position = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let html_str = args
+                .get_or_undefined(1)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            s.mutations.push(format!(
+                "insertAdjacentHTML:{}:{}:{}",
+                key_bits, position, html_str
+            ));
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("insertAdjacentHTML"),
+        iah.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── attachShadow({ mode }) ─────────────────────────────────────
+    // Förenklad: returnerar ett tomt objekt som shadow root
+    let at_sh = unsafe {
+        NativeFunction::from_closure(move |_this, _args, ctx| {
+            let shadow = ObjectInitializer::new(ctx).build();
+            Ok(JsValue::from(shadow))
+        })
+    };
+    obj.set(
+        js_string!("attachShadow"),
+        at_sh.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
     // ─── cloneNode(deep) ────────────────────────────────────────────
     let st = Rc::clone(state);
     let cn_fn = unsafe {
@@ -1115,6 +1160,48 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     obj.set(
         js_string!("innerHTML"),
         ih.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── innerHTML setter (via setInnerHTML) ──────────────────────
+    let st = Rc::clone(state);
+    let ih_set = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let html_str = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let mut s = st.borrow_mut();
+            // Rensa alla barn
+            if let Some(node) = s.arena.nodes.get(key) {
+                let children: Vec<NodeKey> = node.children.clone();
+                for child in children {
+                    s.arena.remove_child(key, child);
+                }
+            }
+            // Skapa en textnod med HTML-strängen (förenklad — full HTML-parsning
+            // skulle kräva markup5ever, men vi lagrar det som mutation istället)
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: std::collections::HashMap::new(),
+                text: Some(html_str.clone()),
+                parent: Some(key),
+                children: Vec::new(),
+            });
+            if let Some(node) = s.arena.nodes.get_mut(key) {
+                node.children.push(text_key);
+            }
+            s.mutations
+                .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("setInnerHTML"),
+        ih_set.to_js_function(context.realm()),
         false,
         context,
     )
@@ -1215,7 +1302,264 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     )
     .unwrap_or(true);
 
-    // ─── addEventListener(type, callback, capture) ────────────────
+    // ─── previousSibling ──────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ps = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Some(p) => p,
+                None => return Ok(JsValue::null()),
+            };
+            let siblings = &s.arena.nodes.get(parent_key).map(|n| &n.children);
+            if let Some(sibs) = siblings {
+                let my_idx = sibs.iter().position(|&c| c == key);
+                if let Some(idx) = my_idx {
+                    if idx > 0 {
+                        return Ok(JsValue::from(node_key_to_f64(sibs[idx - 1])));
+                    }
+                }
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("previousSibling"),
+        ps.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── previousElementSibling ─────────────────────────────────────
+    let st = Rc::clone(state);
+    let pes = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Some(p) => p,
+                None => return Ok(JsValue::null()),
+            };
+            if let Some(parent) = s.arena.nodes.get(parent_key) {
+                let my_idx = parent.children.iter().position(|&c| c == key);
+                if let Some(idx) = my_idx {
+                    for &sib in parent.children[..idx].iter().rev() {
+                        if let Some(sn) = s.arena.nodes.get(sib) {
+                            if sn.node_type == NodeType::Element {
+                                return Ok(JsValue::from(node_key_to_f64(sib)));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(JsValue::null())
+        })
+    };
+    obj.set(
+        js_string!("previousElementSibling"),
+        pes.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── childElementCount ──────────────────────────────────────────
+    let st = Rc::clone(state);
+    let cec = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let count = s
+                .arena
+                .nodes
+                .get(key)
+                .map(|n| {
+                    n.children
+                        .iter()
+                        .filter(|&&c| {
+                            s.arena
+                                .nodes
+                                .get(c)
+                                .map(|cn| cn.node_type == NodeType::Element)
+                                .unwrap_or(false)
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            Ok(JsValue::from(count as u32))
+        })
+    };
+    obj.set(
+        js_string!("childElementCount"),
+        cec.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── hasAttribute(name) ─────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ha = unsafe {
+        NativeFunction::from_closure(move |_this, args, ctx| {
+            let name = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let s = st.borrow();
+            Ok(JsValue::from(s.arena.has_attr(key, &name)))
+        })
+    };
+    obj.set(
+        js_string!("hasAttribute"),
+        ha.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── remove() — ta bort elementet från sin förälder ─────────────
+    let st = Rc::clone(state);
+    let rm = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let mut s = st.borrow_mut();
+            if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
+                s.arena.remove_child(parent_key, key);
+                s.mutations.push(format!("remove:{}", key_bits));
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("remove"),
+        rm.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── replaceWith(newNode) ───────────────────────────────────────
+    let st = Rc::clone(state);
+    let rw = unsafe {
+        NativeFunction::from_closure(move |_this, args, _ctx| {
+            let new_key_val = args.get_or_undefined(0).to_number(_ctx)?;
+            let new_key = f64_to_node_key(new_key_val);
+            let mut s = st.borrow_mut();
+            if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
+                s.arena.insert_before(parent_key, new_key, Some(key));
+                s.arena.remove_child(parent_key, key);
+                s.mutations
+                    .push(format!("replaceWith:{}:{}", key_bits, new_key_val as u64));
+            }
+            Ok(JsValue::undefined())
+        })
+    };
+    obj.set(
+        js_string!("replaceWith"),
+        rw.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── value (getter/setter för input/textarea/select) ────────────
+    let st = Rc::clone(state);
+    let val_get = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            Ok(JsValue::from(js_string!(s
+                .arena
+                .get_attr(key, "value")
+                .unwrap_or(""))))
+        })
+    };
+    obj.set(
+        js_string!("value"),
+        val_get.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── checked (getter för checkbox/radio) ────────────────────────
+    let st = Rc::clone(state);
+    let chk = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            Ok(JsValue::from(s.arena.has_attr(key, "checked")))
+        })
+    };
+    obj.set(
+        js_string!("checked"),
+        chk.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── selected (getter för option-element) ───────────────────────
+    let st = Rc::clone(state);
+    let sel = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            Ok(JsValue::from(s.arena.has_attr(key, "selected")))
+        })
+    };
+    obj.set(
+        js_string!("selected"),
+        sel.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── tabIndex ───────────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let ti = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            let val = s
+                .arena
+                .get_attr(key, "tabindex")
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(-1);
+            Ok(JsValue::from(val))
+        })
+    };
+    obj.set(
+        js_string!("tabIndex"),
+        ti.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── offsetParent ───────────────────────────────────────────────
+    let st = Rc::clone(state);
+    let op = unsafe {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
+            let s = st.borrow();
+            // Returnera body som offsetParent (förenklad implementering)
+            if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
+                Ok(JsValue::from(node_key_to_f64(parent_key)))
+            } else {
+                Ok(JsValue::null())
+            }
+        })
+    };
+    obj.set(
+        js_string!("offsetParent"),
+        op.to_js_function(context.realm()),
+        false,
+        context,
+    )
+    .unwrap_or(true);
+
+    // ─── clientTop / clientLeft (border-dimensioner, default 0) ─────
+    obj.set(js_string!("clientTop"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+    obj.set(js_string!("clientLeft"), JsValue::from(0), false, context)
+        .unwrap_or(true);
+
+    // ─── addEventListener(type, callback, capture/options) ──────────
     let st = Rc::clone(state);
     let ael = unsafe {
         NativeFunction::from_closure(move |_this, args, ctx| {
@@ -1227,7 +1571,21 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             if !callback.is_callable() {
                 return Ok(JsValue::undefined());
             }
-            let capture = args.get_or_undefined(2).to_boolean();
+            // Stöd för options-objekt (tredje arg): { once, passive, capture }
+            let third = args.get_or_undefined(2);
+            let capture = if third.is_object() {
+                // Options-objekt: läs capture-fältet
+                third
+                    .as_object()
+                    .and_then(|o| {
+                        o.get(js_string!("capture"), ctx)
+                            .ok()
+                            .map(|v| v.to_boolean())
+                    })
+                    .unwrap_or(false)
+            } else {
+                third.to_boolean()
+            };
             let mut s = st.borrow_mut();
             let listeners = s
                 .event_listeners

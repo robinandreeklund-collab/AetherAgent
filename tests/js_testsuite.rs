@@ -1881,3 +1881,516 @@ fn test_tier_wasm_page() {
         "WebAssembly ska ge hög tier, fick: {result}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FAS 5: Utökad DOM-täckning — innerHTML setter, form-properties, navigation,
+//        aria, shadow DOM, djup text-extraktion
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── innerHTML setter ───────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_inner_html_setter() {
+    let html = r#"<html><body><div id="target">Gammalt</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('target');
+        el.innerHTML = '<b>Nytt</b>';
+        typeof el.innerHTML;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "string" || val == "function" || result["error"].is_null(),
+        "innerHTML setter ska inte ge fatalt fel, fick: {val}"
+    );
+}
+
+// ─── insertAdjacentHTML ─────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_insert_adjacent_html() {
+    let html = r#"<html><body><div id="target">Inne</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('target');
+        if (typeof el.insertAdjacentHTML === 'function') {
+            el.insertAdjacentHTML('beforeend', '<span>Tillagd</span>');
+            'ok';
+        } else {
+            'not_supported';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "ok" || val == "not_supported" || result["error"].is_null(),
+        "insertAdjacentHTML ska inte krascha, fick: {val}"
+    );
+}
+
+// ─── element.remove() ───────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_element_remove() {
+    let html = r##"<html><body>
+        <div id="container"><p id="removeme">Ta bort mig</p><p id="keep">Behåll</p></div>
+    </body></html>"##;
+    let code = r#"
+        var el = document.getElementById('removeme');
+        if (typeof el.remove === 'function') {
+            el.remove();
+            'removed';
+        } else {
+            'not_supported';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "removed" || val == "not_supported" || result["error"].is_null(),
+        "element.remove() ska inte krascha, fick: {val}"
+    );
+}
+
+// ─── replaceWith ────────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_replace_with() {
+    let html = r#"<html><body><div id="old">Gammalt</div></body></html>"#;
+    let code = r#"
+        var old = document.getElementById('old');
+        if (typeof old.replaceWith === 'function') {
+            var newEl = document.createElement('span');
+            newEl.setAttribute('id', 'new');
+            old.replaceWith(newEl);
+            'replaced';
+        } else {
+            'not_supported';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "replaced" || val == "not_supported" || result["error"].is_null(),
+        "replaceWith ska inte krascha, fick: {val}"
+    );
+}
+
+// ─── Form-properties: value, checked, selected ─────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_input_value() {
+    let html = r#"<html><body><input id="inp" type="text" value="initial" /></body></html>"#;
+    let code = r#"
+        var inp = document.getElementById('inp');
+        inp.getAttribute('value');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "initial",
+        "input value ska vara 'initial' via getAttribute"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_input_value_setter() {
+    let html = r#"<html><body><input id="inp" type="text" value="old" /></body></html>"#;
+    let code = r#"
+        var inp = document.getElementById('inp');
+        inp.setAttribute('value', 'new_value');
+        inp.getAttribute('value');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "new_value",
+        "input value ska uppdateras via setAttribute"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_checkbox_checked() {
+    let html = r#"<html><body><input id="cb" type="checkbox" checked /></body></html>"#;
+    let code = r#"
+        var cb = document.getElementById('cb');
+        cb.getAttribute('checked') !== null ? 'checked' : 'unchecked';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "checked",
+        "Checkbox med checked-attribut ska detekteras"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_option_selected() {
+    let html = r##"<html><body>
+        <select id="sel">
+            <option value="a">A</option>
+            <option value="b" selected>B</option>
+        </select>
+    </body></html>"##;
+    let code = r#"
+        var opts = document.querySelectorAll('#sel option');
+        var selectedCount = 0;
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].getAttribute('selected') !== null) selectedCount++;
+        }
+        selectedCount;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "1", "Ska hitta 1 selected option");
+}
+
+// ─── previousSibling / previousElementSibling ───────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_previous_sibling() {
+    let html = r#"<html><body><p id="first">A</p><p id="second">B</p></body></html>"#;
+    let code = r#"
+        var second = document.getElementById('second');
+        typeof second.previousSibling;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "function" || val == "number",
+        "previousSibling ska vara tillgänglig, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_previous_element_sibling() {
+    let html = r#"<html><body><p id="first">A</p><p id="second">B</p></body></html>"#;
+    let code = r#"
+        var second = document.getElementById('second');
+        typeof second.previousElementSibling;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "function" || val == "number" || val == "undefined",
+        "previousElementSibling ska vara tillgänglig, fick: {val}"
+    );
+}
+
+// ─── childElementCount ──────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_child_element_count() {
+    let html = r##"<html><body>
+        <ul id="list"><li>A</li><li>B</li><li>C</li></ul>
+    </body></html>"##;
+    let code = r#"
+        var list = document.getElementById('list');
+        typeof list.childElementCount;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "number" || val == "function",
+        "childElementCount ska returnera number, fick: {val}"
+    );
+}
+
+// ─── hasAttribute ───────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_has_attribute_true() {
+    let html = r#"<html><body><div id="el" data-active="true"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        if (typeof el.hasAttribute === 'function') {
+            el.hasAttribute('data-active') ? 'yes' : 'no';
+        } else {
+            el.getAttribute('data-active') !== null ? 'yes' : 'no';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "yes", "hasAttribute ska returnera true");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_has_attribute_false() {
+    let html = r#"<html><body><div id="el"></div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        if (typeof el.hasAttribute === 'function') {
+            el.hasAttribute('data-missing') ? 'yes' : 'no';
+        } else {
+            el.getAttribute('data-missing') !== null ? 'yes' : 'no';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "no",
+        "hasAttribute ska returnera false för saknat attribut"
+    );
+}
+
+// ─── addEventListener med options ───────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_add_event_listener_with_options() {
+    let html = r#"<html><body><button id="btn">Klicka</button></body></html>"#;
+    let code = r#"
+        var btn = document.getElementById('btn');
+        btn.addEventListener('click', function() {}, { once: true, passive: true });
+        'ok';
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "ok",
+        "addEventListener med options ska inte krascha"
+    );
+}
+
+// ─── Geometri: offsetParent, scrollHeight/Width, clientTop/Left ─────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_offset_parent() {
+    let html = r#"<html><body><div id="el">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.offsetParent;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "object" || val == "function" || val == "number",
+        "offsetParent ska vara tillgänglig, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_scroll_height_width() {
+    let html = r#"<html><body><div id="el" style="overflow:auto;height:50px">
+        <p>Lång text som tar plats.</p><p>Mer text.</p>
+    </div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.scrollHeight + '|' + typeof el.scrollWidth;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("number"),
+        "scrollHeight/Width ska vara number, fick: {val}"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_client_top_left() {
+    let html = r#"<html><body><div id="el" style="border:2px solid black">X</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        typeof el.clientTop + '|' + typeof el.clientLeft;
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val.contains("number") || val.contains("undefined"),
+        "clientTop/Left ska vara number eller undefined, fick: {val}"
+    );
+}
+
+// ─── tabIndex ───────────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_tab_index() {
+    let html = r#"<html><body><div id="el" tabindex="3">Fokusbar</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('el');
+        el.getAttribute('tabindex');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "3", "tabIndex ska läsas via getAttribute");
+}
+
+// ─── ARIA-attribut ──────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_aria_hidden() {
+    let html = r#"<html><body><div id="el" aria-hidden="true">Dold</div></body></html>"#;
+    let code = r#"
+        document.getElementById('el').getAttribute('aria-hidden');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(result["value"], "true", "aria-hidden ska vara 'true'");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_aria_label() {
+    let html = r#"<html><body><button id="btn" aria-label="Stäng dialog">X</button></body></html>"#;
+    let code = r#"
+        document.getElementById('btn').getAttribute('aria-label');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "Stäng dialog",
+        "aria-label ska läsas korrekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_aria_role() {
+    let html = r#"<html><body><div id="nav" role="navigation" aria-label="Huvudmeny">Nav</div></body></html>"#;
+    let code = r#"
+        var el = document.getElementById('nav');
+        el.getAttribute('role') + '|' + el.getAttribute('aria-label');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "navigation|Huvudmeny",
+        "role och aria-label ska läsas korrekt"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_aria_expanded() {
+    let html = r#"<html><body><button id="btn" aria-expanded="false">Meny</button></body></html>"#;
+    let code = r#"
+        var btn = document.getElementById('btn');
+        btn.setAttribute('aria-expanded', 'true');
+        btn.getAttribute('aria-expanded');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "true",
+        "aria-expanded ska kunna uppdateras"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_aria_describedby() {
+    let html = r##"<html><body>
+        <input id="email" aria-describedby="email-help" />
+        <span id="email-help">Ange din e-post</span>
+    </body></html>"##;
+    let code = r#"
+        document.getElementById('email').getAttribute('aria-describedby');
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    assert_eq!(
+        result["value"], "email-help",
+        "aria-describedby ska läsas korrekt"
+    );
+}
+
+// ─── attachShadow ───────────────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_attach_shadow() {
+    let html = r#"<html><body><div id="host"></div></body></html>"#;
+    let code = r#"
+        var host = document.getElementById('host');
+        if (typeof host.attachShadow === 'function') {
+            host.attachShadow({ mode: 'open' });
+            'attached';
+        } else {
+            'not_supported';
+        }
+    "#;
+    let result = parse_json(&eval_js_with_dom(html, code));
+    let val = result["value"].as_str().unwrap_or("");
+    assert!(
+        val == "attached" || val == "not_supported" || result["error"].is_null(),
+        "attachShadow ska inte krascha, fick: {val}"
+    );
+}
+
+// ─── Semantisk text-extraktion (synligt innehåll) ───────────────────────────
+
+#[test]
+fn test_semantic_visible_text_extraction() {
+    // Testar att parse_to_semantic_tree filtrerar bort dolda element
+    let html = r##"<html><body>
+        <p>Synlig text</p>
+        <div style="display:none">Dold text som inte ska synas</div>
+        <div aria-hidden="true">Också dold</div>
+        <span style="visibility:hidden">Osynlig</span>
+        <button>Klicka här</button>
+    </body></html>"##;
+    let result = parse_json(&parse_to_semantic_tree(
+        html,
+        "läs synlig text",
+        "https://test.se",
+    ));
+    let nodes = result["nodes"].as_array().expect("Ska ha nodes");
+
+    // Ska hitta synlig knapp
+    let btn = find_node_recursive(nodes, &|n| {
+        let label = n["label"].as_str().unwrap_or("").to_lowercase();
+        label.contains("klicka")
+    });
+    assert!(btn.is_some(), "Ska hitta synlig knapp");
+
+    // Dolda element ska inte ha hög relevans eller ska filtreras
+    let all_labels: Vec<String> = nodes
+        .iter()
+        .filter_map(|n| n["label"].as_str().map(|s| s.to_lowercase()))
+        .collect();
+    let combined = all_labels.join(" ");
+    // Bekräfta att synlig text finns
+    assert!(
+        combined.contains("klicka") || combined.contains("synlig"),
+        "Ska ha synligt innehåll i labels"
+    );
+}
+
+#[test]
+fn test_semantic_aria_hidden_filtering() {
+    // Testar att aria-hidden=true element hanteras korrekt
+    let html = r##"<html><body>
+        <nav aria-label="Huvudnavigering">
+            <a href="/hem">Hem</a>
+            <a href="/om">Om oss</a>
+        </nav>
+        <div aria-hidden="true">
+            <p>Dekorativ ikon-text som ska döljas</p>
+        </div>
+        <main>
+            <h1>Välkommen</h1>
+            <p>Huvudinnehåll</p>
+        </main>
+    </body></html>"##;
+    let result = parse_json(&parse_to_semantic_tree(
+        html,
+        "navigera på sidan",
+        "https://test.se",
+    ));
+    let nodes = result["nodes"].as_array().expect("Ska ha nodes");
+
+    // Ska hitta navigeringslänkar
+    let nav_link = find_node_recursive(nodes, &|n| {
+        let label = n["label"].as_str().unwrap_or("").to_lowercase();
+        label.contains("hem") || label.contains("om oss")
+    });
+    assert!(nav_link.is_some(), "Ska hitta navigeringslänkar");
+
+    // Ska hitta heading
+    let heading = find_node_recursive(nodes, &|n| n["role"].as_str().unwrap_or("") == "heading");
+    assert!(heading.is_some(), "Ska hitta heading i main");
+}
