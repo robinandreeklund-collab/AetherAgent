@@ -3,117 +3,128 @@
 ## Overview
 
 Comprehensive test suite for AetherAgent's Boa JS engine integration.
-50 tests covering the full JS pipeline: sandbox eval, DOM bridge, event loop,
-hydration, escalation, and end-to-end `parse_with_js`.
+**142 tests** total: 120 unit/integration + 22 live site tests.
 
-**Test file:** `tests/js_testsuite.rs`
-**Run:** `cargo test --features js-eval --test js_testsuite`
+## Quick Start
 
-## Test Coverage
+```bash
+# Run all JS tests (120 tests, no network needed)
+cargo test --features js-eval --test js_testsuite
 
-### 1. JS Sandbox (`js_eval.rs`) — 11 tests
+# Run live site tests (22 tests, requires network)
+cargo test --features js-eval --test live_site_tests -- --include-ignored
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_eval_js_basic_math` | Basic arithmetic (2+3=5) |
-| `test_eval_js_string_operations` | String methods (toUpperCase, concat) |
-| `test_eval_js_json_operations` | JSON.stringify/parse roundtrip |
-| `test_eval_js_array_methods` | Array sort, join |
-| `test_eval_js_math_functions` | Math.max |
-| `test_eval_js_blocked_fetch` | fetch() blocked by allowlist |
-| `test_eval_js_blocked_eval` | eval() blocked |
-| `test_eval_js_blocked_import` | import() blocked |
-| `test_eval_js_blocked_xmlhttp` | XMLHttpRequest blocked |
-| `test_eval_js_batch` | Batch eval of multiple snippets |
-| `test_eval_js_batch_with_error` | Batch continues after error in one snippet |
+# Run everything
+cargo test --features js-eval --test js_testsuite --test live_site_tests -- --include-ignored
+```
+
+## Test Files
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `tests/js_testsuite.rs` | 120 | Full DOM API, sandbox, event loop, hydration, escalation |
+| `tests/live_site_tests.rs` | 22 | Real website parsing, extraction, JS detection |
+
+## js_testsuite.rs — 120 Tests
+
+### 1. JS Sandbox (`eval_js`) — 11 tests
+- Basic math, strings, JSON, arrays, Math functions
+- Security: fetch/eval/import/XMLHttpRequest blocked
+- Batch eval with error isolation
 
 ### 2. JS Detection (`detect_js`) — 4 tests
+- Inline scripts, event handlers, no-JS pages, framework detection
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_detect_js_inline_script` | Detects `<script>` with DOM access |
-| `test_detect_js_event_handlers` | Detects onclick, onchange, onmouseover |
-| `test_detect_js_no_js` | Zero scripts/handlers on static HTML |
-| `test_detect_js_framework_nextjs` | Next.js framework detection via __NEXT_DATA__ |
+### 3. DOM Bridge (`eval_js_with_dom`) — 10 tests
+- getElementById, querySelector/All, setAttribute/getAttribute
+- textContent, createElement, removeChild, classList, style
 
-### 3. DOM Bridge (`dom_bridge.rs` via `eval_js_with_dom`) — 10 tests
+### 4. DOM API Complete Coverage — 45 tests
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_dom_bridge_get_element_by_id` | getElementById + getAttribute |
-| `test_dom_bridge_set_text_content` | textContent setter doesn't crash |
-| `test_dom_bridge_set_attribute` | setAttribute + getAttribute roundtrip |
-| `test_dom_bridge_create_element` | createElement returns object |
-| `test_dom_bridge_query_selector` | querySelector with class selector |
-| `test_dom_bridge_query_selector_all` | querySelectorAll returns correct count |
-| `test_dom_bridge_remove_child` | removeChild reduces children count |
-| `test_dom_bridge_inner_html_via_mutations` | Attribute manipulation on elements with children |
-| `test_dom_bridge_classlist` | classList.add modifies className |
-| `test_dom_bridge_style` | style.color getter/setter |
+**Document methods (9):**
+body, head, documentElement, getElementsByClassName, getElementsByTagName,
+createTextNode, createComment, createDocumentFragment, activeElement
 
-### 4. Event Loop (`event_loop.rs`) — 4 tests
+**Tree navigation (7):**
+parentNode, firstChild, firstElementChild, nextSibling, nextElementSibling,
+childNodes, children
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_event_loop_set_timeout` | setTimeout fires, event_loop_ticks > 0 |
-| `test_event_loop_set_interval` | setInterval with clearInterval, timers_fired >= 1 |
-| `test_event_loop_request_animation_frame` | rAF triggers ticks |
-| `test_event_loop_timer_limits` | Large delay (999999ms) clamped, no crash |
+**Element manipulation (12):**
+removeAttribute, insertBefore, cloneNode, outerHTML, innerHTML,
+dataset, closest, matches, contains, getRootNode, isConnected, hidden
 
-### 5. Hydration (`hydration.rs`) — 4 tests
+**classList (5):** remove, toggle, contains, replace, length
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_hydration_nextjs` | Next.js __NEXT_DATA__ extraction |
-| `test_hydration_no_framework` | Plain HTML returns found=false |
-| `test_hydration_nuxt` | Nuxt window.__NUXT__ returns valid response |
-| `test_hydration_angular` | Angular ng-state extraction |
+**style (3):** setProperty/getPropertyValue, removeProperty, multiple properties
 
-### 6. Escalation (`escalation.rs`) — 4 tests
+**Geometry (5):** offset dims, scroll dims, client dims, getBoundingClientRect, getClientRects
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_tier_static_html` | Static HTML -> StaticParse tier |
-| `test_tier_with_dom_scripts` | DOM-modifying scripts -> BoaDom tier |
-| `test_tier_spa_shell` | React SPA -> high confidence tier |
-| `test_tier_nextjs_hydration` | Next.js SSR -> Hydration tier |
+**Events (4):** addEventListener, dispatchEvent, CustomEvent, Event/stopPropagation
 
-### 7. parse_with_js Pipeline — 4 tests
+**Observers (3):** IntersectionObserver, ResizeObserver, MutationObserver
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_parse_with_js_static_page` | Returns tree object for static HTML |
-| `test_parse_with_js_dom_manipulation` | JS analysis reports inline scripts |
-| `test_parse_with_js_event_handlers` | Event handlers processed without error |
-| `test_parse_with_js_injection_detection` | Injection in hidden div doesn't crash pipeline |
+**Other (4):** getComputedStyle, customElements, console methods, pointer lock, shadow DOM
 
-### 8. Security — 4 tests
+**CSS selectors (4):** attribute, child combinator, comma-separated, :first-child
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_sandbox_no_require` | require('fs') blocked |
-| `test_sandbox_no_process` | process.env not accessible |
-| `test_sandbox_no_constructor_escape` | Constructor chain doesn't expose dangerous globals |
-| `test_sandbox_no_settimeout_in_pure_eval` | setTimeout unavailable in pure sandbox (no DOM) |
+### 5. Event Loop — 7 tests
+- setTimeout, setInterval, requestAnimationFrame
+- Timer limits, queueMicrotask, cancelAnimationFrame, clearTimeout
 
-### 9. Integration — 5 tests
+### 6. Hydration — 8 tests
+- Next.js, Nuxt, Angular (detection tests)
+- SvelteKit, Remix, Gatsby, Qwik (format validation)
+- No-framework detection
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_eval_js_timing` | eval_time_us > 0 and < 5s |
-| `test_full_ecommerce_with_js` | E-commerce page: button, select, JS detection |
-| `test_full_login_form_with_js` | Login form: email input, submit button |
-| `test_safe_page_no_warnings` | Clean page produces zero injection warnings |
-| `test_large_page_performance` | 120 elements parsed in < 500ms |
+### 7. Escalation — 6 tests
+- Static HTML, DOM scripts, SPA shell, Next.js SSR
+- WebGL, WebAssembly pages
+
+### 8. parse_with_js Pipeline — 4 tests
+- Static page, DOM manipulation, event handlers, injection detection
+
+### 9. Security — 5 tests
+- require/process blocked, constructor escape safe
+- setTimeout isolation in pure sandbox, eval timing
+
+### 10. End-to-end Integration — 5 tests
+- E-commerce with JS, login form, safe page, performance (120 elements)
+
+## live_site_tests.rs — 22 Tests
+
+All tests are `#[ignore]` by default (require network).
+
+### Sites Tested
+
+| Site | Tests | What's verified |
+|------|-------|-----------------|
+| books.toscrape.com | 5 | Parse, JS detect, extract, tier, injection |
+| news.ycombinator.com | 3 | Parse (30+ noder), find_and_click, injection |
+| example.com | 3 | Parse, extract, tier (StaticParse) |
+| httpbin.org | 2 | Parse, JS detection |
+| Wikipedia (Rust article) | 3 | Parse (20+ noder), performance (<1s), injection |
+| GitHub repo | 2 | Parse, JS detection |
+| Cross-site | 4 | Semantic diff, compile_goal, parse_with_js, hydration |
+
+### MCP Test Scenarios (10 documented)
+
+The file also documents 10 MCP tool test scenarios for manual/CI testing:
+
+1. `fetch_parse` — books.toscrape.com, HN, example.com
+2. `fetch_extract` — books.toscrape.com, example.com
+3. `fetch_click` — HN "new" link, books "next" page
+4. `parse_with_js` — GitHub repo pages
+5. `check_injection` — positive and negative cases
 
 ## Known Limitations
 
-1. **textContent as getter**: Boa's DOM bridge returns `textContent` as a function object
-   rather than a string value when accessed as a property. Tests use `getAttribute()` instead.
-2. **createElement + appendChild**: The `appendChild` call on dynamically created elements
-   may fail in some cases. Test verifies `createElement` returns an object.
-3. **Nuxt hydration**: `window.__NUXT__` format detection depends on exact script format;
-   may return `found: false` for non-standard Nuxt setups.
+1. **DOM property getters**: Boa returns some DOM properties (parentNode, dataset,
+   innerHTML) as getter functions rather than values. Tests use `typeof` checks.
+2. **Event/CustomEvent constructors**: `new Event('click')` may fail in Boa.
+   Tests verify constructor availability rather than instantiation.
+3. **Observer constructors**: IntersectionObserver/ResizeObserver registered via
+   window globals; MutationObserver via event_loop. Availability varies.
+4. **Live tests**: Depend on external sites being available. Run with `--include-ignored`.
 
 ## API Response Formats
 
@@ -124,20 +135,22 @@ hydration, escalation, and end-to-end `parse_with_js`.
 
 ### eval_js_with_dom
 ```json
-{"value": "result", "error": null, "mutations": [], "eval_time_us": 100, "event_loop_ticks": 3, "timers_fired": 1}
+{"value": "result", "error": null, "mutations": [], "eval_time_us": 100,
+ "event_loop_ticks": 3, "timers_fired": 1}
 ```
 
 ### extract_hydration
 ```json
-{"found": true, "framework": "NextJs", "nodes": [...], "warnings": [...], "extract_time_ms": 1}
+{"found": true, "framework": "NextJs", "nodes": [...], "warnings": [...]}
 ```
 
 ### parse_with_js
 ```json
-{"tree": {"nodes": [...], "parse_time_ms": 5}, "js_bindings": [...], "js_analysis": {"total_inline_scripts": 1, "total_event_handlers": 2, "has_framework": false}, "total_evals": 1, "successful_evals": 1, "exec_time_ms": 10}
+{"tree": {"nodes": [...]}, "js_analysis": {"total_inline_scripts": 1,
+ "total_event_handlers": 2, "has_framework": false}, "total_evals": 1}
 ```
 
 ### select_parse_tier
 ```json
-{"tier": "StaticParse", "reason": "No JS detected", "confidence": 0.95, "analysis_time_us": 50}
+{"tier": "StaticParse", "reason": "...", "confidence": 0.95}
 ```
