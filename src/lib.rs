@@ -1211,10 +1211,20 @@ pub fn render_html_to_png(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
+    // Säkerhetsgräns: förhindra OOM vid orimligt stor HTML
+    const MAX_HTML_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    if html.len() > MAX_HTML_SIZE {
+        return Err(format!(
+            "HTML för stor för rendering: {} bytes (max {MAX_HTML_SIZE})",
+            html.len()
+        ));
+    }
+
     // Säkerhetsgräns: förhindra OOM vid orimliga dimensioner
-    const MAX_WIDTH: u32 = 4096;
-    const MAX_HEIGHT: u32 = 8192;
-    const MAX_PIXELS: u64 = 4096 * 8192; // ~134 MB RGBA-buffer
+    // Sänkt från 4096×8192 (134MB) till 2048×4096 (33MB) för stabilitet
+    const MAX_WIDTH: u32 = 2048;
+    const MAX_HEIGHT: u32 = 4096;
+    const MAX_PIXELS: u64 = 2048 * 4096; // ~33 MB RGBA-buffer
     let width = width.min(MAX_WIDTH);
     let height = height.min(MAX_HEIGHT);
     let total_pixels = width as u64 * height as u64;
