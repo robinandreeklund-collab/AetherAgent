@@ -1587,10 +1587,7 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 third.to_boolean()
             };
             let mut s = st.borrow_mut();
-            let listeners = s
-                .event_listeners
-                .entry(key_bits as u64)
-                .or_insert_with(Vec::new);
+            let listeners = s.event_listeners.entry(key_bits as u64).or_default();
             listeners.push(EventListener {
                 event_type,
                 callback,
@@ -1692,7 +1689,8 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             };
             for cb in &target_listeners {
                 if let Some(callable) = cb.as_callable() {
-                    let _ = callable.call(&JsValue::undefined(), &[event_val.clone()], ctx);
+                    let _ =
+                        callable.call(&JsValue::undefined(), std::slice::from_ref(&event_val), ctx);
                 }
             }
 
@@ -1729,7 +1727,11 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     };
                     for cb in &ancestor_listeners {
                         if let Some(callable) = cb.as_callable() {
-                            let _ = callable.call(&JsValue::undefined(), &[event_val.clone()], ctx);
+                            let _ = callable.call(
+                                &JsValue::undefined(),
+                                std::slice::from_ref(&event_val),
+                                ctx,
+                            );
                         }
                     }
                 }
@@ -2034,14 +2036,11 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
     // ─── getRootNode() ──────────────────────────────────────────────
     let st = Rc::clone(state);
     let root_node_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+        NativeFunction::from_closure(move |_this, _args, _ctx| {
             let s = st.borrow();
             let mut current = key;
-            loop {
-                match s.arena.nodes.get(current).and_then(|n| n.parent) {
-                    Some(parent) => current = parent,
-                    None => break,
-                }
+            while let Some(parent) = s.arena.nodes.get(current).and_then(|n| n.parent) {
+                current = parent;
             }
             Ok(JsValue::from(node_key_to_f64(current)))
         })
@@ -2529,18 +2528,16 @@ fn register_window(context: &mut Context, state: SharedState) {
             }
 
             let merged_for_closure = merged.clone();
-            let get_pv = unsafe {
-                NativeFunction::from_closure(move |_this, args, ctx2| {
-                    let prop = args
-                        .get_or_undefined(0)
-                        .to_string(ctx2)
-                        .map(|s| s.to_std_string_escaped())
-                        .unwrap_or_default()
-                        .to_lowercase();
-                    let val = merged_for_closure.get(&prop).cloned().unwrap_or_default();
-                    Ok(JsValue::from(js_string!(val.as_str())))
-                })
-            };
+            let get_pv = NativeFunction::from_closure(move |_this, args, ctx2| {
+                let prop = args
+                    .get_or_undefined(0)
+                    .to_string(ctx2)
+                    .map(|s| s.to_std_string_escaped())
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let val = merged_for_closure.get(&prop).cloned().unwrap_or_default();
+                Ok(JsValue::from(js_string!(val.as_str())))
+            });
 
             let style = ObjectInitializer::new(ctx)
                 .function(get_pv, js_string!("getPropertyValue"), 1)
@@ -2577,54 +2574,52 @@ fn register_window(context: &mut Context, state: SharedState) {
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_io);
 
-            let observe_fn = unsafe {
-                NativeFunction::from_closure(move |_this, args, ctx2| {
-                    let target = args.get_or_undefined(0);
-                    let target_key = extract_node_key(target, ctx2);
+            let observe_fn = NativeFunction::from_closure(move |_this, args, ctx2| {
+                let target = args.get_or_undefined(0);
+                let target_key = extract_node_key(target, ctx2);
 
-                    if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
-                        let (y, w, h) = {
-                            let s = st_observe.borrow();
-                            let (_, y, w, h) = estimate_layout_rect(&s.arena, k);
-                            (y, w, h)
-                        };
+                if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                    let (y, w, h) = {
+                        let s = st_observe.borrow();
+                        let (_, y, w, h) = estimate_layout_rect(&s.arena, k);
+                        (y, w, h)
+                    };
 
-                        let is_visible = y < 768.0 && w > 0.0 && h > 0.0;
-                        let ratio = if is_visible { 1.0 } else { 0.0 };
+                    let is_visible = y < 768.0 && w > 0.0 && h > 0.0;
+                    let ratio = if is_visible { 1.0 } else { 0.0 };
 
-                        let bounds = ObjectInitializer::new(ctx2)
-                            .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
-                            .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
-                            .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
-                            .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
-                            .build();
+                    let bounds = ObjectInitializer::new(ctx2)
+                        .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
+                        .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
+                        .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
+                        .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
+                        .build();
 
-                        let entry = ObjectInitializer::new(ctx2)
-                            .property(
-                                js_string!("isIntersecting"),
-                                JsValue::from(is_visible),
-                                Attribute::READONLY,
-                            )
-                            .property(
-                                js_string!("intersectionRatio"),
-                                JsValue::from(ratio),
-                                Attribute::READONLY,
-                            )
-                            .property(
-                                js_string!("boundingClientRect"),
-                                bounds,
-                                Attribute::READONLY,
-                            )
-                            .property(js_string!("target"), target.clone(), Attribute::READONLY)
-                            .build();
+                    let entry = ObjectInitializer::new(ctx2)
+                        .property(
+                            js_string!("isIntersecting"),
+                            JsValue::from(is_visible),
+                            Attribute::READONLY,
+                        )
+                        .property(
+                            js_string!("intersectionRatio"),
+                            JsValue::from(ratio),
+                            Attribute::READONLY,
+                        )
+                        .property(
+                            js_string!("boundingClientRect"),
+                            bounds,
+                            Attribute::READONLY,
+                        )
+                        .property(js_string!("target"), target.clone(), Attribute::READONLY)
+                        .build();
 
-                        let entries = JsArray::new(ctx2);
-                        let _ = entries.push(entry, ctx2);
-                        let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
-                    }
-                    Ok(JsValue::undefined())
-                })
-            };
+                    let entries = JsArray::new(ctx2);
+                    let _ = entries.push(entry, ctx2);
+                    let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                }
+                Ok(JsValue::undefined())
+            });
 
             let unobserve_fn =
                 NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
@@ -2655,53 +2650,51 @@ fn register_window(context: &mut Context, state: SharedState) {
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_ro);
 
-            let observe_fn = unsafe {
-                NativeFunction::from_closure(move |_this, args, ctx2| {
-                    let target = args.get_or_undefined(0);
-                    let target_key = extract_node_key(target, ctx2);
+            let observe_fn = NativeFunction::from_closure(move |_this, args, ctx2| {
+                let target = args.get_or_undefined(0);
+                let target_key = extract_node_key(target, ctx2);
 
-                    if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
-                        let (w, h) = {
-                            let s = st_observe.borrow();
-                            let (_, _, w, h) = estimate_layout_rect(&s.arena, k);
-                            (w, h)
-                        };
+                if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                    let (w, h) = {
+                        let s = st_observe.borrow();
+                        let (_, _, w, h) = estimate_layout_rect(&s.arena, k);
+                        (w, h)
+                    };
 
-                        let content_rect = ObjectInitializer::new(ctx2)
-                            .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
-                            .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
-                            .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
-                            .property(js_string!("y"), JsValue::from(0.0), Attribute::READONLY)
-                            .build();
+                    let content_rect = ObjectInitializer::new(ctx2)
+                        .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
+                        .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
+                        .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
+                        .property(js_string!("y"), JsValue::from(0.0), Attribute::READONLY)
+                        .build();
 
-                        let border_size = ObjectInitializer::new(ctx2)
-                            .property(
-                                js_string!("inlineSize"),
-                                JsValue::from(w),
-                                Attribute::READONLY,
-                            )
-                            .property(
-                                js_string!("blockSize"),
-                                JsValue::from(h),
-                                Attribute::READONLY,
-                            )
-                            .build();
-                        let border_arr = JsArray::new(ctx2);
-                        let _ = border_arr.push(border_size, ctx2);
+                    let border_size = ObjectInitializer::new(ctx2)
+                        .property(
+                            js_string!("inlineSize"),
+                            JsValue::from(w),
+                            Attribute::READONLY,
+                        )
+                        .property(
+                            js_string!("blockSize"),
+                            JsValue::from(h),
+                            Attribute::READONLY,
+                        )
+                        .build();
+                    let border_arr = JsArray::new(ctx2);
+                    let _ = border_arr.push(border_size, ctx2);
 
-                        let entry = ObjectInitializer::new(ctx2)
-                            .property(js_string!("contentRect"), content_rect, Attribute::READONLY)
-                            .property(js_string!("borderBoxSize"), border_arr, Attribute::READONLY)
-                            .property(js_string!("target"), target.clone(), Attribute::READONLY)
-                            .build();
+                    let entry = ObjectInitializer::new(ctx2)
+                        .property(js_string!("contentRect"), content_rect, Attribute::READONLY)
+                        .property(js_string!("borderBoxSize"), border_arr, Attribute::READONLY)
+                        .property(js_string!("target"), target.clone(), Attribute::READONLY)
+                        .build();
 
-                        let entries = JsArray::new(ctx2);
-                        let _ = entries.push(entry, ctx2);
-                        let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
-                    }
-                    Ok(JsValue::undefined())
-                })
-            };
+                    let entries = JsArray::new(ctx2);
+                    let _ = entries.push(entry, ctx2);
+                    let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                }
+                Ok(JsValue::undefined())
+            });
 
             let unobserve_fn =
                 NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
