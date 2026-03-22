@@ -52,6 +52,9 @@ image = { version = "0.25", optional = true }
 # CDP – Chrome DevTools Protocol for Tier 2 rendering (optional)
 headless_chrome = { version = "1.0", optional = true }
 
+# Fas 19: CSS Cascade Engine – lightningcss for CSS parsing + cascade
+lightningcss = { version = "1.0.0-alpha.71", optional = true, default-features = false }
+
 # Blitz – ren Rust HTML/CSS-renderer för server-side screenshots (optional)
 blitz-html = { version = "0.2", optional = true }
 blitz-dom = { version = "0.2", optional = true }
@@ -71,7 +74,7 @@ base64 = "0.22"
 [features]
 default = []
 server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision"]
-js-eval = ["boa_engine"]
+js-eval = ["boa_engine", "lightningcss"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]

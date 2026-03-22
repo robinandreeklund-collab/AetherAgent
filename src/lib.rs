@@ -5,6 +5,8 @@ mod arena_dom;
 mod causal;
 mod collab;
 mod compiler;
+#[cfg(feature = "js-eval")]
+mod css_cascade;
 mod diff;
 #[cfg(feature = "js-eval")]
 mod dom_bridge;
