@@ -34,6 +34,7 @@ fn find_node_recursive<'a>(
 // FAS 1: js_eval — sandbox, säkerhet, batch
 // ═══════════════════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_basic_math() {
     let result = parse_json(&eval_js("2 + 3"));
@@ -42,12 +43,14 @@ fn test_eval_js_basic_math() {
     assert_eq!(result["timed_out"], false, "Ska inte timeouta");
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_string_operations() {
     let result = parse_json(&eval_js("'hello'.toUpperCase() + ' WORLD'"));
     assert_eq!(result["value"], "HELLO WORLD", "String concat ska fungera");
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_json_operations() {
     let result = parse_json(&eval_js("JSON.stringify({a: 1, b: [2,3]})"));
@@ -57,12 +60,14 @@ fn test_eval_js_json_operations() {
     assert_eq!(inner["b"][0], 2, "Array-element ska bevaras");
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_array_methods() {
     let result = parse_json(&eval_js("[3,1,2].sort().join(',')"));
     assert_eq!(result["value"], "1,2,3", "Array sort+join ska fungera");
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_math_functions() {
     let result = parse_json(&eval_js("Math.max(10, 20, 5)"));
@@ -105,6 +110,7 @@ fn test_eval_js_blocked_xmlhttp() {
     );
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_batch() {
     let snippets = serde_json::to_string(&vec!["1+1", "2*3", "'abc'.length"]).unwrap();
@@ -116,6 +122,7 @@ fn test_eval_js_batch() {
     assert_eq!(results[2]["value"], "3", "'abc'.length = 3");
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_batch_with_error() {
     let snippets = serde_json::to_string(&vec!["1+1", "fetch('x')", "3+3"]).unwrap();
@@ -655,6 +662,7 @@ fn test_sandbox_no_settimeout_in_pure_eval() {
     );
 }
 
+#[cfg(feature = "js-eval")]
 #[test]
 fn test_eval_js_timing() {
     let result = parse_json(&eval_js("1+1"));
