@@ -1941,12 +1941,12 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     let html_with_css = &css_result.html;
 
     // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
-    // Auto-detektera fast_render för tunga sidor (>200KB HTML)
-    // Extern resursladdning i Blitz kostar 2-5s och kan orsaka timeout på tunga sidor
-    const FAST_RENDER_THRESHOLD: usize = 200 * 1024;
+    // Auto-detektera fast_render baserat på original HTML-storlek (före CSS-inlining)
+    // Tröskeln 500KB matchar riktigt tunga sidor (github 569KB) som kraschar Blitz
+    const FAST_RENDER_THRESHOLD: usize = 500 * 1024;
     let fast_render = req
         .fast_render
-        .unwrap_or(html_with_css.len() > FAST_RENDER_THRESHOLD);
+        .unwrap_or(html.len() > FAST_RENDER_THRESHOLD);
     let html_for_render = html_with_css.clone();
     let url_for_render = final_url.clone();
     let status_code = fetch_result.status_code;
