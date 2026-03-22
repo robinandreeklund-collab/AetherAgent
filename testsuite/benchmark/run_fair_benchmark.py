@@ -180,7 +180,7 @@ for name, url in SITES:
         if png:
             with open(f"{AETHER_DIR}/{sname}.png", "wb") as f:
                 f.write(png)
-            css_ok = d.get("css_added_bytes", 0) > 0
+            css_ok = d.get("css_bytes_added", d.get("css_added_bytes", 0)) > 0
             quality = "med CSS" if css_ok else "utan CSS"
             print(f"  {name:<28} {ae_ms:>6}ms  {len(png):>7} bytes  ({quality})")
             results["render"].append({"site": name, "ms": ae_ms, "png_bytes": len(png),

@@ -1237,10 +1237,16 @@ pub fn render_html_to_png(
     }
     // Applicera CSS cascade → inline styles innan Blitz-rendering
     // Blitz renderar bara inline/HTML-styles — detta kopplar computed styles till rendering
+    // Skippa cascade för stora sidor (>300KB) — kostnaden väger tyngre än vinsten
     #[cfg(feature = "js-eval")]
     let html = {
-        let (cascaded, _count) = css_cascade::apply_cascade_to_html(html);
-        cascaded
+        const CASCADE_MAX_HTML_SIZE: usize = 300 * 1024; // 300 KB
+        if html.len() <= CASCADE_MAX_HTML_SIZE {
+            let (cascaded, _count) = css_cascade::apply_cascade_to_html(html);
+            cascaded
+        } else {
+            html.to_string()
+        }
     };
     #[cfg(not(feature = "js-eval"))]
     let html = html.to_string();

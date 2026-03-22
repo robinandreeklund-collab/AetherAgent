@@ -1902,6 +1902,9 @@ struct FetchRenderRequest {
     width: u32,
     #[serde(default = "default_height")]
     height: u32,
+    /// true = skippa extern resursladdning i Blitz (~50ms), false = ladda allt (~2-5s cap)
+    /// Om ej angivet: auto-detektera baserat på HTML-storlek (>200KB → fast)
+    fast_render: Option<bool>,
 }
 
 #[cfg(all(feature = "fetch", feature = "blitz"))]
@@ -1938,6 +1941,12 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     let html_with_css = &css_result.html;
 
     // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
+    // Auto-detektera fast_render för tunga sidor (>200KB HTML)
+    // Extern resursladdning i Blitz kostar 2-5s och kan orsaka timeout på tunga sidor
+    const FAST_RENDER_THRESHOLD: usize = 200 * 1024;
+    let fast_render = req
+        .fast_render
+        .unwrap_or(html_with_css.len() > FAST_RENDER_THRESHOLD);
     let html_for_render = html_with_css.clone();
     let url_for_render = final_url.clone();
     let status_code = fetch_result.status_code;
@@ -1959,7 +1968,7 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                     &url_for_render,
                     render_width,
                     render_height,
-                    false,
+                    fast_render,
                 ) {
                     Ok((png_bytes, tier_used)) => {
                         use base64::Engine;
@@ -2007,7 +2016,7 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                 &url_for_render,
                 render_width,
                 render_height,
-                false,
+                fast_render,
             ) {
                 Ok((png_bytes, tier_used)) => {
                     use base64::Engine;
