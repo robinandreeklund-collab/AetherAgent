@@ -77,7 +77,9 @@ use types::{SemanticTree, WorkflowMemory};
 /// ~5-10x snabbare traversering och cache-friendly minnesallokering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     let rcdom = parse_html(html);
-    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    let mut arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    // Resolva lazy-loaded bilder (data-src → src) innan semantisk analys
+    arena.resolve_lazy_images();
     let title = arena.extract_title();
     let mut builder = SemanticBuilder::new(goal);
     let mut tree = builder.build_from_arena(&arena, url, &title);
@@ -1253,7 +1255,17 @@ pub fn render_html_to_png(
     let use_compiled = compiled.fully_compiled;
     let compiled_html = compiled.html;
 
-<<<<<<< HEAD
+    // Säkerhetsgräns: Blitz/Vello kraschar (panik i GradientLut) på sidor med
+    // väldigt stora CSS-gradienter (t.ex. github.com ~3.7MB CSS). Skippa rendering
+    // för extremt stora HTML-dokument som triggar denna bugg.
+    const MAX_HTML_FOR_BLITZ: usize = 3 * 1024 * 1024; // 3 MB
+    if html.len() > MAX_HTML_FOR_BLITZ {
+        return Err(format!(
+            "HTML för stort för Blitz ({:.1} MB > 3 MB max) — använd CDP-tier istället",
+            html.len() as f64 / (1024.0 * 1024.0)
+        ));
+    }
+
     // Försök 1: rendera med CSS-compiled HTML
     if use_compiled {
         let html_owned = compiled_html.clone();
@@ -1299,20 +1311,6 @@ pub fn render_html_to_png(
     }
 
     // Fallback: rendera med original HTML (utan CSS Compiler)
-=======
-    // Säkerhetsgräns: Blitz/Vello kraschar (panik i GradientLut) på sidor med
-    // väldigt stora CSS-gradienter (t.ex. github.com ~3.7MB CSS). Skippa rendering
-    // för extremt stora HTML-dokument som triggar denna bugg.
-    const MAX_HTML_FOR_BLITZ: usize = 3 * 1024 * 1024; // 3 MB
-    if html.len() > MAX_HTML_FOR_BLITZ {
-        return Err(format!(
-            "HTML för stort för Blitz ({:.1} MB > 3 MB max) — använd CDP-tier istället",
-            html.len() as f64 / (1024.0 * 1024.0)
-        ));
-    }
-
-    // Kör Blitz-renderingen med catch_unwind — Blitz kan panika vid tunga sidor
->>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
     let html_owned = html.to_string();
     let base_url_owned = base_url.to_string();
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -1334,26 +1332,128 @@ pub fn render_html_to_png(
     }
 }
 
-/// Strippa <noscript>-element från HTML innan Blitz-rendering.
-/// Blitz kör ingen JS, så noscript-innehåll visas felaktigt som "Enable JavaScript".
+/// Strippa <noscript>-element och nojs-divvar från HTML innan Blitz-rendering.
+///
+/// Hanterar:
+///   1. `<noscript>` — Blitz kör ingen JS, så dessa visas felaktigt
+///   2. `<div id="nojs">` — python.org-mönstret, JS-varning utan noscript-tagg
+///   3. `<div class="no-js">` / `<div class="nojs">` — alternativa mönster
 #[cfg(feature = "blitz")]
 fn strip_noscript(html: &str) -> String {
-    // Regex-fri stripping — hanterar nested tags korrekt
+    let mut result = strip_noscript_tags(html);
+    result = strip_nojs_divs(&result);
+    result
+}
+
+/// Strippa <noscript>-element
+#[cfg(feature = "blitz")]
+fn strip_noscript_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut remaining = html;
     while let Some(start) = remaining.to_ascii_lowercase().find("<noscript") {
         result.push_str(&remaining[..start]);
-        // Hitta matchande </noscript>
         let after_tag = &remaining[start..];
         if let Some(end) = after_tag.to_ascii_lowercase().find("</noscript>") {
             let close_end = end + "</noscript>".len();
             remaining = &after_tag[close_end..];
         } else {
-            // Inget sluttagg — skippa resten
             remaining = "";
             break;
         }
     }
+    result.push_str(remaining);
+    result
+}
+
+/// Strippa nojs-divvar: `<div id="nojs">`, `<div class="nojs">`, `<div class="no-js">`
+///
+/// python.org använder `<div id="nojs">` istället för `<noscript>` — kräver JS-eval
+/// för att döljas. Blitz kör inget JS, så vi tar bort dessa före rendering.
+#[cfg(feature = "blitz")]
+fn strip_nojs_divs(html: &str) -> String {
+    // Mönster att matcha i öppningstaggar
+    const NOJS_PATTERNS: &[&str] = &[
+        r#"id="nojs""#,
+        r#"id='nojs'"#,
+        r#"class="nojs""#,
+        r#"class='nojs'"#,
+        r#"class="no-js""#,
+        r#"class='no-js'"#,
+        r#"id="no-js""#,
+        r#"id='no-js'"#,
+    ];
+
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+    let lower = html.to_ascii_lowercase();
+    let mut lower_remaining = lower.as_str();
+
+    loop {
+        // Hitta nästa <div som kan vara nojs
+        let div_pos = match lower_remaining.find("<div") {
+            Some(p) => p,
+            None => break,
+        };
+
+        // Hitta slutet av öppningstaggen
+        let after_div = &lower_remaining[div_pos..];
+        let tag_end = match after_div.find('>') {
+            Some(p) => p,
+            None => break,
+        };
+
+        let opening_tag = &after_div[..tag_end + 1];
+        let is_nojs = NOJS_PATTERNS
+            .iter()
+            .any(|pattern| opening_tag.contains(pattern));
+
+        if is_nojs {
+            // Lägg till allt före denna div
+            result.push_str(&remaining[..div_pos]);
+
+            // Hitta matchande </div> (hantera nesting)
+            let content_start = div_pos + tag_end + 1;
+            let after_content = &lower_remaining[content_start..];
+            let mut depth = 1u32;
+            let mut search_pos = 0;
+            let close_pos = loop {
+                // Hitta nästa div-relaterade tagg
+                let next_open = after_content[search_pos..].find("<div");
+                let next_close = after_content[search_pos..].find("</div>");
+
+                match (next_open, next_close) {
+                    (Some(o), Some(c)) if o < c => {
+                        depth += 1;
+                        search_pos += o + 4;
+                    }
+                    (_, Some(c)) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break Some(content_start + search_pos + c + "</div>".len());
+                        }
+                        search_pos += c + 6;
+                    }
+                    _ => break None,
+                }
+            };
+
+            if let Some(end) = close_pos {
+                remaining = &remaining[end..];
+                lower_remaining = &lower[html.len() - remaining.len()..];
+            } else {
+                remaining = "";
+                lower_remaining = "";
+                break;
+            }
+        } else {
+            // Inte nojs — kopiera fram till efter denna div-tagg
+            let skip_to = div_pos + tag_end + 1;
+            result.push_str(&remaining[..skip_to]);
+            remaining = &remaining[skip_to..];
+            lower_remaining = &lower_remaining[skip_to..];
+        }
+    }
+
     result.push_str(remaining);
     result
 }
@@ -3166,7 +3266,10 @@ mod tests {
         fn test_strip_noscript_with_attributes() {
             let html = r#"<noscript class="js-fallback">JS required</noscript><p>OK</p>"#;
             let result = strip_noscript(html);
-            assert!(!result.contains("JS required"), "Noscript med attribut ska strippas");
+            assert!(
+                !result.contains("JS required"),
+                "Noscript med attribut ska strippas"
+            );
             assert!(result.contains("<p>OK</p>"), "Innehåll utanför ska bevaras");
         }
 
@@ -3174,6 +3277,58 @@ mod tests {
         fn test_strip_noscript_empty_html() {
             assert_eq!(strip_noscript(""), "");
             assert_eq!(strip_noscript("no noscript here"), "no noscript here");
+        }
+
+        // === NoJS-div-stripping ===
+
+        #[test]
+        fn test_strip_nojs_div_by_id() {
+            let html = r#"<html><body><div id="nojs">Aktivera JavaScript</div><p>Innehåll</p></body></html>"#;
+            let result = strip_noscript(html);
+            assert!(
+                !result.contains("Aktivera JavaScript"),
+                "div#nojs borde strippas"
+            );
+            assert!(result.contains("Innehåll"), "Övrigt innehåll ska bevaras");
+        }
+
+        #[test]
+        fn test_strip_nojs_div_by_class() {
+            let html = r#"<html><body><div class="no-js">JS krävs</div><p>OK</p></body></html>"#;
+            let result = strip_noscript(html);
+            assert!(!result.contains("JS krävs"), "div.no-js borde strippas");
+            assert!(result.contains("<p>OK</p>"), "Övrig HTML ska bevaras");
+        }
+
+        #[test]
+        fn test_strip_nojs_div_nested() {
+            let html = r#"<html><body><div id="nojs"><div class="inner"><p>Enable JS to use this site</p></div></div><p>Real</p></body></html>"#;
+            let result = strip_noscript(html);
+            assert!(
+                !result.contains("Enable JS"),
+                "Nästlat nojs-innehåll borde strippas"
+            );
+            assert!(result.contains("Real"), "Innehåll efter nojs ska finnas");
+        }
+
+        #[test]
+        fn test_strip_normal_div_preserved() {
+            let html = r#"<html><body><div id="content">Riktigt innehåll</div></body></html>"#;
+            let result = strip_noscript(html);
+            assert!(
+                result.contains("Riktigt innehåll"),
+                "Vanliga divvar ska inte strippas"
+            );
+        }
+
+        #[test]
+        fn test_strip_combined_noscript_and_nojs() {
+            let html =
+                r#"<html><body><noscript>A</noscript><div id="nojs">B</div><p>C</p></body></html>"#;
+            let result = strip_noscript(html);
+            assert!(!result.contains(">A<"), "noscript borde strippas");
+            assert!(!result.contains(">B<"), "nojs-div borde strippas");
+            assert!(result.contains(">C<"), "Vanligt innehåll ska bevaras");
         }
     }
 }
