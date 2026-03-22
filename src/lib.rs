@@ -1235,27 +1235,18 @@ pub fn render_html_to_png(
             "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
         ));
     }
-    // Applicera CSS cascade → inline styles innan Blitz-rendering
-    // Blitz renderar bara inline/HTML-styles — detta kopplar computed styles till rendering
-    // Skippa cascade för stora sidor (>300KB) — kostnaden väger tyngre än vinsten
-    #[cfg(feature = "js-eval")]
-    let html = {
-        const CASCADE_MAX_HTML_SIZE: usize = 300 * 1024; // 300 KB
-        if html.len() <= CASCADE_MAX_HTML_SIZE {
-            let (cascaded, _count) = css_cascade::apply_cascade_to_html(html);
-            cascaded
-        } else {
-            html.to_string()
-        }
-    };
-    #[cfg(not(feature = "js-eval"))]
-    let html = html.to_string();
+    // OBS: CSS cascade (css_cascade.rs) appliceras INTE här.
+    // Blitz har en egen full CSS-motor som hanterar <style>-taggar, specificitet och arv.
+    // Extern CSS hämtas av inline_external_css() och läggs som <style>-taggar som Blitz
+    // parsear nativt — det ger bättre resultat än vår förenklade cascade.
+    // css_cascade.rs används istället av JS-sandboxen (window.getComputedStyle).
 
     // Kör hela Blitz-renderingen i catch_unwind — Blitz kan panika vid tunga/felaktiga sidor
+    let html_owned = html.to_string();
     let base_url_owned = base_url.to_string();
 
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-        render_html_to_png_inner(&html, &base_url_owned, width, height, fast_render)
+        render_html_to_png_inner(&html_owned, &base_url_owned, width, height, fast_render)
     }));
 
     match render_result {
