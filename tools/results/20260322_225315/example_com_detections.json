@@ -1,0 +1,144 @@
+{
+  "detections": [
+    {
+      "bbox": {
+        "height": 0.00032348634,
+        "width": 0.0002532959,
+        "x": 0.00019683839,
+        "y": 6.7138666e-05
+      },
+      "class": "heading",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.00043945314,
+        "width": 0.859375,
+        "x": 0.0,
+        "y": 0.87087405
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.013879395,
+        "width": 0.013989258,
+        "x": 0.0068847663,
+        "y": 0.0071472167
+      },
+      "class": "heading",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.011083985,
+        "width": 0.87656254,
+        "x": 0.0,
+        "y": 0.88352054
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.003125,
+        "width": 0.003125,
+        "x": 0.0,
+        "y": 0.0015625
+      },
+      "class": "button",
+      "confidence": 0.880797
+    }
+  ],
+  "inference_time_ms": 115,
+  "preprocess_time_ms": 82,
+  "raw_detection_count": 5,
+  "tree": {
+    "goal": "find main content",
+    "injection_warnings": [],
+    "nodes": [
+      {
+        "bbox": {
+          "height": 0.00032348634,
+          "width": 0.0002532959,
+          "x": 0.00019683839,
+          "y": 6.7138666e-05
+        },
+        "id": 1,
+        "label": "vision_heading #1",
+        "relevance": 0.6,
+        "role": "heading",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.00043945314,
+          "width": 0.859375,
+          "x": 0.0,
+          "y": 0.87087405
+        },
+        "id": 2,
+        "label": "vision_button #2",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "bbox": {
+          "height": 0.013879395,
+          "width": 0.013989258,
+          "x": 0.0068847663,
+          "y": 0.0071472167
+        },
+        "id": 3,
+        "label": "vision_heading #3",
+        "relevance": 0.6,
+        "role": "heading",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.011083985,
+          "width": 0.87656254,
+          "x": 0.0,
+          "y": 0.88352054
+        },
+        "id": 4,
+        "label": "vision_button #4",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.003125,
+          "width": 0.003125,
+          "x": 0.0,
+          "y": 0.0015625
+        },
+        "id": 5,
+        "label": "vision_button #5",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      }
+    ],
+    "parse_time_ms": 0,
+    "title": "",
+    "url": "screenshot://local"
+  }
+}

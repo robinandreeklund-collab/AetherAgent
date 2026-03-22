@@ -1,0 +1,68 @@
+{
+  "detections": [
+    {
+      "bbox": {
+        "height": 0.5078125,
+        "width": 0.74296874,
+        "x": 0.25703126,
+        "y": 0.49218747
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.003125,
+        "width": 0.003125,
+        "x": 0.0015625,
+        "y": 0.0015625
+      },
+      "class": "button",
+      "confidence": 0.880797
+    }
+  ],
+  "inference_time_ms": 100,
+  "preprocess_time_ms": 76,
+  "raw_detection_count": 2,
+  "tree": {
+    "goal": "extract quotes and authors",
+    "injection_warnings": [],
+    "nodes": [
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.5078125,
+          "width": 0.74296874,
+          "x": 0.25703126,
+          "y": 0.49218747
+        },
+        "id": 1,
+        "label": "vision_button #1",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.003125,
+          "width": 0.003125,
+          "x": 0.0015625,
+          "y": 0.0015625
+        },
+        "id": 2,
+        "label": "vision_button #2",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      }
+    ],
+    "parse_time_ms": 0,
+    "title": "",
+    "url": "screenshot://local"
+  }
+}

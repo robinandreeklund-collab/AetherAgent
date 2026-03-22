@@ -1,0 +1,120 @@
+{
+  "detections": [
+    {
+      "bbox": {
+        "height": 0.06831055,
+        "width": 0.06889649,
+        "x": 0.034155272,
+        "y": 0.034594726
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.4847656,
+        "width": 0.4013672,
+        "x": 0.5986328,
+        "y": 0.5152344
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.17031251,
+        "width": 0.17226563,
+        "x": 0.08574218,
+        "y": 0.08398437
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.003125,
+        "width": 0.003125,
+        "x": 0.0015625,
+        "y": 0.0015625
+      },
+      "class": "button",
+      "confidence": 0.880797
+    }
+  ],
+  "inference_time_ms": 88,
+  "preprocess_time_ms": 66,
+  "raw_detection_count": 4,
+  "tree": {
+    "goal": "find book prices and titles",
+    "injection_warnings": [],
+    "nodes": [
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.06831055,
+          "width": 0.06889649,
+          "x": 0.034155272,
+          "y": 0.034594726
+        },
+        "id": 1,
+        "label": "vision_button #1",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.4847656,
+          "width": 0.4013672,
+          "x": 0.5986328,
+          "y": 0.5152344
+        },
+        "id": 2,
+        "label": "vision_button #2",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.17031251,
+          "width": 0.17226563,
+          "x": 0.08574218,
+          "y": 0.08398437
+        },
+        "id": 3,
+        "label": "vision_button #3",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.003125,
+          "width": 0.003125,
+          "x": 0.0015625,
+          "y": 0.0015625
+        },
+        "id": 4,
+        "label": "vision_button #4",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      }
+    ],
+    "parse_time_ms": 0,
+    "title": "",
+    "url": "screenshot://local"
+  }
+}

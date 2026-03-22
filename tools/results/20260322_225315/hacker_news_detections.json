@@ -1,0 +1,94 @@
+{
+  "detections": [
+    {
+      "bbox": {
+        "height": 0.5324218,
+        "width": 0.3546875,
+        "x": 0.0,
+        "y": 0.46757814
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.49296877,
+        "width": 0.9921875,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.003125,
+        "width": 0.003125,
+        "x": 0.0015625,
+        "y": 0.0015625
+      },
+      "class": "button",
+      "confidence": 0.880797
+    }
+  ],
+  "inference_time_ms": 112,
+  "preprocess_time_ms": 76,
+  "raw_detection_count": 3,
+  "tree": {
+    "goal": "find top stories and links",
+    "injection_warnings": [],
+    "nodes": [
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.5324218,
+          "width": 0.3546875,
+          "x": 0.0,
+          "y": 0.46757814
+        },
+        "id": 1,
+        "label": "vision_button #1",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.49296877,
+          "width": 0.9921875,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "id": 2,
+        "label": "vision_button #2",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.003125,
+          "width": 0.003125,
+          "x": 0.0015625,
+          "y": 0.0015625
+        },
+        "id": 3,
+        "label": "vision_button #3",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      }
+    ],
+    "parse_time_ms": 0,
+    "title": "",
+    "url": "screenshot://local"
+  }
+}
