@@ -1987,6 +1987,7 @@ pub fn workflow_status(orchestrator_json: &str) -> String {
 /// * `top_n` - Number of results to return (1-10, default 3)
 /// * `goal` - Agent goal for relevance scoring (default: same as query)
 /// * `html` - Pre-fetched DDG HTML (if empty, returns error asking caller to fetch)
+#[wasm_bindgen]
 pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> String {
     let start = now_ms();
     let effective_goal = if goal.is_empty() {
@@ -2030,6 +2031,7 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
 }
 
 /// Convenience: build the DDG URL for a query so callers can fetch it
+#[wasm_bindgen]
 pub fn build_search_url(query: &str) -> String {
     search::build_ddg_url(query)
 }
