@@ -350,6 +350,50 @@ struct FetchSearchParams {
     max_nodes_per_result: Option<usize>,
 }
 
+// ─── Fas 7: Fetch-combined parameter types ──────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct FetchParseParams {
+    /// URL to fetch and parse
+    url: String,
+    /// The agent's current goal (e.g. "buy cheapest flight")
+    goal: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct FetchClickParams {
+    /// URL to fetch
+    url: String,
+    /// The agent's current goal
+    goal: String,
+    /// What to click (e.g. "Add to cart", "Log in")
+    target_label: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct FetchExtractParams {
+    /// URL to fetch
+    url: String,
+    /// The agent's current goal
+    goal: String,
+    /// Keys to extract (e.g. ["price", "title", "rating"])
+    keys: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct FetchStreamParseParams {
+    /// URL to fetch and stream-parse
+    url: String,
+    /// The agent's current goal
+    goal: String,
+    /// Max nodes per chunk (default: 10)
+    top_n: Option<u32>,
+    /// Minimum relevance score (default: 0.1)
+    min_relevance: Option<f32>,
+    /// Hard limit on total emitted nodes (default: 50)
+    max_nodes: Option<u32>,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -716,6 +760,64 @@ impl AetherMcpServer {
         })
         .to_string()
     }
+
+    #[tool(
+        name = "fetch_parse",
+        description = "ALL-IN-ONE: Fetch a URL and parse it into a semantic accessibility tree in one call. USE THIS TOOL WHEN: you have a URL and want the full semantic tree without fetching HTML separately. Returns: the semantic tree (same as 'parse'), fetch metadata (status, redirects, timing), and detected XHR/fetch API calls. Combines fetch + parse + XHR detection in a single request."
+    )]
+    fn fetch_parse(&self, Parameters(params): Parameters<FetchParseParams>) -> String {
+        // Stub — async fetch hanteras i call_tool override
+        serde_json::json!({
+            "action": "fetch_parse_pending",
+            "url": params.url,
+            "goal": params.goal,
+        })
+        .to_string()
+    }
+
+    #[tool(
+        name = "fetch_click",
+        description = "ALL-IN-ONE: Fetch a URL, parse it, and find the best element to click. USE THIS TOOL WHEN: you know the URL and what you want to click — combines fetch + find_and_click. Returns: the matched element (role, label, selector_hint, relevance) plus fetch metadata."
+    )]
+    fn fetch_click(&self, Parameters(params): Parameters<FetchClickParams>) -> String {
+        // Stub — async fetch hanteras i call_tool override
+        serde_json::json!({
+            "action": "fetch_click_pending",
+            "url": params.url,
+            "goal": params.goal,
+            "target_label": params.target_label,
+        })
+        .to_string()
+    }
+
+    #[tool(
+        name = "fetch_extract",
+        description = "ALL-IN-ONE: Fetch a URL and extract specific data fields. USE THIS TOOL WHEN: you know the URL and exactly what data you need (e.g. price, title, rating). Returns: extracted key-value pairs with confidence scores, plus fetch metadata."
+    )]
+    fn fetch_extract(&self, Parameters(params): Parameters<FetchExtractParams>) -> String {
+        // Stub — async fetch hanteras i call_tool override
+        serde_json::json!({
+            "action": "fetch_extract_pending",
+            "url": params.url,
+            "goal": params.goal,
+            "keys": params.keys,
+        })
+        .to_string()
+    }
+
+    #[tool(
+        name = "fetch_stream_parse",
+        description = "ALL-IN-ONE: Fetch a URL and stream-parse it with adaptive relevance filtering. USE THIS TOOL WHEN: you want a token-efficient parse of a live URL — fetches the page and returns only the most relevant nodes. Combines fetch + stream_parse_adaptive. Set max_nodes to limit output (default 50)."
+    )]
+    fn fetch_stream_parse(&self, Parameters(params): Parameters<FetchStreamParseParams>) -> String {
+        // Stub — async fetch hanteras i call_tool override
+        serde_json::json!({
+            "action": "fetch_stream_parse_pending",
+            "url": params.url,
+            "goal": params.goal,
+        })
+        .to_string()
+    }
 }
 
 /// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
@@ -1003,6 +1105,281 @@ fn extract_page_nodes(stream_json: &str, max: usize) -> Vec<aether_agent::search
         })
         .take(max)
         .collect()
+}
+
+/// Hanterar fetch_parse: hämta URL + parsa till semantiskt träd
+async fn handle_fetch_parse(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let fetch_ms = start.elapsed().as_millis() as u64;
+    let parse_start = std::time::Instant::now();
+
+    let tree_json =
+        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url);
+    let xhr_json = aether_agent::detect_xhr_urls(&fetch_result.body);
+
+    let parse_ms = parse_start.elapsed().as_millis() as u64;
+    let total_ms = start.elapsed().as_millis() as u64;
+
+    let tree_val: serde_json::Value =
+        serde_json::from_str(&tree_json).unwrap_or(serde_json::Value::Null);
+    let xhr_val: serde_json::Value =
+        serde_json::from_str(&xhr_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "tree": tree_val,
+        "xhr_calls": xhr_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "timing": {
+            "fetch_ms": fetch_ms,
+            "parse_ms": parse_ms,
+            "total_ms": total_ms,
+        },
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar fetch_click: hämta URL + hitta klickbart element
+async fn handle_fetch_click(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let target_label = args
+        .get("target_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let click_json = aether_agent::find_and_click(
+        &fetch_result.body,
+        goal,
+        &fetch_result.final_url,
+        target_label,
+    );
+    let total_ms = start.elapsed().as_millis() as u64;
+
+    let click_val: serde_json::Value =
+        serde_json::from_str(&click_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "click": click_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar fetch_extract: hämta URL + extrahera data
+async fn handle_fetch_extract(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let keys: Vec<String> = args
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let keys_json = serde_json::to_string(&keys).unwrap_or_default();
+    let extract_json = aether_agent::extract_data(
+        &fetch_result.body,
+        goal,
+        &fetch_result.final_url,
+        &keys_json,
+    );
+    let total_ms = start.elapsed().as_millis() as u64;
+
+    let extract_val: serde_json::Value =
+        serde_json::from_str(&extract_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "extract": extract_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar fetch_stream_parse: hämta URL + adaptiv stream-parsning
+async fn handle_fetch_stream_parse(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Saknar arguments".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+    let min_relevance = args
+        .get("min_relevance")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.1) as f32;
+    let max_nodes = args.get("max_nodes").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let stream_json = aether_agent::stream_parse_adaptive(
+        &fetch_result.body,
+        goal,
+        &fetch_result.final_url,
+        top_n,
+        min_relevance,
+        max_nodes,
+    );
+    let total_ms = start.elapsed().as_millis() as u64;
+
+    let stream_val: serde_json::Value =
+        serde_json::from_str(&stream_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "stream": stream_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
 }
 
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
@@ -1399,6 +1776,26 @@ impl ServerHandler for AetherMcpServer {
             "fetch_search" => {
                 let args = request.arguments.as_ref();
                 let result = handle_fetch_search(args).await;
+                Ok(result)
+            }
+            "fetch_parse" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_parse(args).await;
+                Ok(result)
+            }
+            "fetch_click" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_click(args).await;
+                Ok(result)
+            }
+            "fetch_extract" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_extract(args).await;
+                Ok(result)
+            }
+            "fetch_stream_parse" => {
+                let args = request.arguments.as_ref();
+                let result = handle_fetch_stream_parse(args).await;
                 Ok(result)
             }
             // Alla andra verktyg: delegera till router
