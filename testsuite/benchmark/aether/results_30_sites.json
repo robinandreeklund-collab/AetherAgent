@@ -1,0 +1,424 @@
+[
+  {
+    "site": "example.com",
+    "url": "https://example.com",
+<<<<<<< HEAD
+    "ms": 283,
+=======
+    "ms": 658,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 61530,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "news.ycombinator.com",
+    "url": "https://news.ycombinator.com",
+<<<<<<< HEAD
+    "ms": 753,
+    "png_bytes": 422646,
+=======
+    "ms": 1337,
+    "png_bytes": 438498,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  },
+  {
+    "site": "books.toscrape.com",
+    "url": "https://books.toscrape.com",
+<<<<<<< HEAD
+    "ms": 1089,
+    "png_bytes": 142532,
+=======
+    "ms": 2045,
+    "png_bytes": 129170,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "www.aftonbladet.se",
+    "url": "https://www.aftonbladet.se",
+<<<<<<< HEAD
+    "ms": 2265,
+    "png_bytes": 53800,
+=======
+    "ms": 2476,
+    "png_bytes": 59522,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "www.di.se",
+    "url": "https://www.di.se",
+<<<<<<< HEAD
+    "ms": 5358,
+    "png_bytes": 490145,
+=======
+    "ms": 8087,
+    "png_bytes": 491040,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "www.expressen.se",
+    "url": "https://www.expressen.se",
+<<<<<<< HEAD
+    "ms": 2184,
+=======
+    "ms": 3937,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 105159,
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "www.apple.com",
+    "url": "https://www.apple.com",
+<<<<<<< HEAD
+    "ms": 1762,
+=======
+    "ms": 1904,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 279762,
+    "css_found": 7,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "github.com",
+    "url": "https://github.com",
+<<<<<<< HEAD
+    "ms": 733,
+    "status": "fail",
+    "error": "Render failed: Blitz failed and CDP unavailable: Blitz rendering kraschade (catc"
+=======
+    "ms": 306,
+    "status": "fail",
+    "error": "Render failed: Blitz failed and CDP unavailable: HTML f\u00f6r stort f\u00f6r Blitz (3.7 M"
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+  },
+  {
+    "site": "x.com",
+    "url": "https://x.com",
+<<<<<<< HEAD
+    "ms": 694,
+    "png_bytes": 102098,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+=======
+    "ms": 790,
+    "png_bytes": 25317,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "small"
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+  },
+  {
+    "site": "www.bbc.com",
+    "url": "https://www.bbc.com",
+<<<<<<< HEAD
+    "ms": 325,
+=======
+    "ms": 878,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 27465,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "egress"
+  },
+  {
+    "site": "docs.python.org",
+    "url": "https://docs.python.org/3/",
+<<<<<<< HEAD
+    "ms": 738,
+=======
+    "ms": 794,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 330930,
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "cnn.com",
+    "url": "https://www.cnn.com",
+<<<<<<< HEAD
+    "ms": 739,
+    "png_bytes": 215081,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+=======
+    "ms": 654,
+    "status": "fail",
+    "error": "Render failed: Blitz failed and CDP unavailable: HTML f\u00f6r stort f\u00f6r Blitz (4.6 M"
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+  },
+  {
+    "site": "linkedin.com",
+    "url": "https://www.linkedin.com",
+<<<<<<< HEAD
+    "ms": 1055,
+    "png_bytes": 217328,
+=======
+    "ms": 1488,
+    "png_bytes": 216072,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+  },
+  {
+    "site": "svt.se",
+    "url": "https://www.svt.se",
+<<<<<<< HEAD
+    "ms": 3064,
+    "png_bytes": 306647,
+=======
+    "ms": 2582,
+    "png_bytes": 265322,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 8,
+    "css_loaded": 8,
+    "status": "ok"
+  },
+  {
+    "site": "dn.se",
+    "url": "https://www.dn.se",
+<<<<<<< HEAD
+    "ms": 4142,
+    "png_bytes": 657628,
+=======
+    "ms": 5583,
+    "png_bytes": 599482,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "google.com",
+    "url": "https://www.google.com",
+<<<<<<< HEAD
+    "ms": 516,
+    "png_bytes": 65823,
+=======
+    "ms": 646,
+    "png_bytes": 65836,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "rust-lang.org",
+    "url": "https://www.rust-lang.org",
+<<<<<<< HEAD
+    "ms": 1233,
+    "png_bytes": 146579,
+=======
+    "ms": 1835,
+    "png_bytes": 341043,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "mozilla.org",
+    "url": "https://www.mozilla.org",
+<<<<<<< HEAD
+    "ms": 2248,
+    "png_bytes": 177530,
+=======
+    "ms": 2271,
+    "png_bytes": 201057,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "cloudflare.com",
+    "url": "https://www.cloudflare.com",
+<<<<<<< HEAD
+    "ms": 1030,
+=======
+    "ms": 1080,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 99745,
+    "css_found": 3,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "vercel.com",
+    "url": "https://vercel.com",
+<<<<<<< HEAD
+    "ms": 1084,
+    "png_bytes": 232712,
+=======
+    "ms": 1056,
+    "png_bytes": 237337,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 11,
+    "css_loaded": 11,
+    "status": "ok"
+  },
+  {
+    "site": "python.org",
+    "url": "https://www.python.org",
+<<<<<<< HEAD
+    "ms": 1151,
+    "png_bytes": 169927,
+=======
+    "ms": 1895,
+    "png_bytes": 132081,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 4,
+    "css_loaded": 3,
+    "status": "ok"
+  },
+  {
+    "site": "httpbin.org",
+    "url": "https://httpbin.org/html",
+<<<<<<< HEAD
+    "ms": 289,
+=======
+    "ms": 540,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "png_bytes": 447859,
+    "css_found": 0,
+    "css_loaded": 0,
+    "status": "ok"
+  },
+  {
+    "site": "quotes.toscrape.com",
+    "url": "https://quotes.toscrape.com",
+<<<<<<< HEAD
+    "ms": 1116,
+    "png_bytes": 246475,
+=======
+    "ms": 1457,
+    "png_bytes": 255702,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 2,
+    "css_loaded": 2,
+    "status": "ok"
+  },
+  {
+    "site": "svd.se",
+    "url": "https://www.svd.se",
+<<<<<<< HEAD
+    "ms": 1375,
+    "png_bytes": 493188,
+=======
+    "ms": 1862,
+    "png_bytes": 435526,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 4,
+    "css_loaded": 4,
+    "status": "ok"
+  },
+  {
+    "site": "ebay.com",
+    "url": "https://www.ebay.com",
+<<<<<<< HEAD
+    "ms": 1389,
+    "png_bytes": 100053,
+=======
+    "ms": 1537,
+    "png_bytes": 90382,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 2,
+    "css_loaded": 2,
+    "status": "ok"
+  },
+  {
+    "site": "w3schools.com",
+    "url": "https://www.w3schools.com",
+<<<<<<< HEAD
+    "ms": 1426,
+    "png_bytes": 165926,
+=======
+    "ms": 2876,
+    "png_bytes": 173929,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "hn.algolia.com",
+    "url": "https://hn.algolia.com",
+<<<<<<< HEAD
+    "ms": 1133,
+    "png_bytes": 30185,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+=======
+    "ms": 415,
+    "png_bytes": 24304,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "small"
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+  },
+  {
+    "site": "dev.to",
+    "url": "https://dev.to",
+<<<<<<< HEAD
+    "ms": 1620,
+    "png_bytes": 888718,
+=======
+    "ms": 3285,
+    "png_bytes": 563019,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 6,
+    "css_loaded": 6,
+    "status": "ok"
+  },
+  {
+    "site": "npr.org",
+    "url": "https://www.npr.org",
+<<<<<<< HEAD
+    "ms": 1237,
+    "png_bytes": 326966,
+=======
+    "ms": 1584,
+    "png_bytes": 183135,
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+    "css_found": 5,
+    "css_loaded": 5,
+    "status": "ok"
+  },
+  {
+    "site": "dw.com",
+    "url": "https://www.dw.com",
+<<<<<<< HEAD
+    "ms": 828,
+    "png_bytes": 30398,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "ok"
+=======
+    "ms": 1178,
+    "png_bytes": 25660,
+    "css_found": 1,
+    "css_loaded": 1,
+    "status": "small"
+>>>>>>> 1a375d6 (feat: noscript stripping, Blitz crash isolation, improved resource loading)
+  }
+]

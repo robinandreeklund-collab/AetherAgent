@@ -1,0 +1,137 @@
+{
+  "timestamp": "20260322_225315",
+  "server": "http://localhost:3000",
+  "sites": [
+    {
+      "name": "example_com",
+      "url": "https://example.com",
+      "type": "static",
+      "tier_used": "Blitz",
+      "latency_ms": 759.2,
+      "detection_count": 5,
+      "class_counts": {
+        "heading": 2,
+        "button": 3
+      },
+      "raw_screenshot_kb": 60.1,
+      "annotated_screenshot_kb": 46.2,
+      "inference_time_ms": 115,
+      "preprocess_time_ms": 82,
+      "raw_detection_count": 5,
+      "files": {
+        "raw": "example_com_raw.png",
+        "annotated": "example_com_onnx.png",
+        "detections": "example_com_detections.json"
+      }
+    },
+    {
+      "name": "hacker_news",
+      "url": "https://news.ycombinator.com",
+      "type": "static",
+      "tier_used": "Blitz",
+      "latency_ms": 2257.5,
+      "detection_count": 3,
+      "class_counts": {
+        "button": 3
+      },
+      "raw_screenshot_kb": 521.6,
+      "annotated_screenshot_kb": 371.5,
+      "inference_time_ms": 112,
+      "preprocess_time_ms": 76,
+      "raw_detection_count": 3,
+      "files": {
+        "raw": "hacker_news_raw.png",
+        "annotated": "hacker_news_onnx.png",
+        "detections": "hacker_news_detections.json"
+      }
+    },
+    {
+      "name": "books_toscrape",
+      "url": "https://books.toscrape.com",
+      "type": "ecommerce-images",
+      "tier_used": "Blitz",
+      "latency_ms": 1308.7,
+      "detection_count": 4,
+      "class_counts": {
+        "button": 4
+      },
+      "raw_screenshot_kb": 118.8,
+      "annotated_screenshot_kb": 92.8,
+      "inference_time_ms": 88,
+      "preprocess_time_ms": 66,
+      "raw_detection_count": 4,
+      "files": {
+        "raw": "books_toscrape_raw.png",
+        "annotated": "books_toscrape_onnx.png",
+        "detections": "books_toscrape_detections.json"
+      }
+    },
+    {
+      "name": "quotes_toscrape",
+      "url": "https://quotes.toscrape.com",
+      "type": "static",
+      "tier_used": "Blitz",
+      "latency_ms": 1187.4,
+      "detection_count": 2,
+      "class_counts": {
+        "button": 2
+      },
+      "raw_screenshot_kb": 240.7,
+      "annotated_screenshot_kb": 192.5,
+      "inference_time_ms": 100,
+      "preprocess_time_ms": 76,
+      "raw_detection_count": 2,
+      "files": {
+        "raw": "quotes_toscrape_raw.png",
+        "annotated": "quotes_toscrape_onnx.png",
+        "detections": "quotes_toscrape_detections.json"
+      }
+    },
+    {
+      "name": "httpbin_html",
+      "url": "https://httpbin.org/html",
+      "type": "static",
+      "tier_used": "Blitz",
+      "latency_ms": 636.8,
+      "detection_count": 5,
+      "class_counts": {
+        "input": 1,
+        "link": 2,
+        "button": 2
+      },
+      "raw_screenshot_kb": 437.4,
+      "annotated_screenshot_kb": 318.0,
+      "inference_time_ms": 97,
+      "preprocess_time_ms": 69,
+      "raw_detection_count": 5,
+      "files": {
+        "raw": "httpbin_html_raw.png",
+        "annotated": "httpbin_html_onnx.png",
+        "detections": "httpbin_html_detections.json"
+      }
+    },
+    {
+      "name": "wikipedia_rust",
+      "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+      "type": "static-images",
+      "tier_used": "Blitz",
+      "latency_ms": 800.4,
+      "detection_count": 5,
+      "class_counts": {
+        "input": 1,
+        "link": 2,
+        "button": 2
+      },
+      "raw_screenshot_kb": 26.8,
+      "annotated_screenshot_kb": 26.6,
+      "inference_time_ms": 88,
+      "preprocess_time_ms": 60,
+      "raw_detection_count": 5,
+      "files": {
+        "raw": "wikipedia_rust_raw.png",
+        "annotated": "wikipedia_rust_onnx.png",
+        "detections": "wikipedia_rust_detections.json"
+      }
+    }
+  ]
+}

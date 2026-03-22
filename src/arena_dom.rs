@@ -387,6 +387,23 @@ impl ArenaDom {
             }
         }
 
+        // nojs-divvar: id="nojs" eller class="no-js" — JS-varningar som python.org
+        if let Some(id) = node.get_attr("id") {
+            let id_lower = id.to_lowercase();
+            if Self::NOJS_IDENTIFIERS.iter().any(|pat| id_lower == *pat) {
+                return false;
+            }
+        }
+        if let Some(class) = node.get_attr("class") {
+            let class_lower = class.to_lowercase();
+            if Self::NOJS_IDENTIFIERS
+                .iter()
+                .any(|pat| class_lower.split_whitespace().any(|c| c == *pat))
+            {
+                return false;
+            }
+        }
+
         true
     }
 
@@ -436,6 +453,10 @@ impl ArenaDom {
             }
         }
     }
+
+    /// ID/klass-mönster som indikerar "JavaScript krävs"-meddelanden
+    const NOJS_IDENTIFIERS: &'static [&'static str] =
+        &["nojs", "no-js", "noscript-warning", "js-disabled"];
 
     /// CTA-nyckelord
     const CTA_KEYWORDS: &'static [&'static str] = &[
@@ -674,6 +695,70 @@ impl ArenaDom {
         }
 
         String::new()
+    }
+    /// Lazy-load attribut som kan innehålla den riktiga bild-URL:en
+    const LAZY_SRC_ATTRS: &'static [&'static str] = &[
+        "data-src",
+        "data-lazy-src",
+        "data-original",
+        "data-image",
+        "data-thumb",
+        "data-thumbnail",
+    ];
+
+    /// Resolva lazy-loaded bilder: kopiera data-src → src på <img> utan riktig src.
+    ///
+    /// Många sajter använder lazy-loading (data-src, IntersectionObserver).
+    /// Denna metod genomsöker hela DOM och promoterar lazy-attribut till src
+    /// så att Blitz-rendering och semantisk extraktion ser bilderna.
+    pub fn resolve_lazy_images(&mut self) {
+        let keys: Vec<NodeKey> = self.nodes.keys().collect();
+        for key in keys {
+            let is_img = self
+                .nodes
+                .get(key)
+                .map(|n| n.tag.as_deref() == Some("img"))
+                .unwrap_or(false);
+            if !is_img {
+                continue;
+            }
+
+            // Kolla om src redan är riktig (inte placeholder)
+            let has_real_src = self
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("src"))
+                .map(|src| {
+                    let t = src.trim();
+                    !t.is_empty() && !t.starts_with("data:")
+                })
+                .unwrap_or(false);
+
+            if has_real_src {
+                continue;
+            }
+
+            // Sök i lazy-attribut
+            let mut lazy_src = None;
+            if let Some(node) = self.nodes.get(key) {
+                for attr_name in Self::LAZY_SRC_ATTRS {
+                    if let Some(val) = node.get_attr(attr_name) {
+                        let trimmed = val.trim();
+                        if !trimmed.is_empty() {
+                            lazy_src = Some(trimmed.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Promotera lazy-src → src (direkt via HashMap, utan set_attr som kräver js-eval)
+            if let Some(src) = lazy_src {
+                if let Some(node) = self.nodes.get_mut(key) {
+                    node.attributes.insert("src".to_string(), src);
+                }
+            }
+        }
     }
 }
 
@@ -991,6 +1076,140 @@ mod tests {
             elapsed.as_millis() < 200,
             "Konvertering borde ta <200ms, tog {}ms",
             elapsed.as_millis()
+        );
+    }
+
+    // === Lazy-loaded bilder ===
+
+    #[test]
+    fn test_resolve_lazy_images_data_src() {
+        let mut arena = make_arena(
+            r##"<html><body><img data-src="https://example.com/photo.jpg" alt="Foto" /></body></html>"##,
+        );
+        let img = find_by_tag(&arena, arena.document, "img").expect("Borde hitta <img>");
+
+        // Före resolve: ingen riktig src
+        assert!(
+            arena.get_attr(img, "src").is_none(),
+            "src borde saknas innan resolve"
+        );
+
+        arena.resolve_lazy_images();
+
+        assert_eq!(
+            arena.get_attr(img, "src"),
+            Some("https://example.com/photo.jpg"),
+            "data-src borde promoterats till src"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_images_placeholder_data_uri() {
+        let mut arena = make_arena(
+            r##"<html><body><img src="data:image/svg+xml;base64,PHN2Zz4=" data-src="https://real.com/img.png" /></body></html>"##,
+        );
+        arena.resolve_lazy_images();
+        let img = find_by_tag(&arena, arena.document, "img").expect("Borde hitta <img>");
+        assert_eq!(
+            arena.get_attr(img, "src"),
+            Some("https://real.com/img.png"),
+            "data: placeholder borde bytas ut mot data-src"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_images_keeps_real_src() {
+        let mut arena = make_arena(
+            r##"<html><body><img src="https://real.com/img.png" data-src="https://lazy.com/other.png" /></body></html>"##,
+        );
+        arena.resolve_lazy_images();
+        let img = find_by_tag(&arena, arena.document, "img").expect("Borde hitta <img>");
+        assert_eq!(
+            arena.get_attr(img, "src"),
+            Some("https://real.com/img.png"),
+            "Riktig src borde inte ändras"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_images_multiple() {
+        let mut arena = make_arena(
+            r##"<html><body>
+                <img data-src="https://a.com/1.jpg" />
+                <img data-lazy-src="https://b.com/2.jpg" />
+                <img src="https://c.com/3.jpg" />
+            </body></html>"##,
+        );
+        arena.resolve_lazy_images();
+
+        // Räkna imgs med riktig src
+        let keys: Vec<_> = arena.nodes.keys().collect();
+        let imgs_with_src: Vec<_> = keys
+            .iter()
+            .filter(|k| {
+                arena.tag_name(**k) == Some("img")
+                    && arena
+                        .get_attr(**k, "src")
+                        .map(|s| !s.starts_with("data:") && !s.is_empty())
+                        .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(
+            imgs_with_src.len(),
+            3,
+            "Alla 3 bilder borde ha riktig src efter resolve"
+        );
+    }
+
+    // === NoJS-filtrering ===
+
+    #[test]
+    fn test_nojs_div_hidden_by_id() {
+        let arena =
+            make_arena(r##"<html><body><div id="nojs">Aktivera JavaScript</div></body></html>"##);
+        let keys: Vec<_> = arena.nodes.keys().collect();
+        let nojs = keys
+            .iter()
+            .find(|k| arena.get_attr(**k, "id") == Some("nojs"))
+            .expect("Borde hitta div#nojs");
+        assert!(
+            !arena.is_likely_visible(*nojs),
+            "div#nojs borde markeras som osynlig"
+        );
+    }
+
+    #[test]
+    fn test_nojs_div_hidden_by_class() {
+        let arena = make_arena(
+            r##"<html><body><div class="no-js warning">Aktivera JavaScript</div></body></html>"##,
+        );
+        let keys: Vec<_> = arena.nodes.keys().collect();
+        let nojs = keys
+            .iter()
+            .find(|k| {
+                arena
+                    .get_attr(**k, "class")
+                    .map(|c| c.contains("no-js"))
+                    .unwrap_or(false)
+            })
+            .expect("Borde hitta div.no-js");
+        assert!(
+            !arena.is_likely_visible(*nojs),
+            "div.no-js borde markeras som osynlig"
+        );
+    }
+
+    #[test]
+    fn test_normal_div_visible() {
+        let arena = make_arena(r##"<html><body><div id="content">Innehåll</div></body></html>"##);
+        let keys: Vec<_> = arena.nodes.keys().collect();
+        let content = keys
+            .iter()
+            .find(|k| arena.get_attr(**k, "id") == Some("content"))
+            .expect("Borde hitta div#content");
+        assert!(
+            arena.is_likely_visible(*content),
+            "Vanlig div borde vara synlig"
         );
     }
 }

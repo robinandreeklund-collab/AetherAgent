@@ -66,10 +66,14 @@ pub fn get_tag_name(handle: &Handle) -> Option<String> {
     }
 }
 
+/// ID/klass-mönster som indikerar "JavaScript krävs"-meddelanden
+const NOJS_IDENTIFIERS: &[&str] = &["nojs", "no-js", "noscript-warning", "js-disabled"];
+
 /// Kontrollera om elementet är synligt (utökad heuristik)
 ///
 /// Detekterar: display:none, visibility:hidden, opacity:0, aria-hidden="true",
-/// HTML hidden-attribut, off-screen positioning (left:-9999px).
+/// HTML hidden-attribut, off-screen positioning (left:-9999px),
+/// nojs-divvar (id="nojs", class="no-js" etc.).
 pub fn is_likely_visible(handle: &Handle) -> bool {
     // Kolla style-attribut för osynlighet
     if let Some(style) = get_attr(handle, "style") {
@@ -88,6 +92,23 @@ pub fn is_likely_visible(handle: &Handle) -> bool {
             if &attr.name.local == "aria-hidden" && attr.value.trim().eq_ignore_ascii_case("true") {
                 return false;
             }
+        }
+    }
+
+    // nojs-divvar: id="nojs" eller class="no-js" — JS-varningar som python.org
+    if let Some(id) = get_attr(handle, "id") {
+        let id_lower = id.to_lowercase();
+        if NOJS_IDENTIFIERS.iter().any(|pat| id_lower == *pat) {
+            return false;
+        }
+    }
+    if let Some(class) = get_attr(handle, "class") {
+        let class_lower = class.to_lowercase();
+        if NOJS_IDENTIFIERS
+            .iter()
+            .any(|pat| class_lower.split_whitespace().any(|c| c == *pat))
+        {
+            return false;
         }
     }
 
@@ -253,6 +274,48 @@ fn looks_like_price(handle: &Handle) -> bool {
     false
 }
 
+/// Lazy-load attribut som kan innehålla den riktiga bild-URL:en
+const LAZY_SRC_ATTRS: &[&str] = &[
+    "data-src",
+    "data-lazy-src",
+    "data-original",
+    "data-image",
+    "data-thumb",
+    "data-thumbnail",
+];
+
+/// Hämta den effektiva bild-URL:en för ett <img>-element.
+///
+/// Om `src` saknas eller är en placeholder (data: URI), letar vi i
+/// lazy-load-attribut (data-src, data-lazy-src, etc.).
+/// Returnerar `None` om ingen bild-URL hittas.
+pub fn resolve_lazy_src(handle: &Handle) -> Option<String> {
+    let tag = get_tag_name(handle)?;
+    if tag != "img" {
+        return None;
+    }
+
+    // Kolla om src redan är riktig (inte placeholder)
+    if let Some(src) = get_attr(handle, "src") {
+        let trimmed = src.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with("data:") {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    // Fallback: sök i lazy-load-attribut
+    for attr_name in LAZY_SRC_ATTRS {
+        if let Some(val) = get_attr(handle, attr_name) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 /// Extrahera label för ett element (WCAG-fallback-kedja)
 pub fn extract_label(handle: &Handle) -> String {
     // 1. aria-label
@@ -303,6 +366,16 @@ pub fn extract_label(handle: &Handle) -> String {
     if let Some(name) = get_attr(handle, "name") {
         if !name.trim().is_empty() {
             return name.trim().to_string();
+        }
+    }
+
+    // 8. Lazy-loaded bild-URL som sista utväg för <img> utan annan label
+    if let Some(src) = resolve_lazy_src(handle) {
+        if let Some(filename) = src.rsplit('/').next() {
+            let clean = filename.split('?').next().unwrap_or(filename);
+            if !clean.is_empty() {
+                return format!("[img:{}]", clean);
+            }
         }
     }
 
@@ -814,5 +887,106 @@ mod tests {
             "Label ska trunkeras till max 80 tecken, got {} tecken",
             label.len()
         );
+    }
+
+    // === resolve_lazy_src ===
+
+    #[test]
+    fn test_resolve_lazy_src_data_src() {
+        let html = r##"<html><body><img data-src="https://example.com/photo.jpg" alt="Foto" /></body></html>"##;
+        let dom = parse_html(html);
+        let img = find_element(&dom.document, "img").expect("Borde hitta <img>");
+        let src = resolve_lazy_src(&img);
+        assert_eq!(
+            src,
+            Some("https://example.com/photo.jpg".to_string()),
+            "data-src borde resolveas som bild-URL"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_src_data_lazy_src() {
+        let html = r##"<html><body><img data-lazy-src="https://cdn.example.com/img.webp" /></body></html>"##;
+        let dom = parse_html(html);
+        let img = find_element(&dom.document, "img").expect("Borde hitta <img>");
+        let src = resolve_lazy_src(&img);
+        assert_eq!(
+            src,
+            Some("https://cdn.example.com/img.webp".to_string()),
+            "data-lazy-src borde resolveas"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_src_placeholder_data_uri() {
+        let html = r##"<html><body><img src="data:image/svg+xml;base64,PHN2Zz4=" data-src="https://real.com/img.png" /></body></html>"##;
+        let dom = parse_html(html);
+        let img = find_element(&dom.document, "img").expect("Borde hitta <img>");
+        let src = resolve_lazy_src(&img);
+        assert_eq!(
+            src,
+            Some("https://real.com/img.png".to_string()),
+            "Placeholder data-URI borde ignoreras, data-src borde resolveas"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_src_real_src_not_overridden() {
+        let html = r##"<html><body><img src="https://real.com/img.png" data-src="https://other.com/lazy.png" /></body></html>"##;
+        let dom = parse_html(html);
+        let img = find_element(&dom.document, "img").expect("Borde hitta <img>");
+        let src = resolve_lazy_src(&img);
+        assert_eq!(
+            src,
+            Some("https://real.com/img.png".to_string()),
+            "Riktig src borde inte overridas av data-src"
+        );
+    }
+
+    #[test]
+    fn test_resolve_lazy_src_non_img_returns_none() {
+        let html =
+            r##"<html><body><div data-src="https://example.com/bg.jpg">Text</div></body></html>"##;
+        let dom = parse_html(html);
+        let div = find_element(&dom.document, "div").expect("Borde hitta <div>");
+        assert!(
+            resolve_lazy_src(&div).is_none(),
+            "resolve_lazy_src borde returnera None för icke-img-element"
+        );
+    }
+
+    // === nojs-filtrering ===
+
+    #[test]
+    fn test_nojs_div_hidden_by_id() {
+        let html = r##"<html><body><div id="nojs">Aktivera JavaScript</div></body></html>"##;
+        let dom = parse_html(html);
+        let div = find_element_by_attr(&dom.document, "id", "nojs").expect("Borde hitta div#nojs");
+        assert!(
+            !is_likely_visible(&div),
+            "div#nojs borde markeras som osynlig"
+        );
+    }
+
+    #[test]
+    fn test_nojs_div_hidden_by_class() {
+        let html =
+            r##"<html><body><div class="no-js warning">Aktivera JavaScript</div></body></html>"##;
+        let dom = parse_html(html);
+        let div = find_element_by_attr(&dom.document, "class", "no-js warning")
+            .expect("Borde hitta div.no-js");
+        assert!(
+            !is_likely_visible(&div),
+            "div.no-js borde markeras som osynlig"
+        );
+    }
+
+    #[test]
+    fn test_normal_div_still_visible() {
+        let html = r##"<html><body><div id="content">Innehåll</div></body></html>"##;
+        let dom = parse_html(html);
+        let div =
+            find_element_by_attr(&dom.document, "id", "content").expect("Borde hitta div#content");
+        assert!(is_likely_visible(&div), "Vanlig div borde vara synlig");
     }
 }

@@ -20,6 +20,7 @@ os.makedirs(AETHER_DIR, exist_ok=True)
 os.makedirs(LP_DIR, exist_ok=True)
 
 SITES = [
+    # Original 10
     ("example.com", "https://example.com"),
     ("news.ycombinator.com", "https://news.ycombinator.com"),
     ("books.toscrape.com", "https://books.toscrape.com"),
@@ -30,6 +31,28 @@ SITES = [
     ("github.com", "https://github.com"),
     ("x.com", "https://x.com"),
     ("www.bbc.com", "https://www.bbc.com"),
+    # Batch 2: JS-tunga sajter
+    ("docs.python.org", "https://docs.python.org/3/"),
+    ("cnn.com", "https://www.cnn.com"),
+    ("linkedin.com", "https://www.linkedin.com"),
+    ("svt.se", "https://www.svt.se"),
+    ("dn.se", "https://www.dn.se"),
+    ("google.com", "https://www.google.com"),
+    ("rust-lang.org", "https://www.rust-lang.org"),
+    ("mozilla.org", "https://www.mozilla.org"),
+    ("cloudflare.com", "https://www.cloudflare.com"),
+    ("vercel.com", "https://vercel.com"),
+    # Batch 3: blandad komplexitet
+    ("python.org", "https://www.python.org"),
+    ("httpbin.org", "https://httpbin.org/html"),
+    ("quotes.toscrape.com", "https://quotes.toscrape.com"),
+    ("svd.se", "https://www.svd.se"),
+    ("ebay.com", "https://www.ebay.com"),
+    ("w3schools.com", "https://www.w3schools.com"),
+    ("hn.algolia.com", "https://hn.algolia.com"),
+    ("dev.to", "https://dev.to"),
+    ("npr.org", "https://www.npr.org"),
+    ("dw.com", "https://www.dw.com"),
 ]
 
 def ae_api(endpoint, payload, timeout=30):
@@ -180,7 +203,7 @@ for name, url in SITES:
         if png:
             with open(f"{AETHER_DIR}/{sname}.png", "wb") as f:
                 f.write(png)
-            css_ok = d.get("css_added_bytes", 0) > 0
+            css_ok = d.get("css_bytes_added", d.get("css_added_bytes", 0)) > 0
             quality = "med CSS" if css_ok else "utan CSS"
             print(f"  {name:<28} {ae_ms:>6}ms  {len(png):>7} bytes  ({quality})")
             results["render"].append({"site": name, "ms": ae_ms, "png_bytes": len(png),

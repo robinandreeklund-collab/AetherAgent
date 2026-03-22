@@ -628,16 +628,13 @@ impl TieredBackend {
             tab.wait_until_navigated()
                 .map_err(|e| format!("CDP wait: {e}"))?;
 
-            // networkidle0-logik: vänta tills inga aktiva nätverksanrop pågår.
-            // Injicerar JS-interceptor som räknar fetch()/XHR-anrop och pollar.
-            // Fallback: max 5s total väntetid (undviker eviga lopar på long-poll/WebSocket-sidor).
-            wait_for_network_idle(&tab, 500, 5000);
+            // Aktivera lazy-loaded bilder innan vi väntar — data-src → src
+            activate_lazy_images(&tab);
 
-            // BUG-002 fix: Vänta på DOM-stabilitet efter network idle.
-            // SPAs renderar ofta asynkront efter att XHR/fetch slutfört — DOM
-            // ändras fortfarande (spinner → faktiskt innehåll). Pollar
-            // document.body.innerHTML.length tills det stabiliserats.
-            wait_for_dom_stable(&tab, 300, 3000);
+            // Kombinerad settle-logik: nätverks-idle + DOM-stabilitet + bildladdning
+            // Dubbla trösklar: min_settle=250ms, idle_window=500ms, max=4s
+            // Statiska sidor → ~250-400ms, bildtunga → upp till 500ms efter sista bild
+            wait_for_page_settle(&tab, 250, 500, 4000);
         }
 
         // Ta viewport screenshot som PNG
@@ -763,147 +760,240 @@ impl Default for TieredBackend {
     }
 }
 
-/// networkidle0: Vänta tills inga nätverksanrop pågår under `quiet_ms` millisekunder.
+/// Kombinerad sidstabilisering med dubbla trösklar.
 ///
-/// Injicerar JS som interceptar fetch() och XMLHttpRequest för att räkna aktiva requests.
-/// Pollar var 100ms och returnerar när räknaren hållit sig på 0 under `quiet_ms`.
-/// Avbryter efter `timeout_ms` totalt (undviker eviga WebSocket/long-poll-lopar).
+/// Logik: settle + idle + early exit + readyState
+///   - `min_settle_ms`: Minsta tid vi väntar efter sista nätverksaktivitet (150–300 ms)
+///   - `idle_window_ms`: Bekräftelsefönster — inga nya requests under denna tid (400–600 ms)
+///   - `max_total_ms`: Säkerhetsnät — max total väntetid (4–5 s)
+///   - Early exit: Om inga requests alls efter DOM-parsing i >300 ms → avsluta direkt
+///   - readyState: Använder `document.readyState` + load-event för naturlig signal
+///
+/// Trackar: fetch(), XHR, bildladdning, document.readyState, DOM-storlek.
+/// Statiska sidor (inga externa resurser) → klar på ~250–400 ms.
+/// Bildtunga sidor → väntar upp till idle_window_ms efter sista bild.
 #[cfg(feature = "cdp")]
-fn wait_for_network_idle(
+fn wait_for_page_settle(
     tab: &std::sync::Arc<headless_chrome::Tab>,
-    quiet_ms: u64,
-    timeout_ms: u64,
+    min_settle_ms: u64,
+    idle_window_ms: u64,
+    max_total_ms: u64,
 ) {
-    // Injicera nätverksräknare — interceptar fetch() och XHR
+    // Injicera kombinerad tracker: nätverksanrop + bildladdning + readyState
     let inject_result = tab.evaluate(
         r#"
         (function() {
-            if (window.__aether_net_count !== undefined) return;
-            window.__aether_net_count = 0;
+            if (window.__aether_settle !== undefined) return;
+            window.__aether_settle = {
+                net: 0,
+                img: 0,
+                ready: false,
+                lastActivity: Date.now()
+            };
+            var s = window.__aether_settle;
+
+            // readyState + load-event
+            if (document.readyState === 'complete') {
+                s.ready = true;
+            } else {
+                window.addEventListener('load', function() {
+                    s.ready = true;
+                }, { once: true });
+            }
 
             // Intercepta fetch()
-            const origFetch = window.fetch;
-            window.fetch = function(...args) {
-                window.__aether_net_count++;
-                return origFetch.apply(this, args).finally(() => {
-                    window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+            var origFetch = window.fetch;
+            window.fetch = function() {
+                s.net++;
+                s.lastActivity = Date.now();
+                return origFetch.apply(this, arguments).finally(function() {
+                    s.net = Math.max(0, s.net - 1);
+                    s.lastActivity = Date.now();
                 });
             };
 
             // Intercepta XMLHttpRequest
-            const origOpen = XMLHttpRequest.prototype.open;
-            const origSend = XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.open = function(...args) {
+            var origOpen = XMLHttpRequest.prototype.open;
+            var origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function() {
                 this.__aether_tracked = true;
-                return origOpen.apply(this, args);
+                return origOpen.apply(this, arguments);
             };
-            XMLHttpRequest.prototype.send = function(...args) {
+            XMLHttpRequest.prototype.send = function() {
                 if (this.__aether_tracked) {
-                    window.__aether_net_count++;
+                    s.net++;
+                    s.lastActivity = Date.now();
                     this.addEventListener('loadend', function() {
-                        window.__aether_net_count = Math.max(0, window.__aether_net_count - 1);
+                        s.net = Math.max(0, s.net - 1);
+                        s.lastActivity = Date.now();
                     }, { once: true });
                 }
-                return origSend.apply(this, args);
+                return origSend.apply(this, arguments);
             };
+
+            // Tracka bildladdning — hitta alla <img> med src eller data-src
+            function trackImages() {
+                var imgs = document.querySelectorAll('img');
+                for (var i = 0; i < imgs.length; i++) {
+                    var img = imgs[i];
+                    if (img.__aether_img_tracked) continue;
+                    img.__aether_img_tracked = true;
+                    if (!img.complete) {
+                        s.img++;
+                        s.lastActivity = Date.now();
+                        img.addEventListener('load', function() {
+                            s.img = Math.max(0, s.img - 1);
+                            s.lastActivity = Date.now();
+                        }, { once: true });
+                        img.addEventListener('error', function() {
+                            s.img = Math.max(0, s.img - 1);
+                            s.lastActivity = Date.now();
+                        }, { once: true });
+                    }
+                }
+            }
+            trackImages();
+
+            // MutationObserver för dynamiskt tillagda bilder
+            if (typeof MutationObserver !== 'undefined') {
+                new MutationObserver(function(mutations) {
+                    s.lastActivity = Date.now();
+                    trackImages();
+                }).observe(document.documentElement, { childList: true, subtree: true });
+            }
         })()
         "#,
         false,
     );
 
     if inject_result.is_err() {
-        // Om JS-injection misslyckades, fall tillbaka på fast delay
-        std::thread::sleep(std::time::Duration::from_millis(quiet_ms));
+        // Fallback: fast delay om JS-injection misslyckas
+        std::thread::sleep(std::time::Duration::from_millis(min_settle_ms));
         return;
     }
 
     let poll_interval = std::time::Duration::from_millis(100);
-    let timeout = std::time::Duration::from_millis(timeout_ms);
-    let quiet_duration = std::time::Duration::from_millis(quiet_ms);
+    let min_settle = std::time::Duration::from_millis(min_settle_ms);
+    let idle_window = std::time::Duration::from_millis(idle_window_ms);
+    let max_total = std::time::Duration::from_millis(max_total_ms);
     let start = std::time::Instant::now();
     let mut idle_since: Option<std::time::Instant> = None;
+    let mut last_dom_length: i64 = -1;
+    let mut ever_had_activity = false;
 
     loop {
-        if start.elapsed() >= timeout {
-            break;
+        if start.elapsed() >= max_total {
+            break; // Säkerhetsnät
         }
 
-        let count = tab
-            .evaluate("window.__aether_net_count || 0", false)
+        // Hämta settle-status: pending_count + ready + lastActivity
+        let status_js = r#"
+            (function() {
+                var s = window.__aether_settle || { net: 0, img: 0, ready: true, lastActivity: 0 };
+                return JSON.stringify({
+                    pending: s.net + s.img,
+                    ready: s.ready,
+                    sinceActivity: Date.now() - s.lastActivity,
+                    domLen: document.body ? document.body.innerHTML.length : 0
+                });
+            })()
+        "#;
+
+        let (pending, ready, since_activity, dom_len) = tab
+            .evaluate(status_js, false)
             .ok()
             .and_then(|v| v.value)
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+            .and_then(|v| {
+                let s = v.as_str()?;
+                let obj: serde_json::Value = serde_json::from_str(s).ok()?;
+                Some((
+                    obj.get("pending")?.as_i64().unwrap_or(0),
+                    obj.get("ready")?.as_bool().unwrap_or(false),
+                    obj.get("sinceActivity")?.as_i64().unwrap_or(0),
+                    obj.get("domLen")?.as_i64().unwrap_or(0),
+                ))
+            })
+            .unwrap_or((0, false, 0, 0));
 
-        if count == 0 {
+        if pending > 0 {
+            ever_had_activity = true;
+        }
+
+        let dom_changed = dom_len != last_dom_length && last_dom_length >= 0;
+        last_dom_length = dom_len;
+
+        let is_idle = pending == 0 && !dom_changed;
+
+        if is_idle {
             let now = std::time::Instant::now();
             if let Some(since) = idle_since {
-                if now.duration_since(since) >= quiet_duration {
-                    break; // Nätverket har varit idle tillräckligt länge
+                let idle_duration = now.duration_since(since);
+
+                // Early exit: inga requests alls efter DOM-parsing + passerat min_settle
+                if !ever_had_activity && idle_duration >= min_settle {
+                    break;
+                }
+
+                // readyState complete + idle-fönster uppnått → klar
+                if ready && idle_duration >= idle_window {
+                    break;
+                }
+
+                // Även utan readyState: om idle tillräckligt länge
+                if idle_duration >= idle_window {
+                    break;
                 }
             } else {
                 idle_since = Some(now);
             }
         } else {
-            idle_since = None; // Aktiva requests → nollställ
+            idle_since = None; // Aktivitet → nollställ idle-timer
         }
 
         std::thread::sleep(poll_interval);
     }
 }
 
-/// BUG-002 fix: Vänta tills DOM stabiliserats (innerHTML.length slutar ändras).
+/// Aktivera lazy-loaded bilder via CDP.
 ///
-/// SPAs renderar ofta asynkront efter nätverks-idle:
-///   1. HTML laddas med tom <div id="root">
-///   2. JS hämtar data via fetch/XHR (network idle väntar på detta)
-///   3. React/Vue/Angular renderar DOM med data (~50-500ms efter network idle)
-///
-/// Denna funktion pollar `document.body.innerHTML.length` var 100ms.
-/// Om längden inte ändrats under `stable_ms` → DOM är stabil.
-/// Max `timeout_ms` total väntetid.
+/// Många sajter använder `data-src`, `data-lazy-src`, `loading="lazy"` etc.
+/// Denna funktion kopierar data-src → src och triggar IntersectionObserver
+/// genom att scrolla hela sidan.
 #[cfg(feature = "cdp")]
-fn wait_for_dom_stable(
-    tab: &std::sync::Arc<headless_chrome::Tab>,
-    stable_ms: u64,
-    timeout_ms: u64,
-) {
-    let poll_interval = std::time::Duration::from_millis(100);
-    let timeout = std::time::Duration::from_millis(timeout_ms);
-    let stable_duration = std::time::Duration::from_millis(stable_ms);
-    let start = std::time::Instant::now();
-
-    let mut last_length: i64 = -1;
-    let mut stable_since: Option<std::time::Instant> = None;
-
-    loop {
-        if start.elapsed() >= timeout {
-            break;
-        }
-
-        let current_length = tab
-            .evaluate("document.body ? document.body.innerHTML.length : 0", false)
-            .ok()
-            .and_then(|v| v.value)
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
-        if current_length == last_length && current_length > 0 {
-            let now = std::time::Instant::now();
-            if let Some(since) = stable_since {
-                if now.duration_since(since) >= stable_duration {
-                    break; // DOM har varit stabil tillräckligt länge
+fn activate_lazy_images(tab: &std::sync::Arc<headless_chrome::Tab>) {
+    let _ = tab.evaluate(
+        r#"
+        (function() {
+            // 1. Kopiera data-src → src för alla bilder som saknar riktig src
+            var lazySrcAttrs = ['data-src', 'data-lazy-src', 'data-original', 'data-image',
+                                'data-thumb', 'data-thumbnail', 'data-bg', 'data-background-image'];
+            var imgs = document.querySelectorAll('img');
+            for (var i = 0; i < imgs.length; i++) {
+                var img = imgs[i];
+                // Skippa om bilden redan har en riktig src (inte placeholder)
+                if (img.src && !img.src.startsWith('data:') && img.src !== '') continue;
+                for (var j = 0; j < lazySrcAttrs.length; j++) {
+                    var lazySrc = img.getAttribute(lazySrcAttrs[j]);
+                    if (lazySrc && lazySrc.length > 0) {
+                        img.src = lazySrc;
+                        break;
+                    }
                 }
-            } else {
-                stable_since = Some(now);
             }
-        } else {
-            last_length = current_length;
-            stable_since = None; // DOM ändrades → nollställ
-        }
 
-        std::thread::sleep(poll_interval);
-    }
+            // 2. Trigga IntersectionObserver genom att scrolla nedåt och tillbaka
+            var scrollHeight = document.documentElement.scrollHeight;
+            var viewHeight = window.innerHeight;
+            var steps = Math.min(Math.ceil(scrollHeight / viewHeight), 10);
+            for (var s = 0; s <= steps; s++) {
+                window.scrollTo(0, s * viewHeight);
+            }
+            // Scrolla tillbaka till toppen
+            window.scrollTo(0, 0);
+        })()
+        "#,
+        false,
+    );
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────

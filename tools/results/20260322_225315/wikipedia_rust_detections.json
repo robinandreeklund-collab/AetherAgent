@@ -1,0 +1,146 @@
+{
+  "detections": [
+    {
+      "bbox": {
+        "height": 0.00020141601,
+        "width": 0.9640625,
+        "x": 0.0,
+        "y": 0.96552426
+      },
+      "class": "input",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.009082031,
+        "width": 0.0076721194,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "class": "link",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.014050305,
+        "width": 1.0,
+        "x": 0.0,
+        "y": 0.9859497
+      },
+      "class": "button",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.026220703,
+        "width": 0.024853516,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "class": "link",
+      "confidence": 1.0
+    },
+    {
+      "bbox": {
+        "height": 0.003125,
+        "width": 0.003125,
+        "x": 0.0015625,
+        "y": 0.0015625
+      },
+      "class": "button",
+      "confidence": 0.880797
+    }
+  ],
+  "inference_time_ms": 88,
+  "preprocess_time_ms": 60,
+  "raw_detection_count": 5,
+  "tree": {
+    "goal": "find article headings and links",
+    "injection_warnings": [],
+    "nodes": [
+      {
+        "action": "type",
+        "bbox": {
+          "height": 0.00020141601,
+          "width": 0.9640625,
+          "x": 0.0,
+          "y": 0.96552426
+        },
+        "id": 1,
+        "label": "vision_input #1",
+        "relevance": 0.85,
+        "role": "textbox",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.009082031,
+          "width": 0.0076721194,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "id": 2,
+        "label": "vision_link #2",
+        "relevance": 0.90000004,
+        "role": "link",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.014050305,
+          "width": 1.0,
+          "x": 0.0,
+          "y": 0.9859497
+        },
+        "id": 3,
+        "label": "vision_button #3",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.026220703,
+          "width": 0.024853516,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "id": 4,
+        "label": "vision_link #4",
+        "relevance": 0.90000004,
+        "role": "link",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      },
+      {
+        "action": "click",
+        "bbox": {
+          "height": 0.003125,
+          "width": 0.003125,
+          "x": 0.0015625,
+          "y": 0.0015625
+        },
+        "id": 5,
+        "label": "vision_button #5",
+        "relevance": 0.9,
+        "role": "button",
+        "state": {},
+        "trust": "Untrusted",
+        "value": null
+      }
+    ],
+    "parse_time_ms": 0,
+    "title": "",
+    "url": "screenshot://local"
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "fetch": [
+    {
+      "site": "example.com",
+      "ae_ms": 131,
+      "ae_size": 528,
+      "lp_ms": 282,
+      "lp_size": 529,
+      "winner": "AE"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 263,
+      "ae_size": 34234,
+      "lp_ms": 770,
+      "lp_size": 34285,
+      "winner": "AE"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 874,
+      "ae_size": 51294,
+      "lp_ms": 648,
+      "lp_size": 51276,
+      "winner": "LP"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 1404,
+      "ae_size": 462251,
+      "lp_ms": 15541,
+      "lp_size": 870862,
+      "winner": "AE"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 1377,
+      "ae_size": 504252,
+      "lp_ms": 5280,
+      "lp_size": 616432,
+      "winner": "AE"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 1103,
+      "ae_size": 275528,
+      "lp_ms": 5248,
+      "lp_size": 389543,
+      "winner": "AE"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 196,
+      "ae_size": 234910,
+      "lp_ms": 3576,
+      "lp_size": 312476,
+      "winner": "AE"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 215,
+      "ae_size": 568996,
+      "lp_ms": 5356,
+      "lp_size": 547658,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 212,
+      "ae_size": 245053,
+      "lp_ms": 1181,
+      "lp_size": 248301,
+      "winner": "AE"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 1127,
+      "ae_size": 24,
+      "lp_ms": 262,
+      "lp_size": 111,
+      "winner": "LP"
+    }
+  ],
+  "parse": [
+    {
+      "site": "example.com",
+      "ae_ms": 40,
+      "ae_nodes": 6,
+      "lp_ms": 171,
+      "lp_lines": 6,
+      "winner": "AE"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 98,
+      "ae_nodes": 492,
+      "lp_ms": 342,
+      "lp_lines": 515,
+      "winner": "AE"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 125,
+      "ae_nodes": 312,
+      "lp_ms": 878,
+      "lp_lines": 272,
+      "winner": "AE"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 188,
+      "ae_nodes": 368,
+      "lp_ms": 12585,
+      "lp_lines": 648,
+      "winner": "AE"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 592,
+      "ae_nodes": 1008,
+      "lp_ms": 5701,
+      "lp_lines": 555,
+      "winner": "AE"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 417,
+      "ae_nodes": 1184,
+      "lp_ms": 5243,
+      "lp_lines": 567,
+      "winner": "AE"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 225,
+      "ae_nodes": 445,
+      "lp_ms": 1676,
+      "lp_lines": 515,
+      "winner": "AE"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 271,
+      "ae_nodes": 594,
+      "lp_ms": 5289,
+      "lp_lines": 359,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 222,
+      "ae_nodes": 12,
+      "lp_ms": 1078,
+      "lp_lines": 8,
+      "winner": "AE"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 7,
+      "ae_nodes": 1,
+      "lp_ms": 177,
+      "lp_lines": 2,
+      "winner": "AE"
+    }
+  ],
+  "render": [
+    {
+      "site": "example.com",
+      "ms": 1387,
+      "png_bytes": 61627,
+      "css_inlined": false
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ms": 3428,
+      "png_bytes": 604341,
+      "css_inlined": true
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ms": 3139,
+      "png_bytes": 55729,
+      "css_inlined": true
+    },
+    {
+      "site": "www.di.se",
+      "ms": 8311,
+      "png_bytes": 626671,
+      "css_inlined": true
+    },
+    {
+      "site": "www.expressen.se",
+      "ms": 5721,
+      "png_bytes": 105159,
+      "css_inlined": true
+    },
+    {
+      "site": "www.apple.com",
+      "ms": 8111,
+      "png_bytes": 279762,
+      "css_inlined": true
+    },
+    {
+      "site": "x.com",
+      "ms": 1025,
+      "png_bytes": 102098,
+      "css_inlined": false
+    },
+    {
+      "site": "www.bbc.com",
+      "ms": 826,
+      "png_bytes": 27465,
+      "css_inlined": false
+    }
+  ]
+}
