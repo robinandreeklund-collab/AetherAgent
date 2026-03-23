@@ -64,18 +64,20 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
         };
     }
 
-    // Steg 1+2: Extrahera <style>-block, transform med LightningCSS, filtrera @media
+    // Steg 1: Resolve CSS custom properties FÖRST (innan LightningCSS)
+    // LightningCSS resolvar inte var() — vi gör det manuellt.
+    let html_vars_resolved = resolve_css_variables(html);
+
+    // Steg 1.5: Lägg till system font fallbacks
+    let html_with_fonts = add_font_fallbacks(&html_vars_resolved);
+
+    // Steg 2+3: Extrahera <style>-block, transform med LightningCSS (Chrome 40
+    // downlevel), filtrera @media
     let (html_with_transformed_css, blocks_processed, rules_count) =
-        transform_and_filter_css(html, viewport);
+        transform_and_filter_css(&html_with_fonts, viewport);
 
-    // Steg 2.5: Resolve CSS custom properties (var(--x)) till konkreta värden
-    let html_with_resolved_vars = resolve_css_variables(&html_with_transformed_css);
-
-    // Steg 2.6: Lägg till system font fallbacks
-    let html_with_fonts = add_font_fallbacks(&html_with_resolved_vars);
-
-    // Steg 3: Inline all CSS till style="" med css-inline
-    let final_html = inline_css_to_attributes(&html_with_fonts);
+    // Steg 4: Inline all CSS till style="" med css-inline
+    let final_html = inline_css_to_attributes(&html_with_transformed_css);
 
     // Validering: css-inline kan producera trasig output för extremt komplex CSS.
     // Snabb check: output borde inte vara dramatiskt mindre än input (indikerar att
@@ -151,11 +153,11 @@ fn transform_single_css(css: &str, viewport: &ViewportConfig) -> String {
         Err(_) => return css.to_string(), // Fallback vid parse-error
     };
 
-    // Konfigurera targets — Chrome 120 stödjer CSS vars, @layer, nesting, :is(),
-    // color-mix(), logical properties. LightningCSS behåller var() och moderna
-    // features som Blitz kan hantera istället för att strippa allt.
+    // Konfigurera targets — Chrome 40 tvingar maximal downlevel av moderna CSS
+    // features (nesting, :is(), color-mix(), @layer, etc.) till simpla properties
+    // som Blitz kan tolka. var() resolvas separat i resolve_css_variables().
     let targets = Targets::from(Browsers {
-        chrome: Some(120 << 16), // Chrome 120 — modern CSS med var()-stöd
+        chrome: Some(40 << 16), // Chrome 40 — maximal downleveling för Blitz
         ..Default::default()
     });
 
