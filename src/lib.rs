@@ -33,6 +33,8 @@ mod session;
 mod stream_engine;
 mod stream_state;
 mod streaming;
+#[cfg(feature = "blitz")]
+mod taffy_render;
 mod temporal;
 mod trust;
 pub mod types;
@@ -1861,22 +1863,18 @@ fn pick_best_srcset_url(srcset: &str, viewport_width: u32) -> String {
     let target = viewport_width as i32;
 
     for entry in srcset.split(',') {
-        let parts: Vec<&str> = entry.trim().split_whitespace().collect();
+        let parts: Vec<&str> = entry.split_whitespace().collect();
         if parts.is_empty() {
             continue;
         }
         let url = parts[0];
         let descriptor = parts.get(1).unwrap_or(&"");
 
-        let width = if descriptor.ends_with('w') {
-            descriptor[..descriptor.len() - 1]
-                .parse::<i32>()
-                .unwrap_or(0)
-        } else if descriptor.ends_with('x') {
+        let width = if let Some(w_val) = descriptor.strip_suffix('w') {
+            w_val.parse::<i32>().unwrap_or(0)
+        } else if let Some(x_val) = descriptor.strip_suffix('x') {
             // Pixel density — anta 1x = viewport_width
-            let density = descriptor[..descriptor.len() - 1]
-                .parse::<f32>()
-                .unwrap_or(1.0);
+            let density = x_val.parse::<f32>().unwrap_or(1.0);
             (target as f32 * density) as i32
         } else {
             // Ingen descriptor — anta full storlek
@@ -1886,7 +1884,7 @@ fn pick_best_srcset_url(srcset: &str, viewport_width: u32) -> String {
         // Välj minsta bild som är >= viewport, eller största om ingen är tillräckligt stor
         if best_url.is_empty()
             || (width >= target && (best_width < target || width < best_width))
-            || (width < target && width > best_width && best_width < target)
+            || (width < target && width > best_width)
         {
             best_url = url.to_string();
             best_width = width;
@@ -2009,13 +2007,7 @@ fn strip_nojs_divs(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
     let mut lower_remaining = lower.as_str();
 
-    loop {
-        // Hitta nästa <div som kan vara nojs
-        let div_pos = match lower_remaining.find("<div") {
-            Some(p) => p,
-            None => break,
-        };
-
+    while let Some(div_pos) = lower_remaining.find("<div") {
         // Hitta slutet av öppningstaggen
         let after_div = &lower_remaining[div_pos..];
         let tag_end = match after_div.find('>') {
@@ -2063,7 +2055,6 @@ fn strip_nojs_divs(html: &str) -> String {
                 lower_remaining = &lower[html.len() - remaining.len()..];
             } else {
                 remaining = "";
-                lower_remaining = "";
                 break;
             }
         } else {
@@ -2079,7 +2070,7 @@ fn strip_nojs_divs(html: &str) -> String {
     result
 }
 
-/// Intern Blitz-rendering — separerad för catch_unwind
+/// Intern rendering — Taffy layout + vello_cpu rasterisering (ersätter Blitz)
 #[cfg(feature = "blitz")]
 fn render_html_to_png_inner(
     html: &str,
@@ -2088,123 +2079,7 @@ fn render_html_to_png_inner(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
-    use anyrender::{ImageRenderer, PaintScene as _};
-    use blitz_dom::DocumentConfig;
-    use blitz_html::HtmlDocument;
-    use blitz_traits::shell::{ColorScheme, Viewport};
-
-    let scale: f32 = 1.0;
-
-    // Strippa <noscript> — Blitz kör ingen JS, så dessa visar "enable javascript"-meddelanden
-    let html = &strip_noscript(html);
-
-    let mut document = if fast_render {
-        HtmlDocument::from_html(
-            html,
-            DocumentConfig {
-                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-                base_url: Some(base_url.to_string()),
-                ..Default::default()
-            },
-        )
-    } else {
-        let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
-        let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
-            std::sync::Arc::new(callback);
-        let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
-
-        let mut doc = HtmlDocument::from_html(
-            html,
-            DocumentConfig {
-                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
-                base_url: Some(base_url.to_string()),
-                net_provider: Some(std::sync::Arc::clone(&net)
-                    as std::sync::Arc<
-                        dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
-                    >),
-                ..Default::default()
-            },
-        );
-
-        // Steg 1: Initial resolve — triggar resursdiscovery i Blitz DOM
-        doc.as_mut().resolve(0.0);
-
-        // Steg 2: Vänta så att Blitz hinner köa resurshämtningar
-        std::thread::sleep(std::time::Duration::from_millis(150));
-
-        // Steg 3: Resursladdningsloop med smart idle-detection
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let mut idle_rounds = 0u32;
-        let mut total_loaded = 0u32;
-        loop {
-            let mut loaded_any = false;
-            while let Ok((_doc_id, resource)) = rx.try_recv() {
-                doc.as_mut().load_resource(resource);
-                loaded_any = true;
-                total_loaded += 1;
-            }
-            doc.as_mut().resolve(0.0);
-
-            // Kräv minst 10 tomma rundor (200ms idle) innan vi avslutar
-            // Bilder kan trigga sekundära resurshämtningar (CSS, fonter)
-            if net.is_empty() && !loaded_any {
-                idle_rounds += 1;
-                if idle_rounds >= 10 {
-                    break;
-                }
-            } else {
-                idle_rounds = 0;
-            }
-
-            if std::time::Instant::now() >= deadline {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-
-        while let Ok((_doc_id, resource)) = rx.try_recv() {
-            doc.as_mut().load_resource(resource);
-        }
-        doc.as_mut().resolve(0.0);
-        doc
-    };
-
-    if fast_render {
-        document.as_mut().resolve(0.0);
-    }
-
-    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
-    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
-    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
-    renderer.render_to_vec(
-        |scene| {
-            scene.fill(
-                peniko::Fill::NonZero,
-                peniko::kurbo::Affine::IDENTITY,
-                white,
-                None,
-                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
-            );
-            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
-        },
-        &mut buffer,
-    );
-
-    let mut png_bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| format!("PNG header: {e}"))?;
-        writer
-            .write_image_data(&buffer)
-            .map_err(|e| format!("PNG data: {e}"))?;
-        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
-    }
-
-    Ok(png_bytes)
+    taffy_render::render_to_png(html, base_url, width, height, fast_render)
 }
 
 /// Render HTML with JS evaluation — QuickJS modifies DOM, then Blitz renders

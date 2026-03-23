@@ -598,7 +598,6 @@ pub fn add_font_fallbacks(html: &str) -> String {
     // Hitta alla font-family deklarationer och lägg till fallbacks
     for &(web_font, fallback) in FONT_MAP {
         // Matcha: font-family: "Inter" eller font-family: Inter (case-insensitive)
-        let lower = result.to_ascii_lowercase();
         let search = web_font;
         let mut new_result = String::with_capacity(result.len());
         let mut remaining = result.as_str();
@@ -619,7 +618,7 @@ pub fn add_font_fallbacks(html: &str) -> String {
                 // Hitta slutet av font-family-värdet (nästa ; eller } eller ")
                 let after_font = &remaining[pos + search.len()..];
                 let value_end = after_font
-                    .find(|c: char| c == ';' || c == '}' || c == '"' || c == '\'')
+                    .find([';', '}', '"', '\''])
                     .unwrap_or(after_font.len());
 
                 let current_value = &after_font[..value_end];
