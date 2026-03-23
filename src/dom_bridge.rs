@@ -821,15 +821,12 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         Function::new(ctx.clone(), JsFn(ExitPointerLock))?,
     )?;
 
-    // activeElement — returnerar fokuserat element eller body
-    doc.set(
+    // activeElement — getter som returnerar fokuserat element eller body
+    doc.prop(
         "activeElement",
-        Function::new(
-            ctx.clone(),
-            JsFn(ActiveElement {
-                state: Rc::clone(&state),
-            }),
-        )?,
+        Accessor::new_get(JsFn(ActiveElement {
+            state: Rc::clone(&state),
+        })),
     )?;
 
     // body, head, documentElement — statiska egenskaper
@@ -1045,6 +1042,188 @@ impl JsHandler for HasAttribute {
             .unwrap_or(false);
         Ok(Value::new_bool(ctx.clone(), has))
     }
+}
+
+// ─── getAttributeNames ──────────────────────────────────────────────────────
+
+struct GetAttributeNames {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetAttributeNames {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        if let Some(node) = s.arena.nodes.get(self.key) {
+            let mut names: Vec<&String> = node.attributes.keys().collect();
+            names.sort();
+            for (i, name) in names.iter().enumerate() {
+                arr.set(
+                    i,
+                    rquickjs::String::from_str(ctx.clone(), name)?.into_value(),
+                )?;
+            }
+        }
+        Ok(arr.into_value())
+    }
+}
+
+// ─── insertAdjacentHTML ─────────────────────────────────────────────────────
+
+struct InsertAdjacentHTML {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertAdjacentHTML {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let position = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_lowercase();
+        let html_str = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+
+        if html_str.is_empty() {
+            return Ok(Value::new_undefined(ctx.clone()));
+        }
+
+        {
+            let mut s = self.state.borrow_mut();
+
+            // Parsa HTML-fragmentet
+            let parsed_keys = if !html_str.contains('<') {
+                // Enkel textnode
+                let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                    node_type: NodeType::Text,
+                    tag: None,
+                    attributes: std::collections::HashMap::new(),
+                    text: Some(html_str),
+                    parent: None,
+                    children: vec![],
+                });
+                vec![text_key]
+            } else {
+                let rcdom = crate::parser::parse_html(&html_str);
+                let fragment = ArenaDom::from_rcdom(&rcdom);
+                let doc_key = fragment.document;
+                let children = fragment
+                    .nodes
+                    .get(doc_key)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                // Kopiera alla fragment-barn till vår arena (utan förälder ännu)
+                let mut new_keys = Vec::new();
+                // Använd temporär nyckel — vi sätter rätt förälder nedan
+                let temp_parent = s.arena.document;
+                for &child in &children {
+                    let nk = copy_subtree_return_key(&fragment, child, &mut s.arena);
+                    new_keys.push(nk);
+                }
+                // Ta bort från temp-förälder (copy_subtree_return_key lägger inte till)
+                let _ = temp_parent;
+                new_keys
+            };
+
+            match position.as_str() {
+                "beforebegin" => {
+                    // Infoga före detta element (syskon)
+                    if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                        if let Some(parent_node) = s.arena.nodes.get_mut(parent_key) {
+                            if let Some(pos) =
+                                parent_node.children.iter().position(|&c| c == self.key)
+                            {
+                                for (i, &nk) in parsed_keys.iter().enumerate() {
+                                    parent_node.children.insert(pos + i, nk);
+                                }
+                            }
+                        }
+                        for &nk in &parsed_keys {
+                            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                                n.parent = Some(parent_key);
+                            }
+                        }
+                    }
+                }
+                "afterbegin" => {
+                    // Infoga som första barn
+                    if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                        for (i, &nk) in parsed_keys.iter().enumerate() {
+                            node.children.insert(i, nk);
+                        }
+                    }
+                    for &nk in &parsed_keys {
+                        if let Some(n) = s.arena.nodes.get_mut(nk) {
+                            n.parent = Some(self.key);
+                        }
+                    }
+                }
+                "beforeend" => {
+                    // Infoga som sista barn
+                    for &nk in &parsed_keys {
+                        s.arena.append_child(self.key, nk);
+                    }
+                }
+                "afterend" => {
+                    // Infoga efter detta element (syskon)
+                    if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                        if let Some(parent_node) = s.arena.nodes.get_mut(parent_key) {
+                            if let Some(pos) =
+                                parent_node.children.iter().position(|&c| c == self.key)
+                            {
+                                for (i, &nk) in parsed_keys.iter().enumerate() {
+                                    parent_node.children.insert(pos + 1 + i, nk);
+                                }
+                            }
+                        }
+                        for &nk in &parsed_keys {
+                            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                                n.parent = Some(parent_key);
+                            }
+                        }
+                    }
+                }
+                _ => {} // Ogiltig position — ignorera tyst
+            }
+
+            s.mutations.push("insertAdjacentHTML".to_string());
+        }
+
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+/// Kopiera ett subträd och returnera nyckeln till roten (utan att lägga till som barn)
+fn copy_subtree_return_key(src: &ArenaDom, src_key: NodeKey, dst: &mut ArenaDom) -> NodeKey {
+    let node = match src.nodes.get(src_key) {
+        Some(n) => n.clone(),
+        None => {
+            return dst.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: std::collections::HashMap::new(),
+                text: None,
+                parent: None,
+                children: vec![],
+            });
+        }
+    };
+    let new_key = dst.nodes.insert(crate::arena_dom::DomNode {
+        node_type: node.node_type,
+        tag: node.tag,
+        attributes: node.attributes,
+        text: node.text,
+        parent: None,
+        children: vec![],
+    });
+    for &child in &node.children {
+        copy_subtree(src, child, new_key, dst);
+    }
+    new_key
 }
 
 struct AppendChild {
@@ -1672,6 +1851,26 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(HasAttribute {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getAttributeNames",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetAttributeNames {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "insertAdjacentHTML",
+        Function::new(
+            ctx.clone(),
+            JsFn(InsertAdjacentHTML {
                 state: Rc::clone(state),
                 key,
             }),
@@ -2983,6 +3182,125 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
         )?;
     }
 
+    // crypto
+    {
+        struct RandomUUID;
+        impl JsHandler for RandomUUID {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                // Generera v4-liknande UUID utan externt beroende
+                let mut bytes = [0u8; 16];
+                // Enkel PRNG baserad på tid — tillräcklig för sandbox
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+                let mut state = seed;
+                for b in &mut bytes {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    *b = (state >> 33) as u8;
+                }
+                bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+                bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
+                let uuid = format!(
+                    "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                    bytes[0], bytes[1], bytes[2], bytes[3],
+                    bytes[4], bytes[5], bytes[6], bytes[7],
+                    bytes[8], bytes[9], bytes[10], bytes[11],
+                    bytes[12], bytes[13], bytes[14], bytes[15]
+                );
+                Ok(rquickjs::String::from_str(ctx.clone(), &uuid)?.into_value())
+            }
+        }
+
+        struct GetRandomValues;
+        impl JsHandler for GetRandomValues {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                // Fyller en TypedArray/Array med pseudo-slumpmässiga bytes
+                if let Some(arr_val) = args.first() {
+                    if let Some(arr) = arr_val.as_object() {
+                        let length: i32 = arr.get("length").unwrap_or(0);
+                        let seed = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos();
+                        let mut state = seed;
+                        for i in 0..length {
+                            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                            let val = ((state >> 33) & 0xff) as i32;
+                            arr.set(i as u32, val)?;
+                        }
+                    }
+                    return Ok(args[0].clone());
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            }
+        }
+
+        let crypto = Object::new(ctx.clone())?;
+        crypto.set("randomUUID", Function::new(ctx.clone(), JsFn(RandomUUID))?)?;
+        crypto.set(
+            "getRandomValues",
+            Function::new(ctx.clone(), JsFn(GetRandomValues))?,
+        )?;
+        win.set("crypto", crypto)?;
+    }
+
+    // location.searchParams — enkel URLSearchParams stub
+    {
+        let search_params = Object::new(ctx.clone())?;
+        struct SPGet;
+        impl JsHandler for SPGet {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                Ok(Value::new_null(ctx.clone()))
+            }
+        }
+        struct SPHas;
+        impl JsHandler for SPHas {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                Ok(Value::new_bool(ctx.clone(), false))
+            }
+        }
+        struct SPToString;
+        impl JsHandler for SPToString {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value())
+            }
+        }
+        search_params.set("get", Function::new(ctx.clone(), JsFn(SPGet))?)?;
+        search_params.set("getAll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("has", Function::new(ctx.clone(), JsFn(SPHas))?)?;
+        search_params.set("set", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("delete", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("toString", Function::new(ctx.clone(), JsFn(SPToString))?)?;
+        search_params.set("entries", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("keys", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("values", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        search_params.set("forEach", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+        // Sätt på location-objektet
+        let loc: Object = win.get("location")?;
+        loc.set("searchParams", search_params)?;
+    }
+
     // Kopiera till globalThis
     ctx.globals().set("window", win)?;
 
@@ -2992,6 +3310,7 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
         globalThis.atob = function(s) { return s; };
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
+        globalThis.crypto = globalThis.window.crypto;
         globalThis.Event = function Event(type, opts) {
             this.type = type || '';
             this.bubbles = (opts && opts.bubbles) || false;
@@ -3006,6 +3325,67 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
             this.cancelable = (opts && opts.cancelable) || false;
             this.stopPropagation = function() {};
             this.preventDefault = function() {};
+        };
+        globalThis.DOMParser = function DOMParser() {
+            this.parseFromString = function(str, type) {
+                var doc = {
+                    documentElement: document.documentElement,
+                    body: document.body,
+                    head: document.head,
+                    querySelector: function(sel) { return document.querySelector(sel); },
+                    querySelectorAll: function(sel) { return document.querySelectorAll(sel); },
+                    getElementById: function(id) { return document.getElementById(id); },
+                    getElementsByTagName: function(tag) { return document.getElementsByTagName(tag); },
+                    getElementsByClassName: function(cls) { return document.getElementsByClassName(cls); }
+                };
+                return doc;
+            };
+        };
+        globalThis.URL = function URL(url, base) {
+            var full = url || '';
+            if (base && url && url.indexOf('://') === -1) {
+                if (base.charAt(base.length - 1) !== '/' && url.charAt(0) !== '/') {
+                    full = base + '/' + url;
+                } else {
+                    full = base + url;
+                }
+            }
+            this.href = full;
+            this.toString = function() { return this.href; };
+            var parts = full.match(/^(https?:)\/\/([^/:]+)(:[0-9]+)?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
+            if (parts) {
+                this.protocol = parts[1] || '';
+                this.hostname = parts[2] || '';
+                this.port = parts[3] ? parts[3].substring(1) : '';
+                this.host = this.hostname + (this.port ? ':' + this.port : '');
+                this.pathname = parts[4] || '/';
+                this.search = parts[5] || '';
+                this.hash = parts[6] || '';
+                this.origin = this.protocol + '//' + this.host;
+            } else {
+                this.protocol = ''; this.hostname = ''; this.port = '';
+                this.host = ''; this.pathname = full; this.search = '';
+                this.hash = ''; this.origin = '';
+            }
+            this.searchParams = {
+                _params: {},
+                get: function(key) { return this._params[key] || null; },
+                has: function(key) { return key in this._params; },
+                set: function(key, val) { this._params[key] = val; },
+                delete: function(key) { delete this._params[key]; },
+                toString: function() {
+                    var parts = [];
+                    for (var k in this._params) { parts.push(k + '=' + this._params[k]); }
+                    return parts.join('&');
+                }
+            };
+            if (this.search) {
+                var qs = this.search.substring(1).split('&');
+                for (var i = 0; i < qs.length; i++) {
+                    var pair = qs[i].split('=');
+                    if (pair[0]) this.searchParams._params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1] || '');
+                }
+            }
         };
     "#,
     )?;
@@ -3145,6 +3525,47 @@ impl JsHandler for StorageClear {
     }
 }
 
+struct StorageLength {
+    state: SharedState,
+    is_local: bool,
+}
+impl JsHandler for StorageLength {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let len = if self.is_local {
+            s.local_storage.len()
+        } else {
+            s.session_storage.len()
+        };
+        Ok(Value::new_int(ctx.clone(), len as i32))
+    }
+}
+
+struct StorageKey {
+    state: SharedState,
+    is_local: bool,
+}
+impl JsHandler for StorageKey {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let index = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
+        if index < 0 {
+            return Ok(Value::new_null(ctx.clone()));
+        }
+        let s = self.state.borrow();
+        let storage = if self.is_local {
+            &s.local_storage
+        } else {
+            &s.session_storage
+        };
+        let mut keys: Vec<&String> = storage.keys().collect();
+        keys.sort();
+        match keys.get(index as usize) {
+            Some(k) => Ok(rquickjs::String::from_str(ctx.clone(), k)?.into_value()),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
 fn register_storage<'js>(
     ctx: &Ctx<'js>,
     state: SharedState,
@@ -3192,13 +3613,24 @@ fn register_storage<'js>(
             }),
         )?,
     )?;
-    let s = state.borrow();
-    let len = if is_local {
-        s.local_storage.len()
-    } else {
-        s.session_storage.len()
-    };
-    storage.set("length", len as i32)?;
+    storage.set(
+        "key",
+        Function::new(
+            ctx.clone(),
+            JsFn(StorageKey {
+                state: Rc::clone(&state),
+                is_local,
+            }),
+        )?,
+    )?;
+    // Dynamisk length-getter via Accessor
+    storage.prop(
+        "length",
+        Accessor::new_get(JsFn(StorageLength {
+            state: Rc::clone(&state),
+            is_local,
+        })),
+    )?;
     ctx.globals().set(name, storage)?;
     Ok(())
 }
@@ -4692,6 +5124,203 @@ mod tests {
         assert!(
             result.event_loop_ticks > 0,
             "Event loop borde ha dränerat microtasks"
+        );
+    }
+
+    // ─── Nya API-tester (Prio 1–3) ─────────────────────────────────────────
+
+    #[test]
+    fn test_get_attribute_names() {
+        let arena = make_arena(
+            r##"<html><body><div id="test" class="foo" data-x="1"></div></body></html>"##,
+        );
+        let code = r#"
+            var el = document.getElementById('test');
+            var names = el.getAttributeNames();
+            names.sort().join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(val.contains("class"), "Borde innehålla 'class': {}", val);
+        assert!(val.contains("id"), "Borde innehålla 'id': {}", val);
+        assert!(val.contains("data-x"), "Borde innehålla 'data-x': {}", val);
+    }
+
+    #[test]
+    fn test_insert_adjacent_html_beforeend() {
+        let arena =
+            make_arena(r##"<html><body><div id="container"><p>Existing</p></div></body></html>"##);
+        let code = r#"
+            var el = document.getElementById('container');
+            el.insertAdjacentHTML('beforeend', '<span>Added</span>');
+            el.innerHTML;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(val.contains("Added"), "Borde ha lagt till span: {}", val);
+    }
+
+    #[test]
+    fn test_insert_adjacent_html_afterbegin() {
+        let arena = make_arena(r##"<html><body><div id="c"><p>Old</p></div></body></html>"##);
+        let code = r#"
+            var el = document.getElementById('c');
+            el.insertAdjacentHTML('afterbegin', '<b>First</b>');
+            el.innerHTML;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(val.contains("First"), "Borde ha infogat först: {}", val);
+    }
+
+    #[test]
+    fn test_storage_length_and_key() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            localStorage.setItem('a', '1');
+            localStorage.setItem('b', '2');
+            localStorage.setItem('c', '3');
+            var len = localStorage.length;
+            var k0 = localStorage.key(0);
+            var k2 = localStorage.key(2);
+            var kNull = localStorage.key(99);
+            len + '|' + k0 + '|' + k2 + '|' + String(kNull);
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(val.starts_with("3|"), "length borde vara 3: {}", val);
+        assert!(val.ends_with("|null"), "key(99) borde vara null: {}", val);
+    }
+
+    #[test]
+    fn test_document_active_element() {
+        let arena = make_arena(r##"<html><body><input id="inp"/></body></html>"##);
+        let code = r#"
+            var ae = document.activeElement;
+            var tag1 = ae ? ae.tagName : 'null';
+            var inp = document.getElementById('inp');
+            inp.focus();
+            var ae2 = document.activeElement;
+            var tag2 = ae2 ? ae2.tagName : 'null';
+            tag1 + '|' + tag2;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(
+            val.contains("BODY"),
+            "Initialt activeElement borde vara body: {}",
+            val
+        );
+        assert!(
+            val.contains("INPUT"),
+            "Efter focus() borde activeElement vara input: {}",
+            val
+        );
+    }
+
+    #[test]
+    fn test_crypto_random_uuid() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var uuid = crypto.randomUUID();
+            // UUID v4 format: 8-4-4-4-12 hex
+            var valid = uuid.length === 36 && uuid.charAt(8) === '-' && uuid.charAt(13) === '-';
+            valid + '|' + uuid.charAt(14);
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(
+            val.starts_with("true|4"),
+            "UUID borde vara v4-format: {}",
+            val
+        );
+    }
+
+    #[test]
+    fn test_crypto_get_random_values() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var arr = [0, 0, 0, 0];
+            var result = crypto.getRandomValues(arr);
+            typeof result === 'object' ? 'ok' : 'fail';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("ok"),
+            "getRandomValues borde returnera arrayen"
+        );
+    }
+
+    #[test]
+    fn test_domparser() {
+        let arena = make_arena(r#"<html><body><p>Hello</p></body></html>"#);
+        let code = r#"
+            var parser = new DOMParser();
+            var doc = parser.parseFromString('<p>Test</p>', 'text/html');
+            typeof doc.querySelector === 'function' ? 'ok' : 'fail';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("ok"),
+            "DOMParser borde returnera doc-liknande objekt"
+        );
+    }
+
+    #[test]
+    fn test_url_constructor() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var u = new URL('https://example.com:8080/path?foo=bar#hash');
+            u.protocol + '|' + u.hostname + '|' + u.port + '|' + u.pathname + '|' + u.search + '|' + u.hash;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert_eq!(
+            val, "https:|example.com|8080|/path|?foo=bar|#hash",
+            "URL borde parsa korrekt"
+        );
+    }
+
+    #[test]
+    fn test_url_search_params() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var u = new URL('https://example.com/page?a=1&b=2');
+            u.searchParams.get('a') + '|' + u.searchParams.get('b') + '|' + u.searchParams.has('c');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("1|2|false"),
+            "URLSearchParams borde fungera"
+        );
+    }
+
+    #[test]
+    fn test_location_search_params() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var sp = window.location.searchParams;
+            typeof sp.get === 'function' && typeof sp.has === 'function' ? 'ok' : 'fail';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("ok"),
+            "location.searchParams borde finnas"
         );
     }
 }
