@@ -2204,6 +2204,101 @@ fn make_element_object<'js>(
         obj.set("clientHeight", h)?;
     }
 
+    // ─── childElementCount ─────────────────────────────────────────
+    {
+        let s = state.borrow();
+        let count = s
+            .arena
+            .nodes
+            .get(key)
+            .map(|n| {
+                n.children
+                    .iter()
+                    .filter(|&&ck| {
+                        s.arena
+                            .nodes
+                            .get(ck)
+                            .map(|cn| cn.node_type == NodeType::Element)
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        obj.set("childElementCount", count as i32)?;
+    }
+
+    // ─── offsetParent ───────────────────────────────────────────────
+    {
+        struct OffsetParentGetter {
+            state: SharedState,
+            key: NodeKey,
+        }
+        impl JsHandler for OffsetParentGetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let parent = self
+                    .state
+                    .borrow()
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.parent);
+                match parent {
+                    Some(pk) => make_element_object(ctx, pk, &self.state),
+                    None => Ok(Value::new_null(ctx.clone())),
+                }
+            }
+        }
+        obj.prop(
+            "offsetParent",
+            Accessor::new_get(JsFn(OffsetParentGetter {
+                state: Rc::clone(state),
+                key,
+            }))
+            .configurable(),
+        )?;
+    }
+
+    // ─── getRootNode ────────────────────────────────────────────────
+    {
+        struct GetRootNodeHandler {
+            state: SharedState,
+            key: NodeKey,
+        }
+        impl JsHandler for GetRootNodeHandler {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let root = {
+                    let s = self.state.borrow();
+                    let mut current = self.key;
+                    loop {
+                        match s.arena.nodes.get(current).and_then(|n| n.parent) {
+                            Some(pk) => current = pk,
+                            None => break current,
+                        }
+                    }
+                };
+                make_element_object(ctx, root, &self.state)
+            }
+        }
+        obj.set(
+            "getRootNode",
+            Function::new(
+                ctx.clone(),
+                JsFn(GetRootNodeHandler {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+    }
+
     // ─── Övriga egenskaper ─────────────────────────────────────────
     {
         let s = state.borrow();

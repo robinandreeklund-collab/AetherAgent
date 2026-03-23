@@ -607,11 +607,9 @@ pub(crate) fn quickjs_value_to_string<'js>(
             .unwrap_or_default(),
         _ => {
             // För objekt/arrayer: använd JSON.stringify eller toString()
-            if let Ok(s) = ctx.json_stringify(val.clone()) {
-                if let Some(json_str) = s {
-                    if let Ok(rs) = json_str.to_string() {
-                        return rs;
-                    }
+            if let Ok(Some(json_str)) = ctx.json_stringify(val.clone()) {
+                if let Ok(rs) = json_str.to_string() {
+                    return rs;
                 }
             }
             // Fallback: toString()

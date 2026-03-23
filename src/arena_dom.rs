@@ -48,12 +48,14 @@ impl DomNode {
 
     /// Sätt attribut — O(1) via HashMap. Används av DOM Bridge.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn set_attr(&mut self, name: &str, value: &str) {
         self.attributes.insert(name.to_string(), value.to_string());
     }
 
     /// Ta bort attribut — O(1) via HashMap. Används av DOM Bridge.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn remove_attr(&mut self, name: &str) -> bool {
         self.attributes.remove(name).is_some()
     }
@@ -165,6 +167,7 @@ impl ArenaDom {
     /// Sätt attribut på en nod — O(1) via HashMap.
     /// Används av DOM Bridge (js-eval) för setAttribute-anrop.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn set_attr(&mut self, key: NodeKey, attr_name: &str, value: &str) {
         if let Some(node) = self.nodes.get_mut(key) {
             node.set_attr(attr_name, value);
@@ -174,6 +177,7 @@ impl ArenaDom {
     /// Ta bort attribut från en nod — O(1) via HashMap.
     /// Används av DOM Bridge (js-eval) för removeAttribute-anrop.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn remove_attr(&mut self, key: NodeKey, attr_name: &str) -> bool {
         self.nodes
             .get_mut(key)

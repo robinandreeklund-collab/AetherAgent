@@ -19,6 +19,12 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
+/// Typ-alias för due timers och recurring timers att spara om.
+type DueTimersResult = (
+    Vec<Persistent<Function<'static>>>,
+    Vec<(u32, Persistent<Function<'static>>, u64)>,
+);
+
 // ─── Livstidssäker IntoJsFunc-wrapper ────────────────────────────────────────
 // rquickjs closures kan inte returnera Value<'js> pga livstidsinferens.
 // Denna trait + wrapper löser problemet via explicit 'js-livstid i handle().
@@ -516,10 +522,7 @@ pub fn run_event_loop(ctx: &Ctx<'_>, el: &SharedEventLoop) -> Result<EventLoopSt
 
         // Fas 2: Avancera virtuell klocka och kör mogna timers
         // Steg 1: Extrahera mogna timers (utan att anropa restore inne i borrow_mut)
-        let (due_timers, recurring_resave): (
-            Vec<Persistent<Function<'static>>>,
-            Vec<(u32, Persistent<Function<'static>>, u64)>,
-        ) = {
+        let (due_timers, recurring_resave): DueTimersResult = {
             let mut state = el.borrow_mut();
             state.virtual_time_ms += 1; // Avancera 1ms per tick
             state.ticks += 1;
