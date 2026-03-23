@@ -1,11 +1,11 @@
-/// CSS Cascade Engine — Fas 19
-///
-/// Parses `<style>` tags and inline styles from ArenaDom, resolves
-/// specificity-ordered cascade, and computes styles per node with
-/// CSS inheritance support.
-///
-/// Används av `dom_bridge.rs` för `window.getComputedStyle()`.
-#[allow(dead_code)]
+//! CSS Cascade Engine — Fas 19
+//!
+//! Parses `<style>` tags and inline styles from ArenaDom, resolves
+//! specificity-ordered cascade, and computes styles per node with
+//! CSS inheritance support.
+//!
+//! Används av `dom_bridge.rs` för `window.getComputedStyle()`.
+#![allow(dead_code)]
 use std::collections::HashMap;
 
 use crate::arena_dom::{ArenaDom, NodeKey, NodeType};

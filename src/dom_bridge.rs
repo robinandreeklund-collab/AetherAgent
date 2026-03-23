@@ -2973,10 +2973,7 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
                 let obs = Object::new(ctx.clone())?;
                 obs.set("observe", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
                 obs.set("unobserve", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                obs.set(
-                    "disconnect",
-                    Function::new(ctx.clone(), JsFn(NoOpHandler))?,
-                )?;
+                obs.set("disconnect", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
                 Ok(obs.into_value())
             }
         }
