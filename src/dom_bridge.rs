@@ -470,23 +470,23 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
     // Bygg document-objektet
     let doc = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("getElementById", get_element_by_id).unwrap_or(())
+    doc.set("getElementById", get_element_by_id).unwrap_or(())
         ;
-    /* TODO */ obj.set("querySelector", query_selector).unwrap_or(())
+    doc.set("querySelector", query_selector).unwrap_or(())
         ;
-    /* TODO */ obj.set("querySelectorAll", query_selector_all).unwrap_or(())
+    doc.set("querySelectorAll", query_selector_all).unwrap_or(())
         ;
-    /* TODO */ obj.set("createElement", create_element).unwrap_or(())
+    doc.set("createElement", create_element).unwrap_or(())
         ;
-    /* TODO */ obj.set("createTextNode", create_text_node).unwrap_or(())
+    doc.set("createTextNode", create_text_node).unwrap_or(())
         ;
-    /* TODO */ obj.set("createComment", create_comment).unwrap_or(())
+    doc.set("createComment", create_comment).unwrap_or(())
         ;
-    /* TODO */ obj.set("createDocumentFragment", create_doc_fragment).unwrap_or(())
+    doc.set("createDocumentFragment", create_doc_fragment).unwrap_or(())
         ;
-    /* TODO */ obj.set("getElementsByClassName", get_by_class).unwrap_or(())
+    doc.set("getElementsByClassName", get_by_class).unwrap_or(())
         ;
-    /* TODO */ obj.set("getElementsByTagName", get_by_tag).unwrap_or(());
+    doc.set("getElementsByTagName", get_by_tag).unwrap_or(());
 
     // body, head, documentElement
     let (body_key, head_key, html_key) = {
@@ -567,27 +567,27 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
             .set("commonAncestorContainer", Value::new_null(ctx.clone()),
             )
             ;
-    /* TODO */ obj.set("collapse", collapse_fn).unwrap_or(())
+    doc.set("collapse", collapse_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("selectNode", select_node_fn).unwrap_or(())
+    doc.set("selectNode", select_node_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("selectNodeContents", select_node_contents_fn).unwrap_or(())
+    doc.set("selectNodeContents", select_node_contents_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("setStart", set_start_fn).unwrap_or(())
+    doc.set("setStart", set_start_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("setEnd", set_end_fn).unwrap_or(())
+    doc.set("setEnd", set_end_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("setStartBefore", set_start_before_fn).unwrap_or(())
+    doc.set("setStartBefore", set_start_before_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("setEndAfter", set_end_after_fn).unwrap_or(())
+    doc.set("setEndAfter", set_end_after_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("cloneRange", clone_range_fn).unwrap_or(())
+    doc.set("cloneRange", clone_range_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("deleteContents", delete_contents_fn).unwrap_or(())
+    doc.set("deleteContents", delete_contents_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("toString", to_string_fn).unwrap_or(())
+    doc.set("toString", to_string_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("getBoundingClientRect", get_bounding_fn).unwrap_or(());
+    doc.set("getBoundingClientRect", get_bounding_fn).unwrap_or(());
 
         Ok(range.into_value())
     });
@@ -597,7 +597,7 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // getSelection() — grundläggande Selection API
     let get_selection_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -616,11 +616,11 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
 
         let selection = Object::new(ctx.clone()).unwrap()
             ;
-    /* TODO */ obj.set("anchorNode", Value::new_null(ctx.clone())).unwrap_or(())
+    doc.set("anchorNode", Value::new_null(ctx.clone())).unwrap_or(())
             .set("anchorOffset", Value::new_int(ctx.clone(), 0),
             )
             ;
-    /* TODO */ obj.set("focusNode", Value::new_null(ctx.clone())).unwrap_or(())
+    doc.set("focusNode", Value::new_null(ctx.clone())).unwrap_or(())
             .set("focusOffset", Value::new_int(ctx.clone(), 0),
             )
             .set("isCollapsed", Value::new_bool(ctx.clone(), true),
@@ -629,17 +629,17 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
             .set("type", rquickjs::String::from_str(ctx.clone(), "None").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
             ;
-    /* TODO */ obj.set("removeAllRanges", remove_all_ranges).unwrap_or(())
+    doc.set("removeAllRanges", remove_all_ranges).unwrap_or(())
             ;
-    /* TODO */ obj.set("addRange", add_range_fn).unwrap_or(())
+    doc.set("addRange", add_range_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("collapse", collapse_fn).unwrap_or(())
+    doc.set("collapse", collapse_fn).unwrap_or(())
             ;
-    /* TODO */ obj.set("collapseToStart", collapse_to_start).unwrap_or(())
+    doc.set("collapseToStart", collapse_to_start).unwrap_or(())
             ;
-    /* TODO */ obj.set("collapseToEnd", collapse_to_end).unwrap_or(())
+    doc.set("collapseToEnd", collapse_to_end).unwrap_or(())
             ;
-    /* TODO */ obj.set("toString", to_string_fn).unwrap_or(());
+    doc.set("toString", to_string_fn).unwrap_or(());
 
         Ok(selection.into_value())
     });
@@ -649,7 +649,7 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // exitPointerLock()
     let exit_pl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
@@ -659,7 +659,7 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // activeElement — returnerar det element som har fokus (default: body)
     let st_ae = Rc::clone(&state);
@@ -693,7 +693,7 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     ctx.globals().set("document", doc)
         .unwrap_or(());
@@ -779,7 +779,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── setAttribute(name, value) ──────────────────────────────────
     let st = Rc::clone(state);
@@ -804,7 +804,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── removeAttribute(name) ──────────────────────────────────────
     let st = Rc::clone(state);
@@ -824,7 +824,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── textContent (accessor property: getter + setter) ──────────
     {
@@ -892,7 +892,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── removeChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
@@ -912,7 +912,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── parentNode ─────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -929,7 +929,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── childNodes ─────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -953,7 +953,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── firstChild ─────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -975,7 +975,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── nextSibling ────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1002,7 +1002,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── closest(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1027,7 +1027,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── matches(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1045,7 +1045,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── children (bara element-barn) ───────────────────────────────
     let st = Rc::clone(state);
@@ -1074,7 +1074,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── dataset (läs data-* attribut) ──────────────────────────────
     let st = Rc::clone(state);
@@ -1103,7 +1103,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── insertBefore(newChild, refChild) ─────────────────────────
     let st = Rc::clone(state);
@@ -1124,7 +1124,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── insertAdjacentHTML(position, html) ────────────────────────
     // Förenklad: loggar mutation, parsning av HTML stöds ej (kräver full parser)
@@ -1151,7 +1151,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── attachShadow({ mode }) ─────────────────────────────────────
     // Förenklad: returnerar ett tomt objekt som shadow root
@@ -1165,7 +1165,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── cloneNode(deep) ────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1190,7 +1190,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── outerHTML (getter) ─────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1207,7 +1207,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── innerHTML (accessor property: getter + setter) ────────────
     {
@@ -1298,7 +1298,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     let st = Rc::clone(state);
     let tc_set_compat = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -1331,7 +1331,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── firstElementChild ──────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1354,7 +1354,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── nextElementSibling ─────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1384,7 +1384,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── previousSibling ──────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1411,7 +1411,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── previousElementSibling ─────────────────────────────────────
     let st = Rc::clone(state);
@@ -1441,7 +1441,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── childElementCount ──────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1472,7 +1472,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── hasAttribute(name) ─────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1490,7 +1490,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── remove() — ta bort elementet från sin förälder ─────────────
     let st = Rc::clone(state);
@@ -1508,7 +1508,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── replaceWith(newNode) ───────────────────────────────────────
     let st = Rc::clone(state);
@@ -1530,7 +1530,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── replaceChild(newChild, oldChild) (Fas 19) ────────────────
     let st_rc = Rc::clone(state);
@@ -1552,7 +1552,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── before/after/prepend/append (Fas 19) ───────────────────────
     let st_before = Rc::clone(state);
@@ -1573,7 +1573,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     let st_after = Rc::clone(state);
     let after_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -1601,7 +1601,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     let st_prepend = Rc::clone(state);
     let prepend_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -1624,7 +1624,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     let st_append = Rc::clone(state);
     let append_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -1642,7 +1642,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── toggleAttribute(name) (Fas 19) ─────────────────────────────
     let st_ta = Rc::clone(state);
@@ -1667,7 +1667,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── getAttributeNames() (Fas 19) ───────────────────────────────
     let st_gan = Rc::clone(state);
@@ -1692,7 +1692,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── normalize() — slå ihop adjacenta text-noder (Fas 19) ───────
     let st_norm = Rc::clone(state);
@@ -1744,7 +1744,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── value (getter/setter för input/textarea/select) ────────────
     let st = Rc::clone(state);
@@ -1761,7 +1761,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── checked (getter för checkbox/radio) ────────────────────────
     let st = Rc::clone(state);
@@ -1775,7 +1775,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── selected (getter för option-element) ───────────────────────
     let st = Rc::clone(state);
@@ -1789,7 +1789,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── tabIndex ───────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1808,7 +1808,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── offsetParent ───────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -1827,13 +1827,13 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── clientTop / clientLeft (border-dimensioner, default 0) ─────
     obj.set("clientTop", Value::new_int(ctx.clone(), 0), false, ctx)
-        .unwrap_or(true);
+        .unwrap_or(());
     obj.set("clientLeft", Value::new_int(ctx.clone(), 0), false, ctx)
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // ─── addEventListener(type, callback, capture/options) ──────────
     let st = Rc::clone(state);
@@ -1876,7 +1876,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── removeEventListener(type, callback) ────────────────────
     let st = Rc::clone(state);
@@ -1901,7 +1901,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── dispatchEvent(event) ───────────────────────────────────
     let st = Rc::clone(state);
@@ -1920,7 +1920,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 .as_object()
                 .and_then(|o| o.get("bubbles", ctx).ok())
                 .map(|v| v.as_bool().unwrap_or(false))
-                .unwrap_or(true);
+                .unwrap_or(());
 
             // Sätt target + currentTarget
             if let Some(obj) = event_val.as_object() {
@@ -2021,7 +2021,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── focus() ────────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -2037,7 +2037,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── blur() ─────────────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -2055,7 +2055,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── scrollIntoView(options) ────────────────────────────────────
     let st = Rc::clone(state);
@@ -2080,7 +2080,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── getBoundingClientRect() ────────────────────────────────────
     let st = Rc::clone(state);
@@ -2089,21 +2089,21 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
             let rect = Object::new(ctx.clone()).unwrap()
                 ;
-    /* TODO */ obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
+    obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
                 ;
-    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+    obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
                 .set("width", Value::new_float(ctx.clone(), width as f64),
                 )
                 .set("height", Value::new_float(ctx.clone(), height as f64),
                 )
                 ;
-    /* TODO */ obj.set("top", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+    obj.set("top", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
                 .set("right", Value::from(x + width),
                 )
                 .set("bottom", Value::from(y + height),
                 )
                 ;
-    /* TODO */ obj.set("left", Value::new_float(ctx.clone(), x as f64)).unwrap_or(());
+    obj.set("left", Value::new_float(ctx.clone(), x as f64)).unwrap_or(());
             Ok(rect.into_value())
     }).unwrap();
     obj.set(
@@ -2112,7 +2112,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── getClientRects() ───────────────────────────────────────────
     let st = Rc::clone(state);
@@ -2122,9 +2122,9 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             let rect = Object::new(ctx.clone()).unwrap()
                 ;
-    /* TODO */ obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
+    obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
                 ;
-    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+    obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
                 .set("width", Value::new_float(ctx.clone(), width as f64),
                 )
                 .set("height", Value::new_float(ctx.clone(), height as f64),
@@ -2138,7 +2138,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── offset* / client* / scroll* properties ─────────────────────
     {
@@ -2163,45 +2163,45 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
         obj.set("offsetLeft", Value::new_int(ctx.clone(), 0), false, ctx)
-            .unwrap_or(true);
+            .unwrap_or(());
         obj.set("offsetWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
-            .unwrap_or(true);
+            .unwrap_or(());
         obj.set("offsetHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
-            .unwrap_or(true);
+            .unwrap_or(());
         obj.set(
             "scrollTop",
             Value::new_float(ctx.clone(), scroll_top as f64),
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
         obj.set(
             "scrollLeft",
             Value::new_float(ctx.clone(), scroll_left as f64),
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
         obj.set(
             "scrollWidth",
             Value::new_float(ctx.clone(), content_w as f64),
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
         obj.set(
             "scrollHeight",
             Value::new_float(ctx.clone(), content_h as f64),
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
         obj.set("clientWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
-            .unwrap_or(true);
+            .unwrap_or(());
         obj.set("clientHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
-            .unwrap_or(true);
+            .unwrap_or(());
     }
 
     // ─── shadowRoot (read-only traversal av deklarativ Shadow DOM) ──
@@ -2252,7 +2252,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
     }
 
     // ─── contains(otherElement) ─────────────────────────────────────
@@ -2271,7 +2271,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── getRootNode() ──────────────────────────────────────────────
     let st = Rc::clone(state);
@@ -2289,7 +2289,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     // ─── hidden (property kopplad till hidden-attribut) ──────────────
     {
@@ -2306,7 +2306,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
     }
 
     // ─── requestPointerLock() / exitPointerLock() ───────────────────
@@ -2317,7 +2317,7 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         false,
         ctx,
     )
-    .unwrap_or(true);
+    .unwrap_or(());
 
     Value::new_float(ctx.clone(), obj as f64)
 }
@@ -2477,19 +2477,19 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
 
     let cl = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("add", add_fn).unwrap_or(())
+    obj.set("add", add_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("remove", remove_fn).unwrap_or(())
+    obj.set("remove", remove_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("toggle", toggle_fn).unwrap_or(())
+    obj.set("toggle", toggle_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("contains", contains_fn).unwrap_or(())
+    obj.set("contains", contains_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("replace", replace_fn).unwrap_or(())
+    obj.set("replace", replace_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("value", value_fn).unwrap_or(())
+    obj.set("value", value_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("length", length_fn).unwrap_or(());
+    obj.set("length", length_fn).unwrap_or(());
 
     Value::new_float(ctx.clone(), cl as f64)
 }
@@ -2599,13 +2599,13 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
 
     let style = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("setProperty", set_prop).unwrap_or(())
+    obj.set("setProperty", set_prop).unwrap_or(())
         ;
-    /* TODO */ obj.set("getPropertyValue", get_prop).unwrap_or(())
+    obj.set("getPropertyValue", get_prop).unwrap_or(())
         ;
-    /* TODO */ obj.set("removeProperty", remove_prop).unwrap_or(())
+    obj.set("removeProperty", remove_prop).unwrap_or(())
         ;
-    /* TODO */ obj.set("cssText", css_text_get).unwrap_or(());
+    obj.set("cssText", css_text_get).unwrap_or(());
 
     // Populera vanliga CSS-egenskaper från inline style
     let common_props = [
@@ -2745,7 +2745,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
             let style = Object::new(ctx.clone()).unwrap()
                 ;
-    /* TODO */ obj.set("getPropertyValue", get_pv).unwrap_or(());
+    win.set("getPropertyValue", get_pv).unwrap_or(());
 
             // Sätt alla properties som egenskaper (camelCase + kebab)
             for (prop, val) in &merged {
@@ -2767,7 +2767,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // matchMedia(query) — Fas 19: CSS media query matching
     let match_media = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -2797,9 +2797,9 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 2,
             )
             ;
-    /* TODO */ obj.set("addListener", add_listener).unwrap_or(())
+    win.set("addListener", add_listener).unwrap_or(())
             ;
-    /* TODO */ obj.set("removeListener", remove_listener).unwrap_or(());
+    win.set("removeListener", remove_listener).unwrap_or(());
         Ok(mql.into_value())
     });
     window
@@ -2809,7 +2809,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // atob/btoa — base64 encode/decode
     let atob_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -2831,7 +2831,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     let btoa_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let input = args
@@ -2849,7 +2849,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // scrollTo/scrollBy — stubs som loggar mutation
     let st_scroll = Rc::clone(&state);
@@ -2869,7 +2869,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
     let st_scroll2 = Rc::clone(&state);
     let scroll_by = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let x = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
@@ -2887,7 +2887,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
     // scroll = alias för scrollTo
     let scroll_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     window
@@ -2897,7 +2897,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // performance.now()
     let perf_start = std::time::Instant::now();
@@ -2907,7 +2907,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     }).unwrap();
     let performance = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("now", perf_now).unwrap_or(());
+    win.set("now", perf_now).unwrap_or(());
     window
         .set("performance", performance).unwrap_or(());
 
@@ -2934,7 +2934,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // history stub
     let st_hist = Rc::clone(&state);
@@ -2968,15 +2968,15 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     let go_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     let history = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("pushState", push_state).unwrap_or(())
+    win.set("pushState", push_state).unwrap_or(())
         ;
-    /* TODO */ obj.set("replaceState", replace_state).unwrap_or(())
+    win.set("replaceState", replace_state).unwrap_or(())
         ;
-    /* TODO */ obj.set("back", back_fn).unwrap_or(())
+    win.set("back", back_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("forward", forward_fn).unwrap_or(())
+    win.set("forward", forward_fn).unwrap_or(())
         ;
-    /* TODO */ obj.set("go", go_fn).unwrap_or(())
+    win.set("go", go_fn).unwrap_or(())
         .set("length", Value::new_int(ctx.clone(), 1));
     window
         .set("history", history).unwrap_or(());
@@ -3006,7 +3006,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // open/close stubs
     let open_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_null(ctx.clone())) }).unwrap();
@@ -3018,7 +3018,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
     window
         .set(
             "close",
@@ -3026,7 +3026,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // IntersectionObserver — fires per-element on observe() med layoutdata
     let st_io = Rc::clone(&state);
@@ -3051,13 +3051,13 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
                     let bounds = Object::new(ctx.clone()).unwrap()
                         ;
-    /* TODO */ obj.set("x", Value::from(0.0)).unwrap_or(())
+    win.set("x", Value::from(0.0)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+    win.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
+    win.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(());
+    win.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(());
 
                     let entry = Object::new(ctx.clone()).unwrap()
                         .set("isIntersecting", Value::new_float(ctx.clone(), is_visible as f64),
@@ -3069,7 +3069,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                             bounds,
                         )
                         ;
-    /* TODO */ obj.set("target", target.clone()).unwrap_or(());
+    win.set("target", target.clone()).unwrap_or(());
 
                     let entries = rquickjs::Array::new(ctx.clone()).unwrap();
                     let _ = entries.set(0, entry);
@@ -3084,11 +3084,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let observer = Object::new(ctx.clone()).unwrap()
                 ;
-    /* TODO */ obj.set("observe", observe_fn).unwrap_or(())
+    win.set("observe", observe_fn).unwrap_or(())
                 ;
-    /* TODO */ obj.set("unobserve", unobserve_fn).unwrap_or(())
+    win.set("unobserve", unobserve_fn).unwrap_or(())
                 ;
-    /* TODO */ obj.set("disconnect", disconnect_fn).unwrap_or(());
+    win.set("disconnect", disconnect_fn).unwrap_or(());
             Ok(observer.into_value())
     }).unwrap();
     window
@@ -3098,7 +3098,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // ResizeObserver — fires callback on observe() med element-dimensioner
     let st_ro = Rc::clone(&state);
@@ -3120,13 +3120,13 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
                     let content_rect = Object::new(ctx.clone()).unwrap()
                         ;
-    /* TODO */ obj.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
+    win.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(())
+    win.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("x", Value::from(0.0)).unwrap_or(())
+    win.set("x", Value::from(0.0)).unwrap_or(())
                         ;
-    /* TODO */ obj.set("y", Value::from(0.0)).unwrap_or(());
+    win.set("y", Value::from(0.0)).unwrap_or(());
 
                     let border_size = Object::new(ctx.clone()).unwrap()
                         .set("inlineSize", Value::new_float(ctx.clone(), w as f64),
@@ -3138,11 +3138,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
                     let entry = Object::new(ctx.clone()).unwrap()
                         ;
-    /* TODO */ obj.set("contentRect", content_rect).unwrap_or(())
+    win.set("contentRect", content_rect).unwrap_or(())
                         ;
-    /* TODO */ obj.set("borderBoxSize", border_arr).unwrap_or(())
+    win.set("borderBoxSize", border_arr).unwrap_or(())
                         ;
-    /* TODO */ obj.set("target", target.clone()).unwrap_or(());
+    win.set("target", target.clone()).unwrap_or(());
 
                     let entries = rquickjs::Array::new(ctx.clone()).unwrap();
                     let _ = entries.set(0, entry);
@@ -3157,11 +3157,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let observer = Object::new(ctx.clone()).unwrap()
                 ;
-    /* TODO */ obj.set("observe", observe_fn).unwrap_or(())
+    win.set("observe", observe_fn).unwrap_or(())
                 ;
-    /* TODO */ obj.set("unobserve", unobserve_fn).unwrap_or(())
+    win.set("unobserve", unobserve_fn).unwrap_or(())
                 ;
-    /* TODO */ obj.set("disconnect", disconnect_fn).unwrap_or(());
+    win.set("disconnect", disconnect_fn).unwrap_or(());
             Ok(observer.into_value())
     }).unwrap();
     window
@@ -3171,7 +3171,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // customElements — med lifecycle callback-stöd (connectedCallback, disconnectedCallback)
     // Lagrar registrerade element-definitioner med deras konstruktor/klass
@@ -3235,11 +3235,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
     let custom_elements = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("define", ce_define).unwrap_or(())
+    win.set("define", ce_define).unwrap_or(())
         ;
-    /* TODO */ obj.set("get", ce_get).unwrap_or(())
+    win.set("get", ce_get).unwrap_or(())
         ;
-    /* TODO */ obj.set("whenDefined", ce_when).unwrap_or(());
+    win.set("whenDefined", ce_when).unwrap_or(());
     window
         .set(
             "customElements",
@@ -3247,7 +3247,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             false,
             ctx,
         )
-        .unwrap_or(true);
+        .unwrap_or(());
 
     // localStorage — in-memory sandboxad implementation (Fas 19)
     register_storage(ctx, Rc::clone(&state), "localStorage", true);
@@ -3322,7 +3322,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         let event = Object::new(ctx.clone()).unwrap()
             .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
-            .set("bubbles", Value::new_float(ctx.clone(), bubbles as f64),
+            .set("bubbles", Value::new_bool(ctx.clone(), bubbles),
             )
             .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
             )
@@ -3333,7 +3333,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("__stopped__", Value::new_bool(ctx.clone(), false),
             )
             ;
-    /* TODO */ obj.set("target", Value::new_null(ctx.clone())).unwrap_or(())
+    win.set("target", Value::new_null(ctx.clone())).unwrap_or(())
             .set("currentTarget", Value::new_null(ctx.clone()),
             )
             .set("eventPhase", Value::new_int(ctx.clone(), 0))
@@ -3342,20 +3342,16 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("isTrusted", Value::new_bool(ctx.clone(), false),
             )
             ;
-    /* TODO */ obj.set("stopPropagation", stop_prop).unwrap_or(())
+    win.set("stopPropagation", stop_prop).unwrap_or(())
             ;
-    /* TODO */ obj.set("preventDefault", prevent_default).unwrap_or(())
+    win.set("preventDefault", prevent_default).unwrap_or(())
             ;
-    /* TODO */ obj.set("stopImmediatePropagation", stop_imm).unwrap_or(());
+    win.set("stopImmediatePropagation", stop_imm).unwrap_or(());
 
         Ok(event.into_value())
     });
-    ctx
-        .register_global_property(
-            "Event",
-            event_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("Event", event_ctor,
+        ).unwrap_or(());
 
     // CustomEvent konstruktor — new CustomEvent('my-event', {detail: data})
     let custom_event_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -3405,7 +3401,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         let event = Object::new(ctx.clone()).unwrap()
             .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
-            .set("bubbles", Value::new_float(ctx.clone(), bubbles as f64),
+            .set("bubbles", Value::new_bool(ctx.clone(), bubbles),
             )
             .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
             )
@@ -3416,26 +3412,22 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("__stopped__", Value::new_bool(ctx.clone(), false),
             )
             ;
-    /* TODO */ obj.set("detail", detail).unwrap_or(())
+    win.set("detail", detail).unwrap_or(())
             ;
-    /* TODO */ obj.set("target", Value::new_null(ctx.clone())).unwrap_or(())
+    win.set("target", Value::new_null(ctx.clone())).unwrap_or(())
             .set("currentTarget", Value::new_null(ctx.clone()),
             )
             .set("isTrusted", Value::new_bool(ctx.clone(), false),
             )
             ;
-    /* TODO */ obj.set("stopPropagation", stop_prop).unwrap_or(())
+    win.set("stopPropagation", stop_prop).unwrap_or(())
             ;
-    /* TODO */ obj.set("preventDefault", prevent_default).unwrap_or(());
+    win.set("preventDefault", prevent_default).unwrap_or(());
 
         Ok(event.into_value())
     });
-    ctx
-        .register_global_property(
-            "CustomEvent",
-            custom_event_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("CustomEvent", custom_event_ctor,
+        ).unwrap_or(());
 
     // ─── Globala API:er (Fas 19) ─────────────────────────────────────────────
 
@@ -3458,15 +3450,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
             ;
-    /* TODO */ obj.set("encode", encode_fn).unwrap_or(());
+    win.set("encode", encode_fn).unwrap_or(());
         Ok(encoder.into_value())
     });
-    ctx
-        .register_global_property(
-            "TextEncoder",
-            text_encoder_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("TextEncoder", text_encoder_ctor,
+        ).unwrap_or(());
 
     // TextDecoder
     let text_decoder_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -3492,15 +3480,11 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
             ;
-    /* TODO */ obj.set("decode", decode_fn).unwrap_or(());
+    win.set("decode", decode_fn).unwrap_or(());
         Ok(decoder.into_value())
     });
-    ctx
-        .register_global_property(
-            "TextDecoder",
-            text_decoder_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("TextDecoder", text_decoder_ctor,
+        ).unwrap_or(());
 
     // URL constructor
     let url_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -3612,12 +3596,8 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
 
         Ok(url_obj.into_value())
     });
-    ctx
-        .register_global_property(
-            "URL",
-            url_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("URL", url_ctor,
+        ).unwrap_or(());
 
     // AbortController stub
     let abort_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -3625,7 +3605,7 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             .set("aborted", Value::new_bool(ctx.clone(), false),
             )
             ;
-    /* TODO */ obj.set("reason", Value::new_undefined(ctx.clone())).unwrap_or(());
+    win.set("reason", Value::new_undefined(ctx.clone())).unwrap_or(());
         let signal_clone = signal.clone();
         let abort_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let _ = signal_clone.set("aborted", Value::new_bool(ctx.clone(), true), false, ctx);
@@ -3633,16 +3613,12 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         }).unwrap();
         let controller = Object::new(ctx.clone()).unwrap()
             ;
-    /* TODO */ obj.set("abort", abort_fn).unwrap_or(());
+    win.set("abort", abort_fn).unwrap_or(());
         let _ = controller.set("signal", signal);
         Ok(controller.into_value())
     });
-    ctx
-        .register_global_property(
-            "AbortController",
-            abort_ctor,
-        )
-        .unwrap_or(());
+    ctx.globals().set("AbortController", abort_ctor,
+        ).unwrap_or(());
 
     // structuredClone — JSON roundtrip-approximation
     let structured_clone = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
@@ -3651,12 +3627,8 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         let json_str = val.as_string().and_then(|s| s.to_string().ok()).unwrap_or_default();
         Ok(rquickjs::String::from_str(ctx.clone(), json_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
     });
-    ctx
-        .register_global_property(
-            "structuredClone",
-            structured_clone,
-        )
-        .unwrap_or(());
+    ctx.globals().set("structuredClone", structured_clone,
+        ).unwrap_or(());
 
     // crypto.randomUUID() och getRandomValues()
     let random_uuid = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -3696,9 +3668,9 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     });
     let crypto = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("randomUUID", random_uuid).unwrap_or(())
+    win.set("randomUUID", random_uuid).unwrap_or(())
         ;
-    /* TODO */ obj.set("getRandomValues", get_random_values).unwrap_or(());
+    win.set("getRandomValues", get_random_values).unwrap_or(());
     ctx.globals().set("crypto", crypto)
         .unwrap_or(());
 }
@@ -3838,15 +3810,15 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
 
     let storage_obj = Object::new(ctx.clone()).unwrap()
         ;
-    /* TODO */ obj.set("getItem", get_item).unwrap_or(())
+    obj.set("getItem", get_item).unwrap_or(())
         ;
-    /* TODO */ obj.set("setItem", set_item).unwrap_or(())
+    obj.set("setItem", set_item).unwrap_or(())
         ;
-    /* TODO */ obj.set("removeItem", remove_item).unwrap_or(())
+    obj.set("removeItem", remove_item).unwrap_or(())
         ;
-    /* TODO */ obj.set("clear", clear).unwrap_or(())
+    obj.set("clear", clear).unwrap_or(())
         ;
-    /* TODO */ obj.set("key", key_fn).unwrap_or(());
+    obj.set("key", key_fn).unwrap_or(());
 
     // Sätt length som getter (via closure)
     let length_getter = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -5002,7 +4974,7 @@ fn is_empty_element(arena: &ArenaDom, key: NodeKey) -> bool {
                 // :empty = inga element- eller text-barn (kommentarer ok)
                 cn.node_type != NodeType::Element && cn.node_type != NodeType::Text
             })
-            .unwrap_or(true)
+            .unwrap_or(())
     })
 }
 
