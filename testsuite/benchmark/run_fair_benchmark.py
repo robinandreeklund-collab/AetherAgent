@@ -9,15 +9,29 @@ Apples-to-apples comparison:
 """
 
 import json, base64, urllib.request, subprocess, time, os, sys
+from datetime import datetime
 
 AETHER_SERVER = "http://localhost:3000"
 LIGHTPANDA = "/tmp/lightpanda"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-AETHER_DIR = f"{BASE_DIR}/aether"
 LP_DIR = f"{BASE_DIR}/lightpanda"
 
+# Skapa datumstämplad folder för varje körning
+RUN_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+AETHER_DIR = f"{BASE_DIR}/aether_{RUN_TIMESTAMP}"
 os.makedirs(AETHER_DIR, exist_ok=True)
 os.makedirs(LP_DIR, exist_ok=True)
+
+# Uppdatera latest-symlink
+LATEST_LINK = f"{BASE_DIR}/aether_latest"
+if os.path.islink(LATEST_LINK):
+    os.unlink(LATEST_LINK)
+elif os.path.exists(LATEST_LINK):
+    os.rename(LATEST_LINK, f"{LATEST_LINK}.bak")
+os.symlink(f"aether_{RUN_TIMESTAMP}", LATEST_LINK)
+
+print(f"Resultat sparas i: aether_{RUN_TIMESTAMP}/")
+print()
 
 SITES = [
     # Original 10
@@ -217,7 +231,14 @@ for name, url in SITES:
 print(f"\n  Lightpanda: 0/10 screenshots (ingen rendering-motor)")
 
 # ═══════════════════════════════════════════════════════════════════
-# Save results
+# Spara resultat i datumstämplad folder + BASE_DIR
+results["_meta"] = {
+    "timestamp": RUN_TIMESTAMP,
+    "date": datetime.now().isoformat(),
+    "output_dir": AETHER_DIR,
+}
+with open(f"{AETHER_DIR}/results.json", "w") as f:
+    json.dump(results, f, indent=2)
 with open(f"{BASE_DIR}/fair_results.json", "w") as f:
     json.dump(results, f, indent=2)
 
