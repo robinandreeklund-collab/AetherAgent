@@ -1277,32 +1277,36 @@ pub fn render_html_to_png(
     // Detta aktiverar lazy-loaded bilder, framework-hydrering, och DOM-mutationer.
     #[cfg(feature = "js-eval")]
     let html = {
-        let scripts = js_eval::extract_ordered_scripts(html);
-        // Säkerhetsgräns: skippa JS-evaluering om total script-storlek > 500KB
-        // Stora bundles (SPA-frameworks) tar för lång tid och kan krascha servern
-        const MAX_TOTAL_SCRIPT_SIZE: usize = 500 * 1024;
-        let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
-        if !scripts.is_empty() && total_script_bytes <= MAX_TOTAL_SCRIPT_SIZE {
-            let rcdom = parser::parse_html(html);
-            let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
-            let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena_viewport(
-                &scripts, arena, width, height,
-            );
-            if !eval_result.result.mutations.is_empty() {
-                let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
-                // Säkerhetskontroll: om serialisering producerar drastiskt
-                // mindre HTML har arena-roundtrip traskat DOM:en — fallback
-                if serialized.len() >= html.len() / 3 {
-                    std::borrow::Cow::Owned(serialized)
+        // Skippa JS-eval helt för stor HTML — ArenaDom + QuickJS på >300KB tar för lång tid
+        const MAX_HTML_FOR_JS_EVAL: usize = 300 * 1024;
+        const MAX_TOTAL_SCRIPT_SIZE: usize = 200 * 1024;
+        if html.len() > MAX_HTML_FOR_JS_EVAL {
+            std::borrow::Cow::Borrowed(html)
+        } else {
+            let scripts = js_eval::extract_ordered_scripts(html);
+            let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
+            if !scripts.is_empty() && total_script_bytes <= MAX_TOTAL_SCRIPT_SIZE {
+                let rcdom = parser::parse_html(html);
+                let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+                let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena_viewport(
+                    &scripts, arena, width, height,
+                );
+                if !eval_result.result.mutations.is_empty() {
+                    let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
+                    // Säkerhetskontroll: om serialisering producerar drastiskt
+                    // mindre HTML har arena-roundtrip traskat DOM:en — fallback
+                    if serialized.len() >= html.len() / 3 {
+                        std::borrow::Cow::Owned(serialized)
+                    } else {
+                        std::borrow::Cow::Borrowed(html)
+                    }
                 } else {
                     std::borrow::Cow::Borrowed(html)
                 }
             } else {
                 std::borrow::Cow::Borrowed(html)
             }
-        } else {
-            std::borrow::Cow::Borrowed(html)
-        }
+        } // stäng yttre html-size guard
     };
     #[cfg(not(feature = "js-eval"))]
     let html = std::borrow::Cow::Borrowed(html);
@@ -1468,26 +1472,17 @@ fn strip_css_gradients(html: &str) -> String {
                     }
                 }
 
-                let full_gradient = &after[..end];
                 let gradient_body = &after[paren_start + 1..end.saturating_sub(1)];
                 let is_conic = lower[pos..].starts_with("conic");
                 let is_repeating_conic = lower[pos..].starts_with("repeating-conic");
 
-                // conic-gradient → alltid fallback (Vello stödjer inte)
-                if is_conic || is_repeating_conic {
+                // Strippa ALLA gradienter → fallback-färg
+                // Vello GradientLut har edge-case buggar med diverse stop-kombinationer
+                // som kraschar processen trots catch_unwind (panik i tokio worker thread)
+                {
+                    let _ = (is_conic, is_repeating_conic); // undvik unused warnings
                     let fallback = extract_gradient_fallback_color(gradient_body);
                     result.push_str(&fallback);
-                } else {
-                    // Räkna color stops (komma-separerade delar minus direction)
-                    let color_stop_count = count_gradient_color_stops(gradient_body);
-                    if color_stop_count >= 2 {
-                        // ≥2 color stops — gradient borde vara säker för Vello
-                        result.push_str(full_gradient);
-                    } else {
-                        // <2 stops — kraschar Vello → fallback
-                        let fallback = extract_gradient_fallback_color(gradient_body);
-                        result.push_str(&fallback);
-                    }
                 }
 
                 remaining = &remaining[pos + end..];
@@ -1499,29 +1494,6 @@ fn strip_css_gradients(html: &str) -> String {
         }
     }
     result
-}
-
-/// Räkna color stops i en gradient (exkludera direction-argument)
-#[cfg(feature = "blitz")]
-fn count_gradient_color_stops(body: &str) -> usize {
-    let parts: Vec<&str> = body.split(',').collect();
-    if parts.is_empty() {
-        return 0;
-    }
-    // Första delen kan vara direction (to right, 45deg, circle, etc.)
-    let first = parts[0].trim().to_ascii_lowercase();
-    let has_direction = first.starts_with("to ")
-        || first.ends_with("deg")
-        || first.ends_with("rad")
-        || first.ends_with("turn")
-        || first.starts_with("circle")
-        || first.starts_with("ellipse")
-        || first.contains(" at ");
-    if has_direction {
-        parts.len() - 1
-    } else {
-        parts.len()
-    }
 }
 
 /// Extrahera en användbar fallback-färg från gradient-argument.

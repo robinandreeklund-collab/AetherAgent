@@ -388,10 +388,14 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
         .sum();
     let mut inlined_css = String::with_capacity(estimated_size);
 
+    // Begränsa total CSS-budget: HTML + inlinad CSS får ej överstiga 2MB
+    // (github: 569KB HTML + 842KB CSS = 1.4MB OK, men 569KB + 2MB CSS = OOM)
+    const MAX_TOTAL_CSS_BUDGET: usize = 1500 * 1024; // 1.5MB total CSS
+
     for (i, css_result) in results.iter().enumerate() {
         match css_result {
             Ok(css) => {
-                if css.len() <= 512_000 {
+                if css.len() <= 512_000 && css_bytes_added + css.len() <= MAX_TOTAL_CSS_BUDGET {
                     inlined_css.push_str(&format!(
                         "\n<style data-inlined-from=\"{}\">\n{}\n</style>\n",
                         css_links[i].url, css
@@ -404,6 +408,17 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
                         error: None,
                     });
                     css_loaded += 1;
+                } else if css_bytes_added + css.len() > MAX_TOTAL_CSS_BUDGET {
+                    css_details.push(CssFileStatus {
+                        url: css_links[i].url.clone(),
+                        loaded: false,
+                        size_bytes: css.len(),
+                        error: Some(format!(
+                            "CSS-budget överstigen: +{} bytes > {MAX_TOTAL_CSS_BUDGET}",
+                            css.len()
+                        )),
+                    });
+                    css_failed += 1;
                 } else {
                     css_details.push(CssFileStatus {
                         url: css_links[i].url.clone(),
