@@ -1278,7 +1278,9 @@ pub fn render_html_to_png(
         if !scripts.is_empty() {
             let rcdom = parser::parse_html(html);
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
-            let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+            let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena_viewport(
+                &scripts, arena, width, height,
+            );
             if !eval_result.result.mutations.is_empty() {
                 let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
                 // Säkerhetskontroll: om serialisering producerar drastiskt
@@ -1299,10 +1301,11 @@ pub fn render_html_to_png(
     let html = std::borrow::Cow::Borrowed(html);
     let html: &str = &html;
 
-    // ── Steg 1.5: Strippa <script>-taggar FÖRST ──
-    // Måste ske före prepare_html_for_render — annars matchar <img> inuti
-    // <script>-block (JSON, template strings) och traskar parsningen.
-    let html_no_scripts = strip_script_tags(html);
+    // ── Steg 1.5: Strippa <script> och <noscript> FÖRST ──
+    // Scripts: måste ske före prepare_html_for_render (undvik <img> i <script>-block)
+    // Noscript: måste ske före CSS-compiler (undvik "enable JS"-text i layout)
+    let html_cleaned = strip_script_tags(html);
+    let html_no_scripts = strip_noscript(&html_cleaned);
 
     // ── Steg 2: Förbered HTML för rendering ──
     // Resolve lazy images, picture elements, srcset → konkret src
@@ -2059,23 +2062,30 @@ fn render_html_to_png_inner(
             },
         );
 
-        // Vänta lite längre så att Blitz hinner starta alla resurshämtningar (bilder, CSS, fonter)
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Steg 1: Initial resolve — triggar resursdiscovery i Blitz DOM
+        doc.as_mut().resolve(0.0);
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        // Steg 2: Vänta så att Blitz hinner köa resurshämtningar
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Steg 3: Resursladdningsloop med smart idle-detection
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut idle_rounds = 0u32;
+        let mut total_loaded = 0u32;
         loop {
             let mut loaded_any = false;
             while let Ok((_doc_id, resource)) = rx.try_recv() {
                 doc.as_mut().load_resource(resource);
                 loaded_any = true;
+                total_loaded += 1;
             }
             doc.as_mut().resolve(0.0);
 
-            // Kräv minst 5 tomma rundor (100ms idle) innan vi avslutar — ger bilder tid att ladda
+            // Kräv minst 10 tomma rundor (200ms idle) innan vi avslutar
+            // Bilder kan trigga sekundära resurshämtningar (CSS, fonter)
             if net.is_empty() && !loaded_any {
                 idle_rounds += 1;
-                if idle_rounds >= 5 {
+                if idle_rounds >= 10 {
                     break;
                 }
             } else {

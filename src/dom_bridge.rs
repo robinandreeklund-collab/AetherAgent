@@ -437,6 +437,17 @@ pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalRes
 /// så att anroparen kan serialisera den modifierade DOM:en till HTML.
 #[cfg(feature = "blitz")]
 pub fn eval_js_with_lifecycle_and_arena(scripts: &[String], arena: ArenaDom) -> DomEvalWithArena {
+    eval_js_with_lifecycle_and_arena_viewport(scripts, arena, 1280, 900)
+}
+
+/// Evaluera inline scripts med lifecycle och viewport-dimensioner
+#[cfg(feature = "blitz")]
+pub fn eval_js_with_lifecycle_and_arena_viewport(
+    scripts: &[String],
+    arena: ArenaDom,
+    viewport_width: u32,
+    viewport_height: u32,
+) -> DomEvalWithArena {
     let start = std::time::Instant::now();
 
     if scripts.is_empty() {
@@ -472,7 +483,8 @@ pub fn eval_js_with_lifecycle_and_arena(scripts: &[String], arena: ArenaDom) -> 
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
         let _ = register_document(&ctx, Rc::clone(&state));
-        let _ = register_window(&ctx, Rc::clone(&state));
+        let _ =
+            register_window_with_viewport(&ctx, Rc::clone(&state), viewport_width, viewport_height);
         let _ = register_console(&ctx, Rc::clone(&state));
 
         let mut last_value: Option<String> = None;
@@ -1694,6 +1706,47 @@ fn clone_node_recursive(state: &SharedState, key: NodeKey, deep: bool) -> NodeKe
     new_key
 }
 
+/// attachShadow({mode: "open"|"closed"}) — skapar en shadow root som barn-element
+struct AttachShadow {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for AttachShadow {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Extrahera mode (default "open")
+        let _mode = args
+            .first()
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, String>("mode").ok())
+            .unwrap_or_else(|| "open".to_string());
+
+        // Skapa en shadow root-nod (template med shadowrootmode-attribut)
+        let shadow_key = {
+            let mut s = self.state.borrow_mut();
+            let shadow_node = crate::arena_dom::DomNode {
+                node_type: crate::arena_dom::NodeType::Element,
+                tag: Some("template".to_string()),
+                attributes: {
+                    let mut attrs = std::collections::HashMap::new();
+                    attrs.insert("shadowrootmode".to_string(), _mode);
+                    attrs
+                },
+                text: None,
+                parent: Some(self.key),
+                children: vec![],
+            };
+            let sk = s.arena.nodes.insert(shadow_node);
+            // Lägg till som första barn
+            if let Some(parent) = s.arena.nodes.get_mut(self.key) {
+                parent.children.insert(0, sk);
+            }
+            s.mutations.push("attachShadow".to_string());
+            sk
+        };
+        make_element_object(ctx, shadow_key, &self.state)
+    }
+}
+
 struct QuerySelectorElement {
     state: SharedState,
     key: NodeKey,
@@ -2230,6 +2283,17 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(CloneNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    // attachShadow — skapa en shadow root (enkel implementation)
+    obj.set(
+        "attachShadow",
+        Function::new(
+            ctx.clone(),
+            JsFn(AttachShadow {
                 state: Rc::clone(state),
                 key,
             }),
@@ -3370,6 +3434,16 @@ impl JsHandler for MatchMediaHandler {
 }
 
 fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
+    register_window_with_viewport(ctx, state, 1280, 900)
+}
+
+/// Register window-objekt med dynamiska viewport-dimensioner
+fn register_window_with_viewport<'js>(
+    ctx: &Ctx<'js>,
+    state: SharedState,
+    viewport_width: u32,
+    viewport_height: u32,
+) -> rquickjs::Result<()> {
     let win = Object::new(ctx.clone())?;
 
     // getComputedStyle
@@ -3389,11 +3463,11 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
         Function::new(ctx.clone(), JsFn(MatchMediaHandler))?,
     )?;
 
-    // Viewport
-    win.set("innerWidth", 1280)?;
-    win.set("innerHeight", 900)?;
-    win.set("outerWidth", 1280)?;
-    win.set("outerHeight", 900)?;
+    // Viewport — synkad med rendering-dimensioner
+    win.set("innerWidth", viewport_width)?;
+    win.set("innerHeight", viewport_height)?;
+    win.set("outerWidth", viewport_width)?;
+    win.set("outerHeight", viewport_height)?;
     win.set("devicePixelRatio", 1.0)?;
 
     // Scroll no-ops
@@ -3465,12 +3539,12 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
     nav.set("hardwareConcurrency", 1)?;
     win.set("navigator", nav)?;
 
-    // screen
+    // screen — synkad med viewport
     let screen = Object::new(ctx.clone())?;
-    screen.set("width", 1280)?;
-    screen.set("height", 900)?;
-    screen.set("availWidth", 1280)?;
-    screen.set("availHeight", 900)?;
+    screen.set("width", viewport_width)?;
+    screen.set("height", viewport_height)?;
+    screen.set("availWidth", viewport_width)?;
+    screen.set("availHeight", viewport_height)?;
     screen.set("colorDepth", 24)?;
     screen.set("pixelDepth", 24)?;
     win.set("screen", screen)?;
