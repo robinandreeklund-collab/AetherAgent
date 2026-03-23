@@ -2951,15 +2951,65 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
     )?;
     win.set("performance", perf)?;
 
+    // customElements
+    let custom_elements = Object::new(ctx.clone())?;
+    custom_elements.set("define", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    custom_elements.set("get", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    custom_elements.set(
+        "whenDefined",
+        Function::new(ctx.clone(), JsFn(NoOpHandler))?,
+    )?;
+    win.set("customElements", custom_elements)?;
+
+    // ResizeObserver
+    {
+        struct ResizeObserverConstructor;
+        impl JsHandler for ResizeObserverConstructor {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let obs = Object::new(ctx.clone())?;
+                obs.set("observe", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+                obs.set("unobserve", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+                obs.set(
+                    "disconnect",
+                    Function::new(ctx.clone(), JsFn(NoOpHandler))?,
+                )?;
+                Ok(obs.into_value())
+            }
+        }
+        win.set(
+            "ResizeObserver",
+            Function::new(ctx.clone(), JsFn(ResizeObserverConstructor))?,
+        )?;
+    }
+
     // Kopiera till globalThis
     ctx.globals().set("window", win)?;
 
-    // Registrera atob/btoa, encodeURI/decodeURI via JS
+    // Registrera atob/btoa, encodeURI/decodeURI via JS + Event/CustomEvent constructors
     ctx.eval::<(), _>(
         r#"
         globalThis.atob = function(s) { return s; };
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
+        globalThis.Event = function Event(type, opts) {
+            this.type = type || '';
+            this.bubbles = (opts && opts.bubbles) || false;
+            this.cancelable = (opts && opts.cancelable) || false;
+            this.stopPropagation = function() {};
+            this.preventDefault = function() {};
+        };
+        globalThis.CustomEvent = function CustomEvent(type, opts) {
+            this.type = type || '';
+            this.detail = (opts && opts.detail) || null;
+            this.bubbles = (opts && opts.bubbles) || false;
+            this.cancelable = (opts && opts.cancelable) || false;
+            this.stopPropagation = function() {};
+            this.preventDefault = function() {};
+        };
     "#,
     )?;
 

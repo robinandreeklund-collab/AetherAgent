@@ -5,6 +5,7 @@
 /// CSS inheritance support.
 ///
 /// Används av `dom_bridge.rs` för `window.getComputedStyle()`.
+#[allow(dead_code)]
 use std::collections::HashMap;
 
 use crate::arena_dom::{ArenaDom, NodeKey, NodeType};
