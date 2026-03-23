@@ -122,7 +122,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         console_output: Vec::new(),
     }));
 
-    let (rt, context) = crate::js_eval::create_sandboxed_runtime();
+    let (_rt, context) = crate::js_eval::create_sandboxed_runtime();
 
     let result = context.with(|ctx| {
         // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
@@ -238,7 +238,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         console_output: Vec::new(),
     }));
 
-    let (rt, context) = crate::js_eval::create_sandboxed_runtime();
+    let (_rt, context) = crate::js_eval::create_sandboxed_runtime();
 
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
