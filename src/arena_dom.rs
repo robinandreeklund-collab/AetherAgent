@@ -205,6 +205,7 @@ impl ArenaDom {
 
     /// Ta bort barn-nod. Returnerar true om barnet hittades och togs bort.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn remove_child(&mut self, parent: NodeKey, child: NodeKey) -> bool {
         let found = self
             .nodes
@@ -224,6 +225,7 @@ impl ArenaDom {
 
     /// Infoga barn-nod före en referensnod. Om ref_child är None → appendChild.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn insert_before(
         &mut self,
         parent: NodeKey,
@@ -257,6 +259,7 @@ impl ArenaDom {
 
     /// Djup-klona en nod och alla dess barn. Returnerar nyckeln till klonen.
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn clone_node_deep(&mut self, key: NodeKey) -> Option<NodeKey> {
         let node = self.nodes.get(key)?.clone();
         let children_to_clone: Vec<NodeKey> = node.children.clone();
@@ -279,6 +282,7 @@ impl ArenaDom {
 
     /// Serialisera en nod till HTML-sträng (outerHTML)
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn serialize_html(&self, key: NodeKey) -> String {
         let node = match self.nodes.get(key) {
             Some(n) => n,
@@ -332,6 +336,7 @@ impl ArenaDom {
 
     /// Serialisera barn av en nod till HTML (innerHTML)
     #[cfg(any(feature = "js-eval", test))]
+    #[allow(dead_code)]
     pub fn serialize_inner_html(&self, key: NodeKey) -> String {
         let node = match self.nodes.get(key) {
             Some(n) => n,

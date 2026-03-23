@@ -2496,6 +2496,46 @@ impl JsHandler for ClassListToggle {
     }
 }
 
+struct ClassListReplace {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListReplace {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let old_cls = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let new_cls = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.get_attr("class").unwrap_or("").to_string();
+            let classes: Vec<&str> = current.split_whitespace().collect();
+            if classes.contains(&old_cls.as_str()) {
+                let replaced: Vec<String> = classes
+                    .into_iter()
+                    .map(|c| {
+                        if c == old_cls {
+                            new_cls.clone()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect();
+                node.attributes
+                    .insert("class".to_string(), replaced.join(" "));
+                return Ok(Value::new_bool(ctx.clone(), true));
+            }
+        }
+        Ok(Value::new_bool(ctx.clone(), false))
+    }
+}
+
 fn make_class_list<'js>(
     ctx: &Ctx<'js>,
     key: NodeKey,
@@ -2537,6 +2577,16 @@ fn make_class_list<'js>(
         Function::new(
             ctx.clone(),
             JsFn(ClassListToggle {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "replace",
+        Function::new(
+            ctx.clone(),
+            JsFn(ClassListReplace {
                 state: Rc::clone(state),
                 key,
             }),
