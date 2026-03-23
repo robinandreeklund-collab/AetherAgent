@@ -986,10 +986,8 @@ async fn handle_fetch_search(
         Ok(result) => result.body,
         Err(e) => {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                format!(
-                    r#"{{"error": "fetch_search: DuckDuckGo fetch failed for query '{}': {}"}}"#,
-                    query, e
-                )
+                r#"{{"error": "fetch_search: DuckDuckGo fetch failed for query '{}': {}"}}"#,
+                query, e
             ))]);
         }
     };
