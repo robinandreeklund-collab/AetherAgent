@@ -1938,16 +1938,21 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
 
     // Steg 2: Inline extern CSS med detaljerad felrapportering
     let css_result = fetch::inline_external_css_detailed(html, final_url).await;
-    let html_with_css = &css_result.html;
+    let html_with_css = css_result.html.clone();
+
+    // Steg 2b: Hämta och inlina externa scripts (SPA-stöd)
+    // Ersätter <script src="bundle.js"></script> med <script>KOD</script>
+    let js_result = fetch::fetch_and_inline_external_scripts(&html_with_css, final_url).await;
+    let html_with_js = js_result.html;
 
     // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
-    // Auto-detektera fast_render baserat på original HTML-storlek (före CSS-inlining)
+    // Auto-detektera fast_render baserat på original HTML-storlek (före CSS/JS-inlining)
     // Tröskeln 500KB matchar riktigt tunga sidor (github 569KB) som kraschar Blitz
     const FAST_RENDER_THRESHOLD: usize = 500 * 1024;
     let fast_render = req
         .fast_render
         .unwrap_or(html.len() > FAST_RENDER_THRESHOLD);
-    let html_for_render = html_with_css.clone();
+    let html_for_render = html_with_js;
     let url_for_render = final_url.clone();
     let status_code = fetch_result.status_code;
     let js_code = req.js_code.clone();
@@ -1958,6 +1963,9 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     let css_failed_count = css_result.css_failed;
     let css_bytes = css_result.css_bytes_added;
     let css_details_clone = css_result.css_details.clone();
+    let js_scripts_found = js_result.scripts_found;
+    let js_scripts_loaded = js_result.scripts_loaded;
+    let js_bytes_added = js_result.js_bytes_added;
 
     let render_future = tokio::task::spawn_blocking(move || {
         #[cfg(feature = "js-eval")]
@@ -1985,6 +1993,9 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                             "css_failed": css_failed_count,
                             "css_bytes_added": css_bytes,
                             "css_details": css_details_clone,
+                            "js_scripts_found": js_scripts_found,
+                            "js_scripts_loaded": js_scripts_loaded,
+                            "js_bytes_added": js_bytes_added,
                             "tier_used": format!("{:?}", tier_used),
                         })
                         .to_string()
@@ -1996,6 +2007,8 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                         "css_loaded": css_loaded_count,
                         "css_failed": css_failed_count,
                         "css_details": css_details_clone,
+                        "js_scripts_found": js_scripts_found,
+                        "js_scripts_loaded": js_scripts_loaded,
                     })
                     .to_string(),
                 }

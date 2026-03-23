@@ -452,6 +452,223 @@ pub async fn inline_external_css(html: &str, base_url: &str) -> String {
     inline_external_css_detailed(html, base_url).await.html
 }
 
+// ─── Extern JS-hämtning (SPA-stöd) ──────────────────────────────────────────
+
+/// Resultat från extern script-inlining
+#[derive(Debug, Clone)]
+pub struct JsInlineResult {
+    /// HTML med externa scripts ersatta av inlinade scripts
+    pub html: String,
+    /// Antal externa scripts hittade
+    pub scripts_found: usize,
+    /// Antal scripts som hämtades
+    pub scripts_loaded: usize,
+    /// Antal scripts som misslyckades
+    pub scripts_failed: usize,
+    /// Total JS-storlek inlinad (bytes)
+    pub js_bytes_added: usize,
+}
+
+/// Hämta externa `<script src="...">` filer och inlina dem i HTML:en.
+///
+/// Ersätter `<script src="bundle.js"></script>` med `<script>/* hämtad kod */</script>`.
+/// Detta gör att den befintliga JS-lifecycle-pipelinen (QuickJS + DOM bridge)
+/// kan köra SPA-bundles som bygger upp sidan.
+///
+/// Begränsningar:
+/// - Max 20 externa scripts
+/// - Max 3 MB per script-fil
+/// - Max 8 MB totalt
+/// - 10 sekunders timeout per hämtning
+pub async fn fetch_and_inline_external_scripts(html: &str, base_url: &str) -> JsInlineResult {
+    #[cfg(not(feature = "js-eval"))]
+    {
+        let _ = base_url;
+        return JsInlineResult {
+            html: html.to_string(),
+            scripts_found: 0,
+            scripts_loaded: 0,
+            scripts_failed: 0,
+            js_bytes_added: 0,
+        };
+    }
+
+    #[cfg(feature = "js-eval")]
+    {
+        use crate::js_eval::{extract_all_scripts, ScriptEntry};
+
+        const MAX_SCRIPTS: usize = 20;
+        const MAX_SCRIPT_SIZE: usize = 3 * 1024 * 1024;
+        const MAX_TOTAL_SIZE: usize = 8 * 1024 * 1024;
+
+        let entries = extract_all_scripts(html, base_url);
+        let external_urls: Vec<(usize, String)> = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| match e {
+                ScriptEntry::External(url) => Some((i, url.clone())),
+                ScriptEntry::Inline => None,
+            })
+            .take(MAX_SCRIPTS)
+            .collect();
+
+        let scripts_found = external_urls.len();
+        if scripts_found == 0 {
+            return JsInlineResult {
+                html: html.to_string(),
+                scripts_found: 0,
+                scripts_loaded: 0,
+                scripts_failed: 0,
+                js_bytes_added: 0,
+            };
+        }
+
+        // Parallell hämtning av externa scripts
+        let mut handles = Vec::with_capacity(external_urls.len());
+        for (_idx, url) in &external_urls {
+            let client = SHARED_CLIENT.clone();
+            let url = url.clone();
+            handles.push(tokio::spawn(async move {
+                let resp = client
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .await;
+                match resp {
+                    Ok(r) if r.status().is_success() => match r.bytes().await {
+                        Ok(bytes) if bytes.len() <= MAX_SCRIPT_SIZE => {
+                            String::from_utf8(bytes.to_vec()).ok()
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }));
+        }
+
+        // Samla resultat
+        let mut fetched: Vec<Option<String>> = Vec::with_capacity(handles.len());
+        for handle in handles {
+            fetched.push(handle.await.ok().flatten());
+        }
+
+        // Bygg URL → kod-mappning
+        let mut url_to_code: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        let mut total_bytes = 0usize;
+        let mut scripts_loaded = 0usize;
+        let mut scripts_failed = 0usize;
+
+        for (i, (_idx, url)) in external_urls.iter().enumerate() {
+            if let Some(Some(code)) = fetched.get(i) {
+                if total_bytes + code.len() <= MAX_TOTAL_SIZE {
+                    total_bytes += code.len();
+                    url_to_code.insert(url.as_str(), code.as_str());
+                    scripts_loaded += 1;
+                } else {
+                    scripts_failed += 1;
+                }
+            } else {
+                scripts_failed += 1;
+            }
+        }
+
+        if scripts_loaded == 0 {
+            return JsInlineResult {
+                html: html.to_string(),
+                scripts_found,
+                scripts_loaded: 0,
+                scripts_failed,
+                js_bytes_added: 0,
+            };
+        }
+
+        // Ersätt <script src="URL"></script> med <script>KOD</script> i HTML:en
+        let html_out = replace_external_scripts_with_inline(html, base_url, &url_to_code);
+
+        JsInlineResult {
+            html: html_out,
+            scripts_found,
+            scripts_loaded,
+            scripts_failed,
+            js_bytes_added: total_bytes,
+        }
+    }
+}
+
+/// Ersätt externa script-taggar med inlinade versioner
+#[cfg(feature = "js-eval")]
+fn replace_external_scripts_with_inline(
+    html: &str,
+    base_url: &str,
+    url_to_code: &std::collections::HashMap<&str, &str>,
+) -> String {
+    use crate::js_eval::extract_all_scripts;
+    use crate::js_eval::ScriptEntry;
+
+    let entries = extract_all_scripts(html, base_url);
+    let mut result =
+        String::with_capacity(html.len() + url_to_code.values().map(|v| v.len()).sum::<usize>());
+    let lower = html.to_lowercase();
+    let mut last_pos = 0;
+    let mut search_from = 0;
+    let mut entry_idx = 0;
+
+    while let Some(start) = lower[search_from..].find("<script") {
+        let abs_start = search_from + start;
+        if let Some(tag_end_offset) = lower[abs_start..].find('>') {
+            let tag_end = abs_start + tag_end_offset + 1;
+            if let Some(close_offset) = lower[tag_end..].find("</script>") {
+                let close_end = tag_end + close_offset + 9; // 9 = "</script>".len()
+                let tag_text = &lower[abs_start..abs_start + tag_end_offset];
+
+                // Matcha mot entries — kontrollera att det är en extern script
+                let is_json = tag_text.contains("application/json")
+                    || tag_text.contains("application/ld+json")
+                    || tag_text.contains("importmap");
+                let is_external = tag_text.contains("src=");
+
+                if !is_json && is_external {
+                    if let Some(entry) = entries.get(entry_idx) {
+                        if let ScriptEntry::External(url) = entry {
+                            if let Some(code) = url_to_code.get(url.as_str()) {
+                                // Ersätt hela <script src="...">...</script> med <script>KOD</script>
+                                result.push_str(&html[last_pos..abs_start]);
+                                result.push_str("<script>");
+                                // Escape </script> i JS-koden
+                                result.push_str(
+                                    &code
+                                        .replace("</script>", "<\\/script>")
+                                        .replace("</Script>", "<\\/Script>")
+                                        .replace("</SCRIPT>", "<\\/SCRIPT>"),
+                                );
+                                result.push_str("</script>");
+                                last_pos = close_end;
+                            }
+                        }
+                        entry_idx += 1;
+                    }
+                } else if !is_json && !is_external {
+                    // Inline script — räkna entry-index
+                    let code = html[tag_end..tag_end + close_offset].trim();
+                    if !code.is_empty() {
+                        entry_idx += 1;
+                    }
+                }
+
+                search_from = close_end;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    result.push_str(&html[last_pos..]);
+    result
+}
+
 /// Intern: extrahera CSS-länk-URLer från HTML
 struct CssLink {
     url: String,
