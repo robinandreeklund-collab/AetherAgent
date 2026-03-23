@@ -151,6 +151,13 @@ impl EventLoopState {
         id
     }
 
+    /// Rensa alla Persistent-referenser (måste anropas innan Runtime droppas)
+    pub fn clear_persistent(&mut self) {
+        self.timers.clear();
+        self.raf_queue.clear();
+        self.observers.clear();
+    }
+
     /// Kolla om det finns väntande arbete
     fn has_pending_work(&self) -> bool {
         !self.timers.iter().all(|t| t.cancelled)
@@ -460,10 +467,20 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
 // ─── Event Loop Runner ──────────────────────────────────────────────────────
 
 /// Dränera QuickJS job-kö (Promises/microtasks)
-fn drain_pending_jobs(rt: &rquickjs::Runtime) {
-    while rt.is_job_pending() {
-        if let Err(_e) = rt.execute_pending_job() {
-            break;
+/// Använder raw FFI för att undvika RefCell-dubbelborrow med Context::with
+fn drain_pending_jobs_ctx(ctx: &Ctx<'_>) {
+    unsafe {
+        let ctx_ptr = ctx.as_raw().as_ptr();
+        let rt_ptr = rquickjs::qjs::JS_GetRuntime(ctx_ptr);
+        loop {
+            if !rquickjs::qjs::JS_IsJobPending(rt_ptr) {
+                break;
+            }
+            let mut pctx = std::mem::MaybeUninit::<*mut rquickjs::qjs::JSContext>::uninit();
+            let r = rquickjs::qjs::JS_ExecutePendingJob(rt_ptr, pctx.as_mut_ptr());
+            if r <= 0 {
+                break;
+            }
         }
     }
 }
@@ -471,11 +488,7 @@ fn drain_pending_jobs(rt: &rquickjs::Runtime) {
 /// Kör event-loopen tills alla köer är tomma eller begränsningar nås
 ///
 /// Returnerar antal ticks som kördes och eventuella fel.
-pub fn run_event_loop(
-    rt: &rquickjs::Runtime,
-    ctx: &Ctx<'_>,
-    el: &SharedEventLoop,
-) -> Result<EventLoopStats, String> {
+pub fn run_event_loop(ctx: &Ctx<'_>, el: &SharedEventLoop) -> Result<EventLoopStats, String> {
     let mut total_ticks: usize = 0;
     let mut timers_fired: usize = 0;
     let mut rafs_fired: usize = 0;
@@ -485,7 +498,7 @@ pub fn run_event_loop(
     let wall_start = std::time::Instant::now();
 
     // Fas 1: Dränera QuickJS inbyggda microtask-kö (Promises)
-    drain_pending_jobs(rt);
+    drain_pending_jobs_ctx(ctx);
     total_ticks += 1;
 
     loop {
@@ -667,7 +680,7 @@ pub fn run_event_loop(
         }
 
         // Fas 5: Dränera microtasks igen (timer/rAF callbacks kan ha schemalagt nya)
-        drain_pending_jobs(rt);
+        drain_pending_jobs_ctx(ctx);
 
         total_ticks += 1;
 
@@ -762,7 +775,9 @@ mod tests {
         qctx.with(|ctx| {
             let el = Rc::new(RefCell::new(EventLoopState::new()));
             register_event_loop(&ctx, Rc::clone(&el)).expect("register_event_loop borde lyckas");
-            f(&rt, ctx, el)
+            let result = f(&rt, ctx, Rc::clone(&el));
+            el.borrow_mut().clear_persistent();
+            result
         })
     }
 
@@ -777,7 +792,7 @@ mod tests {
                 });
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let stats = run_event_loop(rt, &ctx, &el);
+            let stats = run_event_loop(&ctx, &el);
             assert!(stats.is_ok(), "Event loop borde lyckas");
 
             let val: bool = ctx.eval("resolved").expect("borde kunna läsa resolved");
@@ -796,7 +811,7 @@ mod tests {
                 }, 1);
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let stats = run_event_loop(rt, &ctx, &el).expect("event loop borde lyckas");
+            let stats = run_event_loop(&ctx, &el).expect("event loop borde lyckas");
             assert!(stats.timers_fired > 0, "Minst en timer borde ha körts");
 
             let val: bool = ctx.eval("timerFired").expect("borde kunna läsa timerFired");
@@ -816,7 +831,7 @@ mod tests {
                 clearTimeout(id);
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: bool = ctx.eval("timerFired").expect("borde kunna läsa timerFired");
             assert!(!val, "timerFired borde vara false efter clearTimeout");
@@ -837,7 +852,7 @@ mod tests {
                 }, 1);
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: i32 = ctx.eval("count").expect("borde kunna läsa count");
             assert!(
@@ -861,7 +876,7 @@ mod tests {
                 });
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let stats = run_event_loop(rt, &ctx, &el);
+            let stats = run_event_loop(&ctx, &el);
             assert!(stats.is_ok(), "Event loop borde lyckas");
 
             let val: bool = ctx.eval("rafCalled").expect("borde kunna läsa rafCalled");
@@ -881,7 +896,7 @@ mod tests {
                 cancelAnimationFrame(id);
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: bool = ctx.eval("rafCalled").expect("borde kunna läsa rafCalled");
             assert!(!val, "rAF borde inte ha körts efter cancel");
@@ -899,7 +914,7 @@ mod tests {
                 });
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: bool = ctx
                 .eval("microtaskRan")
@@ -938,7 +953,7 @@ mod tests {
                 requestAnimationFrame(function(ts) {});
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let stats = run_event_loop(rt, &ctx, &el).unwrap();
+            let stats = run_event_loop(&ctx, &el).unwrap();
             assert!(stats.ticks > 0, "Borde ha kört minst 1 tick");
 
             let display = format!("{}", stats);
@@ -991,7 +1006,7 @@ mod tests {
                     .then(function(v) { result = v; });
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: i32 = ctx.eval("result").expect("borde kunna läsa result");
             assert_eq!(val, 20, "Promise-kedja borde ge 20: got {}", val);
@@ -1013,7 +1028,7 @@ mod tests {
                 });
             "#;
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
-            let _ = run_event_loop(rt, &ctx, &el);
+            let _ = run_event_loop(&ctx, &el);
 
             let val: String = ctx.eval("steps.join(',')").expect("borde kunna läsa steps");
             assert!(
