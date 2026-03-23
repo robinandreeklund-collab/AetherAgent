@@ -2,10 +2,15 @@
 ///
 /// HTML → markup5ever DOM → inline-styles → Taffy layout → vello_cpu rasterisering → PNG.
 /// Stödjer block/flex layout, bakgrundsfärger, text, borders, padding, margin.
+/// Text renderas med riktiga glypher via skrifa charmap + vello_cpu glyph_run.
 use crate::parser;
 use markup5ever_rcdom::{Handle, NodeData};
+use skrifa::instance::LocationRef;
+use skrifa::MetadataProvider;
 use std::collections::HashMap;
+use std::sync::Arc;
 use taffy::prelude::*;
+use vello_cpu::peniko::{Blob, FontData};
 
 // ── Renderträd ──
 
@@ -21,6 +26,30 @@ struct RenderNode {
     children: Vec<RenderNode>,
 }
 
+/// Sökvägar för systemfonter — testar i ordning tills en hittas.
+const FONT_SEARCH_PATHS: &[&str] = &[
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "C:\\Windows\\Fonts\\arial.ttf",
+];
+
+/// Ladda en systemfont — returnerar (font-bytes, FontData för vello_cpu).
+fn load_system_font() -> Option<(Arc<Vec<u8>>, FontData)> {
+    for path in FONT_SEARCH_PATHS {
+        if let Ok(bytes) = std::fs::read(path) {
+            let arc_bytes = Arc::new(bytes);
+            let blob = Blob::new(Arc::new(arc_bytes.as_slice().to_vec().into_boxed_slice()));
+            let font_data = FontData::new(blob, 0);
+            return Some((arc_bytes, font_data));
+        }
+    }
+    None
+}
+
 /// Parsa HTML och rendera till PNG-bytes.
 pub fn render_to_png(
     html: &str,
@@ -31,10 +60,13 @@ pub fn render_to_png(
 ) -> Result<Vec<u8>, String> {
     let rcdom = parser::parse_html(html);
 
+    // Ladda systemfont för text-rendering
+    let font_info = load_system_font();
+
     let mut taffy: TaffyTree<()> = TaffyTree::new();
 
-    // Bygg renderträd från DOM
-    let root_render = build_render_tree(&rcdom.document, &mut taffy, width);
+    // Bygg renderträd från DOM — använd fontdata för korrekt textbredd
+    let root_render = build_render_tree(&rcdom.document, &mut taffy, width, &font_info);
 
     // Roten: viewport-storlek
     let root_style = Style {
@@ -68,7 +100,7 @@ pub fn render_to_png(
     fill_rect(&mut ctx, 0.0, 0.0, w as f64, h as f64);
 
     // Rita renderträdet
-    paint_node(&mut ctx, &taffy, &root_render, 0.0, 0.0);
+    paint_node(&mut ctx, &taffy, &root_render, 0.0, 0.0, &font_info);
 
     // Rasterisera till buffer
     let mut buffer = vec![0u8; w as usize * h as usize * 4];
@@ -111,10 +143,39 @@ fn fill_rect(ctx: &mut vello_cpu::RenderContext, x0: f64, y0: f64, x1: f64, y1: 
 
 // ── DOM → Renderträd ──
 
+/// Beräkna textbredd med riktiga font-metrics om tillgängligt.
+fn measure_text_width(
+    text: &str,
+    font_size: f32,
+    font_info: &Option<(Arc<Vec<u8>>, FontData)>,
+) -> f32 {
+    if let Some((font_bytes, _)) = font_info {
+        if let Ok(font_ref) = skrifa::FontRef::new(font_bytes.as_slice()) {
+            let charmap = font_ref.charmap();
+            let glyph_metrics = font_ref.glyph_metrics(
+                skrifa::instance::Size::new(font_size),
+                LocationRef::default(),
+            );
+            let mut width = 0.0f32;
+            for ch in text.chars() {
+                if let Some(gid) = charmap.map(ch) {
+                    width += glyph_metrics.advance_width(gid).unwrap_or(font_size * 0.5);
+                } else {
+                    width += font_size * 0.5;
+                }
+            }
+            return width;
+        }
+    }
+    // Fallback utan font
+    text.len() as f32 * font_size * 0.6
+}
+
 fn build_render_tree(
     handle: &Handle,
     taffy: &mut TaffyTree<()>,
     viewport_width: u32,
+    font_info: &Option<(Arc<Vec<u8>>, FontData)>,
 ) -> RenderNode {
     match &handle.data {
         NodeData::Document => {
@@ -122,7 +183,7 @@ fn build_render_tree(
                 .children
                 .borrow()
                 .iter()
-                .map(|c| build_render_tree(c, taffy, viewport_width))
+                .map(|c| build_render_tree(c, taffy, viewport_width, font_info))
                 .collect();
             let child_ids: Vec<taffy::NodeId> = children.iter().map(|c| c.taffy_id).collect();
             let style = Style {
@@ -168,11 +229,15 @@ fn build_render_tree(
                     children: vec![],
                 };
             }
-            // Grov textbredd-estimering
+            // Textbredd med riktiga font-metrics
             let font_size = 16.0f32;
-            let char_width = font_size * 0.6;
-            let max_chars_per_line = (viewport_width as f32 / char_width).max(1.0);
-            let lines = (trimmed.len() as f32 / max_chars_per_line).ceil().max(1.0);
+            let text_width = measure_text_width(trimmed, font_size, font_info);
+            let vp_w = viewport_width as f32;
+            let lines = if vp_w > 0.0 {
+                (text_width / vp_w).ceil().max(1.0)
+            } else {
+                1.0
+            };
             let text_height = lines * font_size * 1.2;
 
             let style = Style {
@@ -263,7 +328,7 @@ fn build_render_tree(
                 .children
                 .borrow()
                 .iter()
-                .map(|c| build_render_tree(c, taffy, viewport_width))
+                .map(|c| build_render_tree(c, taffy, viewport_width, font_info))
                 .collect();
             let child_ids: Vec<taffy::NodeId> = children.iter().map(|c| c.taffy_id).collect();
 
@@ -375,6 +440,7 @@ fn paint_node(
     node: &RenderNode,
     parent_x: f64,
     parent_y: f64,
+    font_info: &Option<(Arc<Vec<u8>>, FontData)>,
 ) {
     let layout = taffy.layout(node.taffy_id).unwrap();
     let x = parent_x + layout.location.x as f64;
@@ -397,46 +463,128 @@ fn paint_node(
         let bc = node.border_color.unwrap_or([0, 0, 0, 255]);
         set_color(ctx, bc);
         let bw = node.border_width as f64;
-        // Topp
         fill_rect(ctx, x, y, x + w, y + bw);
-        // Botten
         fill_rect(ctx, x, y + h - bw, x + w, y + h);
-        // Vänster
         fill_rect(ctx, x, y, x + bw, y + h);
-        // Höger
         fill_rect(ctx, x + w - bw, y, x + w, y + h);
     }
 
-    // Text — simpel rektangel-fallback (glyph-API kräver fontdata)
+    // Text — riktig glyph-rendering via skrifa + vello_cpu
     if let Some(ref text) = node.text {
         if !text.is_empty() {
-            set_color(ctx, node.text_color);
-            let char_w = node.font_size as f64 * 0.55;
-            let char_h = node.font_size as f64 * 0.7;
-            let line_height = node.font_size as f64 * 1.2;
-            let max_x = x + w;
-            let mut cx = x;
-            let mut cy = y + node.font_size as f64 * 0.25;
-
-            for ch in text.chars() {
-                if ch == '\n' || cx + char_w > max_x {
-                    cx = x;
-                    cy += line_height;
-                    if ch == '\n' {
-                        continue;
-                    }
-                }
-                if !ch.is_whitespace() {
-                    fill_rect(ctx, cx, cy, cx + char_w * 0.8, cy + char_h);
-                }
-                cx += char_w;
-            }
+            paint_text_glyphs(ctx, text, node, x, y, w, font_info);
         }
     }
 
     // Rita barn
     for child in &node.children {
-        paint_node(ctx, taffy, child, x, y);
+        paint_node(ctx, taffy, child, x, y, font_info);
+    }
+}
+
+/// Rendera text med riktiga glypher via vello_cpu glyph_run.
+fn paint_text_glyphs(
+    ctx: &mut vello_cpu::RenderContext,
+    text: &str,
+    node: &RenderNode,
+    x: f64,
+    y: f64,
+    box_width: f64,
+    font_info: &Option<(Arc<Vec<u8>>, FontData)>,
+) {
+    let font_size = node.font_size;
+    let line_height = font_size * 1.2;
+
+    // Sätt textfärg
+    set_color(ctx, node.text_color);
+
+    if let Some((font_bytes, font_data)) = font_info {
+        // Riktig glyph-rendering
+        if let Ok(font_ref) = skrifa::FontRef::new(font_bytes.as_slice()) {
+            let charmap = font_ref.charmap();
+            let glyph_metrics = font_ref.glyph_metrics(
+                skrifa::instance::Size::new(font_size),
+                LocationRef::default(),
+            );
+
+            // Dela upp text i rader baserat på box-bredd
+            let mut lines: Vec<Vec<(vello_cpu::Glyph, f32)>> = Vec::new();
+            let mut current_line: Vec<(vello_cpu::Glyph, f32)> = Vec::new();
+            let mut cx = 0.0f32;
+
+            for ch in text.chars() {
+                if ch == '\n' {
+                    lines.push(std::mem::take(&mut current_line));
+                    cx = 0.0;
+                    continue;
+                }
+
+                let gid = charmap.map(ch);
+                let advance = gid
+                    .and_then(|g| glyph_metrics.advance_width(g))
+                    .unwrap_or(font_size * 0.5);
+
+                // Radbrytning
+                if cx + advance > box_width as f32 && !current_line.is_empty() {
+                    lines.push(std::mem::take(&mut current_line));
+                    cx = 0.0;
+                }
+
+                if let Some(gid) = gid {
+                    current_line.push((
+                        vello_cpu::Glyph {
+                            id: gid.to_u32(),
+                            x: cx,
+                            y: 0.0,
+                        },
+                        advance,
+                    ));
+                }
+                cx += advance;
+            }
+            if !current_line.is_empty() {
+                lines.push(current_line);
+            }
+
+            // Rendera varje rad som en glyph_run
+            for (line_idx, line_glyphs) in lines.iter().enumerate() {
+                if line_glyphs.is_empty() {
+                    continue;
+                }
+                let line_y = y + (line_idx as f64 + 1.0) * line_height as f64;
+                let transform = vello_cpu::kurbo::Affine::translate((x, line_y));
+
+                let glyphs_iter = line_glyphs.iter().map(|(g, _)| *g);
+
+                ctx.glyph_run(font_data)
+                    .font_size(font_size)
+                    .glyph_transform(transform)
+                    .hint(true)
+                    .fill_glyphs(glyphs_iter);
+            }
+            return;
+        }
+    }
+
+    // Fallback: rektanglar om ingen font finns
+    let char_w = font_size as f64 * 0.55;
+    let char_h = font_size as f64 * 0.7;
+    let max_x = x + box_width;
+    let mut cx = x;
+    let mut cy = y + font_size as f64 * 0.25;
+
+    for ch in text.chars() {
+        if ch == '\n' || cx + char_w > max_x {
+            cx = x;
+            cy += line_height as f64;
+            if ch == '\n' {
+                continue;
+            }
+        }
+        if !ch.is_whitespace() {
+            fill_rect(ctx, cx, cy, cx + char_w * 0.8, cy + char_h);
+        }
+        cx += char_w;
     }
 }
 
