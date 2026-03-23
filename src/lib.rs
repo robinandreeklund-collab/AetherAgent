@@ -1294,6 +1294,10 @@ pub fn render_html_to_png(
     let html = std::borrow::Cow::Borrowed(html);
     let html: &str = &html;
 
+    // ── Steg 1.5: Förbered HTML för rendering ──
+    // Resolve lazy images, picture elements, srcset → konkret src
+    let html = prepare_html_for_render(html, width);
+
     // ── Steg 2: CSS Compiler Pipeline ──
     // 1. LightningCSS — resolve CSS vars, downlevel nesting/:is()/color functions
     // 2. Media Query Filter — evaluera @media mot viewport, strippa icke-matchande
@@ -1305,7 +1309,7 @@ pub fn render_html_to_png(
     };
 
     // ── Steg 3: Strippa <script>-taggar (redan körda) ──
-    let html_stripped = strip_script_tags(html);
+    let html_stripped = strip_script_tags(&html);
     let html = &html_stripped;
 
     let compiled = css_compiler::compile_css(html, &viewport);
@@ -1560,6 +1564,300 @@ fn try_extract_css_color(stop: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Förbered HTML för visuell rendering i Blitz.
+///
+/// Löser:
+/// 1. `loading="lazy"` → `loading="eager"` (Blitz har ingen scroll-viewport)
+/// 2. `data-src` → `src` (JS lazy-load mönster)
+/// 3. `<picture>` → välj bästa `<source>` baserat på viewport-bredd
+/// 4. `srcset` → välj bästa storlek för given bredd
+/// 5. Placeholder-GIF `src="data:image/gif..."` → ersätt med data-src om tillgänglig
+#[cfg(feature = "blitz")]
+fn prepare_html_for_render(html: &str, viewport_width: u32) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+
+    while !remaining.is_empty() {
+        // Hitta nästa <img eller <picture tagg
+        let lower = remaining.to_ascii_lowercase();
+        let img_pos = lower.find("<img ");
+        let pic_pos = lower.find("<picture");
+
+        let next = match (img_pos, pic_pos) {
+            (Some(i), Some(p)) if p < i => Some(("picture", p)),
+            (Some(i), _) => Some(("img", i)),
+            (None, Some(p)) => Some(("picture", p)),
+            (None, None) => None,
+        };
+
+        match next {
+            Some(("picture", pos)) => {
+                result.push_str(&remaining[..pos]);
+                // Extrahera hela <picture>...</picture>
+                let after = &remaining[pos..];
+                let lower_after = after.to_ascii_lowercase();
+                if let Some(end) = lower_after.find("</picture>") {
+                    let picture_block = &after[..end + "</picture>".len()];
+                    result.push_str(&resolve_picture_element(picture_block, viewport_width));
+                    remaining = &remaining[pos + end + "</picture>".len()..];
+                } else {
+                    // Oparrad <picture> — behåll som den är
+                    result.push_str(&after[..1]);
+                    remaining = &remaining[pos + 1..];
+                }
+            }
+            Some(("img", pos)) => {
+                result.push_str(&remaining[..pos]);
+                let after = &remaining[pos..];
+                if let Some(end) = after.find('>') {
+                    let tag = &after[..end + 1];
+                    result.push_str(&transform_img_tag(tag, viewport_width));
+                    remaining = &remaining[pos + end + 1..];
+                } else {
+                    result.push_str(after);
+                    break;
+                }
+            }
+            _ => {
+                result.push_str(remaining);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Transformera en enskild <img> tagg för Blitz-rendering
+#[cfg(feature = "blitz")]
+fn transform_img_tag(tag: &str, viewport_width: u32) -> String {
+    let mut result = tag.to_string();
+
+    // 1. loading="lazy" → loading="eager"
+    let lower = result.to_ascii_lowercase();
+    if let Some(pos) = lower.find("loading=\"lazy\"") {
+        let end = pos + "loading=\"lazy\"".len();
+        result.replace_range(pos..end, "loading=\"eager\"");
+    } else if let Some(pos) = lower.find("loading='lazy'") {
+        let end = pos + "loading='lazy'".len();
+        result.replace_range(pos..end, "loading='eager'");
+    }
+
+    // 2. data-src → src (om src saknas eller är placeholder-GIF)
+    let lower = result.to_ascii_lowercase();
+    let has_placeholder_src = lower.contains("src=\"data:image/gif")
+        || lower.contains("src='data:image/gif")
+        || lower.contains("src=\"data:image/svg")
+        || lower.contains("src='data:image/svg")
+        || lower.contains("src=\"about:blank")
+        || lower.contains("src='about:blank");
+
+    if let Some(data_src) = extract_attr_value(&result, "data-src") {
+        if has_placeholder_src || !lower.contains(" src=") {
+            // Ersätt placeholder-src med data-src
+            result = set_or_replace_attr(&result, "src", &data_src);
+        }
+    }
+
+    // 3. srcset → välj bästa storlek för viewport
+    if let Some(srcset_val) = extract_attr_value(&result, "srcset") {
+        let best = pick_best_srcset_url(&srcset_val, viewport_width);
+        if !best.is_empty() {
+            // Sätt src till bästa srcset-URL
+            result = set_or_replace_attr(&result, "src", &best);
+        }
+    }
+
+    result
+}
+
+/// Resolve <picture> element: välj bästa <source> och returnera som <img>
+#[cfg(feature = "blitz")]
+fn resolve_picture_element(picture: &str, viewport_width: u32) -> String {
+    // Hitta <img> inuti <picture>
+    let lower = picture.to_ascii_lowercase();
+    let img_start = match lower.find("<img ") {
+        Some(p) => p,
+        None => return picture.to_string(), // Ingen <img> inuti — behåll
+    };
+    let img_end = match picture[img_start..].find('>') {
+        Some(p) => img_start + p + 1,
+        None => return picture.to_string(),
+    };
+    let img_tag = &picture[img_start..img_end];
+
+    // Hitta alla <source> med srcset
+    let mut best_url = String::new();
+    let mut search_from = 0;
+    while let Some(src_start) = lower[search_from..].find("<source") {
+        let abs_start = search_from + src_start;
+        if let Some(src_end) = lower[abs_start..].find('>') {
+            let source_tag = &picture[abs_start..abs_start + src_end + 1];
+            // Kolla media-attribut — vi vill matcha viewport
+            let media = extract_attr_value(source_tag, "media");
+            let matches_viewport = match &media {
+                Some(m) => media_query_matches(m, viewport_width),
+                None => true, // Ingen media = alltid matchande
+            };
+
+            if matches_viewport {
+                if let Some(srcset) = extract_attr_value(source_tag, "srcset") {
+                    let url = pick_best_srcset_url(&srcset, viewport_width);
+                    if !url.is_empty() {
+                        best_url = url;
+                        // Första matchande source vinner
+                        break;
+                    }
+                }
+            }
+            search_from = abs_start + src_end + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Bygg en transformerad <img> med bästa URL
+    let mut final_img = transform_img_tag(img_tag, viewport_width);
+    if !best_url.is_empty() {
+        final_img = set_or_replace_attr(&final_img, "src", &best_url);
+    }
+    final_img
+}
+
+/// Extrahera attribut-värde från en HTML-tagg
+#[cfg(feature = "blitz")]
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    // Sök efter attr="value" eller attr='value'
+    for delim in ['"', '\''] {
+        let pattern = format!("{attr}={delim}");
+        if let Some(start) = lower.find(&pattern) {
+            let val_start = start + pattern.len();
+            if let Some(end) = tag[val_start..].find(delim) {
+                return Some(tag[val_start..val_start + end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Sätt eller ersätt ett attribut-värde i en HTML-tagg
+#[cfg(feature = "blitz")]
+fn set_or_replace_attr(tag: &str, attr: &str, value: &str) -> String {
+    let lower = tag.to_ascii_lowercase();
+    // Försök hitta och ersätta befintligt attribut
+    for delim in ['"', '\''] {
+        let pattern = format!("{attr}={delim}");
+        if let Some(start) = lower.find(&pattern) {
+            let val_start = start + pattern.len();
+            if let Some(end) = tag[val_start..].find(delim) {
+                let mut result = String::with_capacity(tag.len() + value.len());
+                result.push_str(&tag[..val_start]);
+                result.push_str(value);
+                result.push_str(&tag[val_start + end..]);
+                return result;
+            }
+        }
+    }
+    // Attribut saknas — lägg till innan >
+    if let Some(close) = tag.rfind('>') {
+        let before_close = tag[..close].trim_end();
+        let is_self_closing = before_close.ends_with('/');
+        let insert_pos = if is_self_closing {
+            before_close.len() - 1
+        } else {
+            close
+        };
+        let mut result = String::with_capacity(tag.len() + attr.len() + value.len() + 4);
+        result.push_str(&tag[..insert_pos]);
+        result.push(' ');
+        result.push_str(attr);
+        result.push_str("=\"");
+        result.push_str(value);
+        result.push('"');
+        result.push_str(&tag[insert_pos..]);
+        return result;
+    }
+    tag.to_string()
+}
+
+/// Välj bästa URL från srcset baserat på viewport-bredd
+#[cfg(feature = "blitz")]
+fn pick_best_srcset_url(srcset: &str, viewport_width: u32) -> String {
+    let mut best_url = String::new();
+    let mut best_width: i32 = 0;
+    let target = viewport_width as i32;
+
+    for entry in srcset.split(',') {
+        let parts: Vec<&str> = entry.trim().split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let url = parts[0];
+        let descriptor = parts.get(1).unwrap_or(&"");
+
+        let width = if descriptor.ends_with('w') {
+            descriptor[..descriptor.len() - 1]
+                .parse::<i32>()
+                .unwrap_or(0)
+        } else if descriptor.ends_with('x') {
+            // Pixel density — anta 1x = viewport_width
+            let density = descriptor[..descriptor.len() - 1]
+                .parse::<f32>()
+                .unwrap_or(1.0);
+            (target as f32 * density) as i32
+        } else {
+            // Ingen descriptor — anta full storlek
+            target
+        };
+
+        // Välj minsta bild som är >= viewport, eller största om ingen är tillräckligt stor
+        if best_url.is_empty()
+            || (width >= target && (best_width < target || width < best_width))
+            || (width < target && width > best_width && best_width < target)
+        {
+            best_url = url.to_string();
+            best_width = width;
+        }
+    }
+    best_url
+}
+
+/// Enkel media query match — stödjer (min-width: Xpx) och (max-width: Xpx)
+#[cfg(feature = "blitz")]
+fn media_query_matches(media: &str, viewport_width: u32) -> bool {
+    let lower = media.to_ascii_lowercase();
+    let vw = viewport_width as i32;
+
+    // Matcha (min-width: XXXpx)
+    if let Some(pos) = lower.find("min-width") {
+        if let Some(val) = extract_px_value(&lower[pos..]) {
+            if vw < val {
+                return false;
+            }
+        }
+    }
+
+    // Matcha (max-width: XXXpx)
+    if let Some(pos) = lower.find("max-width") {
+        if let Some(val) = extract_px_value(&lower[pos..]) {
+            if vw > val {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Extrahera px-värde från "min-width: 640px" → 640
+#[cfg(feature = "blitz")]
+fn extract_px_value(s: &str) -> Option<i32> {
+    let colon = s.find(':')?;
+    let after = s[colon + 1..].trim_start();
+    let end = after.find("px").or_else(|| after.find(')'))?;
+    after[..end].trim().parse::<i32>().ok()
 }
 
 /// Strippa <script>-element från HTML innan rendering.
