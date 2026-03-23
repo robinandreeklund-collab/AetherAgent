@@ -137,10 +137,7 @@ impl EventLoopState {
 /// Hämta argument som f64, med fallback
 fn arg_as_f64(args: &[Value<'_>], index: usize) -> f64 {
     args.get(index)
-        .and_then(|v| {
-            v.as_float()
-                .or_else(|| v.as_int().map(|i| i as f64))
-        })
+        .and_then(|v| v.as_float().or_else(|| v.as_int().map(|i| i as f64)))
         .unwrap_or(0.0)
 }
 
@@ -164,7 +161,10 @@ fn register_timers(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
         Function::new(
             ctx.clone(),
             move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args.first().cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+                let callback_val = args
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::new_undefined(ctx.clone()));
                 let func = match callback_val.as_function() {
                     Some(f) => f.clone(),
                     None => return Ok(Value::new_int(ctx, 0)),
@@ -196,7 +196,10 @@ fn register_timers(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
         Function::new(
             ctx.clone(),
             move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args.first().cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+                let callback_val = args
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::new_undefined(ctx.clone()));
                 let func = match callback_val.as_function() {
                     Some(f) => f.clone(),
                     None => return Ok(Value::new_int(ctx, 0)),
@@ -270,7 +273,10 @@ fn register_raf(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
         Function::new(
             ctx.clone(),
             move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args.first().cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+                let callback_val = args
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::new_undefined(ctx.clone()));
                 let func = match callback_val.as_function() {
                     Some(f) => f.clone(),
                     None => return Ok(Value::new_int(ctx, 0)),
@@ -332,7 +338,10 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
         Function::new(
             ctx.clone(),
             move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args.first().cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+                let callback_val = args
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::new_undefined(ctx.clone()));
                 let func = match callback_val.as_function() {
                     Some(f) => f.clone(),
                     None => return Ok(Value::new_undefined(ctx)),
@@ -360,8 +369,14 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
                     Function::new(
                         ctx.clone(),
                         move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                            let target = args.first().cloned().unwrap_or(Value::new_undefined(ctx.clone()));
-                            let options = args.get(1).cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+                            let target = args
+                                .first()
+                                .cloned()
+                                .unwrap_or(Value::new_undefined(ctx.clone()));
+                            let options = args
+                                .get(1)
+                                .cloned()
+                                .unwrap_or(Value::new_undefined(ctx.clone()));
 
                             // Extrahera __nodeKey__ från target
                             let node_key = target
@@ -466,7 +481,10 @@ pub fn run_event_loop(
 
         // Fas 2: Avancera virtuell klocka och kör mogna timers
         // Steg 1: Extrahera mogna timers (utan att anropa restore inne i borrow_mut)
-        let (due_timers, recurring_resave): (Vec<Persistent<Function<'static>>>, Vec<(u32, Persistent<Function<'static>>, u64)>) = {
+        let (due_timers, recurring_resave): (
+            Vec<Persistent<Function<'static>>>,
+            Vec<(u32, Persistent<Function<'static>>, u64)>,
+        ) = {
             let mut state = el.borrow_mut();
             state.virtual_time_ms += 1; // Avancera 1ms per tick
             state.ticks += 1;
@@ -483,7 +501,11 @@ pub fn run_event_loop(
                 }
                 if timer.delay_ms <= current_time {
                     if timer.recurring {
-                        recurring.push((timer.id, timer.callback, current_time + timer.delay_ms.max(1)));
+                        recurring.push((
+                            timer.id,
+                            timer.callback,
+                            current_time + timer.delay_ms.max(1),
+                        ));
                     } else {
                         due.push(timer.callback);
                     }
@@ -598,7 +620,9 @@ pub fn run_event_loop(
                         o.callback.clone()
                     })
                 };
-                let Some(cb) = callback_persistent else { continue };
+                let Some(cb) = callback_persistent else {
+                    continue;
+                };
                 if let Ok(func) = cb.restore(ctx) {
                     let records = rquickjs::Array::new(ctx.clone())
                         .map_err(|e| format!("Array::new failed: {}", e))
@@ -794,7 +818,11 @@ mod tests {
             let _ = run_event_loop(rt, &ctx, &el);
 
             let val: i32 = ctx.eval("count").expect("borde kunna läsa count");
-            assert!(val >= 3, "count borde vara >= 3 efter setInterval: got {}", val);
+            assert!(
+                val >= 3,
+                "count borde vara >= 3 efter setInterval: got {}",
+                val
+            );
         });
     }
 
@@ -851,7 +879,9 @@ mod tests {
             let _: Value = ctx.eval(code).expect("eval borde lyckas");
             let _ = run_event_loop(rt, &ctx, &el);
 
-            let val: bool = ctx.eval("microtaskRan").expect("borde kunna läsa microtaskRan");
+            let val: bool = ctx
+                .eval("microtaskRan")
+                .expect("borde kunna läsa microtaskRan");
             assert!(val, "Microtask borde ha körts");
         });
     }
@@ -890,9 +920,21 @@ mod tests {
             assert!(stats.ticks > 0, "Borde ha kört minst 1 tick");
 
             let display = format!("{}", stats);
-            assert!(display.contains("ticks="), "Display borde innehålla ticks: {}", display);
-            assert!(display.contains("rafs="), "Display borde innehålla rafs: {}", display);
-            assert!(display.contains("mutations="), "Display borde innehålla mutations: {}", display);
+            assert!(
+                display.contains("ticks="),
+                "Display borde innehålla ticks: {}",
+                display
+            );
+            assert!(
+                display.contains("rafs="),
+                "Display borde innehålla rafs: {}",
+                display
+            );
+            assert!(
+                display.contains("mutations="),
+                "Display borde innehålla mutations: {}",
+                display
+            );
         });
     }
 
@@ -904,7 +946,11 @@ mod tests {
             target: 42,
             attribute_name: Some("class".to_string()),
         });
-        assert_eq!(state.pending_mutations.len(), 1, "Borde ha 1 pending mutation");
+        assert_eq!(
+            state.pending_mutations.len(),
+            1,
+            "Borde ha 1 pending mutation"
+        );
         let mr = state.pending_mutations.pop_front().unwrap();
         assert_eq!(mr.mutation_type, "attributes");
         assert_eq!(mr.target, 42);
@@ -948,9 +994,21 @@ mod tests {
             let _ = run_event_loop(rt, &ctx, &el);
 
             let val: String = ctx.eval("steps.join(',')").expect("borde kunna läsa steps");
-            assert!(val.contains("start"), "Borde innehålla 'start': got {}", val);
-            assert!(val.contains("promise"), "Borde innehålla 'promise': got {}", val);
-            assert!(val.contains("timeout"), "Borde innehålla 'timeout': got {}", val);
+            assert!(
+                val.contains("start"),
+                "Borde innehålla 'start': got {}",
+                val
+            );
+            assert!(
+                val.contains("promise"),
+                "Borde innehålla 'promise': got {}",
+                val
+            );
+            assert!(
+                val.contains("timeout"),
+                "Borde innehålla 'timeout': got {}",
+                val
+            );
         });
     }
 }

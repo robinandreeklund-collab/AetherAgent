@@ -487,30 +487,28 @@ pub fn eval_js(code: &str) -> JsEvalResult {
 
     let (_rt, ctx) = create_sandboxed_runtime();
 
-    ctx.with(|ctx| {
-        match ctx.eval::<rquickjs::Value, _>(code) {
-            Ok(result) => {
-                let value_str = quickjs_value_to_string(&ctx, &result);
-                JsEvalResult {
-                    value: Some(value_str),
-                    error: None,
-                    timed_out: false,
-                    eval_time_us: start.elapsed().as_micros() as u64,
-                }
+    ctx.with(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
+        Ok(result) => {
+            let value_str = quickjs_value_to_string(&ctx, &result);
+            JsEvalResult {
+                value: Some(value_str),
+                error: None,
+                timed_out: false,
+                eval_time_us: start.elapsed().as_micros() as u64,
             }
-            Err(e) => {
-                let err_str = quickjs_error_string(&ctx, &e);
-                let err_lower = err_str.to_lowercase();
-                let timed_out = err_lower.contains("interrupted")
-                    || err_lower.contains("stack overflow")
-                    || err_lower.contains("stack size exceeded")
-                    || err_lower.contains("out of memory");
-                JsEvalResult {
-                    value: None,
-                    error: Some(err_str),
-                    timed_out,
-                    eval_time_us: start.elapsed().as_micros() as u64,
-                }
+        }
+        Err(e) => {
+            let err_str = quickjs_error_string(&ctx, &e);
+            let err_lower = err_str.to_lowercase();
+            let timed_out = err_lower.contains("interrupted")
+                || err_lower.contains("stack overflow")
+                || err_lower.contains("stack size exceeded")
+                || err_lower.contains("out of memory");
+            JsEvalResult {
+                value: None,
+                error: Some(err_str),
+                timed_out,
+                eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
     })
@@ -575,7 +573,10 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
 
 /// Konvertera ett QuickJS Value till en Rust-sträng
 #[cfg(feature = "js-eval")]
-pub(crate) fn quickjs_value_to_string<'js>(ctx: &rquickjs::Ctx<'js>, val: &rquickjs::Value<'js>) -> String {
+pub(crate) fn quickjs_value_to_string<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    val: &rquickjs::Value<'js>,
+) -> String {
     use rquickjs::Type;
     match val.type_of() {
         Type::Undefined => "undefined".to_string(),
@@ -587,7 +588,10 @@ pub(crate) fn quickjs_value_to_string<'js>(ctx: &rquickjs::Ctx<'js>, val: &rquic
                 "false".to_string()
             }
         }
-        Type::Int => val.as_int().map(|v| v.to_string()).unwrap_or_else(|| "0".to_string()),
+        Type::Int => val
+            .as_int()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "0".to_string()),
         Type::Float => {
             let f = val.as_float().unwrap_or(0.0);
             // Matcha JavaScript-formatering: 59.98, inte 5.998e1
@@ -627,9 +631,7 @@ pub(crate) fn quickjs_error_string<'js>(ctx: &rquickjs::Ctx<'js>, err: &rquickjs
             let caught = ctx.catch();
             if let Some(exc) = caught.as_exception() {
                 let msg = exc.message().unwrap_or_default();
-                let stack = exc
-                    .stack()
-                    .unwrap_or_default();
+                let stack = exc.stack().unwrap_or_default();
                 if stack.is_empty() {
                     msg
                 } else {

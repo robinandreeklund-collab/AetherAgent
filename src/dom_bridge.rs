@@ -121,7 +121,9 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         console_output: Vec::new(),
     }));
 
-    let mut ctx = { let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */ };
+    let mut ctx = {
+        let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */
+    };
 
     // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
     let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
@@ -231,7 +233,9 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         console_output: Vec::new(),
     }));
 
-    let mut ctx = { let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */ };
+    let mut ctx = {
+        let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */
+    };
     let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
     event_loop::register_event_loop(&mut ctx, Rc::clone(&el));
     register_document(&mut ctx, Rc::clone(&state));
@@ -317,8 +321,14 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
 
     // SAFETY: Closures capture Rc<RefCell<BridgeState>> som ej är Send/Sync,
     // men QuickJS-kontexten är single-threaded och closures lever inom samma tråd.
-    let get_element_by_id = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let id = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let get_element_by_id = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let id = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let id_str = id.to_std_string_escaped();
             let key = {
                 let s = state_gbi.borrow();
@@ -328,10 +338,18 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 Some(k) => Ok(make_element_object(ctx, k, &state_gbi)),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let query_selector = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let selector = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let query_selector = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let selector = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
             let key = {
                 let s = state_qs.borrow();
@@ -341,10 +359,18 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 Some(k) => Ok(make_element_object(ctx, k, &state_qs)),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let query_selector_all = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let selector = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let query_selector_all = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let selector = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
             let keys = {
                 let s = state_qsa.borrow();
@@ -356,10 +382,18 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 array.set(0, elem)?;
             }
             Ok(array.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let create_element = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let tag = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let create_element = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let tag = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let tag_str = tag.to_std_string_escaped().to_lowercase();
             let key = {
                 let mut s = state_ce.borrow_mut();
@@ -373,10 +407,18 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 })
             };
             Ok(make_element_object(ctx, key, &state_ce))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let create_text_node = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let text = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let create_text_node = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let text = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let text_str = text.to_std_string_escaped();
             let key = {
                 let mut s = state_ct.borrow_mut();
@@ -390,11 +432,19 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 })
             };
             Ok(make_element_object(ctx, key, &state_ct))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // createComment(text)
-    let create_comment = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let text = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let create_comment = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let text = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let text_str = text.to_std_string_escaped();
             let key = {
                 let mut s = state_cc.borrow_mut();
@@ -408,10 +458,14 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 })
             };
             Ok(make_element_object(ctx, key, &state_cc))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // getElementsByClassName(cls)
-    let get_by_class = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let get_by_class = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -428,10 +482,14 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 array.set(0, elem)?;
             }
             Ok(array.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // getElementsByTagName(tag)
-    let get_by_tag = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let get_by_tag = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let tag = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -448,11 +506,15 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 array.set(0, elem)?;
             }
             Ok(array.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // createDocumentFragment
     let state_cdf = Rc::clone(&state);
-    let create_doc_fragment = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let create_doc_fragment = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let key = {
                 let mut s = state_cdf.borrow_mut();
                 s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -465,27 +527,23 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                 })
             };
             Ok(make_element_object(ctx, key, &state_cdf))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // Bygg document-objektet
-    let doc = Object::new(ctx.clone()).unwrap()
-        ;
-    doc.set("getElementById", get_element_by_id).unwrap_or(())
-        ;
-    doc.set("querySelector", query_selector).unwrap_or(())
-        ;
-    doc.set("querySelectorAll", query_selector_all).unwrap_or(())
-        ;
-    doc.set("createElement", create_element).unwrap_or(())
-        ;
-    doc.set("createTextNode", create_text_node).unwrap_or(())
-        ;
-    doc.set("createComment", create_comment).unwrap_or(())
-        ;
-    doc.set("createDocumentFragment", create_doc_fragment).unwrap_or(())
-        ;
-    doc.set("getElementsByClassName", get_by_class).unwrap_or(())
-        ;
+    let doc = Object::new(ctx.clone()).unwrap();
+    doc.set("getElementById", get_element_by_id).unwrap_or(());
+    doc.set("querySelector", query_selector).unwrap_or(());
+    doc.set("querySelectorAll", query_selector_all)
+        .unwrap_or(());
+    doc.set("createElement", create_element).unwrap_or(());
+    doc.set("createTextNode", create_text_node).unwrap_or(());
+    doc.set("createComment", create_comment).unwrap_or(());
+    doc.set("createDocumentFragment", create_doc_fragment)
+        .unwrap_or(());
+    doc.set("getElementsByClassName", get_by_class)
+        .unwrap_or(());
     doc.set("getElementsByTagName", get_by_tag).unwrap_or(());
 
     // body, head, documentElement
@@ -513,157 +571,183 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
     }
 
     // createRange() — grundläggande Range API för rich-text editors
-    let create_range_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-        let collapse_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let select_node_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let select_node_contents_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let set_start_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let set_end_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let set_start_before_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let set_end_after_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let clone_range_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-            // Returnera nytt Range-liknande objekt
-            let inner = Object::new(ctx.clone()).unwrap()
-                .set("collapsed", Value::new_bool(ctx.clone(), true),
-                )
-                .set("startOffset", Value::new_int(ctx.clone(), 0),
-                )
-                .set("endOffset", Value::new_int(ctx.clone(), 0));
-            Ok(inner.into_value())
-        });
-        let delete_contents_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let to_string_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))) }).unwrap();
-        let get_bounding_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-            let rect = Object::new(ctx.clone()).unwrap()
-                .set("x", Value::new_int(ctx.clone(), 0))
-                .set("y", Value::new_int(ctx.clone(), 0))
-                .set("width", Value::new_int(ctx.clone(), 0))
-                .set("height", Value::new_int(ctx.clone(), 0))
-                .set("top", Value::new_int(ctx.clone(), 0))
-                .set("right", Value::new_int(ctx.clone(), 0))
-                .set("bottom", Value::new_int(ctx.clone(), 0))
-                .set("left", Value::new_int(ctx.clone(), 0));
-            Ok(rect.into_value())
-        });
+    let create_range_fn =
+        Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let collapse_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let select_node_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let select_node_contents_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let set_start_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let set_end_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let set_start_before_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let set_end_after_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let clone_range_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    // Returnera nytt Range-liknande objekt
+                    let inner = Object::new(ctx.clone())
+                        .unwrap()
+                        .set("collapsed", Value::new_bool(ctx.clone(), true))
+                        .set("startOffset", Value::new_int(ctx.clone(), 0))
+                        .set("endOffset", Value::new_int(ctx.clone(), 0));
+                    Ok(inner.into_value())
+                });
+            let delete_contents_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let to_string_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(rquickjs::String::from_str(ctx.clone(), "")
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+                })
+                .unwrap();
+            let get_bounding_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    let rect = Object::new(ctx.clone())
+                        .unwrap()
+                        .set("x", Value::new_int(ctx.clone(), 0))
+                        .set("y", Value::new_int(ctx.clone(), 0))
+                        .set("width", Value::new_int(ctx.clone(), 0))
+                        .set("height", Value::new_int(ctx.clone(), 0))
+                        .set("top", Value::new_int(ctx.clone(), 0))
+                        .set("right", Value::new_int(ctx.clone(), 0))
+                        .set("bottom", Value::new_int(ctx.clone(), 0))
+                        .set("left", Value::new_int(ctx.clone(), 0));
+                    Ok(rect.into_value())
+                });
 
-        let range = Object::new(ctx.clone()).unwrap()
-            .set("collapsed", Value::new_bool(ctx.clone(), true),
-            )
-            .set("startContainer", Value::new_null(ctx.clone()),
-            )
-            .set("endContainer", Value::new_null(ctx.clone()),
-            )
-            .set("startOffset", Value::new_int(ctx.clone(), 0),
-            )
-            .set("endOffset", Value::new_int(ctx.clone(), 0))
-            .set("commonAncestorContainer", Value::new_null(ctx.clone()),
-            )
-            ;
-    doc.set("collapse", collapse_fn).unwrap_or(())
-            ;
-    doc.set("selectNode", select_node_fn).unwrap_or(())
-            ;
-    doc.set("selectNodeContents", select_node_contents_fn).unwrap_or(())
-            ;
-    doc.set("setStart", set_start_fn).unwrap_or(())
-            ;
-    doc.set("setEnd", set_end_fn).unwrap_or(())
-            ;
-    doc.set("setStartBefore", set_start_before_fn).unwrap_or(())
-            ;
-    doc.set("setEndAfter", set_end_after_fn).unwrap_or(())
-            ;
-    doc.set("cloneRange", clone_range_fn).unwrap_or(())
-            ;
-    doc.set("deleteContents", delete_contents_fn).unwrap_or(())
-            ;
-    doc.set("toString", to_string_fn).unwrap_or(())
-            ;
-    doc.set("getBoundingClientRect", get_bounding_fn).unwrap_or(());
+            let range = Object::new(ctx.clone())
+                .unwrap()
+                .set("collapsed", Value::new_bool(ctx.clone(), true))
+                .set("startContainer", Value::new_null(ctx.clone()))
+                .set("endContainer", Value::new_null(ctx.clone()))
+                .set("startOffset", Value::new_int(ctx.clone(), 0))
+                .set("endOffset", Value::new_int(ctx.clone(), 0))
+                .set("commonAncestorContainer", Value::new_null(ctx.clone()));
+            doc.set("collapse", collapse_fn).unwrap_or(());
+            doc.set("selectNode", select_node_fn).unwrap_or(());
+            doc.set("selectNodeContents", select_node_contents_fn)
+                .unwrap_or(());
+            doc.set("setStart", set_start_fn).unwrap_or(());
+            doc.set("setEnd", set_end_fn).unwrap_or(());
+            doc.set("setStartBefore", set_start_before_fn).unwrap_or(());
+            doc.set("setEndAfter", set_end_after_fn).unwrap_or(());
+            doc.set("cloneRange", clone_range_fn).unwrap_or(());
+            doc.set("deleteContents", delete_contents_fn).unwrap_or(());
+            doc.set("toString", to_string_fn).unwrap_or(());
+            doc.set("getBoundingClientRect", get_bounding_fn)
+                .unwrap_or(());
 
-        Ok(range.into_value())
-    });
-    doc.set(
-        "createRange",
-        create_range_fn,
-        false,
-        ctx,
-    )
-    .unwrap_or(());
+            Ok(range.into_value())
+        });
+    doc.set("createRange", create_range_fn, false, ctx)
+        .unwrap_or(());
 
     // getSelection() — grundläggande Selection API
-    let get_selection_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-        let remove_all_ranges =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let add_range_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let collapse_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let collapse_to_start =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let collapse_to_end =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let to_string_fn =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))) }).unwrap();
+    let get_selection_fn =
+        Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let remove_all_ranges =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let add_range_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let collapse_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let collapse_to_start =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let collapse_to_end =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let to_string_fn =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(rquickjs::String::from_str(ctx.clone(), "")
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+                })
+                .unwrap();
 
-        let selection = Object::new(ctx.clone()).unwrap()
-            ;
-    doc.set("anchorNode", Value::new_null(ctx.clone())).unwrap_or(())
-            .set("anchorOffset", Value::new_int(ctx.clone(), 0),
-            )
-            ;
-    doc.set("focusNode", Value::new_null(ctx.clone())).unwrap_or(())
-            .set("focusOffset", Value::new_int(ctx.clone(), 0),
-            )
-            .set("isCollapsed", Value::new_bool(ctx.clone(), true),
-            )
-            .set("rangeCount", Value::new_int(ctx.clone(), 0))
-            .set("type", rquickjs::String::from_str(ctx.clone(), "None").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
-            )
-            ;
-    doc.set("removeAllRanges", remove_all_ranges).unwrap_or(())
-            ;
-    doc.set("addRange", add_range_fn).unwrap_or(())
-            ;
-    doc.set("collapse", collapse_fn).unwrap_or(())
-            ;
-    doc.set("collapseToStart", collapse_to_start).unwrap_or(())
-            ;
-    doc.set("collapseToEnd", collapse_to_end).unwrap_or(())
-            ;
-    doc.set("toString", to_string_fn).unwrap_or(());
+            let selection = Object::new(ctx.clone()).unwrap();
+            doc.set("anchorNode", Value::new_null(ctx.clone()))
+                .unwrap_or(())
+                .set("anchorOffset", Value::new_int(ctx.clone(), 0));
+            doc.set("focusNode", Value::new_null(ctx.clone()))
+                .unwrap_or(())
+                .set("focusOffset", Value::new_int(ctx.clone(), 0))
+                .set("isCollapsed", Value::new_bool(ctx.clone(), true))
+                .set("rangeCount", Value::new_int(ctx.clone(), 0))
+                .set(
+                    "type",
+                    rquickjs::String::from_str(ctx.clone(), "None")
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                );
+            doc.set("removeAllRanges", remove_all_ranges).unwrap_or(());
+            doc.set("addRange", add_range_fn).unwrap_or(());
+            doc.set("collapse", collapse_fn).unwrap_or(());
+            doc.set("collapseToStart", collapse_to_start).unwrap_or(());
+            doc.set("collapseToEnd", collapse_to_end).unwrap_or(());
+            doc.set("toString", to_string_fn).unwrap_or(());
 
-        Ok(selection.into_value())
-    });
-    doc.set(
-        "getSelection",
-        get_selection_fn,
-        false,
-        ctx,
-    )
-    .unwrap_or(());
+            Ok(selection.into_value())
+        });
+    doc.set("getSelection", get_selection_fn, false, ctx)
+        .unwrap_or(());
 
     // exitPointerLock()
-    let exit_pl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    doc.set(
-        "exitPointerLock",
-        exit_pl,
-        false,
-        ctx,
-    )
-    .unwrap_or(());
+    let exit_pl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    doc.set("exitPointerLock", exit_pl, false, ctx)
+        .unwrap_or(());
 
     // activeElement — returnerar det element som har fokus (default: body)
     let st_ae = Rc::clone(&state);
-    let active_element_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let active_element_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let focused = st_ae.borrow().focused_element;
             match focused {
                 Some(key_u64) => {
@@ -686,17 +770,13 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
                     }
                 }
             }
-    }).unwrap();
-    doc.set(
-        "activeElement",
-        active_element_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
-
-    ctx.globals().set("document", doc)
+    .unwrap();
+    doc.set("activeElement", active_element_fn, false, ctx)
         .unwrap_or(());
+
+    ctx.globals().set("document", doc).unwrap_or(());
 }
 
 // ─── Element-objekt ─────────────────────────────────────────────────────────
@@ -704,11 +784,7 @@ fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> 
 /// Extrahera NodeKey från ett JS-element-objekt via __nodeKey__
 fn extract_node_key(val: &Value<'_>) -> Option<NodeKey> {
     let obj = val.as_object()?;
-    let bits = obj
-        .get("__nodeKey__", ctx)
-        .ok()?
-        .to_number(ctx)
-        .ok()?;
+    let bits = obj.get("__nodeKey__", ctx).ok()?.to_number(ctx).ok()?;
     Some(f64_to_node_key(bits))
 }
 
@@ -721,7 +797,11 @@ fn f64_to_node_key(bits: f64) -> NodeKey {
 /// Skapa ett JS-objekt som representerar ett DOM-element med full funktionalitet.
 ///
 /// Alla metoder har tillgång till arena via SharedState-closures.
-fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
+fn make_element_object(
+    ctx: &Ctx<'_>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'_>> {
     let key_bits = node_key_to_f64(key);
 
     // Bestäm nodeType och tagName från arena
@@ -750,40 +830,72 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         (nt, tag, id, cls)
     };
 
-    let obj = Object::new(ctx.clone()).unwrap()
-        .set("__nodeKey__", Value::new_float(ctx.clone(), key_bits as f64),
+    let obj = Object::new(ctx.clone())
+        .unwrap()
+        .set(
+            "__nodeKey__",
+            Value::new_float(ctx.clone(), key_bits as f64),
         )
-        .set("nodeType", Value::new_int(ctx.clone(), node_type_val),
+        .set("nodeType", Value::new_int(ctx.clone(), node_type_val))
+        .set(
+            "tagName",
+            rquickjs::String::from_str(
+                ctx.clone(),
+                tag_name
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ),
         )
-        .set("tagName", rquickjs::String::from_str(ctx.clone(), tag_name.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+        .set(
+            "id",
+            rquickjs::String::from_str(
+                ctx.clone(),
+                id_val
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ),
         )
-        .set("id", rquickjs::String::from_str(ctx.clone(), id_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-        )
-        .set("className", rquickjs::String::from_str(ctx.clone(), class_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+        .set(
+            "className",
+            rquickjs::String::from_str(
+                ctx.clone(),
+                class_val
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ),
         );
 
     // ─── getAttribute(name) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ga = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let name = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
+    let ga = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let name = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_string(ctx)?;
             let name_str = name.to_std_string_escaped();
             let s = st.borrow();
             match s.arena.nodes.get(key).and_then(|n| n.get_attr(&name_str)) {
-                Some(v) => Ok(rquickjs::String::from_str(ctx.clone(), v).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+                Some(v) => Ok(rquickjs::String::from_str(ctx.clone(), v)
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
-    obj.set(
-        "getAttribute",
-        ga,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("getAttribute", ga, false, ctx).unwrap_or(());
 
     // ─── setAttribute(name, value) ──────────────────────────────────
     let st = Rc::clone(state);
-    let sa = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let sa = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -797,18 +909,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             s.mutations
                 .push(format!("setAttribute({}, {})", name, value));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "setAttribute",
-        sa,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("setAttribute", sa, false, ctx).unwrap_or(());
 
     // ─── removeAttribute(name) ──────────────────────────────────────
     let st = Rc::clone(state);
-    let ra = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ra = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -817,25 +927,32 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             s.arena.remove_attr(key, &name);
             s.mutations.push(format!("removeAttribute({})", name));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "removeAttribute",
-        ra,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("removeAttribute", ra, false, ctx).unwrap_or(());
 
     // ─── textContent (accessor property: getter + setter) ──────────
     {
         let st_get = Rc::clone(state);
-        let tc_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let tc_get = Function::new(
+            ctx.clone(),
+            move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let s = st_get.borrow();
                 let text = s.arena.extract_text(key);
-                Ok(rquickjs::String::from_str(ctx.clone(), text.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-        }).unwrap();
+                Ok(rquickjs::String::from_str(
+                    ctx.clone(),
+                    text.as_str()
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                ))
+            },
+        )
+        .unwrap();
         let st_set = Rc::clone(state);
-        let tc_set = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+        let tc_set = Function::new(
+            ctx.clone(),
+            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let text = args
                     .get_or_undefined(0)
                     .to_string(ctx)?
@@ -860,104 +977,114 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 s.arena.append_child(key, text_key);
                 s.mutations.push("setTextContent".to_string());
                 Ok(Value::new_undefined(ctx.clone()))
-        }).unwrap();
+            },
+        )
+        .unwrap();
         let getter_fn = tc_get;
         let setter_fn = tc_set;
-        let _ = obj.define_property_or_throw(
+        let _ = obj.prop(
             "textContent",
-            /* PropertyDescriptor */
-                .get(getter_fn)
-                .set(setter_fn)
-                .enumerable(true)
-                .configurable(true),
-            ctx,
+            Accessor::new(getter_fn, setter_fn)
+                .configurable()
+                .enumerable(),
         );
     }
 
     // ─── appendChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ac = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let child_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
+    let ac = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let child_key = match extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            ) {
                 Some(k) => k,
                 None => return Ok(Value::new_undefined(ctx.clone())),
             };
             let mut s = st.borrow_mut();
             s.arena.append_child(key, child_key);
             s.mutations.push("appendChild".to_string());
-            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
-    }).unwrap();
-    obj.set(
-        "appendChild",
-        ac,
-        false,
-        ctx,
+            Ok(args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("appendChild", ac, false, ctx).unwrap_or(());
 
     // ─── removeChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let rc = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let child_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
+    let rc = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let child_key = match extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            ) {
                 Some(k) => k,
                 None => return Ok(Value::new_undefined(ctx.clone())),
             };
             let mut s = st.borrow_mut();
             s.arena.remove_child(key, child_key);
             s.mutations.push("removeChild".to_string());
-            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
-    }).unwrap();
-    obj.set(
-        "removeChild",
-        rc,
-        false,
-        ctx,
+            Ok(args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("removeChild", rc, false, ctx).unwrap_or(());
 
     // ─── parentNode ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let pn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let pn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(parent_key) => Ok(Value::from(node_key_to_f64(parent_key))),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
-    obj.set(
-        "parentNode",
-        pn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("parentNode", pn, false, ctx).unwrap_or(());
 
     // ─── childNodes ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let cn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let cn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 for (i, &child) in node.children.iter().enumerate() {
                     let child_bits = node_key_to_f64(child);
-                    let child_obj = Object::new(ctx.clone()).unwrap()
-                        .set("__nodeKey__", Value::new_float(ctx.clone(), child_bits as f64),
-                        );
+                    let child_obj = Object::new(ctx.clone()).unwrap().set(
+                        "__nodeKey__",
+                        Value::new_float(ctx.clone(), child_bits as f64),
+                    );
                     let _ = arr.set(i, child_obj);
                 }
             }
             Ok(arr.into_value())
-    }).unwrap();
-    obj.set(
-        "childNodes",
-        cn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("childNodes", cn, false, ctx).unwrap_or(());
 
     // ─── firstChild ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let fc = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let fc = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             match s
                 .arena
@@ -968,18 +1095,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 Some(child_key) => Ok(Value::from(node_key_to_f64(child_key))),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
-    obj.set(
-        "firstChild",
-        fc,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("firstChild", fc, false, ctx).unwrap_or(());
 
     // ─── nextSibling ────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let ns = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let ns = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
@@ -995,18 +1120,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "nextSibling",
-        ns,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("nextSibling", ns, false, ctx).unwrap_or(());
 
     // ─── closest(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let cl = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let cl = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let sel = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1020,36 +1143,32 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 current = s.arena.nodes.get(k).and_then(|n| n.parent);
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "closest",
-        cl,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("closest", cl, false, ctx).unwrap_or(());
 
     // ─── matches(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let ms = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ms = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let sel = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let s = st.borrow();
             Ok(Value::from(matches_selector(&s.arena, key, &sel)))
-    }).unwrap();
-    obj.set(
-        "matches",
-        ms,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("matches", ms, false, ctx).unwrap_or(());
 
     // ─── children (bara element-barn) ───────────────────────────────
     let st = Rc::clone(state);
-    let ch = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let ch = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
@@ -1057,9 +1176,9 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 for &child in &node.children {
                     if let Some(cn) = s.arena.nodes.get(child) {
                         if cn.node_type == NodeType::Element {
-                            let co = Object::new(ctx.clone()).unwrap()
-                                .set("__nodeKey__", Value::from(node_key_to_f64(child)),
-                                );
+                            let co = Object::new(ctx.clone())
+                                .unwrap()
+                                .set("__nodeKey__", Value::from(node_key_to_f64(child)));
                             let _ = arr.set(i, co);
                             i += 1;
                         }
@@ -1067,18 +1186,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(arr.into_value())
-    }).unwrap();
-    obj.set(
-        "children",
-        ch,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("children", ch, false, ctx).unwrap_or(());
 
     // ─── dataset (läs data-* attribut) ──────────────────────────────
     let st = Rc::clone(state);
-    let ds = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let ds = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let ds_obj = Object::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
@@ -1088,7 +1205,12 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                         let camel = data_attr_to_camel(name);
                         let _ = ds_obj.set(
                             camel.as_str(),
-                            rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+                            rquickjs::String::from_str(
+                                ctx.clone(),
+                                v.as_str()
+                                    .map(|s| s.into_value())
+                                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                            ),
                             false,
                             ctx,
                         );
@@ -1096,40 +1218,49 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(ds_obj.into_value())
-    }).unwrap();
-    obj.set(
-        "dataset",
-        ds,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("dataset", ds, false, ctx).unwrap_or(());
 
     // ─── insertBefore(newChild, refChild) ─────────────────────────
     let st = Rc::clone(state);
-    let ib = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_child = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
+    let ib = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_child = match extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            ) {
                 Some(k) => k,
                 None => return Ok(Value::new_undefined(ctx.clone())),
             };
-            let ref_child = extract_node_key(&args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+            let ref_child = extract_node_key(
+                &args
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             let mut s = st.borrow_mut();
             s.arena.insert_before(key, new_child, ref_child);
             s.mutations.push("insertBefore".to_string());
-            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
-    }).unwrap();
-    obj.set(
-        "insertBefore",
-        ib,
-        false,
-        ctx,
+            Ok(args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("insertBefore", ib, false, ctx).unwrap_or(());
 
     // ─── insertAdjacentHTML(position, html) ────────────────────────
     // Förenklad: loggar mutation, parsning av HTML stöds ej (kräver full parser)
     let st = Rc::clone(state);
-    let iah = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let iah = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let position = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1144,83 +1275,78 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 key_bits, position, html_str
             ));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "insertAdjacentHTML",
-        iah,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("insertAdjacentHTML", iah, false, ctx).unwrap_or(());
 
     // ─── attachShadow({ mode }) ─────────────────────────────────────
     // Förenklad: returnerar ett tomt objekt som shadow root
-    let at_sh = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let at_sh = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let shadow = Object::new(ctx.clone()).unwrap();
             Ok(Value::new_float(ctx.clone(), shadow as f64))
-    }).unwrap();
-    obj.set(
-        "attachShadow",
-        at_sh,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("attachShadow", at_sh, false, ctx).unwrap_or(());
 
     // ─── cloneNode(deep) ────────────────────────────────────────────
     let st = Rc::clone(state);
-    let cn_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let cn_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             match s.arena.clone_node_deep(key) {
                 Some(clone_key) => {
                     let bits = node_key_to_f64(clone_key);
-                    let clone_obj = Object::new(ctx.clone()).unwrap()
-                        .set("__nodeKey__", Value::new_float(ctx.clone(), bits as f64),
-                        )
-                        .set("nodeType", Value::new_int(ctx.clone(), 1),
-                        );
+                    let clone_obj = Object::new(ctx.clone())
+                        .unwrap()
+                        .set("__nodeKey__", Value::new_float(ctx.clone(), bits as f64))
+                        .set("nodeType", Value::new_int(ctx.clone(), 1));
                     Ok(clone_obj.into_value())
                 }
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
-    obj.set(
-        "cloneNode",
-        cn_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("cloneNode", cn_fn, false, ctx).unwrap_or(());
 
     // ─── outerHTML (getter) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let oh = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let oh = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             Ok(Value::from(js_string!(s
                 .arena
                 .serialize_html(key)
                 .as_str())))
-    }).unwrap();
-    obj.set(
-        "outerHTML",
-        oh,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("outerHTML", oh, false, ctx).unwrap_or(());
 
     // ─── innerHTML (accessor property: getter + setter) ────────────
     {
         let st_get = Rc::clone(state);
-        let ih_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let ih_get = Function::new(
+            ctx.clone(),
+            move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let s = st_get.borrow();
                 Ok(Value::from(js_string!(s
                     .arena
                     .serialize_inner_html(key)
                     .as_str())))
-        }).unwrap();
+            },
+        )
+        .unwrap();
         let st_set = Rc::clone(state);
-        let ih_set = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+        let ih_set = Function::new(
+            ctx.clone(),
+            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let html_str = args
                     .get_or_undefined(0)
                     .to_string(ctx)?
@@ -1248,24 +1374,25 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 s.mutations
                     .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
                 Ok(Value::new_undefined(ctx.clone()))
-        }).unwrap();
+            },
+        )
+        .unwrap();
         let getter_fn = ih_get;
         let setter_fn = ih_set;
-        let _ = obj.define_property_or_throw(
+        let _ = obj.prop(
             "innerHTML",
-            /* PropertyDescriptor */
-                .get(getter_fn)
-                .set(setter_fn)
-                .enumerable(true)
-                .configurable(true),
-            ctx,
+            Accessor::new(getter_fn, setter_fn)
+                .configurable()
+                .enumerable(),
         );
     }
 
     // ─── Bakåtkompatibla metoder: setInnerHTML / setTextContent ──────
     // Behåller dessa som explicita metoder för befintlig kod
     let st = Rc::clone(state);
-    let ih_set_compat = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ih_set_compat = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let html_str = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1291,17 +1418,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             s.mutations
                 .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "setInnerHTML",
-        ih_set_compat,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("setInnerHTML", ih_set_compat, false, ctx)
+        .unwrap_or(());
 
     let st = Rc::clone(state);
-    let tc_set_compat = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let tc_set_compat = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let text = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1324,18 +1450,17 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             s.arena.append_child(key, text_key);
             s.mutations.push("setTextContent".to_string());
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "setTextContent",
-        tc_set_compat,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("setTextContent", tc_set_compat, false, ctx)
+        .unwrap_or(());
 
     // ─── firstElementChild ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let fec = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let fec = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             if let Some(node) = s.arena.nodes.get(key) {
                 for &child in &node.children {
@@ -1347,18 +1472,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "firstElementChild",
-        fec,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("firstElementChild", fec, false, ctx).unwrap_or(());
 
     // ─── nextElementSibling ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let nes = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let nes = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
@@ -1377,18 +1500,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "nextElementSibling",
-        nes,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("nextElementSibling", nes, false, ctx).unwrap_or(());
 
     // ─── previousSibling ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let ps = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let ps = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
@@ -1404,18 +1525,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "previousSibling",
-        ps,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("previousSibling", ps, false, ctx).unwrap_or(());
 
     // ─── previousElementSibling ─────────────────────────────────────
     let st = Rc::clone(state);
-    let pes = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let pes = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
@@ -1434,18 +1553,17 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_null(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "previousElementSibling",
-        pes,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("previousElementSibling", pes, false, ctx)
+        .unwrap_or(());
 
     // ─── childElementCount ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let cec = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let cec = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let count = s
                 .arena
@@ -1465,55 +1583,53 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 })
                 .unwrap_or(0);
             Ok(Value::new_int(ctx.clone(), count as i32))
-    }).unwrap();
-    obj.set(
-        "childElementCount",
-        cec,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("childElementCount", cec, false, ctx).unwrap_or(());
 
     // ─── hasAttribute(name) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ha = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ha = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let s = st.borrow();
             Ok(Value::from(s.arena.has_attr(key, &name)))
-    }).unwrap();
-    obj.set(
-        "hasAttribute",
-        ha,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("hasAttribute", ha, false, ctx).unwrap_or(());
 
     // ─── remove() — ta bort elementet från sin förälder ─────────────
     let st = Rc::clone(state);
-    let rm = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let rm = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
                 s.arena.remove_child(parent_key, key);
                 s.mutations.push(format!("remove:{}", key_bits));
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "remove",
-        rm,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("remove", rm, false, ctx).unwrap_or(());
 
     // ─── replaceWith(newNode) ───────────────────────────────────────
     let st = Rc::clone(state);
-    let rw = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key_val = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_number(_ctx)?;
+    let rw = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key_val = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .to_number(_ctx)?;
             let new_key = f64_to_node_key(new_key_val);
             let mut s = st.borrow_mut();
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1523,20 +1639,28 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                     .push(format!("replaceWith:{}:{}", key_bits, new_key_val as u64));
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "replaceWith",
-        rw,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("replaceWith", rw, false, ctx).unwrap_or(());
 
     // ─── replaceChild(newChild, oldChild) (Fas 19) ────────────────
     let st_rc = Rc::clone(state);
-    let replace_child = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key_val = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
-            let old_key_val = extract_node_key(&args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+    let replace_child = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key_val = extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
+            let old_key_val = extract_node_key(
+                &args
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             if let (Some(new_k), Some(old_k)) = (new_key_val, old_key_val) {
                 let mut s = st_rc.borrow_mut();
                 s.arena.insert_before(key, new_k, Some(old_k));
@@ -1544,20 +1668,28 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 s.mutations
                     .push(format!("replaceChild:{}", key_bits as u64));
             }
-            Ok(args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone())
-    }).unwrap();
-    obj.set(
-        "replaceChild",
-        replace_child,
-        false,
-        ctx,
+            Ok(args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .clone())
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("replaceChild", replace_child, false, ctx)
+        .unwrap_or(());
 
     // ─── before/after/prepend/append (Fas 19) ───────────────────────
     let st_before = Rc::clone(state);
-    let before_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+    let before_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             if let Some(nk) = new_key {
                 let mut s = st_before.borrow_mut();
                 if let Some(parent) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1566,18 +1698,21 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "before",
-        before_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("before", before_fn, false, ctx).unwrap_or(());
 
     let st_after = Rc::clone(state);
-    let after_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+    let after_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             if let Some(nk) = new_key {
                 let mut s = st_after.borrow_mut();
                 if let Some(parent) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1594,18 +1729,21 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "after",
-        after_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("after", after_fn, false, ctx).unwrap_or(());
 
     let st_prepend = Rc::clone(state);
-    let prepend_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+    let prepend_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             if let Some(nk) = new_key {
                 let mut s = st_prepend.borrow_mut();
                 let first_child = s
@@ -1617,36 +1755,37 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 s.mutations.push(format!("prepend:{}", key_bits as u64));
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "prepend",
-        prepend_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("prepend", prepend_fn, false, ctx).unwrap_or(());
 
     let st_append = Rc::clone(state);
-    let append_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+    let append_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            );
             if let Some(nk) = new_key {
                 let mut s = st_append.borrow_mut();
                 s.arena.append_child(key, nk);
                 s.mutations.push(format!("append:{}", key_bits as u64));
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "append",
-        append_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("append", append_fn, false, ctx).unwrap_or(());
 
     // ─── toggleAttribute(name) (Fas 19) ─────────────────────────────
     let st_ta = Rc::clone(state);
-    let toggle_attr = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let toggle_attr = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let attr = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -1660,43 +1799,46 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 s.arena.set_attr(key, &attr, "");
             }
             Ok(Value::from(!had))
-    }).unwrap();
-    obj.set(
-        "toggleAttribute",
-        toggle_attr,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("toggleAttribute", toggle_attr, false, ctx)
+        .unwrap_or(());
 
     // ─── getAttributeNames() (Fas 19) ───────────────────────────────
     let st_gan = Rc::clone(state);
-    let get_attr_names = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let get_attr_names = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_gan.borrow();
             let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 for (i, name) in node.attributes.keys().enumerate() {
                     let _ = arr.set(
                         i as u32,
-                        rquickjs::String::from_str(ctx.clone(), name.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+                        rquickjs::String::from_str(
+                            ctx.clone(),
+                            name.as_str()
+                                .map(|s| s.into_value())
+                                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                        ),
                         false,
                         ctx,
                     );
                 }
             }
             Ok(arr.into_value())
-    }).unwrap();
-    obj.set(
-        "getAttributeNames",
-        get_attr_names,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("getAttributeNames", get_attr_names, false, ctx)
+        .unwrap_or(());
 
     // ─── normalize() — slå ihop adjacenta text-noder (Fas 19) ───────
     let st_norm = Rc::clone(state);
-    let normalize_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let normalize_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st_norm.borrow_mut();
             let children: Vec<NodeKey> = s
                 .arena
@@ -1737,63 +1879,55 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 i += 1;
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "normalize",
-        normalize_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("normalize", normalize_fn, false, ctx).unwrap_or(());
 
     // ─── value (getter/setter för input/textarea/select) ────────────
     let st = Rc::clone(state);
-    let val_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let val_get = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             Ok(Value::from(js_string!(s
                 .arena
                 .get_attr(key, "value")
                 .unwrap_or(""))))
-    }).unwrap();
-    obj.set(
-        "value",
-        val_get,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("value", val_get, false, ctx).unwrap_or(());
 
     // ─── checked (getter för checkbox/radio) ────────────────────────
     let st = Rc::clone(state);
-    let chk = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let chk = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             Ok(Value::from(s.arena.has_attr(key, "checked")))
-    }).unwrap();
-    obj.set(
-        "checked",
-        chk,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("checked", chk, false, ctx).unwrap_or(());
 
     // ─── selected (getter för option-element) ───────────────────────
     let st = Rc::clone(state);
-    let sel = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let sel = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             Ok(Value::from(s.arena.has_attr(key, "selected")))
-    }).unwrap();
-    obj.set(
-        "selected",
-        sel,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("selected", sel, false, ctx).unwrap_or(());
 
     // ─── tabIndex ───────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let ti = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let ti = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let val = s
                 .arena
@@ -1801,18 +1935,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 .and_then(|v| v.parse::<i32>().ok())
                 .unwrap_or(-1);
             Ok(Value::new_int(ctx.clone(), val))
-    }).unwrap();
-    obj.set(
-        "tabIndex",
-        ti,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("tabIndex", ti, false, ctx).unwrap_or(());
 
     // ─── offsetParent ───────────────────────────────────────────────
     let st = Rc::clone(state);
-    let op = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let op = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             // Returnera body som offsetParent (förenklad implementering)
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1820,14 +1952,10 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             } else {
                 Ok(Value::new_null(ctx.clone()))
             }
-    }).unwrap();
-    obj.set(
-        "offsetParent",
-        op,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("offsetParent", op, false, ctx).unwrap_or(());
 
     // ─── clientTop / clientLeft (border-dimensioner, default 0) ─────
     obj.set("clientTop", Value::new_int(ctx.clone(), 0), false, ctx)
@@ -1837,17 +1965,26 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
 
     // ─── addEventListener(type, callback, capture/options) ──────────
     let st = Rc::clone(state);
-    let ael = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ael = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let event_type = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
-            let callback = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone();
+            let callback = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .clone();
             if !callback.is_function() {
                 return Ok(Value::new_undefined(ctx.clone()));
             }
             // Stöd för options-objekt (tredje arg): { once, passive, capture }
-            let third = args.get(2).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            let third = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let capture = if third.is_object() {
                 // Options-objekt: läs capture-fältet
                 third
@@ -1869,18 +2006,16 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 capture,
             });
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "addEventListener",
-        ael,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("addEventListener", ael, false, ctx).unwrap_or(());
 
     // ─── removeEventListener(type, callback) ────────────────────
     let st = Rc::clone(state);
-    let rel = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let rel = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let event_type = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1894,19 +2029,21 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 }
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "removeEventListener",
-        rel,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("removeEventListener", rel, false, ctx)
+        .unwrap_or(());
 
     // ─── dispatchEvent(event) ───────────────────────────────────
     let st = Rc::clone(state);
-    let de = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let event_val = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+    let de = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let event_val = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let event_type = event_val
                 .as_object()
                 .and_then(|o| o.get("type", ctx).ok())
@@ -1924,7 +2061,12 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
 
             // Sätt target + currentTarget
             if let Some(obj) = event_val.as_object() {
-                let _ = obj.set("target", Value::new_float(ctx.clone(), key_bits as f64), false, ctx);
+                let _ = obj.set(
+                    "target",
+                    Value::new_float(ctx.clone(), key_bits as f64),
+                    false,
+                    ctx,
+                );
                 let _ = obj.set(
                     "currentTarget",
                     Value::new_float(ctx.clone(), key_bits as f64),
@@ -1960,8 +2102,11 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             };
             for cb in &target_listeners {
                 if let Some(callable) = cb.as_function() {
-                    let _ =
-                        callable.call(&Value::new_undefined(ctx.clone()), std::slice::from_ref(&event_val), ctx);
+                    let _ = callable.call(
+                        &Value::new_undefined(ctx.clone()),
+                        std::slice::from_ref(&event_val),
+                        ctx,
+                    );
                 }
             }
 
@@ -2014,52 +2159,46 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
                 .map(|v| v.as_bool().unwrap_or(false))
                 .unwrap_or(false);
             Ok(Value::from(!prevented))
-    }).unwrap();
-    obj.set(
-        "dispatchEvent",
-        de,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("dispatchEvent", de, false, ctx).unwrap_or(());
 
     // ─── focus() ────────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let focus_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let focus_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             s.focused_element = Some(key_bits as u64);
             s.mutations.push("focus".to_string());
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "focus",
-        focus_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("focus", focus_fn, false, ctx).unwrap_or(());
 
     // ─── blur() ─────────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let blur_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let blur_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             if s.focused_element == Some(key_bits as u64) {
                 s.focused_element = None;
             }
             s.mutations.push("blur".to_string());
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "blur",
-        blur_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("blur", blur_fn, false, ctx).unwrap_or(());
 
     // ─── scrollIntoView(options) ────────────────────────────────────
     let st = Rc::clone(state);
-    let siv = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let siv = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let y = {
                 let s = st.borrow();
                 let (_, y, _, _) = estimate_layout_rect(&s.arena, key);
@@ -2073,72 +2212,59 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             s.scroll_positions.insert(doc_key, (y, 0.0));
             s.mutations.push(format!("scrollIntoView(y={})", y));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    obj.set(
-        "scrollIntoView",
-        siv,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("scrollIntoView", siv, false, ctx).unwrap_or(());
 
     // ─── getBoundingClientRect() ────────────────────────────────────
     let st = Rc::clone(state);
-    let gbcr = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let gbcr = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
-            let rect = Object::new(ctx.clone()).unwrap()
-                ;
-    obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
-                ;
-    obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
-                .set("width", Value::new_float(ctx.clone(), width as f64),
-                )
-                .set("height", Value::new_float(ctx.clone(), height as f64),
-                )
-                ;
-    obj.set("top", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
-                .set("right", Value::from(x + width),
-                )
-                .set("bottom", Value::from(y + height),
-                )
-                ;
-    obj.set("left", Value::new_float(ctx.clone(), x as f64)).unwrap_or(());
+            let rect = Object::new(ctx.clone()).unwrap();
+            obj.set("x", Value::new_float(ctx.clone(), x as f64))
+                .unwrap_or(());
+            obj.set("y", Value::new_float(ctx.clone(), y as f64))
+                .unwrap_or(())
+                .set("width", Value::new_float(ctx.clone(), width as f64))
+                .set("height", Value::new_float(ctx.clone(), height as f64));
+            obj.set("top", Value::new_float(ctx.clone(), y as f64))
+                .unwrap_or(())
+                .set("right", Value::from(x + width))
+                .set("bottom", Value::from(y + height));
+            obj.set("left", Value::new_float(ctx.clone(), x as f64))
+                .unwrap_or(());
             Ok(rect.into_value())
-    }).unwrap();
-    obj.set(
-        "getBoundingClientRect",
-        gbcr,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("getBoundingClientRect", gbcr, false, ctx)
+        .unwrap_or(());
 
     // ─── getClientRects() ───────────────────────────────────────────
     let st = Rc::clone(state);
-    let gcr = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let gcr = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
             let arr = rquickjs::Array::new(ctx.clone()).unwrap();
-            let rect = Object::new(ctx.clone()).unwrap()
-                ;
-    obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
-                ;
-    obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
-                .set("width", Value::new_float(ctx.clone(), width as f64),
-                )
-                .set("height", Value::new_float(ctx.clone(), height as f64),
-                );
+            let rect = Object::new(ctx.clone()).unwrap();
+            obj.set("x", Value::new_float(ctx.clone(), x as f64))
+                .unwrap_or(());
+            obj.set("y", Value::new_float(ctx.clone(), y as f64))
+                .unwrap_or(())
+                .set("width", Value::new_float(ctx.clone(), width as f64))
+                .set("height", Value::new_float(ctx.clone(), height as f64));
             let _ = arr.set(0, rect);
             Ok(arr.into_value())
-    }).unwrap();
-    obj.set(
-        "getClientRects",
-        gcr,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("getClientRects", gcr, false, ctx).unwrap_or(());
 
     // ─── offset* / client* / scroll* properties ─────────────────────
     {
@@ -2166,10 +2292,20 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
         .unwrap_or(());
         obj.set("offsetLeft", Value::new_int(ctx.clone(), 0), false, ctx)
             .unwrap_or(());
-        obj.set("offsetWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
-            .unwrap_or(());
-        obj.set("offsetHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
-            .unwrap_or(());
+        obj.set(
+            "offsetWidth",
+            Value::new_float(ctx.clone(), w as f64),
+            false,
+            ctx,
+        )
+        .unwrap_or(());
+        obj.set(
+            "offsetHeight",
+            Value::new_float(ctx.clone(), h as f64),
+            false,
+            ctx,
+        )
+        .unwrap_or(());
         obj.set(
             "scrollTop",
             Value::new_float(ctx.clone(), scroll_top as f64),
@@ -2198,10 +2334,20 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             ctx,
         )
         .unwrap_or(());
-        obj.set("clientWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
-            .unwrap_or(());
-        obj.set("clientHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
-            .unwrap_or(());
+        obj.set(
+            "clientWidth",
+            Value::new_float(ctx.clone(), w as f64),
+            false,
+            ctx,
+        )
+        .unwrap_or(());
+        obj.set(
+            "clientHeight",
+            Value::new_float(ctx.clone(), h as f64),
+            false,
+            ctx,
+        )
+        .unwrap_or(());
     }
 
     // ─── shadowRoot (read-only traversal av deklarativ Shadow DOM) ──
@@ -2230,7 +2376,8 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
             let shadow = make_element_object(ctx, template_key, state);
             obj.set("shadowRoot", shadow).unwrap_or(());
         } else {
-            obj.set("shadowRoot", Value::new_null(ctx.clone())).unwrap_or(());
+            obj.set("shadowRoot", Value::new_null(ctx.clone()))
+                .unwrap_or(());
         }
     }
 
@@ -2257,39 +2404,41 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
 
     // ─── contains(otherElement) ─────────────────────────────────────
     let st = Rc::clone(state);
-    let contains_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let other_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
+    let contains_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let other_key = match extract_node_key(
+                &args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone())),
+            ) {
                 Some(k) => k,
                 None => return Ok(Value::new_bool(ctx.clone(), false)),
             };
             let s = st.borrow();
             Ok(Value::from(node_contains(&s.arena, key, other_key)))
-    }).unwrap();
-    obj.set(
-        "contains",
-        contains_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("contains", contains_fn, false, ctx).unwrap_or(());
 
     // ─── getRootNode() ──────────────────────────────────────────────
     let st = Rc::clone(state);
-    let root_node_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let root_node_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let mut current = key;
             while let Some(parent) = s.arena.nodes.get(current).and_then(|n| n.parent) {
                 current = parent;
             }
             Ok(Value::from(node_key_to_f64(current)))
-    }).unwrap();
-    obj.set(
-        "getRootNode",
-        root_node_fn,
-        false,
-        ctx,
+        },
     )
-    .unwrap_or(());
+    .unwrap();
+    obj.set("getRootNode", root_node_fn, false, ctx)
+        .unwrap_or(());
 
     // ─── hidden (property kopplad till hidden-attribut) ──────────────
     {
@@ -2310,22 +2459,25 @@ fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rqui
     }
 
     // ─── requestPointerLock() / exitPointerLock() ───────────────────
-    let rpl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    obj.set(
-        "requestPointerLock",
-        rpl,
-        false,
-        ctx,
-    )
-    .unwrap_or(());
+    let rpl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    obj.set("requestPointerLock", rpl, false, ctx).unwrap_or(());
 
     Value::new_float(ctx.clone(), obj as f64)
 }
 
 /// Skapa classList-objekt med add/remove/toggle/contains
-fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
+fn make_class_list(
+    ctx: &Ctx<'_>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'_>> {
     let st_add = Rc::clone(state);
-    let add_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let add_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2344,10 +2496,14 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
             }
             s.mutations.push(format!("classList.add({})", cls));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_rm = Rc::clone(state);
-    let remove_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let remove_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2364,10 +2520,14 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
             }
             s.mutations.push(format!("classList.remove({})", cls));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_tg = Rc::clone(state);
-    let toggle_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let toggle_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2396,10 +2556,14 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
                 node.set_attr("class", &new_val);
             }
             Ok(Value::from(!has))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_ct = Rc::clone(state);
-    let contains_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let contains_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2413,11 +2577,15 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
                 .map(|c| c.split_whitespace().any(|x| x == cls))
                 .unwrap_or(false);
             Ok(Value::new_bool(ctx.clone(), has))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // replace(old, new) — byt klass
     let st_rp = Rc::clone(state);
-    let replace_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let replace_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let old_cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2446,11 +2614,15 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
                 }
             }
             Ok(Value::new_bool(ctx.clone(), had))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // value — hela class-strängen
     let st_val = Rc::clone(state);
-    let value_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let value_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_val.borrow();
             let val = s
                 .arena
@@ -2458,12 +2630,18 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
                 .get(key)
                 .and_then(|n| n.get_attr("class"))
                 .unwrap_or("");
-            Ok(rquickjs::String::from_str(ctx.clone(), val).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
-    }).unwrap();
+            Ok(rquickjs::String::from_str(ctx.clone(), val)
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+        },
+    )
+    .unwrap();
 
     // length — antal klasser
     let st_len = Rc::clone(state);
-    let length_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let length_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_len.borrow();
             let count = s
                 .arena
@@ -2473,29 +2651,28 @@ fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs
                 .map(|c| c.split_whitespace().count())
                 .unwrap_or(0);
             Ok(Value::new_int(ctx.clone(), count))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let cl = Object::new(ctx.clone()).unwrap()
-        ;
-    obj.set("add", add_fn).unwrap_or(())
-        ;
-    obj.set("remove", remove_fn).unwrap_or(())
-        ;
-    obj.set("toggle", toggle_fn).unwrap_or(())
-        ;
-    obj.set("contains", contains_fn).unwrap_or(())
-        ;
-    obj.set("replace", replace_fn).unwrap_or(())
-        ;
-    obj.set("value", value_fn).unwrap_or(())
-        ;
+    let cl = Object::new(ctx.clone()).unwrap();
+    obj.set("add", add_fn).unwrap_or(());
+    obj.set("remove", remove_fn).unwrap_or(());
+    obj.set("toggle", toggle_fn).unwrap_or(());
+    obj.set("contains", contains_fn).unwrap_or(());
+    obj.set("replace", replace_fn).unwrap_or(());
+    obj.set("value", value_fn).unwrap_or(());
     obj.set("length", length_fn).unwrap_or(());
 
     Value::new_float(ctx.clone(), cl as f64)
 }
 
 /// Skapa style-objekt med inline CSS-stöd kopplat till arena
-fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
+fn make_style_object(
+    ctx: &Ctx<'_>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'_>> {
     // Läs initiala stilar från style-attributet
     let initial_styles = {
         let s = state.borrow();
@@ -2510,7 +2687,9 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
 
     // setProperty(prop, value)
     let st = Rc::clone(state);
-    let set_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let set_prop = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2539,11 +2718,15 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
             s.mutations
                 .push(format!("style.setProperty({}, {})", prop, value));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     // getPropertyValue(prop)
     let st = Rc::clone(state);
-    let get_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let get_prop = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2558,12 +2741,21 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
                 .unwrap_or("");
             let styles = parse_inline_styles(style_str);
             let val = styles.get(&prop).cloned().unwrap_or_default();
-            Ok(rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-    }).unwrap();
+            Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                val.as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ))
+        },
+    )
+    .unwrap();
 
     // removeProperty(prop)
     let st = Rc::clone(state);
-    let remove_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let remove_prop = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2581,12 +2773,22 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
             let old_val = styles.remove(&prop).unwrap_or_default();
             let new_style = serialize_inline_styles(&styles);
             s.arena.set_attr(key, "style", &new_style);
-            Ok(rquickjs::String::from_str(ctx.clone(), old_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-    }).unwrap();
+            Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                old_val
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ))
+        },
+    )
+    .unwrap();
 
     // cssText getter
     let st = Rc::clone(state);
-    let css_text_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let css_text_get = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let style_str = s
                 .arena
@@ -2594,17 +2796,17 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
                 .get(key)
                 .and_then(|n| n.get_attr("style"))
                 .unwrap_or("");
-            Ok(rquickjs::String::from_str(ctx.clone(), style_str).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
-    }).unwrap();
+            Ok(rquickjs::String::from_str(ctx.clone(), style_str)
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+        },
+    )
+    .unwrap();
 
-    let style = Object::new(ctx.clone()).unwrap()
-        ;
-    obj.set("setProperty", set_prop).unwrap_or(())
-        ;
-    obj.set("getPropertyValue", get_prop).unwrap_or(())
-        ;
-    obj.set("removeProperty", remove_prop).unwrap_or(())
-        ;
+    let style = Object::new(ctx.clone()).unwrap();
+    obj.set("setProperty", set_prop).unwrap_or(());
+    obj.set("getPropertyValue", get_prop).unwrap_or(());
+    obj.set("removeProperty", remove_prop).unwrap_or(());
     obj.set("cssText", css_text_get).unwrap_or(());
 
     // Populera vanliga CSS-egenskaper från inline style
@@ -2636,7 +2838,12 @@ fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquick
         let camel = data_attr_to_camel(prop);
         let _ = style.set(
             camel.as_str(),
-            rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            rquickjs::String::from_str(
+                ctx.clone(),
+                val.as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ),
             false,
             ctx,
         );
@@ -2665,40 +2872,68 @@ fn data_attr_to_camel(name: &str) -> String {
 // ─── Window-objekt ──────────────────────────────────────────────────────────
 
 fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
-    let window = Object::new(ctx.clone()).unwrap()
-        .set("innerWidth", Value::new_int(ctx.clone(), 1024),
-        )
-        .set("innerHeight", Value::new_int(ctx.clone(), 768),
-        );
+    let window = Object::new(ctx.clone())
+        .unwrap()
+        .set("innerWidth", Value::new_int(ctx.clone(), 1024))
+        .set("innerHeight", Value::new_int(ctx.clone(), 768));
 
     // location stub
-    let location = Object::new(ctx.clone()).unwrap()
-        .set("href", rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+    let location = Object::new(ctx.clone())
+        .unwrap()
+        .set(
+            "href",
+            rquickjs::String::from_str(ctx.clone(), "")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .set("hostname", rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        .set(
+            "hostname",
+            rquickjs::String::from_str(ctx.clone(), "")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .set("pathname", rquickjs::String::from_str(ctx.clone(), "/").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        .set(
+            "pathname",
+            rquickjs::String::from_str(ctx.clone(), "/")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .set("protocol", rquickjs::String::from_str(ctx.clone(), "https:").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        .set(
+            "protocol",
+            rquickjs::String::from_str(ctx.clone(), "https:")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         );
 
-    window
-        .set("location", location).unwrap_or(());
+    window.set("location", location).unwrap_or(());
 
     // navigator stub
-    let navigator = Object::new(ctx.clone()).unwrap()
-        .set("userAgent", rquickjs::String::from_str(ctx.clone(), "AetherAgent/0.1").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+    let navigator = Object::new(ctx.clone())
+        .unwrap()
+        .set(
+            "userAgent",
+            rquickjs::String::from_str(ctx.clone(), "AetherAgent/0.1")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .set("language", rquickjs::String::from_str(ctx.clone(), "en").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        .set(
+            "language",
+            rquickjs::String::from_str(ctx.clone(), "en")
+                .map(|s| s.into_value())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         );
 
-    window
-        .set("navigator", navigator).unwrap_or(());
+    window.set("navigator", navigator).unwrap_or(());
 
     // getComputedStyle(el) — använder CSS Cascade Engine (Fas 19)
     let st_gcs = Rc::clone(&state);
-    let gcs = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let elem = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+    let gcs = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let elem = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let node_key = extract_node_key(&elem);
 
             let merged = match node_key {
@@ -2740,205 +2975,231 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                     .unwrap_or_default()
                     .to_lowercase();
                 let val = merged_for_closure.get(&prop).cloned().unwrap_or_default();
-                Ok(rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
+                Ok(rquickjs::String::from_str(
+                    ctx.clone(),
+                    val.as_str()
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                ))
             });
 
-            let style = Object::new(ctx.clone()).unwrap()
-                ;
-    win.set("getPropertyValue", get_pv).unwrap_or(());
+            let style = Object::new(ctx.clone()).unwrap();
+            win.set("getPropertyValue", get_pv).unwrap_or(());
 
             // Sätt alla properties som egenskaper (camelCase + kebab)
             for (prop, val) in &merged {
                 let camel = data_attr_to_camel(prop);
                 let _ = style.set(
                     camel.as_str(),
-                    rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        val.as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
                     false,
                     ctx,
                 );
             }
 
             Ok(style.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
     window
-        .set(
-            "getComputedStyle",
-            gcs,
-            false,
-            ctx,
-        )
+        .set("getComputedStyle", gcs, false, ctx)
         .unwrap_or(());
 
     // matchMedia(query) — Fas 19: CSS media query matching
-    let match_media = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let query = args
-            .get_or_undefined(0)
-            .to_string(ctx)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_default();
+    let match_media = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let query = args
+                .get_or_undefined(0)
+                .to_string(ctx)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default();
 
-        // Parsa bredd-baserade media queries mot innerWidth=1024
-        let matches = parse_media_query_matches(&query, 1024.0, 768.0);
+            // Parsa bredd-baserade media queries mot innerWidth=1024
+            let matches = parse_media_query_matches(&query, 1024.0, 768.0);
 
-        let add_listener =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-        let remove_listener =
-            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+            let add_listener =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
+            let remove_listener =
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                    Ok(Value::new_undefined(ctx))
+                })
+                .unwrap();
 
-        let mql = Object::new(ctx.clone()).unwrap()
-            .set("matches", Value::new_float(ctx.clone(), matches as f64),
-            )
-            .set("media", rquickjs::String::from_str(ctx.clone(), query.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .function(add_listener.clone(), "addEventListener", 2)
-            .function(
-                remove_listener.clone(),
-                "removeEventListener",
-                2,
-            )
-            ;
-    win.set("addListener", add_listener).unwrap_or(())
-            ;
-    win.set("removeListener", remove_listener).unwrap_or(());
-        Ok(mql.into_value())
-    });
+            let mql = Object::new(ctx.clone())
+                .unwrap()
+                .set("matches", Value::new_float(ctx.clone(), matches as f64))
+                .set(
+                    "media",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        query
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .function(add_listener.clone(), "addEventListener", 2)
+                .function(remove_listener.clone(), "removeEventListener", 2);
+            win.set("addListener", add_listener).unwrap_or(());
+            win.set("removeListener", remove_listener).unwrap_or(());
+            Ok(mql.into_value())
+        },
+    );
     window
-        .set(
-            "matchMedia",
-            match_media,
-            false,
-            ctx,
-        )
+        .set("matchMedia", match_media, false, ctx)
         .unwrap_or(());
 
     // atob/btoa — base64 encode/decode
-    let atob_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let input = args
-            .get_or_undefined(0)
-            .to_string(ctx)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_default();
-        // atob decodes base64
-        match base64_decode(&input) {
-            Some(decoded) => Ok(rquickjs::String::from_str(ctx.clone(), decoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
-            None => Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-        }
-    });
-    window
-        .set(
-            "atob",
-            atob_fn,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+    let atob_fn = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let input = args
+                .get_or_undefined(0)
+                .to_string(ctx)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default();
+            // atob decodes base64
+            match base64_decode(&input) {
+                Some(decoded) => Ok(rquickjs::String::from_str(
+                    ctx.clone(),
+                    decoded
+                        .as_str()
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                )),
+                None => Ok(rquickjs::String::from_str(ctx.clone(), "")
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            }
+        },
+    );
+    window.set("atob", atob_fn, false, ctx).unwrap_or(());
 
-    let btoa_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let input = args
-            .get_or_undefined(0)
-            .to_string(ctx)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_default();
-        let encoded = base64_encode(&input);
-        Ok(rquickjs::String::from_str(ctx.clone(), encoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-    });
-    window
-        .set(
-            "btoa",
-            btoa_fn,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+    let btoa_fn = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let input = args
+                .get_or_undefined(0)
+                .to_string(ctx)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default();
+            let encoded = base64_encode(&input);
+            Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                encoded
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ))
+        },
+    );
+    window.set("btoa", btoa_fn, false, ctx).unwrap_or(());
 
     // scrollTo/scrollBy — stubs som loggar mutation
     let st_scroll = Rc::clone(&state);
-    let scroll_to = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let x = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
-            let y = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
+    let scroll_to = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let x = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_float()
+                .or_else(|| Some(0.0))
+                .unwrap_or(0.0);
+            let y = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_float()
+                .or_else(|| Some(0.0))
+                .unwrap_or(0.0);
             st_scroll
                 .borrow_mut()
                 .mutations
                 .push(format!("window.scrollTo({}, {})", x, y));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    window
-        .set(
-            "scrollTo",
-            scroll_to,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+        },
+    )
+    .unwrap();
+    window.set("scrollTo", scroll_to, false, ctx).unwrap_or(());
     let st_scroll2 = Rc::clone(&state);
-    let scroll_by = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let x = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
-            let y = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
+    let scroll_by = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let x = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_float()
+                .or_else(|| Some(0.0))
+                .unwrap_or(0.0);
+            let y = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_float()
+                .or_else(|| Some(0.0))
+                .unwrap_or(0.0);
             st_scroll2
                 .borrow_mut()
                 .mutations
                 .push(format!("window.scrollBy({}, {})", x, y));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    window
-        .set(
-            "scrollBy",
-            scroll_by,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+        },
+    )
+    .unwrap();
+    window.set("scrollBy", scroll_by, false, ctx).unwrap_or(());
     // scroll = alias för scrollTo
-    let scroll_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    window
-        .set(
-            "scroll",
-            scroll_fn,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+    let scroll_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    window.set("scroll", scroll_fn, false, ctx).unwrap_or(());
 
     // performance.now()
     let perf_start = std::time::Instant::now();
-    let perf_now = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let perf_now = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let ms = perf_start.elapsed().as_secs_f64() * 1000.0;
             Ok(Value::new_float(ctx.clone(), ms as f64))
-    }).unwrap();
-    let performance = Object::new(ctx.clone()).unwrap()
-        ;
+        },
+    )
+    .unwrap();
+    let performance = Object::new(ctx.clone()).unwrap();
     win.set("now", perf_now).unwrap_or(());
-    window
-        .set("performance", performance).unwrap_or(());
+    window.set("performance", performance).unwrap_or(());
 
     // screen object
-    let screen = Object::new(ctx.clone()).unwrap()
-        .set("width", Value::new_int(ctx.clone(), 1920),
-        )
-        .set("height", Value::new_int(ctx.clone(), 1080),
-        )
-        .set("colorDepth", Value::new_int(ctx.clone(), 24),
-        )
-        .set("availWidth", Value::new_int(ctx.clone(), 1920),
-        )
-        .set("availHeight", Value::new_int(ctx.clone(), 1040),
-        );
-    window
-        .set("screen", screen).unwrap_or(());
+    let screen = Object::new(ctx.clone())
+        .unwrap()
+        .set("width", Value::new_int(ctx.clone(), 1920))
+        .set("height", Value::new_int(ctx.clone(), 1080))
+        .set("colorDepth", Value::new_int(ctx.clone(), 24))
+        .set("availWidth", Value::new_int(ctx.clone(), 1920))
+        .set("availHeight", Value::new_int(ctx.clone(), 1040));
+    window.set("screen", screen).unwrap_or(());
 
     // devicePixelRatio
     window
-        .set(
-            "devicePixelRatio",
-            Value::from(1.0),
-            false,
-            ctx,
-        )
+        .set("devicePixelRatio", Value::from(1.0), false, ctx)
         .unwrap_or(());
 
     // history stub
     let st_hist = Rc::clone(&state);
-    let push_state = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let push_state = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let url = args
                 .get_or_undefined(2)
                 .to_string(ctx)
@@ -2949,9 +3210,13 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 .mutations
                 .push(format!("history.pushState({})", url));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
     let st_hist2 = Rc::clone(&state);
-    let replace_state = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let replace_state = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let url = args
                 .get_or_undefined(2)
                 .to_string(ctx)
@@ -2962,81 +3227,97 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 .mutations
                 .push(format!("history.replaceState({})", url));
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
-    let back_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    let forward_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    let go_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    let history = Object::new(ctx.clone()).unwrap()
-        ;
-    win.set("pushState", push_state).unwrap_or(())
-        ;
-    win.set("replaceState", replace_state).unwrap_or(())
-        ;
-    win.set("back", back_fn).unwrap_or(())
-        ;
-    win.set("forward", forward_fn).unwrap_or(())
-        ;
-    win.set("go", go_fn).unwrap_or(())
+        },
+    )
+    .unwrap();
+    let back_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    let forward_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    let go_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    let history = Object::new(ctx.clone()).unwrap();
+    win.set("pushState", push_state).unwrap_or(());
+    win.set("replaceState", replace_state).unwrap_or(());
+    win.set("back", back_fn).unwrap_or(());
+    win.set("forward", forward_fn).unwrap_or(());
+    win.set("go", go_fn)
+        .unwrap_or(())
         .set("length", Value::new_int(ctx.clone(), 1));
-    window
-        .set("history", history).unwrap_or(());
+    window.set("history", history).unwrap_or(());
 
     // requestIdleCallback — kör callback direkt (idle = always)
-    let ric_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        if let Some(callable) = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_function() {
-            let deadline = Object::new(ctx.clone()).unwrap()
-                .set("didTimeout", Value::new_bool(ctx.clone(), false),
+    let ric_fn = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            if let Some(callable) = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_function()
+            {
+                let deadline = Object::new(ctx.clone())
+                    .unwrap()
+                    .set("didTimeout", Value::new_bool(ctx.clone(), false));
+                let time_remaining =
+                    Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                        Ok(Value::from(50.0))
+                    })
+                    .unwrap();
+                let _ = deadline.set(
+                    "timeRemaining",
+                    time_remaining.to_js_function(ctx.realm()),
+                    false,
+                    ctx,
                 );
-            let time_remaining =
-                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::from(50.0)) }).unwrap();
-            let _ = deadline.set(
-                "timeRemaining",
-                time_remaining.to_js_function(ctx.realm()),
-                false,
-                ctx,
-            );
-            let _ = callable.call(&Value::new_undefined(ctx.clone()), &[deadline.into_value()], ctx);
-        }
-        Ok(Value::new_int(ctx.clone(), 1))
-    });
+                let _ = callable.call(
+                    &Value::new_undefined(ctx.clone()),
+                    &[deadline.into_value()],
+                    ctx,
+                );
+            }
+            Ok(Value::new_int(ctx.clone(), 1))
+        },
+    );
     window
-        .set(
-            "requestIdleCallback",
-            ric_fn,
-            false,
-            ctx,
-        )
+        .set("requestIdleCallback", ric_fn, false, ctx)
         .unwrap_or(());
 
     // open/close stubs
-    let open_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_null(ctx.clone())) }).unwrap();
-    let close_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
-    window
-        .set(
-            "open",
-            open_fn,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
-    window
-        .set(
-            "close",
-            close_fn,
-            false,
-            ctx,
-        )
-        .unwrap_or(());
+    let open_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_null(ctx.clone()))
+    })
+    .unwrap();
+    let close_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        Ok(Value::new_undefined(ctx))
+    })
+    .unwrap();
+    window.set("open", open_fn, false, ctx).unwrap_or(());
+    window.set("close", close_fn, false, ctx).unwrap_or(());
 
     // IntersectionObserver — fires per-element on observe() med layoutdata
     let st_io = Rc::clone(&state);
-    let io_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let callback = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+    let io_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let callback = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_io);
 
             let observe_fn = Function::new(move |_this, args, ctx| {
-                let target = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let target = args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
                 let target_key = extract_node_key(&target);
 
                 if let (Some(callable), Some(k)) = (cb_clone.as_function(), target_key) {
@@ -3049,31 +3330,35 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                     let is_visible = y < 768.0 && w > 0.0 && h > 0.0;
                     let ratio = if is_visible { 1.0 } else { 0.0 };
 
-                    let bounds = Object::new(ctx.clone()).unwrap()
-                        ;
-    win.set("x", Value::from(0.0)).unwrap_or(())
-                        ;
-    win.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
-                        ;
-    win.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
-                        ;
-    win.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(());
+                    let bounds = Object::new(ctx.clone()).unwrap();
+                    win.set("x", Value::from(0.0)).unwrap_or(());
+                    win.set("y", Value::new_float(ctx.clone(), y as f64))
+                        .unwrap_or(());
+                    win.set("width", Value::new_float(ctx.clone(), w as f64))
+                        .unwrap_or(());
+                    win.set("height", Value::new_float(ctx.clone(), h as f64))
+                        .unwrap_or(());
 
-                    let entry = Object::new(ctx.clone()).unwrap()
-                        .set("isIntersecting", Value::new_float(ctx.clone(), is_visible as f64),
+                    let entry = Object::new(ctx.clone())
+                        .unwrap()
+                        .set(
+                            "isIntersecting",
+                            Value::new_float(ctx.clone(), is_visible as f64),
                         )
-                        .set("intersectionRatio", Value::new_float(ctx.clone(), ratio as f64),
+                        .set(
+                            "intersectionRatio",
+                            Value::new_float(ctx.clone(), ratio as f64),
                         )
-                        .property(
-                            "boundingClientRect",
-                            bounds,
-                        )
-                        ;
-    win.set("target", target.clone()).unwrap_or(());
+                        .property("boundingClientRect", bounds);
+                    win.set("target", target.clone()).unwrap_or(());
 
                     let entries = rquickjs::Array::new(ctx.clone()).unwrap();
                     let _ = entries.set(0, entry);
-                    let _ = callable.call(&Value::new_undefined(ctx.clone()), &[entries.into_value()], ctx);
+                    let _ = callable.call(
+                        &Value::new_undefined(ctx.clone()),
+                        &[entries.into_value()],
+                        ctx,
+                    );
                 }
                 Ok(Value::new_undefined(ctx.clone()))
             });
@@ -3082,33 +3367,35 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let disconnect_fn =
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
-            let observer = Object::new(ctx.clone()).unwrap()
-                ;
-    win.set("observe", observe_fn).unwrap_or(())
-                ;
-    win.set("unobserve", unobserve_fn).unwrap_or(())
-                ;
-    win.set("disconnect", disconnect_fn).unwrap_or(());
+            let observer = Object::new(ctx.clone()).unwrap();
+            win.set("observe", observe_fn).unwrap_or(());
+            win.set("unobserve", unobserve_fn).unwrap_or(());
+            win.set("disconnect", disconnect_fn).unwrap_or(());
             Ok(observer.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
     window
-        .set(
-            "IntersectionObserver",
-            io_fn,
-            false,
-            ctx,
-        )
+        .set("IntersectionObserver", io_fn, false, ctx)
         .unwrap_or(());
 
     // ResizeObserver — fires callback on observe() med element-dimensioner
     let st_ro = Rc::clone(&state);
-    let ro_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let callback = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+    let ro_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let callback = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_ro);
 
             let observe_fn = Function::new(move |_this, args, ctx| {
-                let target = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let target = args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
                 let target_key = extract_node_key(&target);
 
                 if let (Some(callable), Some(k)) = (cb_clone.as_function(), target_key) {
@@ -3118,35 +3405,33 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                         (w, h)
                     };
 
-                    let content_rect = Object::new(ctx.clone()).unwrap()
-                        ;
-    win.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
-                        ;
-    win.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(())
-                        ;
-    win.set("x", Value::from(0.0)).unwrap_or(())
-                        ;
-    win.set("y", Value::from(0.0)).unwrap_or(());
+                    let content_rect = Object::new(ctx.clone()).unwrap();
+                    win.set("width", Value::new_float(ctx.clone(), w as f64))
+                        .unwrap_or(());
+                    win.set("height", Value::new_float(ctx.clone(), h as f64))
+                        .unwrap_or(());
+                    win.set("x", Value::from(0.0)).unwrap_or(());
+                    win.set("y", Value::from(0.0)).unwrap_or(());
 
-                    let border_size = Object::new(ctx.clone()).unwrap()
-                        .set("inlineSize", Value::new_float(ctx.clone(), w as f64),
-                        )
-                        .set("blockSize", Value::new_float(ctx.clone(), h as f64),
-                        );
+                    let border_size = Object::new(ctx.clone())
+                        .unwrap()
+                        .set("inlineSize", Value::new_float(ctx.clone(), w as f64))
+                        .set("blockSize", Value::new_float(ctx.clone(), h as f64));
                     let border_arr = rquickjs::Array::new(ctx.clone()).unwrap();
                     let _ = border_arr.set(0, border_size);
 
-                    let entry = Object::new(ctx.clone()).unwrap()
-                        ;
-    win.set("contentRect", content_rect).unwrap_or(())
-                        ;
-    win.set("borderBoxSize", border_arr).unwrap_or(())
-                        ;
-    win.set("target", target.clone()).unwrap_or(());
+                    let entry = Object::new(ctx.clone()).unwrap();
+                    win.set("contentRect", content_rect).unwrap_or(());
+                    win.set("borderBoxSize", border_arr).unwrap_or(());
+                    win.set("target", target.clone()).unwrap_or(());
 
                     let entries = rquickjs::Array::new(ctx.clone()).unwrap();
                     let _ = entries.set(0, entry);
-                    let _ = callable.call(&Value::new_undefined(ctx.clone()), &[entries.into_value()], ctx);
+                    let _ = callable.call(
+                        &Value::new_undefined(ctx.clone()),
+                        &[entries.into_value()],
+                        ctx,
+                    );
                 }
                 Ok(Value::new_undefined(ctx.clone()))
             });
@@ -3155,22 +3440,16 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let disconnect_fn =
                 Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
-            let observer = Object::new(ctx.clone()).unwrap()
-                ;
-    win.set("observe", observe_fn).unwrap_or(())
-                ;
-    win.set("unobserve", unobserve_fn).unwrap_or(())
-                ;
-    win.set("disconnect", disconnect_fn).unwrap_or(());
+            let observer = Object::new(ctx.clone()).unwrap();
+            win.set("observe", observe_fn).unwrap_or(());
+            win.set("unobserve", unobserve_fn).unwrap_or(());
+            win.set("disconnect", disconnect_fn).unwrap_or(());
             Ok(observer.into_value())
-    }).unwrap();
+        },
+    )
+    .unwrap();
     window
-        .set(
-            "ResizeObserver",
-            ro_fn,
-            false,
-            ctx,
-        )
+        .set("ResizeObserver", ro_fn, false, ctx)
         .unwrap_or(());
 
     // customElements — med lifecycle callback-stöd (connectedCallback, disconnectedCallback)
@@ -3179,23 +3458,33 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         Rc::new(RefCell::new(std::collections::HashMap::new()));
 
     let reg_define = Rc::clone(&registry);
-    let ce_define = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ce_define = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped()
                 .to_lowercase();
-            let constructor = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone();
+            let constructor = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .clone();
             // Validera att namnet innehåller bindestreck (Web Components-krav)
             if !name.contains('-') {
                 return Ok(Value::new_undefined(ctx.clone()));
             }
             reg_define.borrow_mut().insert(name, constructor);
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let reg_get = Rc::clone(&registry);
-    let ce_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ce_get = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -3206,10 +3495,14 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                 Some(ctor) => Ok(ctor.clone()),
                 None => Ok(Value::new_undefined(ctx.clone())),
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let reg_when = Rc::clone(&registry);
-    let ce_when = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let ce_when = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -3231,22 +3524,16 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
                     Err(_) => Ok(Value::new_undefined(ctx.clone())),
                 }
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
-    let custom_elements = Object::new(ctx.clone()).unwrap()
-        ;
-    win.set("define", ce_define).unwrap_or(())
-        ;
-    win.set("get", ce_get).unwrap_or(())
-        ;
+    let custom_elements = Object::new(ctx.clone()).unwrap();
+    win.set("define", ce_define).unwrap_or(());
+    win.set("get", ce_get).unwrap_or(());
     win.set("whenDefined", ce_when).unwrap_or(());
     window
-        .set(
-            "customElements",
-            custom_elements,
-            false,
-            ctx,
-        )
+        .set("customElements", custom_elements, false, ctx)
         .unwrap_or(());
 
     // localStorage — in-memory sandboxad implementation (Fas 19)
@@ -3254,381 +3541,512 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     register_storage(ctx, Rc::clone(&state), "sessionStorage", false);
 
     // Sätt localStorage/sessionStorage på window också
-    if let Ok(ls) = ctx
-        .global_object()
-        .get("localStorage", ctx)
-    {
-        window
-            .set("localStorage", ls).unwrap_or(());
+    if let Ok(ls) = ctx.global_object().get("localStorage", ctx) {
+        window.set("localStorage", ls).unwrap_or(());
     }
-    if let Ok(ss) = ctx
-        .global_object()
-        .get("sessionStorage", ctx)
-    {
-        window
-            .set("sessionStorage", ss).unwrap_or(());
+    if let Ok(ss) = ctx.global_object().get("sessionStorage", ctx) {
+        window.set("sessionStorage", ss).unwrap_or(());
     }
 
-    ctx.globals().set("window", window)
-        .unwrap_or(());
+    ctx.globals().set("window", window).unwrap_or(());
 
     // Event konstruktor — new Event('click', {bubbles: true})
-    let event_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let type_str = args
-            .get_or_undefined(0)
-            .to_string(ctx)?
-            .to_std_string_escaped();
-        let options = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        let bubbles = options
-            .as_object()
-            .and_then(|o| o.get("bubbles", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
-        let cancelable = options
-            .as_object()
-            .and_then(|o| o.get("cancelable", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
-        let composed = options
-            .as_object()
-            .and_then(|o| o.get("composed", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
+    let event_ctor = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let type_str = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let options = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            let bubbles = options
+                .as_object()
+                .and_then(|o| o.get("bubbles", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
+            let cancelable = options
+                .as_object()
+                .and_then(|o| o.get("cancelable", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
+            let composed = options
+                .as_object()
+                .and_then(|o| o.get("composed", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
 
-        let stop_prop = Function::new(|this, _args, ctx| {
-            if let Some(obj) = this.as_object() {
-                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
-            }
-            Ok(Value::new_undefined(ctx.clone()))
-        });
-        let prevent_default = Function::new(|this, _args, ctx| {
-            if let Some(obj) = this.as_object() {
-                let _ = obj.set(
-                    "defaultPrevented",
-                    Value::new_bool(ctx.clone(), true),
-                    false,
-                    ctx,
-                );
-            }
-            Ok(Value::new_undefined(ctx.clone()))
-        });
-        let stop_imm = Function::new(|this, _args, ctx| {
-            if let Some(obj) = this.as_object() {
-                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
-            }
-            Ok(Value::new_undefined(ctx.clone()))
-        });
+            let stop_prop = Function::new(|this, _args, ctx| {
+                if let Some(obj) = this.as_object() {
+                    let _ = obj.set(
+                        "__stopped__",
+                        Value::new_bool(ctx.clone(), true),
+                        false,
+                        ctx,
+                    );
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            });
+            let prevent_default = Function::new(|this, _args, ctx| {
+                if let Some(obj) = this.as_object() {
+                    let _ = obj.set(
+                        "defaultPrevented",
+                        Value::new_bool(ctx.clone(), true),
+                        false,
+                        ctx,
+                    );
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            });
+            let stop_imm = Function::new(|this, _args, ctx| {
+                if let Some(obj) = this.as_object() {
+                    let _ = obj.set(
+                        "__stopped__",
+                        Value::new_bool(ctx.clone(), true),
+                        false,
+                        ctx,
+                    );
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            });
 
-        let event = Object::new(ctx.clone()).unwrap()
-            .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .set("bubbles", Value::new_bool(ctx.clone(), bubbles),
-            )
-            .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
-            )
-            .set("composed", Value::new_float(ctx.clone(), composed as f64),
-            )
-            .set("defaultPrevented", Value::new_bool(ctx.clone(), false),
-            )
-            .set("__stopped__", Value::new_bool(ctx.clone(), false),
-            )
-            ;
-    win.set("target", Value::new_null(ctx.clone())).unwrap_or(())
-            .set("currentTarget", Value::new_null(ctx.clone()),
-            )
-            .set("eventPhase", Value::new_int(ctx.clone(), 0))
-            .set("timeStamp", Value::from(0.0),
-            )
-            .set("isTrusted", Value::new_bool(ctx.clone(), false),
-            )
-            ;
-    win.set("stopPropagation", stop_prop).unwrap_or(())
-            ;
-    win.set("preventDefault", prevent_default).unwrap_or(())
-            ;
-    win.set("stopImmediatePropagation", stop_imm).unwrap_or(());
+            let event = Object::new(ctx.clone())
+                .unwrap()
+                .set(
+                    "type",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        type_str
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set("bubbles", Value::new_bool(ctx.clone(), bubbles))
+                .set(
+                    "cancelable",
+                    Value::new_float(ctx.clone(), cancelable as f64),
+                )
+                .set("composed", Value::new_float(ctx.clone(), composed as f64))
+                .set("defaultPrevented", Value::new_bool(ctx.clone(), false))
+                .set("__stopped__", Value::new_bool(ctx.clone(), false));
+            win.set("target", Value::new_null(ctx.clone()))
+                .unwrap_or(())
+                .set("currentTarget", Value::new_null(ctx.clone()))
+                .set("eventPhase", Value::new_int(ctx.clone(), 0))
+                .set("timeStamp", Value::from(0.0))
+                .set("isTrusted", Value::new_bool(ctx.clone(), false));
+            win.set("stopPropagation", stop_prop).unwrap_or(());
+            win.set("preventDefault", prevent_default).unwrap_or(());
+            win.set("stopImmediatePropagation", stop_imm).unwrap_or(());
 
-        Ok(event.into_value())
-    });
-    ctx.globals().set("Event", event_ctor,
-        ).unwrap_or(());
+            Ok(event.into_value())
+        },
+    );
+    ctx.globals().set("Event", event_ctor).unwrap_or(());
 
     // CustomEvent konstruktor — new CustomEvent('my-event', {detail: data})
-    let custom_event_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let type_str = args
-            .get_or_undefined(0)
-            .to_string(ctx)?
-            .to_std_string_escaped();
-        let options = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        let bubbles = options
-            .as_object()
-            .and_then(|o| o.get("bubbles", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
-        let detail = options
-            .as_object()
-            .and_then(|o| o.get("detail", ctx).ok())
-            .unwrap_or(Value::new_null(ctx.clone()));
-        let composed = options
-            .as_object()
-            .and_then(|o| o.get("composed", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
-        let cancelable = options
-            .as_object()
-            .and_then(|o| o.get("cancelable", ctx).ok())
-            .map(|v| v.as_bool().unwrap_or(false))
-            .unwrap_or(false);
+    let custom_event_ctor = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let type_str = args
+                .get_or_undefined(0)
+                .to_string(ctx)?
+                .to_std_string_escaped();
+            let options = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            let bubbles = options
+                .as_object()
+                .and_then(|o| o.get("bubbles", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
+            let detail = options
+                .as_object()
+                .and_then(|o| o.get("detail", ctx).ok())
+                .unwrap_or(Value::new_null(ctx.clone()));
+            let composed = options
+                .as_object()
+                .and_then(|o| o.get("composed", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
+            let cancelable = options
+                .as_object()
+                .and_then(|o| o.get("cancelable", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
+                .unwrap_or(false);
 
-        let stop_prop = Function::new(|this, _args, ctx| {
-            if let Some(obj) = this.as_object() {
-                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
-            }
-            Ok(Value::new_undefined(ctx.clone()))
-        });
-        let prevent_default = Function::new(|this, _args, ctx| {
-            if let Some(obj) = this.as_object() {
-                let _ = obj.set(
-                    "defaultPrevented",
-                    Value::new_bool(ctx.clone(), true),
-                    false,
-                    ctx,
-                );
-            }
-            Ok(Value::new_undefined(ctx.clone()))
-        });
+            let stop_prop = Function::new(|this, _args, ctx| {
+                if let Some(obj) = this.as_object() {
+                    let _ = obj.set(
+                        "__stopped__",
+                        Value::new_bool(ctx.clone(), true),
+                        false,
+                        ctx,
+                    );
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            });
+            let prevent_default = Function::new(|this, _args, ctx| {
+                if let Some(obj) = this.as_object() {
+                    let _ = obj.set(
+                        "defaultPrevented",
+                        Value::new_bool(ctx.clone(), true),
+                        false,
+                        ctx,
+                    );
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            });
 
-        let event = Object::new(ctx.clone()).unwrap()
-            .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .set("bubbles", Value::new_bool(ctx.clone(), bubbles),
-            )
-            .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
-            )
-            .set("composed", Value::new_float(ctx.clone(), composed as f64),
-            )
-            .set("defaultPrevented", Value::new_bool(ctx.clone(), false),
-            )
-            .set("__stopped__", Value::new_bool(ctx.clone(), false),
-            )
-            ;
-    win.set("detail", detail).unwrap_or(())
-            ;
-    win.set("target", Value::new_null(ctx.clone())).unwrap_or(())
-            .set("currentTarget", Value::new_null(ctx.clone()),
-            )
-            .set("isTrusted", Value::new_bool(ctx.clone(), false),
-            )
-            ;
-    win.set("stopPropagation", stop_prop).unwrap_or(())
-            ;
-    win.set("preventDefault", prevent_default).unwrap_or(());
+            let event = Object::new(ctx.clone())
+                .unwrap()
+                .set(
+                    "type",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        type_str
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set("bubbles", Value::new_bool(ctx.clone(), bubbles))
+                .set(
+                    "cancelable",
+                    Value::new_float(ctx.clone(), cancelable as f64),
+                )
+                .set("composed", Value::new_float(ctx.clone(), composed as f64))
+                .set("defaultPrevented", Value::new_bool(ctx.clone(), false))
+                .set("__stopped__", Value::new_bool(ctx.clone(), false));
+            win.set("detail", detail).unwrap_or(());
+            win.set("target", Value::new_null(ctx.clone()))
+                .unwrap_or(())
+                .set("currentTarget", Value::new_null(ctx.clone()))
+                .set("isTrusted", Value::new_bool(ctx.clone(), false));
+            win.set("stopPropagation", stop_prop).unwrap_or(());
+            win.set("preventDefault", prevent_default).unwrap_or(());
 
-        Ok(event.into_value())
-    });
-    ctx.globals().set("CustomEvent", custom_event_ctor,
-        ).unwrap_or(());
+            Ok(event.into_value())
+        },
+    );
+    ctx.globals()
+        .set("CustomEvent", custom_event_ctor)
+        .unwrap_or(());
 
     // ─── Globala API:er (Fas 19) ─────────────────────────────────────────────
 
     // TextEncoder
-    let text_encoder_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-        let encode_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let input = args
+    let text_encoder_ctor =
+        Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let encode_fn = Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+                    let input = args
+                        .get_or_undefined(0)
+                        .to_string(ctx)
+                        .map(|s| s.to_std_string_escaped())
+                        .unwrap_or_default();
+                    let bytes = input.as_bytes();
+                    let arr = rquickjs::Array::new(ctx.clone()).unwrap();
+                    for (i, &b) in bytes.iter().enumerate() {
+                        let _ = arr.set(
+                            i as u32,
+                            Value::new_float(ctx.clone(), b as f64),
+                            false,
+                            ctx,
+                        );
+                    }
+                    Ok(arr.into_value())
+                },
+            );
+            let encoder = Object::new(ctx.clone()).unwrap().set(
+                "encoding",
+                rquickjs::String::from_str(ctx.clone(), "utf-8")
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            );
+            win.set("encode", encode_fn).unwrap_or(());
+            Ok(encoder.into_value())
+        });
+    ctx.globals()
+        .set("TextEncoder", text_encoder_ctor)
+        .unwrap_or(());
+
+    // TextDecoder
+    let text_decoder_ctor =
+        Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let decode_fn = Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+                    let input = args
+                        .get(0)
+                        .cloned()
+                        .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                    // Försök tolka som array/typed array
+                    let mut bytes: Vec<u8> = Vec::new();
+                    if let Some(obj) = input.as_object() {
+                        // Hämta length och iterera
+                        if let Ok(len) = obj.get("length", ctx) {
+                            let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
+                            for i in 0..len.min(1_000_000) {
+                                if let Ok(val) = obj.get(i as u32, ctx) {
+                                    bytes
+                                        .push(val.as_float().or_else(|| Some(0.0)).unwrap_or(0.0)
+                                            as u8);
+                                }
+                            }
+                        }
+                    }
+                    let decoded = String::from_utf8_lossy(&bytes).to_string();
+                    Ok(rquickjs::String::from_str(
+                        ctx.clone(),
+                        decoded
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ))
+                },
+            );
+            let decoder = Object::new(ctx.clone()).unwrap().set(
+                "encoding",
+                rquickjs::String::from_str(ctx.clone(), "utf-8")
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            );
+            win.set("decode", decode_fn).unwrap_or(());
+            Ok(decoder.into_value())
+        });
+    ctx.globals()
+        .set("TextDecoder", text_decoder_ctor)
+        .unwrap_or(());
+
+    // URL constructor
+    let url_ctor = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let url_str = args
                 .get_or_undefined(0)
                 .to_string(ctx)
                 .map(|s| s.to_std_string_escaped())
                 .unwrap_or_default();
-            let bytes = input.as_bytes();
-            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
-            for (i, &b) in bytes.iter().enumerate() {
-                let _ = arr.set(i as u32, Value::new_float(ctx.clone(), b as f64), false, ctx);
-            }
-            Ok(arr.into_value())
-        });
-        let encoder = Object::new(ctx.clone()).unwrap()
-            .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
-            )
-            ;
-    win.set("encode", encode_fn).unwrap_or(());
-        Ok(encoder.into_value())
-    });
-    ctx.globals().set("TextEncoder", text_encoder_ctor,
-        ).unwrap_or(());
-
-    // TextDecoder
-    let text_decoder_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-        let decode_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let input = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-            // Försök tolka som array/typed array
-            let mut bytes: Vec<u8> = Vec::new();
-            if let Some(obj) = input.as_object() {
-                // Hämta length och iterera
-                if let Ok(len) = obj.get("length", ctx) {
-                    let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
-                    for i in 0..len.min(1_000_000) {
-                        if let Ok(val) = obj.get(i as u32, ctx) {
-                            bytes.push(val.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as u8);
-                        }
-                    }
-                }
-            }
-            let decoded = String::from_utf8_lossy(&bytes).to_string();
-            Ok(rquickjs::String::from_str(ctx.clone(), decoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-        });
-        let decoder = Object::new(ctx.clone()).unwrap()
-            .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
-            )
-            ;
-    win.set("decode", decode_fn).unwrap_or(());
-        Ok(decoder.into_value())
-    });
-    ctx.globals().set("TextDecoder", text_decoder_ctor,
-        ).unwrap_or(());
-
-    // URL constructor
-    let url_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let url_str = args
-            .get_or_undefined(0)
-            .to_string(ctx)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_default();
-        let base_str = if args.len() > 1 {
-            args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))
-                .to_string(ctx)
-                .map(|s| s.to_std_string_escaped())
-                .ok()
-        } else {
-            None
-        };
-
-        let full_url = if let Some(base) = base_str {
-            if url_str.starts_with("http") {
-                url_str.clone()
+            let base_str = if args.len() > 1 {
+                args.get(1)
+                    .cloned()
+                    .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                    .to_string(ctx)
+                    .map(|s| s.to_std_string_escaped())
+                    .ok()
             } else {
-                format!(
-                    "{}/{}",
-                    base.trim_end_matches('/'),
-                    url_str.trim_start_matches('/')
-                )
-            }
-        } else {
-            url_str.clone()
-        };
+                None
+            };
 
-        // Parsa URL-delar
-        let (protocol, hostname, pathname, search, hash) = parse_url_parts(&full_url);
-
-        // searchParams
-        let sp_obj = Object::new(ctx.clone()).unwrap();
-        let params = parse_query_string(&search);
-        let params_clone = params.clone();
-        let sp_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let key = args
-                    .get_or_undefined(0)
-                    .to_string(ctx)
-                    .map(|s| s.to_std_string_escaped())
-                    .unwrap_or_default();
-                match params_clone.iter().find(|(k, _)| k == &key) {
-                    Some((_, v)) => Ok(rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
-                    None => Ok(Value::new_null(ctx.clone())),
+            let full_url = if let Some(base) = base_str {
+                if url_str.starts_with("http") {
+                    url_str.clone()
+                } else {
+                    format!(
+                        "{}/{}",
+                        base.trim_end_matches('/'),
+                        url_str.trim_start_matches('/')
+                    )
                 }
-        }).unwrap();
-        let params_clone2 = params.clone();
-        let sp_has = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let key = args
-                    .get_or_undefined(0)
-                    .to_string(ctx)
-                    .map(|s| s.to_std_string_escaped())
-                    .unwrap_or_default();
-                Ok(Value::from(params_clone2.iter().any(|(k, _)| k == &key)))
-        }).unwrap();
-        let sp_tostring = {
-            let s = search.clone();
-            unsafe {
-                Function::new(move |_this, _args, _ctx| {
-                    Ok(rquickjs::String::from_str(ctx.clone(), s.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-                })
-            }
-        };
-        let _ = sp_obj.set(
-            "get",
-            sp_get.to_js_function(ctx.realm()),
-            false,
-            ctx,
-        );
-        let _ = sp_obj.set(
-            "has",
-            sp_has.to_js_function(ctx.realm()),
-            false,
-            ctx,
-        );
-        let _ = sp_obj.set(
-            "toString",
-            sp_tostring.to_js_function(ctx.realm()),
-            false,
-            ctx,
-        );
+            } else {
+                url_str.clone()
+            };
 
-        let url_obj = Object::new(ctx.clone()).unwrap()
-            .set("href", rquickjs::String::from_str(ctx.clone(), full_url.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            // Parsa URL-delar
+            let (protocol, hostname, pathname, search, hash) = parse_url_parts(&full_url);
+
+            // searchParams
+            let sp_obj = Object::new(ctx.clone()).unwrap();
+            let params = parse_query_string(&search);
+            let params_clone = params.clone();
+            let sp_get = Function::new(
+                ctx.clone(),
+                move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+                    let key = args
+                        .get_or_undefined(0)
+                        .to_string(ctx)
+                        .map(|s| s.to_std_string_escaped())
+                        .unwrap_or_default();
+                    match params_clone.iter().find(|(k, _)| k == &key) {
+                        Some((_, v)) => Ok(rquickjs::String::from_str(
+                            ctx.clone(),
+                            v.as_str()
+                                .map(|s| s.into_value())
+                                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                        )),
+                        None => Ok(Value::new_null(ctx.clone())),
+                    }
+                },
             )
-            .set("protocol", rquickjs::String::from_str(ctx.clone(), protocol.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            .unwrap();
+            let params_clone2 = params.clone();
+            let sp_has = Function::new(
+                ctx.clone(),
+                move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+                    let key = args
+                        .get_or_undefined(0)
+                        .to_string(ctx)
+                        .map(|s| s.to_std_string_escaped())
+                        .unwrap_or_default();
+                    Ok(Value::from(params_clone2.iter().any(|(k, _)| k == &key)))
+                },
             )
-            .set("hostname", rquickjs::String::from_str(ctx.clone(), hostname.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .set("pathname", rquickjs::String::from_str(ctx.clone(), pathname.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .set("search", rquickjs::String::from_str(ctx.clone(), search.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .set("hash", rquickjs::String::from_str(ctx.clone(), hash.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
-            )
-            .property(
-                "origin",
-                Value::from(js_string!(format!(
-                    "{}://{}",
-                    protocol.trim_end_matches(':'),
-                    hostname
-                )
-                .as_str())),
+            .unwrap();
+            let sp_tostring = {
+                let s = search.clone();
+                unsafe {
+                    Function::new(move |_this, _args, _ctx| {
+                        Ok(rquickjs::String::from_str(
+                            ctx.clone(),
+                            s.as_str()
+                                .map(|s| s.into_value())
+                                .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                        ))
+                    })
+                }
+            };
+            let _ = sp_obj.set("get", sp_get.to_js_function(ctx.realm()), false, ctx);
+            let _ = sp_obj.set("has", sp_has.to_js_function(ctx.realm()), false, ctx);
+            let _ = sp_obj.set(
+                "toString",
+                sp_tostring.to_js_function(ctx.realm()),
+                false,
+                ctx,
             );
-        let _ = url_obj.set("searchParams", sp_obj);
 
-        Ok(url_obj.into_value())
-    });
-    ctx.globals().set("URL", url_ctor,
-        ).unwrap_or(());
+            let url_obj = Object::new(ctx.clone())
+                .unwrap()
+                .set(
+                    "href",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        full_url
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set(
+                    "protocol",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        protocol
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set(
+                    "hostname",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        hostname
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set(
+                    "pathname",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        pathname
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set(
+                    "search",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        search
+                            .as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .set(
+                    "hash",
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        hash.as_str()
+                            .map(|s| s.into_value())
+                            .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                    ),
+                )
+                .property(
+                    "origin",
+                    Value::from(js_string!(format!(
+                        "{}://{}",
+                        protocol.trim_end_matches(':'),
+                        hostname
+                    )
+                    .as_str())),
+                );
+            let _ = url_obj.set("searchParams", sp_obj);
+
+            Ok(url_obj.into_value())
+        },
+    );
+    ctx.globals().set("URL", url_ctor).unwrap_or(());
 
     // AbortController stub
     let abort_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-        let signal = Object::new(ctx.clone()).unwrap()
-            .set("aborted", Value::new_bool(ctx.clone(), false),
-            )
-            ;
-    win.set("reason", Value::new_undefined(ctx.clone())).unwrap_or(());
+        let signal = Object::new(ctx.clone())
+            .unwrap()
+            .set("aborted", Value::new_bool(ctx.clone(), false));
+        win.set("reason", Value::new_undefined(ctx.clone()))
+            .unwrap_or(());
         let signal_clone = signal.clone();
-        let abort_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let abort_fn = Function::new(
+            ctx.clone(),
+            move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let _ = signal_clone.set("aborted", Value::new_bool(ctx.clone(), true), false, ctx);
                 Ok(Value::new_undefined(ctx.clone()))
-        }).unwrap();
-        let controller = Object::new(ctx.clone()).unwrap()
-            ;
-    win.set("abort", abort_fn).unwrap_or(());
+            },
+        )
+        .unwrap();
+        let controller = Object::new(ctx.clone()).unwrap();
+        win.set("abort", abort_fn).unwrap_or(());
         let _ = controller.set("signal", signal);
         Ok(controller.into_value())
     });
-    ctx.globals().set("AbortController", abort_ctor,
-        ).unwrap_or(());
+    ctx.globals()
+        .set("AbortController", abort_ctor)
+        .unwrap_or(());
 
     // structuredClone — JSON roundtrip-approximation
-    let structured_clone = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        let val = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        // Använda JSON.stringify → JSON.parse som approximation
-        let json_str = val.as_string().and_then(|s| s.to_string().ok()).unwrap_or_default();
-        Ok(rquickjs::String::from_str(ctx.clone(), json_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
-    });
-    ctx.globals().set("structuredClone", structured_clone,
-        ).unwrap_or(());
+    let structured_clone = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let val = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            // Använda JSON.stringify → JSON.parse som approximation
+            let json_str = val
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                json_str
+                    .as_str()
+                    .map(|s| s.into_value())
+                    .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+            ))
+        },
+    );
+    ctx.globals()
+        .set("structuredClone", structured_clone)
+        .unwrap_or(());
 
     // crypto.randomUUID() och getRandomValues()
     let random_uuid = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
@@ -3646,33 +4064,37 @@ fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
             ((ts.wrapping_mul(6364136223846793005)) & 0xFFFFFFFFFFFF) as u64,
         );
         Ok(rquickjs::String::from_str(ctx.clone(), &uuid)?.into_value())
-    }).unwrap();
-    let get_random_values = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-        // Fyll array med pseudo-random bytes
-        let arr = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        if let Some(obj) = arr.as_object() {
-            if let Ok(len) = obj.get("length", ctx) {
-                let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                for i in 0..len.min(65536) {
-                    let val = ((ts.wrapping_mul(i as u128 + 1).wrapping_add(i as u128 * 7)) & 0xFF)
-                        as f64;
-                    let _ = obj.set(i, Value::new_int(ctx.clone(), val));
+    })
+    .unwrap();
+    let get_random_values = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            // Fyll array med pseudo-random bytes
+            let arr = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            if let Some(obj) = arr.as_object() {
+                if let Ok(len) = obj.get("length", ctx) {
+                    let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    for i in 0..len.min(65536) {
+                        let val = ((ts.wrapping_mul(i as u128 + 1).wrapping_add(i as u128 * 7))
+                            & 0xFF) as f64;
+                        let _ = obj.set(i, Value::new_int(ctx.clone(), val));
+                    }
                 }
             }
-        }
-        Ok(arr.clone())
-    });
-    let crypto = Object::new(ctx.clone()).unwrap()
-        ;
-    win.set("randomUUID", random_uuid).unwrap_or(())
-        ;
+            Ok(arr.clone())
+        },
+    );
+    let crypto = Object::new(ctx.clone()).unwrap();
+    win.set("randomUUID", random_uuid).unwrap_or(());
     win.set("getRandomValues", get_random_values).unwrap_or(());
-    ctx.globals().set("crypto", crypto)
-        .unwrap_or(());
+    ctx.globals().set("crypto", crypto).unwrap_or(());
 }
 
 // ─── Console-objekt ─────────────────────────────────────────────────────────
@@ -3699,22 +4121,29 @@ fn register_console(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
         })
     };
 
-    let console = Object::new(ctx.clone()).unwrap()
+    let console = Object::new(ctx.clone())
+        .unwrap()
         .function(make_log(Rc::clone(&state), ""), "log", 1)
         .function(make_log(Rc::clone(&state), "WARN"), "warn", 1)
         .function(make_log(Rc::clone(&state), "ERROR"), "error", 1)
         .function(make_log(state, "INFO"), "info", 1);
 
-    ctx.globals().set("console", console)
-        .unwrap_or(());
+    ctx.globals().set("console", console).unwrap_or(());
 }
 
 // ─── localStorage / sessionStorage — in-memory sandbox (Fas 19) ─────────────
 
-fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: bool) -> rquickjs::Result<()> {
+fn register_storage(
+    ctx: &Ctx<'_>,
+    state: SharedState,
+    name: &str,
+    is_local: bool,
+) -> rquickjs::Result<()> {
     let st_get = Rc::clone(&state);
     let is_local_get = is_local;
-    let get_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let get_item = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -3727,14 +4156,23 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
                 &s.session_storage
             };
             match storage.get(&key) {
-                Some(v) => Ok(rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+                Some(v) => Ok(rquickjs::String::from_str(
+                    ctx.clone(),
+                    v.as_str()
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                )),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_set = Rc::clone(&state);
     let is_local_set = is_local;
-    let set_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let set_item = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -3756,11 +4194,15 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
                 storage.insert(key, val);
             }
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_rem = Rc::clone(&state);
     let is_local_rem = is_local;
-    let remove_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+    let remove_item = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -3774,11 +4216,15 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
             };
             storage.remove(&key);
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_clear = Rc::clone(&state);
     let is_local_clear = is_local;
-    let clear = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let clear = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st_clear.borrow_mut();
             let storage = if is_local_clear {
                 &mut s.local_storage
@@ -3787,12 +4233,22 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
             };
             storage.clear();
             Ok(Value::new_undefined(ctx.clone()))
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_key = Rc::clone(&state);
     let is_local_key = is_local;
-    let key_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-            let index = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
+    let key_fn = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let index = args
+                .get(0)
+                .cloned()
+                .unwrap_or_else(|| Value::new_undefined(ctx.clone()))
+                .as_float()
+                .or_else(|| Some(0.0))
+                .unwrap_or(0.0) as usize;
             let s = st_key.borrow();
             let storage = if is_local_key {
                 &s.local_storage
@@ -3800,28 +4256,32 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
                 &s.session_storage
             };
             match storage.keys().nth(index) {
-                Some(k) => Ok(rquickjs::String::from_str(ctx.clone(), k.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+                Some(k) => Ok(rquickjs::String::from_str(
+                    ctx.clone(),
+                    k.as_str()
+                        .map(|s| s.into_value())
+                        .unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+                )),
                 None => Ok(Value::new_null(ctx.clone())),
             }
-    }).unwrap();
+        },
+    )
+    .unwrap();
 
     let st_len = Rc::clone(&state);
     let is_local_len = is_local;
 
-    let storage_obj = Object::new(ctx.clone()).unwrap()
-        ;
-    obj.set("getItem", get_item).unwrap_or(())
-        ;
-    obj.set("setItem", set_item).unwrap_or(())
-        ;
-    obj.set("removeItem", remove_item).unwrap_or(())
-        ;
-    obj.set("clear", clear).unwrap_or(())
-        ;
+    let storage_obj = Object::new(ctx.clone()).unwrap();
+    obj.set("getItem", get_item).unwrap_or(());
+    obj.set("setItem", set_item).unwrap_or(());
+    obj.set("removeItem", remove_item).unwrap_or(());
+    obj.set("clear", clear).unwrap_or(());
     obj.set("key", key_fn).unwrap_or(());
 
     // Sätt length som getter (via closure)
-    let length_getter = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+    let length_getter = Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_len.borrow();
             let storage = if is_local_len {
                 &s.local_storage
@@ -3829,16 +4289,12 @@ fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: boo
                 &s.session_storage
             };
             Ok(Value::from(storage.len() as f64))
-    }).unwrap();
-    let _ = storage_obj.set(
-        "length",
-        length_getter,
-        false,
-        ctx,
-    );
+        },
+    )
+    .unwrap();
+    let _ = storage_obj.set("length", length_getter, false, ctx);
 
-    ctx
-        .register_global_property(name, storage_obj)
+    ctx.register_global_property(name, storage_obj)
         .unwrap_or(());
 }
 
