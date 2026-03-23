@@ -211,7 +211,7 @@ for name, url in SITES:
     sname = safe_name(name)
     t0 = time.time()
     try:
-        d = ae_api("/api/fetch/render", {"url": url, "width": 1280, "height": 900}, timeout=30)
+        d = ae_api("/api/fetch/render", {"url": url, "width": 1280, "height": 900}, timeout=60)
         ae_ms = int((time.time() - t0) * 1000)
         png = base64.b64decode(d.get("png_base64", ""))
         if png:

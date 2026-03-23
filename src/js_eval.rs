@@ -11,17 +11,18 @@ use rquickjs::{Context, Runtime};
 
 // ─── Sandbox-begränsningar ──────────────────────────────────────────────────
 
-/// Max stack-storlek i bytes (QuickJS default 256KB)
+/// Max stack-storlek i bytes (höjd till 1MB för SPA-bundles med djupa anropskedjor)
 #[cfg(feature = "js-eval")]
-const MAX_STACK_SIZE: usize = 256 * 1024;
+const MAX_STACK_SIZE: usize = 1024 * 1024;
 
-/// Max minnesanvändning (8 MB — förhindrar minnesexplosion)
+/// Max minnesanvändning (64 MB — SPA-bundles behöver mer minne)
 #[cfg(feature = "js-eval")]
-const MAX_MEMORY: usize = 8 * 1024 * 1024;
+const MAX_MEMORY: usize = 64 * 1024 * 1024;
 
 /// Max exekveringstid i millisekunder (väggklocka) innan interrupt
+/// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
 #[cfg(feature = "js-eval")]
-const MAX_EVAL_MS: u64 = 500;
+const MAX_EVAL_MS: u64 = 5000;
 
 /// Delad flagga som interrupt-handlern läser.
 /// Sätts till `true` av en timeout-tråd för att avbryta JS-exekvering.
@@ -318,6 +319,122 @@ pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
     }
 
     scripts
+}
+
+// ─── Extern script-stöd (SPA-sajter) ────────────────────────────────────────
+
+/// En script-entry i dokumentordning — antingen inline-kod eller en extern URL.
+#[cfg(feature = "js-eval")]
+#[derive(Debug, Clone)]
+pub enum ScriptEntry {
+    /// Inline script — redan i HTML, behöver ej hämtas
+    Inline,
+    /// Extern script — URL som behöver hämtas
+    External(String),
+}
+
+/// Extrahera alla scripts i dokumentordning (inline + externa)
+///
+/// Till skillnad från `extract_ordered_scripts` returnerar denna ALLA scripts,
+/// inklusive externa `<script src="...">` som behöver hämtas separat.
+/// JSON/LD+JSON/importmap-scripts filtreras bort.
+#[cfg(feature = "js-eval")]
+pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
+    let mut entries = Vec::new();
+    let lower = html.to_lowercase();
+    let mut search_from = 0;
+
+    while let Some(start) = lower[search_from..].find("<script") {
+        let abs_start = search_from + start;
+        if let Some(tag_end) = lower[abs_start..].find('>') {
+            let content_start = abs_start + tag_end + 1;
+            if let Some(end) = lower[content_start..].find("</script>") {
+                let tag_text = &lower[abs_start..abs_start + tag_end];
+
+                // Skippa JSON/LD+JSON/importmap (SSR-data, inte körbara)
+                let is_json = tag_text.contains("application/json")
+                    || tag_text.contains("application/ld+json")
+                    || tag_text.contains("importmap");
+
+                if !is_json {
+                    let is_external = tag_text.contains("src=");
+                    if is_external {
+                        // Extrahera URL från src-attribut
+                        let orig_tag = &html[abs_start..abs_start + tag_end + 1];
+                        if let Some(url) = extract_src_url(orig_tag, base_url) {
+                            entries.push(ScriptEntry::External(url));
+                        }
+                    } else {
+                        let code = html[content_start..content_start + end].trim();
+                        if !code.is_empty() {
+                            entries.push(ScriptEntry::Inline);
+                        }
+                    }
+                }
+
+                search_from = content_start + end + 9;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    entries
+}
+
+/// Extrahera URL från ett script-tags src-attribut
+#[cfg(feature = "js-eval")]
+fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let src_pos = lower.find("src=")?;
+    let after_src = &tag[src_pos + 4..];
+    let (quote, rest) = if let Some(stripped) = after_src.strip_prefix('"') {
+        ('"', stripped)
+    } else if let Some(stripped) = after_src.strip_prefix('\'') {
+        ('\'', stripped)
+    } else {
+        // Oklart format — skippa
+        return None;
+    };
+    let end = rest.find(quote)?;
+    let url = &rest[..end];
+
+    // Tomma src, data-URIs eller javascript: — skippa
+    if url.is_empty() || url.starts_with("data:") || url.starts_with("javascript:") {
+        return None;
+    }
+
+    // Resolve relativa URLer mot base_url
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url.to_string())
+    } else if url.starts_with("//") {
+        let scheme = if base_url.starts_with("https://") {
+            "https:"
+        } else {
+            "http:"
+        };
+        Some(format!("{scheme}{url}"))
+    } else if url.starts_with('/') {
+        // Absolut path — extrahera origin från base_url
+        let origin_end = base_url
+            .find("://")
+            .and_then(|i| base_url[i + 3..].find('/').map(|j| i + 3 + j));
+        if let Some(end) = origin_end {
+            Some(format!("{}{}", &base_url[..end], url))
+        } else {
+            Some(format!("{}{}", base_url.trim_end_matches('/'), url))
+        }
+    } else {
+        // Relativ path
+        let base_dir = if let Some(last_slash) = base_url.rfind('/') {
+            &base_url[..last_slash + 1]
+        } else {
+            base_url
+        };
+        Some(format!("{base_dir}{url}"))
+    }
 }
 
 /// Kolla om JS-koden troligen påverkar DOM-innehåll
@@ -1243,5 +1360,89 @@ mod tests {
         let html = r#"<html><body><p>No scripts</p></body></html>"#;
         let scripts = extract_ordered_scripts(html);
         assert!(scripts.is_empty(), "Borde inte hitta scripts");
+    }
+
+    // ─── Tester för extract_all_scripts (SPA-stöd) ──────────────────────────
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_mixed() {
+        let html = r##"<html><body>
+            <script>var x = 1;</script>
+            <script src="https://cdn.example.com/bundle.js"></script>
+            <script>var y = 2;</script>
+        </body></html>"##;
+        let entries = extract_all_scripts(html, "https://example.com/");
+        assert_eq!(
+            entries.len(),
+            3,
+            "Borde hitta 3 entries (2 inline + 1 extern)"
+        );
+        assert!(
+            matches!(entries[0], ScriptEntry::Inline),
+            "Första borde vara inline"
+        );
+        assert!(
+            matches!(&entries[1], ScriptEntry::External(url) if url == "https://cdn.example.com/bundle.js"),
+            "Andra borde vara extern med rätt URL"
+        );
+        assert!(
+            matches!(entries[2], ScriptEntry::Inline),
+            "Tredje borde vara inline"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_relative_url() {
+        let html = r##"<html><body><script src="/js/app.js"></script></body></html>"##;
+        let entries = extract_all_scripts(html, "https://www.example.com/page");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], ScriptEntry::External(url) if url == "https://www.example.com/js/app.js"),
+            "Borde resolve relativ URL korrekt"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_protocol_relative() {
+        let html =
+            r##"<html><body><script src="//cdn.example.com/lib.js"></script></body></html>"##;
+        let entries = extract_all_scripts(html, "https://example.com/");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], ScriptEntry::External(url) if url == "https://cdn.example.com/lib.js"),
+            "Borde resolve protocol-relativ URL"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_skips_json() {
+        let html = r#"<html><body>
+            <script type="application/json">{"data": true}</script>
+            <script src="https://cdn.example.com/app.js"></script>
+        </body></html>"#;
+        let entries = extract_all_scripts(html, "https://example.com/");
+        assert_eq!(entries.len(), 1, "Borde skippa JSON-script");
+        assert!(matches!(&entries[0], ScriptEntry::External(_)));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_src_url_single_quotes() {
+        let url = extract_src_url("<script src='/js/bundle.js'>", "https://example.com/page");
+        assert_eq!(url, Some("https://example.com/js/bundle.js".to_string()));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_src_url_skips_data_uri() {
+        let url = extract_src_url(
+            r#"<script src="data:text/javascript,alert(1)">"#,
+            "https://example.com/",
+        );
+        assert_eq!(url, None, "Borde skippa data-URI");
     }
 }

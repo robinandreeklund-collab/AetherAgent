@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max render-tid i sekunder — förhindrar att tunga sidor (t.ex. github.com ~569KB) hänger servern
-const RENDER_TIMEOUT_SECS: u64 = 20;
+const RENDER_TIMEOUT_SECS: u64 = 45;
 
 /// Delat server-state med förladdad vision-modell (ORT session med Mutex för &mut run)
 // [RTEN-ROLLBACK-ID:server-state] Gamla: vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>
@@ -1938,16 +1938,28 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
 
     // Steg 2: Inline extern CSS med detaljerad felrapportering
     let css_result = fetch::inline_external_css_detailed(html, final_url).await;
-    let html_with_css = &css_result.html;
+    let html_with_css = css_result.html.clone();
+
+    // Steg 2b: Hämta och inlina externa scripts (SPA-stöd)
+    // Skippa JS-inlining helt i render-pipelinen — CSS-inlining redan blåser upp HTML
+    // och JS-inlining ovanpå det kraschar Blitz (github 569KB → 3.8MB med CSS+JS)
+    let js_result = fetch::JsInlineResult {
+        html: html_with_css.clone(),
+        scripts_found: 0,
+        scripts_loaded: 0,
+        scripts_failed: 0,
+        js_bytes_added: 0,
+    };
+    let html_with_js = html_with_css;
 
     // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
-    // Auto-detektera fast_render baserat på original HTML-storlek (före CSS-inlining)
+    // Auto-detektera fast_render baserat på original HTML-storlek (före CSS/JS-inlining)
     // Tröskeln 500KB matchar riktigt tunga sidor (github 569KB) som kraschar Blitz
     const FAST_RENDER_THRESHOLD: usize = 500 * 1024;
     let fast_render = req
         .fast_render
         .unwrap_or(html.len() > FAST_RENDER_THRESHOLD);
-    let html_for_render = html_with_css.clone();
+    let html_for_render = html_with_js;
     let url_for_render = final_url.clone();
     let status_code = fetch_result.status_code;
     let js_code = req.js_code.clone();
@@ -1958,18 +1970,29 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     let css_failed_count = css_result.css_failed;
     let css_bytes = css_result.css_bytes_added;
     let css_details_clone = css_result.css_details.clone();
+    let js_scripts_found = js_result.scripts_found;
+    let js_scripts_loaded = js_result.scripts_loaded;
+    let js_bytes_added = js_result.js_bytes_added;
 
     let render_future = tokio::task::spawn_blocking(move || {
         #[cfg(feature = "js-eval")]
         {
             if js_code.is_empty() {
-                match aether_agent::screenshot_with_tier(
-                    &html_for_render,
-                    &url_for_render,
-                    render_width,
-                    render_height,
-                    fast_render,
-                ) {
+                // catch_unwind: Vello/GradientLut kraschar ibland på edge-case gradienter
+                let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    aether_agent::screenshot_with_tier(
+                        &html_for_render,
+                        &url_for_render,
+                        render_width,
+                        render_height,
+                        fast_render,
+                    )
+                }));
+                let render_result = match render_result {
+                    Ok(r) => r,
+                    Err(_) => Err("Blitz/Vello panic (gradient edge case)".to_string()),
+                };
+                match render_result {
                     Ok((png_bytes, tier_used)) => {
                         use base64::Engine;
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
@@ -1985,6 +2008,9 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                             "css_failed": css_failed_count,
                             "css_bytes_added": css_bytes,
                             "css_details": css_details_clone,
+                            "js_scripts_found": js_scripts_found,
+                            "js_scripts_loaded": js_scripts_loaded,
+                            "js_bytes_added": js_bytes_added,
                             "tier_used": format!("{:?}", tier_used),
                         })
                         .to_string()
@@ -1996,6 +2022,8 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
                         "css_loaded": css_loaded_count,
                         "css_failed": css_failed_count,
                         "css_details": css_details_clone,
+                        "js_scripts_found": js_scripts_found,
+                        "js_scripts_loaded": js_scripts_loaded,
                     })
                     .to_string(),
                 }
@@ -2011,13 +2039,20 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
         }
         #[cfg(not(feature = "js-eval"))]
         {
-            match aether_agent::screenshot_with_tier(
-                &html_for_render,
-                &url_for_render,
-                render_width,
-                render_height,
-                fast_render,
-            ) {
+            let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                aether_agent::screenshot_with_tier(
+                    &html_for_render,
+                    &url_for_render,
+                    render_width,
+                    render_height,
+                    fast_render,
+                )
+            }));
+            let render_result = match render_result {
+                Ok(r) => r,
+                Err(_) => Err("Blitz/Vello panic (gradient edge case)".to_string()),
+            };
+            match render_result {
                 Ok((png_bytes, tier_used)) => {
                     use base64::Engine;
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);

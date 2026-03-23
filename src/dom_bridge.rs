@@ -3901,6 +3901,183 @@ fn register_window_with_viewport<'js>(
     "#,
     )?;
 
+    // SPA-stöd: fetch/XHR/Observer-stubs som förhindrar krascher i SPA-bundles
+    ctx.eval::<(), _>(
+        r#"
+        // fetch() — returnera tom Response (förhindrar ReferenceError i SPA-bundles)
+        globalThis.fetch = function(url, opts) {
+            return Promise.resolve({
+                ok: false,
+                status: 0,
+                statusText: 'Sandbox: network disabled',
+                url: typeof url === 'string' ? url : '',
+                redirected: false,
+                type: 'basic',
+                headers: {
+                    get: function() { return null; },
+                    has: function() { return false; },
+                    forEach: function() {},
+                    entries: function() { return []; },
+                    keys: function() { return []; },
+                    values: function() { return []; }
+                },
+                json: function() { return Promise.reject(new Error('Sandbox: fetch disabled')); },
+                text: function() { return Promise.resolve(''); },
+                blob: function() { return Promise.resolve(new Blob ? new Blob([]) : {}); },
+                arrayBuffer: function() { return Promise.resolve(new ArrayBuffer(0)); },
+                clone: function() { return this; },
+                body: null,
+                bodyUsed: false
+            });
+        };
+
+        // Headers constructor
+        globalThis.Headers = function Headers(init) {
+            this._h = {};
+            if (init && typeof init === 'object') {
+                for (var k in init) { this._h[k.toLowerCase()] = init[k]; }
+            }
+            this.get = function(k) { return this._h[k.toLowerCase()] || null; };
+            this.has = function(k) { return k.toLowerCase() in this._h; };
+            this.set = function(k, v) { this._h[k.toLowerCase()] = v; };
+            this.delete = function(k) { delete this._h[k.toLowerCase()]; };
+            this.forEach = function(cb) { for (var k in this._h) { cb(this._h[k], k, this); } };
+            this.entries = function() { var r = []; for (var k in this._h) { r.push([k, this._h[k]]); } return r; };
+            this.keys = function() { return Object.keys(this._h); };
+            this.values = function() { return Object.values(this._h); };
+        };
+
+        // Response constructor
+        globalThis.Response = function Response(body, opts) {
+            this.ok = opts && opts.status >= 200 && opts.status < 300;
+            this.status = (opts && opts.status) || 200;
+            this.statusText = (opts && opts.statusText) || '';
+            this.headers = new Headers((opts && opts.headers) || {});
+            this._body = body || '';
+            this.json = function() { try { return Promise.resolve(JSON.parse(this._body)); } catch(e) { return Promise.reject(e); } };
+            this.text = function() { return Promise.resolve(String(this._body)); };
+            this.clone = function() { return new Response(this._body, opts); };
+        };
+
+        // Request constructor
+        globalThis.Request = function Request(url, opts) {
+            this.url = typeof url === 'string' ? url : (url && url.url) || '';
+            this.method = (opts && opts.method) || 'GET';
+            this.headers = new Headers((opts && opts.headers) || {});
+            this.body = (opts && opts.body) || null;
+        };
+
+        // AbortController
+        globalThis.AbortController = function AbortController() {
+            this.signal = { aborted: false, addEventListener: function(){}, removeEventListener: function(){} };
+            this.abort = function() { this.signal.aborted = true; };
+        };
+
+        // XMLHttpRequest stub
+        globalThis.XMLHttpRequest = function XMLHttpRequest() {
+            this.readyState = 0;
+            this.status = 0;
+            this.statusText = '';
+            this.responseText = '';
+            this.response = '';
+            this.onreadystatechange = null;
+            this.onload = null;
+            this.onerror = null;
+            this.open = function() { this.readyState = 1; };
+            this.send = function() {
+                this.readyState = 4;
+                this.status = 0;
+                if (this.onerror) { try { this.onerror({}); } catch(e) {} }
+                if (this.onreadystatechange) { try { this.onreadystatechange(); } catch(e) {} }
+            };
+            this.setRequestHeader = function() {};
+            this.getResponseHeader = function() { return null; };
+            this.getAllResponseHeaders = function() { return ''; };
+            this.abort = function() {};
+            this.addEventListener = function() {};
+            this.removeEventListener = function() {};
+        };
+
+        // IntersectionObserver stub
+        globalThis.IntersectionObserver = function IntersectionObserver(cb, opts) {
+            this.observe = function() {};
+            this.unobserve = function() {};
+            this.disconnect = function() {};
+            this.takeRecords = function() { return []; };
+        };
+
+        // MessageChannel stub (React uses this)
+        globalThis.MessageChannel = function MessageChannel() {
+            var self = this;
+            this.port1 = {
+                onmessage: null,
+                postMessage: function(msg) {
+                    if (self.port2.onmessage) {
+                        try { self.port2.onmessage({ data: msg }); } catch(e) {}
+                    }
+                },
+                close: function() {}
+            };
+            this.port2 = {
+                onmessage: null,
+                postMessage: function(msg) {
+                    if (self.port1.onmessage) {
+                        try { self.port1.onmessage({ data: msg }); } catch(e) {}
+                    }
+                },
+                close: function() {}
+            };
+        };
+
+        // Blob stub
+        if (typeof Blob === 'undefined') {
+            globalThis.Blob = function Blob(parts, opts) {
+                this.size = 0;
+                this.type = (opts && opts.type) || '';
+                if (parts) { for (var i = 0; i < parts.length; i++) { this.size += (parts[i].length || 0); } }
+                this.text = function() { return Promise.resolve(''); };
+                this.arrayBuffer = function() { return Promise.resolve(new ArrayBuffer(0)); };
+                this.slice = function() { return new Blob([]); };
+            };
+        }
+
+        // FormData stub
+        globalThis.FormData = function FormData() {
+            this._data = {};
+            this.append = function(k, v) { this._data[k] = v; };
+            this.get = function(k) { return this._data[k] || null; };
+            this.has = function(k) { return k in this._data; };
+            this.delete = function(k) { delete this._data[k]; };
+            this.entries = function() { var r = []; for (var k in this._data) { r.push([k, this._data[k]]); } return r; };
+        };
+
+        // Map polyfill om saknas
+        if (typeof Map === 'undefined') {
+            globalThis.Map = function Map() {
+                this._data = {};
+                this.set = function(k, v) { this._data[k] = v; return this; };
+                this.get = function(k) { return this._data[k]; };
+                this.has = function(k) { return k in this._data; };
+                this.delete = function(k) { return delete this._data[k]; };
+                this.clear = function() { this._data = {}; };
+                this.forEach = function(cb) { for (var k in this._data) { cb(this._data[k], k, this); } };
+                Object.defineProperty(this, 'size', { get: function() { return Object.keys(this._data).length; } });
+            };
+        }
+        if (typeof Set === 'undefined') {
+            globalThis.Set = function Set() {
+                this._data = {};
+                this.add = function(v) { this._data[v] = true; return this; };
+                this.has = function(v) { return v in this._data; };
+                this.delete = function(v) { return delete this._data[v]; };
+                this.clear = function() { this._data = {}; };
+                this.forEach = function(cb) { for (var k in this._data) { cb(k, k, this); } };
+                Object.defineProperty(this, 'size', { get: function() { return Object.keys(this._data).length; } });
+            };
+        }
+    "#,
+    )?;
+
     // Registrera localStorage/sessionStorage
     register_storage(ctx, Rc::clone(&state), "localStorage", true)?;
     register_storage(ctx, Rc::clone(&state), "sessionStorage", false)?;
