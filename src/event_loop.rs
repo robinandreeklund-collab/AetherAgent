@@ -10,11 +10,38 @@
 ///
 /// Alla timer-callbacks körs synkront via virtuell klocka — ingen riktig väntan.
 /// Säkerhetsbegränsningar: max 1000 ticks, max 50ms total exekvering.
-use rquickjs::{function::Rest, Ctx, Function, Object, Persistent, Value};
+use rquickjs::{
+    function::{FromParams, IntoJsFunc, ParamRequirement, Params, Rest},
+    Ctx, Function, Object, Persistent, Value,
+};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+
+// ─── Livstidssäker IntoJsFunc-wrapper ────────────────────────────────────────
+// rquickjs closures kan inte returnera Value<'js> pga livstidsinferens.
+// Denna trait + wrapper löser problemet via explicit 'js-livstid i handle().
+
+/// Trait för JS-callback-hanterare med korrekt livstidshantering
+pub(crate) trait JsHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>>;
+}
+
+/// Wrapper som implementerar IntoJsFunc för alla JsHandler-implementationer
+pub(crate) struct JsFn<H: JsHandler>(pub(crate) H);
+
+impl<'js, H: JsHandler> IntoJsFunc<'js, (Ctx<'js>, Rest<Value<'js>>)> for JsFn<H> {
+    fn param_requirements() -> ParamRequirement {
+        ParamRequirement::any()
+    }
+    fn call(&self, params: Params<'_, 'js>) -> rquickjs::Result<Value<'js>> {
+        let ctx = params.ctx().clone();
+        let mut access = params.access();
+        let (_, rest): (Ctx<'js>, Rest<Value<'js>>) = FromParams::from_params(&mut access)?;
+        self.0.handle(&ctx, &rest.0)
+    }
+}
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
@@ -135,7 +162,7 @@ impl EventLoopState {
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
 
 /// Hämta argument som f64, med fallback
-fn arg_as_f64(args: &[Value<'_>], index: usize) -> f64 {
+fn arg_as_f64(args: &[Value], index: usize) -> f64 {
     args.get(index)
         .and_then(|v| v.as_float().or_else(|| v.as_int().map(|i| i as f64)))
         .unwrap_or(0.0)
@@ -144,7 +171,7 @@ fn arg_as_f64(args: &[Value<'_>], index: usize) -> f64 {
 // ─── Registrera globala funktioner ──────────────────────────────────────────
 
 /// Registrera alla event-loop-globaler på QuickJS-kontexten
-pub fn register_event_loop(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
+pub fn register_event_loop<'js>(ctx: &Ctx<'js>, el: SharedEventLoop) -> rquickjs::Result<()> {
     register_timers(ctx, Rc::clone(&el))?;
     register_raf(ctx, Rc::clone(&el))?;
     register_queue_microtask(ctx)?;
@@ -154,112 +181,79 @@ pub fn register_event_loop(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Resu
 
 /// Registrera setTimeout, setInterval, clearTimeout, clearInterval
 fn register_timers(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
-    // setTimeout(callback, delay)
-    let el_st = Rc::clone(&el);
+    // ─── Handler-strukturer ───────────────────────────────────────────
+    struct SetTimerHandler {
+        el: SharedEventLoop,
+        recurring: bool,
+    }
+    impl JsHandler for SetTimerHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_int(ctx.clone(), 0)),
+            };
+            let delay = arg_as_f64(args, 1).max(if self.recurring { 1.0 } else { 0.0 }) as u64;
+            let delay = delay.min(MAX_DELAY_MS);
+
+            let mut state = self.el.borrow_mut();
+            if state.timers.len() >= MAX_TIMERS {
+                return Ok(Value::new_int(ctx.clone(), -1));
+            }
+            let id = state.alloc_id();
+            state.timers.push(TimerTask {
+                id,
+                callback: Persistent::save(ctx, func),
+                delay_ms: delay,
+                recurring: self.recurring,
+                cancelled: false,
+            });
+            Ok(Value::new_int(ctx.clone(), id as i32))
+        }
+    }
+
+    struct ClearTimerHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for ClearTimerHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let id = arg_as_f64(args, 0) as u32;
+            let mut state = self.el.borrow_mut();
+            for timer in &mut state.timers {
+                if timer.id == id {
+                    timer.cancelled = true;
+                }
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
     ctx.globals().set(
         "setTimeout",
         Function::new(
             ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args
-                    .first()
-                    .cloned()
-                    .unwrap_or(Value::new_undefined(ctx.clone()));
-                let func = match callback_val.as_function() {
-                    Some(f) => f.clone(),
-                    None => return Ok(Value::new_int(ctx, 0)),
-                };
-                let delay = arg_as_f64(&args, 1).max(0.0) as u64;
-                let delay = delay.min(MAX_DELAY_MS);
-
-                let mut state = el_st.borrow_mut();
-                if state.timers.len() >= MAX_TIMERS {
-                    return Ok(Value::new_int(ctx, -1));
-                }
-                let id = state.alloc_id();
-                state.timers.push(TimerTask {
-                    id,
-                    callback: Persistent::save(&ctx, func),
-                    delay_ms: delay,
-                    recurring: false,
-                    cancelled: false,
-                });
-                Ok(Value::new_int(ctx, id as i32))
-            },
+            JsFn(SetTimerHandler {
+                el: Rc::clone(&el),
+                recurring: false,
+            }),
         )?,
     )?;
-
-    // setInterval(callback, delay)
-    let el_si = Rc::clone(&el);
     ctx.globals().set(
         "setInterval",
         Function::new(
             ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args
-                    .first()
-                    .cloned()
-                    .unwrap_or(Value::new_undefined(ctx.clone()));
-                let func = match callback_val.as_function() {
-                    Some(f) => f.clone(),
-                    None => return Ok(Value::new_int(ctx, 0)),
-                };
-                let delay = arg_as_f64(&args, 1).max(1.0) as u64;
-                let delay = delay.min(MAX_DELAY_MS);
-
-                let mut state = el_si.borrow_mut();
-                if state.timers.len() >= MAX_TIMERS {
-                    return Ok(Value::new_int(ctx, -1));
-                }
-                let id = state.alloc_id();
-                state.timers.push(TimerTask {
-                    id,
-                    callback: Persistent::save(&ctx, func),
-                    delay_ms: delay,
-                    recurring: true,
-                    cancelled: false,
-                });
-                Ok(Value::new_int(ctx, id as i32))
-            },
+            JsFn(SetTimerHandler {
+                el: Rc::clone(&el),
+                recurring: true,
+            }),
         )?,
     )?;
-
-    // clearTimeout(id)
-    let el_ct = Rc::clone(&el);
     ctx.globals().set(
         "clearTimeout",
-        Function::new(
-            ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let id = arg_as_f64(&args, 0) as u32;
-                let mut state = el_ct.borrow_mut();
-                for timer in &mut state.timers {
-                    if timer.id == id {
-                        timer.cancelled = true;
-                    }
-                }
-                Ok(Value::new_undefined(ctx))
-            },
-        )?,
+        Function::new(ctx.clone(), JsFn(ClearTimerHandler { el: Rc::clone(&el) }))?,
     )?;
-
-    // clearInterval(id) — samma logik
-    let el_ci = Rc::clone(&el);
     ctx.globals().set(
         "clearInterval",
-        Function::new(
-            ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let id = arg_as_f64(&args, 0) as u32;
-                let mut state = el_ci.borrow_mut();
-                for timer in &mut state.timers {
-                    if timer.id == id {
-                        timer.cancelled = true;
-                    }
-                }
-                Ok(Value::new_undefined(ctx))
-            },
-        )?,
+        Function::new(ctx.clone(), JsFn(ClearTimerHandler { el: Rc::clone(&el) }))?,
     )?;
 
     Ok(())
@@ -267,48 +261,49 @@ fn register_timers(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
 
 /// Registrera requestAnimationFrame / cancelAnimationFrame
 fn register_raf(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
-    let el_raf = Rc::clone(&el);
+    struct RafHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for RafHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_int(ctx.clone(), 0)),
+            };
+            let mut state = self.el.borrow_mut();
+            let id = state.alloc_id();
+            state.raf_queue.push(RafTask {
+                id,
+                callback: Persistent::save(ctx, func),
+                cancelled: false,
+            });
+            Ok(Value::new_int(ctx.clone(), id as i32))
+        }
+    }
+
+    struct CancelRafHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for CancelRafHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let id = arg_as_f64(args, 0) as u32;
+            let mut state = self.el.borrow_mut();
+            for raf_task in &mut state.raf_queue {
+                if raf_task.id == id {
+                    raf_task.cancelled = true;
+                }
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
     ctx.globals().set(
         "requestAnimationFrame",
-        Function::new(
-            ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args
-                    .first()
-                    .cloned()
-                    .unwrap_or(Value::new_undefined(ctx.clone()));
-                let func = match callback_val.as_function() {
-                    Some(f) => f.clone(),
-                    None => return Ok(Value::new_int(ctx, 0)),
-                };
-                let mut state = el_raf.borrow_mut();
-                let id = state.alloc_id();
-                state.raf_queue.push(RafTask {
-                    id,
-                    callback: Persistent::save(&ctx, func),
-                    cancelled: false,
-                });
-                Ok(Value::new_int(ctx, id as i32))
-            },
-        )?,
+        Function::new(ctx.clone(), JsFn(RafHandler { el: Rc::clone(&el) }))?,
     )?;
-
-    let el_craf = Rc::clone(&el);
     ctx.globals().set(
         "cancelAnimationFrame",
-        Function::new(
-            ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let id = arg_as_f64(&args, 0) as u32;
-                let mut state = el_craf.borrow_mut();
-                for raf_task in &mut state.raf_queue {
-                    if raf_task.id == id {
-                        raf_task.cancelled = true;
-                    }
-                }
-                Ok(Value::new_undefined(ctx))
-            },
-        )?,
+        Function::new(ctx.clone(), JsFn(CancelRafHandler { el: Rc::clone(&el) }))?,
     )?;
 
     Ok(())
@@ -332,103 +327,130 @@ fn register_queue_microtask(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
 
 /// Registrera MutationObserver-konstruktorn
 fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
-    let el_mo = Rc::clone(&el);
+    struct MutationObserverConstructor {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for MutationObserverConstructor {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_undefined(ctx.clone())),
+            };
+
+            let observer_index = {
+                let mut state = self.el.borrow_mut();
+                let idx = state.observers.len();
+                state.observers.push(ObserverEntry {
+                    callback: Persistent::save(ctx, func),
+                    targets: Vec::new(),
+                    child_list: false,
+                    attributes: false,
+                    subtree: false,
+                });
+                idx
+            };
+
+            let observer = Object::new(ctx.clone())?;
+
+            // observe(target, options)
+            struct ObserveHandler {
+                el: SharedEventLoop,
+                idx: usize,
+            }
+            impl JsHandler for ObserveHandler {
+                fn handle<'js>(
+                    &self,
+                    ctx: &Ctx<'js>,
+                    args: &[Value<'js>],
+                ) -> rquickjs::Result<Value<'js>> {
+                    let target = args
+                        .first()
+                        .cloned()
+                        .unwrap_or(Value::new_undefined(ctx.clone()));
+                    let options = args
+                        .get(1)
+                        .cloned()
+                        .unwrap_or(Value::new_undefined(ctx.clone()));
+
+                    let node_key = target
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, f64>("__nodeKey__").ok())
+                        .unwrap_or(0.0) as u64;
+
+                    let child_list = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("childList").ok())
+                        .unwrap_or(false);
+                    let attributes = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("attributes").ok())
+                        .unwrap_or(false);
+                    let subtree = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("subtree").ok())
+                        .unwrap_or(false);
+
+                    let mut state = self.el.borrow_mut();
+                    if let Some(entry) = state.observers.get_mut(self.idx) {
+                        entry.targets.push(node_key);
+                        entry.child_list = child_list;
+                        entry.attributes = attributes;
+                        entry.subtree = subtree;
+                    }
+                    Ok(Value::new_undefined(ctx.clone()))
+                }
+            }
+
+            observer.set(
+                "observe",
+                Function::new(
+                    ctx.clone(),
+                    JsFn(ObserveHandler {
+                        el: Rc::clone(&self.el),
+                        idx: observer_index,
+                    }),
+                )?,
+            )?;
+
+            // disconnect()
+            struct DisconnectHandler {
+                el: SharedEventLoop,
+                idx: usize,
+            }
+            impl JsHandler for DisconnectHandler {
+                fn handle<'js>(
+                    &self,
+                    ctx: &Ctx<'js>,
+                    _args: &[Value<'js>],
+                ) -> rquickjs::Result<Value<'js>> {
+                    let mut state = self.el.borrow_mut();
+                    if let Some(entry) = state.observers.get_mut(self.idx) {
+                        entry.targets.clear();
+                    }
+                    Ok(Value::new_undefined(ctx.clone()))
+                }
+            }
+
+            observer.set(
+                "disconnect",
+                Function::new(
+                    ctx.clone(),
+                    JsFn(DisconnectHandler {
+                        el: Rc::clone(&self.el),
+                        idx: observer_index,
+                    }),
+                )?,
+            )?;
+
+            Ok(observer.into_value())
+        }
+    }
+
     ctx.globals().set(
         "MutationObserver",
         Function::new(
             ctx.clone(),
-            move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                let callback_val = args
-                    .first()
-                    .cloned()
-                    .unwrap_or(Value::new_undefined(ctx.clone()));
-                let func = match callback_val.as_function() {
-                    Some(f) => f.clone(),
-                    None => return Ok(Value::new_undefined(ctx)),
-                };
-
-                let observer_index = {
-                    let mut state = el_mo.borrow_mut();
-                    let idx = state.observers.len();
-                    state.observers.push(ObserverEntry {
-                        callback: Persistent::save(&ctx, func),
-                        targets: Vec::new(),
-                        child_list: false,
-                        attributes: false,
-                        subtree: false,
-                    });
-                    idx
-                };
-
-                let observer = Object::new(ctx.clone())?;
-
-                // observe(target, options)
-                let el_observe = Rc::clone(&el_mo);
-                observer.set(
-                    "observe",
-                    Function::new(
-                        ctx.clone(),
-                        move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
-                            let target = args
-                                .first()
-                                .cloned()
-                                .unwrap_or(Value::new_undefined(ctx.clone()));
-                            let options = args
-                                .get(1)
-                                .cloned()
-                                .unwrap_or(Value::new_undefined(ctx.clone()));
-
-                            // Extrahera __nodeKey__ från target
-                            let node_key = target
-                                .as_object()
-                                .and_then(|obj| obj.get::<_, f64>("__nodeKey__").ok())
-                                .unwrap_or(0.0) as u64;
-
-                            // Läs options
-                            let child_list = options
-                                .as_object()
-                                .and_then(|obj| obj.get::<_, bool>("childList").ok())
-                                .unwrap_or(false);
-                            let attributes = options
-                                .as_object()
-                                .and_then(|obj| obj.get::<_, bool>("attributes").ok())
-                                .unwrap_or(false);
-                            let subtree = options
-                                .as_object()
-                                .and_then(|obj| obj.get::<_, bool>("subtree").ok())
-                                .unwrap_or(false);
-
-                            let mut state = el_observe.borrow_mut();
-                            if let Some(entry) = state.observers.get_mut(observer_index) {
-                                entry.targets.push(node_key);
-                                entry.child_list = child_list;
-                                entry.attributes = attributes;
-                                entry.subtree = subtree;
-                            }
-
-                            Ok(Value::new_undefined(ctx))
-                        },
-                    )?,
-                )?;
-
-                // disconnect()
-                let el_disconnect = Rc::clone(&el_mo);
-                observer.set(
-                    "disconnect",
-                    Function::new(
-                        ctx.clone(),
-                        move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
-                            let mut state = el_disconnect.borrow_mut();
-                            if let Some(entry) = state.observers.get_mut(observer_index) {
-                                entry.targets.clear();
-                            }
-                            Ok(Value::new_undefined(ctx))
-                        },
-                    )?,
-                )?;
-
-                Ok(observer.into_value())
-            },
+            JsFn(MutationObserverConstructor { el: Rc::clone(&el) }),
         )?,
     )?;
 
@@ -518,7 +540,7 @@ pub fn run_event_loop(
         };
 
         // Kör mogna one-shot callbacks
-        for cb in &due_timers {
+        for cb in due_timers {
             if let Ok(func) = cb.restore(ctx) {
                 let _ = func.call::<_, Value>(());
             }
@@ -734,7 +756,7 @@ mod tests {
     #[cfg(feature = "js-eval")]
     fn with_quickjs_context<F, R>(f: F) -> R
     where
-        F: FnOnce(&rquickjs::Runtime, Ctx<'_>, SharedEventLoop) -> R,
+        F: for<'js> FnOnce(&rquickjs::Runtime, Ctx<'js>, SharedEventLoop) -> R,
     {
         let (rt, qctx) = crate::js_eval::create_sandboxed_runtime();
         qctx.with(|ctx| {

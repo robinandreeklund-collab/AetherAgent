@@ -8,16 +8,16 @@
       "html_length": 528,
       "css_inlined": false,
       "css_added_bytes": 0,
-      "total_ms": 419,
+      "total_ms": 521,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
       "html_length": 529,
-      "html_ms": 372,
+      "html_ms": 607,
       "tree_lines": 6,
-      "tree_ms": 176,
-      "total_ms": 372,
+      "tree_ms": 669,
+      "total_ms": 607,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -27,21 +27,21 @@
     "site": "news.ycombinator.com",
     "url": "https://news.ycombinator.com",
     "aether": {
-      "png_size": 412953,
+      "png_size": 408203,
       "screenshot": true,
-      "html_length": 41785,
+      "html_length": 41916,
       "css_inlined": true,
       "css_added_bytes": 0,
-      "total_ms": 5633,
+      "total_ms": 1254,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 34381,
-      "html_ms": 181,
-      "tree_lines": 518,
-      "tree_ms": 283,
-      "total_ms": 181,
+      "html_length": 34515,
+      "html_ms": 442,
+      "tree_lines": 515,
+      "tree_ms": 291,
+      "total_ms": 442,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -51,46 +51,46 @@
     "site": "www.aftonbladet.se",
     "url": "https://www.aftonbladet.se",
     "aether": {
-      "png_size": 55729,
+      "png_size": 127663,
       "screenshot": true,
-      "html_length": 605892,
+      "html_length": 624919,
       "css_inlined": true,
       "css_added_bytes": 0,
-      "total_ms": 5796,
+      "total_ms": 2326,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 882746,
-      "html_ms": 16588,
-      "tree_lines": 657,
-      "tree_ms": 16735,
-      "total_ms": 16588,
+      "html_length": 855365,
+      "html_ms": 16194,
+      "tree_lines": 404,
+      "tree_ms": 5206,
+      "total_ms": 16194,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false,
-      "errors": "$time=1774197951302 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
+      "errors": "$time=1774247610658 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
     }
   },
   {
     "site": "www.di.se",
     "url": "https://www.di.se",
     "aether": {
-      "png_size": 609042,
+      "png_size": 266314,
       "screenshot": true,
-      "html_length": 668970,
+      "html_length": 681741,
       "css_inlined": true,
       "css_added_bytes": 0,
-      "total_ms": 9141,
+      "total_ms": 2159,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 523262,
-      "html_ms": 5730,
-      "tree_lines": 578,
-      "tree_ms": 6414,
-      "total_ms": 5730,
+      "html_length": 535414,
+      "html_ms": 5212,
+      "tree_lines": 646,
+      "tree_ms": 5200,
+      "total_ms": 5212,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -102,19 +102,19 @@
     "aether": {
       "png_size": 105159,
       "screenshot": true,
-      "html_length": 657782,
+      "html_length": 659519,
       "css_inlined": true,
       "css_added_bytes": 0,
-      "total_ms": 7070,
+      "total_ms": 2272,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 276011,
-      "html_ms": 5206,
-      "tree_lines": 534,
-      "tree_ms": 5217,
-      "total_ms": 5206,
+      "html_length": 278398,
+      "html_ms": 5290,
+      "tree_lines": 571,
+      "tree_ms": 5222,
+      "total_ms": 5290,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -126,19 +126,19 @@
     "aether": {
       "png_size": 279762,
       "screenshot": true,
-      "html_length": 898038,
+      "html_length": 898208,
       "css_inlined": true,
       "css_added_bytes": 0,
-      "total_ms": 6189,
+      "total_ms": 2841,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 312476,
-      "html_ms": 2614,
+      "html_length": 312217,
+      "html_ms": 1842,
       "tree_lines": 515,
-      "tree_ms": 1931,
-      "total_ms": 2614,
+      "tree_ms": 1976,
+      "total_ms": 1842,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -153,16 +153,16 @@
       "html_length": 24,
       "css_inlined": false,
       "css_added_bytes": 0,
-      "total_ms": 436,
+      "total_ms": 620,
       "has_js": true,
       "has_renderer": true
     },
     "lightpanda": {
       "html_length": 111,
-      "html_ms": 200,
+      "html_ms": 176,
       "tree_lines": 2,
-      "tree_ms": 498,
-      "total_ms": 200,
+      "tree_ms": 137,
+      "total_ms": 176,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -172,14 +172,17 @@
     "site": "github.com",
     "url": "https://github.com",
     "aether": {
-      "error": "Remote end closed connection without response"
+      "error": "Render failed: Blitz failed and CDP unavailable: HTML f\u00f6r stort f\u00f6r Blitz (3.7 MB > 3 MB max) \u2014 anv\u00e4nd CDP-tier ist\u00e4llet",
+      "total_ms": 558,
+      "has_js": true,
+      "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 543643,
-      "html_ms": 5310,
+      "html_length": 547181,
+      "html_ms": 5239,
       "tree_lines": 359,
-      "tree_ms": 5278,
-      "total_ms": 5310,
+      "tree_ms": 5268,
+      "total_ms": 5239,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -189,14 +192,21 @@
     "site": "x.com",
     "url": "https://x.com",
     "aether": {
-      "error": "<urlopen error [Errno 111] Connection refused>"
+      "png_size": 29103,
+      "screenshot": true,
+      "html_length": 245507,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 907,
+      "has_js": true,
+      "has_renderer": true
     },
     "lightpanda": {
-      "html_length": 248301,
-      "html_ms": 1640,
+      "html_length": 248755,
+      "html_ms": 1097,
       "tree_lines": 8,
-      "tree_ms": 1604,
-      "total_ms": 1640,
+      "tree_ms": 1060,
+      "total_ms": 1097,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false
@@ -206,18 +216,25 @@
     "site": "books.toscrape.com",
     "url": "https://books.toscrape.com",
     "aether": {
-      "error": "<urlopen error [Errno 111] Connection refused>"
+      "png_size": 142532,
+      "screenshot": true,
+      "html_length": 279429,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 1746,
+      "has_js": true,
+      "has_renderer": true
     },
     "lightpanda": {
       "html_length": 51276,
-      "html_ms": 888,
+      "html_ms": 442,
       "tree_lines": 272,
-      "tree_ms": 557,
-      "total_ms": 888,
+      "tree_ms": 540,
+      "total_ms": 442,
       "has_js": true,
       "has_renderer": false,
       "screenshot": false,
-      "errors": "$time=1774198056024 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
+      "errors": "$time=1774247679292 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
     }
   }
 ]
