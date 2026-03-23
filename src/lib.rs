@@ -100,7 +100,9 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     tree
 }
 
-/// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd
+/// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd.
+/// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
+/// och används för att bygga det semantiska trädet.
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
     #[cfg(feature = "js-eval")]
     {
@@ -108,7 +110,15 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
         if !scripts.is_empty() {
             let rcdom = parser::parse_html(html);
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
-            let _eval_result = dom_bridge::eval_js_with_lifecycle(&scripts, arena);
+            let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+
+            // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
+            if !eval_with_arena.result.mutations.is_empty() {
+                let modified_html = eval_with_arena
+                    .arena
+                    .serialize_html(eval_with_arena.arena.document);
+                return build_tree(&modified_html, goal, url);
+            }
         }
     }
     build_tree(html, goal, url)
@@ -1259,20 +1269,42 @@ pub fn render_html_to_png(
             "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
         ));
     }
-    // CSS Compiler Pipeline (Fas 19):
+    // ── Steg 1: Kör JS lifecycle innan rendering ──
+    // Extrahera inline scripts → kör DOMContentLoaded/load → serialisera modifierad DOM.
+    // Detta aktiverar lazy-loaded bilder, framework-hydrering, och DOM-mutationer.
+    #[cfg(feature = "js-eval")]
+    let html = {
+        let scripts = js_eval::extract_ordered_scripts(html);
+        if !scripts.is_empty() {
+            let rcdom = parser::parse_html(html);
+            let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+            let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+            if !eval_result.result.mutations.is_empty() {
+                std::borrow::Cow::Owned(
+                    eval_result.arena.serialize_html(eval_result.arena.document),
+                )
+            } else {
+                std::borrow::Cow::Borrowed(html)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(html)
+        }
+    };
+    #[cfg(not(feature = "js-eval"))]
+    let html = std::borrow::Cow::Borrowed(html);
+    let html: &str = &html;
+
+    // ── Steg 2: CSS Compiler Pipeline ──
     // 1. LightningCSS — resolve CSS vars, downlevel nesting/:is()/color functions
     // 2. Media Query Filter — evaluera @media mot viewport, strippa icke-matchande
     // 3. css-inline — flattena ALL CSS till style="" på varje element, ta bort <style>
-    //
-    // Resultat: Blitz ser bara inline styles — ingen selektor-matchning behövs,
-    // inga CSS-ambiguiteter, inga var()/calc()/@media-problem.
     let viewport = css_compiler::ViewportConfig {
         width,
         height,
         color_scheme: css_compiler::ColorScheme::Light,
     };
-    // Strippa <script>-taggar — behövs aldrig för visuell rendering
-    // och kan vara enorma (GitHub ~2MB JS, CNN ~4MB)
+
+    // ── Steg 3: Strippa <script>-taggar (redan körda) ──
     let html_stripped = strip_script_tags(html);
     let html = &html_stripped;
 
@@ -1410,8 +1442,10 @@ fn strip_css_gradients(html: &str) -> String {
                         _ => {}
                     }
                 }
-                // Ersätt hela gradient med transparent
-                result.push_str("transparent");
+                // Extrahera en fallback-färg från gradient-argumenten
+                let gradient_body = &after[paren_start + 1..end.saturating_sub(1)];
+                let fallback = extract_gradient_fallback_color(gradient_body);
+                result.push_str(&fallback);
                 remaining = &remaining[pos + end..];
             }
             None => {
@@ -1421,6 +1455,111 @@ fn strip_css_gradients(html: &str) -> String {
         }
     }
     result
+}
+
+/// Extrahera en användbar fallback-färg från gradient-argument.
+/// Letar efter sista CSS-färgen i gradient-definitionen (slutfärgen = visuellt dominant).
+/// Returnerar `#808080` om ingen färg hittas.
+#[cfg(feature = "blitz")]
+fn extract_gradient_fallback_color(gradient_body: &str) -> String {
+    // Dela på komma (yttersta nivå) — hitta sista color stop
+    let parts: Vec<&str> = gradient_body.split(',').collect();
+
+    // Iterera bakifrån — sista färgen i gradienten är vanligtvis den visuellt dominanta
+    for part in parts.iter().rev() {
+        let trimmed = part.trim();
+        if let Some(color) = try_extract_css_color(trimmed) {
+            return color;
+        }
+    }
+    // Ingen färg hittad — grå fallback (neutral, bättre än transparent)
+    "#808080".to_string()
+}
+
+/// Försök extrahera en CSS-färg från en color stop (t.ex. "#ff0000 50%", "rgb(0,0,0)", "red")
+#[cfg(feature = "blitz")]
+fn try_extract_css_color(stop: &str) -> Option<String> {
+    let lower = stop.trim().to_ascii_lowercase();
+
+    // Hex-färg: #fff, #ffffff, #rrggbbaa
+    if let Some(hex_start) = lower.find('#') {
+        let hex = &stop[hex_start..];
+        let hex_end = hex
+            .find(|c: char| !c.is_ascii_hexdigit() && c != '#')
+            .unwrap_or(hex.len());
+        let hex_val = &hex[..hex_end];
+        if matches!(hex_val.len(), 4 | 7 | 9) {
+            return Some(hex_val.to_string());
+        }
+    }
+
+    // rgb()/rgba()/hsl()/hsla() — behåll hela funktionsanropet
+    for prefix in &["rgb(", "rgba(", "hsl(", "hsla("] {
+        if lower.starts_with(prefix) {
+            // Hitta matchande parentes
+            if let Some(close) = stop.find(')') {
+                return Some(stop[..close + 1].to_string());
+            }
+        }
+    }
+
+    // Namngivna CSS-färger (vanligaste)
+    const NAMED_COLORS: &[&str] = &[
+        "black",
+        "white",
+        "red",
+        "green",
+        "blue",
+        "yellow",
+        "orange",
+        "purple",
+        "gray",
+        "grey",
+        "navy",
+        "teal",
+        "maroon",
+        "olive",
+        "aqua",
+        "fuchsia",
+        "silver",
+        "lime",
+        "coral",
+        "crimson",
+        "gold",
+        "indigo",
+        "ivory",
+        "khaki",
+        "lavender",
+        "magenta",
+        "pink",
+        "plum",
+        "salmon",
+        "sienna",
+        "tan",
+        "tomato",
+        "turquoise",
+        "violet",
+        "wheat",
+        "darkblue",
+        "darkgreen",
+        "darkred",
+        "darkgray",
+        "darkgrey",
+        "lightblue",
+        "lightgreen",
+        "lightgray",
+        "lightgrey",
+        "transparent",
+    ];
+    // Kolla om första ordet i stopp:et matchar en CSS-färg
+    let first_word = lower.split_whitespace().next().unwrap_or("");
+    if NAMED_COLORS.contains(&first_word) {
+        // Returnera transparent som sista utväg — men det är bättre
+        // att behålla den explicita färgen om sidan valt den
+        return Some(first_word.to_string());
+    }
+
+    None
 }
 
 /// Strippa <script>-element från HTML innan rendering.

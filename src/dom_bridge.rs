@@ -431,6 +431,139 @@ pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalRes
     result
 }
 
+/// Evaluera inline scripts med simulerad browser-lifecycle och returnera modifierad ArenaDom.
+///
+/// Samma som `eval_js_with_lifecycle` men ger tillbaka arenan med alla DOM-mutationer
+/// så att anroparen kan serialisera den modifierade DOM:en till HTML.
+#[cfg(feature = "blitz")]
+pub fn eval_js_with_lifecycle_and_arena(scripts: &[String], arena: ArenaDom) -> DomEvalWithArena {
+    let start = std::time::Instant::now();
+
+    if scripts.is_empty() {
+        return DomEvalWithArena {
+            result: DomEvalResult {
+                value: None,
+                error: None,
+                mutations: vec![],
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: 0,
+                timers_fired: 0,
+            },
+            arena,
+        };
+    }
+
+    let state: SharedState = Rc::new(RefCell::new(BridgeState {
+        arena,
+        mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
+        css_context: None,
+        local_storage: std::collections::HashMap::new(),
+        session_storage: std::collections::HashMap::new(),
+        console_output: Vec::new(),
+        ready_state: "loading".to_string(),
+    }));
+
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+
+    let result = context.with(|ctx| {
+        let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+        let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = register_document(&ctx, Rc::clone(&state));
+        let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_console(&ctx, Rc::clone(&state));
+
+        let mut last_value: Option<String> = None;
+        let mut first_error: Option<String> = None;
+
+        // Fas 1: readyState = "loading" — kör alla scripts
+        for script in scripts {
+            match ctx.eval::<Value, _>(script.as_str()) {
+                Ok(result) => {
+                    let v = crate::js_eval::quickjs_value_to_string(&ctx, &result);
+                    if v != "undefined" {
+                        last_value = Some(v);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(crate::js_eval::quickjs_error_string(&ctx, &e));
+                    }
+                }
+            }
+        }
+
+        // Fas 2: readyState = "interactive" + DOMContentLoaded
+        state.borrow_mut().ready_state = "interactive".to_string();
+        let _ = ctx.eval::<Value, _>(
+            r#"
+            if (typeof document !== 'undefined' && document.dispatchEvent) {
+                document.dispatchEvent(new Event('DOMContentLoaded'));
+            }
+            "#,
+        );
+
+        // Fas 3: readyState = "complete" + load
+        state.borrow_mut().ready_state = "complete".to_string();
+        let _ = ctx.eval::<Value, _>(
+            r#"
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(new Event('load'));
+            }
+            "#,
+        );
+
+        // Dränera event loop
+        let loop_stats = event_loop::run_event_loop(&ctx, &el);
+        let (ticks, timers) = match &loop_stats {
+            Ok(s) => (s.ticks, s.timers_fired),
+            Err(_) => (0, 0),
+        };
+
+        let mutations = state.borrow().mutations.clone();
+        state.borrow_mut().event_listeners.clear();
+        el.borrow_mut().clear_persistent();
+
+        DomEvalResult {
+            value: last_value,
+            error: first_error.or_else(|| loop_stats.err()),
+            mutations,
+            eval_time_us: start.elapsed().as_micros() as u64,
+            event_loop_ticks: ticks,
+            timers_fired: timers,
+        }
+    });
+
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
+
+    // Extrahera arena från SharedState
+    let bridge = match Rc::try_unwrap(state) {
+        Ok(cell) => cell.into_inner(),
+        Err(rc) => {
+            let borrowed = rc.borrow();
+            BridgeState {
+                arena: borrowed.arena.clone(),
+                mutations: borrowed.mutations.clone(),
+                event_listeners: std::collections::HashMap::new(),
+                focused_element: borrowed.focused_element,
+                scroll_positions: std::collections::HashMap::new(),
+                css_context: None,
+                local_storage: std::collections::HashMap::new(),
+                session_storage: std::collections::HashMap::new(),
+                console_output: Vec::new(),
+                ready_state: borrowed.ready_state.clone(),
+            }
+        }
+    };
+
+    DomEvalWithArena {
+        result,
+        arena: bridge.arena,
+    }
+}
+
 // ─── Document-objekt ────────────────────────────────────────────────────────
 
 // ─── JsHandler-structs för document-metoder ─────────────────────────────────
