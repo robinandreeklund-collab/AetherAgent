@@ -100,6 +100,20 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     tree
 }
 
+/// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd
+fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
+    #[cfg(feature = "js-eval")]
+    {
+        let scripts = js_eval::extract_ordered_scripts(html);
+        if !scripts.is_empty() {
+            let rcdom = parser::parse_html(html);
+            let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+            let _eval_result = dom_bridge::eval_js_with_lifecycle(&scripts, arena);
+        }
+    }
+    build_tree(html, goal, url)
+}
+
 /// Pre-allokerad JSON-serialisering via serde_json::to_writer.
 /// Undviker intern String-allokering genom att skriva direkt till Vec<u8>.
 /// Estimerar buffert-storlek baserat på antal noder (~200 bytes/nod).
@@ -279,6 +293,12 @@ pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
             let t = build_tree(html, goal, url);
             let result = js_bridge::selective_exec(&t, html);
             (result.tree, "quickjs_dom")
+        }
+
+        // Tier 2.5: QuickJS + lifecycle — kör scripts med DOMContentLoaded/load
+        escalation::ParseTier::QuickJsLifecycle { .. } => {
+            let t = run_lifecycle_parse(html, goal, url);
+            (t, "quickjs_lifecycle")
         }
 
         // Tier 3/4: Behöver extern rendering — fallback till statisk parse

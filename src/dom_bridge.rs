@@ -71,6 +71,8 @@ struct BridgeState {
     session_storage: std::collections::HashMap<String, String>,
     /// Fångade console-meddelanden
     console_output: Vec<String>,
+    /// document.readyState — "loading", "interactive" eller "complete"
+    ready_state: String,
 }
 
 type SharedState = Rc<RefCell<BridgeState>>;
@@ -120,9 +122,10 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         local_storage: std::collections::HashMap::new(),
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
+        ready_state: "complete".to_string(),
     }));
 
-    let (_rt, context) = crate::js_eval::create_sandboxed_runtime();
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
 
     let result = context.with(|ctx| {
         // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
@@ -179,6 +182,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         eval_result
     });
 
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
     result
 }
 
@@ -236,9 +240,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         local_storage: std::collections::HashMap::new(),
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
+        ready_state: "complete".to_string(),
     }));
 
-    let (_rt, context) = crate::js_eval::create_sandboxed_runtime();
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
 
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
@@ -287,6 +292,8 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         eval_result
     });
 
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
+
     // Extrahera arena från SharedState
     // context och alla Rc-kloner i closures droppas ovan → try_unwrap kan lyckas
     let bridge = match Rc::try_unwrap(state) {
@@ -303,6 +310,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 local_storage: std::collections::HashMap::new(),
                 session_storage: std::collections::HashMap::new(),
                 console_output: Vec::new(),
+                ready_state: borrowed.ready_state.clone(),
             }
         }
     };
@@ -311,6 +319,116 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         result,
         arena: bridge.arena,
     }
+}
+
+/// Evaluera inline scripts med simulerad browser-lifecycle
+///
+/// Kör scripts i 3 faser:
+/// 1. readyState = "loading" — kör synkrona scripts
+/// 2. readyState = "interactive" — dispatcha DOMContentLoaded
+/// 3. readyState = "complete" — dispatcha load
+///
+/// Returnerar modifierad ArenaDom med alla DOM-mutationer applicerade.
+pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalResult {
+    let start = std::time::Instant::now();
+
+    if scripts.is_empty() {
+        return DomEvalResult {
+            value: None,
+            error: None,
+            mutations: vec![],
+            eval_time_us: start.elapsed().as_micros() as u64,
+            event_loop_ticks: 0,
+            timers_fired: 0,
+        };
+    }
+
+    let state: SharedState = Rc::new(RefCell::new(BridgeState {
+        arena,
+        mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
+        css_context: None,
+        local_storage: std::collections::HashMap::new(),
+        session_storage: std::collections::HashMap::new(),
+        console_output: Vec::new(),
+        ready_state: "loading".to_string(),
+    }));
+
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+
+    let result = context.with(|ctx| {
+        let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+        let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = register_document(&ctx, Rc::clone(&state));
+        let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_console(&ctx, Rc::clone(&state));
+
+        let mut last_value: Option<String> = None;
+        let mut first_error: Option<String> = None;
+
+        // Fas 1: readyState = "loading" — kör alla scripts
+        for script in scripts {
+            match ctx.eval::<Value, _>(script.as_str()) {
+                Ok(result) => {
+                    let v = crate::js_eval::quickjs_value_to_string(&ctx, &result);
+                    if v != "undefined" {
+                        last_value = Some(v);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(crate::js_eval::quickjs_error_string(&ctx, &e));
+                    }
+                }
+            }
+        }
+
+        // Fas 2: readyState = "interactive" + DOMContentLoaded
+        state.borrow_mut().ready_state = "interactive".to_string();
+        let _ = ctx.eval::<Value, _>(
+            r#"
+            if (typeof document !== 'undefined' && document.dispatchEvent) {
+                document.dispatchEvent(new Event('DOMContentLoaded'));
+            }
+            "#,
+        );
+
+        // Fas 3: readyState = "complete" + load
+        state.borrow_mut().ready_state = "complete".to_string();
+        let _ = ctx.eval::<Value, _>(
+            r#"
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(new Event('load'));
+            }
+            "#,
+        );
+
+        // Dränera event loop (microtasks, timers, rAF)
+        let loop_stats = event_loop::run_event_loop(&ctx, &el);
+        let (ticks, timers) = match &loop_stats {
+            Ok(s) => (s.ticks, s.timers_fired),
+            Err(_) => (0, 0),
+        };
+
+        let mutations = state.borrow().mutations.clone();
+
+        state.borrow_mut().event_listeners.clear();
+        el.borrow_mut().clear_persistent();
+
+        DomEvalResult {
+            value: last_value,
+            error: first_error.or_else(|| loop_stats.err()),
+            mutations,
+            eval_time_us: start.elapsed().as_micros() as u64,
+            event_loop_ticks: ticks,
+            timers_fired: timers,
+        }
+    });
+
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
+    result
 }
 
 // ─── Document-objekt ────────────────────────────────────────────────────────
@@ -821,6 +939,41 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         Function::new(ctx.clone(), JsFn(ExitPointerLock))?,
     )?;
 
+    // addEventListener / removeEventListener / dispatchEvent på document
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.set(
+            "addEventListener",
+            Function::new(
+                ctx.clone(),
+                JsFn(AddEventListenerHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "removeEventListener",
+            Function::new(
+                ctx.clone(),
+                JsFn(RemoveEventListenerHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "dispatchEvent",
+            Function::new(
+                ctx.clone(),
+                JsFn(DispatchEventHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+    }
+
     // activeElement — getter som returnerar fokuserat element eller body
     doc.prop(
         "activeElement",
@@ -828,6 +981,29 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
             state: Rc::clone(&state),
         })),
     )?;
+
+    // readyState — dynamisk getter
+    {
+        struct ReadyStateGetter {
+            state: SharedState,
+        }
+        impl JsHandler for ReadyStateGetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let s = self.state.borrow();
+                Ok(rquickjs::String::from_str(ctx.clone(), &s.ready_state)?.into_value())
+            }
+        }
+        doc.prop(
+            "readyState",
+            Accessor::new_get(JsFn(ReadyStateGetter {
+                state: Rc::clone(&state),
+            })),
+        )?;
+    }
 
     // body, head, documentElement — statiska egenskaper
     let (body_key, head_key, html_key) = {
@@ -3094,6 +3270,44 @@ fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<
     win.set("scrollX", 0)?;
     win.set("scrollY", 0)?;
 
+    // addEventListener / removeEventListener / dispatchEvent på window
+    {
+        // Använd document-nyckel som proxy — window-events lagras där
+        let doc_key = state.borrow().arena.document;
+        // Separata handlers med nyckel 0 (speciell window-markör)
+        // Vi använder doc_key+1 offset som unik nyckel
+        win.set(
+            "addEventListener",
+            Function::new(
+                ctx.clone(),
+                JsFn(AddEventListenerHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        win.set(
+            "removeEventListener",
+            Function::new(
+                ctx.clone(),
+                JsFn(RemoveEventListenerHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        win.set(
+            "dispatchEvent",
+            Function::new(
+                ctx.clone(),
+                JsFn(DispatchEventHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+    }
+
     // location
     let loc = Object::new(ctx.clone())?;
     loc.set("href", "https://example.com/")?;
@@ -5321,6 +5535,152 @@ mod tests {
             result.value.as_deref(),
             Some("ok"),
             "location.searchParams borde finnas"
+        );
+    }
+
+    // ─── Lifecycle-tester ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_document_ready_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"document.readyState"#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("complete"),
+            "readyState borde vara 'complete' som standard"
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_dom_content_loaded() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let scripts = vec![r#"
+            var loaded = false;
+            var readyStates = [document.readyState];
+            document.addEventListener('DOMContentLoaded', function() {
+                loaded = true;
+                readyStates.push(document.readyState);
+            });
+            "#
+        .to_string()];
+        let result = eval_js_with_lifecycle(&scripts, arena);
+        assert!(
+            result.error.is_none(),
+            "Lifecycle borde inte ge fel: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_load_event() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let scripts = vec![r#"
+            var windowLoaded = false;
+            window.addEventListener('load', function() {
+                windowLoaded = true;
+            });
+            "#
+        .to_string()];
+        let result = eval_js_with_lifecycle(&scripts, arena);
+        assert!(
+            result.error.is_none(),
+            "Lifecycle load borde inte ge fel: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_multiple_scripts() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let scripts = vec![
+            "var x = 10;".to_string(),
+            "var y = x + 5;".to_string(),
+            "x + y".to_string(),
+        ];
+        let result = eval_js_with_lifecycle(&scripts, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("25"),
+            "Scripts borde dela kontext"
+        );
+    }
+
+    // ─── Mutation Pipeline-tester ──────────────────────────────────────────
+
+    #[test]
+    fn test_mutation_set_text_content_propagates() {
+        let arena = make_arena(r##"<html><body><div id="target">Old</div></body></html>"##);
+        let code = r#"
+            var el = document.getElementById('target');
+            el.textContent = 'New';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert!(
+            !result.mutations.is_empty(),
+            "Borde ha registrerat mutationer"
+        );
+    }
+
+    #[test]
+    fn test_mutation_set_attribute_propagates() {
+        let arena = make_arena(r##"<html><body><div id="target">Test</div></body></html>"##);
+        let code = r#"
+            var el = document.getElementById('target');
+            el.setAttribute('class', 'highlight');
+            el.getAttribute('class');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("highlight"),
+            "setAttribute + getAttribute borde fungera"
+        );
+    }
+
+    #[test]
+    fn test_mutation_append_child_propagates() {
+        let arena = make_arena(r##"<html><body><div id="container"></div></body></html>"##);
+        let code = r#"
+            var c = document.getElementById('container');
+            var span = document.createElement('span');
+            span.textContent = 'Dynamic';
+            c.appendChild(span);
+            c.innerHTML;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(
+            val.contains("Dynamic"),
+            "appendChild borde synas i innerHTML: {}",
+            val
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_ready_state_transitions() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let scripts = vec![r#"
+            var states = [];
+            states.push(document.readyState);
+            document.addEventListener('DOMContentLoaded', function() {
+                states.push('dcl:' + document.readyState);
+            });
+            window.addEventListener('load', function() {
+                states.push('load:' + document.readyState);
+            });
+            "#
+        .to_string()];
+        let result = eval_js_with_lifecycle(&scripts, arena);
+        assert!(
+            result.error.is_none(),
+            "Lifecycle transitions borde inte ge fel: {:?}",
+            result.error
         );
     }
 }

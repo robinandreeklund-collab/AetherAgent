@@ -11,10 +11,6 @@ use rquickjs::{Context, Runtime};
 
 // ─── Sandbox-begränsningar ──────────────────────────────────────────────────
 
-/// Max loop-iterationer (förhindrar while(true) och for(;;))
-#[cfg(feature = "js-eval")]
-const MAX_LOOP_ITERATIONS: u64 = 100_000;
-
 /// Max stack-storlek i bytes (QuickJS default 256KB)
 #[cfg(feature = "js-eval")]
 const MAX_STACK_SIZE: usize = 256 * 1024;
@@ -23,26 +19,60 @@ const MAX_STACK_SIZE: usize = 256 * 1024;
 #[cfg(feature = "js-eval")]
 const MAX_MEMORY: usize = 8 * 1024 * 1024;
 
+/// Max exekveringstid i millisekunder (väggklocka) innan interrupt
+#[cfg(feature = "js-eval")]
+const MAX_EVAL_MS: u64 = 500;
+
+/// Delad flagga som interrupt-handlern läser.
+/// Sätts till `true` av en timeout-tråd för att avbryta JS-exekvering.
+#[cfg(feature = "js-eval")]
+pub(crate) struct InterruptState {
+    /// Håller Arc vid liv — timeout-tråden sätter denna till true.
+    /// Droppar vi denna stoppas interrupt-handlerns referens.
+    _abort_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 /// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
 ///
-/// Sätter stack-storlek, minneslimit och interrupt-handler
-/// för att förhindra denial-of-service i JS-sandboxen.
+/// Använder rquickjs set_interrupt_handler med en Arc<AtomicBool>-flagga.
+/// Anroparen kan sätta flaggan till true för att avbryta.
+/// Returnerar (Runtime, Context, InterruptState).
 #[cfg(feature = "js-eval")]
-pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context) {
+pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context, InterruptState) {
     let rt = Runtime::new().expect("QuickJS Runtime::new misslyckades");
     rt.set_max_stack_size(MAX_STACK_SIZE);
     rt.set_memory_limit(MAX_MEMORY);
 
-    // Interrupt-handler: avbryt efter MAX_LOOP_ITERATIONS operationer
-    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let counter_clone = counter.clone();
+    let should_abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let abort_clone = should_abort.clone();
+
+    // Interrupt-handler via rquickjs API + separat timeout-tråd
     rt.set_interrupt_handler(Some(Box::new(move || {
-        let n = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        n >= MAX_LOOP_ITERATIONS
+        abort_clone.load(std::sync::atomic::Ordering::Relaxed)
     })));
 
+    // Starta timeout-tråd som sätter flaggan efter MAX_EVAL_MS
+    let abort_for_timeout = should_abort.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(MAX_EVAL_MS));
+        abort_for_timeout.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
     let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
-    (rt, ctx)
+
+    (
+        rt,
+        ctx,
+        InterruptState {
+            _abort_flag: should_abort,
+        },
+    )
+}
+
+/// Cleanup för InterruptState — droppar Arc (no-op om inga referenser kvar)
+#[cfg(feature = "js-eval")]
+pub(crate) fn free_interrupt_state(state: InterruptState) {
+    drop(state);
 }
 
 use serde::{Deserialize, Serialize};
@@ -245,6 +275,49 @@ pub fn detect_js_snippets(html: &str) -> JsDetectionResult {
         total_inline_scripts,
         total_event_handlers,
     }
+}
+
+/// Extrahera inline scripts i dokumentordning för lifecycle-exekvering
+///
+/// Returnerar fullständig kod (ej trunkerad) för varje inline script.
+/// Filtrerar bort externa scripts (src=), type="application/json", type="application/ld+json".
+#[cfg(feature = "js-eval")]
+pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
+    let mut scripts = Vec::new();
+    let lower = html.to_lowercase();
+    let mut search_from = 0;
+
+    while let Some(start) = lower[search_from..].find("<script") {
+        let abs_start = search_from + start;
+        if let Some(tag_end) = lower[abs_start..].find('>') {
+            let content_start = abs_start + tag_end + 1;
+            if let Some(end) = lower[content_start..].find("</script>") {
+                let tag_text = &lower[abs_start..abs_start + tag_end];
+
+                // Skippa externa scripts
+                let is_external = tag_text.contains("src=");
+                // Skippa JSON/LD+JSON (SSR-data, inte körbara)
+                let is_json = tag_text.contains("application/json")
+                    || tag_text.contains("application/ld+json")
+                    || tag_text.contains("importmap");
+
+                if !is_external && !is_json {
+                    let code = html[content_start..content_start + end].trim();
+                    if !code.is_empty() {
+                        scripts.push(code.to_string());
+                    }
+                }
+
+                search_from = content_start + end + 9;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    scripts
 }
 
 /// Kolla om JS-koden troligen påverkar DOM-innehåll
@@ -485,9 +558,9 @@ pub fn eval_js(code: &str) -> JsEvalResult {
         };
     }
 
-    let (_rt, ctx) = create_sandboxed_runtime();
+    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
 
-    ctx.with(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
+    let result = ctx.with(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
         Ok(result) => {
             let value_str = quickjs_value_to_string(&ctx, &result);
             JsEvalResult {
@@ -511,7 +584,9 @@ pub fn eval_js(code: &str) -> JsEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
-    })
+    });
+    free_interrupt_state(interrupt_ptr);
+    result
 }
 
 /// Evalera flera JS-uttryck med delad kontext (persistent state)
@@ -523,7 +598,7 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
     // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
-    let (_rt, ctx) = create_sandboxed_runtime();
+    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
     let mut results = Vec::with_capacity(snippets.len());
 
     ctx.with(|ctx| {
@@ -562,6 +637,8 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
             }
         }
     });
+
+    free_interrupt_state(interrupt_ptr);
 
     JsBatchResult {
         results,
@@ -1077,12 +1154,11 @@ mod tests {
 
     #[test]
     #[cfg(feature = "js-eval")]
-    #[ignore = "QuickJS interrupt handler i rquickjs 0.11 triggar inte under ctx.with() — behöver raw FFI-lösning"]
     fn test_infinite_loop_aborts() {
-        let result = eval_js("var x=0; while(x<1000000) { x++; } x");
+        let result = eval_js("var x=0; while(true) { x++; } x");
         assert!(
             result.error.is_some(),
-            "Loop som överskrider limit borde ge fel: value={:?}",
+            "Oändlig loop borde avbrytas: value={:?}",
             result.value
         );
         assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
@@ -1090,12 +1166,11 @@ mod tests {
 
     #[test]
     #[cfg(feature = "js-eval")]
-    #[ignore = "QuickJS interrupt handler i rquickjs 0.11 triggar inte under ctx.with() — behöver raw FFI-lösning"]
     fn test_large_for_loop_aborts() {
-        let result = eval_js("var s=0; for(var i=0; i<1000000; i++) { s+=i; } s");
+        let result = eval_js("var s=0; for(var i=0; i<100000000; i++) { s+=i; } s");
         assert!(
             result.error.is_some(),
-            "Stor loop borde ge fel: value={:?}",
+            "Stor loop (100M) borde avbrytas: value={:?}",
             result.value
         );
         assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
@@ -1123,13 +1198,50 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_sandboxed_runtime_creates() {
-        let (rt, ctx) = create_sandboxed_runtime();
+        let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
         // Verifiera att runtime och kontext skapas utan panik
         ctx.with(|ctx| {
             let result: rquickjs::Result<i32> = ctx.eval("1 + 1");
             assert_eq!(result.unwrap(), 2, "Grundläggande eval borde fungera");
         });
-        drop(ctx);
-        drop(rt);
+        free_interrupt_state(interrupt_ptr);
+    }
+
+    // ─── extract_ordered_scripts tester ─────────────────────────────────────
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_basic() {
+        let html =
+            r#"<html><body><script>var x = 1;</script><script>var y = 2;</script></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 2, "Borde hitta 2 inline scripts");
+        assert_eq!(scripts[0], "var x = 1;");
+        assert_eq!(scripts[1], "var y = 2;");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_skips_external() {
+        let html = r##"<html><body><script src="app.js"></script><script>var x = 1;</script></body></html>"##;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 1, "Borde skippa extern script");
+        assert_eq!(scripts[0], "var x = 1;");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_skips_json() {
+        let html = r#"<html><body><script type="application/json">{"key":"val"}</script><script>var x = 1;</script></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 1, "Borde skippa JSON script");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_empty() {
+        let html = r#"<html><body><p>No scripts</p></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert!(scripts.is_empty(), "Borde inte hitta scripts");
     }
 }

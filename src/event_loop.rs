@@ -774,14 +774,16 @@ mod tests {
     where
         F: for<'js> FnOnce(&rquickjs::Runtime, Ctx<'js>, SharedEventLoop) -> R,
     {
-        let (rt, qctx) = crate::js_eval::create_sandboxed_runtime();
-        qctx.with(|ctx| {
+        let (rt, qctx, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+        let result = qctx.with(|ctx| {
             let el = Rc::new(RefCell::new(EventLoopState::new()));
             register_event_loop(&ctx, Rc::clone(&el)).expect("register_event_loop borde lyckas");
             let result = f(&rt, ctx, Rc::clone(&el));
             el.borrow_mut().clear_persistent();
             result
-        })
+        });
+        crate::js_eval::free_interrupt_state(interrupt_ptr);
+        result
     }
 
     #[test]

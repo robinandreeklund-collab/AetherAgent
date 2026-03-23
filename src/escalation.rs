@@ -19,6 +19,8 @@ pub enum ParseTier {
     StaticParse,
     /// Tier 2: Sandboxad QuickJS + DOM — kör inline scripts mot ArenaDom, ~10-50 ms
     QuickJsDom { script_count: u32 },
+    /// Tier 2.5: QuickJS + DOM + lifecycle — DOMContentLoaded/load events, ~50-200 ms
+    QuickJsLifecycle { script_count: u32 },
     /// Tier 3: Blitz render — ren Rust CSS-layout, ~10-50 ms
     BlitzRender,
     /// Tier 4: Chrome CDP — fullständig browser, ~500-2000 ms
@@ -155,6 +157,26 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
                 },
                 reason: "SPA-skelett utan server-renderat innehåll".to_string(),
                 confidence: 0.8,
+                analysis_time_us: start.elapsed().as_micros() as u64,
+            };
+        }
+
+        // Framework-sidor med DOMContentLoaded/load-beroende → Tier 2.5
+        let needs_lifecycle = js_info.has_framework
+            || html_lower.contains("domcontentloaded")
+            || html_lower.contains("addeventlistener")
+            || html_lower.contains("onload");
+
+        if needs_lifecycle {
+            return TierDecision {
+                tier: ParseTier::QuickJsLifecycle {
+                    script_count: js_info.total_inline_scripts,
+                },
+                reason: format!(
+                    "{} inline scripts + framework/lifecycle — QuickJS+lifecycle",
+                    js_info.total_inline_scripts
+                ),
+                confidence: 0.80,
                 analysis_time_us: start.elapsed().as_micros() as u64,
             };
         }
@@ -430,5 +452,25 @@ mod tests {
             !is_spa_shell(&not_spa.to_lowercase()),
             "Borde INTE flagga sida med mycket innehåll som SPA"
         );
+    }
+
+    #[test]
+    fn test_tier_lifecycle_for_framework_page() {
+        let html = r##"<html><body>
+            <div id="app">Content</div>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.getElementById('app').textContent = 'Loaded';
+                });
+            </script>
+        </body></html>"##;
+        let decision = select_tier(html, "https://example.com");
+        match &decision.tier {
+            ParseTier::QuickJsLifecycle { .. } => {}
+            other => panic!(
+                "Borde välja QuickJsLifecycle för DOMContentLoaded-sida, fick {:?}",
+                other
+            ),
+        }
     }
 }
