@@ -1149,4 +1149,48 @@ mod tests {
         // Ska ha inline styles
         assert!(result.html.contains("style="), "Borde ha inline styles");
     }
+
+    #[test]
+    fn test_css_properties_survive_pipeline() {
+        // Diagnostik: kontrollera att box-shadow, gradient, transform, opacity,
+        // float bevaras genom CSS-compilern
+        let html = r##"<html><head><style>
+            nav { display: flex; background: linear-gradient(to right, #306998, #FFD43B); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+            nav a { display: inline-block; padding: 10px; color: white; }
+            .float-left { float: left; width: 200px; }
+            .center { transform: translate(-50%, -50%); position: absolute; top: 50%; left: 50%; opacity: 0.8; }
+            .ellipsis { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        </style></head><body>
+            <nav><a href="#">Python</a><a href="#">PSF</a><a href="#">Docs</a></nav>
+            <div class="float-left">Sidebar</div>
+            <div class="center">Centered</div>
+            <div class="ellipsis">Very long text that should be truncated</div>
+        </body></html>"##;
+
+        let result = compile_css(html, &ViewportConfig::default());
+        let out = &result.html;
+
+        // Varje CSS-property borde finnas i output (inline style)
+        assert!(
+            out.contains("linear-gradient") || out.contains("background"),
+            "Gradient borde bevaras: saknas i output"
+        );
+        assert!(
+            out.contains("box-shadow"),
+            "box-shadow borde bevaras: saknas i output.\nOutput: {}",
+            &out[..out.len().min(2000)]
+        );
+        assert!(
+            out.contains("transform"),
+            "transform borde bevaras: saknas i output"
+        );
+        assert!(
+            out.contains("opacity"),
+            "opacity borde bevaras: saknas i output"
+        );
+        assert!(
+            out.contains("display: flex") || out.contains("display:flex"),
+            "display:flex borde bevaras"
+        );
+    }
 }

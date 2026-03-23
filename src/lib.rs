@@ -1310,6 +1310,13 @@ pub fn render_html_to_png(
     let html_cleaned = strip_script_tags(html);
     let html_no_scripts = strip_noscript(&html_cleaned);
 
+    // ── Steg 1.6: Modernizr-klasser ──
+    // Många sajter använder Modernizr/JS-baserad feature detection som lägger till
+    // klasser som "js", "no-touch", "flexbox" på <html>. Utan JS körs aldrig denna
+    // detection → desktop CSS (float:left, inline-block nav) appliceras aldrig.
+    // Vi simulerar en modern desktop-miljö genom att ersätta "no-js" → "js no-touch".
+    let html_no_scripts = apply_modernizr_classes(&html_no_scripts);
+
     // ── Steg 2: Förbered HTML för rendering ──
     // loading=lazy→eager, data-src→src, picture→img, srcset→src
     let html = prepare_html_for_render(&html_no_scripts, width);
@@ -1949,6 +1956,74 @@ fn strip_script_tags(html: &str) -> String {
         }
     }
     result.push_str(remaining);
+    result
+}
+
+/// Simulera Modernizr/JS feature detection-klasser.
+/// Många sajter (python.org, w3schools, etc.) har `<html class="no-js">` och CSS-regler
+/// som `.no-touch .nav-item { float: left }`. Utan JS ändras aldrig "no-js" → "js",
+/// så desktop-layout appliceras aldrig.
+/// Denna funktion:
+/// 1. Ersätter "no-js" med "js" i html/body class
+/// 2. Lägger till "no-touch" (desktop touch detection)
+#[cfg(feature = "blitz")]
+fn apply_modernizr_classes(html: &str) -> String {
+    let mut result = html.to_string();
+
+    // Hantera <html class="no-js ..."> → <html class="js no-touch ...">
+    // Case-insensitive sökning
+    let lower = result.to_ascii_lowercase();
+    if let Some(html_tag_start) = lower.find("<html") {
+        if let Some(tag_end) = lower[html_tag_start..].find('>') {
+            let tag = &result[html_tag_start..html_tag_start + tag_end + 1];
+
+            // Hitta class-attributet
+            let tag_lower = tag.to_ascii_lowercase();
+            if let Some(class_pos) = tag_lower.find("class=\"") {
+                let class_start = class_pos + "class=\"".len();
+                if let Some(class_end) = tag[class_start..].find('"') {
+                    let classes = &tag[class_start..class_start + class_end];
+                    let mut new_classes: Vec<&str> = classes.split_whitespace().collect();
+
+                    // Ersätt "no-js" med "js"
+                    let mut changed = false;
+                    for c in &mut new_classes {
+                        if c.eq_ignore_ascii_case("no-js") {
+                            *c = "js";
+                            changed = true;
+                        }
+                    }
+
+                    // Lägg till "no-touch" om det inte redan finns
+                    let has_no_touch = new_classes
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case("no-touch"));
+                    if !has_no_touch {
+                        new_classes.push("no-touch");
+                        changed = true;
+                    }
+
+                    if changed {
+                        let new_class_str = new_classes.join(" ");
+                        let abs_class_start = html_tag_start + class_start;
+                        let abs_class_end = abs_class_start + class_end;
+                        if result.is_char_boundary(abs_class_start)
+                            && result.is_char_boundary(abs_class_end)
+                        {
+                            result.replace_range(abs_class_start..abs_class_end, &new_class_str);
+                        }
+                    }
+                }
+            } else {
+                // Ingen class — lägg till class="js no-touch"
+                let insert_pos = html_tag_start + 5; // efter "<html"
+                if result.is_char_boundary(insert_pos) {
+                    result.insert_str(insert_pos, " class=\"js no-touch\"");
+                }
+            }
+        }
+    }
+
     result
 }
 
