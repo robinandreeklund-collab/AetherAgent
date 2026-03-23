@@ -153,11 +153,11 @@ fn transform_single_css(css: &str, viewport: &ViewportConfig) -> String {
         Err(_) => return css.to_string(), // Fallback vid parse-error
     };
 
-    // Konfigurera targets — Chrome 40 tvingar maximal downlevel av moderna CSS
-    // features (nesting, :is(), color-mix(), @layer, etc.) till simpla properties
-    // som Blitz kan tolka. var() resolvas separat i resolve_css_variables().
+    // Chrome 120 — behåller modern CSS (color-mix, @layer, nesting, logical
+    // properties) som ger bättre rendering i Blitz. var() resolvas separat
+    // i resolve_css_variables() innan denna transform körs.
     let targets = Targets::from(Browsers {
-        chrome: Some(40 << 16), // Chrome 40 — maximal downleveling för Blitz
+        chrome: Some(120 << 16),
         ..Default::default()
     });
 
