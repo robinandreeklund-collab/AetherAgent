@@ -68,8 +68,14 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
     let (html_with_transformed_css, blocks_processed, rules_count) =
         transform_and_filter_css(html, viewport);
 
+    // Steg 2.5: Resolve CSS custom properties (var(--x)) till konkreta värden
+    let html_with_resolved_vars = resolve_css_variables(&html_with_transformed_css);
+
+    // Steg 2.6: Lägg till system font fallbacks
+    let html_with_fonts = add_font_fallbacks(&html_with_resolved_vars);
+
     // Steg 3: Inline all CSS till style="" med css-inline
-    let final_html = inline_css_to_attributes(&html_with_transformed_css);
+    let final_html = inline_css_to_attributes(&html_with_fonts);
 
     // Validering: css-inline kan producera trasig output för extremt komplex CSS.
     // Snabb check: output borde inte vara dramatiskt mindre än input (indikerar att
@@ -145,10 +151,11 @@ fn transform_single_css(css: &str, viewport: &ViewportConfig) -> String {
         Err(_) => return css.to_string(), // Fallback vid parse-error
     };
 
-    // Konfigurera targets — "Chrome 40" tvingar downlevel av alla moderna features
-    // Detta resolver CSS nesting, :is(), color functions, logical properties etc.
+    // Konfigurera targets — Chrome 120 stödjer CSS vars, @layer, nesting, :is(),
+    // color-mix(), logical properties. LightningCSS behåller var() och moderna
+    // features som Blitz kan hantera istället för att strippa allt.
     let targets = Targets::from(Browsers {
-        chrome: Some(40 << 16), // Chrome 40 — tvingar maximal downleveling
+        chrome: Some(120 << 16), // Chrome 120 — modern CSS med var()-stöd
         ..Default::default()
     });
 
@@ -388,6 +395,257 @@ fn evaluate_single_media_feature(feature: &str, viewport: &ViewportConfig) -> bo
 }
 
 // ─── Steg 3: css-inline ─────────────────────────────────────────────────────
+
+/// Resolve CSS custom properties: extrahera :root { --x: value; } och
+/// substituera var(--x) / var(--x, fallback) genom hela CSS:en.
+///
+/// Hanterar:
+/// - `:root { --primary: #0066cc; }` → extrahera variabel-mappning
+/// - `color: var(--primary)` → `color: #0066cc`
+/// - `color: var(--missing, red)` → `color: red` (fallback)
+/// - Nästlade var(): `var(--x, var(--y, blue))` → resolvas rekursivt
+fn resolve_css_variables(html: &str) -> String {
+    // Steg 1: Extrahera alla custom properties från :root, html, body block
+    let vars = extract_custom_properties(html);
+    if vars.is_empty() {
+        return html.to_string();
+    }
+
+    // Steg 2: Substituera var(--x) och var(--x, fallback) överallt
+    substitute_var_functions(html, &vars)
+}
+
+/// Extrahera CSS custom properties (--name: value) från :root, html, body block
+fn extract_custom_properties(html: &str) -> std::collections::HashMap<String, String> {
+    let mut vars = std::collections::HashMap::new();
+
+    // Hitta :root { ... }, html { ... }, body { ... } block i <style>
+    let lower = html.to_ascii_lowercase();
+    for selector in &[":root", "html", "body"] {
+        let mut search_from = 0;
+        while let Some(pos) = lower[search_from..].find(selector) {
+            let abs_pos = search_from + pos;
+            // Hitta öppnande {
+            let after = &html[abs_pos..];
+            if let Some(brace_start) = after.find('{') {
+                // Hitta matchande }
+                let block_start = abs_pos + brace_start + 1;
+                let mut depth = 1;
+                let mut block_end = block_start;
+                for (i, ch) in html[block_start..].char_indices() {
+                    match ch {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                block_end = block_start + i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Parsa custom properties ur blocket
+                let block = &html[block_start..block_end];
+                for decl in block.split(';') {
+                    let trimmed = decl.trim();
+                    if let Some(colon) = trimmed.find(':') {
+                        let name = trimmed[..colon].trim();
+                        if name.starts_with("--") {
+                            let value = trimmed[colon + 1..].trim().to_string();
+                            vars.insert(name.to_string(), value);
+                        }
+                    }
+                }
+                search_from = block_end + 1;
+            } else {
+                search_from = abs_pos + selector.len();
+            }
+        }
+    }
+    vars
+}
+
+/// Substituera var(--name) och var(--name, fallback) i HTML/CSS
+fn substitute_var_functions(
+    html: &str,
+    vars: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut result = html.to_string();
+    // Max 5 iterationer — hanterar nästlade var()
+    for _ in 0..5 {
+        let lower = result.to_ascii_lowercase();
+        if !lower.contains("var(--") {
+            break;
+        }
+        let mut new_result = String::with_capacity(result.len());
+        let mut remaining = result.as_str();
+
+        while let Some(pos) = remaining.to_ascii_lowercase().find("var(--") {
+            new_result.push_str(&remaining[..pos]);
+            let after = &remaining[pos..];
+
+            // Hitta matchande ) med nesting — starta efter "var("
+            let open_paren = match after.find('(') {
+                Some(p) => p,
+                None => {
+                    new_result.push_str("var(--");
+                    remaining = &remaining[pos + 6..];
+                    continue;
+                }
+            };
+            let mut depth = 0;
+            let mut end = 0;
+            let mut found_close = false;
+            for (i, ch) in after[open_paren..].char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = open_paren + i + 1;
+                            found_close = true;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if !found_close || end <= open_paren + 2 {
+                // Ingen matchande ) — behåll var( och fortsätt
+                new_result.push_str("var(--");
+                remaining = &remaining[pos + 6..];
+                continue;
+            }
+
+            let inner_start = open_paren + 1;
+            let inner_end = end - 1;
+            let var_expr = &after[inner_start..inner_end];
+
+            // Parsa: --name eller --name, fallback
+            let (var_name, fallback) = if let Some(comma) = find_top_level_comma(var_expr) {
+                let name = var_expr[..comma].trim();
+                let fb = var_expr[comma + 1..].trim();
+                (name, Some(fb))
+            } else {
+                (var_expr.trim(), None)
+            };
+
+            // Resolva
+            if let Some(value) = vars.get(var_name) {
+                new_result.push_str(value);
+            } else if let Some(fb) = fallback {
+                new_result.push_str(fb);
+            } else {
+                // Ingen resolution — behåll original var()
+                new_result.push_str(&after[..end]);
+            }
+
+            remaining = &remaining[pos + end..];
+        }
+        new_result.push_str(remaining);
+        result = new_result;
+    }
+    result
+}
+
+/// Hitta första komma på toppnivå (utanför nästlade parenteser)
+fn find_top_level_comma(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            ',' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Lägg till system font-fallback i font-family deklarationer.
+/// Säkerställer att text renderas korrekt även om custom fonts inte laddas.
+/// Mappar vanliga webfonter till system-equivalenter.
+pub fn add_font_fallbacks(html: &str) -> String {
+    // Vanliga webfonter → system font mappning
+    const FONT_MAP: &[(&str, &str)] = &[
+        ("inter", "system-ui, -apple-system, sans-serif"),
+        ("roboto", "Arial, Helvetica, sans-serif"),
+        ("open sans", "Helvetica, Arial, sans-serif"),
+        ("lato", "Helvetica, Arial, sans-serif"),
+        ("montserrat", "Verdana, sans-serif"),
+        ("poppins", "Verdana, sans-serif"),
+        ("source sans", "Helvetica, Arial, sans-serif"),
+        ("nunito", "Verdana, sans-serif"),
+        ("raleway", "Verdana, sans-serif"),
+        ("playfair", "Georgia, serif"),
+        ("merriweather", "Georgia, serif"),
+        ("noto sans", "Arial, Helvetica, sans-serif"),
+        ("noto serif", "Georgia, serif"),
+        ("ubuntu", "system-ui, sans-serif"),
+        ("fira sans", "system-ui, sans-serif"),
+    ];
+
+    let mut result = html.to_string();
+
+    // Hitta alla font-family deklarationer och lägg till fallbacks
+    for &(web_font, fallback) in FONT_MAP {
+        // Matcha: font-family: "Inter" eller font-family: Inter (case-insensitive)
+        let lower = result.to_ascii_lowercase();
+        let search = web_font;
+        let mut new_result = String::with_capacity(result.len());
+        let mut remaining = result.as_str();
+        let mut changed = false;
+
+        while let Some(pos) = remaining.to_ascii_lowercase().find(search) {
+            // Kolla att det är i en font-family-kontext
+            let before = &remaining[..pos];
+            let is_font_ctx = before
+                .rfind("font-family")
+                .map(|fp| {
+                    // Kontrollera att inget ';' eller '}' finns mellan font-family och fonten
+                    !before[fp..].contains(';') || before[fp..pos].contains(':')
+                })
+                .unwrap_or(false);
+
+            if is_font_ctx {
+                // Hitta slutet av font-family-värdet (nästa ; eller } eller ")
+                let after_font = &remaining[pos + search.len()..];
+                let value_end = after_font
+                    .find(|c: char| c == ';' || c == '}' || c == '"' || c == '\'')
+                    .unwrap_or(after_font.len());
+
+                let current_value = &after_font[..value_end];
+                // Lägg bara till fallback om inte redan finns
+                if !current_value.to_ascii_lowercase().contains("sans-serif")
+                    && !current_value.to_ascii_lowercase().contains("serif")
+                    && !current_value.to_ascii_lowercase().contains("monospace")
+                    && !current_value.to_ascii_lowercase().contains("system-ui")
+                {
+                    new_result.push_str(&remaining[..pos + search.len()]);
+                    new_result.push_str(current_value);
+                    new_result.push_str(", ");
+                    new_result.push_str(fallback);
+                    remaining = &remaining[pos + search.len() + value_end..];
+                    changed = true;
+                    continue;
+                }
+            }
+            new_result.push_str(&remaining[..pos + search.len()]);
+            remaining = &remaining[pos + search.len()..];
+        }
+        new_result.push_str(remaining);
+        if changed {
+            result = new_result;
+        }
+    }
+    result
+}
 
 /// Inline all CSS till style=""-attribut med css-inline craten.
 /// Tar bort <style>-block efter inlining.

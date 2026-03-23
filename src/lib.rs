@@ -1308,7 +1308,7 @@ pub fn render_html_to_png(
     let html_no_scripts = strip_noscript(&html_cleaned);
 
     // ── Steg 2: Förbered HTML för rendering ──
-    // Resolve lazy images, picture elements, srcset → konkret src
+    // loading=lazy→eager, data-src→src, picture→img, srcset→src
     let html = prepare_html_for_render(&html_no_scripts, width);
 
     // ── Steg 3: CSS Compiler Pipeline ──
@@ -1405,16 +1405,16 @@ pub fn render_html_to_png(
     }
 }
 
-/// Strippa CSS-gradienter som kraschar Vello (GradientLut index-bugg).
-/// Ersätter `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)` med
-/// en solid färg — bevarar layout men undviker Vello-panik.
+/// Sanitera CSS-gradienter: behåll fungerande gradienter, fixa de som kraschar Vello.
+/// Vello GradientLut kraschar på gradienter med <2 color stops eller extremt korta stops.
+/// Strategi: räkna color stops — om ≥2 och rimliga → behåll. Annars → fallback-färg.
+/// conic-gradient strippas alltid (Vello stödjer inte).
 #[cfg(feature = "blitz")]
 fn strip_css_gradients(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut remaining = html;
 
     loop {
-        // Hitta nästa gradient-deklaration
         let lower = remaining.to_ascii_lowercase();
         let positions = [
             lower.find("linear-gradient("),
@@ -1429,7 +1429,6 @@ fn strip_css_gradients(html: &str) -> String {
         match earliest {
             Some(pos) => {
                 result.push_str(&remaining[..pos]);
-                // Hitta matchande slutparentes med räkning av nesting
                 let after = &remaining[pos..];
                 let paren_start = match after.find('(') {
                     Some(p) => p,
@@ -1453,10 +1452,29 @@ fn strip_css_gradients(html: &str) -> String {
                         _ => {}
                     }
                 }
-                // Extrahera en fallback-färg från gradient-argumenten
+
+                let full_gradient = &after[..end];
                 let gradient_body = &after[paren_start + 1..end.saturating_sub(1)];
-                let fallback = extract_gradient_fallback_color(gradient_body);
-                result.push_str(&fallback);
+                let is_conic = lower[pos..].starts_with("conic");
+                let is_repeating_conic = lower[pos..].starts_with("repeating-conic");
+
+                // conic-gradient → alltid fallback (Vello stödjer inte)
+                if is_conic || is_repeating_conic {
+                    let fallback = extract_gradient_fallback_color(gradient_body);
+                    result.push_str(&fallback);
+                } else {
+                    // Räkna color stops (komma-separerade delar minus direction)
+                    let color_stop_count = count_gradient_color_stops(gradient_body);
+                    if color_stop_count >= 2 {
+                        // ≥2 color stops — gradient borde vara säker för Vello
+                        result.push_str(full_gradient);
+                    } else {
+                        // <2 stops — kraschar Vello → fallback
+                        let fallback = extract_gradient_fallback_color(gradient_body);
+                        result.push_str(&fallback);
+                    }
+                }
+
                 remaining = &remaining[pos + end..];
             }
             None => {
@@ -1466,6 +1484,29 @@ fn strip_css_gradients(html: &str) -> String {
         }
     }
     result
+}
+
+/// Räkna color stops i en gradient (exkludera direction-argument)
+#[cfg(feature = "blitz")]
+fn count_gradient_color_stops(body: &str) -> usize {
+    let parts: Vec<&str> = body.split(',').collect();
+    if parts.is_empty() {
+        return 0;
+    }
+    // Första delen kan vara direction (to right, 45deg, circle, etc.)
+    let first = parts[0].trim().to_ascii_lowercase();
+    let has_direction = first.starts_with("to ")
+        || first.ends_with("deg")
+        || first.ends_with("rad")
+        || first.ends_with("turn")
+        || first.starts_with("circle")
+        || first.starts_with("ellipse")
+        || first.contains(" at ");
+    if has_direction {
+        parts.len() - 1
+    } else {
+        parts.len()
+    }
 }
 
 /// Extrahera en användbar fallback-färg från gradient-argument.
@@ -1651,19 +1692,42 @@ fn transform_img_tag(tag: &str, viewport_width: u32) -> String {
         result.replace_range(pos..end, "loading='eager'");
     }
 
-    // 2. data-src → src (om src saknas eller är placeholder-GIF)
+    // 2. data-src → src (om src saknas eller är placeholder)
     let lower = result.to_ascii_lowercase();
     let has_placeholder_src = lower.contains("src=\"data:image/gif")
         || lower.contains("src='data:image/gif")
         || lower.contains("src=\"data:image/svg")
         || lower.contains("src='data:image/svg")
+        || lower.contains("src=\"data:image/png")
+        || lower.contains("src='data:image/png")
         || lower.contains("src=\"about:blank")
-        || lower.contains("src='about:blank");
+        || lower.contains("src='about:blank")
+        || lower.contains("src=\"\"")
+        || lower.contains("src=''");
 
-    if let Some(data_src) = extract_attr_value(&result, "data-src") {
-        if has_placeholder_src || !lower.contains(" src=") {
-            // Ersätt placeholder-src med data-src
-            result = set_or_replace_attr(&result, "src", &data_src);
+    // Prova flera lazy-load attribut i prioritetsordning
+    let lazy_attrs = ["data-src", "data-lazy-src", "data-original", "data-lazy"];
+    let mut resolved = false;
+    for attr in &lazy_attrs {
+        if let Some(real_src) = extract_attr_value(&result, attr) {
+            if !real_src.is_empty()
+                && !real_src.starts_with("data:")
+                && (has_placeholder_src || !lower.contains(" src="))
+            {
+                result = set_or_replace_attr(&result, "src", &real_src);
+                resolved = true;
+                break;
+            }
+        }
+    }
+
+    // Om inte resolvad via data-src: prova data-srcset
+    if !resolved {
+        if let Some(data_srcset) = extract_attr_value(&result, "data-srcset") {
+            let best = pick_best_srcset_url(&data_srcset, viewport_width);
+            if !best.is_empty() && (has_placeholder_src || !lower.contains(" src=")) {
+                result = set_or_replace_attr(&result, "src", &best);
+            }
         }
     }
 

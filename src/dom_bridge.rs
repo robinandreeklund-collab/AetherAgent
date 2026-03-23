@@ -2918,6 +2918,95 @@ fn make_element_object<'js>(
         }
     }
 
+    // slot — element.slot property (för slotted content)
+    {
+        let s = state.borrow();
+        let slot_val = s
+            .arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.attributes.get("slot").cloned())
+            .unwrap_or_default();
+        obj.set("slot", slot_val.as_str())?;
+
+        // Om detta är ett <slot>-element: lägg till assignedNodes()
+        let is_slot = s
+            .arena
+            .nodes
+            .get(key)
+            .map(|n| n.tag.as_deref() == Some("slot"))
+            .unwrap_or(false);
+        if is_slot {
+            let slot_name = s
+                .arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.attributes.get("name").cloned())
+                .unwrap_or_default();
+            // Hitta host-elementets barn som matchar slot-name
+            let parent_key = s.arena.nodes.get(key).and_then(|n| n.parent);
+            // Gå uppåt tills vi hittar shadow host (template → host)
+            let host_key = parent_key.and_then(|pk| {
+                s.arena.nodes.get(pk).and_then(|pn| {
+                    if pn.tag.as_deref() == Some("template") {
+                        pn.parent
+                    } else {
+                        Some(pk)
+                    }
+                })
+            });
+            drop(s);
+
+            // assignedNodes() — returnera array av slotted barn
+            let assigned: Vec<NodeKey> = if let Some(hk) = host_key {
+                let s = state.borrow();
+                s.arena
+                    .nodes
+                    .get(hk)
+                    .map(|host| {
+                        host.children
+                            .iter()
+                            .filter(|&&child| {
+                                let child_slot = s
+                                    .arena
+                                    .nodes
+                                    .get(child)
+                                    .and_then(|cn| cn.attributes.get("slot").cloned())
+                                    .unwrap_or_default();
+                                child_slot == slot_name
+                            })
+                            .copied()
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+
+            let assigned_arr = rquickjs::Array::new(ctx.clone())?;
+            for (i, &node_key) in assigned.iter().enumerate() {
+                let el = make_element_object(ctx, node_key, state)?;
+                assigned_arr.set(i, el)?;
+            }
+            obj.set(
+                "assignedNodes",
+                Function::new(
+                    ctx.clone(),
+                    move |_: ()| -> rquickjs::Result<rquickjs::Array<'_>> {
+                        Err(rquickjs::Error::new_from_js(
+                            "function",
+                            "not callable after creation",
+                        ))
+                    },
+                )?,
+            )?;
+            // Direkt property istf metod (enklare)
+            obj.set("_assignedNodes", assigned_arr)?;
+        } else {
+            drop(s);
+        }
+    }
+
     // classList
     obj.set("classList", make_class_list(ctx, key, state)?)?;
 
