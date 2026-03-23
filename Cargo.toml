@@ -61,9 +61,7 @@ taffy = { version = "0.9", optional = true }
 parley = { version = "0.6", optional = true }
 fontique = { version = "0.6", optional = true }
 skrifa = { version = "0.37", optional = true }
-anyrender = { version = "0.6", optional = true }
-anyrender_vello_cpu = { version = "0.7", optional = true }
-peniko = { version = "0.5", optional = true }
+vello_cpu = { version = "0.0.3", features = ["text"], optional = true }
 png = { version = "0.17", optional = true }
 
 [dev-dependencies]
@@ -78,7 +76,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
-blitz = ["taffy", "parley", "fontique", "skrifa", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss"]
+blitz = ["taffy", "parley", "fontique", "skrifa", "vello_cpu", "png", "base64", "css-inline", "lightningcss"]
 cdp = ["headless_chrome"]
 
 [[bin]]
