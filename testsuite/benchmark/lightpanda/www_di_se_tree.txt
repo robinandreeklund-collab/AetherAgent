@@ -36,7 +36,7 @@
     54 button 'Okej'
  56 paragraph
   57 'Hoppa till innehållet'
- 60 link 'OMXSPI -1,56% 17:33'
+ 60 link 'OMXSPI 0,00% 08:00'
  61 separator
  62 link 'S&P 500 -1,51% 22:30'
  63 separator
@@ -44,7 +44,7 @@
  65 separator
  66 link 'DAX -2,01% 18:00'
  67 separator
- 68 link 'NIKKEI 0,00% 01:30'
+ 68 link 'NIKKEI -3,48% 07:30'
  71 article
   73 article
    76 'Nordens största affärstidning • Mån 23 mar 2026'
@@ -258,389 +258,383 @@
  509 article
   510 paragraph
    511 'Di TV'
-  513 link 'Håll koll: Marknadshändelserna kommande vecka'
-  514 link 'Börsmorgon 20 mars 2026'
-  515 link 'Micael Johansson: ”AI avgörande för att vinna krig”'
+  513 link 'LIVE: Börsmorgon 23 mars'
+  514 link 'Morgonkoll: Upptrappning av kriget i Iran – guldet fortsätter falla'
+  515 link 'Håll koll: Marknadshändelserna kommande vecka'
  523 article
-  524 link 'Just nu: SKF får sänkt riktkurs – här är dagens rekar'
+  524 link 'Just nu: Finska jätten köper plan för miljarder av börssuccén'
  525 article
-  526 link 'Just nu: Kivra skjuter på planerna om eget ”bank-id”'
- 528 article
-  529 link 'JUST NU: Mörk start på veckan Börsen mot nya nedgångar Väntad press på cykliskt Oljepriset i schack'
+  526 link 'Just nu: Guldpriset rasar i inflationsnojan'
+ 527 article
+  528 link 'Just nu: Flera banker höjer boräntor: ”Kriget skakar om”'
  530 article
-  531 link 'Asienbörser under press efter Trumps nya hot'
+  531 link 'JUST NU: Mörk start på veckan Börsen mot nya nedgångar Väntad press på cykliskt Oljepriset i schack'
  532 article
-  533 link 'Strategerna: ”Dystert och skakigt” – kan vända snabbt Experter ser hur börsen går mot röd måndag – och ännu ett orosmoln'
- 535 article
-  536 link 'Rutte säker: Hormuzsundet kommer öppnas igen'
+  533 link 'Asienbörser under press efter Trumps nya hot'
+ 534 article
+  535 link 'Strategerna: ”Dystert och skakigt” – kan vända snabbt Experter ser hur börsen går mot röd måndag – och ännu ett orosmoln'
  537 article
-  538 link 'IEA: Krisen hotar globala ekonomin'
+  538 link 'Rutte säker: Hormuzsundet kommer öppnas igen'
  539 article
-  540 link 'Israel: Storskalig attack mot Teheran'
+  540 link 'IEA: Krisen hotar globala ekonomin'
  541 article
-  542 link 'Amerikansk toppmilitär till Irans befolkning: Stanna inne'
+  542 link 'Israel: Storskalig attack mot Teheran'
  543 article
-  544 link 'Börsveteranen avvaktar med notering: ”Har kylts av” Problemet med trenden: ”Inte bra för näringslivet”'
- 550 link 'Stormens öga ”Investeringar är det smartaste man kan ägna sig åt” 37 min'
- 552 link 'Wallnor & PM Wallnor & PM – ”Allt ska ske med statens hjälp” 15 min'
- 553 separator
- 554 link 'Alla poddar'
- 557 heading 'L:s ödesmöte'
+  544 link 'Amerikansk toppmilitär till Irans befolkning: Stanna inne'
+ 547 heading 'Börsmorgon'
+ 548 article
+  551 figure 'LIVE: Börsmorgon 23 mars Stäng'
+   554 'LIVE: Börsmorgon 23 mars'
+   555 button 'Stäng'
+  556 link 'Se morgonens hetaste nyheter i Börsmorgon Nordeas Mats J Andersson och Di:s analytiker Robert Andersson gästar'
  558 article
-  559 link 'Mohamsson vann interna striden Omvald som partiledare efter teknikkaos'
- 561 article
-  562 link 'Mohamsson: Tio år av vånda är över'
- 563 article
-  564 link 'S: Markant ökad sannolikhet för Åkesson'
- 565 article
-  566 link 'Analys. Sälj aktien som dubblats nu Robert Andersson Ett snabbt bygge med låg vinstkvalitet Robert Andersson'
- 567 article
-  568 link 'Annons Innehåll från Ålandsbanken Innehåll från Ålandsbanken Förvaltarnas jakt på kvalitetsbolag leder till Norden Därför är regionen en favorit bland många investerare'
- 569 article
-  570 link 'Debatt. Elbilspremien utökas med 100 Mkr Regeringen: Fler förslag som stärker klimatarbetet'
- 573 heading 'Di Digital'
- 574 article
-  575 link 'Han miljardsatsar på musikrättigheter ”Ocykliskt tillgångsslag som passar pensionsförvaltare”'
- 577 article
-  578 link 'Kryptonestorn: Därför slår bitcoin guld i krigets Iran Coinshares analyschef: ”Staten kan inte röra det”'
- 579 article
-  580 link 'Saabs vd: Ökad efterfrågan på lösningen Europa saknar ”AI blir en viktig komponent för framgång i krig”'
- 581 link 'Läs mer från Di Digital'
- 582 article
-  583 link 'Intervju: Essitys vd Ulrika Kolsrud Energismäll hotar: ”Alla påverkas” Köper mest fossilgas i Sverige Därför gjorde de storköpet i USA Så ska fallet på viktiga marknaden mötas'
- 587 article
-  588 link 'Nya handelsvägar i Gulfen: ”En viss optimism” Experten: Tecken på viss vändning – men kostnaderna spökar'
- 590 article
-  591 link 'Kronjuvelerna i skottlinjen skapar energikris'
- 592 article
-  593 link 'Varnar för containerkris: ”Enorma konsekvenser”'
- 597 heading 'Utvalda poddavsnitt'
- 598 link 'Visa alla'
- 601 link 'Poddavsnittets omslagsbild Wallnor & PM ”Allt ska ske med statens hjälp\" 15 min'
- 603 link 'Poddavsnittets omslagsbild Stormens öga Daniel Helldén: ”Mamma var bankdirektör och sa alltid ”Investera!” 37 min'
- 605 link 'Poddavsnittets omslagsbild Kort & Lång Börsen lockar – trots skräckscenario 42 min'
- 606 article
-  607 link 'Debatt. Vi stärker samarbetet med Australien Von der Leyen: Ökad handel och säkerhetssamarbete inleds'
- 608 article
-  609 link 'Annons Innehåll från Länsförsäkringar Innehåll från Länsförsäkringar Småföretagare: Så undviker du att en låg lön blir en låg pension Undvik pensionsfällan: ”Skillnaden blir väldigt tydlig när du väl går i pension”'
- 610 article
-  611 link 'LKAB:s nya vd i stor intervju Reformutrymmet slut – nu sinar kassakon Beskedet: Räkna med lägre utdelning ”Kommer leda på ett annat sätt” Framtiden för Hybritprojektet'
- 612 article
-  613 link 'WHO varnar för krigsutlöst kärnkatastrof ”Det har aldrig tidigare skett”'
- 614 article
-  615 link 'Nestorns råd i börsoron: ”Gå inte in med nya pengar” Experterna: Så ska du agera när börsen skakar – nio aktier att köpa nu'
- 618 article
-  619 link 'Nästa marknad att skakas om: ”Kan förvärras snabbt” Experter om läget för företagsobligationerna'
- 620 article
-  621 link 'Iran hotar stänga Hormuz helt ”Allt står redo för den stora striden”'
- 622 article
-  623 link 'Analys. Mycket mer att hämta i succérådet Robert Andersson Vårt köptips rusade – 30 procents uppsida kvar Robert Andersson'
+  559 link 'Fem saker att ha koll på inför börsöppning'
+ 560 article
+  561 link 'SKF får sänkt riktkurs – här är dagens rekar'
+ 564 article
+  565 link 'Nestorns råd i börsoron: ”Gå inte in med nya pengar” Experterna: Så ska du agera när börsen skakar – nio aktier att köpa nu'
+ 566 article
+  567 link 'Fingerprint sväljs av Precise Biometrics Ordföranden: ”Naturligt nästa steg”'
+ 568 article
+  569 link 'Analys. Sälj aktien som dubblats nu Robert Andersson Ett snabbt bygge med låg vinstkvalitet Robert Andersson'
+ 570 article
+  571 link 'Annons Innehåll från Posti Innehåll från Posti Logistikjätten går på nordisk offensiv: ”Är ett bra läge nu” Därför satsar finska Posti på den svenska logistikmarknaden.'
+ 575 link 'Stormens öga ”Investeringar är det smartaste man kan ägna sig åt” 37 min'
+ 577 link 'Wallnor & PM Wallnor & PM: ”Allt ska ske med statens hjälp” 15 min'
+ 578 separator
+ 579 link 'Alla poddar'
+ 582 heading 'Di Digital'
+ 583 article
+  584 link 'Då slår AI ut Stockholms vanligaste jobb Mjukvaru-vd:n: Tror inte de har många år kvar på tronen'
+ 586 article
+  587 link 'Zuckerberg uppges utveckla egen AI-agent för vd-rollen Del av Metas bredare AI-strategi'
+ 588 article
+  589 link 'Kivra skjuter på planerna om eget ”bank-id” Kommunikationschefen: ”Lanseringen är framflyttad”'
+ 590 link 'Läs mer från Di Digital'
+ 591 article
+  592 link 'Intervju: Essitys vd Ulrika Kolsrud Energismäll hotar: ”Alla påverkas” Köper mest fossilgas i Sverige Därför gjorde de storköpet i USA Så ska fallet på viktiga marknaden mötas'
+ 597 heading 'L:s ödesmöte'
+ 598 article
+  599 link 'Mohamsson vann interna striden Omvald som partiledare efter teknikkaos'
+ 601 article
+  602 link 'Mohamsson: Tio år av vånda är över'
+ 603 article
+  604 link 'S: Markant ökad sannolikhet för Åkesson'
+ 608 heading 'Utvalda poddavsnitt'
+ 609 link 'Visa alla'
+ 612 link 'Poddavsnittets omslagsbild Wallnor & PM ”Allt ska ske med statens hjälp\" 15 min'
+ 614 link 'Poddavsnittets omslagsbild Stormens öga Daniel Helldén: ”Mamma var bankdirektör och sa alltid ”Investera!” 37 min'
+ 616 link 'Poddavsnittets omslagsbild Kort & Lång Börsen lockar – trots skräckscenario 42 min'
+ 617 article
+  618 link 'Debatt. Elbilspremien utökas med 100 Mkr Regeringen: Fler förslag som stärker klimatarbetet'
+ 619 article
+  620 link 'Annons Innehåll från Dustin Innehåll från Dustin Experterna: Så kan företag bygga en säker AI-miljö Allt fler företag vill dra nytta av AI – därför bör man inte vänta.'
+ 621 article
+  622 link 'LKAB:s nya vd i stor intervju Reformutrymmet slut – nu sinar kassakon Beskedet: Räkna med lägre utdelning ”Kommer leda på ett annat sätt” Framtiden för Hybritprojektet'
  624 article
-  625 link 'Annons Innehåll från IKEA Innehåll från IKEA Expertens tips: Så inreder du ett flexibelt kontor ”Idag måste kontoren konkurrera med bekvämligheten av att arbeta hemifrån”'
- 628 heading 'Tema: Bygg & fastighet'
+  625 link 'Nya handelsvägar i Gulfen: ”En viss optimism” Experten: Tecken på viss vändning – men kostnaderna spökar'
+ 627 article
+  628 link 'Kronjuvelerna i skottlinjen skapar energikris'
  629 article
-  630 link 'Tema: Bygg & fastighet Framtidens bygge – livet under jord Krig och klimatkris pressar oss att tänka nytt'
- 632 article
-  633 link 'Sidosysslan blev Gasell – nu vill byggarna ha konkurrens Fokuserar på klimatsmarta material: ”Gått vår egen väg”'
- 634 article
-  635 link 'Annons Innehåll från Södra Byggbranschen ställer om till trä – klimatfördelarna driver utvecklingen'
- 636 link 'Läs mer om Tema: Bygg & fastighet'
+  630 link 'Varnar för containerkris: ”Enorma konsekvenser”'
+ 631 article
+  632 link 'Debatt. Vi stärker samarbetet med Australien Von der Leyen: Ökad handel och säkerhetssamarbete inleds'
+ 635 article
+  636 link 'WHO varnar för krigsutlöst kärnkatastrof ”Det har aldrig tidigare skett”'
  637 article
-  638 link 'Ledare. Nu räcker det med fossilberoende Frida Wallnor Hur kan Europa fortsatt vara så beroende av olja och gas? Frida Wallnor'
+  638 link 'Nästa marknad att skakas om: ”Kan förvärras snabbt” Experter om läget för företagsobligationerna'
  639 article
-  640 link 'Lista 30 procent billigare – här blir semestern en prisfest De billigaste och dyraste resmålen just nu – ”valuta för pengarna”'
- 645 heading 'Deklaration'
+  640 link 'Iran hotar stänga Hormuz helt ”Allt står redo för den stora striden”'
+ 641 article
+  642 link 'Annons Innehåll från Mangold Innehåll från Mangold Strängare regler för emissioner ritar om småbolagens spelplan ”Det gör att framför allt mindre noterade bolag får svårare att resa kapital”'
+ 645 heading 'Tema: Bygg & fastighet'
  646 article
-  647 link 'Kommentar. Så gör du rätt med aktierna i deklarationen Frida Bratt Då lönar sig schablonmetoden • Fördelen med vanlig depå Frida Bratt'
- 648 article
-  649 link 'Experterna: Avdragen du inte får missa i deklarationen Läs det här noggrant innan du skriver under'
- 650 link 'Läs mer om Deklaration'
- 652 article
-  653 link 'Då slår AI ut Stockholms vanligaste jobb Mjukvaru-vd:n: Tror inte de har många år kvar på tronen'
+  647 link 'Tema: Bygg & fastighet Framtidens bygge – livet under jord Krig och klimatkris pressar oss att tänka nytt'
+ 649 article
+  650 link 'Sidosysslan blev Gasell – nu vill byggarna ha konkurrens Fokuserar på klimatsmarta material: ”Gått vår egen väg”'
+ 651 article
+  652 link 'Annons Innehåll från EPSCEMENT Byggkostnaden skenar – därför måste lösningarna bli lättare'
+ 653 link 'Läs mer om Tema: Bygg & fastighet'
  654 article
-  655 link 'Ny rapport: Här är jobben som hotas av AI Chefsekonom: ”Fyller nya jobb med teknik, inte människor”'
+  655 link 'Analys. Mycket mer att hämta i succérådet Robert Andersson Vårt köptips rusade – 30 procents uppsida kvar Robert Andersson'
  656 article
-  657 link 'AI-utvecklingen får advokatbyrån att höja kraven Vd:n: ”Vi letar efter renässansmänniskor”'
- 658 article
-  659 link 'Bättre räckvidd lyfter Subaru Följer storebror Toyota i spåren – vässar elbilsupplevelsen'
- 660 article
-  661 link 'Annons Innehåll från Mangold Innehåll från Mangold Strängare regler för emissioner ritar om småbolagens spelplan ”Det gör att framför allt mindre noterade bolag får svårare att resa kapital”'
- 662 article
-  663 link 'Mäktiga megakyrkor tar sin hand från Trump Nya tongångar: ”Vi håller oss utanför politiken”'
- 664 article
-  665 link 'Krönika. Jag är den där snåla djäveln Günther Mårder Kanske är du också det? Günther Mårder'
- 666 article
-  667 link 'Trumps ger Iran två dygn – hotar bomba infrastruktur Kräver att Hormuzsundet öppnas'
- 670 article
-  671 link 'Sommarjobbets dolda hinder – riskerar att hamna utanför Studie- och yrkesvägledare: ”Inte alltid tydligt”'
- 672 article
-  673 link 'Analys. Techjättarnas brutala plan ger börsen svindel Robert Andersson 17.000 miljarder ryker för att säkra enormt framtidslyft Robert Andersson'
- 674 article
-  675 link 'Hon fixar heta scener – ”lätt att gå över sina gränser” Intimitetskoordinatorn: ”Mitt jobb är att se till att intima scener blir bättre”'
- 678 article
-  679 link 'Systembolaget kräver utökade tider för hemleverans Ministern: ”Skulle gärna se att man hittar en lösning”'
- 680 article
-  681 link 'Nya rookien på jobbet – en veteran: “Kan mer än de tror” Satsar på att fler 55-plussare ska sommarjobba'
- 684 heading 'Di Weekend'
+  657 link 'Ledare. Nu räcker det med fossilberoende Frida Wallnor Hur kan Europa fortsatt vara så beroende av olja och gas? Frida Wallnor'
+ 662 heading 'Deklaration'
+ 663 article
+  664 link 'Kommentar. Så gör du rätt med aktierna Frida Bratt Då lönar sig schablonmetoden • Fördelen med vanlig depå Frida Bratt'
+ 665 article
+  666 link 'Experterna: Avdragen du inte får missa i deklarationen Läs det här noggrant innan du skriver under'
+ 667 link 'Läs mer om Deklaration'
+ 668 article
+  669 link 'Lista 30 procent billigare – här blir semestern en prisfest De billigaste och dyraste resmålen just nu – ”valuta för pengarna”'
+ 671 article
+  672 link 'Ny rapport: Här är jobben som hotas av AI Chefsekonom: ”Fyller nya jobb med teknik, inte människor”'
+ 673 article
+  674 link 'AI-utvecklingen får advokatbyrån att höja kraven Vd:n: ”Vi letar efter renässansmänniskor”'
+ 675 article
+  676 link 'Annons Innehåll från Ålandsbanken Innehåll från Ålandsbanken Förvaltarnas jakt på kvalitetsbolag leder till Norden Därför är regionen en favorit bland många investerare'
+ 677 article
+  678 link 'Bättre räckvidd lyfter Subaru Följer storebror Toyota i spåren – vässar elbilsupplevelsen'
+ 679 article
+  680 link 'Mäktiga megakyrkor tar sin hand från Trump Nya tongångar: ”Vi håller oss utanför politiken”'
+ 681 article
+  682 link 'Krönika. Jag är den där snåla djäveln Günther Mårder Kanske är du också det? Günther Mårder'
  685 article
-  686 link 'Krönika. Klokhet och list trumfar råstyrka Jan Gradvall Inspiration och kreativitet kan leda en vilse Jan Gradvall'
+  686 link 'Trumps ger Iran två dygn – hotar bomba infrastruktur Kräver att Hormuzsundet öppnas'
  687 article
-  688 link 'Ett helt nytt Maggio-sound Jan Gradvall om veckans hetaste kultur'
- 689 link 'Läs mer från Di Weekend'
- 692 article
-  693 link 'Trump: Migrationspolis ska lösa flygplatskaos Utspel efter långa väntetider på amerikanska flygplatser'
- 694 article
-  695 link 'Musk fälls – manipulerade Twitter-aktien inför köp Kan komma att kosta flera miljarder'
- 696 article
-  697 link 'Lyxkryssarpremiär i Stockholm – högtryck väntas ”En av de mest attraktiva kryssningsdestinationerna i Östersjön”'
- 700 article
-  701 link 'Sex trender på AI-sektorns Woodstock-festival Höga förväntningar inom flera nya områden'
- 702 complementary
-  704 link 'Marknadsnytt Läs mer från Marknadsnytt'
-  707 article
-   708 link '07:23 BÖRS & BOLAG SKF får sänkt riktkurs – här är dagens rekar I ett magert rekflöde får SKF sänkt rekommendation från SKF. Även Fabege och Essity får sänkta riktkurser.'
-  709 article
-   710 link '06:50 BÖRS & BOLAG Försäkringsteknikbolagets vd tar tjänstledigt Försäkringsteknikbolaget Nord Insuretech meddelar att styrelseledamoten Ole Morten Settevik har blivit utsedd till tillförordnad vd med omedelbar verkan.'
-  711 article
-   712 link '06:22 RÅVAROR Så har striderna slagit mot energianläggningarna Mer än 40 energitillgångar i nio länder i Mellanöstern har skadats ”allvarligt eller mycket allvarligt” av kriget i Mellanöstern. Det säger Fatih Birol, chef för Internationella energiorganet (IEA), vilket potentiellt kan förlänga störningarna i globala leveranskedjor efter att konflikten är över, rapporterar Bloomberg News.'
-  713 article
-   714 link '05:09 NYHETER Kraftigt ned på börserna i Asien – oljepriset stiger Börserna i Tokyo och Seoul backar rejält strax efter öppning på måndagen. Nedgången kommer bland annat efter utspel om en eskalering av konflikten i Mellanöstern.'
-  715 article
-   716 link '05:00 NYHETER Detta händer måndag 23 mars Det tyska stålbolaget Salzgitter publicerar sitt bokslut för 2025. Vidare släpps data för bygginvesteringar i USA under januari. Det är några av punkterna i dagens agenda.'
-  721 figure 'Micael Johansson: ”AI avgörande för att vinna krig” Stäng'
-   724 'Micael Johansson: ”AI avgörande för att vinna krig”'
-   725 button 'Stäng'
-  726 link 'Micael Johansson: ”AI avgörande för att vinna krig”'
-  729 button 'OMXSPI'
-  730 button 'S&P 500'
-  731 button 'NIKKEI'
-  735 paragraph
-   736 '-1,56%'
-  738 '-4,71% i år'
-  742 heading 'Vinnare'
-  744 link 'Maha Capital'
-  746 '10,58%'
-  748 '14,00'
-  750 link 'PowerCell Sweden'
-  752 '9,90%'
-  754 '18,42'
-  756 link 'TradeDoubler'
-  758 '9,30%'
-  760 '6,58'
-  762 heading 'Förlorare'
-  764 link 'Sivers Semiconductors'
-  766 '-19,59%'
-  768 '8,44'
-  770 link 'engcon B'
-  772 '-10,30%'
-  774 '56,60'
-  776 link 'CoinShares International Limited'
-  778 '-9,28%'
-  780 '72,30'
-  787 heading 'Di Weekend'
-  788 article
-   789 link 'H&M-veteranen Pernilla Wohlfahrt – en modechef i medvind Samtidigt som H&M stängde över 100 butiker förra året går ett av den svenska modejättens varumärken på offensiven. 2025 blev Arkets mest expansiva år hittills med 14 nya butiker. Den som leder arbetet är H&M-veteranen Pernilla Wohlfahrt, som för 15 år sedan också startade kedjan Cos. ”Jag tror att vi kan bli riktigt stora”, konstaterar hon.'
-  790 article
-   791 link 'New York har kommit till Stockholm'
-  792 article
-   793 link '”Om jag inte får bo här kommer jag att dö”'
-  794 link 'Läs mer från Di Weekend'
-  795 article
-   796 link 'Annons Innehåll från Nibe En viktig pusselbit: Ventilationen maximerar energibesparingen Stor outnyttjad potential – så kan fastighetsägare spara stora mängder energi.'
-  799 heading 'Företagande'
-  800 article
-   801 link 'Lånet blev miljonsuccé – nu siktar gymdrottningen norrut Förhållandet sprack men lånet på en halv miljon danska kronor slutade i braksuccé. Nu ska danskarnas pilatesdrottning Gitte Salling och hennes gymkedja Energii erövra Sverige. ”Coronapandemin var bra på ett sätt – folk fick så ont i ryggen att de började träna”, säger hon.'
-  802 article
-   803 link 'Riskerna ökar – så jobbar bolagens krisgrupper'
-  804 article
-   805 link 'Slut på hemlighetsmakeriet: Nu får du veta kollegans lön'
-  806 link 'Läs mer om Företagande'
-  811 heading 'Hållbart Näringsliv'
-  812 article
-   813 link 'Lyten köper Northvolts återvinningsanläggning Northvoltköparen Lyten köper nu även Northvolts anläggning för återvinning av batterier, kallad Revolt, som liksom huvudanläggningen ligger i Skellefteå. Det framgår av ett pressmeddelande utan finansiella detaljer.'
-  814 article
-   815 link 'Regler om lönetransparens skjuts upp'
-  816 article
-   817 link 'Slut på hemlighetsmakeriet: Nu får du veta kollegans lön'
-  818 link 'Läs mer om Hållbart Näringsliv'
-  823 heading 'Nytt från Di'
-  824 article
-   825 link 'Di lanserar ny IR-tjänst för börsbolag Di stärker sin position som landets ledande affärstidning genom att lansera en ny digital tjänst för börsbolag och investerare. ”Genom denna satsning gör vi Di till ett ännu bättre arbetsverktyg för läsare och prenumeranter”, säger Peter Fellman, chefredaktör för Dagens industri.'
-  826 article
-   827 link 'Di vässar bevakning av juridikbranschen'
-  828 article
-   829 link 'Prisregn över Dagens industri'
-  830 link 'Läs mer nytt från Di'
-  837 heading 'Mest läst'
+  688 link 'Sommarjobbets dolda hinder – riskerar att hamna utanför Studie- och yrkesvägledare: ”Inte alltid tydligt”'
+ 689 article
+  690 link 'Analys. Techjättarnas brutala plan ger börsen svindel Robert Andersson 17.000 miljarder ryker för att säkra enormt framtidslyft Robert Andersson'
+ 693 article
+  694 link 'Hon fixar heta scener – ”lätt att gå över sina gränser” Intimitetskoordinatorn: ”Mitt jobb är att se till att intima scener blir bättre”'
+ 695 article
+  696 link 'Systembolaget kräver utökade tider för hemleverans Ministern: ”Skulle gärna se att man hittar en lösning”'
+ 697 article
+  698 link 'Nya rookien på jobbet – en veteran: ”Kan mer än de tror” Satsar på att fler 55-plussare ska sommarjobba'
+ 703 heading 'Di Weekend'
+ 704 article
+  705 link 'Krönika. Klokhet och list trumfar råstyrka Jan Gradvall Inspiration och kreativitet kan leda en vilse Jan Gradvall'
+ 706 article
+  707 link 'Ett helt nytt Maggio-sound Jan Gradvall om veckans hetaste kultur'
+ 708 link 'Läs mer från Di Weekend'
+ 709 article
+  710 link 'Trump: Migrationspolis ska lösa flygplatskaos Utspel efter långa väntetider på amerikanska flygplatser'
+ 711 article
+  712 link 'Musk fälls – manipulerade Twitter-aktien inför köp Kan komma att kosta flera miljarder'
+ 715 article
+  716 link 'Lyxkryssarpremiär i Stockholm – högtryck väntas ”En av de mest attraktiva kryssningsdestinationerna i Östersjön”'
+ 717 article
+  718 link 'Sex trender på AI-sektorns Woodstock-festival Höga förväntningar inom flera nya områden'
+ 719 complementary
+  721 link 'Marknadsnytt Läs mer från Marknadsnytt'
+  724 article
+   725 link '08:52 BÖRS & BOLAG Nobias ordförande avböjer omval – ledamot föreslås fatta klubban Köksbolaget Nobia föreslår att den nuvarande styrelseledamoten Jimmy Renström väljs till ny styrelseordförande samt att Katarina Lindström väljs till som ny styrelseledamot.'
+  726 article
+   727 link '08:38 BÖRS & BOLAG Sagax storhandlar i Spanien och Portugal Fastighetsbolaget Sagax har förvärvat sammanlagt 12 fastigheter i fyra affärer för drygt 1,2 miljarder kronor. Det framgår av ett pressmeddelande.'
+  728 article
+   729 link '08:27 BÖRS & BOLAG Svagare prognoser än väntat från SSAB-konkurrent Det tyska stålbolaget Salzgitters resultat för helåret 2025 präglades av en svag efterfrågan inom viktiga kundsektorer, höga energipriser och hård internationell konkurrens. Det skriver bolaget i rapporten för fjärde kvartalet och helåret 2025.'
+  730 article
+   731 link '08:26 BÖRS & BOLAG Diamyd gör nyemission – utspädning på 11 procent Styrelsen för Diamyd Medical har beslutat om en riktad emission av drygt 17,2 miljoner aktier till teckningskursen 13,54 kronor, vilket tillför bolaget cirka 233 miljoner kronor före transaktionskostnader. Det framgår av ett pressmeddelande.'
+  732 article
+   733 link '08:15 BÖRS & BOLAG SKF-uppvärdering avlägsen enligt SEB – sänker riktkursen SEB Equities har sänkt sin riktkurs för kullagerföretaget SKF från 250 till 237 kronor med upprepad behållrekommendation.'
+  738 figure 'Micael Johansson: ”AI avgörande för att vinna krig” Stäng'
+   741 'Micael Johansson: ”AI avgörande för att vinna krig”'
+   742 button 'Stäng'
+  743 link 'Micael Johansson: ”AI avgörande för att vinna krig”'
+  746 button 'OMXSPI'
+  747 button 'S&P 500'
+  748 button 'NIKKEI'
+  752 paragraph
+   753 '0,00%'
+  755 '-4,71% i år'
+  759 heading 'Vinnare'
+  761 'Ingen data tillgänglig just nu'
+  763 heading 'Förlorare'
+  765 'Ingen data tillgänglig just nu'
+  772 heading 'Di Weekend'
+  773 article
+   774 link 'H&M-veteranen Pernilla Wohlfahrt – en modechef i medvind Samtidigt som H&M stängde över 100 butiker förra året går ett av den svenska modejättens varumärken på offensiven. 2025 blev Arkets mest expansiva år hittills med 14 nya butiker. Den som leder arbetet är H&M-veteranen Pernilla Wohlfahrt, som för 15 år sedan också startade kedjan Cos. ”Jag tror att vi kan bli riktigt stora”, konstaterar hon.'
+  775 article
+   776 link 'New York har kommit till Stockholm'
+  777 article
+   778 link '”Om jag inte får bo här kommer jag att dö”'
+  779 link 'Läs mer från Di Weekend'
+  780 article
+   781 link 'Annons Innehåll från Nibe En viktig pusselbit: Ventilationen maximerar energibesparingen Stor outnyttjad potential – så kan fastighetsägare spara stora mängder energi.'
+  784 heading 'Företagande'
+  785 article
+   786 link 'Lånet blev miljonsuccé – nu siktar gymdrottningen norrut Förhållandet sprack men lånet på en halv miljon danska kronor slutade i braksuccé. Nu ska danskarnas pilatesdrottning Gitte Salling och hennes gymkedja Energii erövra Sverige. ”Coronapandemin var bra på ett sätt – folk fick så ont i ryggen att de började träna”, säger hon.'
+  787 article
+   788 link 'Riskerna ökar – så jobbar bolagens krisgrupper'
+  789 article
+   790 link 'Slut på hemlighetsmakeriet: Nu får du veta kollegans lön'
+  791 link 'Läs mer om Företagande'
+  796 heading 'Hållbart Näringsliv'
+  797 article
+   798 link 'Lyten köper Northvolts återvinningsanläggning Northvoltköparen Lyten köper nu även Northvolts anläggning för återvinning av batterier, kallad Revolt, som liksom huvudanläggningen ligger i Skellefteå. Det framgår av ett pressmeddelande utan finansiella detaljer.'
+  799 article
+   800 link 'Regler om lönetransparens skjuts upp'
+  801 article
+   802 link 'Slut på hemlighetsmakeriet: Nu får du veta kollegans lön'
+  803 link 'Läs mer om Hållbart Näringsliv'
+  808 heading 'Nytt från Di'
+  809 article
+   810 link 'Di lanserar ny IR-tjänst för börsbolag Di stärker sin position som landets ledande affärstidning genom att lansera en ny digital tjänst för börsbolag och investerare. ”Genom denna satsning gör vi Di till ett ännu bättre arbetsverktyg för läsare och prenumeranter”, säger Peter Fellman, chefredaktör för Dagens industri.'
+  811 article
+   812 link 'Di vässar bevakning av juridikbranschen'
+  813 article
+   814 link 'Prisregn över Dagens industri'
+  815 link 'Läs mer nytt från Di'
+  822 heading 'Mest läst'
+  823 article
+   824 link '1 Strategerna: Börsfall att vänta – ”dystert och skakigt”'
+  825 article
+   826 link '2 30 procent billigare – här blir semestern en prisfest'
+  827 article
+   828 link '3 WHO varnar för krigsutlöst kärnkatastrof'
+  829 article
+   830 link '4 Kraftigt ned på börserna i Asien – oljepriset stiger'
+  831 article
+   832 link '5 Nya handelsvägar i Gulfen: ”En viss optimism”'
+  835 heading 'Mest sedda idag'
+  836 article
+   837 link '1 Experten: ”Kunderna vill ha bensinmotorer”'
   838 article
-   839 link '1 Strategerna: Börsfall att vänta – ”dystert och skakigt”'
+   839 link '2 Oljepriset rekylerar upp efter nya Trumputspel'
   840 article
-   841 link '2 30 procent billigare – här blir semestern en prisfest'
+   841 link '3 Experten: \"Får rysningar av justeringar\'
   842 article
-   843 link '3 WHO varnar för krigsutlöst kärnkatastrof'
+   843 link '4 Börsmorgon 9 mars 2026 – se hela programmet'
   844 article
-   845 link '4 Nya handelsvägar i Gulfen: ”En viss optimism”'
-  846 article
-   847 link '5 Nästa marknad att skakas om: ”Kan förvärras snabbt”'
-  850 heading 'Mest sedda idag'
-  851 article
-   852 link '1 Experten: ”Kunderna vill ha bensinmotorer”'
-  853 article
-   854 link '2 Oljepriset rekylerar upp efter nya Trumputspel'
-  855 article
-   856 link '3 Experten: \"Får rysningar av justeringar\'
-  857 article
-   858 link '4 Börsmorgon 9 mars 2026 – se hela programmet'
-  859 article
-   860 link '5 Experten: Dollarn fortfarande kungen när det stormar'
-  862 link 'Tjänstebil'
-  866 heading 'Mina bevakningar'
-  868 paragraph
-   869 'Skräddarsy ditt eget nyhetsflöde för att få ut det mesta och bästa från Dagens industri.'
-  870 paragraph
-   871 'Logga in för att skapa eller se dina bevakningar.'
-  873 link 'Logga in'
-  878 heading 'Senaste analyserna'
-  879 article
-   880 link 'Robert Andersson Mycket mer att hämta i succérådet'
-  881 article
-   882 link 'Robert Andersson Techjättarnas brutala plan ger börsen svindel'
-  883 article
-   884 link 'Robert Andersson Sälj kursdubblaren nu'
-  885 article
-   886 link 'Jonathan Axelsson Insynstopparna som fyndköpte i raset'
-  887 link 'Läs mer från Di:s analysredaktion'
-  890 heading 'Lediga jobb'
-  891 link 'Legal & Business Affairs Manager till Universal Music Universal Music • Stockholm'
-  892 link 'Head of Legal Nordics till Universal Music Universal Music • Stockholm'
-  893 link 'Head of Financial Crime Prevention to Euroclear Sweden Euroclear Sweden • Stockholm'
-  894 link 'Compliancekonsulter- icke finansiell verksamhet Sharp Recruitment & Consultants • Sverige'
-  895 link 'Bolagsjurist till SRV Återvinning SRV Återvinning • Stockholm'
-  896 link 'Se fler lediga jobb'
-  900 'Annons'
-  902 heading 'Investor Relations'
-  903 article
-   904 link 'Innehåll från Argo Defence Group Försvarskoncernen tar klivet till börsen: ”Vi har stor potential att växa”'
-  905 article
-   906 link 'Innehåll från Hilbert Group Trotsar kryptoraset – institutionella investerare driver tillväxten'
-  907 article
-   908 link 'Innehåll från Heba Fastighets AB Nytt flaggskepp i satsning på framtidens äldreboenden'
-  911 heading 'Indikatorer'
-  914 link 'Brentolja ($/fat)'
-  916 '0,47'
-  918 '109,22'
-  920 link 'Guld ($/uns)'
-  922 '-256,64'
-  924 '4 241,63'
-  926 link 'USD/SEK'
-  928 '0,05'
-  930 '9,40 kr'
-  932 link 'EUR/SEK'
-  934 '0,04'
-  936 '10,83 kr'
-  938 link 'Ränta Sv 3 mån'
-  940 '-'
-  942 '1,86%'
-  944 link 'Ränta Sv 10 år'
-  946 '-0,80'
-  948 '2,84%'
-  950 heading 'Plånbokskoll'
-  951 'Plånbokskoll'
-  956 heading 'Pressreleaser premium'
-  957 article
-   958 link 'Storsala genomför en riktad nyemission om 139 miljoner kronor för expansion 4 min sedan'
-  959 article
-   960 link 'Årsredovisning 2025 Fredag 12:30'
-  961 article
-   962 link 'Förändringar i Duni Groups ledningsgrupp Fredag 11:00'
-  963 article
-   964 link 'Swegreen butiksodling kommer till ICA Kvantum Märsta. Fredag 09:46'
-  965 article
-   966 link 'Klädmärket Discovery lanserar kollektion med Prebonas teknologi Cool&OdorControl Fredag 09:01'
-  967 link 'Läs fler pressreleaser'
- 970 contentinfo
-  972 'Missa inget. Prenumerera och få tillgång till alla artiklar.'
-  974 link 'Prenumerera'
-  975 link 'Logga in'
-  979 link 'Feedback'
-  980 link 'Tipsa redaktionen'
-  981 navigation 'Sidfotsmeny'
-   985 'Mer från Di'
-   988 link 'Di Digital'
-   990 link 'Di Weekend'
-   992 link 'DiTV'
-   994 link 'Di Gasell'
-   996 link 'Börsnyheter'
-   998 link 'Privatekonomi'
-   1000 link 'Valutakurser'
-   1002 link 'Fondbevakning'
-   1004 link 'Klimatindex'
-   1006 link 'Räntekoll'
-   1008 link 'Tidningen i PDF'
-   1010 link 'Utbildningar'
-   1012 link 'Di Event'
-   1014 link 'Läs mer om Di +Pro'
-   1017 'Mer om börs'
-   1020 link 'Börsen idag'
-   1022 link 'Börsmorgon'
-   1024 link 'Börsens öppettider'
-   1026 link 'Stockholmsbörsen'
-   1028 link 'Aktiekurser'
-   1030 link 'Aktiesparande'
-   1032 link 'Aktietips'
-   1034 link 'Börsindex'
-   1036 link 'Veckans aktie'
-   1038 link 'Stockwatch'
-   1040 link 'Företagskalender'
-   1042 link 'Trader'
-   1045 'Om Di'
-   1048 link 'Mina sidor'
-   1050 link 'Bli prenumerant'
-   1052 link 'Om Bonnier News Business'
-   1054 link 'Kontakta redaktionen'
-   1056 link 'Kontakta kundservice'
-   1058 link 'Vanliga frågor och svar'
-   1060 link 'Jobba hos oss'
-   1062 link 'Annonsera'
-   1064 link 'Gold Standard'
-   1066 link 'Anmäl störande/felaktig annons'
-   1068 link 'Kakpolicy'
-   1070 link 'Kaklista'
-   1072 link 'Personuppgiftspolicy'
-   1074 paragraph
-    1075 'Hantera kakor'
-   1077 link 'Upphovsrätt & AI'
-   1080 link 'Appar Ta del av Di:s sylvassa journalistik och få pushnotiser när det senaste händer'
-   1082 link 'Nyhetsbrev Prenumerera på exklusivt innehåll du inte hittar någon annanstans'
-   1084 link 'Bevakningar Skräddarsy ditt nyhetsflöde för att få ut det mesta och bästa'
-   1086 link 'Poddar Lyssna på intervjuer, guider, börsanalyser och nyhetssvep, en podcast för varje smak'
-  1088 link 'LinkedIn'
-  1089 link 'X'
-  1090 link 'Facebook'
-  1091 link 'Instagram'
-  1094 'För prenumerationsärenden, ring'
-  1095 link '08-573 651 00'
-  1096 '· Tillhandahållare av innehåll: Dagens industri, 105 16 Stockholm, org.nr: 556221-8494 · Ansvarig utgivare: Peter Fellman · di.se'
-  1097 paragraph
-   1098 'Innehållet på denna webbplats är upphovsrättsligt skyddat. Ange källa vid citering. Dagens industri är en del av Bonnier News.'
- 1100
-  1101 button
-  1102 heading 'Logga in på di.se'
-  1103 paragraph
-  1104 link 'Till inloggningen'
-  1105 paragraph
-   1106 'eller'
-  1107 link 'Skapa konto utan kostnad'
-  1108 paragraph
-  1109 separator
-  1110 heading 'Inte prenumerant än?'
-  1111 paragraph
-   1112 'Skaffa en prenumeration och få tillgång till di.se, e-tidningen och alla funktioner'
-  1113 link 'Bli prenumerant'
- 1117 button
- 1118 heading 'Tillgång till alla nyhetsbrev med en prenumeration'
- 1119 paragraph
-  1120 'För att anmäla dig till det här nyhetsbrevet behöver du vara'
-  1122 'prenumerant'
-  1123 '.'
- 1124 link 'Bli prenumerant'
+   845 link '5 Experten: Dollarn fortfarande kungen när det stormar'
+  847 link 'Tjänstebil'
+  851 heading 'Mina bevakningar'
+  853 paragraph
+   854 'Skräddarsy ditt eget nyhetsflöde för att få ut det mesta och bästa från Dagens industri.'
+  855 paragraph
+   856 'Logga in för att skapa eller se dina bevakningar.'
+  858 link 'Logga in'
+  863 heading 'Senaste analyserna'
+  864 article
+   865 link 'Robert Andersson Mycket mer att hämta i succérådet'
+  866 article
+   867 link 'Robert Andersson Techjättarnas brutala plan ger börsen svindel'
+  868 article
+   869 link 'Robert Andersson Sälj kursdubblaren nu'
+  870 article
+   871 link 'Jonathan Axelsson Insynstopparna som fyndköpte i raset'
+  872 link 'Läs mer från Di:s analysredaktion'
+  875 heading 'Lediga jobb'
+  876 link 'Legal & Business Affairs Manager till Universal Music Universal Music • Stockholm'
+  877 link 'Head of Legal Nordics till Universal Music Universal Music • Stockholm'
+  878 link 'Head of Financial Crime Prevention to Euroclear Sweden Euroclear Sweden • Stockholm'
+  879 link 'Compliancekonsulter- icke finansiell verksamhet Sharp Recruitment & Consultants • Sverige'
+  880 link 'Bolagsjurist till SRV Återvinning SRV Återvinning • Stockholm'
+  881 link 'Se fler lediga jobb'
+  885 'Annons'
+  887 heading 'Investor Relations'
+  888 article
+   889 link 'Innehåll från Argo Defence Group Försvarskoncernen tar klivet till börsen: ”Vi har stor potential att växa”'
+  890 article
+   891 link 'Innehåll från Heba Fastighets AB Nytt flaggskepp i satsning på framtidens äldreboenden'
+  892 article
+   893 link 'Innehåll från Hilbert Group Trotsar kryptoraset – institutionella investerare driver tillväxten'
+  896 heading 'Indikatorer'
+  899 link 'Brentolja ($/fat)'
+  901 '1,68'
+  903 '110,43'
+  905 link 'Guld ($/uns)'
+  907 '-286,77'
+  909 '4 211,50'
+  911 link 'USD/SEK'
+  913 '0,04'
+  915 '9,40 kr'
+  917 link 'EUR/SEK'
+  919 '0,04'
+  921 '10,84 kr'
+  923 link 'Ränta Sv 3 mån'
+  925 '0,01'
+  927 '1,86%'
+  929 link 'Ränta Sv 10 år'
+  931 '-0,27'
+  933 '2,88%'
+  935 heading 'Plånbokskoll'
+  936 'Plånbokskoll'
+  941 heading 'Pressreleaser premium'
+  942 article
+   943 link 'Återköp av aktier av Truecaller B i vecka 12 2026 23 min sedan'
+  944 article
+   945 link 'Storsala genomför en riktad nyemission om 139 miljoner kronor för expansion 07:30'
+  946 article
+   947 link 'Årsredovisning 2025 Fredag 12:30'
+  948 article
+   949 link 'Förändringar i Duni Groups ledningsgrupp Fredag 11:00'
+  950 article
+   951 link 'Swegreen butiksodling kommer till ICA Kvantum Märsta. Fredag 09:46'
+  952 link 'Läs fler pressreleaser'
+ 955 contentinfo
+  957 'Missa inget. Prenumerera och få tillgång till alla artiklar.'
+  959 link 'Prenumerera'
+  960 link 'Logga in'
+  964 link 'Feedback'
+  965 link 'Tipsa redaktionen'
+  966 navigation 'Sidfotsmeny'
+   970 'Mer från Di'
+   973 link 'Di Digital'
+   975 link 'Di Weekend'
+   977 link 'DiTV'
+   979 link 'Di Gasell'
+   981 link 'Börsnyheter'
+   983 link 'Privatekonomi'
+   985 link 'Valutakurser'
+   987 link 'Fondbevakning'
+   989 link 'Klimatindex'
+   991 link 'Räntekoll'
+   993 link 'Tidningen i PDF'
+   995 link 'Utbildningar'
+   997 link 'Di Event'
+   999 link 'Läs mer om Di +Pro'
+   1002 'Mer om börs'
+   1005 link 'Börsen idag'
+   1007 link 'Börsmorgon'
+   1009 link 'Börsens öppettider'
+   1011 link 'Stockholmsbörsen'
+   1013 link 'Aktiekurser'
+   1015 link 'Aktiesparande'
+   1017 link 'Aktietips'
+   1019 link 'Börsindex'
+   1021 link 'Veckans aktie'
+   1023 link 'Stockwatch'
+   1025 link 'Företagskalender'
+   1027 link 'Trader'
+   1030 'Om Di'
+   1033 link 'Mina sidor'
+   1035 link 'Bli prenumerant'
+   1037 link 'Om Bonnier News Business'
+   1039 link 'Kontakta redaktionen'
+   1041 link 'Kontakta kundservice'
+   1043 link 'Vanliga frågor och svar'
+   1045 link 'Jobba hos oss'
+   1047 link 'Annonsera'
+   1049 link 'Gold Standard'
+   1051 link 'Anmäl störande/felaktig annons'
+   1053 link 'Kakpolicy'
+   1055 link 'Kaklista'
+   1057 link 'Personuppgiftspolicy'
+   1059 paragraph
+    1060 'Hantera kakor'
+   1062 link 'Upphovsrätt & AI'
+   1065 link 'Appar Ta del av Di:s sylvassa journalistik och få pushnotiser när det senaste händer'
+   1067 link 'Nyhetsbrev Prenumerera på exklusivt innehåll du inte hittar någon annanstans'
+   1069 link 'Bevakningar Skräddarsy ditt nyhetsflöde för att få ut det mesta och bästa'
+   1071 link 'Poddar Lyssna på intervjuer, guider, börsanalyser och nyhetssvep, en podcast för varje smak'
+  1073 link 'LinkedIn'
+  1074 link 'X'
+  1075 link 'Facebook'
+  1076 link 'Instagram'
+  1079 'För prenumerationsärenden, ring'
+  1080 link '08-573 651 00'
+  1081 '· Tillhandahållare av innehåll: Dagens industri, 105 16 Stockholm, org.nr: 556221-8494 · Ansvarig utgivare: Peter Fellman · di.se'
+  1082 paragraph
+   1083 'Innehållet på denna webbplats är upphovsrättsligt skyddat. Ange källa vid citering. Dagens industri är en del av Bonnier News.'
+ 1085
+  1086 button
+  1087 heading 'Logga in på di.se'
+  1088 paragraph
+  1089 link 'Till inloggningen'
+  1090 paragraph
+   1091 'eller'
+  1092 link 'Skapa konto utan kostnad'
+  1093 paragraph
+  1094 separator
+  1095 heading 'Inte prenumerant än?'
+  1096 paragraph
+   1097 'Skaffa en prenumeration och få tillgång till di.se, e-tidningen och alla funktioner'
+  1098 link 'Bli prenumerant'
+ 1102 button
+ 1103 heading 'Tillgång till alla nyhetsbrev med en prenumeration'
+ 1104 paragraph
+  1105 'För att anmäla dig till det här nyhetsbrevet behöver du vara'
+  1107 'prenumerant'
+  1108 '.'
+ 1109 link 'Bli prenumerant'
