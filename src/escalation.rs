@@ -2,7 +2,7 @@
 ///
 /// Intelligent tier-val som väljer minsta möjliga exekveringsnivå per sida.
 /// Kör aldrig mer arbete än nödvändigt: hydration-data → 0 ms JS,
-/// statisk HTML → ingen Boa, enkel JS → sandboxad Boa+DOM, etc.
+/// statisk HTML → ingen JS-motor, enkel JS → sandboxad QuickJS+DOM, etc.
 use serde::{Deserialize, Serialize};
 
 use crate::hydration;
@@ -17,8 +17,8 @@ pub enum ParseTier {
     Hydration { framework: String },
     /// Tier 1: Statisk HTML parse — ingen JS, ~1 ms
     StaticParse,
-    /// Tier 2: Sandboxad Boa + DOM — kör inline scripts mot ArenaDom, ~10-50 ms
-    BoaDom { script_count: u32 },
+    /// Tier 2: Sandboxad QuickJS + DOM — kör inline scripts mot ArenaDom, ~10-50 ms
+    QuickJsDom { script_count: u32 },
     /// Tier 3: Blitz render — ren Rust CSS-layout, ~10-50 ms
     BlitzRender,
     /// Tier 4: Chrome CDP — fullständig browser, ~500-2000 ms
@@ -160,11 +160,11 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
         }
 
         return TierDecision {
-            tier: ParseTier::BoaDom {
+            tier: ParseTier::QuickJsDom {
                 script_count: js_info.total_inline_scripts,
             },
             reason: format!(
-                "{} inline scripts med DOM-åtkomst — Boa+DOM räcker",
+                "{} inline scripts med DOM-åtkomst — QuickJS+DOM räcker",
                 js_info.total_inline_scripts
             ),
             confidence: 0.85,
@@ -306,8 +306,8 @@ mod tests {
 
         let decision = select_tier(html, "https://shop.example.com");
         assert!(
-            matches!(decision.tier, ParseTier::BoaDom { .. }),
-            "Inline JS med DOM-access borde ge Tier 2 (BoaDom), fick {:?}",
+            matches!(decision.tier, ParseTier::QuickJsDom { .. }),
+            "Inline JS med DOM-access borde ge Tier 2 (QuickJsDom), fick {:?}",
             decision.tier
         );
     }

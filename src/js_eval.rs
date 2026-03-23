@@ -1,13 +1,13 @@
 /// JavaScript Sandbox Evaluation – Fas 4b
 ///
-/// Kör små JS-snippets i en sandboxad Boa-motor.
+/// Kör små JS-snippets i en sandboxad QuickJS-motor (via rquickjs).
 /// Används för att utvärdera klientlogik som påverkar sidinnehåll,
 /// t.ex. prisuträkningar, villkorlig rendering, textinterpolering.
 ///
 /// Säkerhetsprincip: Ingen åtkomst till DOM, nätverk, filsystem eller timers.
 /// Bara ren beräkningslogik (matematik, strängar, objekt, arrayer).
 #[cfg(feature = "js-eval")]
-use boa_engine::{Context, Source};
+use rquickjs::{Context, Runtime};
 
 // ─── Sandbox-begränsningar ──────────────────────────────────────────────────
 
@@ -15,26 +15,34 @@ use boa_engine::{Context, Source};
 #[cfg(feature = "js-eval")]
 const MAX_LOOP_ITERATIONS: u64 = 100_000;
 
-/// Max stack-storlek (förhindrar djup rekursion)
+/// Max stack-storlek i bytes (QuickJS default 256KB)
 #[cfg(feature = "js-eval")]
-const MAX_STACK_SIZE: usize = 256;
+const MAX_STACK_SIZE: usize = 256 * 1024;
 
-/// Max rekursionsdjup
+/// Max minnesanvändning (8 MB — förhindrar minnesexplosion)
 #[cfg(feature = "js-eval")]
-const MAX_RECURSION_DEPTH: usize = 64;
+const MAX_MEMORY: usize = 8 * 1024 * 1024;
 
-/// Skapa en sandboxad Boa-kontext med runtime-begränsningar
+/// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
 ///
-/// Sätter loop-iterations-limit, stack-storlek och rekursionslimit
+/// Sätter stack-storlek, minneslimit och interrupt-handler
 /// för att förhindra denial-of-service i JS-sandboxen.
 #[cfg(feature = "js-eval")]
-pub(crate) fn create_sandboxed_context() -> Context {
-    let mut ctx = Context::default();
-    let limits = ctx.runtime_limits_mut();
-    limits.set_loop_iteration_limit(MAX_LOOP_ITERATIONS);
-    limits.set_stack_size_limit(MAX_STACK_SIZE);
-    limits.set_recursion_limit(MAX_RECURSION_DEPTH);
-    ctx
+pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context) {
+    let rt = Runtime::new().expect("QuickJS Runtime::new misslyckades");
+    rt.set_max_stack_size(MAX_STACK_SIZE);
+    rt.set_memory_limit(MAX_MEMORY);
+
+    // Interrupt-handler: avbryt efter MAX_LOOP_ITERATIONS operationer
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counter_clone = counter.clone();
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        let n = counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        n >= MAX_LOOP_ITERATIONS
+    })));
+
+    let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
+    (rt, ctx)
 }
 
 use serde::{Deserialize, Serialize};
@@ -327,7 +335,7 @@ const ALLOWED_PATTERNS: &[&str] = &[
     "json.stringify(",
     "json.parse(",
     "hasownproperty(",
-    // Ternary, literals, variabler — tillåts implicit av Boa
+    // Ternary, literals, variabler — tillåts implicit av QuickJS
     "true",
     "false",
     "null",
@@ -477,90 +485,161 @@ pub fn eval_js(code: &str) -> JsEvalResult {
         };
     }
 
-    let mut context = create_sandboxed_context();
+    let (_rt, ctx) = create_sandboxed_runtime();
 
-    match context.eval(Source::from_bytes(code)) {
-        Ok(result) => {
-            let value_str = result
-                .to_string(&mut context)
-                .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
-            JsEvalResult {
-                value: Some(value_str),
-                error: None,
-                timed_out: false,
-                eval_time_us: start.elapsed().as_micros() as u64,
+    ctx.with(|ctx| {
+        match ctx.eval::<rquickjs::Value, _>(code) {
+            Ok(result) => {
+                let value_str = quickjs_value_to_string(&ctx, &result);
+                JsEvalResult {
+                    value: Some(value_str),
+                    error: None,
+                    timed_out: false,
+                    eval_time_us: start.elapsed().as_micros() as u64,
+                }
+            }
+            Err(e) => {
+                let err_str = quickjs_error_string(&ctx, &e);
+                let err_lower = err_str.to_lowercase();
+                let timed_out = err_lower.contains("interrupted")
+                    || err_lower.contains("stack overflow")
+                    || err_lower.contains("stack size exceeded")
+                    || err_lower.contains("out of memory");
+                JsEvalResult {
+                    value: None,
+                    error: Some(err_str),
+                    timed_out,
+                    eval_time_us: start.elapsed().as_micros() as u64,
+                }
             }
         }
-        Err(e) => {
-            // Kolla om felet beror på runtime-begränsning
-            let err_str = format!("{}", e);
-            let err_lower = err_str.to_lowercase();
-            let timed_out = err_lower.contains("loop iteration limit")
-                || err_lower.contains("stack overflow")
-                || err_lower.contains("recursion limit")
-                || err_lower.contains("runtime limit");
-            JsEvalResult {
-                value: None,
-                error: Some(err_str),
-                timed_out,
-                eval_time_us: start.elapsed().as_micros() as u64,
-            }
-        }
-    }
+    })
 }
 
 /// Evalera flera JS-uttryck med delad kontext (persistent state)
 ///
-/// Alla snippets delar samma Boa Context — variabler definierade i
+/// Alla snippets delar samma QuickJS Context — variabler definierade i
 /// snippet 1 är tillgängliga i snippet 2, etc.
 #[cfg(feature = "js-eval")]
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
     // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
-    let mut context = create_sandboxed_context();
+    let (_rt, ctx) = create_sandboxed_runtime();
     let mut results = Vec::with_capacity(snippets.len());
 
-    for code in snippets {
-        let snippet_start = std::time::Instant::now();
+    ctx.with(|ctx| {
+        for code in snippets {
+            let snippet_start = std::time::Instant::now();
 
-        // Allowlist-kontroll per snippet
-        if let Err(reason) = check_js_safety(code) {
-            results.push(JsEvalResult {
-                value: None,
-                error: Some(reason),
-                timed_out: false,
-                eval_time_us: snippet_start.elapsed().as_micros() as u64,
-            });
-            continue;
-        }
-
-        match context.eval(Source::from_bytes(code.as_bytes())) {
-            Ok(result) => {
-                let value_str = result
-                    .to_string(&mut context)
-                    .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
-                results.push(JsEvalResult {
-                    value: Some(value_str),
-                    error: None,
-                    timed_out: false,
-                    eval_time_us: snippet_start.elapsed().as_micros() as u64,
-                });
-            }
-            Err(e) => {
+            // Allowlist-kontroll per snippet
+            if let Err(reason) = check_js_safety(code) {
                 results.push(JsEvalResult {
                     value: None,
-                    error: Some(format!("{}", e)),
+                    error: Some(reason),
                     timed_out: false,
                     eval_time_us: snippet_start.elapsed().as_micros() as u64,
                 });
+                continue;
+            }
+
+            match ctx.eval::<rquickjs::Value, _>(code.as_str()) {
+                Ok(result) => {
+                    let value_str = quickjs_value_to_string(&ctx, &result);
+                    results.push(JsEvalResult {
+                        value: Some(value_str),
+                        error: None,
+                        timed_out: false,
+                        eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                    });
+                }
+                Err(e) => {
+                    results.push(JsEvalResult {
+                        value: None,
+                        error: Some(quickjs_error_string(&ctx, &e)),
+                        timed_out: false,
+                        eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                    });
+                }
             }
         }
-    }
+    });
 
     JsBatchResult {
         results,
         total_eval_time_us: start.elapsed().as_micros() as u64,
+    }
+}
+
+// ─── QuickJS hjälpfunktioner ──────────────────────────────────────────────
+
+/// Konvertera ett QuickJS Value till en Rust-sträng
+#[cfg(feature = "js-eval")]
+pub(crate) fn quickjs_value_to_string<'js>(ctx: &rquickjs::Ctx<'js>, val: &rquickjs::Value<'js>) -> String {
+    use rquickjs::Type;
+    match val.type_of() {
+        Type::Undefined => "undefined".to_string(),
+        Type::Null => "null".to_string(),
+        Type::Bool => {
+            if val.as_bool().unwrap_or(false) {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        Type::Int => val.as_int().map(|v| v.to_string()).unwrap_or_else(|| "0".to_string()),
+        Type::Float => {
+            let f = val.as_float().unwrap_or(0.0);
+            // Matcha JavaScript-formatering: 59.98, inte 5.998e1
+            if f.fract() == 0.0 && f.abs() < 1e15 {
+                format!("{}", f as i64)
+            } else {
+                format!("{}", f)
+            }
+        }
+        Type::String => val
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default(),
+        _ => {
+            // För objekt/arrayer: använd JSON.stringify eller toString()
+            if let Ok(s) = ctx.json_stringify(val.clone()) {
+                if let Some(json_str) = s {
+                    if let Ok(rs) = json_str.to_string() {
+                        return rs;
+                    }
+                }
+            }
+            // Fallback: toString()
+            val.as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_else(|| "[object]".to_string())
+        }
+    }
+}
+
+/// Extrahera felmeddelande från QuickJS-error
+#[cfg(feature = "js-eval")]
+pub(crate) fn quickjs_error_string<'js>(ctx: &rquickjs::Ctx<'js>, err: &rquickjs::Error) -> String {
+    match err {
+        rquickjs::Error::Exception => {
+            // Hämta det kastade undantaget
+            let caught = ctx.catch();
+            if let Some(exc) = caught.as_exception() {
+                let msg = exc.message().unwrap_or_default();
+                let stack = exc
+                    .stack()
+                    .unwrap_or_default();
+                if stack.is_empty() {
+                    msg
+                } else {
+                    format!("{}\n{}", msg, stack)
+                }
+            } else {
+                format!("{:?}", caught)
+            }
+        }
+        other => format!("{}", other),
     }
 }
 
@@ -1041,23 +1120,14 @@ mod tests {
 
     #[test]
     #[cfg(feature = "js-eval")]
-    fn test_sandboxed_context_limits() {
-        let ctx = create_sandboxed_context();
-        let limits = ctx.runtime_limits();
-        assert_eq!(
-            limits.loop_iteration_limit(),
-            MAX_LOOP_ITERATIONS,
-            "Loop-limit borde vara satt"
-        );
-        assert_eq!(
-            limits.stack_size_limit(),
-            MAX_STACK_SIZE,
-            "Stack-limit borde vara satt"
-        );
-        assert_eq!(
-            limits.recursion_limit(),
-            MAX_RECURSION_DEPTH,
-            "Recursion-limit borde vara satt"
-        );
+    fn test_sandboxed_runtime_creates() {
+        let (rt, ctx) = create_sandboxed_runtime();
+        // Verifiera att runtime och kontext skapas utan panik
+        ctx.with(|ctx| {
+            let result: rquickjs::Result<i32> = ctx.eval("1 + 1");
+            assert_eq!(result.unwrap(), 2, "Grundläggande eval borde fungera");
+        });
+        drop(ctx);
+        drop(rt);
     }
 }

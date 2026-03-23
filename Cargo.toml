@@ -25,8 +25,8 @@ tokio = { version = "1", features = ["full"], optional = true }
 tokio-stream = { version = "0.1", optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
 
-# JS evaluation engine (Fas 4b – optional, adds ~2MB to binary)
-boa_engine = { version = "0.21", optional = true }
+# JS evaluation engine (QuickJS via rquickjs – optional, snabbare och mindre än Boa)
+rquickjs = { version = "0.11", features = ["bindgen"], optional = true }
 
 # HTTP fetch (Fas 7 – optional, for standalone page fetching)
 reqwest = { version = "0.12", features = ["cookies", "gzip", "brotli", "rustls-tls", "rustls-tls-native-roots"], optional = true, default-features = false }
@@ -75,7 +75,7 @@ base64 = "0.22"
 [features]
 default = []
 server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision"]
-js-eval = ["boa_engine"]
+js-eval = ["rquickjs"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]

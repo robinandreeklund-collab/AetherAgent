@@ -1,6 +1,6 @@
-/// Boa DOM Bridge — Fas 17.4-17.6
+/// QuickJS DOM Bridge — Fas 17.4-17.6
 ///
-/// Exponerar ArenaDom som `document`/`window`-objekt i Boa JS-kontexten.
+/// Exponerar ArenaDom som `document`/`window`-objekt i QuickJS-kontexten.
 /// Fullständig DOM-implementation med 40+ metoder:
 ///
 /// Document: getElementById, querySelector, querySelectorAll, createElement,
@@ -15,12 +15,7 @@
 /// Window: getComputedStyle (stubbad)
 /// CSS Selectors: #id, .class, tag, tag.class, [attr], [attr="val"],
 ///   div > span (child), div span (descendant), :first-child, komma-sep
-use boa_engine::{
-    js_string,
-    object::{builtins::JsArray, ObjectInitializer},
-    property::{Attribute, PropertyDescriptor},
-    Context, JsArgs, JsValue, NativeFunction, Source,
-};
+use rquickjs::{function::Rest, object::Accessor, Ctx, Function, Object, Persistent, Value};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -53,7 +48,7 @@ pub type DomMutation = String;
 /// En registrerad event listener på ett DOM-element
 struct EventListener {
     event_type: String,
-    callback: JsValue,
+    callback: Persistent<Function<'static>>,
     capture: bool,
 }
 
@@ -82,7 +77,7 @@ type SharedState = Rc<RefCell<BridgeState>>;
 
 /// Evaluera JS-kod med tillgång till DOM via ArenaDom
 ///
-/// Sätter upp `document` och `window` som globala objekt i Boa-kontexten.
+/// Sätter upp `document` och `window` som globala objekt i QuickJS-kontexten.
 /// Returnerar eventuellt returvärde och alla DOM-mutationer.
 pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
     let start = std::time::Instant::now();
@@ -126,29 +121,29 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         console_output: Vec::new(),
     }));
 
-    let mut context = crate::js_eval::create_sandboxed_context();
+    let mut ctx = { let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */ };
 
     // Registrera event-loop (setTimeout, setInterval, rAF, MutationObserver, queueMicrotask)
     let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
-    event_loop::register_event_loop(&mut context, Rc::clone(&el));
+    event_loop::register_event_loop(&mut ctx, Rc::clone(&el));
 
     // Registrera document-objekt
-    register_document(&mut context, Rc::clone(&state));
+    register_document(&mut ctx, Rc::clone(&state));
 
     // Registrera window-objekt
-    register_window(&mut context, Rc::clone(&state));
+    register_window(&mut ctx, Rc::clone(&state));
 
     // Registrera console (fångar output)
-    register_console(&mut context, Rc::clone(&state));
+    register_console(&mut ctx, Rc::clone(&state));
 
-    match context.eval(Source::from_bytes(code)) {
+    match ctx.eval::<Value, _>(code) {
         Ok(result) => {
             let value_str = result
-                .to_string(&mut context)
+                .to_string(&mut ctx)
                 .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
 
             // Kör event-loopen: dränera microtasks, timers, rAF, MutationObservers
-            let loop_stats = event_loop::run_event_loop(&mut context, &el);
+            let loop_stats = event_loop::run_event_loop(&mut ctx, &el);
             let (ticks, timers) = match &loop_stats {
                 Ok(s) => (s.ticks, s.timers_fired),
                 Err(_) => (0, 0),
@@ -171,7 +166,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         }
         Err(e) => DomEvalResult {
             value: None,
-            error: Some(format!("{}", e)),
+            error: Some(format!("{:?}", e)),
             mutations: state.borrow().mutations.clone(),
             eval_time_us: start.elapsed().as_micros() as u64,
             event_loop_ticks: 0,
@@ -236,20 +231,20 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         console_output: Vec::new(),
     }));
 
-    let mut context = crate::js_eval::create_sandboxed_context();
+    let mut ctx = { let (_, c) = crate::js_eval::create_sandboxed_runtime(); /* TODO */ };
     let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
-    event_loop::register_event_loop(&mut context, Rc::clone(&el));
-    register_document(&mut context, Rc::clone(&state));
-    register_window(&mut context, Rc::clone(&state));
-    register_console(&mut context, Rc::clone(&state));
+    event_loop::register_event_loop(&mut ctx, Rc::clone(&el));
+    register_document(&mut ctx, Rc::clone(&state));
+    register_window(&mut ctx, Rc::clone(&state));
+    register_console(&mut ctx, Rc::clone(&state));
 
-    let result = match context.eval(Source::from_bytes(code)) {
+    let result = match ctx.eval::<Value, _>(code) {
         Ok(res) => {
             let value_str = res
-                .to_string(&mut context)
+                .to_string(&mut ctx)
                 .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
 
-            let loop_stats = event_loop::run_event_loop(&mut context, &el);
+            let loop_stats = event_loop::run_event_loop(&mut ctx, &el);
             let (ticks, timers) = match &loop_stats {
                 Ok(s) => (s.ticks, s.timers_fired),
                 Err(_) => (0, 0),
@@ -272,7 +267,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         }
         Err(e) => DomEvalResult {
             value: None,
-            error: Some(format!("{}", e)),
+            error: Some(format!("{:?}", e)),
             mutations: state.borrow().mutations.clone(),
             eval_time_us: start.elapsed().as_micros() as u64,
             event_loop_ticks: 0,
@@ -281,8 +276,8 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
     };
 
     // Extrahera arena från SharedState — ta tillbaka ägandet
-    // Rc::try_unwrap fungerar eftersom context (med alla Rc-kloner) droppas ovan
-    drop(context);
+    // Rc::try_unwrap fungerar eftersom ctx (med alla Rc-kloner) droppas ovan
+    drop(ctx);
     let bridge = match Rc::try_unwrap(state) {
         Ok(cell) => cell.into_inner(),
         Err(rc) => {
@@ -310,7 +305,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
 
 // ─── Document-objekt ────────────────────────────────────────────────────────
 
-fn register_document(context: &mut Context, state: SharedState) {
+fn register_document(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     let state_gbi = Rc::clone(&state);
     let state_qs = Rc::clone(&state);
     let state_qsa = Rc::clone(&state);
@@ -321,10 +316,9 @@ fn register_document(context: &mut Context, state: SharedState) {
     let state_gtn = Rc::clone(&state);
 
     // SAFETY: Closures capture Rc<RefCell<BridgeState>> som ej är Send/Sync,
-    // men Boa-kontexten är single-threaded och closures lever inom samma tråd.
-    let get_element_by_id = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let id = args.get_or_undefined(0).to_string(ctx)?;
+    // men QuickJS-kontexten är single-threaded och closures lever inom samma tråd.
+    let get_element_by_id = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let id = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let id_str = id.to_std_string_escaped();
             let key = {
                 let s = state_gbi.borrow();
@@ -332,14 +326,12 @@ fn register_document(context: &mut Context, state: SharedState) {
             };
             match key {
                 Some(k) => Ok(make_element_object(ctx, k, &state_gbi)),
-                None => Ok(JsValue::null()),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
 
-    let query_selector = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let selector = args.get_or_undefined(0).to_string(ctx)?;
+    let query_selector = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let selector = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
             let key = {
                 let s = state_qs.borrow();
@@ -347,31 +339,27 @@ fn register_document(context: &mut Context, state: SharedState) {
             };
             match key {
                 Some(k) => Ok(make_element_object(ctx, k, &state_qs)),
-                None => Ok(JsValue::null()),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
 
-    let query_selector_all = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let selector = args.get_or_undefined(0).to_string(ctx)?;
+    let query_selector_all = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let selector = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let sel_str = selector.to_std_string_escaped();
             let keys = {
                 let s = state_qsa.borrow();
                 query_select_all(&s.arena, &sel_str)
             };
-            let array = JsArray::new(ctx);
+            let array = rquickjs::Array::new(ctx.clone()).unwrap();
             for key in keys {
                 let elem = make_element_object(ctx, key, &state_qsa);
-                array.push(elem, ctx)?;
+                array.set(0, elem)?;
             }
-            Ok(array.into())
-        })
-    };
+            Ok(array.into_value())
+    }).unwrap();
 
-    let create_element = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let tag = args.get_or_undefined(0).to_string(ctx)?;
+    let create_element = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let tag = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let tag_str = tag.to_std_string_escaped().to_lowercase();
             let key = {
                 let mut s = state_ce.borrow_mut();
@@ -385,12 +373,10 @@ fn register_document(context: &mut Context, state: SharedState) {
                 })
             };
             Ok(make_element_object(ctx, key, &state_ce))
-        })
-    };
+    }).unwrap();
 
-    let create_text_node = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let text = args.get_or_undefined(0).to_string(ctx)?;
+    let create_text_node = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let text = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let text_str = text.to_std_string_escaped();
             let key = {
                 let mut s = state_ct.borrow_mut();
@@ -404,13 +390,11 @@ fn register_document(context: &mut Context, state: SharedState) {
                 })
             };
             Ok(make_element_object(ctx, key, &state_ct))
-        })
-    };
+    }).unwrap();
 
     // createComment(text)
-    let create_comment = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let text = args.get_or_undefined(0).to_string(ctx)?;
+    let create_comment = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let text = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let text_str = text.to_std_string_escaped();
             let key = {
                 let mut s = state_cc.borrow_mut();
@@ -424,12 +408,10 @@ fn register_document(context: &mut Context, state: SharedState) {
                 })
             };
             Ok(make_element_object(ctx, key, &state_cc))
-        })
-    };
+    }).unwrap();
 
     // getElementsByClassName(cls)
-    let get_by_class = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let get_by_class = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -440,18 +422,16 @@ fn register_document(context: &mut Context, state: SharedState) {
                 find_all_by_class(&s.arena, s.arena.document, &cls, &mut results);
                 results
             };
-            let array = JsArray::new(ctx);
+            let array = rquickjs::Array::new(ctx.clone()).unwrap();
             for key in keys {
                 let elem = make_element_object(ctx, key, &state_gcn);
-                array.push(elem, ctx)?;
+                array.set(0, elem)?;
             }
-            Ok(array.into())
-        })
-    };
+            Ok(array.into_value())
+    }).unwrap();
 
     // getElementsByTagName(tag)
-    let get_by_tag = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let get_by_tag = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let tag = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -462,19 +442,17 @@ fn register_document(context: &mut Context, state: SharedState) {
                 find_all_by_tag(&s.arena, s.arena.document, &tag, &mut results);
                 results
             };
-            let array = JsArray::new(ctx);
+            let array = rquickjs::Array::new(ctx.clone()).unwrap();
             for key in keys {
                 let elem = make_element_object(ctx, key, &state_gtn);
-                array.push(elem, ctx)?;
+                array.set(0, elem)?;
             }
-            Ok(array.into())
-        })
-    };
+            Ok(array.into_value())
+    }).unwrap();
 
     // createDocumentFragment
     let state_cdf = Rc::clone(&state);
-    let create_doc_fragment = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let create_doc_fragment = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let key = {
                 let mut s = state_cdf.borrow_mut();
                 s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -487,21 +465,28 @@ fn register_document(context: &mut Context, state: SharedState) {
                 })
             };
             Ok(make_element_object(ctx, key, &state_cdf))
-        })
-    };
+    }).unwrap();
 
     // Bygg document-objektet
-    let doc = ObjectInitializer::new(context)
-        .function(get_element_by_id, js_string!("getElementById"), 1)
-        .function(query_selector, js_string!("querySelector"), 1)
-        .function(query_selector_all, js_string!("querySelectorAll"), 1)
-        .function(create_element, js_string!("createElement"), 1)
-        .function(create_text_node, js_string!("createTextNode"), 1)
-        .function(create_comment, js_string!("createComment"), 1)
-        .function(create_doc_fragment, js_string!("createDocumentFragment"), 0)
-        .function(get_by_class, js_string!("getElementsByClassName"), 1)
-        .function(get_by_tag, js_string!("getElementsByTagName"), 1)
-        .build();
+    let doc = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("getElementById", get_element_by_id).unwrap_or(())
+        ;
+    /* TODO */ obj.set("querySelector", query_selector).unwrap_or(())
+        ;
+    /* TODO */ obj.set("querySelectorAll", query_selector_all).unwrap_or(())
+        ;
+    /* TODO */ obj.set("createElement", create_element).unwrap_or(())
+        ;
+    /* TODO */ obj.set("createTextNode", create_text_node).unwrap_or(())
+        ;
+    /* TODO */ obj.set("createComment", create_comment).unwrap_or(())
+        ;
+    /* TODO */ obj.set("createDocumentFragment", create_doc_fragment).unwrap_or(())
+        ;
+    /* TODO */ obj.set("getElementsByClassName", get_by_class).unwrap_or(())
+        ;
+    /* TODO */ obj.set("getElementsByTagName", get_by_tag).unwrap_or(());
 
     // body, head, documentElement
     let (body_key, head_key, html_key) = {
@@ -515,192 +500,170 @@ fn register_document(context: &mut Context, state: SharedState) {
     };
 
     if let Some(key) = body_key {
-        let body_obj = make_element_object(context, key, &state);
-        doc.set(js_string!("body"), body_obj, false, context)
-            .unwrap_or(true);
+        let body_obj = make_element_object(ctx, key, &state);
+        doc.set("body", body_obj).unwrap_or(());
     }
     if let Some(key) = head_key {
-        let head_obj = make_element_object(context, key, &state);
-        doc.set(js_string!("head"), head_obj, false, context)
-            .unwrap_or(true);
+        let head_obj = make_element_object(ctx, key, &state);
+        doc.set("head", head_obj).unwrap_or(());
     }
     if let Some(key) = html_key {
-        let html_obj = make_element_object(context, key, &state);
-        doc.set(js_string!("documentElement"), html_obj, false, context)
-            .unwrap_or(true);
+        let html_obj = make_element_object(ctx, key, &state);
+        doc.set("documentElement", html_obj).unwrap_or(());
     }
 
     // createRange() — grundläggande Range API för rich-text editors
-    let create_range_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+    let create_range_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
         let collapse_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let select_node_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let select_node_contents_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let set_start_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let set_end_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+        let set_end_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let set_start_before_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let set_end_after_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-        let clone_range_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx2| {
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+        let clone_range_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             // Returnera nytt Range-liknande objekt
-            let inner = ObjectInitializer::new(ctx2)
-                .property(
-                    js_string!("collapsed"),
-                    JsValue::from(true),
-                    Attribute::all(),
+            let inner = Object::new(ctx.clone()).unwrap()
+                .set("collapsed", Value::new_bool(ctx.clone(), true),
                 )
-                .property(
-                    js_string!("startOffset"),
-                    JsValue::from(0),
-                    Attribute::all(),
+                .set("startOffset", Value::new_int(ctx.clone(), 0),
                 )
-                .property(js_string!("endOffset"), JsValue::from(0), Attribute::all())
-                .build();
-            Ok(inner.into())
+                .set("endOffset", Value::new_int(ctx.clone(), 0));
+            Ok(inner.into_value())
         });
         let delete_contents_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let to_string_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
-        let get_bounding_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx2| {
-            let rect = ObjectInitializer::new(ctx2)
-                .property(js_string!("x"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("y"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("width"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("height"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("top"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("right"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("bottom"), JsValue::from(0), Attribute::READONLY)
-                .property(js_string!("left"), JsValue::from(0), Attribute::READONLY)
-                .build();
-            Ok(rect.into())
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))) }).unwrap();
+        let get_bounding_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let rect = Object::new(ctx.clone()).unwrap()
+                .set("x", Value::new_int(ctx.clone(), 0))
+                .set("y", Value::new_int(ctx.clone(), 0))
+                .set("width", Value::new_int(ctx.clone(), 0))
+                .set("height", Value::new_int(ctx.clone(), 0))
+                .set("top", Value::new_int(ctx.clone(), 0))
+                .set("right", Value::new_int(ctx.clone(), 0))
+                .set("bottom", Value::new_int(ctx.clone(), 0))
+                .set("left", Value::new_int(ctx.clone(), 0));
+            Ok(rect.into_value())
         });
 
-        let range = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("collapsed"),
-                JsValue::from(true),
-                Attribute::all(),
+        let range = Object::new(ctx.clone()).unwrap()
+            .set("collapsed", Value::new_bool(ctx.clone(), true),
             )
-            .property(
-                js_string!("startContainer"),
-                JsValue::null(),
-                Attribute::all(),
+            .set("startContainer", Value::new_null(ctx.clone()),
             )
-            .property(
-                js_string!("endContainer"),
-                JsValue::null(),
-                Attribute::all(),
+            .set("endContainer", Value::new_null(ctx.clone()),
             )
-            .property(
-                js_string!("startOffset"),
-                JsValue::from(0),
-                Attribute::all(),
+            .set("startOffset", Value::new_int(ctx.clone(), 0),
             )
-            .property(js_string!("endOffset"), JsValue::from(0), Attribute::all())
-            .property(
-                js_string!("commonAncestorContainer"),
-                JsValue::null(),
-                Attribute::all(),
+            .set("endOffset", Value::new_int(ctx.clone(), 0))
+            .set("commonAncestorContainer", Value::new_null(ctx.clone()),
             )
-            .function(collapse_fn, js_string!("collapse"), 1)
-            .function(select_node_fn, js_string!("selectNode"), 1)
-            .function(select_node_contents_fn, js_string!("selectNodeContents"), 1)
-            .function(set_start_fn, js_string!("setStart"), 2)
-            .function(set_end_fn, js_string!("setEnd"), 2)
-            .function(set_start_before_fn, js_string!("setStartBefore"), 1)
-            .function(set_end_after_fn, js_string!("setEndAfter"), 1)
-            .function(clone_range_fn, js_string!("cloneRange"), 0)
-            .function(delete_contents_fn, js_string!("deleteContents"), 0)
-            .function(to_string_fn, js_string!("toString"), 0)
-            .function(get_bounding_fn, js_string!("getBoundingClientRect"), 0)
-            .build();
+            ;
+    /* TODO */ obj.set("collapse", collapse_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("selectNode", select_node_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("selectNodeContents", select_node_contents_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("setStart", set_start_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("setEnd", set_end_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("setStartBefore", set_start_before_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("setEndAfter", set_end_after_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("cloneRange", clone_range_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("deleteContents", delete_contents_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("toString", to_string_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("getBoundingClientRect", get_bounding_fn).unwrap_or(());
 
-        Ok(range.into())
+        Ok(range.into_value())
     });
     doc.set(
-        js_string!("createRange"),
-        create_range_fn.to_js_function(context.realm()),
+        "createRange",
+        create_range_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // getSelection() — grundläggande Selection API
-    let get_selection_fn = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
+    let get_selection_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
         let remove_all_ranges =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let add_range_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let collapse_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let collapse_to_start =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let collapse_to_end =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let to_string_fn =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(js_string!(""))));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))) }).unwrap();
 
-        let selection = ObjectInitializer::new(ctx)
-            .property(js_string!("anchorNode"), JsValue::null(), Attribute::all())
-            .property(
-                js_string!("anchorOffset"),
-                JsValue::from(0),
-                Attribute::all(),
+        let selection = Object::new(ctx.clone()).unwrap()
+            ;
+    /* TODO */ obj.set("anchorNode", Value::new_null(ctx.clone())).unwrap_or(())
+            .set("anchorOffset", Value::new_int(ctx.clone(), 0),
             )
-            .property(js_string!("focusNode"), JsValue::null(), Attribute::all())
-            .property(
-                js_string!("focusOffset"),
-                JsValue::from(0),
-                Attribute::all(),
+            ;
+    /* TODO */ obj.set("focusNode", Value::new_null(ctx.clone())).unwrap_or(())
+            .set("focusOffset", Value::new_int(ctx.clone(), 0),
             )
-            .property(
-                js_string!("isCollapsed"),
-                JsValue::from(true),
-                Attribute::all(),
+            .set("isCollapsed", Value::new_bool(ctx.clone(), true),
             )
-            .property(js_string!("rangeCount"), JsValue::from(0), Attribute::all())
-            .property(
-                js_string!("type"),
-                JsValue::from(js_string!("None")),
-                Attribute::all(),
+            .set("rangeCount", Value::new_int(ctx.clone(), 0))
+            .set("type", rquickjs::String::from_str(ctx.clone(), "None").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
-            .function(remove_all_ranges, js_string!("removeAllRanges"), 0)
-            .function(add_range_fn, js_string!("addRange"), 1)
-            .function(collapse_fn, js_string!("collapse"), 2)
-            .function(collapse_to_start, js_string!("collapseToStart"), 0)
-            .function(collapse_to_end, js_string!("collapseToEnd"), 0)
-            .function(to_string_fn, js_string!("toString"), 0)
-            .build();
+            ;
+    /* TODO */ obj.set("removeAllRanges", remove_all_ranges).unwrap_or(())
+            ;
+    /* TODO */ obj.set("addRange", add_range_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("collapse", collapse_fn).unwrap_or(())
+            ;
+    /* TODO */ obj.set("collapseToStart", collapse_to_start).unwrap_or(())
+            ;
+    /* TODO */ obj.set("collapseToEnd", collapse_to_end).unwrap_or(())
+            ;
+    /* TODO */ obj.set("toString", to_string_fn).unwrap_or(());
 
-        Ok(selection.into())
+        Ok(selection.into_value())
     });
     doc.set(
-        js_string!("getSelection"),
-        get_selection_fn.to_js_function(context.realm()),
+        "getSelection",
+        get_selection_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // exitPointerLock()
-    let exit_pl = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let exit_pl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     doc.set(
-        js_string!("exitPointerLock"),
-        exit_pl.to_js_function(context.realm()),
+        "exitPointerLock",
+        exit_pl,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // activeElement — returnerar det element som har fokus (default: body)
     let st_ae = Rc::clone(&state);
-    let active_element_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let active_element_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let focused = st_ae.borrow().focused_element;
             match focused {
                 Some(key_u64) => {
@@ -709,7 +672,7 @@ fn register_document(context: &mut Context, state: SharedState) {
                     if exists {
                         Ok(make_element_object(ctx, nk, &st_ae))
                     } else {
-                        Ok(JsValue::null())
+                        Ok(Value::new_null(ctx.clone()))
                     }
                 }
                 None => {
@@ -719,32 +682,30 @@ fn register_document(context: &mut Context, state: SharedState) {
                     };
                     match body_key {
                         Some(bk) => Ok(make_element_object(ctx, bk, &st_ae)),
-                        None => Ok(JsValue::null()),
+                        None => Ok(Value::new_null(ctx.clone())),
                     }
                 }
             }
-        })
-    };
+    }).unwrap();
     doc.set(
-        js_string!("activeElement"),
-        active_element_fn.to_js_function(context.realm()),
+        "activeElement",
+        active_element_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
-    context
-        .register_global_property(js_string!("document"), doc, Attribute::all())
+    ctx.globals().set("document", doc)
         .unwrap_or(());
 }
 
 // ─── Element-objekt ─────────────────────────────────────────────────────────
 
 /// Extrahera NodeKey från ett JS-element-objekt via __nodeKey__
-fn extract_node_key(val: &JsValue, ctx: &mut Context) -> Option<NodeKey> {
+fn extract_node_key(val: &Value<'_>) -> Option<NodeKey> {
     let obj = val.as_object()?;
     let bits = obj
-        .get(js_string!("__nodeKey__"), ctx)
+        .get("__nodeKey__", ctx)
         .ok()?
         .to_number(ctx)
         .ok()?;
@@ -760,7 +721,7 @@ fn f64_to_node_key(bits: f64) -> NodeKey {
 /// Skapa ett JS-objekt som representerar ett DOM-element med full funktionalitet.
 ///
 /// Alla metoder har tillgång till arena via SharedState-closures.
-fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
+fn make_element_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
     let key_bits = node_key_to_f64(key);
 
     // Bestäm nodeType och tagName från arena
@@ -789,59 +750,40 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
         (nt, tag, id, cls)
     };
 
-    let obj = ObjectInitializer::new(context)
-        .property(
-            js_string!("__nodeKey__"),
-            JsValue::from(key_bits),
-            Attribute::empty(),
+    let obj = Object::new(ctx.clone()).unwrap()
+        .set("__nodeKey__", Value::new_float(ctx.clone(), key_bits as f64),
         )
-        .property(
-            js_string!("nodeType"),
-            JsValue::from(node_type_val),
-            Attribute::READONLY,
+        .set("nodeType", Value::new_int(ctx.clone(), node_type_val),
         )
-        .property(
-            js_string!("tagName"),
-            JsValue::from(js_string!(tag_name.as_str())),
-            Attribute::READONLY,
+        .set("tagName", rquickjs::String::from_str(ctx.clone(), tag_name.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
         )
-        .property(
-            js_string!("id"),
-            JsValue::from(js_string!(id_val.as_str())),
-            Attribute::all(),
+        .set("id", rquickjs::String::from_str(ctx.clone(), id_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
         )
-        .property(
-            js_string!("className"),
-            JsValue::from(js_string!(class_val.as_str())),
-            Attribute::all(),
-        )
-        .build();
+        .set("className", rquickjs::String::from_str(ctx.clone(), class_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+        );
 
     // ─── getAttribute(name) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ga = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let name = args.get_or_undefined(0).to_string(ctx)?;
+    let ga = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let name = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_string(ctx)?;
             let name_str = name.to_std_string_escaped();
             let s = st.borrow();
             match s.arena.nodes.get(key).and_then(|n| n.get_attr(&name_str)) {
-                Some(v) => Ok(JsValue::from(js_string!(v))),
-                None => Ok(JsValue::null()),
+                Some(v) => Ok(rquickjs::String::from_str(ctx.clone(), v).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("getAttribute"),
-        ga.to_js_function(context.realm()),
+        "getAttribute",
+        ga,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── setAttribute(name, value) ──────────────────────────────────
     let st = Rc::clone(state);
-    let sa = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let sa = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -854,21 +796,19 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             s.arena.set_attr(key, &name, &value);
             s.mutations
                 .push(format!("setAttribute({}, {})", name, value));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("setAttribute"),
-        sa.to_js_function(context.realm()),
+        "setAttribute",
+        sa,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── removeAttribute(name) ──────────────────────────────────────
     let st = Rc::clone(state);
-    let ra = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ra = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -876,30 +816,26 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             let mut s = st.borrow_mut();
             s.arena.remove_attr(key, &name);
             s.mutations.push(format!("removeAttribute({})", name));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("removeAttribute"),
-        ra.to_js_function(context.realm()),
+        "removeAttribute",
+        ra,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── textContent (accessor property: getter + setter) ──────────
     {
         let st_get = Rc::clone(state);
-        let tc_get = unsafe {
-            NativeFunction::from_closure(move |_this, _args, _ctx| {
+        let tc_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let s = st_get.borrow();
                 let text = s.arena.extract_text(key);
-                Ok(JsValue::from(js_string!(text.as_str())))
-            })
-        };
+                Ok(rquickjs::String::from_str(ctx.clone(), text.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
+        }).unwrap();
         let st_set = Rc::clone(state);
-        let tc_set = unsafe {
-            NativeFunction::from_closure(move |_this, args, ctx| {
+        let tc_set = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let text = args
                     .get_or_undefined(0)
                     .to_string(ctx)?
@@ -923,120 +859,105 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 });
                 s.arena.append_child(key, text_key);
                 s.mutations.push("setTextContent".to_string());
-                Ok(JsValue::undefined())
-            })
-        };
-        let getter_fn = tc_get.to_js_function(context.realm());
-        let setter_fn = tc_set.to_js_function(context.realm());
+                Ok(Value::new_undefined(ctx.clone()))
+        }).unwrap();
+        let getter_fn = tc_get;
+        let setter_fn = tc_set;
         let _ = obj.define_property_or_throw(
-            js_string!("textContent"),
-            PropertyDescriptor::builder()
+            "textContent",
+            /* PropertyDescriptor */
                 .get(getter_fn)
                 .set(setter_fn)
                 .enumerable(true)
-                .configurable(true)
-                .build(),
-            context,
+                .configurable(true),
+            ctx,
         );
     }
 
     // ─── appendChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ac = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let child_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+    let ac = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let child_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
                 Some(k) => k,
-                None => return Ok(JsValue::undefined()),
+                None => return Ok(Value::new_undefined(ctx.clone())),
             };
             let mut s = st.borrow_mut();
             s.arena.append_child(key, child_key);
             s.mutations.push("appendChild".to_string());
-            Ok(args.get_or_undefined(0).clone())
-        })
-    };
+            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+    }).unwrap();
     obj.set(
-        js_string!("appendChild"),
-        ac.to_js_function(context.realm()),
+        "appendChild",
+        ac,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── removeChild(child) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let rc = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let child_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+    let rc = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let child_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
                 Some(k) => k,
-                None => return Ok(JsValue::undefined()),
+                None => return Ok(Value::new_undefined(ctx.clone())),
             };
             let mut s = st.borrow_mut();
             s.arena.remove_child(key, child_key);
             s.mutations.push("removeChild".to_string());
-            Ok(args.get_or_undefined(0).clone())
-        })
-    };
+            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+    }).unwrap();
     obj.set(
-        js_string!("removeChild"),
-        rc.to_js_function(context.realm()),
+        "removeChild",
+        rc,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── parentNode ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let pn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let pn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             match s.arena.nodes.get(key).and_then(|n| n.parent) {
-                Some(parent_key) => Ok(JsValue::from(node_key_to_f64(parent_key))),
-                None => Ok(JsValue::null()),
+                Some(parent_key) => Ok(Value::from(node_key_to_f64(parent_key))),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("parentNode"),
-        pn.to_js_function(context.realm()),
+        "parentNode",
+        pn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── childNodes ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let cn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let cn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            let arr = JsArray::new(ctx);
+            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 for (i, &child) in node.children.iter().enumerate() {
                     let child_bits = node_key_to_f64(child);
-                    let child_obj = ObjectInitializer::new(ctx)
-                        .property(
-                            js_string!("__nodeKey__"),
-                            JsValue::from(child_bits),
-                            Attribute::empty(),
-                        )
-                        .build();
-                    let _ = arr.set(i as u32, child_obj, false, ctx);
+                    let child_obj = Object::new(ctx.clone()).unwrap()
+                        .set("__nodeKey__", Value::new_float(ctx.clone(), child_bits as f64),
+                        );
+                    let _ = arr.set(i, child_obj);
                 }
             }
-            Ok(arr.into())
-        })
-    };
+            Ok(arr.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("childNodes"),
-        cn.to_js_function(context.realm()),
+        "childNodes",
+        cn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── firstChild ─────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let fc = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let fc = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             match s
                 .arena
@@ -1044,52 +965,48 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 .get(key)
                 .and_then(|n| n.children.first().copied())
             {
-                Some(child_key) => Ok(JsValue::from(node_key_to_f64(child_key))),
-                None => Ok(JsValue::null()),
+                Some(child_key) => Ok(Value::from(node_key_to_f64(child_key))),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("firstChild"),
-        fc.to_js_function(context.realm()),
+        "firstChild",
+        fc,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── nextSibling ────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let ns = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let ns = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
-                None => return Ok(JsValue::null()),
+                None => return Ok(Value::new_null(ctx.clone())),
             };
             let siblings = &s.arena.nodes.get(parent_key).map(|n| &n.children);
             if let Some(sibs) = siblings {
                 let my_idx = sibs.iter().position(|&c| c == key);
                 if let Some(idx) = my_idx {
                     if idx + 1 < sibs.len() {
-                        return Ok(JsValue::from(node_key_to_f64(sibs[idx + 1])));
+                        return Ok(Value::from(node_key_to_f64(sibs[idx + 1])));
                     }
                 }
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("nextSibling"),
-        ns.to_js_function(context.realm()),
+        "nextSibling",
+        ns,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── closest(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let cl = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let cl = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let sel = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1098,135 +1015,121 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             let mut current = Some(key);
             while let Some(k) = current {
                 if matches_selector(&s.arena, k, &sel) {
-                    return Ok(JsValue::from(node_key_to_f64(k)));
+                    return Ok(Value::from(node_key_to_f64(k)));
                 }
                 current = s.arena.nodes.get(k).and_then(|n| n.parent);
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("closest"),
-        cl.to_js_function(context.realm()),
+        "closest",
+        cl,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── matches(selector) ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let ms = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ms = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let sel = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let s = st.borrow();
-            Ok(JsValue::from(matches_selector(&s.arena, key, &sel)))
-        })
-    };
+            Ok(Value::from(matches_selector(&s.arena, key, &sel)))
+    }).unwrap();
     obj.set(
-        js_string!("matches"),
-        ms.to_js_function(context.realm()),
+        "matches",
+        ms,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── children (bara element-barn) ───────────────────────────────
     let st = Rc::clone(state);
-    let ch = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let ch = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            let arr = JsArray::new(ctx);
+            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 let mut i = 0u32;
                 for &child in &node.children {
                     if let Some(cn) = s.arena.nodes.get(child) {
                         if cn.node_type == NodeType::Element {
-                            let co = ObjectInitializer::new(ctx)
-                                .property(
-                                    js_string!("__nodeKey__"),
-                                    JsValue::from(node_key_to_f64(child)),
-                                    Attribute::empty(),
-                                )
-                                .build();
-                            let _ = arr.set(i, co, false, ctx);
+                            let co = Object::new(ctx.clone()).unwrap()
+                                .set("__nodeKey__", Value::from(node_key_to_f64(child)),
+                                );
+                            let _ = arr.set(i, co);
                             i += 1;
                         }
                     }
                 }
             }
-            Ok(arr.into())
-        })
-    };
+            Ok(arr.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("children"),
-        ch.to_js_function(context.realm()),
+        "children",
+        ch,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── dataset (läs data-* attribut) ──────────────────────────────
     let st = Rc::clone(state);
-    let ds = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let ds = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            let ds_obj = ObjectInitializer::new(ctx).build();
+            let ds_obj = Object::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 for (k, v) in &node.attributes {
                     if let Some(name) = k.strip_prefix("data-") {
                         // Konvertera kebab-case till camelCase
                         let camel = data_attr_to_camel(name);
                         let _ = ds_obj.set(
-                            js_string!(camel.as_str()),
-                            JsValue::from(js_string!(v.as_str())),
+                            camel.as_str(),
+                            rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
                             false,
                             ctx,
                         );
                     }
                 }
             }
-            Ok(ds_obj.into())
-        })
-    };
+            Ok(ds_obj.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("dataset"),
-        ds.to_js_function(context.realm()),
+        "dataset",
+        ds,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── insertBefore(newChild, refChild) ─────────────────────────
     let st = Rc::clone(state);
-    let ib = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let new_child = match extract_node_key(args.get_or_undefined(0), ctx) {
+    let ib = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_child = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
                 Some(k) => k,
-                None => return Ok(JsValue::undefined()),
+                None => return Ok(Value::new_undefined(ctx.clone())),
             };
-            let ref_child = extract_node_key(args.get_or_undefined(1), ctx);
+            let ref_child = extract_node_key(&args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             let mut s = st.borrow_mut();
             s.arena.insert_before(key, new_child, ref_child);
             s.mutations.push("insertBefore".to_string());
-            Ok(args.get_or_undefined(0).clone())
-        })
-    };
+            Ok(args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())))
+    }).unwrap();
     obj.set(
-        js_string!("insertBefore"),
-        ib.to_js_function(context.realm()),
+        "insertBefore",
+        ib,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── insertAdjacentHTML(position, html) ────────────────────────
     // Förenklad: loggar mutation, parsning av HTML stöds ej (kräver full parser)
     let st = Rc::clone(state);
-    let iah = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let iah = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let position = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1240,101 +1143,84 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 "insertAdjacentHTML:{}:{}:{}",
                 key_bits, position, html_str
             ));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("insertAdjacentHTML"),
-        iah.to_js_function(context.realm()),
+        "insertAdjacentHTML",
+        iah,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── attachShadow({ mode }) ─────────────────────────────────────
     // Förenklad: returnerar ett tomt objekt som shadow root
-    let at_sh = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
-            let shadow = ObjectInitializer::new(ctx).build();
-            Ok(JsValue::from(shadow))
-        })
-    };
+    let at_sh = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+            let shadow = Object::new(ctx.clone()).unwrap();
+            Ok(Value::new_float(ctx.clone(), shadow as f64))
+    }).unwrap();
     obj.set(
-        js_string!("attachShadow"),
-        at_sh.to_js_function(context.realm()),
+        "attachShadow",
+        at_sh,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── cloneNode(deep) ────────────────────────────────────────────
     let st = Rc::clone(state);
-    let cn_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let cn_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             match s.arena.clone_node_deep(key) {
                 Some(clone_key) => {
                     let bits = node_key_to_f64(clone_key);
-                    let clone_obj = ObjectInitializer::new(ctx)
-                        .property(
-                            js_string!("__nodeKey__"),
-                            JsValue::from(bits),
-                            Attribute::empty(),
+                    let clone_obj = Object::new(ctx.clone()).unwrap()
+                        .set("__nodeKey__", Value::new_float(ctx.clone(), bits as f64),
                         )
-                        .property(
-                            js_string!("nodeType"),
-                            JsValue::from(1),
-                            Attribute::READONLY,
-                        )
-                        .build();
-                    Ok(clone_obj.into())
+                        .set("nodeType", Value::new_int(ctx.clone(), 1),
+                        );
+                    Ok(clone_obj.into_value())
                 }
-                None => Ok(JsValue::null()),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("cloneNode"),
-        cn_fn.to_js_function(context.realm()),
+        "cloneNode",
+        cn_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── outerHTML (getter) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let oh = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let oh = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            Ok(JsValue::from(js_string!(s
+            Ok(Value::from(js_string!(s
                 .arena
                 .serialize_html(key)
                 .as_str())))
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("outerHTML"),
-        oh.to_js_function(context.realm()),
+        "outerHTML",
+        oh,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── innerHTML (accessor property: getter + setter) ────────────
     {
         let st_get = Rc::clone(state);
-        let ih_get = unsafe {
-            NativeFunction::from_closure(move |_this, _args, _ctx| {
+        let ih_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
                 let s = st_get.borrow();
-                Ok(JsValue::from(js_string!(s
+                Ok(Value::from(js_string!(s
                     .arena
                     .serialize_inner_html(key)
                     .as_str())))
-            })
-        };
+        }).unwrap();
         let st_set = Rc::clone(state);
-        let ih_set = unsafe {
-            NativeFunction::from_closure(move |_this, args, ctx| {
+        let ih_set = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let html_str = args
                     .get_or_undefined(0)
                     .to_string(ctx)?
@@ -1361,28 +1247,25 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 }
                 s.mutations
                     .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
-                Ok(JsValue::undefined())
-            })
-        };
-        let getter_fn = ih_get.to_js_function(context.realm());
-        let setter_fn = ih_set.to_js_function(context.realm());
+                Ok(Value::new_undefined(ctx.clone()))
+        }).unwrap();
+        let getter_fn = ih_get;
+        let setter_fn = ih_set;
         let _ = obj.define_property_or_throw(
-            js_string!("innerHTML"),
-            PropertyDescriptor::builder()
+            "innerHTML",
+            /* PropertyDescriptor */
                 .get(getter_fn)
                 .set(setter_fn)
                 .enumerable(true)
-                .configurable(true)
-                .build(),
-            context,
+                .configurable(true),
+            ctx,
         );
     }
 
     // ─── Bakåtkompatibla metoder: setInnerHTML / setTextContent ──────
     // Behåller dessa som explicita metoder för befintlig kod
     let st = Rc::clone(state);
-    let ih_set_compat = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ih_set_compat = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let html_str = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1407,20 +1290,18 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             }
             s.mutations
                 .push(format!("setInnerHTML:{}:{}", key_bits, html_str));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("setInnerHTML"),
-        ih_set_compat.to_js_function(context.realm()),
+        "setInnerHTML",
+        ih_set_compat,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     let st = Rc::clone(state);
-    let tc_set_compat = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let tc_set_compat = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let text = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -1442,50 +1323,46 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             });
             s.arena.append_child(key, text_key);
             s.mutations.push("setTextContent".to_string());
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("setTextContent"),
-        tc_set_compat.to_js_function(context.realm()),
+        "setTextContent",
+        tc_set_compat,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── firstElementChild ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let fec = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let fec = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             if let Some(node) = s.arena.nodes.get(key) {
                 for &child in &node.children {
                     if let Some(cn) = s.arena.nodes.get(child) {
                         if cn.node_type == NodeType::Element {
-                            return Ok(JsValue::from(node_key_to_f64(child)));
+                            return Ok(Value::from(node_key_to_f64(child)));
                         }
                     }
                 }
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("firstElementChild"),
-        fec.to_js_function(context.realm()),
+        "firstElementChild",
+        fec,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── nextElementSibling ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let nes = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let nes = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
-                None => return Ok(JsValue::null()),
+                None => return Ok(Value::new_null(ctx.clone())),
             };
             if let Some(parent) = s.arena.nodes.get(parent_key) {
                 let my_idx = parent.children.iter().position(|&c| c == key);
@@ -1493,60 +1370,56 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     for &sib in &parent.children[idx + 1..] {
                         if let Some(sn) = s.arena.nodes.get(sib) {
                             if sn.node_type == NodeType::Element {
-                                return Ok(JsValue::from(node_key_to_f64(sib)));
+                                return Ok(Value::from(node_key_to_f64(sib)));
                             }
                         }
                     }
                 }
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("nextElementSibling"),
-        nes.to_js_function(context.realm()),
+        "nextElementSibling",
+        nes,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── previousSibling ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let ps = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let ps = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
-                None => return Ok(JsValue::null()),
+                None => return Ok(Value::new_null(ctx.clone())),
             };
             let siblings = &s.arena.nodes.get(parent_key).map(|n| &n.children);
             if let Some(sibs) = siblings {
                 let my_idx = sibs.iter().position(|&c| c == key);
                 if let Some(idx) = my_idx {
                     if idx > 0 {
-                        return Ok(JsValue::from(node_key_to_f64(sibs[idx - 1])));
+                        return Ok(Value::from(node_key_to_f64(sibs[idx - 1])));
                     }
                 }
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("previousSibling"),
-        ps.to_js_function(context.realm()),
+        "previousSibling",
+        ps,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── previousElementSibling ─────────────────────────────────────
     let st = Rc::clone(state);
-    let pes = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let pes = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let parent_key = match s.arena.nodes.get(key).and_then(|n| n.parent) {
                 Some(p) => p,
-                None => return Ok(JsValue::null()),
+                None => return Ok(Value::new_null(ctx.clone())),
             };
             if let Some(parent) = s.arena.nodes.get(parent_key) {
                 let my_idx = parent.children.iter().position(|&c| c == key);
@@ -1554,27 +1427,25 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     for &sib in parent.children[..idx].iter().rev() {
                         if let Some(sn) = s.arena.nodes.get(sib) {
                             if sn.node_type == NodeType::Element {
-                                return Ok(JsValue::from(node_key_to_f64(sib)));
+                                return Ok(Value::from(node_key_to_f64(sib)));
                             }
                         }
                     }
                 }
             }
-            Ok(JsValue::null())
-        })
-    };
+            Ok(Value::new_null(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("previousElementSibling"),
-        pes.to_js_function(context.realm()),
+        "previousElementSibling",
+        pes,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── childElementCount ──────────────────────────────────────────
     let st = Rc::clone(state);
-    let cec = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let cec = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let count = s
                 .arena
@@ -1593,62 +1464,56 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                         .count()
                 })
                 .unwrap_or(0);
-            Ok(JsValue::from(count as u32))
-        })
-    };
+            Ok(Value::new_int(ctx.clone(), count as i32))
+    }).unwrap();
     obj.set(
-        js_string!("childElementCount"),
-        cec.to_js_function(context.realm()),
+        "childElementCount",
+        cec,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── hasAttribute(name) ─────────────────────────────────────────
     let st = Rc::clone(state);
-    let ha = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ha = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
             let s = st.borrow();
-            Ok(JsValue::from(s.arena.has_attr(key, &name)))
-        })
-    };
+            Ok(Value::from(s.arena.has_attr(key, &name)))
+    }).unwrap();
     obj.set(
-        js_string!("hasAttribute"),
-        ha.to_js_function(context.realm()),
+        "hasAttribute",
+        ha,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── remove() — ta bort elementet från sin förälder ─────────────
     let st = Rc::clone(state);
-    let rm = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let rm = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
                 s.arena.remove_child(parent_key, key);
                 s.mutations.push(format!("remove:{}", key_bits));
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("remove"),
-        rm.to_js_function(context.realm()),
+        "remove",
+        rm,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── replaceWith(newNode) ───────────────────────────────────────
     let st = Rc::clone(state);
-    let rw = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let new_key_val = args.get_or_undefined(0).to_number(_ctx)?;
+    let rw = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key_val = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).to_number(_ctx)?;
             let new_key = f64_to_node_key(new_key_val);
             let mut s = st.borrow_mut();
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1657,23 +1522,21 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 s.mutations
                     .push(format!("replaceWith:{}:{}", key_bits, new_key_val as u64));
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("replaceWith"),
-        rw.to_js_function(context.realm()),
+        "replaceWith",
+        rw,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── replaceChild(newChild, oldChild) (Fas 19) ────────────────
     let st_rc = Rc::clone(state);
-    let replace_child = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
-            let new_key_val = extract_node_key(args.get_or_undefined(0), ctx2);
-            let old_key_val = extract_node_key(args.get_or_undefined(1), ctx2);
+    let replace_child = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key_val = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
+            let old_key_val = extract_node_key(&args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             if let (Some(new_k), Some(old_k)) = (new_key_val, old_key_val) {
                 let mut s = st_rc.borrow_mut();
                 s.arena.insert_before(key, new_k, Some(old_k));
@@ -1681,22 +1544,20 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 s.mutations
                     .push(format!("replaceChild:{}", key_bits as u64));
             }
-            Ok(args.get_or_undefined(1).clone())
-        })
-    };
+            Ok(args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone())
+    }).unwrap();
     obj.set(
-        js_string!("replaceChild"),
-        replace_child.to_js_function(context.realm()),
+        "replaceChild",
+        replace_child,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── before/after/prepend/append (Fas 19) ───────────────────────
     let st_before = Rc::clone(state);
-    let before_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
-            let new_key = extract_node_key(args.get_or_undefined(0), ctx2);
+    let before_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             if let Some(nk) = new_key {
                 let mut s = st_before.borrow_mut();
                 if let Some(parent) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1704,21 +1565,19 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     s.mutations.push(format!("before:{}", key_bits as u64));
                 }
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("before"),
-        before_fn.to_js_function(context.realm()),
+        "before",
+        before_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     let st_after = Rc::clone(state);
-    let after_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
-            let new_key = extract_node_key(args.get_or_undefined(0), ctx2);
+    let after_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             if let Some(nk) = new_key {
                 let mut s = st_after.borrow_mut();
                 if let Some(parent) = s.arena.nodes.get(key).and_then(|n| n.parent) {
@@ -1734,21 +1593,19 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     s.mutations.push(format!("after:{}", key_bits as u64));
                 }
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("after"),
-        after_fn.to_js_function(context.realm()),
+        "after",
+        after_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     let st_prepend = Rc::clone(state);
-    let prepend_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
-            let new_key = extract_node_key(args.get_or_undefined(0), ctx2);
+    let prepend_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             if let Some(nk) = new_key {
                 let mut s = st_prepend.borrow_mut();
                 let first_child = s
@@ -1759,44 +1616,40 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 s.arena.insert_before(key, nk, first_child);
                 s.mutations.push(format!("prepend:{}", key_bits as u64));
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("prepend"),
-        prepend_fn.to_js_function(context.realm()),
+        "prepend",
+        prepend_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     let st_append = Rc::clone(state);
-    let append_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
-            let new_key = extract_node_key(args.get_or_undefined(0), ctx2);
+    let append_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let new_key = extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())));
             if let Some(nk) = new_key {
                 let mut s = st_append.borrow_mut();
                 s.arena.append_child(key, nk);
                 s.mutations.push(format!("append:{}", key_bits as u64));
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("append"),
-        append_fn.to_js_function(context.realm()),
+        "append",
+        append_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── toggleAttribute(name) (Fas 19) ─────────────────────────────
     let st_ta = Rc::clone(state);
-    let toggle_attr = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx2| {
+    let toggle_attr = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let attr = args
                 .get_or_undefined(0)
-                .to_string(ctx2)
+                .to_string(ctx)
                 .map(|s| s.to_std_string_escaped())
                 .unwrap_or_default();
             let mut s = st_ta.borrow_mut();
@@ -1806,48 +1659,44 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             } else {
                 s.arena.set_attr(key, &attr, "");
             }
-            Ok(JsValue::from(!had))
-        })
-    };
+            Ok(Value::from(!had))
+    }).unwrap();
     obj.set(
-        js_string!("toggleAttribute"),
-        toggle_attr.to_js_function(context.realm()),
+        "toggleAttribute",
+        toggle_attr,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── getAttributeNames() (Fas 19) ───────────────────────────────
     let st_gan = Rc::clone(state);
-    let get_attr_names = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx2| {
+    let get_attr_names = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_gan.borrow();
-            let arr = JsArray::new(ctx2);
+            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             if let Some(node) = s.arena.nodes.get(key) {
                 for (i, name) in node.attributes.keys().enumerate() {
                     let _ = arr.set(
                         i as u32,
-                        JsValue::from(js_string!(name.as_str())),
+                        rquickjs::String::from_str(ctx.clone(), name.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
                         false,
-                        ctx2,
+                        ctx,
                     );
                 }
             }
-            Ok(arr.into())
-        })
-    };
+            Ok(arr.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("getAttributeNames"),
-        get_attr_names.to_js_function(context.realm()),
+        "getAttributeNames",
+        get_attr_names,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── normalize() — slå ihop adjacenta text-noder (Fas 19) ───────
     let st_norm = Rc::clone(state);
-    let normalize_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let normalize_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st_norm.borrow_mut();
             let children: Vec<NodeKey> = s
                 .arena
@@ -1887,142 +1736,130 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 }
                 i += 1;
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("normalize"),
-        normalize_fn.to_js_function(context.realm()),
+        "normalize",
+        normalize_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── value (getter/setter för input/textarea/select) ────────────
     let st = Rc::clone(state);
-    let val_get = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let val_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            Ok(JsValue::from(js_string!(s
+            Ok(Value::from(js_string!(s
                 .arena
                 .get_attr(key, "value")
                 .unwrap_or(""))))
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("value"),
-        val_get.to_js_function(context.realm()),
+        "value",
+        val_get,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── checked (getter för checkbox/radio) ────────────────────────
     let st = Rc::clone(state);
-    let chk = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let chk = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            Ok(JsValue::from(s.arena.has_attr(key, "checked")))
-        })
-    };
+            Ok(Value::from(s.arena.has_attr(key, "checked")))
+    }).unwrap();
     obj.set(
-        js_string!("checked"),
-        chk.to_js_function(context.realm()),
+        "checked",
+        chk,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── selected (getter för option-element) ───────────────────────
     let st = Rc::clone(state);
-    let sel = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let sel = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
-            Ok(JsValue::from(s.arena.has_attr(key, "selected")))
-        })
-    };
+            Ok(Value::from(s.arena.has_attr(key, "selected")))
+    }).unwrap();
     obj.set(
-        js_string!("selected"),
-        sel.to_js_function(context.realm()),
+        "selected",
+        sel,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── tabIndex ───────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let ti = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let ti = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let val = s
                 .arena
                 .get_attr(key, "tabindex")
                 .and_then(|v| v.parse::<i32>().ok())
                 .unwrap_or(-1);
-            Ok(JsValue::from(val))
-        })
-    };
+            Ok(Value::new_int(ctx.clone(), val))
+    }).unwrap();
     obj.set(
-        js_string!("tabIndex"),
-        ti.to_js_function(context.realm()),
+        "tabIndex",
+        ti,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── offsetParent ───────────────────────────────────────────────
     let st = Rc::clone(state);
-    let op = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let op = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             // Returnera body som offsetParent (förenklad implementering)
             if let Some(parent_key) = s.arena.nodes.get(key).and_then(|n| n.parent) {
-                Ok(JsValue::from(node_key_to_f64(parent_key)))
+                Ok(Value::from(node_key_to_f64(parent_key)))
             } else {
-                Ok(JsValue::null())
+                Ok(Value::new_null(ctx.clone()))
             }
-        })
-    };
+    }).unwrap();
     obj.set(
-        js_string!("offsetParent"),
-        op.to_js_function(context.realm()),
+        "offsetParent",
+        op,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── clientTop / clientLeft (border-dimensioner, default 0) ─────
-    obj.set(js_string!("clientTop"), JsValue::from(0), false, context)
+    obj.set("clientTop", Value::new_int(ctx.clone(), 0), false, ctx)
         .unwrap_or(true);
-    obj.set(js_string!("clientLeft"), JsValue::from(0), false, context)
+    obj.set("clientLeft", Value::new_int(ctx.clone(), 0), false, ctx)
         .unwrap_or(true);
 
     // ─── addEventListener(type, callback, capture/options) ──────────
     let st = Rc::clone(state);
-    let ael = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ael = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let event_type = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped();
-            let callback = args.get_or_undefined(1).clone();
-            if !callback.is_callable() {
-                return Ok(JsValue::undefined());
+            let callback = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone();
+            if !callback.is_function() {
+                return Ok(Value::new_undefined(ctx.clone()));
             }
             // Stöd för options-objekt (tredje arg): { once, passive, capture }
-            let third = args.get_or_undefined(2);
+            let third = args.get(2).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let capture = if third.is_object() {
                 // Options-objekt: läs capture-fältet
                 third
                     .as_object()
                     .and_then(|o| {
-                        o.get(js_string!("capture"), ctx)
+                        o.get("capture", ctx)
                             .ok()
-                            .map(|v| v.to_boolean())
+                            .map(|v| v.as_bool().unwrap_or(false))
                     })
                     .unwrap_or(false)
             } else {
-                third.to_boolean()
+                third.as_bool().unwrap_or(false)
             };
             let mut s = st.borrow_mut();
             let listeners = s.event_listeners.entry(key_bits as u64).or_default();
@@ -2031,21 +1868,19 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 callback,
                 capture,
             });
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("addEventListener"),
-        ael.to_js_function(context.realm()),
+        "addEventListener",
+        ael,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── removeEventListener(type, callback) ────────────────────
     let st = Rc::clone(state);
-    let rel = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let rel = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let event_type = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2058,43 +1893,41 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     listeners.remove(pos);
                 }
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("removeEventListener"),
-        rel.to_js_function(context.realm()),
+        "removeEventListener",
+        rel,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── dispatchEvent(event) ───────────────────────────────────
     let st = Rc::clone(state);
-    let de = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let event_val = args.get_or_undefined(0).clone();
+    let de = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let event_val = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let event_type = event_val
                 .as_object()
-                .and_then(|o| o.get(js_string!("type"), ctx).ok())
+                .and_then(|o| o.get("type", ctx).ok())
                 .and_then(|v| v.to_string(ctx).ok())
                 .map(|s| s.to_std_string_escaped())
                 .unwrap_or_default();
             if event_type.is_empty() {
-                return Ok(JsValue::from(false));
+                return Ok(Value::new_bool(ctx.clone(), false));
             }
             let bubbles = event_val
                 .as_object()
-                .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
-                .map(|v| v.to_boolean())
+                .and_then(|o| o.get("bubbles", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
                 .unwrap_or(true);
 
             // Sätt target + currentTarget
             if let Some(obj) = event_val.as_object() {
-                let _ = obj.set(js_string!("target"), JsValue::from(key_bits), false, ctx);
+                let _ = obj.set("target", Value::new_float(ctx.clone(), key_bits as f64), false, ctx);
                 let _ = obj.set(
-                    js_string!("currentTarget"),
-                    JsValue::from(key_bits),
+                    "currentTarget",
+                    Value::new_float(ctx.clone(), key_bits as f64),
                     false,
                     ctx,
                 );
@@ -2113,7 +1946,7 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             };
 
             // Target phase
-            let target_listeners: Vec<JsValue> = {
+            let target_listeners: Vec<Value<'_>> = {
                 let s = st.borrow();
                 s.event_listeners
                     .get(&(key_bits as u64))
@@ -2126,9 +1959,9 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                     .unwrap_or_default()
             };
             for cb in &target_listeners {
-                if let Some(callable) = cb.as_callable() {
+                if let Some(callable) = cb.as_function() {
                     let _ =
-                        callable.call(&JsValue::undefined(), std::slice::from_ref(&event_val), ctx);
+                        callable.call(&Value::new_undefined(ctx.clone()), std::slice::from_ref(&event_val), ctx);
                 }
             }
 
@@ -2137,21 +1970,21 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 for &ancestor_u64 in &ancestors {
                     let stopped = event_val
                         .as_object()
-                        .and_then(|o| o.get(js_string!("__stopped__"), ctx).ok())
-                        .map(|v| v.to_boolean())
+                        .and_then(|o| o.get("__stopped__", ctx).ok())
+                        .map(|v| v.as_bool().unwrap_or(false))
                         .unwrap_or(false);
                     if stopped {
                         break;
                     }
                     if let Some(obj) = event_val.as_object() {
                         let _ = obj.set(
-                            js_string!("currentTarget"),
-                            JsValue::from(ancestor_u64 as f64),
+                            "currentTarget",
+                            Value::new_float(ctx.clone(), ancestor_u64 as f64),
                             false,
                             ctx,
                         );
                     }
-                    let ancestor_listeners: Vec<JsValue> = {
+                    let ancestor_listeners: Vec<Value<'_>> = {
                         let s = st.borrow();
                         s.event_listeners
                             .get(&ancestor_u64)
@@ -2164,9 +1997,9 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                             .unwrap_or_default()
                     };
                     for cb in &ancestor_listeners {
-                        if let Some(callable) = cb.as_callable() {
+                        if let Some(callable) = cb.as_function() {
                             let _ = callable.call(
-                                &JsValue::undefined(),
+                                &Value::new_undefined(ctx.clone()),
                                 std::slice::from_ref(&event_val),
                                 ctx,
                             );
@@ -2177,62 +2010,56 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
 
             let prevented = event_val
                 .as_object()
-                .and_then(|o| o.get(js_string!("defaultPrevented"), ctx).ok())
-                .map(|v| v.to_boolean())
+                .and_then(|o| o.get("defaultPrevented", ctx).ok())
+                .map(|v| v.as_bool().unwrap_or(false))
                 .unwrap_or(false);
-            Ok(JsValue::from(!prevented))
-        })
-    };
+            Ok(Value::from(!prevented))
+    }).unwrap();
     obj.set(
-        js_string!("dispatchEvent"),
-        de.to_js_function(context.realm()),
+        "dispatchEvent",
+        de,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── focus() ────────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let focus_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let focus_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             s.focused_element = Some(key_bits as u64);
             s.mutations.push("focus".to_string());
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("focus"),
-        focus_fn.to_js_function(context.realm()),
+        "focus",
+        focus_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── blur() ─────────────────────────────────────────────────────
     let st = Rc::clone(state);
-    let blur_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let blur_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st.borrow_mut();
             if s.focused_element == Some(key_bits as u64) {
                 s.focused_element = None;
             }
             s.mutations.push("blur".to_string());
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("blur"),
-        blur_fn.to_js_function(context.realm()),
+        "blur",
+        blur_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── scrollIntoView(options) ────────────────────────────────────
     let st = Rc::clone(state);
-    let siv = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let siv = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let y = {
                 let s = st.borrow();
                 let (_, y, _, _) = estimate_layout_rect(&s.arena, key);
@@ -2245,90 +2072,71 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 .unwrap_or(0);
             s.scroll_positions.insert(doc_key, (y, 0.0));
             s.mutations.push(format!("scrollIntoView(y={})", y));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     obj.set(
-        js_string!("scrollIntoView"),
-        siv.to_js_function(context.realm()),
+        "scrollIntoView",
+        siv,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── getBoundingClientRect() ────────────────────────────────────
     let st = Rc::clone(state);
-    let gbcr = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let gbcr = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
-            let rect = ObjectInitializer::new(ctx)
-                .property(js_string!("x"), JsValue::from(x), Attribute::READONLY)
-                .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
-                .property(
-                    js_string!("width"),
-                    JsValue::from(width),
-                    Attribute::READONLY,
+            let rect = Object::new(ctx.clone()).unwrap()
+                ;
+    /* TODO */ obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
+                ;
+    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+                .set("width", Value::new_float(ctx.clone(), width as f64),
                 )
-                .property(
-                    js_string!("height"),
-                    JsValue::from(height),
-                    Attribute::READONLY,
+                .set("height", Value::new_float(ctx.clone(), height as f64),
                 )
-                .property(js_string!("top"), JsValue::from(y), Attribute::READONLY)
-                .property(
-                    js_string!("right"),
-                    JsValue::from(x + width),
-                    Attribute::READONLY,
+                ;
+    /* TODO */ obj.set("top", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+                .set("right", Value::from(x + width),
                 )
-                .property(
-                    js_string!("bottom"),
-                    JsValue::from(y + height),
-                    Attribute::READONLY,
+                .set("bottom", Value::from(y + height),
                 )
-                .property(js_string!("left"), JsValue::from(x), Attribute::READONLY)
-                .build();
-            Ok(rect.into())
-        })
-    };
+                ;
+    /* TODO */ obj.set("left", Value::new_float(ctx.clone(), x as f64)).unwrap_or(());
+            Ok(rect.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("getBoundingClientRect"),
-        gbcr.to_js_function(context.realm()),
+        "getBoundingClientRect",
+        gbcr,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── getClientRects() ───────────────────────────────────────────
     let st = Rc::clone(state);
-    let gcr = unsafe {
-        NativeFunction::from_closure(move |_this, _args, ctx| {
+    let gcr = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let (x, y, width, height) = estimate_layout_rect(&s.arena, key);
-            let arr = JsArray::new(ctx);
-            let rect = ObjectInitializer::new(ctx)
-                .property(js_string!("x"), JsValue::from(x), Attribute::READONLY)
-                .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
-                .property(
-                    js_string!("width"),
-                    JsValue::from(width),
-                    Attribute::READONLY,
+            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
+            let rect = Object::new(ctx.clone()).unwrap()
+                ;
+    /* TODO */ obj.set("x", Value::new_float(ctx.clone(), x as f64)).unwrap_or(())
+                ;
+    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+                .set("width", Value::new_float(ctx.clone(), width as f64),
                 )
-                .property(
-                    js_string!("height"),
-                    JsValue::from(height),
-                    Attribute::READONLY,
-                )
-                .build();
-            let _ = arr.push(rect, ctx);
-            Ok(arr.into())
-        })
-    };
+                .set("height", Value::new_float(ctx.clone(), height as f64),
+                );
+            let _ = arr.set(0, rect);
+            Ok(arr.into_value())
+    }).unwrap();
     obj.set(
-        js_string!("getClientRects"),
-        gcr.to_js_function(context.realm()),
+        "getClientRects",
+        gcr,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
@@ -2350,49 +2158,49 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             .max(h);
         let content_w = w.max(1024.0);
         obj.set(
-            js_string!("offsetTop"),
-            JsValue::from(y_pos),
+            "offsetTop",
+            Value::new_float(ctx.clone(), y_pos as f64),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
-        obj.set(js_string!("offsetLeft"), JsValue::from(0), false, context)
+        obj.set("offsetLeft", Value::new_int(ctx.clone(), 0), false, ctx)
             .unwrap_or(true);
-        obj.set(js_string!("offsetWidth"), JsValue::from(w), false, context)
+        obj.set("offsetWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
             .unwrap_or(true);
-        obj.set(js_string!("offsetHeight"), JsValue::from(h), false, context)
+        obj.set("offsetHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
             .unwrap_or(true);
         obj.set(
-            js_string!("scrollTop"),
-            JsValue::from(scroll_top),
+            "scrollTop",
+            Value::new_float(ctx.clone(), scroll_top as f64),
             false,
-            context,
-        )
-        .unwrap_or(true);
-        obj.set(
-            js_string!("scrollLeft"),
-            JsValue::from(scroll_left),
-            false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
         obj.set(
-            js_string!("scrollWidth"),
-            JsValue::from(content_w),
+            "scrollLeft",
+            Value::new_float(ctx.clone(), scroll_left as f64),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
         obj.set(
-            js_string!("scrollHeight"),
-            JsValue::from(content_h),
+            "scrollWidth",
+            Value::new_float(ctx.clone(), content_w as f64),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
-        obj.set(js_string!("clientWidth"), JsValue::from(w), false, context)
+        obj.set(
+            "scrollHeight",
+            Value::new_float(ctx.clone(), content_h as f64),
+            false,
+            ctx,
+        )
+        .unwrap_or(true);
+        obj.set("clientWidth", Value::new_float(ctx.clone(), w as f64), false, ctx)
             .unwrap_or(true);
-        obj.set(js_string!("clientHeight"), JsValue::from(h), false, context)
+        obj.set("clientHeight", Value::new_float(ctx.clone(), h as f64), false, ctx)
             .unwrap_or(true);
     }
 
@@ -2419,75 +2227,67 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
                 .copied()
         };
         if let Some(template_key) = shadow_key {
-            let shadow = make_element_object(context, template_key, state);
-            obj.set(js_string!("shadowRoot"), shadow, false, context)
-                .unwrap_or(true);
+            let shadow = make_element_object(ctx, template_key, state);
+            obj.set("shadowRoot", shadow).unwrap_or(());
         } else {
-            obj.set(js_string!("shadowRoot"), JsValue::null(), false, context)
-                .unwrap_or(true);
+            obj.set("shadowRoot", Value::new_null(ctx.clone())).unwrap_or(());
         }
     }
 
     // ─── classList ──────────────────────────────────────────────────
-    let class_list = make_class_list(context, key, state);
-    obj.set(js_string!("classList"), class_list, false, context)
-        .unwrap_or(true);
+    let class_list = make_class_list(ctx, key, state);
+    obj.set("classList", class_list).unwrap_or(());
 
     // ─── style (inline CSS-stilar med setProperty/getPropertyValue) ─
-    let style = make_style_object(context, key, state);
-    obj.set(js_string!("style"), style, false, context)
-        .unwrap_or(true);
+    let style = make_style_object(ctx, key, state);
+    obj.set("style", style).unwrap_or(());
 
     // ─── isConnected (boolean — noden är kopplad till document) ─────
     {
         let s = state.borrow();
         let connected = is_connected_to_document(&s.arena, key);
         obj.set(
-            js_string!("isConnected"),
-            JsValue::from(connected),
+            "isConnected",
+            Value::new_bool(ctx.clone(), connected),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
     }
 
     // ─── contains(otherElement) ─────────────────────────────────────
     let st = Rc::clone(state);
-    let contains_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let other_key = match extract_node_key(args.get_or_undefined(0), ctx) {
+    let contains_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let other_key = match extract_node_key(&args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))) {
                 Some(k) => k,
-                None => return Ok(JsValue::from(false)),
+                None => return Ok(Value::new_bool(ctx.clone(), false)),
             };
             let s = st.borrow();
-            Ok(JsValue::from(node_contains(&s.arena, key, other_key)))
-        })
-    };
+            Ok(Value::from(node_contains(&s.arena, key, other_key)))
+    }).unwrap();
     obj.set(
-        js_string!("contains"),
-        contains_fn.to_js_function(context.realm()),
+        "contains",
+        contains_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
     // ─── getRootNode() ──────────────────────────────────────────────
     let st = Rc::clone(state);
-    let root_node_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let root_node_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let mut current = key;
             while let Some(parent) = s.arena.nodes.get(current).and_then(|n| n.parent) {
                 current = parent;
             }
-            Ok(JsValue::from(node_key_to_f64(current)))
-        })
-    };
+            Ok(Value::from(node_key_to_f64(current)))
+    }).unwrap();
     obj.set(
-        js_string!("getRootNode"),
-        root_node_fn.to_js_function(context.realm()),
+        "getRootNode",
+        root_node_fn,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
@@ -2501,32 +2301,31 @@ fn make_element_object(context: &mut Context, key: NodeKey, state: &SharedState)
             .map(|n| n.has_attr("hidden"))
             .unwrap_or(false);
         obj.set(
-            js_string!("hidden"),
-            JsValue::from(is_hidden),
+            "hidden",
+            Value::new_bool(ctx.clone(), is_hidden),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
     }
 
     // ─── requestPointerLock() / exitPointerLock() ───────────────────
-    let rpl = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let rpl = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     obj.set(
-        js_string!("requestPointerLock"),
-        rpl.to_js_function(context.realm()),
+        "requestPointerLock",
+        rpl,
         false,
-        context,
+        ctx,
     )
     .unwrap_or(true);
 
-    JsValue::from(obj)
+    Value::new_float(ctx.clone(), obj as f64)
 }
 
 /// Skapa classList-objekt med add/remove/toggle/contains
-fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
+fn make_class_list(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
     let st_add = Rc::clone(state);
-    let add_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let add_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2544,13 +2343,11 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 }
             }
             s.mutations.push(format!("classList.add({})", cls));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let st_rm = Rc::clone(state);
-    let remove_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let remove_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2566,13 +2363,11 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 node.set_attr("class", &new_val);
             }
             s.mutations.push(format!("classList.remove({})", cls));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let st_tg = Rc::clone(state);
-    let toggle_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let toggle_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2600,13 +2395,11 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 };
                 node.set_attr("class", &new_val);
             }
-            Ok(JsValue::from(!has))
-        })
-    };
+            Ok(Value::from(!has))
+    }).unwrap();
 
     let st_ct = Rc::clone(state);
-    let contains_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let contains_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2619,14 +2412,12 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 .and_then(|n| n.get_attr("class"))
                 .map(|c| c.split_whitespace().any(|x| x == cls))
                 .unwrap_or(false);
-            Ok(JsValue::from(has))
-        })
-    };
+            Ok(Value::new_bool(ctx.clone(), has))
+    }).unwrap();
 
     // replace(old, new) — byt klass
     let st_rp = Rc::clone(state);
-    let replace_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let replace_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let old_cls = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2654,14 +2445,12 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                     node.set_attr("class", &new_val);
                 }
             }
-            Ok(JsValue::from(had))
-        })
-    };
+            Ok(Value::new_bool(ctx.clone(), had))
+    }).unwrap();
 
     // value — hela class-strängen
     let st_val = Rc::clone(state);
-    let value_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let value_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_val.borrow();
             let val = s
                 .arena
@@ -2669,14 +2458,12 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 .get(key)
                 .and_then(|n| n.get_attr("class"))
                 .unwrap_or("");
-            Ok(JsValue::from(js_string!(val)))
-        })
-    };
+            Ok(rquickjs::String::from_str(ctx.clone(), val).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+    }).unwrap();
 
     // length — antal klasser
     let st_len = Rc::clone(state);
-    let length_fn = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let length_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_len.borrow();
             let count = s
                 .arena
@@ -2685,25 +2472,30 @@ fn make_class_list(context: &mut Context, key: NodeKey, state: &SharedState) -> 
                 .and_then(|n| n.get_attr("class"))
                 .map(|c| c.split_whitespace().count())
                 .unwrap_or(0);
-            Ok(JsValue::from(count as i32))
-        })
-    };
+            Ok(Value::new_int(ctx.clone(), count))
+    }).unwrap();
 
-    let cl = ObjectInitializer::new(context)
-        .function(add_fn, js_string!("add"), 1)
-        .function(remove_fn, js_string!("remove"), 1)
-        .function(toggle_fn, js_string!("toggle"), 1)
-        .function(contains_fn, js_string!("contains"), 1)
-        .function(replace_fn, js_string!("replace"), 2)
-        .function(value_fn, js_string!("value"), 0)
-        .function(length_fn, js_string!("length"), 0)
-        .build();
+    let cl = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("add", add_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("remove", remove_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("toggle", toggle_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("contains", contains_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("replace", replace_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("value", value_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("length", length_fn).unwrap_or(());
 
-    JsValue::from(cl)
+    Value::new_float(ctx.clone(), cl as f64)
 }
 
 /// Skapa style-objekt med inline CSS-stöd kopplat till arena
-fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -> JsValue {
+fn make_style_object(ctx: &Ctx<'_>, key: NodeKey, state: &SharedState) -> rquickjs::Result<Value<'_>> {
     // Läs initiala stilar från style-attributet
     let initial_styles = {
         let s = state.borrow();
@@ -2718,8 +2510,7 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
 
     // setProperty(prop, value)
     let st = Rc::clone(state);
-    let set_prop = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let set_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2747,14 +2538,12 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
             s.arena.set_attr(key, "style", &new_style);
             s.mutations
                 .push(format!("style.setProperty({}, {})", prop, value));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     // getPropertyValue(prop)
     let st = Rc::clone(state);
-    let get_prop = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let get_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2769,14 +2558,12 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
                 .unwrap_or("");
             let styles = parse_inline_styles(style_str);
             let val = styles.get(&prop).cloned().unwrap_or_default();
-            Ok(JsValue::from(js_string!(val.as_str())))
-        })
-    };
+            Ok(rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
+    }).unwrap();
 
     // removeProperty(prop)
     let st = Rc::clone(state);
-    let remove_prop = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let remove_prop = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let prop = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -2794,14 +2581,12 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
             let old_val = styles.remove(&prop).unwrap_or_default();
             let new_style = serialize_inline_styles(&styles);
             s.arena.set_attr(key, "style", &new_style);
-            Ok(JsValue::from(js_string!(old_val.as_str())))
-        })
-    };
+            Ok(rquickjs::String::from_str(ctx.clone(), old_val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
+    }).unwrap();
 
     // cssText getter
     let st = Rc::clone(state);
-    let css_text_get = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let css_text_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st.borrow();
             let style_str = s
                 .arena
@@ -2809,16 +2594,18 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
                 .get(key)
                 .and_then(|n| n.get_attr("style"))
                 .unwrap_or("");
-            Ok(JsValue::from(js_string!(style_str)))
-        })
-    };
+            Ok(rquickjs::String::from_str(ctx.clone(), style_str).map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))
+    }).unwrap();
 
-    let style = ObjectInitializer::new(context)
-        .function(set_prop, js_string!("setProperty"), 2)
-        .function(get_prop, js_string!("getPropertyValue"), 1)
-        .function(remove_prop, js_string!("removeProperty"), 1)
-        .function(css_text_get, js_string!("cssText"), 0)
-        .build();
+    let style = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("setProperty", set_prop).unwrap_or(())
+        ;
+    /* TODO */ obj.set("getPropertyValue", get_prop).unwrap_or(())
+        ;
+    /* TODO */ obj.set("removeProperty", remove_prop).unwrap_or(())
+        ;
+    /* TODO */ obj.set("cssText", css_text_get).unwrap_or(());
 
     // Populera vanliga CSS-egenskaper från inline style
     let common_props = [
@@ -2848,14 +2635,14 @@ fn make_style_object(context: &mut Context, key: NodeKey, state: &SharedState) -
         let val = initial_styles.get(*prop).cloned().unwrap_or_default();
         let camel = data_attr_to_camel(prop);
         let _ = style.set(
-            js_string!(camel.as_str()),
-            JsValue::from(js_string!(val.as_str())),
+            camel.as_str(),
+            rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             false,
-            context,
+            ctx,
         );
     }
 
-    JsValue::from(style)
+    Value::new_float(ctx.clone(), style as f64)
 }
 
 /// Konvertera data-attribut-namn till camelCase (t.ex. "product-id" → "productId")
@@ -2877,72 +2664,42 @@ fn data_attr_to_camel(name: &str) -> String {
 
 // ─── Window-objekt ──────────────────────────────────────────────────────────
 
-fn register_window(context: &mut Context, state: SharedState) {
-    let window = ObjectInitializer::new(context)
-        .property(
-            js_string!("innerWidth"),
-            JsValue::from(1024),
-            Attribute::READONLY,
+fn register_window(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
+    let window = Object::new(ctx.clone()).unwrap()
+        .set("innerWidth", Value::new_int(ctx.clone(), 1024),
         )
-        .property(
-            js_string!("innerHeight"),
-            JsValue::from(768),
-            Attribute::READONLY,
-        )
-        .build();
+        .set("innerHeight", Value::new_int(ctx.clone(), 768),
+        );
 
     // location stub
-    let location = ObjectInitializer::new(context)
-        .property(
-            js_string!("href"),
-            JsValue::from(js_string!("")),
-            Attribute::all(),
+    let location = Object::new(ctx.clone()).unwrap()
+        .set("href", rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .property(
-            js_string!("hostname"),
-            JsValue::from(js_string!("")),
-            Attribute::all(),
+        .set("hostname", rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .property(
-            js_string!("pathname"),
-            JsValue::from(js_string!("/")),
-            Attribute::all(),
+        .set("pathname", rquickjs::String::from_str(ctx.clone(), "/").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .property(
-            js_string!("protocol"),
-            JsValue::from(js_string!("https:")),
-            Attribute::all(),
-        )
-        .build();
+        .set("protocol", rquickjs::String::from_str(ctx.clone(), "https:").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        );
 
     window
-        .set(js_string!("location"), location, false, context)
-        .unwrap_or(true);
+        .set("location", location).unwrap_or(());
 
     // navigator stub
-    let navigator = ObjectInitializer::new(context)
-        .property(
-            js_string!("userAgent"),
-            JsValue::from(js_string!("AetherAgent/0.1")),
-            Attribute::READONLY,
+    let navigator = Object::new(ctx.clone()).unwrap()
+        .set("userAgent", rquickjs::String::from_str(ctx.clone(), "AetherAgent/0.1").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
         )
-        .property(
-            js_string!("language"),
-            JsValue::from(js_string!("en")),
-            Attribute::READONLY,
-        )
-        .build();
+        .set("language", rquickjs::String::from_str(ctx.clone(), "en").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
+        );
 
     window
-        .set(js_string!("navigator"), navigator, false, context)
-        .unwrap_or(true);
+        .set("navigator", navigator).unwrap_or(());
 
     // getComputedStyle(el) — använder CSS Cascade Engine (Fas 19)
     let st_gcs = Rc::clone(&state);
-    let gcs = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let elem = args.get_or_undefined(0);
-            let node_key = extract_node_key(elem, ctx);
+    let gcs = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let elem = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+            let node_key = extract_node_key(&elem);
 
             let merged = match node_key {
                 Some(k) => {
@@ -2975,46 +2732,45 @@ fn register_window(context: &mut Context, state: SharedState) {
             };
 
             let merged_for_closure = merged.clone();
-            let get_pv = NativeFunction::from_closure(move |_this, args, ctx2| {
+            let get_pv = Function::new(move |_this, args, ctx| {
                 let prop = args
                     .get_or_undefined(0)
-                    .to_string(ctx2)
+                    .to_string(ctx)
                     .map(|s| s.to_std_string_escaped())
                     .unwrap_or_default()
                     .to_lowercase();
                 let val = merged_for_closure.get(&prop).cloned().unwrap_or_default();
-                Ok(JsValue::from(js_string!(val.as_str())))
+                Ok(rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
             });
 
-            let style = ObjectInitializer::new(ctx)
-                .function(get_pv, js_string!("getPropertyValue"), 1)
-                .build();
+            let style = Object::new(ctx.clone()).unwrap()
+                ;
+    /* TODO */ obj.set("getPropertyValue", get_pv).unwrap_or(());
 
             // Sätt alla properties som egenskaper (camelCase + kebab)
             for (prop, val) in &merged {
                 let camel = data_attr_to_camel(prop);
                 let _ = style.set(
-                    js_string!(camel.as_str()),
-                    JsValue::from(js_string!(val.as_str())),
+                    camel.as_str(),
+                    rquickjs::String::from_str(ctx.clone(), val.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
                     false,
                     ctx,
                 );
             }
 
-            Ok(style.into())
-        })
-    };
+            Ok(style.into_value())
+    }).unwrap();
     window
         .set(
-            js_string!("getComputedStyle"),
-            gcs.to_js_function(context.realm()),
+            "getComputedStyle",
+            gcs,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // matchMedia(query) — Fas 19: CSS media query matching
-    let match_media = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let match_media = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let query = args
             .get_or_undefined(0)
             .to_string(ctx)
@@ -3025,43 +2781,38 @@ fn register_window(context: &mut Context, state: SharedState) {
         let matches = parse_media_query_matches(&query, 1024.0, 768.0);
 
         let add_listener =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
         let remove_listener =
-            NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
 
-        let mql = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("matches"),
-                JsValue::from(matches),
-                Attribute::READONLY,
+        let mql = Object::new(ctx.clone()).unwrap()
+            .set("matches", Value::new_float(ctx.clone(), matches as f64),
             )
-            .property(
-                js_string!("media"),
-                JsValue::from(js_string!(query.as_str())),
-                Attribute::READONLY,
+            .set("media", rquickjs::String::from_str(ctx.clone(), query.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
-            .function(add_listener.clone(), js_string!("addEventListener"), 2)
+            .function(add_listener.clone(), "addEventListener", 2)
             .function(
                 remove_listener.clone(),
-                js_string!("removeEventListener"),
+                "removeEventListener",
                 2,
             )
-            .function(add_listener, js_string!("addListener"), 1)
-            .function(remove_listener, js_string!("removeListener"), 1)
-            .build();
-        Ok(mql.into())
+            ;
+    /* TODO */ obj.set("addListener", add_listener).unwrap_or(())
+            ;
+    /* TODO */ obj.set("removeListener", remove_listener).unwrap_or(());
+        Ok(mql.into_value())
     });
     window
         .set(
-            js_string!("matchMedia"),
-            match_media.to_js_function(context.realm()),
+            "matchMedia",
+            match_media,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // atob/btoa — base64 encode/decode
-    let atob_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let atob_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let input = args
             .get_or_undefined(0)
             .to_string(ctx)
@@ -3069,150 +2820,125 @@ fn register_window(context: &mut Context, state: SharedState) {
             .unwrap_or_default();
         // atob decodes base64
         match base64_decode(&input) {
-            Some(decoded) => Ok(JsValue::from(js_string!(decoded.as_str()))),
-            None => Ok(JsValue::from(js_string!(""))),
+            Some(decoded) => Ok(rquickjs::String::from_str(ctx.clone(), decoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+            None => Ok(rquickjs::String::from_str(ctx.clone(), "").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
         }
     });
     window
         .set(
-            js_string!("atob"),
-            atob_fn.to_js_function(context.realm()),
+            "atob",
+            atob_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
-    let btoa_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let btoa_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let input = args
             .get_or_undefined(0)
             .to_string(ctx)
             .map(|s| s.to_std_string_escaped())
             .unwrap_or_default();
         let encoded = base64_encode(&input);
-        Ok(JsValue::from(js_string!(encoded.as_str())))
+        Ok(rquickjs::String::from_str(ctx.clone(), encoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
     });
     window
         .set(
-            js_string!("btoa"),
-            btoa_fn.to_js_function(context.realm()),
+            "btoa",
+            btoa_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // scrollTo/scrollBy — stubs som loggar mutation
     let st_scroll = Rc::clone(&state);
-    let scroll_to = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let x = args.get_or_undefined(0).to_number(ctx).unwrap_or(0.0);
-            let y = args.get_or_undefined(1).to_number(ctx).unwrap_or(0.0);
+    let scroll_to = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let x = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
+            let y = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
             st_scroll
                 .borrow_mut()
                 .mutations
                 .push(format!("window.scrollTo({}, {})", x, y));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     window
         .set(
-            js_string!("scrollTo"),
-            scroll_to.to_js_function(context.realm()),
+            "scrollTo",
+            scroll_to,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
     let st_scroll2 = Rc::clone(&state);
-    let scroll_by = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let x = args.get_or_undefined(0).to_number(ctx).unwrap_or(0.0);
-            let y = args.get_or_undefined(1).to_number(ctx).unwrap_or(0.0);
+    let scroll_by = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let x = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
+            let y = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0);
             st_scroll2
                 .borrow_mut()
                 .mutations
                 .push(format!("window.scrollBy({}, {})", x, y));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     window
         .set(
-            js_string!("scrollBy"),
-            scroll_by.to_js_function(context.realm()),
+            "scrollBy",
+            scroll_by,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
     // scroll = alias för scrollTo
-    let scroll_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let scroll_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     window
         .set(
-            js_string!("scroll"),
-            scroll_fn.to_js_function(context.realm()),
+            "scroll",
+            scroll_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // performance.now()
     let perf_start = std::time::Instant::now();
-    let perf_now = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let perf_now = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let ms = perf_start.elapsed().as_secs_f64() * 1000.0;
-            Ok(JsValue::from(ms))
-        })
-    };
-    let performance = ObjectInitializer::new(context)
-        .function(perf_now, js_string!("now"), 0)
-        .build();
+            Ok(Value::new_float(ctx.clone(), ms as f64))
+    }).unwrap();
+    let performance = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("now", perf_now).unwrap_or(());
     window
-        .set(js_string!("performance"), performance, false, context)
-        .unwrap_or(true);
+        .set("performance", performance).unwrap_or(());
 
     // screen object
-    let screen = ObjectInitializer::new(context)
-        .property(
-            js_string!("width"),
-            JsValue::from(1920),
-            Attribute::READONLY,
+    let screen = Object::new(ctx.clone()).unwrap()
+        .set("width", Value::new_int(ctx.clone(), 1920),
         )
-        .property(
-            js_string!("height"),
-            JsValue::from(1080),
-            Attribute::READONLY,
+        .set("height", Value::new_int(ctx.clone(), 1080),
         )
-        .property(
-            js_string!("colorDepth"),
-            JsValue::from(24),
-            Attribute::READONLY,
+        .set("colorDepth", Value::new_int(ctx.clone(), 24),
         )
-        .property(
-            js_string!("availWidth"),
-            JsValue::from(1920),
-            Attribute::READONLY,
+        .set("availWidth", Value::new_int(ctx.clone(), 1920),
         )
-        .property(
-            js_string!("availHeight"),
-            JsValue::from(1040),
-            Attribute::READONLY,
-        )
-        .build();
+        .set("availHeight", Value::new_int(ctx.clone(), 1040),
+        );
     window
-        .set(js_string!("screen"), screen, false, context)
-        .unwrap_or(true);
+        .set("screen", screen).unwrap_or(());
 
     // devicePixelRatio
     window
         .set(
-            js_string!("devicePixelRatio"),
-            JsValue::from(1.0),
+            "devicePixelRatio",
+            Value::from(1.0),
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // history stub
     let st_hist = Rc::clone(&state);
-    let push_state = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let push_state = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let url = args
                 .get_or_undefined(2)
                 .to_string(ctx)
@@ -3222,12 +2948,10 @@ fn register_window(context: &mut Context, state: SharedState) {
                 .borrow_mut()
                 .mutations
                 .push(format!("history.pushState({})", url));
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
     let st_hist2 = Rc::clone(&state);
-    let replace_state = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let replace_state = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let url = args
                 .get_or_undefined(2)
                 .to_string(ctx)
@@ -3237,88 +2961,85 @@ fn register_window(context: &mut Context, state: SharedState) {
                 .borrow_mut()
                 .mutations
                 .push(format!("history.replaceState({})", url));
-            Ok(JsValue::undefined())
-        })
-    };
-    let back_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let forward_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let go_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-    let history = ObjectInitializer::new(context)
-        .function(push_state, js_string!("pushState"), 3)
-        .function(replace_state, js_string!("replaceState"), 3)
-        .function(back_fn, js_string!("back"), 0)
-        .function(forward_fn, js_string!("forward"), 0)
-        .function(go_fn, js_string!("go"), 1)
-        .property(js_string!("length"), JsValue::from(1), Attribute::READONLY)
-        .build();
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
+    let back_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+    let forward_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+    let go_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
+    let history = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("pushState", push_state).unwrap_or(())
+        ;
+    /* TODO */ obj.set("replaceState", replace_state).unwrap_or(())
+        ;
+    /* TODO */ obj.set("back", back_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("forward", forward_fn).unwrap_or(())
+        ;
+    /* TODO */ obj.set("go", go_fn).unwrap_or(())
+        .set("length", Value::new_int(ctx.clone(), 1));
     window
-        .set(js_string!("history"), history, false, context)
-        .unwrap_or(true);
+        .set("history", history).unwrap_or(());
 
     // requestIdleCallback — kör callback direkt (idle = always)
-    let ric_fn = NativeFunction::from_fn_ptr(|_this, args, ctx| {
-        if let Some(callable) = args.get_or_undefined(0).as_callable() {
-            let deadline = ObjectInitializer::new(ctx)
-                .property(
-                    js_string!("didTimeout"),
-                    JsValue::from(false),
-                    Attribute::READONLY,
-                )
-                .build();
+    let ric_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+        if let Some(callable) = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_function() {
+            let deadline = Object::new(ctx.clone()).unwrap()
+                .set("didTimeout", Value::new_bool(ctx.clone(), false),
+                );
             let time_remaining =
-                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::from(50.0)));
+                Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::from(50.0)) }).unwrap();
             let _ = deadline.set(
-                js_string!("timeRemaining"),
+                "timeRemaining",
                 time_remaining.to_js_function(ctx.realm()),
                 false,
                 ctx,
             );
-            let _ = callable.call(&JsValue::undefined(), &[deadline.into()], ctx);
+            let _ = callable.call(&Value::new_undefined(ctx.clone()), &[deadline.into_value()], ctx);
         }
-        Ok(JsValue::from(1))
+        Ok(Value::new_int(ctx.clone(), 1))
     });
     window
         .set(
-            js_string!("requestIdleCallback"),
-            ric_fn.to_js_function(context.realm()),
+            "requestIdleCallback",
+            ric_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // open/close stubs
-    let open_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::null()));
-    let close_fn = NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+    let open_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_null(ctx.clone())) }).unwrap();
+    let close_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> { Ok(Value::new_undefined(ctx)) }).unwrap();
     window
         .set(
-            js_string!("open"),
-            open_fn.to_js_function(context.realm()),
+            "open",
+            open_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
     window
         .set(
-            js_string!("close"),
-            close_fn.to_js_function(context.realm()),
+            "close",
+            close_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // IntersectionObserver — fires per-element on observe() med layoutdata
     let st_io = Rc::clone(&state);
-    let io_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let callback = args.get_or_undefined(0).clone();
+    let io_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let callback = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_io);
 
-            let observe_fn = NativeFunction::from_closure(move |_this, args, ctx2| {
-                let target = args.get_or_undefined(0);
-                let target_key = extract_node_key(target, ctx2);
+            let observe_fn = Function::new(move |_this, args, ctx| {
+                let target = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let target_key = extract_node_key(&target);
 
-                if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                if let (Some(callable), Some(k)) = (cb_clone.as_function(), target_key) {
                     let (y, w, h) = {
                         let s = st_observe.borrow();
                         let (_, y, w, h) = estimate_layout_rect(&s.arena, k);
@@ -3328,161 +3049,153 @@ fn register_window(context: &mut Context, state: SharedState) {
                     let is_visible = y < 768.0 && w > 0.0 && h > 0.0;
                     let ratio = if is_visible { 1.0 } else { 0.0 };
 
-                    let bounds = ObjectInitializer::new(ctx2)
-                        .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
-                        .property(js_string!("y"), JsValue::from(y), Attribute::READONLY)
-                        .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
-                        .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
-                        .build();
+                    let bounds = Object::new(ctx.clone()).unwrap()
+                        ;
+    /* TODO */ obj.set("x", Value::from(0.0)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("y", Value::new_float(ctx.clone(), y as f64)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(());
 
-                    let entry = ObjectInitializer::new(ctx2)
-                        .property(
-                            js_string!("isIntersecting"),
-                            JsValue::from(is_visible),
-                            Attribute::READONLY,
+                    let entry = Object::new(ctx.clone()).unwrap()
+                        .set("isIntersecting", Value::new_float(ctx.clone(), is_visible as f64),
+                        )
+                        .set("intersectionRatio", Value::new_float(ctx.clone(), ratio as f64),
                         )
                         .property(
-                            js_string!("intersectionRatio"),
-                            JsValue::from(ratio),
-                            Attribute::READONLY,
-                        )
-                        .property(
-                            js_string!("boundingClientRect"),
+                            "boundingClientRect",
                             bounds,
-                            Attribute::READONLY,
                         )
-                        .property(js_string!("target"), target.clone(), Attribute::READONLY)
-                        .build();
+                        ;
+    /* TODO */ obj.set("target", target.clone()).unwrap_or(());
 
-                    let entries = JsArray::new(ctx2);
-                    let _ = entries.push(entry, ctx2);
-                    let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                    let entries = rquickjs::Array::new(ctx.clone()).unwrap();
+                    let _ = entries.set(0, entry);
+                    let _ = callable.call(&Value::new_undefined(ctx.clone()), &[entries.into_value()], ctx);
                 }
-                Ok(JsValue::undefined())
+                Ok(Value::new_undefined(ctx.clone()))
             });
 
             let unobserve_fn =
-                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+                Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let disconnect_fn =
-                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-            let observer = ObjectInitializer::new(ctx)
-                .function(observe_fn, js_string!("observe"), 1)
-                .function(unobserve_fn, js_string!("unobserve"), 1)
-                .function(disconnect_fn, js_string!("disconnect"), 0)
-                .build();
-            Ok(observer.into())
-        })
-    };
+                Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
+            let observer = Object::new(ctx.clone()).unwrap()
+                ;
+    /* TODO */ obj.set("observe", observe_fn).unwrap_or(())
+                ;
+    /* TODO */ obj.set("unobserve", unobserve_fn).unwrap_or(())
+                ;
+    /* TODO */ obj.set("disconnect", disconnect_fn).unwrap_or(());
+            Ok(observer.into_value())
+    }).unwrap();
     window
         .set(
-            js_string!("IntersectionObserver"),
-            io_fn.to_js_function(context.realm()),
+            "IntersectionObserver",
+            io_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // ResizeObserver — fires callback on observe() med element-dimensioner
     let st_ro = Rc::clone(&state);
-    let ro_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let callback = args.get_or_undefined(0).clone();
+    let ro_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let callback = args.first().cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             let cb_clone = callback.clone();
             let st_observe = Rc::clone(&st_ro);
 
-            let observe_fn = NativeFunction::from_closure(move |_this, args, ctx2| {
-                let target = args.get_or_undefined(0);
-                let target_key = extract_node_key(target, ctx2);
+            let observe_fn = Function::new(move |_this, args, ctx| {
+                let target = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let target_key = extract_node_key(&target);
 
-                if let (Some(callable), Some(k)) = (cb_clone.as_callable(), target_key) {
+                if let (Some(callable), Some(k)) = (cb_clone.as_function(), target_key) {
                     let (w, h) = {
                         let s = st_observe.borrow();
                         let (_, _, w, h) = estimate_layout_rect(&s.arena, k);
                         (w, h)
                     };
 
-                    let content_rect = ObjectInitializer::new(ctx2)
-                        .property(js_string!("width"), JsValue::from(w), Attribute::READONLY)
-                        .property(js_string!("height"), JsValue::from(h), Attribute::READONLY)
-                        .property(js_string!("x"), JsValue::from(0.0), Attribute::READONLY)
-                        .property(js_string!("y"), JsValue::from(0.0), Attribute::READONLY)
-                        .build();
+                    let content_rect = Object::new(ctx.clone()).unwrap()
+                        ;
+    /* TODO */ obj.set("width", Value::new_float(ctx.clone(), w as f64)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("height", Value::new_float(ctx.clone(), h as f64)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("x", Value::from(0.0)).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("y", Value::from(0.0)).unwrap_or(());
 
-                    let border_size = ObjectInitializer::new(ctx2)
-                        .property(
-                            js_string!("inlineSize"),
-                            JsValue::from(w),
-                            Attribute::READONLY,
+                    let border_size = Object::new(ctx.clone()).unwrap()
+                        .set("inlineSize", Value::new_float(ctx.clone(), w as f64),
                         )
-                        .property(
-                            js_string!("blockSize"),
-                            JsValue::from(h),
-                            Attribute::READONLY,
-                        )
-                        .build();
-                    let border_arr = JsArray::new(ctx2);
-                    let _ = border_arr.push(border_size, ctx2);
+                        .set("blockSize", Value::new_float(ctx.clone(), h as f64),
+                        );
+                    let border_arr = rquickjs::Array::new(ctx.clone()).unwrap();
+                    let _ = border_arr.set(0, border_size);
 
-                    let entry = ObjectInitializer::new(ctx2)
-                        .property(js_string!("contentRect"), content_rect, Attribute::READONLY)
-                        .property(js_string!("borderBoxSize"), border_arr, Attribute::READONLY)
-                        .property(js_string!("target"), target.clone(), Attribute::READONLY)
-                        .build();
+                    let entry = Object::new(ctx.clone()).unwrap()
+                        ;
+    /* TODO */ obj.set("contentRect", content_rect).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("borderBoxSize", border_arr).unwrap_or(())
+                        ;
+    /* TODO */ obj.set("target", target.clone()).unwrap_or(());
 
-                    let entries = JsArray::new(ctx2);
-                    let _ = entries.push(entry, ctx2);
-                    let _ = callable.call(&JsValue::undefined(), &[entries.into()], ctx2);
+                    let entries = rquickjs::Array::new(ctx.clone()).unwrap();
+                    let _ = entries.set(0, entry);
+                    let _ = callable.call(&Value::new_undefined(ctx.clone()), &[entries.into_value()], ctx);
                 }
-                Ok(JsValue::undefined())
+                Ok(Value::new_undefined(ctx.clone()))
             });
 
             let unobserve_fn =
-                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
+                Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
             let disconnect_fn =
-                NativeFunction::from_fn_ptr(|_this, _args, _ctx| Ok(JsValue::undefined()));
-            let observer = ObjectInitializer::new(ctx)
-                .function(observe_fn, js_string!("observe"), 1)
-                .function(unobserve_fn, js_string!("unobserve"), 1)
-                .function(disconnect_fn, js_string!("disconnect"), 0)
-                .build();
-            Ok(observer.into())
-        })
-    };
+                Function::new(|_this, _args, _ctx| Ok(Value::new_undefined(ctx.clone())));
+            let observer = Object::new(ctx.clone()).unwrap()
+                ;
+    /* TODO */ obj.set("observe", observe_fn).unwrap_or(())
+                ;
+    /* TODO */ obj.set("unobserve", unobserve_fn).unwrap_or(())
+                ;
+    /* TODO */ obj.set("disconnect", disconnect_fn).unwrap_or(());
+            Ok(observer.into_value())
+    }).unwrap();
     window
         .set(
-            js_string!("ResizeObserver"),
-            ro_fn.to_js_function(context.realm()),
+            "ResizeObserver",
+            ro_fn,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // customElements — med lifecycle callback-stöd (connectedCallback, disconnectedCallback)
     // Lagrar registrerade element-definitioner med deras konstruktor/klass
-    let registry: Rc<RefCell<std::collections::HashMap<String, JsValue>>> =
+    let registry: Rc<RefCell<std::collections::HashMap<String, Value<'_>>>> =
         Rc::new(RefCell::new(std::collections::HashMap::new()));
 
     let reg_define = Rc::clone(&registry);
-    let ce_define = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ce_define = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
                 .to_std_string_escaped()
                 .to_lowercase();
-            let constructor = args.get_or_undefined(1).clone();
+            let constructor = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).clone();
             // Validera att namnet innehåller bindestreck (Web Components-krav)
             if !name.contains('-') {
-                return Ok(JsValue::undefined());
+                return Ok(Value::new_undefined(ctx.clone()));
             }
             reg_define.borrow_mut().insert(name, constructor);
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let reg_get = Rc::clone(&registry);
-    let ce_get = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ce_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -3491,14 +3204,12 @@ fn register_window(context: &mut Context, state: SharedState) {
             let reg = reg_get.borrow();
             match reg.get(&name) {
                 Some(ctor) => Ok(ctor.clone()),
-                None => Ok(JsValue::undefined()),
+                None => Ok(Value::new_undefined(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
 
     let reg_when = Rc::clone(&registry);
-    let ce_when = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let ce_when = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let name = args
                 .get_or_undefined(0)
                 .to_string(ctx)?
@@ -3507,356 +3218,299 @@ fn register_window(context: &mut Context, state: SharedState) {
             let reg = reg_when.borrow();
             if reg.contains_key(&name) {
                 // Redan definierad — returnera resolved Promise
-                let promise = ctx.eval(boa_engine::Source::from_bytes("Promise.resolve()"));
+                let promise = ctx.eval::<Value, _>("Promise.resolve()");
                 match promise {
                     Ok(p) => Ok(p),
-                    Err(_) => Ok(JsValue::undefined()),
+                    Err(_) => Ok(Value::new_undefined(ctx.clone())),
                 }
             } else {
                 // Inte definierad — returnera pending-liknande Promise
-                let promise = ctx.eval(boa_engine::Source::from_bytes("Promise.resolve()"));
+                let promise = ctx.eval::<Value, _>("Promise.resolve()");
                 match promise {
                     Ok(p) => Ok(p),
-                    Err(_) => Ok(JsValue::undefined()),
+                    Err(_) => Ok(Value::new_undefined(ctx.clone())),
                 }
             }
-        })
-    };
+    }).unwrap();
 
-    let custom_elements = ObjectInitializer::new(context)
-        .function(ce_define, js_string!("define"), 2)
-        .function(ce_get, js_string!("get"), 1)
-        .function(ce_when, js_string!("whenDefined"), 1)
-        .build();
+    let custom_elements = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("define", ce_define).unwrap_or(())
+        ;
+    /* TODO */ obj.set("get", ce_get).unwrap_or(())
+        ;
+    /* TODO */ obj.set("whenDefined", ce_when).unwrap_or(());
     window
         .set(
-            js_string!("customElements"),
+            "customElements",
             custom_elements,
             false,
-            context,
+            ctx,
         )
         .unwrap_or(true);
 
     // localStorage — in-memory sandboxad implementation (Fas 19)
-    register_storage(context, Rc::clone(&state), "localStorage", true);
-    register_storage(context, Rc::clone(&state), "sessionStorage", false);
+    register_storage(ctx, Rc::clone(&state), "localStorage", true);
+    register_storage(ctx, Rc::clone(&state), "sessionStorage", false);
 
     // Sätt localStorage/sessionStorage på window också
-    if let Ok(ls) = context
+    if let Ok(ls) = ctx
         .global_object()
-        .get(js_string!("localStorage"), context)
+        .get("localStorage", ctx)
     {
         window
-            .set(js_string!("localStorage"), ls, false, context)
-            .unwrap_or(true);
+            .set("localStorage", ls).unwrap_or(());
     }
-    if let Ok(ss) = context
+    if let Ok(ss) = ctx
         .global_object()
-        .get(js_string!("sessionStorage"), context)
+        .get("sessionStorage", ctx)
     {
         window
-            .set(js_string!("sessionStorage"), ss, false, context)
-            .unwrap_or(true);
+            .set("sessionStorage", ss).unwrap_or(());
     }
 
-    context
-        .register_global_property(js_string!("window"), window, Attribute::all())
+    ctx.globals().set("window", window)
         .unwrap_or(());
 
     // Event konstruktor — new Event('click', {bubbles: true})
-    let event_ctor = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let event_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let type_str = args
             .get_or_undefined(0)
             .to_string(ctx)?
             .to_std_string_escaped();
-        let options = args.get_or_undefined(1);
+        let options = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
         let bubbles = options
             .as_object()
-            .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("bubbles", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
         let cancelable = options
             .as_object()
-            .and_then(|o| o.get(js_string!("cancelable"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("cancelable", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
         let composed = options
             .as_object()
-            .and_then(|o| o.get(js_string!("composed"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("composed", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
 
-        let stop_prop = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+        let stop_prop = Function::new(|this, _args, ctx| {
             if let Some(obj) = this.as_object() {
-                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
             }
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         });
-        let prevent_default = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+        let prevent_default = Function::new(|this, _args, ctx| {
             if let Some(obj) = this.as_object() {
                 let _ = obj.set(
-                    js_string!("defaultPrevented"),
-                    JsValue::from(true),
+                    "defaultPrevented",
+                    Value::new_bool(ctx.clone(), true),
                     false,
-                    ctx2,
+                    ctx,
                 );
             }
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         });
-        let stop_imm = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+        let stop_imm = Function::new(|this, _args, ctx| {
             if let Some(obj) = this.as_object() {
-                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
             }
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         });
 
-        let event = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("type"),
-                JsValue::from(js_string!(type_str.as_str())),
-                Attribute::READONLY,
+        let event = Object::new(ctx.clone()).unwrap()
+            .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
-            .property(
-                js_string!("bubbles"),
-                JsValue::from(bubbles),
-                Attribute::READONLY,
+            .set("bubbles", Value::new_float(ctx.clone(), bubbles as f64),
             )
-            .property(
-                js_string!("cancelable"),
-                JsValue::from(cancelable),
-                Attribute::READONLY,
+            .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
             )
-            .property(
-                js_string!("composed"),
-                JsValue::from(composed),
-                Attribute::READONLY,
+            .set("composed", Value::new_float(ctx.clone(), composed as f64),
             )
-            .property(
-                js_string!("defaultPrevented"),
-                JsValue::from(false),
-                Attribute::all(),
+            .set("defaultPrevented", Value::new_bool(ctx.clone(), false),
             )
-            .property(
-                js_string!("__stopped__"),
-                JsValue::from(false),
-                Attribute::all(),
+            .set("__stopped__", Value::new_bool(ctx.clone(), false),
             )
-            .property(js_string!("target"), JsValue::null(), Attribute::all())
-            .property(
-                js_string!("currentTarget"),
-                JsValue::null(),
-                Attribute::all(),
+            ;
+    /* TODO */ obj.set("target", Value::new_null(ctx.clone())).unwrap_or(())
+            .set("currentTarget", Value::new_null(ctx.clone()),
             )
-            .property(js_string!("eventPhase"), JsValue::from(0), Attribute::all())
-            .property(
-                js_string!("timeStamp"),
-                JsValue::from(0.0),
-                Attribute::READONLY,
+            .set("eventPhase", Value::new_int(ctx.clone(), 0))
+            .set("timeStamp", Value::from(0.0),
             )
-            .property(
-                js_string!("isTrusted"),
-                JsValue::from(false),
-                Attribute::READONLY,
+            .set("isTrusted", Value::new_bool(ctx.clone(), false),
             )
-            .function(stop_prop, js_string!("stopPropagation"), 0)
-            .function(prevent_default, js_string!("preventDefault"), 0)
-            .function(stop_imm, js_string!("stopImmediatePropagation"), 0)
-            .build();
+            ;
+    /* TODO */ obj.set("stopPropagation", stop_prop).unwrap_or(())
+            ;
+    /* TODO */ obj.set("preventDefault", prevent_default).unwrap_or(())
+            ;
+    /* TODO */ obj.set("stopImmediatePropagation", stop_imm).unwrap_or(());
 
-        Ok(event.into())
+        Ok(event.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("Event"),
-            event_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "Event",
+            event_ctor,
         )
         .unwrap_or(());
 
     // CustomEvent konstruktor — new CustomEvent('my-event', {detail: data})
-    let custom_event_ctor = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let custom_event_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let type_str = args
             .get_or_undefined(0)
             .to_string(ctx)?
             .to_std_string_escaped();
-        let options = args.get_or_undefined(1);
+        let options = args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
         let bubbles = options
             .as_object()
-            .and_then(|o| o.get(js_string!("bubbles"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("bubbles", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
         let detail = options
             .as_object()
-            .and_then(|o| o.get(js_string!("detail"), ctx).ok())
-            .unwrap_or(JsValue::null());
+            .and_then(|o| o.get("detail", ctx).ok())
+            .unwrap_or(Value::new_null(ctx.clone()));
         let composed = options
             .as_object()
-            .and_then(|o| o.get(js_string!("composed"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("composed", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
         let cancelable = options
             .as_object()
-            .and_then(|o| o.get(js_string!("cancelable"), ctx).ok())
-            .map(|v| v.to_boolean())
+            .and_then(|o| o.get("cancelable", ctx).ok())
+            .map(|v| v.as_bool().unwrap_or(false))
             .unwrap_or(false);
 
-        let stop_prop = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+        let stop_prop = Function::new(|this, _args, ctx| {
             if let Some(obj) = this.as_object() {
-                let _ = obj.set(js_string!("__stopped__"), JsValue::from(true), false, ctx2);
+                let _ = obj.set("__stopped__", Value::new_bool(ctx.clone(), true), false, ctx);
             }
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         });
-        let prevent_default = NativeFunction::from_fn_ptr(|this, _args, ctx2| {
+        let prevent_default = Function::new(|this, _args, ctx| {
             if let Some(obj) = this.as_object() {
                 let _ = obj.set(
-                    js_string!("defaultPrevented"),
-                    JsValue::from(true),
+                    "defaultPrevented",
+                    Value::new_bool(ctx.clone(), true),
                     false,
-                    ctx2,
+                    ctx,
                 );
             }
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         });
 
-        let event = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("type"),
-                JsValue::from(js_string!(type_str.as_str())),
-                Attribute::READONLY,
+        let event = Object::new(ctx.clone()).unwrap()
+            .set("type", rquickjs::String::from_str(ctx.clone(), type_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
-            .property(
-                js_string!("bubbles"),
-                JsValue::from(bubbles),
-                Attribute::READONLY,
+            .set("bubbles", Value::new_float(ctx.clone(), bubbles as f64),
             )
-            .property(
-                js_string!("cancelable"),
-                JsValue::from(cancelable),
-                Attribute::READONLY,
+            .set("cancelable", Value::new_float(ctx.clone(), cancelable as f64),
             )
-            .property(
-                js_string!("composed"),
-                JsValue::from(composed),
-                Attribute::READONLY,
+            .set("composed", Value::new_float(ctx.clone(), composed as f64),
             )
-            .property(
-                js_string!("defaultPrevented"),
-                JsValue::from(false),
-                Attribute::all(),
+            .set("defaultPrevented", Value::new_bool(ctx.clone(), false),
             )
-            .property(
-                js_string!("__stopped__"),
-                JsValue::from(false),
-                Attribute::all(),
+            .set("__stopped__", Value::new_bool(ctx.clone(), false),
             )
-            .property(js_string!("detail"), detail, Attribute::READONLY)
-            .property(js_string!("target"), JsValue::null(), Attribute::all())
-            .property(
-                js_string!("currentTarget"),
-                JsValue::null(),
-                Attribute::all(),
+            ;
+    /* TODO */ obj.set("detail", detail).unwrap_or(())
+            ;
+    /* TODO */ obj.set("target", Value::new_null(ctx.clone())).unwrap_or(())
+            .set("currentTarget", Value::new_null(ctx.clone()),
             )
-            .property(
-                js_string!("isTrusted"),
-                JsValue::from(false),
-                Attribute::READONLY,
+            .set("isTrusted", Value::new_bool(ctx.clone(), false),
             )
-            .function(stop_prop, js_string!("stopPropagation"), 0)
-            .function(prevent_default, js_string!("preventDefault"), 0)
-            .build();
+            ;
+    /* TODO */ obj.set("stopPropagation", stop_prop).unwrap_or(())
+            ;
+    /* TODO */ obj.set("preventDefault", prevent_default).unwrap_or(());
 
-        Ok(event.into())
+        Ok(event.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("CustomEvent"),
-            custom_event_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "CustomEvent",
+            custom_event_ctor,
         )
         .unwrap_or(());
 
     // ─── Globala API:er (Fas 19) ─────────────────────────────────────────────
 
     // TextEncoder
-    let text_encoder_ctor = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let encode_fn = NativeFunction::from_fn_ptr(|_this, args, ctx2| {
+    let text_encoder_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let encode_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let input = args
                 .get_or_undefined(0)
-                .to_string(ctx2)
+                .to_string(ctx)
                 .map(|s| s.to_std_string_escaped())
                 .unwrap_or_default();
             let bytes = input.as_bytes();
-            let arr = JsArray::new(ctx2);
+            let arr = rquickjs::Array::new(ctx.clone()).unwrap();
             for (i, &b) in bytes.iter().enumerate() {
-                let _ = arr.set(i as u32, JsValue::from(b as f64), false, ctx2);
+                let _ = arr.set(i as u32, Value::new_float(ctx.clone(), b as f64), false, ctx);
             }
-            Ok(arr.into())
+            Ok(arr.into_value())
         });
-        let encoder = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("encoding"),
-                JsValue::from(js_string!("utf-8")),
-                Attribute::READONLY,
+        let encoder = Object::new(ctx.clone()).unwrap()
+            .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
-            .function(encode_fn, js_string!("encode"), 1)
-            .build();
-        Ok(encoder.into())
+            ;
+    /* TODO */ obj.set("encode", encode_fn).unwrap_or(());
+        Ok(encoder.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("TextEncoder"),
-            text_encoder_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "TextEncoder",
+            text_encoder_ctor,
         )
         .unwrap_or(());
 
     // TextDecoder
-    let text_decoder_ctor = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let decode_fn = NativeFunction::from_fn_ptr(|_this, args, ctx2| {
-            let input = args.get_or_undefined(0);
+    let text_decoder_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let decode_fn = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let input = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
             // Försök tolka som array/typed array
             let mut bytes: Vec<u8> = Vec::new();
             if let Some(obj) = input.as_object() {
                 // Hämta length och iterera
-                if let Ok(len) = obj.get(js_string!("length"), ctx2) {
-                    let len = len.to_number(ctx2).unwrap_or(0.0) as usize;
+                if let Ok(len) = obj.get("length", ctx) {
+                    let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
                     for i in 0..len.min(1_000_000) {
-                        if let Ok(val) = obj.get(i as u32, ctx2) {
-                            bytes.push(val.to_number(ctx2).unwrap_or(0.0) as u8);
+                        if let Ok(val) = obj.get(i as u32, ctx) {
+                            bytes.push(val.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as u8);
                         }
                     }
                 }
             }
             let decoded = String::from_utf8_lossy(&bytes).to_string();
-            Ok(JsValue::from(js_string!(decoded.as_str())))
+            Ok(rquickjs::String::from_str(ctx.clone(), decoded.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
         });
-        let decoder = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("encoding"),
-                JsValue::from(js_string!("utf-8")),
-                Attribute::READONLY,
+        let decoder = Object::new(ctx.clone()).unwrap()
+            .set("encoding", rquickjs::String::from_str(ctx.clone(), "utf-8").map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())),
             )
-            .function(decode_fn, js_string!("decode"), 1)
-            .build();
-        Ok(decoder.into())
+            ;
+    /* TODO */ obj.set("decode", decode_fn).unwrap_or(());
+        Ok(decoder.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("TextDecoder"),
-            text_decoder_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "TextDecoder",
+            text_decoder_ctor,
         )
         .unwrap_or(());
 
     // URL constructor
-    let url_ctor = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+    let url_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         let url_str = args
             .get_or_undefined(0)
             .to_string(ctx)
             .map(|s| s.to_std_string_escaped())
             .unwrap_or_default();
         let base_str = if args.len() > 1 {
-            args.get_or_undefined(1)
+            args.get(1).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()))
                 .to_string(ctx)
                 .map(|s| s.to_std_string_escaped())
                 .ok()
@@ -3882,162 +3536,130 @@ fn register_window(context: &mut Context, state: SharedState) {
         let (protocol, hostname, pathname, search, hash) = parse_url_parts(&full_url);
 
         // searchParams
-        let sp_obj = ObjectInitializer::new(ctx).build();
+        let sp_obj = Object::new(ctx.clone()).unwrap();
         let params = parse_query_string(&search);
         let params_clone = params.clone();
-        let sp_get = unsafe {
-            NativeFunction::from_closure(move |_this, args, ctx2| {
+        let sp_get = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let key = args
                     .get_or_undefined(0)
-                    .to_string(ctx2)
+                    .to_string(ctx)
                     .map(|s| s.to_std_string_escaped())
                     .unwrap_or_default();
                 match params_clone.iter().find(|(k, _)| k == &key) {
-                    Some((_, v)) => Ok(JsValue::from(js_string!(v.as_str()))),
-                    None => Ok(JsValue::null()),
+                    Some((_, v)) => Ok(rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+                    None => Ok(Value::new_null(ctx.clone())),
                 }
-            })
-        };
+        }).unwrap();
         let params_clone2 = params.clone();
-        let sp_has = unsafe {
-            NativeFunction::from_closure(move |_this, args, ctx2| {
+        let sp_has = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
                 let key = args
                     .get_or_undefined(0)
-                    .to_string(ctx2)
+                    .to_string(ctx)
                     .map(|s| s.to_std_string_escaped())
                     .unwrap_or_default();
-                Ok(JsValue::from(params_clone2.iter().any(|(k, _)| k == &key)))
-            })
-        };
+                Ok(Value::from(params_clone2.iter().any(|(k, _)| k == &key)))
+        }).unwrap();
         let sp_tostring = {
             let s = search.clone();
             unsafe {
-                NativeFunction::from_closure(move |_this, _args, _ctx| {
-                    Ok(JsValue::from(js_string!(s.as_str())))
+                Function::new(move |_this, _args, _ctx| {
+                    Ok(rquickjs::String::from_str(ctx.clone(), s.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
                 })
             }
         };
         let _ = sp_obj.set(
-            js_string!("get"),
+            "get",
             sp_get.to_js_function(ctx.realm()),
             false,
             ctx,
         );
         let _ = sp_obj.set(
-            js_string!("has"),
+            "has",
             sp_has.to_js_function(ctx.realm()),
             false,
             ctx,
         );
         let _ = sp_obj.set(
-            js_string!("toString"),
+            "toString",
             sp_tostring.to_js_function(ctx.realm()),
             false,
             ctx,
         );
 
-        let url_obj = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("href"),
-                JsValue::from(js_string!(full_url.as_str())),
-                Attribute::all(),
+        let url_obj = Object::new(ctx.clone()).unwrap()
+            .set("href", rquickjs::String::from_str(ctx.clone(), full_url.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            )
+            .set("protocol", rquickjs::String::from_str(ctx.clone(), protocol.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            )
+            .set("hostname", rquickjs::String::from_str(ctx.clone(), hostname.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            )
+            .set("pathname", rquickjs::String::from_str(ctx.clone(), pathname.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            )
+            .set("search", rquickjs::String::from_str(ctx.clone(), search.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
+            )
+            .set("hash", rquickjs::String::from_str(ctx.clone(), hash.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))),
             )
             .property(
-                js_string!("protocol"),
-                JsValue::from(js_string!(protocol.as_str())),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("hostname"),
-                JsValue::from(js_string!(hostname.as_str())),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("pathname"),
-                JsValue::from(js_string!(pathname.as_str())),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("search"),
-                JsValue::from(js_string!(search.as_str())),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("hash"),
-                JsValue::from(js_string!(hash.as_str())),
-                Attribute::READONLY,
-            )
-            .property(
-                js_string!("origin"),
-                JsValue::from(js_string!(format!(
+                "origin",
+                Value::from(js_string!(format!(
                     "{}://{}",
                     protocol.trim_end_matches(':'),
                     hostname
                 )
                 .as_str())),
-                Attribute::READONLY,
-            )
-            .build();
-        let _ = url_obj.set(js_string!("searchParams"), sp_obj, false, ctx);
+            );
+        let _ = url_obj.set("searchParams", sp_obj);
 
-        Ok(url_obj.into())
+        Ok(url_obj.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("URL"),
-            url_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "URL",
+            url_ctor,
         )
         .unwrap_or(());
 
     // AbortController stub
-    let abort_ctor = NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-        let signal = ObjectInitializer::new(ctx)
-            .property(
-                js_string!("aborted"),
-                JsValue::from(false),
-                Attribute::all(),
+    let abort_ctor = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+        let signal = Object::new(ctx.clone()).unwrap()
+            .set("aborted", Value::new_bool(ctx.clone(), false),
             )
-            .property(js_string!("reason"), JsValue::undefined(), Attribute::all())
-            .build();
+            ;
+    /* TODO */ obj.set("reason", Value::new_undefined(ctx.clone())).unwrap_or(());
         let signal_clone = signal.clone();
-        let abort_fn = unsafe {
-            NativeFunction::from_closure(move |_this, _args, ctx2| {
-                let _ = signal_clone.set(js_string!("aborted"), JsValue::from(true), false, ctx2);
-                Ok(JsValue::undefined())
-            })
-        };
-        let controller = ObjectInitializer::new(ctx)
-            .function(abort_fn, js_string!("abort"), 0)
-            .build();
-        let _ = controller.set(js_string!("signal"), signal, false, ctx);
-        Ok(controller.into())
+        let abort_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
+                let _ = signal_clone.set("aborted", Value::new_bool(ctx.clone(), true), false, ctx);
+                Ok(Value::new_undefined(ctx.clone()))
+        }).unwrap();
+        let controller = Object::new(ctx.clone()).unwrap()
+            ;
+    /* TODO */ obj.set("abort", abort_fn).unwrap_or(());
+        let _ = controller.set("signal", signal);
+        Ok(controller.into_value())
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("AbortController"),
-            abort_ctor.to_js_function(context.realm()),
-            Attribute::all(),
+            "AbortController",
+            abort_ctor,
         )
         .unwrap_or(());
 
     // structuredClone — JSON roundtrip-approximation
-    let structured_clone = NativeFunction::from_fn_ptr(|_this, args, ctx| {
-        let val = args.get_or_undefined(0);
+    let structured_clone = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+        let val = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
         // Använda JSON.stringify → JSON.parse som approximation
-        let json_str = val.to_string(ctx)?.to_std_string_escaped();
-        Ok(JsValue::from(js_string!(json_str.as_str())))
+        let json_str = val.as_string().and_then(|s| s.to_string().ok()).unwrap_or_default();
+        Ok(rquickjs::String::from_str(ctx.clone(), json_str.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()))))
     });
-    context
+    ctx
         .register_global_property(
-            js_string!("structuredClone"),
-            structured_clone.to_js_function(context.realm()),
-            Attribute::all(),
+            "structuredClone",
+            structured_clone,
         )
         .unwrap_or(());
 
     // crypto.randomUUID() och getRandomValues()
-    let random_uuid = NativeFunction::from_fn_ptr(|_this, _args, _ctx| {
+    let random_uuid = Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
         // Generera pseudo-UUID v4 med enkel hash
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4051,14 +3673,14 @@ fn register_window(context: &mut Context, state: SharedState) {
             (0x8000 | ((ts >> 60) & 0x3FFF)) as u16,
             ((ts.wrapping_mul(6364136223846793005)) & 0xFFFFFFFFFFFF) as u64,
         );
-        Ok(JsValue::from(js_string!(uuid.as_str())))
-    });
-    let get_random_values = NativeFunction::from_fn_ptr(|_this, args, ctx| {
+        Ok(rquickjs::String::from_str(ctx.clone(), &uuid)?.into_value())
+    }).unwrap();
+    let get_random_values = Function::new(ctx.clone(), |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
         // Fyll array med pseudo-random bytes
-        let arr = args.get_or_undefined(0);
+        let arr = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone()));
         if let Some(obj) = arr.as_object() {
-            if let Ok(len) = obj.get(js_string!("length"), ctx) {
-                let len = len.to_number(ctx).unwrap_or(0.0) as usize;
+            if let Ok(len) = obj.get("length", ctx) {
+                let len = len.as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -4066,27 +3688,27 @@ fn register_window(context: &mut Context, state: SharedState) {
                 for i in 0..len.min(65536) {
                     let val = ((ts.wrapping_mul(i as u128 + 1).wrapping_add(i as u128 * 7)) & 0xFF)
                         as f64;
-                    let _ = obj.set(i as u32, JsValue::from(val), false, ctx);
+                    let _ = obj.set(i, Value::new_int(ctx.clone(), val));
                 }
             }
         }
         Ok(arr.clone())
     });
-    let crypto = ObjectInitializer::new(context)
-        .function(random_uuid, js_string!("randomUUID"), 0)
-        .function(get_random_values, js_string!("getRandomValues"), 1)
-        .build();
-    context
-        .register_global_property(js_string!("crypto"), crypto, Attribute::all())
+    let crypto = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("randomUUID", random_uuid).unwrap_or(())
+        ;
+    /* TODO */ obj.set("getRandomValues", get_random_values).unwrap_or(());
+    ctx.globals().set("crypto", crypto)
         .unwrap_or(());
 }
 
 // ─── Console-objekt ─────────────────────────────────────────────────────────
 
-fn register_console(context: &mut Context, state: SharedState) {
+fn register_console(ctx: &Ctx<'_>, state: SharedState) -> rquickjs::Result<()> {
     // Fånga console-output i BridgeState (Fas 19)
     let make_log = |st: SharedState, prefix: &'static str| unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+        Function::new(move |_this, args, ctx| {
             let parts: Vec<String> = (0..args.len())
                 .map(|i| {
                     args.get_or_undefined(i)
@@ -4101,29 +3723,26 @@ fn register_console(context: &mut Context, state: SharedState) {
                 format!("[{}] {}", prefix, parts.join(" "))
             };
             st.borrow_mut().console_output.push(msg);
-            Ok(JsValue::undefined())
+            Ok(Value::new_undefined(ctx.clone()))
         })
     };
 
-    let console = ObjectInitializer::new(context)
-        .function(make_log(Rc::clone(&state), ""), js_string!("log"), 1)
-        .function(make_log(Rc::clone(&state), "WARN"), js_string!("warn"), 1)
-        .function(make_log(Rc::clone(&state), "ERROR"), js_string!("error"), 1)
-        .function(make_log(state, "INFO"), js_string!("info"), 1)
-        .build();
+    let console = Object::new(ctx.clone()).unwrap()
+        .function(make_log(Rc::clone(&state), ""), "log", 1)
+        .function(make_log(Rc::clone(&state), "WARN"), "warn", 1)
+        .function(make_log(Rc::clone(&state), "ERROR"), "error", 1)
+        .function(make_log(state, "INFO"), "info", 1);
 
-    context
-        .register_global_property(js_string!("console"), console, Attribute::all())
+    ctx.globals().set("console", console)
         .unwrap_or(());
 }
 
 // ─── localStorage / sessionStorage — in-memory sandbox (Fas 19) ─────────────
 
-fn register_storage(context: &mut Context, state: SharedState, name: &str, is_local: bool) {
+fn register_storage(ctx: &Ctx<'_>, state: SharedState, name: &str, is_local: bool) -> rquickjs::Result<()> {
     let st_get = Rc::clone(&state);
     let is_local_get = is_local;
-    let get_item = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let get_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -4136,16 +3755,14 @@ fn register_storage(context: &mut Context, state: SharedState, name: &str, is_lo
                 &s.session_storage
             };
             match storage.get(&key) {
-                Some(v) => Ok(JsValue::from(js_string!(v.as_str()))),
-                None => Ok(JsValue::null()),
+                Some(v) => Ok(rquickjs::String::from_str(ctx.clone(), v.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
 
     let st_set = Rc::clone(&state);
     let is_local_set = is_local;
-    let set_item = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let set_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -4166,14 +3783,12 @@ fn register_storage(context: &mut Context, state: SharedState, name: &str, is_lo
             if storage.len() < 100 && val.len() < 65536 {
                 storage.insert(key, val);
             }
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let st_rem = Rc::clone(&state);
     let is_local_rem = is_local;
-    let remove_item = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
+    let remove_item = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
             let key = args
                 .get_or_undefined(0)
                 .to_string(ctx)
@@ -4186,14 +3801,12 @@ fn register_storage(context: &mut Context, state: SharedState, name: &str, is_lo
                 &mut s.session_storage
             };
             storage.remove(&key);
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let st_clear = Rc::clone(&state);
     let is_local_clear = is_local;
-    let clear = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let clear = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let mut s = st_clear.borrow_mut();
             let storage = if is_local_clear {
                 &mut s.local_storage
@@ -4201,15 +3814,13 @@ fn register_storage(context: &mut Context, state: SharedState, name: &str, is_lo
                 &mut s.session_storage
             };
             storage.clear();
-            Ok(JsValue::undefined())
-        })
-    };
+            Ok(Value::new_undefined(ctx.clone()))
+    }).unwrap();
 
     let st_key = Rc::clone(&state);
     let is_local_key = is_local;
-    let key_fn = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let index = args.get_or_undefined(0).to_number(ctx).unwrap_or(0.0) as usize;
+    let key_fn = Function::new(ctx.clone(), move |ctx: Ctx<'_>, args: Rest<Value<'_>>| -> rquickjs::Result<Value<'_>> {
+            let index = args.get(0).cloned().unwrap_or_else(|| Value::new_undefined(ctx.clone())).as_float().or_else(|| Some(0.0)).unwrap_or(0.0) as usize;
             let s = st_key.borrow();
             let storage = if is_local_key {
                 &s.local_storage
@@ -4217,44 +3828,45 @@ fn register_storage(context: &mut Context, state: SharedState, name: &str, is_lo
                 &s.session_storage
             };
             match storage.keys().nth(index) {
-                Some(k) => Ok(JsValue::from(js_string!(k.as_str()))),
-                None => Ok(JsValue::null()),
+                Some(k) => Ok(rquickjs::String::from_str(ctx.clone(), k.as_str().map(|s| s.into_value()).unwrap_or_else(|_| Value::new_undefined(ctx.clone())))),
+                None => Ok(Value::new_null(ctx.clone())),
             }
-        })
-    };
+    }).unwrap();
 
     let st_len = Rc::clone(&state);
     let is_local_len = is_local;
 
-    let storage_obj = ObjectInitializer::new(context)
-        .function(get_item, js_string!("getItem"), 1)
-        .function(set_item, js_string!("setItem"), 2)
-        .function(remove_item, js_string!("removeItem"), 1)
-        .function(clear, js_string!("clear"), 0)
-        .function(key_fn, js_string!("key"), 1)
-        .build();
+    let storage_obj = Object::new(ctx.clone()).unwrap()
+        ;
+    /* TODO */ obj.set("getItem", get_item).unwrap_or(())
+        ;
+    /* TODO */ obj.set("setItem", set_item).unwrap_or(())
+        ;
+    /* TODO */ obj.set("removeItem", remove_item).unwrap_or(())
+        ;
+    /* TODO */ obj.set("clear", clear).unwrap_or(())
+        ;
+    /* TODO */ obj.set("key", key_fn).unwrap_or(());
 
     // Sätt length som getter (via closure)
-    let length_getter = unsafe {
-        NativeFunction::from_closure(move |_this, _args, _ctx| {
+    let length_getter = Function::new(ctx.clone(), move |ctx: Ctx<'_>| -> rquickjs::Result<Value<'_>> {
             let s = st_len.borrow();
             let storage = if is_local_len {
                 &s.local_storage
             } else {
                 &s.session_storage
             };
-            Ok(JsValue::from(storage.len() as f64))
-        })
-    };
+            Ok(Value::from(storage.len() as f64))
+    }).unwrap();
     let _ = storage_obj.set(
-        js_string!("length"),
-        length_getter.to_js_function(context.realm()),
+        "length",
+        length_getter,
         false,
-        context,
+        ctx,
     );
 
-    context
-        .register_global_property(js_string!(name), storage_obj, Attribute::all())
+    ctx
+        .register_global_property(name, storage_obj)
         .unwrap_or(());
 }
 

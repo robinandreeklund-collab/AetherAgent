@@ -3274,9 +3274,9 @@ fn test_adaptive_parse_js_with_dom() {
     let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
 
     assert!(
-        result["tier_used"].as_str() == Some("boa_dom")
+        result["tier_used"].as_str() == Some("quickjs_dom")
             || result["tier_used"].as_str() == Some("static"),
-        "JS med DOM borde ge tier 'boa_dom' eller 'static', fick {:?}",
+        "JS med DOM borde ge tier 'quickjs_dom' eller 'static', fick {:?}",
         result["tier_used"]
     );
 }

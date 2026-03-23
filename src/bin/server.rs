@@ -1842,7 +1842,7 @@ async fn tier_stats_handler() -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
-// ─── Boa+Blitz: render_with_js ───────────────────────────────────────────────
+// ─── QuickJS+Blitz: render_with_js ───────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct RenderWithJsRequest {
@@ -2348,7 +2348,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "parse_with_js",
-            "description": "Parse HTML with automatic JS evaluation in sandboxed Boa engine.",
+            "description": "Parse HTML with automatic JS evaluation in sandboxed QuickJS engine.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2629,7 +2629,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "render_with_js",
-            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via Boa sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing.",
+            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via QuickJS sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -4022,7 +4022,7 @@ fn build_router(state: AppState) -> Router {
         // Fas 12: TieredBackend
         .route("/api/tiered-screenshot", post(tiered_screenshot_handler))
         .route("/api/tier-stats", get(tier_stats_handler))
-        // Boa+Blitz: render med JS
+        // QuickJS+Blitz: render med JS
         .route("/api/render-with-js", {
             #[cfg(all(feature = "js-eval", feature = "blitz"))]
             {

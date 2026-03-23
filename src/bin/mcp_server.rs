@@ -777,7 +777,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "render_with_js",
-        description = "Render HTML with JavaScript execution: evaluates JS code against the DOM (via Boa sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). USE THIS TOOL WHEN: you need to see what a page looks like AFTER JavaScript modifies the DOM (e.g., dynamic content, computed values, DOM manipulation). Returns: base64-encoded PNG, mutation count, JS eval stats, timing. The JS sandbox supports: getElementById, querySelector, textContent, innerHTML, setAttribute, createElement, appendChild, setTimeout, and more."
+        description = "Render HTML with JavaScript execution: evaluates JS code against the DOM (via QuickJS sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). USE THIS TOOL WHEN: you need to see what a page looks like AFTER JavaScript modifies the DOM (e.g., dynamic content, computed values, DOM manipulation). Returns: base64-encoded PNG, mutation count, JS eval stats, timing. The JS sandbox supports: getElementById, querySelector, textContent, innerHTML, setAttribute, createElement, appendChild, setTimeout, and more."
     )]
     fn render_with_js(&self, Parameters(params): Parameters<RenderWithJsParams>) -> String {
         aether_agent::render_with_js(

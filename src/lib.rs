@@ -200,7 +200,7 @@ pub fn extract_hydration(html: &str, goal: &str) -> String {
 /// Analyze HTML and select optimal parse tier (Fas 17.4)
 ///
 /// Returns JSON with tier decision: Hydration (0), StaticParse (1),
-/// BoaDom (2), BlitzRender (3), or ChromeCdp (4).
+/// QuickJsDom (2), BlitzRender (3), or ChromeCdp (4).
 #[wasm_bindgen]
 pub fn select_parse_tier(html: &str, url: &str) -> String {
     let decision = escalation::select_tier(html, url);
@@ -212,7 +212,7 @@ pub fn select_parse_tier(html: &str, url: &str) -> String {
 
 /// Evaluate JavaScript with DOM access (Fas 17.3)
 ///
-/// Creates a full DOM bridge with document/window objects in Boa context.
+/// Creates a full DOM bridge with document/window objects in QuickJS context.
 /// Returns JSON with evaluation result and any DOM mutations.
 #[cfg(feature = "js-eval")]
 #[wasm_bindgen]
@@ -252,7 +252,7 @@ pub fn eval_js_with_dom(html: &str, code: &str) -> String {
 /// Analyzes HTML to determine the fastest sufficient approach:
 /// - Tier 0 (Hydration): Extracts SSR data directly, 0 ms JS
 /// - Tier 1 (Static): Standard HTML parse via ArenaDom
-/// - Tier 2 (BoaDom): Runs inline JS with DOM bridge (requires js-eval feature)
+/// - Tier 2 (QuickJsDom): Runs inline JS with DOM bridge (requires js-eval feature)
 /// - Tier 3/4: Returns tier recommendation (Blitz/CDP handled externally)
 ///
 /// Returns JSON with SemanticTree + tier metadata.
@@ -274,11 +274,11 @@ pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
             (t, "static")
         }
 
-        // Tier 2: Boa + DOM — kör inline JS mot ArenaDom
-        escalation::ParseTier::BoaDom { .. } => {
+        // Tier 2: QuickJS + DOM — kör inline JS mot ArenaDom
+        escalation::ParseTier::QuickJsDom { .. } => {
             let t = build_tree(html, goal, url);
             let result = js_bridge::selective_exec(&t, html);
-            (result.tree, "boa_dom")
+            (result.tree, "quickjs_dom")
         }
 
         // Tier 3/4: Behöver extern rendering — fallback till statisk parse
@@ -1579,9 +1579,9 @@ fn render_html_to_png_inner(
     Ok(png_bytes)
 }
 
-/// Render HTML with JS evaluation — Boa modifies DOM, then Blitz renders
+/// Render HTML with JS evaluation — QuickJS modifies DOM, then Blitz renders
 ///
-/// Pipeline: HTML → parse → ArenaDom → Boa JS eval → serialize modified HTML → Blitz render → PNG
+/// Pipeline: HTML → parse → ArenaDom → QuickJS eval → serialize modified HTML → Blitz render → PNG
 /// Returns JSON with base64-encoded PNG, mutation count, eval stats.
 #[cfg(all(feature = "js-eval", feature = "blitz"))]
 #[wasm_bindgen]
