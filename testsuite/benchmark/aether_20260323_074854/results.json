@@ -1,0 +1,240 @@
+[
+  {
+    "site": "example.com",
+    "url": "https://example.com",
+    "aether": {
+      "png_size": 61530,
+      "screenshot": true,
+      "html_length": 528,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 475,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 529,
+      "html_ms": 815,
+      "tree_lines": 6,
+      "tree_ms": 479,
+      "total_ms": 815,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "news.ycombinator.com",
+    "url": "https://news.ycombinator.com",
+    "aether": {
+      "png_size": 412071,
+      "screenshot": true,
+      "html_length": 42063,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 1343,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 34672,
+      "html_ms": 703,
+      "tree_lines": 515,
+      "tree_ms": 271,
+      "total_ms": 703,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.aftonbladet.se",
+    "url": "https://www.aftonbladet.se",
+    "aether": {
+      "png_size": 49905,
+      "screenshot": true,
+      "html_length": 619899,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 2548,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 859286,
+      "html_ms": 15706,
+      "tree_lines": 650,
+      "tree_ms": 14848,
+      "total_ms": 15706,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false,
+      "errors": "$time=1774252408309 $scope=js $level=warn $msg=\"eval script\" url=https://www.aftonbladet.se/ caught.exception=\"Unexpected end of input\" caught.stack=\"SyntaxError: Unexpected end of input\\n    at Ve (h"
+    }
+  },
+  {
+    "site": "www.di.se",
+    "url": "https://www.di.se",
+    "aether": {
+      "png_size": 292310,
+      "screenshot": true,
+      "html_length": 683501,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 2695,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 535885,
+      "html_ms": 5466,
+      "tree_lines": 640,
+      "tree_ms": 5207,
+      "total_ms": 5466,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.expressen.se",
+    "url": "https://www.expressen.se",
+    "aether": {
+      "png_size": 105159,
+      "screenshot": true,
+      "html_length": 661788,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 2992,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 279959,
+      "html_ms": 6593,
+      "tree_lines": 575,
+      "tree_ms": 5223,
+      "total_ms": 6593,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.apple.com",
+    "url": "https://www.apple.com",
+    "aether": {
+      "png_size": 279762,
+      "screenshot": true,
+      "html_length": 898208,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 2246,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 312217,
+      "html_ms": 2003,
+      "tree_lines": 515,
+      "tree_ms": 2170,
+      "total_ms": 2003,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "www.bbc.com",
+    "url": "https://www.bbc.com",
+    "aether": {
+      "png_size": 27465,
+      "screenshot": true,
+      "html_length": 24,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 658,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 111,
+      "html_ms": 291,
+      "tree_lines": 2,
+      "tree_ms": 373,
+      "total_ms": 291,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "github.com",
+    "url": "https://github.com",
+    "aether": {
+      "error": "Render failed: Blitz failed and CDP unavailable: HTML f\u00f6r stort f\u00f6r Blitz (3.7 MB > 3 MB max) \u2014 anv\u00e4nd CDP-tier ist\u00e4llet",
+      "total_ms": 615,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 543643,
+      "html_ms": 5298,
+      "tree_lines": 359,
+      "tree_ms": 5305,
+      "total_ms": 5298,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "x.com",
+    "url": "https://x.com",
+    "aether": {
+      "png_size": 29103,
+      "screenshot": true,
+      "html_length": 245507,
+      "css_inlined": false,
+      "css_added_bytes": 0,
+      "total_ms": 1918,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 248755,
+      "html_ms": 1371,
+      "tree_lines": 8,
+      "tree_ms": 1549,
+      "total_ms": 1371,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false
+    }
+  },
+  {
+    "site": "books.toscrape.com",
+    "url": "https://books.toscrape.com",
+    "aether": {
+      "png_size": 142532,
+      "screenshot": true,
+      "html_length": 279429,
+      "css_inlined": true,
+      "css_added_bytes": 0,
+      "total_ms": 2064,
+      "has_js": true,
+      "has_renderer": true
+    },
+    "lightpanda": {
+      "html_length": 51276,
+      "html_ms": 456,
+      "tree_lines": 272,
+      "tree_ms": 540,
+      "total_ms": 456,
+      "has_js": true,
+      "has_renderer": false,
+      "screenshot": false,
+      "errors": "$time=1774252491956 $scope=http $level=warn $msg=\"script fetch error\" err=WriteError req=http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js mode=normal kind=javascript status=404"
+    }
+  }
+]
