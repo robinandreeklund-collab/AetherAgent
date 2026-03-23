@@ -171,11 +171,42 @@ fn measure_text_width(
     text.len() as f32 * font_size * 0.6
 }
 
+/// Ärvd kontext från förälder-element.
+struct InheritedStyle {
+    text_color: [u8; 4],
+    font_size: f32,
+}
+
+impl Default for InheritedStyle {
+    fn default() -> Self {
+        Self {
+            text_color: [0, 0, 0, 255],
+            font_size: 16.0,
+        }
+    }
+}
+
 fn build_render_tree(
     handle: &Handle,
     taffy: &mut TaffyTree<()>,
     viewport_width: u32,
     font_info: &Option<(Arc<Vec<u8>>, FontData)>,
+) -> RenderNode {
+    build_render_tree_inner(
+        handle,
+        taffy,
+        viewport_width,
+        font_info,
+        &InheritedStyle::default(),
+    )
+}
+
+fn build_render_tree_inner(
+    handle: &Handle,
+    taffy: &mut TaffyTree<()>,
+    viewport_width: u32,
+    font_info: &Option<(Arc<Vec<u8>>, FontData)>,
+    inherited: &InheritedStyle,
 ) -> RenderNode {
     match &handle.data {
         NodeData::Document => {
@@ -183,7 +214,7 @@ fn build_render_tree(
                 .children
                 .borrow()
                 .iter()
-                .map(|c| build_render_tree(c, taffy, viewport_width, font_info))
+                .map(|c| build_render_tree_inner(c, taffy, viewport_width, font_info, inherited))
                 .collect();
             let child_ids: Vec<taffy::NodeId> = children.iter().map(|c| c.taffy_id).collect();
             let style = Style {
@@ -221,16 +252,16 @@ fn build_render_tree(
                 return RenderNode {
                     taffy_id,
                     bg_color: None,
-                    text_color: [0, 0, 0, 255],
-                    font_size: 16.0,
+                    text_color: inherited.text_color,
+                    font_size: inherited.font_size,
                     text: None,
                     border_color: None,
                     border_width: 0.0,
                     children: vec![],
                 };
             }
-            // Textbredd med riktiga font-metrics
-            let font_size = 16.0f32;
+            // Textbredd med riktiga font-metrics — ärv font_size från parent
+            let font_size = inherited.font_size;
             let text_width = measure_text_width(trimmed, font_size, font_info);
             let vp_w = viewport_width as f32;
             let lines = if vp_w > 0.0 {
@@ -255,7 +286,7 @@ fn build_render_tree(
             RenderNode {
                 taffy_id,
                 bg_color: None,
-                text_color: [0, 0, 0, 255],
+                text_color: inherited.text_color,
                 font_size,
                 text: Some(trimmed.to_string()),
                 border_color: None,
@@ -307,38 +338,52 @@ fn build_render_tree(
             let bg_color = parsed_css
                 .get("background-color")
                 .and_then(|v| parse_color(v))
-                .or_else(|| parsed_css.get("background").and_then(|v| parse_color(v)));
+                .or_else(|| parsed_css.get("background").and_then(|v| parse_color(v)))
+                .or_else(|| tag_default_bg(&tag));
             let text_color = parsed_css
                 .get("color")
                 .and_then(|v| parse_color(v))
+                .or_else(|| tag_default_color(&tag))
                 .unwrap_or([0, 0, 0, 255]);
             let font_size = parsed_css
                 .get("font-size")
                 .and_then(|v| parse_length(v))
                 .unwrap_or(default_font_size);
-            let border_color = parsed_css.get("border-color").and_then(|v| parse_color(v));
+            let border_color = parsed_css
+                .get("border-color")
+                .and_then(|v| parse_color(v))
+                .or_else(|| parsed_css.get("border").and_then(|v| parse_border_color(v)));
             let border_width = parsed_css
                 .get("border-width")
                 .and_then(|v| parse_length(v))
                 .or_else(|| parsed_css.get("border").and_then(|v| parse_border_width(v)))
-                .unwrap_or(0.0);
+                .unwrap_or_else(|| tag_default_border(&tag));
+
+            // Ärvd kontext till barn — propagera text_color och font_size
+            let child_inherited = InheritedStyle {
+                text_color,
+                font_size,
+            };
 
             // Bygg barn
             let children: Vec<RenderNode> = handle
                 .children
                 .borrow()
                 .iter()
-                .map(|c| build_render_tree(c, taffy, viewport_width, font_info))
+                .map(|c| {
+                    build_render_tree_inner(c, taffy, viewport_width, font_info, &child_inherited)
+                })
                 .collect();
             let child_ids: Vec<taffy::NodeId> = children.iter().map(|c| c.taffy_id).collect();
 
-            // Display
+            // Display — stöd inline-flex/inline-block som flex
             let display = parsed_css
                 .get("display")
-                .map(|v| match v.as_str() {
-                    "flex" => Display::Flex,
+                .map(|v| match v.trim() {
+                    "flex" | "inline-flex" => Display::Flex,
                     "none" => Display::None,
-                    "grid" => Display::Grid,
+                    "grid" | "inline-grid" => Display::Grid,
+                    "inline" | "inline-block" => Display::Flex,
                     _ => Display::Block,
                 })
                 .unwrap_or(default_display);
@@ -365,27 +410,169 @@ fn build_render_tree(
                 .get("height")
                 .and_then(|v| parse_dimension(v))
                 .unwrap_or_else(auto);
+            let max_width = parsed_css
+                .get("max-width")
+                .and_then(|v| parse_dimension(v))
+                .unwrap_or_else(auto);
+            let min_width = parsed_css
+                .get("min-width")
+                .and_then(|v| parse_dimension(v))
+                .unwrap_or(length(0.0));
+            let max_height = parsed_css
+                .get("max-height")
+                .and_then(|v| parse_dimension(v))
+                .unwrap_or_else(auto);
 
+            // Flex-direction: default Row om CSS säger flex, Column om block
             let flex_direction = parsed_css
                 .get("flex-direction")
-                .map(|v| match v.as_str() {
+                .map(|v| match v.trim() {
                     "row" => FlexDirection::Row,
                     "row-reverse" => FlexDirection::RowReverse,
                     "column-reverse" => FlexDirection::ColumnReverse,
-                    _ => FlexDirection::Column,
+                    "column" => FlexDirection::Column,
+                    _ => FlexDirection::Row,
                 })
-                .unwrap_or(FlexDirection::Column);
+                .unwrap_or_else(|| {
+                    if display == Display::Flex {
+                        FlexDirection::Row
+                    } else {
+                        FlexDirection::Column
+                    }
+                });
+
+            // Flex-wrap
+            let flex_wrap = parsed_css
+                .get("flex-wrap")
+                .map(|v| match v.trim() {
+                    "wrap" => FlexWrap::Wrap,
+                    "wrap-reverse" => FlexWrap::WrapReverse,
+                    _ => FlexWrap::NoWrap,
+                })
+                .unwrap_or(FlexWrap::NoWrap);
+
+            // Justify-content (main axis) — stöder text-align: center via fallback
+            let justify_content: Option<JustifyContent> = parsed_css
+                .get("justify-content")
+                .and_then(|v| parse_justify_content(v))
+                .or_else(|| {
+                    parsed_css.get("text-align").and_then(|v| match v.trim() {
+                        "center" => Some(JustifyContent::Center),
+                        "right" | "end" => Some(JustifyContent::End),
+                        _ => None,
+                    })
+                });
+
+            // Align-items (cross axis)
+            let align_items = parsed_css
+                .get("align-items")
+                .and_then(|v| parse_align_items(v));
+
+            // Align-self
+            let align_self: Option<AlignSelf> =
+                parsed_css.get("align-self").and_then(|v| match v.trim() {
+                    "center" => Some(AlignSelf::Center),
+                    "flex-start" | "start" => Some(AlignSelf::Start),
+                    "flex-end" | "end" => Some(AlignSelf::End),
+                    "stretch" => Some(AlignSelf::Stretch),
+                    "baseline" => Some(AlignSelf::Baseline),
+                    _ => None,
+                });
+
+            // Gap
+            let gap_val = parsed_css
+                .get("gap")
+                .and_then(|v| parse_length(v))
+                .unwrap_or(0.0);
+            let row_gap = parsed_css
+                .get("row-gap")
+                .and_then(|v| parse_length(v))
+                .unwrap_or(gap_val);
+            let column_gap = parsed_css
+                .get("column-gap")
+                .and_then(|v| parse_length(v))
+                .unwrap_or(gap_val);
+
+            // Position
+            let position = parsed_css
+                .get("position")
+                .map(|v| match v.trim() {
+                    "absolute" => Position::Absolute,
+                    _ => Position::Relative,
+                })
+                .unwrap_or(Position::Relative);
+
+            // Inset (top/right/bottom/left)
+            let inset = Rect {
+                top: parsed_css
+                    .get("top")
+                    .and_then(|v| parse_lpa(v))
+                    .unwrap_or(LengthPercentageAuto::auto()),
+                right: parsed_css
+                    .get("right")
+                    .and_then(|v| parse_lpa(v))
+                    .unwrap_or(LengthPercentageAuto::auto()),
+                bottom: parsed_css
+                    .get("bottom")
+                    .and_then(|v| parse_lpa(v))
+                    .unwrap_or(LengthPercentageAuto::auto()),
+                left: parsed_css
+                    .get("left")
+                    .and_then(|v| parse_lpa(v))
+                    .unwrap_or(LengthPercentageAuto::auto()),
+            };
+
+            // Flex-grow/shrink/basis
+            let flex_grow = parsed_css
+                .get("flex-grow")
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let flex_shrink = parsed_css
+                .get("flex-shrink")
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .unwrap_or(1.0);
+            let flex_basis = parsed_css
+                .get("flex-basis")
+                .and_then(|v| parse_dimension(v))
+                .unwrap_or_else(auto);
+
+            // Overflow — Taffy overflow:hidden ändrar layout-beräkning utan visuell klippning
+            // → sätts alltid till Visible för att inte dölja content
+            let overflow_x = taffy::Overflow::Visible;
+            let overflow_y = taffy::Overflow::Visible;
 
             let bw = LengthPercentage::length(border_width);
-            let style = Style {
+            let mut style = Style {
                 display,
+                position,
+                inset,
                 size: Size {
                     width: width_dim,
                     height: height_dim,
                 },
+                min_size: Size {
+                    width: min_width,
+                    height: length(0.0),
+                },
+                max_size: Size {
+                    width: max_width,
+                    height: max_height,
+                },
                 padding,
                 margin,
                 flex_direction,
+                flex_wrap,
+                flex_grow,
+                flex_shrink,
+                flex_basis,
+                gap: Size {
+                    width: length(column_gap),
+                    height: length(row_gap),
+                },
+                overflow: taffy::Point {
+                    x: overflow_x,
+                    y: overflow_y,
+                },
                 border: Rect {
                     left: bw,
                     right: bw,
@@ -394,6 +581,15 @@ fn build_render_tree(
                 },
                 ..Default::default()
             };
+            if let Some(jc) = justify_content {
+                style.justify_content = Some(jc);
+            }
+            if let Some(ai) = align_items {
+                style.align_items = Some(ai);
+            }
+            if let Some(als) = align_self {
+                style.align_self = Some(als);
+            }
 
             let taffy_id = taffy
                 .new_with_children(style, &child_ids)
@@ -913,19 +1109,83 @@ fn tag_defaults(tag: &str) -> (Display, f32, u16) {
     match tag {
         "div" | "section" | "article" | "main" | "header" | "footer" | "nav" | "aside" | "form"
         | "fieldset" | "details" | "summary" | "figure" | "figcaption" | "blockquote" | "pre"
-        | "p" | "ul" | "ol" | "li" | "dl" | "dt" | "dd" | "table" | "tr" | "td" | "th"
-        | "thead" | "tbody" | "tfoot" | "hr" | "address" | "hgroup" => (Display::Block, 16.0, 400),
+        | "ul" | "ol" | "dl" | "dt" | "dd" | "table" | "thead" | "tbody" | "tfoot" | "hr"
+        | "address" | "hgroup" => (Display::Block, 16.0, 400),
+        "p" | "li" | "tr" | "td" | "th" => (Display::Block, 16.0, 400),
         "h1" => (Display::Block, 32.0, 700),
         "h2" => (Display::Block, 24.0, 700),
         "h3" => (Display::Block, 18.72, 700),
         "h4" => (Display::Block, 16.0, 700),
         "h5" => (Display::Block, 13.28, 700),
         "h6" => (Display::Block, 10.72, 700),
+        // Inline-element: Flex med Row-direction (Taffy saknar Display::Inline)
         "span" | "a" | "strong" | "em" | "b" | "i" | "u" | "s" | "small" | "sub" | "sup"
-        | "code" | "kbd" | "abbr" | "mark" | "time" | "label" | "img" | "input" | "button"
-        | "select" | "textarea" => (Display::Flex, 16.0, 400),
+        | "code" | "kbd" | "abbr" | "mark" | "time" | "label" => (Display::Flex, 16.0, 400),
+        "img" => (Display::Block, 16.0, 400),
+        "input" | "select" | "textarea" => (Display::Block, 16.0, 400),
+        "button" => (Display::Flex, 16.0, 400),
         "html" | "body" => (Display::Block, 16.0, 400),
         _ => (Display::Block, 16.0, 400),
+    }
+}
+
+/// Standardfärger för specifika HTML-element.
+fn tag_default_color(tag: &str) -> Option<[u8; 4]> {
+    match tag {
+        "a" => Some([0, 0, 238, 255]), // Blå länkfärg
+        _ => None,
+    }
+}
+
+/// Standard-bakgrundsfärg för element.
+fn tag_default_bg(tag: &str) -> Option<[u8; 4]> {
+    match tag {
+        "button" => Some([239, 239, 239, 255]), // Ljusgrå
+        "input" | "textarea" | "select" => Some([255, 255, 255, 255]),
+        _ => None,
+    }
+}
+
+/// Standard border-bredd.
+fn tag_default_border(tag: &str) -> f32 {
+    match tag {
+        "button" | "input" | "textarea" | "select" => 1.0,
+        "hr" => 1.0,
+        _ => 0.0,
+    }
+}
+
+/// Parsa border-color från shorthand.
+fn parse_border_color(val: &str) -> Option<[u8; 4]> {
+    // "1px solid #ccc" → extrahera färg
+    for part in val.split_whitespace() {
+        if let Some(c) = parse_color(part) {
+            return Some(c);
+        }
+    }
+    None
+}
+
+fn parse_justify_content(val: &str) -> Option<JustifyContent> {
+    match val.trim() {
+        "center" => Some(JustifyContent::Center),
+        "flex-start" | "start" => Some(JustifyContent::Start),
+        "flex-end" | "end" => Some(JustifyContent::End),
+        "space-between" => Some(JustifyContent::SpaceBetween),
+        "space-around" => Some(JustifyContent::SpaceAround),
+        "space-evenly" => Some(JustifyContent::SpaceEvenly),
+        _ => None,
+    }
+}
+
+fn parse_align_items(val: &str) -> Option<AlignItems> {
+    match val.trim() {
+        "center" => Some(AlignItems::Center),
+        "flex-start" | "start" => Some(AlignItems::FlexStart),
+        "flex-end" | "end" => Some(AlignItems::FlexEnd),
+        "stretch" => Some(AlignItems::Stretch),
+        "baseline" => Some(AlignItems::Baseline),
+        _ => None,
     }
 }
 
