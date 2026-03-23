@@ -1271,18 +1271,28 @@ pub fn render_html_to_png(
         height,
         color_scheme: css_compiler::ColorScheme::Light,
     };
+    // Strippa <script>-taggar — behövs aldrig för visuell rendering
+    // och kan vara enorma (GitHub ~2MB JS, CNN ~4MB)
+    let html_stripped = strip_script_tags(html);
+    let html = &html_stripped;
+
     let compiled = css_compiler::compile_css(html, &viewport);
     let use_compiled = compiled.fully_compiled;
-    let compiled_html = compiled.html;
+    // Strippa CSS-gradienter som kraschar Vello/GradientLut
+    let compiled_html = strip_css_gradients(&compiled.html);
 
-    // Säkerhetsgräns: Blitz/Vello kraschar (panik i GradientLut) på sidor med
-    // väldigt stora CSS-gradienter (t.ex. github.com ~3.7MB CSS). Skippa rendering
-    // för extremt stora HTML-dokument som triggar denna bugg.
-    const MAX_HTML_FOR_BLITZ: usize = 3 * 1024 * 1024; // 3 MB
-    if html.len() > MAX_HTML_FOR_BLITZ {
+    // Säkerhetsgräns: Blitz/Vello kraschar på extremt stora CSS-gradienter.
+    // Kontrollera storleken EFTER script-stripping och CSS-kompilering.
+    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB (höjt från 3 MB)
+    let check_size = if use_compiled {
+        compiled_html.len()
+    } else {
+        html.len()
+    };
+    if check_size > MAX_HTML_FOR_BLITZ {
         return Err(format!(
-            "HTML för stort för Blitz ({:.1} MB > 3 MB max) — använd CDP-tier istället",
-            html.len() as f64 / (1024.0 * 1024.0)
+            "HTML för stort för Blitz ({:.1} MB > 5 MB max) — använd CDP-tier istället",
+            check_size as f64 / (1024.0 * 1024.0)
         ));
     }
 
@@ -1330,8 +1340,8 @@ pub fn render_html_to_png(
         }
     }
 
-    // Fallback: rendera med original HTML (utan CSS Compiler)
-    let html_owned = html.to_string();
+    // Fallback: rendera med original HTML (utan CSS Compiler), men strippa gradienter
+    let html_owned = strip_css_gradients(html);
     let base_url_owned = base_url.to_string();
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         render_html_to_png_inner(&html_owned, &base_url_owned, width, height, fast_render)
@@ -1350,6 +1360,89 @@ pub fn render_html_to_png(
             Err(format!("Blitz rendering kraschade (catch_unwind): {msg}"))
         }
     }
+}
+
+/// Strippa CSS-gradienter som kraschar Vello (GradientLut index-bugg).
+/// Ersätter `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)` med
+/// en solid färg — bevarar layout men undviker Vello-panik.
+#[cfg(feature = "blitz")]
+fn strip_css_gradients(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+
+    loop {
+        // Hitta nästa gradient-deklaration
+        let lower = remaining.to_ascii_lowercase();
+        let positions = [
+            lower.find("linear-gradient("),
+            lower.find("radial-gradient("),
+            lower.find("conic-gradient("),
+            lower.find("repeating-linear-gradient("),
+            lower.find("repeating-radial-gradient("),
+            lower.find("repeating-conic-gradient("),
+        ];
+        let earliest = positions.iter().filter_map(|p| *p).min();
+
+        match earliest {
+            Some(pos) => {
+                result.push_str(&remaining[..pos]);
+                // Hitta matchande slutparentes med räkning av nesting
+                let after = &remaining[pos..];
+                let paren_start = match after.find('(') {
+                    Some(p) => p,
+                    None => {
+                        result.push_str(after);
+                        break;
+                    }
+                };
+                let mut depth = 0;
+                let mut end = paren_start;
+                for (i, ch) in after[paren_start..].char_indices() {
+                    match ch {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = paren_start + i + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Ersätt hela gradient med transparent
+                result.push_str("transparent");
+                remaining = &remaining[pos + end..];
+            }
+            None => {
+                result.push_str(remaining);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Strippa <script>-element från HTML innan rendering.
+/// Scripts behövs aldrig för visuell rendering och kan vara enorma (GitHub ~2MB JS).
+#[cfg(feature = "blitz")]
+fn strip_script_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+    while let Some(start) = remaining.to_ascii_lowercase().find("<script") {
+        result.push_str(&remaining[..start]);
+        let after_tag = &remaining[start..];
+        if let Some(end) = after_tag.to_ascii_lowercase().find("</script>") {
+            let close_end = end + "</script>".len();
+            remaining = &after_tag[close_end..];
+        } else {
+            // Oparrad <script> — skippa resten av taggen
+            remaining = "";
+            break;
+        }
+    }
+    result.push_str(remaining);
+    result
 }
 
 /// Strippa <noscript>-element och nojs-divvar från HTML innan Blitz-rendering.
