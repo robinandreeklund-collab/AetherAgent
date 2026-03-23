@@ -56,13 +56,24 @@ headless_chrome = { version = "1.0", optional = true }
 lightningcss = { version = "1.0.0-alpha.71", optional = true, default-features = false }
 css-inline = { version = "0.20", optional = true, default-features = false }
 
-# Taffy+Vello rendering — direkt pipeline utan Blitz (flexbox/grid fungerar korrekt)
+# Blitz rendering — fullständig HTML→PNG rendering (Stylo CSS, layout, fonter, bilder)
+blitz-html = { version = "0.2", optional = true }
+blitz-dom = { version = "0.2", optional = true }
+blitz-paint = { version = "0.2", optional = true }
+blitz-net = { version = "0.2", optional = true }
+blitz-traits = { version = "0.2", optional = true }
+anyrender = { version = "0.6", optional = true }
+anyrender_vello_cpu = { version = "0.7", optional = true }
+# Peniko version must match anyrender 0.6's dep (peniko 0.5)
+peniko = { version = "0.5", optional = true }
+png = { version = "0.17", optional = true }
+
+# Taffy+Vello fallback rendering (används som backup)
 taffy = { version = "0.9", optional = true }
 parley = { version = "0.6", optional = true }
 fontique = { version = "0.6", optional = true }
 skrifa = { version = "0.37", optional = true }
 vello_cpu = { version = "0.0.3", features = ["text"], optional = true }
-png = { version = "0.17", optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -76,7 +87,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch", "js-eval"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
-blitz = ["taffy", "parley", "fontique", "skrifa", "vello_cpu", "png", "base64", "css-inline", "lightningcss"]
+blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
 cdp = ["headless_chrome"]
 
 [[bin]]

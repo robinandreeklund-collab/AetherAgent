@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max render-tid i sekunder — förhindrar att tunga sidor (t.ex. github.com ~569KB) hänger servern
-const RENDER_TIMEOUT_SECS: u64 = 10;
+const RENDER_TIMEOUT_SECS: u64 = 20;
 
 /// Delat server-state med förladdad vision-modell (ORT session med Mutex för &mut run)
 // [RTEN-ROLLBACK-ID:server-state] Gamla: vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>

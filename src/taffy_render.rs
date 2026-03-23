@@ -1,4 +1,4 @@
-/// Taffy + vello_cpu rendering pipeline — ersätter Blitz
+/// Taffy + vello_cpu rendering pipeline — fallback-renderer
 ///
 /// HTML → markup5ever DOM → inline-styles → Taffy layout → vello_cpu rasterisering → PNG.
 /// Stödjer block/flex layout, bakgrundsfärger, text, borders, padding, margin.

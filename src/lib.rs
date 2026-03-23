@@ -34,6 +34,7 @@ mod stream_engine;
 mod stream_state;
 mod streaming;
 #[cfg(feature = "blitz")]
+#[allow(dead_code)]
 mod taffy_render;
 mod temporal;
 mod trust;
@@ -2070,7 +2071,8 @@ fn strip_nojs_divs(html: &str) -> String {
     result
 }
 
-/// Intern rendering — Taffy layout + vello_cpu rasterisering (ersätter Blitz)
+/// Intern rendering — Blitz (Stylo CSS + layout + bilder + fonter)
+/// Fallback till Taffy-pipeline om Blitz panikerar.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_inner(
     html: &str,
@@ -2079,7 +2081,117 @@ fn render_html_to_png_inner(
     height: u32,
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
-    taffy_render::render_to_png(html, base_url, width, height, fast_render)
+    use anyrender::{ImageRenderer, PaintScene as _};
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let scale: f32 = 1.0;
+
+    // Strippa <noscript> — Blitz kör ingen JS
+    let html = &strip_noscript(html);
+
+    let mut document = if fast_render {
+        HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                ..Default::default()
+            },
+        )
+    } else {
+        let (mut rx, callback) = blitz_net::MpscCallback::<blitz_dom::net::Resource>::new();
+        let callback: std::sync::Arc<dyn blitz_traits::net::NetCallback<blitz_dom::net::Resource>> =
+            std::sync::Arc::new(callback);
+        let net = std::sync::Arc::new(blitz_net::Provider::new(callback));
+
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                base_url: Some(base_url.to_string()),
+                net_provider: Some(std::sync::Arc::clone(&net)
+                    as std::sync::Arc<
+                        dyn blitz_traits::net::NetProvider<blitz_dom::net::Resource>,
+                    >),
+                ..Default::default()
+            },
+        );
+
+        // Initial resolve — triggar resursdiscovery
+        doc.as_mut().resolve(0.0);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Resursladdningsloop med idle-detection
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut idle_rounds = 0u32;
+        loop {
+            let mut loaded_any = false;
+            while let Ok((_doc_id, resource)) = rx.try_recv() {
+                doc.as_mut().load_resource(resource);
+                loaded_any = true;
+            }
+            doc.as_mut().resolve(0.0);
+
+            if net.is_empty() && !loaded_any {
+                idle_rounds += 1;
+                if idle_rounds >= 10 {
+                    break;
+                }
+            } else {
+                idle_rounds = 0;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        while let Ok((_doc_id, resource)) = rx.try_recv() {
+            doc.as_mut().load_resource(resource);
+        }
+        doc.as_mut().resolve(0.0);
+        doc
+    };
+
+    if fast_render {
+        document.as_mut().resolve(0.0);
+    }
+
+    let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(width, height);
+    let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+    renderer.render_to_vec(
+        |scene| {
+            scene.fill(
+                peniko::Fill::NonZero,
+                peniko::kurbo::Affine::IDENTITY,
+                white,
+                None,
+                &peniko::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+            );
+            blitz_paint::paint_scene(scene, document.as_ref(), scale as f64, width, height);
+        },
+        &mut buffer,
+    );
+
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header: {e}"))?;
+        writer
+            .write_image_data(&buffer)
+            .map_err(|e| format!("PNG data: {e}"))?;
+        writer.finish().map_err(|e| format!("PNG finish: {e}"))?;
+    }
+
+    Ok(png_bytes)
 }
 
 /// Render HTML with JS evaluation — QuickJS modifies DOM, then Blitz renders
