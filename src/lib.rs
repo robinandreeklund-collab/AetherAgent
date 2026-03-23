@@ -1280,9 +1280,14 @@ pub fn render_html_to_png(
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
             if !eval_result.result.mutations.is_empty() {
-                std::borrow::Cow::Owned(
-                    eval_result.arena.serialize_html(eval_result.arena.document),
-                )
+                let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
+                // Säkerhetskontroll: om serialisering producerar drastiskt
+                // mindre HTML har arena-roundtrip traskat DOM:en — fallback
+                if serialized.len() >= html.len() / 3 {
+                    std::borrow::Cow::Owned(serialized)
+                } else {
+                    std::borrow::Cow::Borrowed(html)
+                }
             } else {
                 std::borrow::Cow::Borrowed(html)
             }
@@ -1294,23 +1299,22 @@ pub fn render_html_to_png(
     let html = std::borrow::Cow::Borrowed(html);
     let html: &str = &html;
 
-    // ── Steg 1.5: Förbered HTML för rendering ──
-    // Resolve lazy images, picture elements, srcset → konkret src
-    let html = prepare_html_for_render(html, width);
+    // ── Steg 1.5: Strippa <script>-taggar FÖRST ──
+    // Måste ske före prepare_html_for_render — annars matchar <img> inuti
+    // <script>-block (JSON, template strings) och traskar parsningen.
+    let html_no_scripts = strip_script_tags(html);
 
-    // ── Steg 2: CSS Compiler Pipeline ──
-    // 1. LightningCSS — resolve CSS vars, downlevel nesting/:is()/color functions
-    // 2. Media Query Filter — evaluera @media mot viewport, strippa icke-matchande
-    // 3. css-inline — flattena ALL CSS till style="" på varje element, ta bort <style>
+    // ── Steg 2: Förbered HTML för rendering ──
+    // Resolve lazy images, picture elements, srcset → konkret src
+    let html = prepare_html_for_render(&html_no_scripts, width);
+
+    // ── Steg 3: CSS Compiler Pipeline ──
     let viewport = css_compiler::ViewportConfig {
         width,
         height,
         color_scheme: css_compiler::ColorScheme::Light,
     };
-
-    // ── Steg 3: Strippa <script>-taggar (redan körda) ──
-    let html_stripped = strip_script_tags(&html);
-    let html = &html_stripped;
+    let html = &html;
 
     let compiled = css_compiler::compile_css(html, &viewport);
     let use_compiled = compiled.fully_compiled;
