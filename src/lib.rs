@@ -1251,7 +1251,7 @@ pub fn render_html_to_png(
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
     // Säkerhetsgräns: förhindra OOM vid orimligt stor HTML
-    const MAX_HTML_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    const MAX_HTML_SIZE: usize = 8 * 1024 * 1024; // 8 MB
     if html.len() > MAX_HTML_SIZE {
         return Err(format!(
             "HTML för stor för rendering: {} bytes (max {MAX_HTML_SIZE})",
@@ -1340,7 +1340,7 @@ pub fn render_html_to_png(
 
     // Säkerhetsgräns: Blitz/Vello kraschar på extremt stora CSS-gradienter.
     // Kontrollera storleken EFTER script-stripping och CSS-kompilering.
-    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB (höjt från 3 MB)
+    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB
     let check_size = if use_compiled {
         compiled_html.len()
     } else {
@@ -1348,8 +1348,9 @@ pub fn render_html_to_png(
     };
     if check_size > MAX_HTML_FOR_BLITZ {
         return Err(format!(
-            "HTML för stort för Blitz ({:.1} MB > 5 MB max) — använd CDP-tier istället",
-            check_size as f64 / (1024.0 * 1024.0)
+            "HTML för stort för Blitz ({:.1} MB > {:.0} MB max) — använd CDP-tier istället",
+            check_size as f64 / (1024.0 * 1024.0),
+            MAX_HTML_FOR_BLITZ as f64 / (1024.0 * 1024.0)
         ));
     }
 

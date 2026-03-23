@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 /// Max render-tid i sekunder — förhindrar att tunga sidor (t.ex. github.com ~569KB) hänger servern
-const RENDER_TIMEOUT_SECS: u64 = 20;
+const RENDER_TIMEOUT_SECS: u64 = 45;
 
 /// Delat server-state med förladdad vision-modell (ORT session med Mutex för &mut run)
 // [RTEN-ROLLBACK-ID:server-state] Gamla: vision_model: Arc<RwLock<Option<Arc<rten::Model>>>>
@@ -1937,13 +1937,41 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
     }
 
     // Steg 2: Inline extern CSS med detaljerad felrapportering
-    let css_result = fetch::inline_external_css_detailed(html, final_url).await;
+    // Skippa CSS-inlining för stora sidor (>300KB) — blåser upp HTML och kraschar Blitz
+    const MAX_HTML_FOR_CSS_INLINE: usize = 300 * 1024;
+    let css_result = if html.len() <= MAX_HTML_FOR_CSS_INLINE {
+        fetch::inline_external_css_detailed(html, final_url).await
+    } else {
+        fetch::CssInlineResult {
+            html: html.to_string(),
+            css_found: 0,
+            css_loaded: 0,
+            css_failed: 0,
+            css_bytes_added: 0,
+            css_details: vec![],
+        }
+    };
     let html_with_css = css_result.html.clone();
 
     // Steg 2b: Hämta och inlina externa scripts (SPA-stöd)
-    // Ersätter <script src="bundle.js"></script> med <script>KOD</script>
-    let js_result = fetch::fetch_and_inline_external_scripts(&html_with_css, final_url).await;
-    let html_with_js = js_result.html;
+    // Skippa JS-inlining för stora sidor — blåser upp HTML och kraschar Blitz
+    const MAX_HTML_FOR_JS_INLINE: usize = 200 * 1024; // 200KB
+    let (js_result, html_with_js) = if html_with_css.len() <= MAX_HTML_FOR_JS_INLINE {
+        let result = fetch::fetch_and_inline_external_scripts(&html_with_css, final_url).await;
+        let h = result.html.clone();
+        (result, h)
+    } else {
+        (
+            fetch::JsInlineResult {
+                html: html_with_css.clone(),
+                scripts_found: 0,
+                scripts_loaded: 0,
+                scripts_failed: 0,
+                js_bytes_added: 0,
+            },
+            html_with_css.clone(),
+        )
+    };
 
     // Steg 3: Rendera med TieredBackend (Blitz → CDP-fallback) — med timeout-skydd
     // Auto-detektera fast_render baserat på original HTML-storlek (före CSS/JS-inlining)
