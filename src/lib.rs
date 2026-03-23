@@ -1278,7 +1278,11 @@ pub fn render_html_to_png(
     #[cfg(feature = "js-eval")]
     let html = {
         let scripts = js_eval::extract_ordered_scripts(html);
-        if !scripts.is_empty() {
+        // Säkerhetsgräns: skippa JS-evaluering om total script-storlek > 500KB
+        // Stora bundles (SPA-frameworks) tar för lång tid och kan krascha servern
+        const MAX_TOTAL_SCRIPT_SIZE: usize = 500 * 1024;
+        let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
+        if !scripts.is_empty() && total_script_bytes <= MAX_TOTAL_SCRIPT_SIZE {
             let rcdom = parser::parse_html(html);
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena_viewport(

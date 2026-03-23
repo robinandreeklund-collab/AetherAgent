@@ -497,9 +497,21 @@ pub async fn fetch_and_inline_external_scripts(html: &str, base_url: &str) -> Js
     {
         use crate::js_eval::{extract_all_scripts, ScriptEntry};
 
-        const MAX_SCRIPTS: usize = 20;
-        const MAX_SCRIPT_SIZE: usize = 3 * 1024 * 1024;
-        const MAX_TOTAL_SIZE: usize = 8 * 1024 * 1024;
+        const MAX_SCRIPTS: usize = 10;
+        const MAX_SCRIPT_SIZE: usize = 512 * 1024; // 512KB per fil
+        const MAX_TOTAL_SIZE: usize = 1024 * 1024; // 1MB totalt
+                                                   // Skippa JS-inlining för redan stora sidor — Blitz klarar inte >2MB HTML
+        const MAX_HTML_FOR_JS_INLINE: usize = 500 * 1024;
+
+        if html.len() > MAX_HTML_FOR_JS_INLINE {
+            return JsInlineResult {
+                html: html.to_string(),
+                scripts_found: 0,
+                scripts_loaded: 0,
+                scripts_failed: 0,
+                js_bytes_added: 0,
+            };
+        }
 
         let entries = extract_all_scripts(html, base_url);
         let external_urls: Vec<(usize, String)> = entries
