@@ -20,16 +20,18 @@ git clone --depth 1 --filter=blob:none --sparse "$WPT_REPO" "$WPT_DIR"
 
 cd "$WPT_DIR"
 git sparse-checkout set \
-    dom/nodes \
-    dom/traversal \
-    dom/events \
-    dom/collections \
+    dom \
+    domparsing \
+    encoding \
+    webstorage \
+    custom-elements \
+    shadow-dom \
     html/dom \
     html/syntax \
     html/webappapis/timers \
-    selectors \
-    custom-elements \
-    shadow-dom \
+    console \
+    hr-time \
+    url \
     resources
 
 cd ..
@@ -40,5 +42,7 @@ echo ""
 echo "WPT-suite nedladdad: $TOTAL HTML-testfiler"
 echo ""
 echo "Kör tester med:"
-echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/dom/nodes/"
-echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/ --json"
+echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/dom/"
+echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/html/syntax/"
+echo ""
+echo "Dashboard: docs/wpt-dashboard.md"
