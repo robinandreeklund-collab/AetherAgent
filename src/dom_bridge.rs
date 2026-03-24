@@ -1312,8 +1312,14 @@ impl JsHandler for GetAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let s = self.state.borrow();
-        match s.arena.nodes.get(self.key).and_then(|n| n.get_attr(&name)) {
+        match s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(&lc_name))
+        {
             Some(val) => Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value()),
             None => Ok(Value::new_null(ctx.clone())),
         }
@@ -1339,7 +1345,9 @@ impl JsHandler for SetAttribute {
         {
             let mut s = self.state.borrow_mut();
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                node.attributes.insert(name.clone(), val);
+                // HTML-spec: attributnamn lowercasas på HTML-element
+                let lc_name = name.to_ascii_lowercase();
+                node.attributes.insert(lc_name, val);
             }
             s.mutations.push(std::borrow::Cow::Owned(format!(
                 "setAttribute:{}:{}",
@@ -1362,9 +1370,10 @@ impl JsHandler for RemoveAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
-            node.attributes.remove(&name);
+            node.attributes.remove(&lc_name);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -1381,12 +1390,13 @@ impl JsHandler for HasAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let s = self.state.borrow();
         let has = s
             .arena
             .nodes
             .get(self.key)
-            .map(|n| n.has_attr(&name))
+            .map(|n| n.has_attr(&lc_name))
             .unwrap_or(false);
         Ok(Value::new_bool(ctx.clone(), has))
     }
@@ -1608,10 +1618,32 @@ impl JsHandler for RemoveChild {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let child_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         {
             let mut s = self.state.borrow_mut();
+            // Kontrollera att child verkligen är barn till denna nod
+            let is_child = s
+                .arena
+                .nodes
+                .get(self.key)
+                .map(|n| n.children.contains(&child_key))
+                .unwrap_or(false);
+            if !is_child {
+                drop(s);
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "NotFoundError: child is not a child of this node",
+                    )?
+                    .into(),
+                ));
+            }
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.children.retain(|&c| c != child_key);
             }

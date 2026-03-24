@@ -227,33 +227,86 @@
   }
 })();
 
-// ─── document.createEvent() ─────────────────────────────────────────────────
-// testharness.js och många WPT-tester använder detta
+// ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
 (function() {
-  if (typeof document !== 'undefined' && !document.createEvent) {
-    document.createEvent = function(type) {
-      var e = {
-        type: '',
-        bubbles: false,
-        cancelable: false,
-        defaultPrevented: false,
-        target: null,
-        currentTarget: null,
-        eventPhase: 0,
-        timeStamp: Date.now(),
-        isTrusted: false,
-        preventDefault: function() { this.defaultPrevented = true; },
-        stopPropagation: function() {},
-        stopImmediatePropagation: function() {},
-        initEvent: function(t, b, c) {
-          this.type = t;
-          this.bubbles = !!b;
-          this.cancelable = !!c;
-        }
+  // Definiera saknade event-typer som ärver från Event
+  var eventTypes = [
+    'BeforeUnloadEvent', 'CompositionEvent', 'FocusEvent', 'InputEvent',
+    'KeyboardEvent', 'MouseEvent', 'UIEvent', 'WheelEvent', 'TouchEvent',
+    'AnimationEvent', 'TransitionEvent', 'PointerEvent', 'HashChangeEvent',
+    'PopStateEvent', 'StorageEvent', 'PageTransitionEvent', 'ProgressEvent',
+    'ClipboardEvent', 'DragEvent', 'ErrorEvent', 'MessageEvent',
+    'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
+    'DeviceMotionEvent', 'DeviceOrientationEvent', 'GamepadEvent',
+    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent'
+  ];
+  eventTypes.forEach(function(name) {
+    if (!globalThis[name]) {
+      globalThis[name] = function(type, opts) {
+        this.type = type || '';
+        this.bubbles = (opts && opts.bubbles) || false;
+        this.cancelable = (opts && opts.cancelable) || false;
+        this.defaultPrevented = false;
+        this.target = null;
+        this.currentTarget = null;
+        this.eventPhase = 0;
+        this.timeStamp = Date.now();
+        this.isTrusted = false;
+        this.detail = (opts && opts.detail) || null;
+        this.preventDefault = function() { this.defaultPrevented = true; };
+        this.stopPropagation = function() {};
+        this.stopImmediatePropagation = function() {};
+        this.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
       };
-      return e;
-    };
-  }
+      if (typeof Event !== 'undefined') {
+        globalThis[name].prototype = Object.create(Event.prototype);
+        globalThis[name].prototype.constructor = globalThis[name];
+      }
+    }
+  });
+})();
+
+// ─── document.createEvent() ─────────────────────────────────────────────────
+(function() {
+  if (typeof document === 'undefined') return;
+
+  // Mappning: case-insensitive alias → konstruktor
+  var aliases = {
+    'event': Event, 'events': Event, 'htmlevents': Event,
+    'customevent': typeof CustomEvent !== 'undefined' ? CustomEvent : Event,
+    'uievent': UIEvent, 'uievents': UIEvent,
+    'mouseevent': MouseEvent, 'mouseevents': MouseEvent,
+    'keyboardevent': KeyboardEvent,
+    'compositionevent': CompositionEvent,
+    'focusevent': FocusEvent,
+    'inputevent': InputEvent,
+    'wheelevent': WheelEvent,
+    'beforeunloadevent': BeforeUnloadEvent,
+    'touchevent': typeof TouchEvent !== 'undefined' ? TouchEvent : null,
+    'animationevent': AnimationEvent,
+    'transitionevent': TransitionEvent,
+    'pointerevent': PointerEvent,
+    'hashchangeevent': HashChangeEvent,
+    'popstateevent': PopStateEvent,
+    'storageevent': StorageEvent,
+    'progressevent': ProgressEvent,
+    'messageevent': MessageEvent,
+    'dragevent': DragEvent,
+    'errorevent': ErrorEvent,
+    'clipboardevent': ClipboardEvent,
+    'submiteevent': SubmitEvent
+  };
+
+  document.createEvent = function(type) {
+    var key = type.toLowerCase();
+    var Ctor = aliases[key];
+    if (!Ctor) {
+      throw new DOMException("The operation is not supported.", "NotSupportedError");
+    }
+    var e = new Ctor('');
+    e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
+    return e;
+  };
 })();
 
 // ─── node.ownerDocument ─────────────────────────────────────────────────────
@@ -589,6 +642,32 @@
       });
     }
 
+    // getElementsByTagName / getElementsByClassName på element-nivå
+    if (el.nodeType === 1) {
+      if (!el.getElementsByTagName) {
+        el.getElementsByTagName = function(tag) {
+          if (!this.querySelectorAll) return [];
+          if (tag === '*') return Array.from(this.querySelectorAll('*'));
+          // HTML-spec: case-insensitive match — querySelectorAll matchar redan ci
+          return Array.from(this.querySelectorAll(tag.toLowerCase()));
+        };
+      }
+      if (!el.getElementsByClassName) {
+        el.getElementsByClassName = function(cls) {
+          if (!this.querySelectorAll) return [];
+          var parts = cls.split(/\s+/).filter(function(c) { return c; });
+          var sel = parts.map(function(c) { return '.' + c; }).join('');
+          return Array.from(this.querySelectorAll(sel));
+        };
+      }
+      if (!el.getElementsByTagNameNS) {
+        el.getElementsByTagNameNS = function(ns, tag) {
+          // Simpel: ignorera namespace, sök bara på tag
+          return this.getElementsByTagName(tag);
+        };
+      }
+    }
+
     // id, className — måste skriva tillbaka till arena via setAttribute
     if (el.nodeType === 1 && el.setAttribute) {
       var _origId = el.id || '';
@@ -758,6 +837,16 @@
       // Proxy inte tillgänglig — kopiera manuellt
     }
   }
+})();
+
+// ─── Patcha document.body/head/documentElement (pre-cache-skapade) ───────────
+(function() {
+  if (typeof document === 'undefined') return;
+  // Dessa element skapades före polyfills — patcha dom nu
+  [document.body, document.head, document.documentElement].forEach(function(el) {
+    if (el && typeof __patchChildNode === 'function') __patchChildNode(el);
+    if (el && typeof __patchPrototype === 'function') __patchPrototype(el);
+  });
 })();
 
 // ─── NodeList.forEach ───────────────────────────────────────────────────────
