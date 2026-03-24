@@ -30,8 +30,8 @@ mod parser;
 pub mod search;
 mod semantic;
 mod session;
-mod stream_engine;
-mod stream_state;
+pub mod stream_engine;
+pub mod stream_state;
 mod streaming;
 #[cfg(feature = "blitz")]
 #[allow(dead_code)]

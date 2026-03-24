@@ -1712,6 +1712,221 @@ fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::
     selected
 }
 
+// ─── Fas 16: WebSocket Stream ────────────────────────────────────────────────
+
+/// WebSocket-baserad realtidsstreaming av semantiska noder.
+///
+/// Protokoll:
+/// Client → Server:
+///   {"type":"start", "html":"...", "goal":"...", "url":"...", "config":{"top_n":10,...}}
+///   {"type":"directive", "action":"expand", "node_id": 5}
+///   {"type":"directive", "action":"stop"}
+///   {"type":"directive", "action":"next_branch"}
+///   {"type":"directive", "action":"lower_threshold", "value": 0.1}
+///
+/// Server → Client:
+///   {"type":"meta", "total_dom_nodes":372, "goal":"...", "url":"..."}
+///   {"type":"chunk", "chunk_id":0, "nodes":[...], "nodes_emitted":10, "nodes_seen":372}
+///   {"type":"warning", "warning":{...}}
+///   {"type":"done", "nodes_emitted":10, "total_dom_nodes":372, ...}
+///   {"type":"error", "message":"..."}
+async fn ws_stream_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_ws_stream)
+}
+
+async fn handle_ws_stream(mut socket: axum::extract::ws::WebSocket) {
+    use axum::extract::ws::Message;
+
+    // Vänta på start-meddelande
+    let start_msg =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), socket.recv()).await {
+            Ok(Some(Ok(Message::Text(text)))) => text,
+            _ => {
+                let _ = socket
+                    .send(Message::Text(
+                        r#"{"type":"error","message":"Timeout eller ogiltigt start-meddelande"}"#
+                            .to_string(),
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+    // Parsa start-meddelande
+    let start: serde_json::Value = match serde_json::from_str(&start_msg) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":format!("JSON-parse error: {}", e)})
+                        .to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let msg_type = start.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if msg_type != "start" {
+        let _ = socket
+            .send(Message::Text(
+                r#"{"type":"error","message":"Förväntat type: start"}"#.to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let html = start.get("html").and_then(|v| v.as_str()).unwrap_or("");
+    let goal = start.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let url = start.get("url").and_then(|v| v.as_str()).unwrap_or("");
+
+    if html.is_empty() || goal.is_empty() {
+        let _ = socket
+            .send(Message::Text(
+                r#"{"type":"error","message":"html och goal krävs"}"#.to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let config_val = start.get("config");
+    let top_n = config_val
+        .and_then(|c| c.get("top_n"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as usize;
+    let min_relevance = config_val
+        .and_then(|c| c.get("min_relevance"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.3) as f32;
+    let max_nodes = config_val
+        .and_then(|c| c.get("max_nodes"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50) as usize;
+
+    let config = aether_agent::stream_engine::StreamParseConfig {
+        chunk_size: top_n,
+        min_relevance,
+        max_nodes,
+    };
+
+    // Skapa engine och kör initial parse i blocking thread
+    let html_owned = html.to_string();
+    let goal_owned = goal.to_string();
+    let url_owned = url.to_string();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<aether_agent::stream_engine::StreamChunk>(32);
+
+    // Kör parsning + initial emission i en blocking thread
+    let parse_handle = tokio::task::spawn_blocking(move || {
+        let mut engine = aether_agent::stream_engine::StreamEngine::new(&goal_owned, config);
+        engine.run_streaming(&html_owned, &url_owned, |chunk| {
+            // Skicka via channel (blockerande om buffert full)
+            let _ = tx.blocking_send(chunk);
+        });
+        // Returnera engine för att kunna hantera directives senare
+        engine
+    });
+
+    // Skicka chunks till WebSocket medan parsning pågår
+    while let Some(c) = rx.recv().await {
+        let json = match serde_json::to_string(&c) {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+        if socket.send(Message::Text(json)).await.is_err() {
+            return; // Klient disconnectade
+        }
+    }
+
+    // Parsern är klar (tx droppades) — hämta engine för directives
+    let mut engine = match parse_handle.await {
+        Ok(eng) => eng,
+        Err(_) => return,
+    };
+
+    // Directive-loop: vänta på expand/stop/next_branch/lower_threshold
+    loop {
+        let msg = match tokio::time::timeout(
+            std::time::Duration::from_secs(300), // 5 min timeout
+            socket.recv(),
+        )
+        .await
+        {
+            Ok(Some(Ok(Message::Text(text)))) => text,
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Err(_) => break,
+            _ => continue,
+        };
+
+        let directive_val: serde_json::Value = match serde_json::from_str(&msg) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = socket
+                    .send(Message::Text(
+                        serde_json::json!({"type":"error","message":format!("JSON error: {}", e)})
+                            .to_string(),
+                    ))
+                    .await;
+                continue;
+            }
+        };
+
+        let action = directive_val
+            .get("action")
+            .or_else(|| directive_val.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let directive = match action {
+            "expand" => {
+                let node_id = directive_val
+                    .get("node_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                aether_agent::stream_state::Directive::Expand { node_id }
+            }
+            "stop" => aether_agent::stream_state::Directive::Stop,
+            "next_branch" => aether_agent::stream_state::Directive::NextBranch,
+            "lower_threshold" => {
+                let value = directive_val
+                    .get("value")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.1) as f32;
+                aether_agent::stream_state::Directive::LowerThreshold { value }
+            }
+            _ => {
+                let _ = socket
+                    .send(Message::Text(
+                        serde_json::json!({"type":"error","message":format!("Okänd directive: {}", action)})
+                            .to_string(),
+                    ))
+                    .await;
+                continue;
+            }
+        };
+
+        // Kör directive och samla chunks
+        let mut chunks = Vec::new();
+        engine.handle_directive_streaming(directive, &mut |chunk| {
+            chunks.push(chunk);
+        });
+
+        // Skicka alla genererade chunks
+        for chunk in chunks {
+            let json = match serde_json::to_string(&chunk) {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+            if socket.send(Message::Text(json)).await.is_err() {
+                return;
+            }
+        }
+
+        if engine.is_done() {
+            break;
+        }
+    }
+}
+
 // ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
 
 async fn stream_parse_handler(Json(req): Json<StreamParseRequest>) -> impl IntoResponse {
@@ -4007,6 +4222,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/stream-parse", post(stream_parse_handler))
         .route("/api/fetch/stream-parse", post(fetch_stream_parse))
         .route("/api/directive", post(directive_handler))
+        .route("/ws/stream", get(ws_stream_handler))
         // Fas 11: Vision (kräver --features vision)
         // 50 MB body limit — ONNX-modeller + screenshots i base64
         .route("/api/parse-screenshot", {
@@ -4324,6 +4540,7 @@ async fn main() {
     println!("  POST /api/stream-parse           – Adaptive goal-driven DOM streaming");
     println!("  POST /api/fetch/stream-parse     – Fetch URL → adaptive stream parse");
     println!("  POST /api/directive              – Send directives (expand, stop, etc.)");
+    println!("  GET  /ws/stream                  – WebSocket real-time streaming parse");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");
