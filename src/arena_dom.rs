@@ -31,28 +31,22 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 /// Normaliserar inte hela strängen — söker direkt med case-insensitive bytes.
 fn is_style_hidden_fast(style: &str) -> bool {
     // Patterns att söka (redan lowercase, utan whitespace)
-    const PATTERNS: &[&str] = &[
-        "display:none",
-        "visibility:hidden",
-        "opacity:0",
-        "left:-9999",
-        "left:-10000",
-        "clip:rect(0",
+    const PATTERNS: &[&[u8]] = &[
+        b"display:none",
+        b"visibility:hidden",
+        b"opacity:0",
+        b"left:-9999",
+        b"left:-10000",
+        b"clip:rect(0",
     ];
-    // Bygg normaliserad sträng — men gör det inline utan chars().filter().collect()
-    // Använd byte-nivå: allokera bara OM style innehåller whitespace nära patterns
-    let lower = style.to_ascii_lowercase();
+    // En allokering: byte-normaliserad (lowercase + strip whitespace)
+    let norm: Vec<u8> = style
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace())
+        .map(|b| b.to_ascii_lowercase())
+        .collect();
     for pat in PATTERNS {
-        // Snabbcheck: söker med och utan whitespace runt ':'
-        if lower.contains(pat) {
-            return true;
-        }
-    }
-    // Fallback: normalisera bort whitespace (bara om inget hittades direkt)
-    // Många style-strängar har "display: none" med mellanslag
-    let normalized: String = lower.chars().filter(|c| !c.is_whitespace()).collect();
-    for pat in PATTERNS {
-        if normalized.contains(pat) {
+        if norm.windows(pat.len()).any(|w| w == *pat) {
             return true;
         }
     }

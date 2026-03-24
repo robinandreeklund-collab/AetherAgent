@@ -40,8 +40,8 @@ pub struct DomEvalResult {
     pub timers_fired: usize,
 }
 
-/// En mutation som JS-koden utförde på DOM:en (placeholder för framtida mutation-tracking)
-pub type DomMutation = String;
+/// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar
+pub type DomMutation = std::borrow::Cow<'static, str>;
 
 // ─── Delad state mellan JS-callbacks ────────────────────────────────────────
 
@@ -1315,11 +1315,11 @@ impl JsHandler for SetAttribute {
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.attributes.insert(name.clone(), val);
             }
-            s.mutations.push(format!(
+            s.mutations.push(std::borrow::Cow::Owned(format!(
                 "setAttribute:{}:{}",
                 node_key_to_f64(self.key),
                 name
-            ));
+            )));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -1512,7 +1512,8 @@ impl JsHandler for InsertAdjacentHTML {
                 _ => {} // Ogiltig position — ignorera tyst
             }
 
-            s.mutations.push("insertAdjacentHTML".to_string());
+            s.mutations
+                .push(std::borrow::Cow::Borrowed("insertAdjacentHTML"));
         }
 
         Ok(Value::new_undefined(ctx.clone()))
@@ -1567,7 +1568,7 @@ impl JsHandler for AppendChild {
                 }
             }
             s.arena.append_child(self.key, child_key);
-            s.mutations.push("appendChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("appendChild"));
         }
         make_element_object(ctx, child_key, &self.state)
     }
@@ -1591,7 +1592,7 @@ impl JsHandler for RemoveChild {
             if let Some(child) = s.arena.nodes.get_mut(child_key) {
                 child.parent = None;
             }
-            s.mutations.push("removeChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("removeChild"));
         }
         make_element_object(ctx, child_key, &self.state)
     }
@@ -1630,7 +1631,7 @@ impl JsHandler for InsertBefore {
             if let Some(n) = s.arena.nodes.get_mut(new_key) {
                 n.parent = Some(self.key);
             }
-            s.mutations.push("insertBefore".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("insertBefore"));
         }
         make_element_object(ctx, new_key, &self.state)
     }
@@ -1663,7 +1664,7 @@ impl JsHandler for ReplaceChild {
             if let Some(n) = s.arena.nodes.get_mut(old_key) {
                 n.parent = None;
             }
-            s.mutations.push("replaceChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("replaceChild"));
         }
         make_element_object(ctx, old_key, &self.state)
     }
@@ -1741,7 +1742,7 @@ impl JsHandler for AttachShadow {
             if let Some(parent) = s.arena.nodes.get_mut(self.key) {
                 parent.children.insert(0, sk);
             }
-            s.mutations.push("attachShadow".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("attachShadow"));
             sk
         };
         make_element_object(ctx, shadow_key, &self.state)
@@ -2045,7 +2046,8 @@ impl JsHandler for TextContentSetter {
             children: vec![],
         });
         s.arena.append_child(self.key, text_key);
-        s.mutations.push("setTextContent".to_string());
+        s.mutations
+            .push(std::borrow::Cow::Borrowed("setTextContent"));
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

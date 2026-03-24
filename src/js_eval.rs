@@ -545,8 +545,15 @@ fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
 
 /// Kolla om JS-koden troligen påverkar DOM-innehåll
 fn content_affects_dom(code: &str) -> bool {
-    let lower = code.to_lowercase();
-    CONTENT_PATTERNS.iter().any(|p| lower.contains(p))
+    // Patterns är redan lowercase ASCII — byte-level case-insensitive matching
+    // Undviker allokering av ny String via to_lowercase()
+    let bytes = code.as_bytes();
+    CONTENT_PATTERNS.iter().any(|p| {
+        let needle = p.as_bytes();
+        bytes
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+    })
 }
 
 /// Trunkera kod säkert (UTF-8-aware)
