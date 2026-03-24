@@ -1230,7 +1230,7 @@ fn get_text_content(arena: &ArenaDom, key: NodeKey) -> String {
         None => return String::new(),
     };
     match &node.node_type {
-        NodeType::Text => node.text.as_deref().unwrap_or("").to_string(),
+        NodeType::Text | NodeType::Comment => node.text.as_deref().unwrap_or("").to_string(),
         _ => {
             let mut text = String::new();
             for &child in &node.children {
@@ -2091,22 +2091,54 @@ impl JsHandler for TextContentSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let text = args
             .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
+            .map(|v| {
+                if v.is_null() {
+                    String::new()
+                } else {
+                    v.as_string()
+                        .and_then(|s| s.to_string().ok())
+                        .unwrap_or_else(|| {
+                            // Konvertera nummer/boolean till sträng
+                            if let Some(n) = v.as_number() {
+                                if n == (n as i64) as f64 {
+                                    format!("{}", n as i64)
+                                } else {
+                                    format!("{}", n)
+                                }
+                            } else {
+                                String::new()
+                            }
+                        })
+                }
+            })
             .unwrap_or_default();
         let mut s = self.state.borrow_mut();
-        if let Some(node) = s.arena.nodes.get_mut(self.key) {
-            node.children.clear();
+        // Text/Comment-noder: uppdatera .text direkt (data-alias)
+        let is_text_or_comment = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| matches!(n.node_type, NodeType::Text | NodeType::Comment))
+            .unwrap_or(false);
+        if is_text_or_comment {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.text = Some(text.into());
+            }
+        } else {
+            // Element: rensa barn och skapa ny textnod
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.clear();
+            }
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: Some(self.key),
+                children: vec![],
+            });
+            s.arena.append_child(self.key, text_key);
         }
-        let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
-            node_type: NodeType::Text,
-            tag: None,
-            attributes: crate::arena_dom::Attrs::new(),
-            text: Some(text.into()),
-            parent: Some(self.key),
-            children: vec![],
-        });
-        s.arena.append_child(self.key, text_key);
         s.mutations
             .push(std::borrow::Cow::Borrowed("setTextContent"));
         Ok(Value::new_undefined(ctx.clone()))

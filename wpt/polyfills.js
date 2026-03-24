@@ -15,11 +15,13 @@
     var nt = node.nodeType;
     if (nt !== 3 && nt !== 8) return node;
 
-    // .data getter/setter — alias för textContent
+    // .data getter/setter — alias för textContent (spec: null → "", undefined → "undefined")
     if (!('data' in node)) {
       Object.defineProperty(node, 'data', {
         get: function() { return this.textContent || ''; },
-        set: function(val) { this.textContent = String(val); },
+        set: function(val) {
+          this.textContent = (val === null) ? '' : String(val);
+        },
         configurable: true
       });
     }
@@ -58,6 +60,7 @@
     // .appendData(data)
     if (!node.appendData) {
       node.appendData = function(data) {
+        if (arguments.length < 1) throw new TypeError("Not enough arguments");
         this.data += String(data);
       };
     }
@@ -741,6 +744,11 @@
         set: function(target, prop, value) {
           target[prop] = value;
           return true;
+        },
+        deleteProperty: function(target, prop) {
+          delete target[prop];
+          delete globalThis[prop];
+          return true;
         }
       };
       var proxyWin = new Proxy(origWindow, handler);
@@ -908,7 +916,7 @@
   });
 
   // Utility-typer
-  ['NamedNodeMap','NodeList','HTMLCollection','DOMTokenList','DOMStringMap',
+  ['AbortSignal','DOMImplementation','NamedNodeMap','NodeList','HTMLCollection','DOMTokenList','DOMStringMap',
    'CSSStyleDeclaration','Range','Selection','TreeWalker','NodeIterator',
    'NodeFilter','MutationRecord','StaticRange','AbstractRange'
   ].forEach(function(name) {

@@ -218,13 +218,13 @@ impl TreeSink for ArenaDomSink {
         key
     }
 
-    fn create_comment(&self, _text: StrTendril) -> NodeKey {
-        // Kommentarer har ingen semantisk funktion — skippa textlagring
+    fn create_comment(&self, text: StrTendril) -> NodeKey {
+        // Bevara kommentarstext — behövs av CharacterData WPT-tester
         self.arena.borrow_mut().nodes.insert(DomNode {
             node_type: NodeType::Comment,
             tag: None,
             attributes: Attrs::new(),
-            text: None,
+            text: Some(text),
             parent: None,
             children: vec![],
         })
