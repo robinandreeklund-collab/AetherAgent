@@ -1995,6 +1995,420 @@ impl JsHandler for ToggleAttribute {
 
 /// Konvertera JS-argument till NodeKeys.
 /// Strängar och null/undefined/numbers konverteras till textnoder.
+// ─── Migration: prepend/append/replaceChildren ──────────────────────────────
+struct Prepend {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Prepend {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                let pos = i.min(node.children.len());
+                node.children.insert(pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct Append {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Append {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for nk in new_keys {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.push(nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ReplaceChildren {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceChildren {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Ta bort alla befintliga barn
+        let old_children: Vec<NodeKey> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        for ck in old_children {
+            if let Some(c) = s.arena.nodes.get_mut(ck) {
+                c.parent = None;
+            }
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.children.clear();
+        }
+        // Detach + append nya
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for nk in new_keys {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.push(nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration: CharacterData metoder ───────────────────────────────────────
+struct SubstringData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SubstringData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        if args.len() < 2 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
+            ));
+        }
+        let offset = args[0].as_number().unwrap_or(0.0) as usize;
+        let count = args[1].as_number().unwrap_or(0.0) as usize;
+        let s = self.state.borrow();
+        let data = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_deref())
+            .unwrap_or("");
+        if offset > data.len() {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        let safe_start = char_boundary(data, offset);
+        let safe_end = char_boundary(data, offset + count);
+        let result = &data[safe_start..safe_end];
+        Ok(rquickjs::String::from_str(ctx.clone(), result)?.into_value())
+    }
+}
+
+struct AppendData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for AppendData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        if args.is_empty() {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
+            ));
+        }
+        let data = args[0]
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let mut current = node.text.as_deref().unwrap_or("").to_string();
+            current.push_str(&data);
+            node.text = Some(current.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct InsertData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let data = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| t.len())
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            let safe_offset = char_boundary(&current, offset);
+            let mut new_text = String::with_capacity(current.len() + data.len());
+            new_text.push_str(&current[..safe_offset]);
+            new_text.push_str(&data);
+            new_text.push_str(&current[safe_offset..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct DeleteData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for DeleteData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let count = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| t.len())
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            // Char-boundary-säker: hitta närmaste giltiga byte-offset
+            let safe_start = char_boundary(&current, offset);
+            let safe_end = char_boundary(&current, offset + count);
+            let mut new_text = String::with_capacity(current.len());
+            new_text.push_str(&current[..safe_start]);
+            new_text.push_str(&current[safe_end..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ReplaceData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let count = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let data = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| t.len())
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            let safe_start = char_boundary(&current, offset);
+            let safe_end = char_boundary(&current, offset + count);
+            let mut new_text = String::with_capacity(current.len());
+            new_text.push_str(&current[..safe_start]);
+            new_text.push_str(&data);
+            new_text.push_str(&current[safe_end..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration: insertAdjacentElement/Text ──────────────────────────────────
+struct InsertAdjacentElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertAdjacentElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let position = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_lowercase();
+        let new_key = match args.get(1).and_then(extract_node_key) {
+            Some(k) => k,
+            None => return Ok(Value::new_null(ctx.clone())),
+        };
+        let mut s = self.state.borrow_mut();
+        // Detach
+        if let Some(old_p) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+            if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                p.children.retain(|&c| c != new_key);
+            }
+        }
+        match position.as_str() {
+            "beforebegin" => {
+                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                    let pos = s
+                        .arena
+                        .nodes
+                        .get(parent_key)
+                        .and_then(|n| n.children.iter().position(|&c| c == self.key))
+                        .unwrap_or(0);
+                    if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                        n.parent = Some(parent_key);
+                    }
+                    if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                        parent.children.insert(pos, new_key);
+                    }
+                }
+            }
+            "afterbegin" => {
+                if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                    n.parent = Some(self.key);
+                }
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.insert(0, new_key);
+                }
+            }
+            "beforeend" => {
+                if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                    n.parent = Some(self.key);
+                }
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.push(new_key);
+                }
+            }
+            "afterend" => {
+                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                    let pos = s
+                        .arena
+                        .nodes
+                        .get(parent_key)
+                        .and_then(|n| n.children.iter().position(|&c| c == self.key))
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                        n.parent = Some(parent_key);
+                    }
+                    if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                        let p = pos.min(parent.children.len());
+                        parent.children.insert(p, new_key);
+                    }
+                }
+            }
+            _ => {}
+        }
+        drop(s);
+        make_element_object(ctx, new_key, &self.state)
+    }
+}
+
+struct InsertAdjacentText {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertAdjacentText {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let position = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let text = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Skapa textnod
+        let text_key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: None,
+                children: vec![],
+            })
+        };
+        // Delegera till InsertAdjacentElement-logik
+        let pos_val = rquickjs::String::from_str(ctx.clone(), &position)?.into_value();
+        let elem_val = make_element_object(ctx, text_key, &self.state)?;
+        let handler = InsertAdjacentElement {
+            state: Rc::clone(&self.state),
+            key: self.key,
+        };
+        handler.handle(ctx, &[pos_val, elem_val])
+    }
+}
+
+/// Hitta närmaste giltiga char boundary vid eller efter given byte-offset.
+fn char_boundary(s: &str, offset: usize) -> usize {
+    let offset = offset.min(s.len());
+    if s.is_char_boundary(offset) {
+        return offset;
+    }
+    // Sök framåt
+    for i in offset..=s.len() {
+        if s.is_char_boundary(i) {
+            return i;
+        }
+    }
+    s.len()
+}
+
 fn args_to_node_keys<'js>(
     ctx: &Ctx<'js>,
     args: &[Value<'js>],
@@ -2767,6 +3181,60 @@ fn make_element_object<'js>(
             }),
         )?,
     )?;
+    obj.set(
+        "prepend",
+        Function::new(
+            ctx.clone(),
+            JsFn(Prepend {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "append",
+        Function::new(
+            ctx.clone(),
+            JsFn(Append {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "replaceChildren",
+        Function::new(
+            ctx.clone(),
+            JsFn(ReplaceChildren {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "insertAdjacentElement",
+        Function::new(
+            ctx.clone(),
+            JsFn(InsertAdjacentElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "insertAdjacentText",
+        Function::new(
+            ctx.clone(),
+            JsFn(InsertAdjacentText {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    // CharacterData (substringData, appendData, etc.) — JS-polyfill behålls
+    // tills UTF-16→UTF-8 code unit konvertering implementeras i Rust.
+    // Rust-structs finns (SubstringData, AppendData etc.) men registreras inte
+    // pga att WPT-tester räknar i UTF-16 code units.
     // attachShadow — skapa en shadow root (enkel implementation)
     obj.set(
         "attachShadow",

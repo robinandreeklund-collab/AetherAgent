@@ -43,65 +43,43 @@
       });
     }
 
-    // .substringData(offset, count)
+    // CharacterData methods — kvar som polyfill pga UTF-16 code unit counting
     if (!node.substringData) {
       node.substringData = function(offset, count) {
         if (arguments.length < 2) throw new TypeError("Not enough arguments");
-        var d = this.data;
-        offset = offset >>> 0; // ToUint32 then back
-        if (offset > d.length) {
-          throw new DOMException("Offset is out of range", "IndexSizeError");
-        }
+        var d = this.data; offset = offset >>> 0;
+        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
         count = count >>> 0;
         return d.substring(offset, offset + count);
       };
     }
-
-    // .appendData(data)
     if (!node.appendData) {
       node.appendData = function(data) {
         if (arguments.length < 1) throw new TypeError("Not enough arguments");
         this.data += String(data);
       };
     }
-
-    // .insertData(offset, data)
     if (!node.insertData) {
       node.insertData = function(offset, data) {
-        var d = this.data;
-        offset = offset >>> 0;
-        if (offset > d.length) {
-          throw new DOMException("Offset is out of range", "IndexSizeError");
-        }
+        var d = this.data; offset = offset >>> 0;
+        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
         this.data = d.substring(0, offset) + String(data) + d.substring(offset);
       };
     }
-
-    // .deleteData(offset, count)
     if (!node.deleteData) {
       node.deleteData = function(offset, count) {
-        var d = this.data;
-        offset = offset >>> 0;
-        if (offset > d.length) {
-          throw new DOMException("Offset is out of range", "IndexSizeError");
-        }
+        var d = this.data; offset = offset >>> 0;
+        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
         count = count >>> 0;
-        var end = Math.min(offset + count, d.length);
-        this.data = d.substring(0, offset) + d.substring(end);
+        this.data = d.substring(0, offset) + d.substring(Math.min(offset + count, d.length));
       };
     }
-
-    // .replaceData(offset, count, data)
     if (!node.replaceData) {
       node.replaceData = function(offset, count, data) {
-        var d = this.data;
-        offset = offset >>> 0;
-        if (offset > d.length) {
-          throw new DOMException("Offset is out of range", "IndexSizeError");
-        }
+        var d = this.data; offset = offset >>> 0;
+        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
         count = count >>> 0;
-        var end = Math.min(offset + count, d.length);
-        this.data = d.substring(0, offset) + String(data) + d.substring(end);
+        this.data = d.substring(0, offset) + String(data) + d.substring(Math.min(offset + count, d.length));
       };
     }
 
@@ -475,40 +453,7 @@
 
     // replaceWith() — nu Rust-native i dom_bridge.rs
 
-    if (!el.prepend) {
-      el.prepend = function() {
-        var ref = this.firstChild;
-        for (var i = 0; i < arguments.length; i++) {
-          var node = toNode(arguments[i]);
-          if (ref) {
-            this.insertBefore(node, ref);
-          } else {
-            this.appendChild(node);
-          }
-        }
-      };
-    }
-
-    if (!el.append) {
-      el.append = function() {
-        for (var i = 0; i < arguments.length; i++) {
-          var node = toNode(arguments[i]);
-          this.appendChild(node);
-        }
-      };
-    }
-
-    if (!el.replaceChildren) {
-      el.replaceChildren = function() {
-        while (this.firstChild) {
-          this.removeChild(this.firstChild);
-        }
-        for (var i = 0; i < arguments.length; i++) {
-          var node = toNode(arguments[i]);
-          this.appendChild(node);
-        }
-      };
-    }
+    // prepend, append, replaceChildren — nu Rust-native i dom_bridge.rs
 
     return el;
   }
@@ -874,38 +819,7 @@
       // Kan inte implementera utan tillgång till attributlistan — hoppa
     }
 
-    if (!el.insertAdjacentElement) {
-      el.insertAdjacentElement = function(position, element) {
-        switch (position.toLowerCase()) {
-          case 'beforebegin':
-            if (this.parentNode) this.parentNode.insertBefore(element, this);
-            break;
-          case 'afterbegin':
-            this.insertBefore(element, this.firstChild);
-            break;
-          case 'beforeend':
-            this.appendChild(element);
-            break;
-          case 'afterend':
-            if (this.parentNode) {
-              if (this.nextSibling) {
-                this.parentNode.insertBefore(element, this.nextSibling);
-              } else {
-                this.parentNode.appendChild(element);
-              }
-            }
-            break;
-        }
-        return element;
-      };
-    }
-
-    if (!el.insertAdjacentText) {
-      el.insertAdjacentText = function(position, text) {
-        var node = document.createTextNode(text);
-        this.insertAdjacentElement(position, node);
-      };
-    }
+    // insertAdjacentElement, insertAdjacentText — nu Rust-native i dom_bridge.rs
 
     return el;
   };
