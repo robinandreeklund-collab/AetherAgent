@@ -136,6 +136,8 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_console(&ctx, Rc::clone(&state));
+        // Node identity cache — samma NodeKey ger alltid samma JS-objekt
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(result) => {
@@ -251,6 +253,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_console(&ctx, Rc::clone(&state));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(res) => {
@@ -364,6 +367,8 @@ pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalRes
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_console(&ctx, Rc::clone(&state));
+        // Node identity cache
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -486,6 +491,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         let _ =
             register_window_with_viewport(&ctx, Rc::clone(&state), viewport_width, viewport_height);
         let _ = register_console(&ctx, Rc::clone(&state));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -585,11 +591,32 @@ struct GetElementById {
 }
 impl JsHandler for GetElementById {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let id = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let id = match args.first().and_then(|v| v.as_string()) {
+            Some(s) => match s.to_string() {
+                Ok(id) if !id.is_empty() => id,
+                _ => return Ok(Value::new_null(ctx.clone())),
+            },
+            // Spec: getElementById(undefined) → söker efter "undefined"
+            // getElementById(null) → söker efter "null"
+            None => {
+                let raw = args
+                    .first()
+                    .map(|v| {
+                        if v.is_null() {
+                            "null".to_string()
+                        } else if v.is_undefined() {
+                            "undefined".to_string()
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .unwrap_or_default();
+                if raw.is_empty() {
+                    return Ok(Value::new_null(ctx.clone()));
+                }
+                raw
+            }
+        };
         let key = {
             let s = self.state.borrow();
             find_by_attr_value(&s.arena, "id", &id)
@@ -2148,6 +2175,20 @@ fn make_element_object<'js>(
 ) -> rquickjs::Result<Value<'js>> {
     let key_bits = node_key_to_f64(key);
 
+    // ─── Node identity cache: samma NodeKey → samma JS-objekt ───
+    // Krävs av WPT: getElementById(x) === getElementById(x)
+    {
+        let code = format!(
+            "globalThis.__nodeCache && globalThis.__nodeCache.get({})",
+            key_bits
+        );
+        if let Ok(cached) = ctx.eval::<Value, _>(code.as_str()) {
+            if !cached.is_undefined() && !cached.is_null() {
+                return Ok(cached);
+            }
+        }
+    }
+
     // Läs grundläggande egenskaper
     let (node_type_val, tag_name, id_val, class_val) = {
         let s = state.borrow();
@@ -3031,6 +3072,18 @@ fn make_element_object<'js>(
             }
         }
         obj.set("dataset", dataset)?;
+    }
+
+    // Cacha objektet i __nodeCache så att samma NodeKey → samma objekt (identity)
+    {
+        let global = ctx.globals();
+        let cache_key = format!("__nc_{}", key_bits as u64);
+        let _ = global.set(cache_key.as_str(), obj.clone());
+        let set_code = format!(
+            "globalThis.__nodeCache && globalThis.__nodeCache.set({}, globalThis.{})",
+            key_bits, cache_key
+        );
+        let _ = ctx.eval::<Value, _>(set_code.as_str());
     }
 
     Ok(obj.into_value())
