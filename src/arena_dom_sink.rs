@@ -3,7 +3,11 @@
 /// Eliminerar RcDom-mellansteget: html5ever → ArenaDom i ett steg.
 /// Sparar ~1.5ms per sida genom att undvika Rc-allokeringar och
 /// en hel trädtraversering (from_rcdom).
+///
+/// html5ever 0.38+ kräver &self (inte &mut self) i TreeSink — vi använder
+/// RefCell för interior mutability, precis som RcDom gör.
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use html5ever::tendril::{StrTendril, TendrilSink};
@@ -15,14 +19,16 @@ use crate::arena_dom::{ArenaDom, Attrs, DomNode, NodeKey, NodeType};
 
 /// Håller template-contents-mappning (NodeKey → fragment NodeKey)
 pub struct ArenaDomSink {
-    arena: ArenaDom,
+    arena: RefCell<ArenaDom>,
     /// template-element → template-contents fragment
-    template_contents: HashMap<NodeKey, NodeKey>,
+    template_contents: RefCell<HashMap<NodeKey, NodeKey>>,
     /// mathml annotation-xml integration point flaggor
-    mathml_integration_points: HashMap<NodeKey, bool>,
+    mathml_integration_points: RefCell<HashMap<NodeKey, bool>>,
     /// Taggnamn per nod — O(1) array-indexerad lookup via SecondaryMap
     /// (elem_name anropas hundratals gånger, SecondaryMap undviker hashing)
-    tag_names: SecondaryMap<NodeKey, QualName>,
+    tag_names: RefCell<SecondaryMap<NodeKey, QualName>>,
+    /// Dokumentnod — sparas vid konstruktion, kopieras inte via RefCell
+    document: NodeKey,
 }
 
 impl ArenaDomSink {
@@ -32,26 +38,31 @@ impl ArenaDomSink {
     }
 
     pub fn with_estimated_capacity(estimated_nodes: usize) -> Self {
+        let arena = ArenaDom::with_capacity(estimated_nodes);
+        let document = arena.document;
         ArenaDomSink {
-            arena: ArenaDom::with_capacity(estimated_nodes),
-            template_contents: HashMap::new(),
-            mathml_integration_points: HashMap::new(),
-            tag_names: SecondaryMap::with_capacity(estimated_nodes / 2),
+            arena: RefCell::new(arena),
+            template_contents: RefCell::new(HashMap::new()),
+            mathml_integration_points: RefCell::new(HashMap::new()),
+            tag_names: RefCell::new(SecondaryMap::with_capacity(estimated_nodes / 2)),
+            document,
         }
     }
 
     /// Hjälpfunktion: hämta sista barnet till en nod
     fn last_child(&self, parent: &NodeKey) -> Option<NodeKey> {
         self.arena
+            .borrow()
             .nodes
             .get(*parent)
             .and_then(|n| n.children.last().copied())
     }
 
     /// Hjälpfunktion: försök addera text till sista syskon-textnod
-    fn append_to_existing_text(&mut self, parent: &NodeKey, text: &StrTendril) -> bool {
+    fn append_to_existing_text(&self, parent: &NodeKey, text: &StrTendril) -> bool {
         if let Some(last_key) = self.last_child(parent) {
-            if let Some(node) = self.arena.nodes.get_mut(last_key) {
+            let mut arena = self.arena.borrow_mut();
+            if let Some(node) = arena.nodes.get_mut(last_key) {
                 if node.node_type == NodeType::Text {
                     if let Some(ref mut existing) = node.text {
                         existing.push_slice(text);
@@ -64,8 +75,9 @@ impl ArenaDomSink {
     }
 
     /// Hjälpfunktion: skapa textnod och koppla till parent
-    fn create_and_append_text(&mut self, parent: NodeKey, text: StrTendril) {
-        let key = self.arena.nodes.insert(DomNode {
+    fn create_and_append_text(&self, parent: NodeKey, text: StrTendril) {
+        let mut arena = self.arena.borrow_mut();
+        let key = arena.nodes.insert(DomNode {
             node_type: NodeType::Text,
             tag: None,
             attributes: Attrs::new(),
@@ -73,31 +85,33 @@ impl ArenaDomSink {
             parent: Some(parent),
             children: vec![],
         });
-        if let Some(parent_node) = self.arena.nodes.get_mut(parent) {
+        if let Some(parent_node) = arena.nodes.get_mut(parent) {
             parent_node.children.push(key);
         }
     }
 
     /// Hjälpfunktion: koppla en barnnod till ny parent
-    fn append_node(&mut self, parent: NodeKey, child: NodeKey) {
+    fn append_node(&self, parent: NodeKey, child: NodeKey) {
+        let mut arena = self.arena.borrow_mut();
         // Sätt parent
-        if let Some(child_node) = self.arena.nodes.get_mut(child) {
+        if let Some(child_node) = arena.nodes.get_mut(child) {
             child_node.parent = Some(parent);
         }
         // Lägg till i parents children
-        if let Some(parent_node) = self.arena.nodes.get_mut(parent) {
+        if let Some(parent_node) = arena.nodes.get_mut(parent) {
             parent_node.children.push(child);
         }
     }
 
     /// Hjälpfunktion: ta bort nod från sin parent
-    fn detach(&mut self, target: NodeKey) {
-        let parent_key = self.arena.nodes.get(target).and_then(|n| n.parent);
+    fn detach(&self, target: NodeKey) {
+        let mut arena = self.arena.borrow_mut();
+        let parent_key = arena.nodes.get(target).and_then(|n| n.parent);
         if let Some(pk) = parent_key {
-            if let Some(parent) = self.arena.nodes.get_mut(pk) {
+            if let Some(parent) = arena.nodes.get_mut(pk) {
                 parent.children.retain(|&k| k != target);
             }
-            if let Some(node) = self.arena.nodes.get_mut(target) {
+            if let Some(node) = arena.nodes.get_mut(target) {
                 node.parent = None;
             }
         }
@@ -108,27 +122,36 @@ impl TreeSink for ArenaDomSink {
     type Handle = NodeKey;
     type Output = ArenaDom;
 
+    type ElemName<'a> = ExpandedName<'a>;
+
     fn finish(self) -> ArenaDom {
-        self.arena
+        self.arena.into_inner()
     }
 
-    fn parse_error(&mut self, _msg: Cow<'static, str>) {
+    fn parse_error(&self, _msg: Cow<'static, str>) {
         // Ignorera parse-errors — AetherAgent hanterar trasig HTML graciöst
     }
 
-    fn get_document(&mut self) -> NodeKey {
-        self.arena.document
+    fn get_document(&self) -> NodeKey {
+        self.document
     }
 
     fn elem_name<'a>(&'a self, target: &'a NodeKey) -> ExpandedName<'a> {
-        self.tag_names
-            .get(*target)
-            .expect("elem_name called on non-element node")
-            .expanded()
+        // SAFETY: tag_names borrow lever bara under denna metod,
+        // och html5ever garanterar att elem_name inte anropas rekursivt.
+        // Vi använder unsafe för att undvika RefCell::borrow() lifetime-problem
+        // (ExpandedName refererar in i tag_names som annars släpps vid borrow-drop).
+        let tag_names = self.tag_names.as_ptr();
+        unsafe {
+            (*tag_names)
+                .get(*target)
+                .expect("elem_name called on non-element node")
+                .expanded()
+        }
     }
 
     fn create_element(
-        &mut self,
+        &self,
         name: QualName,
         attrs: Vec<Attribute>,
         flags: ElementFlags,
@@ -139,7 +162,8 @@ impl TreeSink for ArenaDomSink {
             attributes.insert(attr.name.local.to_string(), attr.value.to_string());
         }
 
-        let key = self.arena.nodes.insert(DomNode {
+        let mut arena = self.arena.borrow_mut();
+        let key = arena.nodes.insert(DomNode {
             node_type: NodeType::Element,
             tag: Some(tag),
             attributes,
@@ -147,13 +171,14 @@ impl TreeSink for ArenaDomSink {
             parent: None,
             children: vec![],
         });
+        drop(arena);
 
         // Spara QualName för elem_name()
-        self.tag_names.insert(key, name);
+        self.tag_names.borrow_mut().insert(key, name);
 
         // Template-element: skapa document fragment
         if flags.template {
-            let fragment = self.arena.nodes.insert(DomNode {
+            let fragment = self.arena.borrow_mut().nodes.insert(DomNode {
                 node_type: NodeType::Document,
                 tag: None,
                 attributes: Attrs::new(),
@@ -161,19 +186,21 @@ impl TreeSink for ArenaDomSink {
                 parent: None,
                 children: vec![],
             });
-            self.template_contents.insert(key, fragment);
+            self.template_contents.borrow_mut().insert(key, fragment);
         }
 
         // MathML integration point
         if flags.mathml_annotation_xml_integration_point {
-            self.mathml_integration_points.insert(key, true);
+            self.mathml_integration_points
+                .borrow_mut()
+                .insert(key, true);
         }
 
         key
     }
 
-    fn create_comment(&mut self, text: StrTendril) -> NodeKey {
-        self.arena.nodes.insert(DomNode {
+    fn create_comment(&self, text: StrTendril) -> NodeKey {
+        self.arena.borrow_mut().nodes.insert(DomNode {
             node_type: NodeType::Comment,
             tag: None,
             attributes: Attrs::new(),
@@ -183,8 +210,8 @@ impl TreeSink for ArenaDomSink {
         })
     }
 
-    fn create_pi(&mut self, target: StrTendril, data: StrTendril) -> NodeKey {
-        self.arena.nodes.insert(DomNode {
+    fn create_pi(&self, target: StrTendril, data: StrTendril) -> NodeKey {
+        self.arena.borrow_mut().nodes.insert(DomNode {
             node_type: NodeType::Other,
             tag: Some(format!("?{}", target)),
             attributes: Attrs::new(),
@@ -194,7 +221,7 @@ impl TreeSink for ArenaDomSink {
         })
     }
 
-    fn append(&mut self, parent: &NodeKey, child: NodeOrText<NodeKey>) {
+    fn append(&self, parent: &NodeKey, child: NodeOrText<NodeKey>) {
         match child {
             NodeOrText::AppendNode(child_key) => {
                 self.append_node(*parent, child_key);
@@ -209,7 +236,7 @@ impl TreeSink for ArenaDomSink {
     }
 
     fn append_based_on_parent_node(
-        &mut self,
+        &self,
         element: &NodeKey,
         prev_element: &NodeKey,
         child: NodeOrText<NodeKey>,
@@ -217,6 +244,7 @@ impl TreeSink for ArenaDomSink {
         // Om element har en parent, använd den. Annars prev_element.
         let has_parent = self
             .arena
+            .borrow()
             .nodes
             .get(*element)
             .and_then(|n| n.parent)
@@ -230,7 +258,7 @@ impl TreeSink for ArenaDomSink {
     }
 
     fn append_doctype_to_document(
-        &mut self,
+        &self,
         _name: StrTendril,
         _public_id: StrTendril,
         _system_id: StrTendril,
@@ -238,9 +266,10 @@ impl TreeSink for ArenaDomSink {
         // DOCTYPE ignoreras — AetherAgent behöver inte doctype-info
     }
 
-    fn get_template_contents(&mut self, target: &NodeKey) -> NodeKey {
+    fn get_template_contents(&self, target: &NodeKey) -> NodeKey {
         *self
             .template_contents
+            .borrow()
             .get(target)
             .expect("get_template_contents: inte ett template-element")
     }
@@ -249,12 +278,17 @@ impl TreeSink for ArenaDomSink {
         *x == *y
     }
 
-    fn set_quirks_mode(&mut self, _mode: QuirksMode) {
+    fn set_quirks_mode(&self, _mode: QuirksMode) {
         // Ignorera quirks mode — AetherAgent parsear semantiskt
     }
 
-    fn append_before_sibling(&mut self, sibling: &NodeKey, new_node: NodeOrText<NodeKey>) {
-        let parent_key = self.arena.nodes.get(*sibling).and_then(|n| n.parent);
+    fn append_before_sibling(&self, sibling: &NodeKey, new_node: NodeOrText<NodeKey>) {
+        let parent_key = self
+            .arena
+            .borrow()
+            .nodes
+            .get(*sibling)
+            .and_then(|n| n.parent);
 
         let parent_key = match parent_key {
             Some(pk) => pk,
@@ -264,6 +298,7 @@ impl TreeSink for ArenaDomSink {
         // Hitta siblingens index
         let sibling_idx = self
             .arena
+            .borrow()
             .nodes
             .get(parent_key)
             .map(|p| {
@@ -278,21 +313,23 @@ impl TreeSink for ArenaDomSink {
             NodeOrText::AppendNode(child_key) => {
                 // Ta bort från gammal parent om den finns
                 self.detach(child_key);
+                let mut arena = self.arena.borrow_mut();
                 // Sätt ny parent
-                if let Some(child) = self.arena.nodes.get_mut(child_key) {
+                if let Some(child) = arena.nodes.get_mut(child_key) {
                     child.parent = Some(parent_key);
                 }
                 // Infoga före sibling
-                if let Some(parent) = self.arena.nodes.get_mut(parent_key) {
+                if let Some(parent) = arena.nodes.get_mut(parent_key) {
                     parent.children.insert(sibling_idx, child_key);
                 }
             }
             NodeOrText::AppendText(text) => {
                 // Försök merga med föregående syskon
                 if sibling_idx > 0 {
-                    if let Some(parent) = self.arena.nodes.get(parent_key) {
+                    let mut arena = self.arena.borrow_mut();
+                    if let Some(parent) = arena.nodes.get(parent_key) {
                         let prev_key = parent.children[sibling_idx - 1];
-                        if let Some(prev_node) = self.arena.nodes.get_mut(prev_key) {
+                        if let Some(prev_node) = arena.nodes.get_mut(prev_key) {
                             if prev_node.node_type == NodeType::Text {
                                 if let Some(ref mut existing) = prev_node.text {
                                     existing.push_slice(&text);
@@ -301,9 +338,11 @@ impl TreeSink for ArenaDomSink {
                             }
                         }
                     }
+                    drop(arena);
                 }
                 // Skapa ny textnod och infoga
-                let text_key = self.arena.nodes.insert(DomNode {
+                let mut arena = self.arena.borrow_mut();
+                let text_key = arena.nodes.insert(DomNode {
                     node_type: NodeType::Text,
                     tag: None,
                     attributes: Attrs::new(),
@@ -311,15 +350,16 @@ impl TreeSink for ArenaDomSink {
                     parent: Some(parent_key),
                     children: vec![],
                 });
-                if let Some(parent) = self.arena.nodes.get_mut(parent_key) {
+                if let Some(parent) = arena.nodes.get_mut(parent_key) {
                     parent.children.insert(sibling_idx, text_key);
                 }
             }
         }
     }
 
-    fn add_attrs_if_missing(&mut self, target: &NodeKey, attrs: Vec<Attribute>) {
-        if let Some(node) = self.arena.nodes.get_mut(*target) {
+    fn add_attrs_if_missing(&self, target: &NodeKey, attrs: Vec<Attribute>) {
+        let mut arena = self.arena.borrow_mut();
+        if let Some(node) = arena.nodes.get_mut(*target) {
             for attr in attrs {
                 node.attributes
                     .insert_if_vacant(attr.name.local.to_string(), attr.value.to_string());
@@ -327,35 +367,36 @@ impl TreeSink for ArenaDomSink {
         }
     }
 
-    fn remove_from_parent(&mut self, target: &NodeKey) {
+    fn remove_from_parent(&self, target: &NodeKey) {
         self.detach(*target);
     }
 
-    fn reparent_children(&mut self, node: &NodeKey, new_parent: &NodeKey) {
+    fn reparent_children(&self, node: &NodeKey, new_parent: &NodeKey) {
+        let mut arena = self.arena.borrow_mut();
         // Samla children (klonar Vec för att undvika borrow-konflikt)
-        let children = self
-            .arena
+        let children = arena
             .nodes
             .get(*node)
             .map(|n| n.children.clone())
             .unwrap_or_default();
 
         for child_key in &children {
-            if let Some(child) = self.arena.nodes.get_mut(*child_key) {
+            if let Some(child) = arena.nodes.get_mut(*child_key) {
                 child.parent = Some(*new_parent);
             }
-            if let Some(np) = self.arena.nodes.get_mut(*new_parent) {
+            if let Some(np) = arena.nodes.get_mut(*new_parent) {
                 np.children.push(*child_key);
             }
         }
 
-        if let Some(node) = self.arena.nodes.get_mut(*node) {
+        if let Some(node) = arena.nodes.get_mut(*node) {
             node.children.clear();
         }
     }
 
     fn is_mathml_annotation_xml_integration_point(&self, handle: &NodeKey) -> bool {
         self.mathml_integration_points
+            .borrow()
             .get(handle)
             .copied()
             .unwrap_or(false)
