@@ -463,20 +463,20 @@ fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
         return;
     }
 
-    // Iterativt höj tröskeln och beskär löv — räkna om bara efter varje prune
+    // Iterativt höj tröskeln och beskär löv — räkna och beskär i samma pass
     let mut threshold = 0.2_f32;
     while current_count > max && threshold < 0.8 {
-        prune_leaves_below(nodes, threshold);
-        current_count = count_nodes(nodes);
+        current_count = prune_and_count(nodes, threshold);
         threshold += 0.05;
     }
 }
 
-/// Ta bort löv-noder under en viss relevans-tröskel
-fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
+/// Beskär löv-noder under tröskeln OCH returnerar ny nodcount i ett pass.
+/// Eliminerar separat count_nodes()-traversering (sparar 8x fullständiga trädtraverseringar).
+fn prune_and_count(nodes: &mut Vec<SemanticNode>, threshold: f32) -> usize {
     // Rekursivt beskär barnens löv först
     for node in nodes.iter_mut() {
-        prune_leaves_below(&mut node.children, threshold);
+        prune_and_count(&mut node.children, threshold);
     }
 
     // Ta bort löv-noder (utan barn och utan action) under tröskeln
@@ -491,6 +491,9 @@ fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
             || n.role == "cta"
             || n.role == "product_card"
     });
+
+    // Räkna i samma pass
+    nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
 }
 
 /// Beräkna textlikhet mellan query och candidate (normaliserad word overlap)
@@ -516,7 +519,8 @@ fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: 
         return 0.0;
     }
 
-    let candidate_lower = candidate.to_lowercase();
+    // Använd ascii_lowercase — snabbare, ingen UTF-8-allokering för ASCII-text
+    let candidate_lower = candidate.to_ascii_lowercase();
 
     // Exakt substring-match ger full poäng
     if candidate_lower.contains(query_lower) {
@@ -534,12 +538,13 @@ fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: 
     }
 
     // Fallback: kolla utan separatorer bara om word overlap missade
-    // "story_title" → "storytitle" — undvik allokering om inte nödvändigt
     if matches == 0 && candidate_lower.len() >= query_lower.len() {
         let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
+        // Filtrera direkt på bytes istället för chars() — undviker UTF-8-decode
         let candidate_no_sep: String = candidate_lower
-            .chars()
-            .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+            .bytes()
+            .filter(|b| !b.is_ascii_whitespace() && *b != b'_' && *b != b'-')
+            .map(|b| b as char)
             .collect();
         if candidate_no_sep.contains(&query_joined) {
             return 1.0;
