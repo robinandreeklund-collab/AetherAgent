@@ -8,7 +8,7 @@ use std::time::Instant;
 // Import the library functions directly
 use aether_agent::{
     check_injection, extract_data, fill_form, find_and_click, parse_to_semantic_tree,
-    parse_top_nodes,
+    parse_top_nodes, profile_parse_stages,
 };
 
 #[cfg(feature = "js-eval")]
@@ -83,6 +83,63 @@ fn complex_page() -> String {
     html
 }
 
+/// Realistisk sida: djup nästling, style-attribut, ARIA, många attribut per element
+fn realistic_heavy_page() -> String {
+    let mut html = String::from(
+        r##"<html><head><title>E-handel – Alla produkter</title></head><body>
+        <nav role="navigation" aria-label="Huvudmeny" style="display:flex; justify-content:space-between;">
+            <a href="/" class="logo" title="Hem">SuperShop</a>
+            <input type="search" placeholder="Sök produkter..." aria-label="Sök" />
+            <a href="/konto" aria-label="Mitt konto">Konto</a>
+            <a href="/varukorg" class="cart-btn cta">Varukorg (3)</a>
+        </nav>
+        <div class="filters" style="display:flex; gap:10px;">
+            <select name="category"><option>Alla</option><option>Elektronik</option></select>
+            <select name="sort"><option>Populärast</option><option>Pris</option></select>
+        </div>
+        <main>"##,
+    );
+    for i in 0..150 {
+        html.push_str(&format!(
+            r##"<div class="product-card item-{i}" data-product-id="{i}" itemtype="https://schema.org/Product"
+                 style="border:1px solid #ddd; padding:16px; margin:8px;">
+                <div class="image-wrapper" style="position:relative; overflow:hidden;">
+                    <img src="/img/product-{i}.jpg" alt="Produkt {i}" data-lazy-src="/img/product-{i}-hd.jpg"
+                         style="width:100%; height:auto;" />
+                    <span class="badge" style="position:absolute; top:8px; right:8px; background:red; color:white;">{sale}</span>
+                </div>
+                <h3 class="product-title">{name}</h3>
+                <p class="price" itemprop="price" style="font-size:1.2em; font-weight:bold;">{price} kr</p>
+                <p class="description" style="color:#666; font-size:0.9em;">Högkvalitativ produkt med fri frakt och 30 dagars öppet köp.</p>
+                <div class="actions" style="display:flex; gap:8px; margin-top:12px;">
+                    <button class="add-to-cart cta" id="buy-{i}" aria-label="Köp {name}" data-product="{i}">Lägg i varukorg</button>
+                    <button class="wishlist" aria-label="Spara {name}" style="background:none; border:1px solid #ccc;">♡</button>
+                </div>
+                <div class="rating" style="color:gold;" aria-label="{rating} av 5 stjärnor">{stars}{empty_stars}</div>
+                <a href="/produkt/{i}" class="details-link">Visa detaljer →</a>
+                <div class="hidden-seo" style="display:none; visibility:hidden;">SEO metadata {i}</div>
+            </div>"##,
+            i = i,
+            name = format!("Produkt {}", i),
+            price = 199 + i * 13,
+            sale = if i % 3 == 0 { "REA" } else { "" },
+            rating = (i % 5) + 1,
+            stars = "★".repeat((i % 5) + 1),
+            empty_stars = "☆".repeat(4 - (i % 5)),
+        ));
+    }
+    html.push_str(
+        r##"</main>
+        <footer style="background:#333; color:white; padding:20px;">
+            <a href="/villkor">Villkor</a>
+            <a href="/integritet">Integritetspolicy</a>
+            <a href="/kontakt">Kontakt</a>
+        </footer>
+    </body></html>"##,
+    );
+    html
+}
+
 fn injection_page() -> &'static str {
     r##"<html><body>
         <h1>Normal sida</h1>
@@ -148,6 +205,7 @@ fn main() {
     println!("{}", "=".repeat(70));
 
     let complex = complex_page();
+    let heavy = realistic_heavy_page();
 
     let results = vec![
         // ─── Parse benchmarks ────────────────────────────────────────────
@@ -165,6 +223,9 @@ fn main() {
         }),
         bench("parse: injection page", 100, || {
             parse_to_semantic_tree(injection_page(), "köp produkt", "https://test.com");
+        }),
+        bench("parse: realistic heavy (150 prod)", 20, || {
+            parse_to_semantic_tree(&heavy, "lägg i varukorg", "https://shop.se/alla");
         }),
         // ─── Top-N benchmarks ────────────────────────────────────────────
         bench("top-5: ecommerce", 100, || {
@@ -253,6 +314,14 @@ fn main() {
             r.name, r.iterations, r.avg_us, r.min_us, r.max_us
         );
     }
+
+    // Stage profiling
+    println!("\n{}", "=".repeat(70));
+    println!("Stage Profiling (realistic heavy page):");
+    println!(
+        "  {}",
+        profile_parse_stages(&heavy, "lägg i varukorg", "https://shop.se/alla")
+    );
 
     // Performance assertions
     println!("\n{}", "=".repeat(70));

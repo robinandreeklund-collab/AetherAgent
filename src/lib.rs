@@ -158,6 +158,44 @@ fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode>
     result
 }
 
+/// Profilering: mät tid per parse-steg (HTML → RcDom → Arena → Semantic → JSON)
+pub fn profile_parse_stages(html: &str, goal: &str, url: &str) -> String {
+    use std::time::Instant;
+
+    let t0 = Instant::now();
+    let rcdom = parser::parse_html(html);
+    let t_parse = t0.elapsed();
+
+    let t1 = Instant::now();
+    let mut arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    arena.resolve_lazy_images();
+    let t_arena = t1.elapsed();
+
+    let t2 = Instant::now();
+    let title = arena.extract_title();
+    let mut builder = semantic::SemanticBuilder::new(goal);
+    let tree = builder.build_from_arena(&arena, url, &title);
+    let t_semantic = t2.elapsed();
+
+    let t3 = Instant::now();
+    let _ = hydration::extract_hydration_state(html);
+    let t_hydration = t3.elapsed();
+
+    let t4 = Instant::now();
+    let _ = serialize_json(&tree, tree.nodes.len());
+    let t_json = t4.elapsed();
+
+    format!(
+        "html5ever: {:.1}ms, arena: {:.1}ms, semantic: {:.1}ms, hydration: {:.1}ms, json: {:.1}ms, nodes: {}",
+        t_parse.as_secs_f64() * 1000.0,
+        t_arena.as_secs_f64() * 1000.0,
+        t_semantic.as_secs_f64() * 1000.0,
+        t_hydration.as_secs_f64() * 1000.0,
+        t_json.as_secs_f64() * 1000.0,
+        tree.nodes.len(),
+    )
+}
+
 // ─── Fas 1: Publik API ──────────────────────────────────────────────────────
 
 /// Parsa HTML till ett semantiskt träd med goal-relevance scoring

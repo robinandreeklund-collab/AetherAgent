@@ -7,7 +7,10 @@
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::arena_dom::{ArenaDom, NodeKey};
-use crate::parser::{extract_label, get_attr, get_tag_name, infer_role, is_likely_visible};
+use crate::parser::{
+    extract_label_with_text, extract_text, get_attr, get_tag_name, infer_role_with_text,
+    is_likely_visible_cached, AttrCache,
+};
 use crate::trust::{analyze_text, sanitize_text};
 use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
@@ -149,8 +152,10 @@ impl SemanticBuilder {
         }
 
         let id = self.next_node_id();
-        let role = arena.infer_role(key);
-        let raw_label = arena.extract_label(key);
+        // Extrahera text EN gång — används av både rolldetektering och label-extraktion
+        let inner_text = arena.extract_text(key);
+        let role = arena.infer_role_with_text(key, &inner_text);
+        let raw_label = arena.extract_label_with_text(key, &inner_text);
 
         // Trust shield
         let (trust, warning) = analyze_text(id, &raw_label);
@@ -288,16 +293,20 @@ impl SemanticBuilder {
 
     /// Processa ett enskilt element till en SemanticNode
     fn process_element(&mut self, handle: &Handle, depth: u32) -> Option<SemanticNode> {
-        let tag = get_tag_name(handle).unwrap_or_default();
+        // Bygg AttrCache EN gång — eliminerar 2 extra attribut-iterationer per element
+        let cache = AttrCache::from_handle(handle);
+        let tag = cache.tag.clone();
 
-        // Skippa osynliga element
-        if !is_likely_visible(handle) {
+        // Skippa osynliga element (använd cachad version)
+        if !is_likely_visible_cached(&cache) {
             return None;
         }
 
         let id = self.next_node_id();
-        let role = infer_role(handle);
-        let raw_label = extract_label(handle);
+        // Extrahera text EN gång — används av både rolldetektering och label-extraktion
+        let inner_text = extract_text(handle);
+        let role = infer_role_with_text(&cache, &inner_text);
+        let raw_label = extract_label_with_text(&cache, &inner_text);
 
         // Trust shield – analysera label-texten
         let (trust, warning) = analyze_text(id, &raw_label);
@@ -351,9 +360,9 @@ impl SemanticBuilder {
 
         let action = SemanticNode::infer_action(&role);
 
-        // Hämta HTML id och name för selector hints / formulärmatchning
-        let html_id = get_attr(handle, "id").filter(|v| !v.is_empty());
-        let name = get_attr(handle, "name").filter(|v| !v.is_empty());
+        // Hämta HTML id och name från cache (undvik extra get_attr-anrop)
+        let html_id = cache.id.filter(|v| !v.is_empty());
+        let name = cache.name.filter(|v| !v.is_empty());
 
         // Hämta value: href för länkar, value/aria-valuenow för inputs
         let value = if role == "link" {

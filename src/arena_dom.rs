@@ -453,47 +453,53 @@ impl ArenaDom {
 
     /// Extrahera all text rekursivt (speglar parser::extract_text)
     pub fn extract_text(&self, key: NodeKey) -> String {
+        let mut buf = String::new();
+        self.extract_text_into(key, &mut buf);
+        buf
+    }
+
+    /// Samla text i en delad buffer — zero-alloc per rekursiv nivå
+    fn extract_text_into(&self, key: NodeKey, buf: &mut String) {
         const TEXT_SKIP_TAGS: &[&str] = &["script", "style", "noscript", "template"];
 
         let node = match self.nodes.get(key) {
             Some(n) => n,
-            None => return String::new(),
+            None => return,
         };
 
         match &node.node_type {
             NodeType::Text => {
                 let t = node.text.as_deref().unwrap_or("");
                 let trimmed = t.trim();
-                if trimmed.is_empty() {
-                    String::new()
-                } else {
-                    let mut s = String::with_capacity(trimmed.len() + 1);
-                    s.push_str(trimmed);
-                    s.push(' ');
-                    s
+                if !trimmed.is_empty() {
+                    buf.push_str(trimmed);
+                    buf.push(' ');
                 }
             }
             NodeType::Element => {
                 if let Some(tag) = &node.tag {
                     if TEXT_SKIP_TAGS.contains(&tag.as_str()) {
-                        return String::new();
+                        return;
                     }
                 }
-                // Samla barn-nycklar först (undvik borrow-konflikt)
-                let child_keys: Vec<NodeKey> = node.children.clone();
-                let mut text = String::new();
-                for child_key in &child_keys {
-                    text.push_str(&self.extract_text(*child_key));
+                // Iterera med index — undviker Vec::clone() per nod
+                let num_children = node.children.len();
+                for i in 0..num_children {
+                    // Hämta barn-nyckel via index (säkert: i < num_children)
+                    let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
+                    if let Some(ck) = child_key {
+                        self.extract_text_into(ck, buf);
+                    }
                 }
-                text
             }
             _ => {
-                let child_keys: Vec<NodeKey> = node.children.clone();
-                let mut text = String::new();
-                for child_key in &child_keys {
-                    text.push_str(&self.extract_text(*child_key));
+                let num_children = node.children.len();
+                for i in 0..num_children {
+                    let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
+                    if let Some(ck) = child_key {
+                        self.extract_text_into(ck, buf);
+                    }
                 }
-                text
             }
         }
     }
@@ -530,7 +536,8 @@ impl ArenaDom {
     ];
 
     /// Inferera semantisk roll (speglar parser::infer_role)
-    pub fn infer_role(&self, key: NodeKey) -> String {
+    /// Rolldetektering med pre-extraherad text (undviker dubbla extract_text)
+    pub fn infer_role_with_text(&self, key: NodeKey, precomputed_text: &str) -> String {
         // ARIA-roll har högst prioritet
         if let Some(role) = self.get_attr(key, "role") {
             if !role.is_empty() {
@@ -576,7 +583,7 @@ impl ArenaDom {
             _ => "generic",
         };
 
-        // Schema.org product_card — utan to_lowercase()
+        // Schema.org product_card
         if let Some(itemtype) = self.get_attr(key, "itemtype") {
             let it = itemtype;
             if contains_ignore_ascii_case(it, "schema.org/product")
@@ -585,7 +592,6 @@ impl ArenaDom {
                 return "product_card".to_string();
             }
         }
-        // Data-attribut som indikerar produktkort
         if self.has_attr(key, "data-product-id")
             || self.has_attr(key, "data-product")
             || self.has_attr(key, "data-item-id")
@@ -599,11 +605,10 @@ impl ArenaDom {
             }
         }
 
-        // CTA-heuristik — extrahera text en gång, återanvänd
+        // CTA-heuristik — använd pre-extraherad text
         let class_raw = self.get_attr(key, "class").unwrap_or("");
         if base_role == "button" || base_role == "link" {
-            let text = self.extract_text(key);
-            let text_lower = text.to_ascii_lowercase();
+            let text_lower = precomputed_text.to_ascii_lowercase();
             for kw in Self::CTA_KEYWORDS {
                 if text_lower.contains(kw) {
                     return "cta".to_string();
@@ -619,17 +624,18 @@ impl ArenaDom {
             }
         }
 
-        // Pristext-heuristik — skicka med class
-        if matches!(base_role, "text" | "generic") && self.looks_like_price_fast(key, class_raw) {
+        // Pristext-heuristik
+        if matches!(base_role, "text" | "generic")
+            && self.looks_like_price_from_text(precomputed_text, class_raw, key)
+        {
             return "price".to_string();
         }
 
         base_role.to_string()
     }
 
-    /// Kontrollera om text ser ut som ett pris (med förextraherad class)
-    fn looks_like_price_fast(&self, key: NodeKey, class_raw: &str) -> bool {
-        let text = self.extract_text(key);
+    /// Pris-check med pre-extraherad text (undviker dubbla extract_text)
+    fn looks_like_price_from_text(&self, text: &str, class_raw: &str, key: NodeKey) -> bool {
         let trimmed = text.trim();
         if trimmed.is_empty() || trimmed.len() > 40 {
             return false;
@@ -637,13 +643,11 @@ impl ArenaDom {
         if !trimmed.chars().any(|c| c.is_ascii_digit()) {
             return false;
         }
-        // Valutaindikatorer — case-insensitive utan allokering
         for indicator in Self::PRICE_INDICATORS {
             if contains_ignore_ascii_case(trimmed, indicator) {
                 return true;
             }
         }
-        // CSS-klass — utan to_lowercase()
         if contains_ignore_ascii_case(class_raw, "price")
             || contains_ignore_ascii_case(class_raw, "pris")
             || contains_ignore_ascii_case(class_raw, "cost")
@@ -658,8 +662,16 @@ impl ArenaDom {
         false
     }
 
+    /// Rolldetektering (convenience wrapper som extraherar text internt, används i tester)
+    #[cfg(test)]
+    pub fn infer_role(&self, key: NodeKey) -> String {
+        let text = self.extract_text(key);
+        self.infer_role_with_text(key, &text)
+    }
+
     /// Extrahera label (WCAG fallback-kedja, speglar parser::extract_label)
-    pub fn extract_label(&self, key: NodeKey) -> String {
+    /// Label-extraktion med pre-extraherad text (undviker dubbla extract_text)
+    pub fn extract_label_with_text(&self, key: NodeKey, precomputed_text: &str) -> String {
         // 1. aria-label
         if let Some(label) = self.get_attr(key, "aria-label") {
             let trimmed = label.trim();
@@ -667,7 +679,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 2. aria-labelledby
         if let Some(labelledby) = self.get_attr(key, "aria-labelledby") {
             let trimmed = labelledby.trim();
@@ -675,7 +686,6 @@ impl ArenaDom {
                 return format!("[ref:{}]", trimmed);
             }
         }
-
         // 3. placeholder
         if let Some(placeholder) = self.get_attr(key, "placeholder") {
             let trimmed = placeholder.trim();
@@ -683,7 +693,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 4. alt-text
         if let Some(alt) = self.get_attr(key, "alt") {
             let trimmed = alt.trim();
@@ -691,7 +700,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 5. title-attribut
         if let Some(title) = self.get_attr(key, "title") {
             let trimmed = title.trim();
@@ -699,15 +707,12 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
-        // 6. Inre text
-        let inner = self.extract_text(key);
-        let trimmed = inner.trim();
+        // 6. Inre text (pre-extraherad)
+        let trimmed = precomputed_text.trim();
         if !trimmed.is_empty() {
             let truncated: String = trimmed.chars().take(80).collect();
             return truncated;
         }
-
         // 7. name-attribut
         if let Some(name) = self.get_attr(key, "name") {
             let trimmed = name.trim();
@@ -715,8 +720,14 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         String::new()
+    }
+
+    /// Label-extraktion (convenience wrapper som extraherar text internt, används i tester)
+    #[cfg(test)]
+    pub fn extract_label(&self, key: NodeKey) -> String {
+        let text = self.extract_text(key);
+        self.extract_label_with_text(key, &text)
     }
 
     /// Extrahera sidtitel (speglar semantic::extract_title)

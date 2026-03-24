@@ -15,34 +15,36 @@ pub fn parse_html(html: &str) -> RcDom {
 const TEXT_SKIP_TAGS: &[&str] = &["script", "style", "noscript", "template"];
 
 pub fn extract_text(handle: &Handle) -> String {
-    let mut text = String::new();
+    let mut buf = String::new();
+    extract_text_into(handle, &mut buf);
+    buf
+}
 
+/// Samla text i en delad buffer — undviker String-allokering per rekursiv nivå
+fn extract_text_into(handle: &Handle, buf: &mut String) {
     match &handle.data {
         NodeData::Text { contents } => {
-            let t = contents.borrow().to_string();
+            let t = contents.borrow();
             let trimmed = t.trim();
             if !trimmed.is_empty() {
-                text.push_str(trimmed);
-                text.push(' ');
+                buf.push_str(trimmed);
+                buf.push(' ');
             }
         }
         NodeData::Element { name, .. } => {
-            // Skippa script/style/noscript — deras text är kod, inte innehåll
             if TEXT_SKIP_TAGS.contains(&name.local.as_ref()) {
-                return text;
+                return;
             }
             for child in handle.children.borrow().iter() {
-                text.push_str(&extract_text(child));
+                extract_text_into(child, buf);
             }
         }
         _ => {
             for child in handle.children.borrow().iter() {
-                text.push_str(&extract_text(child));
+                extract_text_into(child, buf);
             }
         }
     }
-
-    text
 }
 
 /// Hämta ett specifikt attributvärde från ett element
@@ -219,18 +221,32 @@ pub fn is_likely_visible_cached(cache: &AttrCache) -> bool {
 }
 
 /// Avgör om en inline style-sträng döljer elementet
+///
+/// Zero-allocation: jämför direkt på bytes med ASCII case-insensitive matching,
+/// hoppar över whitespace utan att bygga ny sträng.
 fn is_style_hidden(style: &str) -> bool {
-    let normalized: String = style
-        .to_lowercase()
-        .chars()
-        .filter(|c| !c.is_whitespace())
+    // Bygg normaliserad vy utan allokering: skippa whitespace, ASCII-lowercase
+    let norm_bytes: Vec<u8> = style
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace())
+        .map(|b| b.to_ascii_lowercase())
         .collect();
-    normalized.contains("display:none")
-        || normalized.contains("visibility:hidden")
-        || normalized.contains("opacity:0")
-        || normalized.contains("left:-9999")
-        || normalized.contains("left:-10000")
-        || normalized.contains("clip:rect(0")
+    let norm = norm_bytes.as_slice();
+
+    contains_bytes(norm, b"display:none")
+        || contains_bytes(norm, b"visibility:hidden")
+        || contains_bytes(norm, b"opacity:0")
+        || contains_bytes(norm, b"left:-9999")
+        || contains_bytes(norm, b"left:-10000")
+        || contains_bytes(norm, b"clip:rect(0")
+}
+
+/// Snabb byte-slice contains (undviker UTF-8 overhead)
+#[inline]
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// CTA-nyckelord som indikerar call-to-action-knappar
@@ -266,8 +282,10 @@ pub fn infer_role(handle: &Handle) -> String {
     infer_role_cached(handle, &cache)
 }
 
-/// Snabb rolldetektering med förextraherade attribut
-pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
+/// Rolldetektering med pre-extraherad text (undviker dubbla extract_text-anrop)
+///
+/// Om `precomputed_text` anges används den istället för att anropa extract_text.
+pub fn infer_role_with_text(cache: &AttrCache, precomputed_text: &str) -> String {
     // ARIA-roll har högst prioritet
     if let Some(ref role) = cache.role {
         if !role.is_empty() {
@@ -312,7 +330,6 @@ pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
 
     // Heuristik: Schema.org product_card
     if let Some(ref itemtype) = cache.itemtype {
-        // Case-insensitive contains utan allokering
         let it_lower_buf: String;
         let it_lower = if itemtype.is_ascii() {
             it_lower_buf = itemtype.to_ascii_lowercase();
@@ -325,7 +342,6 @@ pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
             return "product_card".to_string();
         }
     }
-    // Dataattribut som indikerar produktkort — redan cachade som booleans
     if cache.has_data_product_id || cache.has_data_product || cache.has_data_item_id {
         if let Some(ref class) = cache.class {
             let cl = class.to_ascii_lowercase();
@@ -350,13 +366,12 @@ pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
     };
 
     if base_role == "button" || base_role == "link" {
-        let text = extract_text(handle).to_lowercase();
+        let text_lower = precomputed_text.to_ascii_lowercase();
         for kw in CTA_KEYWORDS {
-            if text.contains(kw) {
+            if text_lower.contains(kw) {
                 return "cta".to_string();
             }
         }
-        // CSS-klasser som antyder CTA
         if class_lower.contains("cta")
             || class_lower.contains("add-to-cart")
             || class_lower.contains("buy-btn")
@@ -367,16 +382,23 @@ pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
     }
 
     // Heuristik: pristext — spans/divs med valutatecken + siffror
-    if matches!(base_role, "text" | "generic") && looks_like_price(handle, &class_lower, cache) {
+    if matches!(base_role, "text" | "generic")
+        && looks_like_price_from_text(precomputed_text, &class_lower, cache)
+    {
         return "price".to_string();
     }
 
     base_role.to_string()
 }
 
-/// Kontrollera om ett elements text ser ut som ett pris
-fn looks_like_price(handle: &Handle, class_lower: &str, cache: &AttrCache) -> bool {
+/// Snabb rolldetektering med förextraherade attribut (legacy wrapper)
+pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
     let text = extract_text(handle);
+    infer_role_with_text(cache, &text)
+}
+
+/// Kontrollera om pre-extraherad text ser ut som ett pris
+fn looks_like_price_from_text(text: &str, class_lower: &str, cache: &AttrCache) -> bool {
     let trimmed = text.trim();
     // Tomt eller för långt → inte pris
     if trimmed.is_empty() || trimmed.len() > 40 {
@@ -461,6 +483,11 @@ pub fn extract_label(handle: &Handle) -> String {
 
 /// Snabb label-extraktion med förextraherade attribut
 pub fn extract_label_cached(handle: &Handle, cache: &AttrCache) -> String {
+    extract_label_with_text(cache, &extract_text(handle))
+}
+
+/// Label-extraktion med pre-extraherad text (undviker dubbla extract_text-anrop)
+pub fn extract_label_with_text(cache: &AttrCache, inner_text: &str) -> String {
     // 1. aria-label
     if let Some(ref label) = cache.aria_label {
         let trimmed = label.trim();
@@ -501,8 +528,8 @@ pub fn extract_label_cached(handle: &Handle, cache: &AttrCache) -> String {
         }
     }
 
-    // 6. Inre text (WCAG-fallback)
-    let inner = extract_text(handle);
+    // 6. Inre text (WCAG-fallback) — använd pre-extraherad text
+    let inner = inner_text;
     let trimmed = inner.trim();
     if !trimmed.is_empty() {
         // Begränsa till 80 tecken

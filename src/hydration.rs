@@ -49,6 +49,19 @@ pub struct HydrationResult {
 /// Försöker extrahera hydration-data från HTML. Returnerar None om ingen
 /// känd ramverks-data hittades.
 pub fn extract_hydration_state(html: &str) -> Option<HydrationData> {
+    // Snabb pre-check: om HTML saknar typiska hydration-markörer, skippa all scanning
+    if !html.contains("__NEXT_DATA__")
+        && !html.contains("__NUXT__")
+        && !html.contains("__remixContext")
+        && !html.contains("__GATSBY")
+        && !html.contains("__APOLLO_STATE__")
+        && !html.contains("type=\"application/json\"")
+        && !html.contains("q:container")
+        && !html.contains("data-astro")
+    {
+        return None;
+    }
+
     // Prova varje ramverk i prioritetsordning (vanligast först)
     if let Some(data) = extract_next_data(html) {
         return Some(data);
