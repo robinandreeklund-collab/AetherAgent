@@ -9,8 +9,7 @@ Real, unmodified tests from https://github.com/web-platform-tests/wpt run direct
 
 | Suite | Cases | Passed | Rate | Date |
 |-------|-------|--------|------|------|
-| **dom/** (total) | 1,140 | 211 | **18.5%** | 2026-03-24 |
-| dom/nodes | 1,027 | 164 | 16.0% | 2026-03-24 |
+| **dom/** (total) | 1,152 | 343 | **29.8%** | 2026-03-24 |
 
 Run WPT yourself:
 ```bash
