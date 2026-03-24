@@ -5,6 +5,174 @@
  * Laddas före testharness.js.
  */
 
+// ─── CharacterData: .data, .length, .substringData, .replaceData, etc. ──────
+// Text (nodeType=3) och Comment (nodeType=8) måste ha CharacterData-metoder
+(function() {
+  if (typeof document === 'undefined') return;
+
+  function patchCharacterData(node) {
+    if (!node || typeof node !== 'object') return node;
+    var nt = node.nodeType;
+    if (nt !== 3 && nt !== 8) return node;
+
+    // .data getter/setter — alias för textContent
+    if (!('data' in node)) {
+      Object.defineProperty(node, 'data', {
+        get: function() { return this.textContent || ''; },
+        set: function(val) { this.textContent = String(val); },
+        configurable: true
+      });
+    }
+
+    // .length
+    if (!('length' in node)) {
+      Object.defineProperty(node, 'length', {
+        get: function() { return (this.data || '').length; },
+        configurable: true
+      });
+    }
+
+    // .nodeValue — alias för data
+    if (!('nodeValue' in node)) {
+      Object.defineProperty(node, 'nodeValue', {
+        get: function() { return this.data; },
+        set: function(val) { this.data = val; },
+        configurable: true
+      });
+    }
+
+    // .substringData(offset, count)
+    if (!node.substringData) {
+      node.substringData = function(offset, count) {
+        if (arguments.length < 2) throw new TypeError("Not enough arguments");
+        var d = this.data;
+        offset = offset >>> 0; // ToUint32 then back
+        if (offset > d.length) {
+          throw new DOMException("Offset is out of range", "IndexSizeError");
+        }
+        count = count >>> 0;
+        return d.substring(offset, offset + count);
+      };
+    }
+
+    // .appendData(data)
+    if (!node.appendData) {
+      node.appendData = function(data) {
+        this.data += String(data);
+      };
+    }
+
+    // .insertData(offset, data)
+    if (!node.insertData) {
+      node.insertData = function(offset, data) {
+        var d = this.data;
+        offset = offset >>> 0;
+        if (offset > d.length) {
+          throw new DOMException("Offset is out of range", "IndexSizeError");
+        }
+        this.data = d.substring(0, offset) + String(data) + d.substring(offset);
+      };
+    }
+
+    // .deleteData(offset, count)
+    if (!node.deleteData) {
+      node.deleteData = function(offset, count) {
+        var d = this.data;
+        offset = offset >>> 0;
+        if (offset > d.length) {
+          throw new DOMException("Offset is out of range", "IndexSizeError");
+        }
+        count = count >>> 0;
+        var end = Math.min(offset + count, d.length);
+        this.data = d.substring(0, offset) + d.substring(end);
+      };
+    }
+
+    // .replaceData(offset, count, data)
+    if (!node.replaceData) {
+      node.replaceData = function(offset, count, data) {
+        var d = this.data;
+        offset = offset >>> 0;
+        if (offset > d.length) {
+          throw new DOMException("Offset is out of range", "IndexSizeError");
+        }
+        count = count >>> 0;
+        var end = Math.min(offset + count, d.length);
+        this.data = d.substring(0, offset) + String(data) + d.substring(end);
+      };
+    }
+
+    return node;
+  }
+
+  globalThis.__patchCharacterData = patchCharacterData;
+})();
+
+// ─── document.implementation ─────────────────────────────────────────────────
+// DOMImplementation med createDocument, createHTMLDocument, createDocumentType
+(function() {
+  if (typeof document === 'undefined') return;
+  if (!document.implementation) {
+    document.implementation = {};
+  }
+  var impl = document.implementation;
+
+  if (!impl.createHTMLDocument) {
+    impl.createHTMLDocument = function(title) {
+      // Returnera ett minimalt dokument-liknande objekt
+      var doc = {
+        nodeType: 9,
+        nodeName: '#document',
+        childNodes: [],
+        children: [],
+        documentElement: null,
+        head: null,
+        body: null,
+        title: title || '',
+        implementation: document.implementation,
+        createElement: document.createElement.bind(document),
+        createTextNode: document.createTextNode.bind(document),
+        createComment: document.createComment.bind(document),
+        createDocumentFragment: document.createDocumentFragment.bind(document),
+        getElementById: function() { return null; },
+        querySelector: function() { return null; },
+        querySelectorAll: function() { return []; },
+        getElementsByClassName: function() { return []; },
+        getElementsByTagName: function() { return []; },
+        addEventListener: function() {},
+        removeEventListener: function() {},
+        dispatchEvent: function() { return true; }
+      };
+      return doc;
+    };
+  }
+
+  if (!impl.createDocument) {
+    impl.createDocument = function(namespace, qualifiedName, doctype) {
+      var doc = impl.createHTMLDocument('');
+      doc.contentType = namespace ? 'application/xml' : 'text/html';
+      return doc;
+    };
+  }
+
+  if (!impl.createDocumentType) {
+    impl.createDocumentType = function(qualifiedName, publicId, systemId) {
+      return {
+        nodeType: 10,
+        nodeName: qualifiedName || '',
+        name: qualifiedName || '',
+        publicId: publicId || '',
+        systemId: systemId || '',
+        ownerDocument: document
+      };
+    };
+  }
+
+  if (!impl.hasFeature) {
+    impl.hasFeature = function() { return true; };
+  }
+})();
+
 // ─── document.title ─────────────────────────────────────────────────────────
 // Många WPT-tester läser document.title för att identifiera sig.
 (function() {
@@ -200,9 +368,19 @@
   // Enklaste: lägg till som polyfill-funktion som WPT-testerna kan använda.
   if (typeof document === 'undefined') return;
 
+  // Konvertera argument till nod per spec: strings/null/undefined/numbers → textNode
+  function toNode(arg) {
+    if (arg && typeof arg === 'object' && (arg.nodeType || arg.appendChild)) return arg;
+    return document.createTextNode(String(arg));
+  }
+
   // Utility: lägg till ChildNode-metoder på ett element-objekt
   function patchChildNode(el) {
     if (!el || typeof el !== 'object') return el;
+    // Sätt rätt prototypkedja (instanceof HTMLDivElement etc.)
+    if (typeof __patchPrototype === 'function') __patchPrototype(el);
+    // CharacterData-metoder för text/comment-noder
+    if (typeof __patchCharacterData === 'function') __patchCharacterData(el);
 
     if (!el.remove) {
       el.remove = function() {
@@ -217,11 +395,7 @@
         var parent = this.parentNode;
         if (!parent) return;
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
-          parent.insertBefore(node, this);
+          parent.insertBefore(toNode(arguments[i]), this);
         }
       };
     }
@@ -232,10 +406,7 @@
         if (!parent) return;
         var ref = this.nextSibling;
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
+          var node = toNode(arguments[i]);
           if (ref) {
             parent.insertBefore(node, ref);
           } else {
@@ -252,10 +423,7 @@
         var ref = this.nextSibling;
         parent.removeChild(this);
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
+          var node = toNode(arguments[i]);
           if (ref) {
             parent.insertBefore(node, ref);
           } else {
@@ -269,10 +437,7 @@
       el.prepend = function() {
         var ref = this.firstChild;
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
+          var node = toNode(arguments[i]);
           if (ref) {
             this.insertBefore(node, ref);
           } else {
@@ -285,10 +450,7 @@
     if (!el.append) {
       el.append = function() {
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
+          var node = toNode(arguments[i]);
           this.appendChild(node);
         }
       };
@@ -300,10 +462,7 @@
           this.removeChild(this.firstChild);
         }
         for (var i = 0; i < arguments.length; i++) {
-          var node = arguments[i];
-          if (typeof node === 'string') {
-            node = document.createTextNode(node);
-          }
+          var node = toNode(arguments[i]);
           this.appendChild(node);
         }
       };
@@ -380,6 +539,42 @@
   globalThis.__patchChildNode = function(el) {
     if (!el || typeof el !== 'object') return el;
     el = _origPatch(el);
+
+    // toggleAttribute(name [, force])
+    if (!el.toggleAttribute) {
+      el.toggleAttribute = function(name, force) {
+        if (arguments.length > 1) {
+          if (force) { this.setAttribute(name, ''); return true; }
+          else { this.removeAttribute(name); return false; }
+        }
+        if (this.hasAttribute(name)) { this.removeAttribute(name); return false; }
+        else { this.setAttribute(name, ''); return true; }
+      };
+    }
+
+    // getAttributeNode(name) — returnerar Attr-liknande objekt
+    if (!el.getAttributeNode) {
+      el.getAttributeNode = function(name) {
+        if (!this.hasAttribute(name)) return null;
+        var val = this.getAttribute(name);
+        return {
+          name: name.toLowerCase(),
+          localName: name.toLowerCase(),
+          value: val,
+          namespaceURI: null,
+          prefix: null,
+          specified: true,
+          ownerElement: this,
+          nodeType: 2,
+          nodeName: name.toLowerCase()
+        };
+      };
+    }
+
+    // getAttributeNames()
+    if (!el.getAttributeNames && el.getAttribute) {
+      // Kan inte implementera utan tillgång till attributlistan — hoppa
+    }
 
     if (!el.insertAdjacentElement) {
       el.insertAdjacentElement = function(position, element) {
@@ -464,41 +659,188 @@
   }
 })();
 
-// ─── HTMLElement typer ──────────────────────────────────────────────────────
-// WPT-tester kontrollerar ofta instanceof HTMLDivElement etc.
+// ─── DOM Type Hierarchy + instanceof-stöd ───────────────────────────────────
+// Bygger en riktig prototypkedja: HTMLDivElement → HTMLElement → Element → Node → EventTarget
 (function() {
-  var types = [
-    'HTMLElement', 'HTMLDivElement', 'HTMLSpanElement', 'HTMLParagraphElement',
-    'HTMLAnchorElement', 'HTMLButtonElement', 'HTMLInputElement',
-    'HTMLFormElement', 'HTMLSelectElement', 'HTMLOptionElement',
-    'HTMLTextAreaElement', 'HTMLImageElement', 'HTMLTableElement',
-    'HTMLTableRowElement', 'HTMLTableCellElement', 'HTMLListElement',
-    'HTMLHeadingElement', 'HTMLLabelElement', 'HTMLFieldSetElement',
-    'HTMLLegendElement', 'HTMLUListElement', 'HTMLOListElement',
-    'HTMLLIElement', 'HTMLPreElement', 'HTMLScriptElement',
-    'HTMLStyleElement', 'HTMLLinkElement', 'HTMLMetaElement',
-    'HTMLBodyElement', 'HTMLHeadElement', 'HTMLHtmlElement',
-    'HTMLBRElement', 'HTMLHRElement', 'HTMLIFrameElement',
-    'HTMLCanvasElement', 'HTMLVideoElement', 'HTMLAudioElement',
-    'HTMLSourceElement', 'HTMLTemplateElement', 'HTMLSlotElement',
-    'HTMLUnknownElement', 'HTMLDataElement', 'HTMLTimeElement',
-    'HTMLOutputElement', 'HTMLProgressElement', 'HTMLMeterElement',
-    'HTMLDetailsElement', 'HTMLSummaryElement', 'HTMLDialogElement',
-    'Text', 'Comment', 'DocumentFragment', 'Document',
-    'Element', 'CharacterData', 'Attr', 'NamedNodeMap',
-    'NodeList', 'HTMLCollection', 'DOMTokenList', 'DOMStringMap',
-    'CSSStyleDeclaration', 'Range', 'Selection',
-    'TreeWalker', 'NodeIterator', 'NodeFilter',
-    'MutationRecord', 'StaticRange', 'AbstractRange',
-    'XMLDocument', 'DocumentType', 'ProcessingInstruction',
-    'CDATASection'
-  ];
+  // Bas-konstruktorer med riktig prototypkedja
+  function EventTarget() {}
+  function NodeBase() {}
+  NodeBase.prototype = Object.create(EventTarget.prototype);
+  NodeBase.prototype.constructor = NodeBase;
 
-  types.forEach(function(name) {
-    if (typeof globalThis[name] === 'undefined') {
+  function ElementBase() {}
+  ElementBase.prototype = Object.create(NodeBase.prototype);
+  ElementBase.prototype.constructor = ElementBase;
+
+  function CharacterDataBase() {}
+  CharacterDataBase.prototype = Object.create(NodeBase.prototype);
+  CharacterDataBase.prototype.constructor = CharacterDataBase;
+
+  function HTMLElementBase() {}
+  HTMLElementBase.prototype = Object.create(ElementBase.prototype);
+  HTMLElementBase.prototype.constructor = HTMLElementBase;
+
+  // Registrera bas-typer (om inte redan definierade)
+  if (!globalThis.EventTarget) globalThis.EventTarget = EventTarget;
+  if (!globalThis.Node) {
+    globalThis.Node = NodeBase;
+    // Node-konstanter
+    Node.ELEMENT_NODE = 1; Node.ATTRIBUTE_NODE = 2; Node.TEXT_NODE = 3;
+    Node.CDATA_SECTION_NODE = 4; Node.PROCESSING_INSTRUCTION_NODE = 7;
+    Node.COMMENT_NODE = 8; Node.DOCUMENT_NODE = 9; Node.DOCUMENT_TYPE_NODE = 10;
+    Node.DOCUMENT_FRAGMENT_NODE = 11;
+    Node.DOCUMENT_POSITION_DISCONNECTED = 1; Node.DOCUMENT_POSITION_PRECEDING = 2;
+    Node.DOCUMENT_POSITION_FOLLOWING = 4; Node.DOCUMENT_POSITION_CONTAINS = 8;
+    Node.DOCUMENT_POSITION_CONTAINED_BY = 16; Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
+  }
+  if (!globalThis.Element) globalThis.Element = ElementBase;
+  if (!globalThis.CharacterData) globalThis.CharacterData = CharacterDataBase;
+  if (!globalThis.HTMLElement) globalThis.HTMLElement = HTMLElementBase;
+
+  // Tagnamn → konstruktor-mappning
+  var tagMap = {};
+  var htmlTypes = {
+    'HTMLDivElement': ['div'],
+    'HTMLSpanElement': ['span'],
+    'HTMLParagraphElement': ['p'],
+    'HTMLAnchorElement': ['a'],
+    'HTMLButtonElement': ['button'],
+    'HTMLInputElement': ['input'],
+    'HTMLFormElement': ['form'],
+    'HTMLSelectElement': ['select'],
+    'HTMLOptionElement': ['option'],
+    'HTMLTextAreaElement': ['textarea'],
+    'HTMLImageElement': ['img'],
+    'HTMLTableElement': ['table'],
+    'HTMLTableRowElement': ['tr'],
+    'HTMLTableCellElement': ['td', 'th'],
+    'HTMLTableSectionElement': ['thead', 'tbody', 'tfoot'],
+    'HTMLTableCaptionElement': ['caption'],
+    'HTMLTableColElement': ['col', 'colgroup'],
+    'HTMLHeadingElement': ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+    'HTMLLabelElement': ['label'],
+    'HTMLFieldSetElement': ['fieldset'],
+    'HTMLLegendElement': ['legend'],
+    'HTMLUListElement': ['ul'],
+    'HTMLOListElement': ['ol'],
+    'HTMLLIElement': ['li'],
+    'HTMLDListElement': ['dl'],
+    'HTMLPreElement': ['pre', 'listing', 'xmp'],
+    'HTMLScriptElement': ['script'],
+    'HTMLStyleElement': ['style'],
+    'HTMLLinkElement': ['link'],
+    'HTMLMetaElement': ['meta'],
+    'HTMLBaseElement': ['base'],
+    'HTMLBodyElement': ['body'],
+    'HTMLHeadElement': ['head'],
+    'HTMLHtmlElement': ['html'],
+    'HTMLBRElement': ['br'],
+    'HTMLHRElement': ['hr'],
+    'HTMLIFrameElement': ['iframe'],
+    'HTMLCanvasElement': ['canvas'],
+    'HTMLVideoElement': ['video'],
+    'HTMLAudioElement': ['audio'],
+    'HTMLSourceElement': ['source'],
+    'HTMLTemplateElement': ['template'],
+    'HTMLSlotElement': ['slot'],
+    'HTMLDataElement': ['data'],
+    'HTMLTimeElement': ['time'],
+    'HTMLOutputElement': ['output'],
+    'HTMLProgressElement': ['progress'],
+    'HTMLMeterElement': ['meter'],
+    'HTMLDetailsElement': ['details'],
+    'HTMLSummaryElement': ['summary'],
+    'HTMLDialogElement': ['dialog'],
+    'HTMLEmbedElement': ['embed'],
+    'HTMLObjectElement': ['object'],
+    'HTMLParamElement': ['param'],
+    'HTMLTrackElement': ['track'],
+    'HTMLAreaElement': ['area'],
+    'HTMLMapElement': ['map'],
+    'HTMLOptGroupElement': ['optgroup'],
+    'HTMLDataListElement': ['datalist'],
+    'HTMLModElement': ['ins', 'del'],
+    'HTMLQuoteElement': ['blockquote', 'q'],
+    'HTMLTitleElement': ['title'],
+    'HTMLFontElement': ['font'],
+    'HTMLDirectoryElement': ['dir'],
+    'HTMLFrameElement': ['frame'],
+    'HTMLFrameSetElement': ['frameset'],
+    'HTMLMarqueeElement': ['marquee'],
+    'HTMLMenuElement': ['menu'],
+    'HTMLPictureElement': ['picture'],
+    'HTMLUnknownElement': []
+  };
+
+  Object.keys(htmlTypes).forEach(function(name) {
+    if (!globalThis[name]) {
+      var Ctor = function() {};
+      Ctor.prototype = Object.create(HTMLElementBase.prototype);
+      Ctor.prototype.constructor = Ctor;
+      globalThis[name] = Ctor;
+    }
+    htmlTypes[name].forEach(function(tag) {
+      tagMap[tag.toUpperCase()] = globalThis[name];
+    });
+  });
+
+  // Icke-HTML-typer
+  var nonHtml = {
+    'Text': CharacterDataBase,
+    'Comment': CharacterDataBase,
+    'DocumentFragment': NodeBase,
+    'Document': NodeBase,
+    'DocumentType': NodeBase,
+    'ProcessingInstruction': CharacterDataBase,
+    'CDATASection': CharacterDataBase,
+    'Attr': NodeBase,
+    'XMLDocument': NodeBase
+  };
+  Object.keys(nonHtml).forEach(function(name) {
+    if (!globalThis[name]) {
+      var Ctor = function() {};
+      Ctor.prototype = Object.create(nonHtml[name].prototype);
+      Ctor.prototype.constructor = Ctor;
+      globalThis[name] = Ctor;
+    }
+  });
+
+  // Utility-typer
+  ['NamedNodeMap','NodeList','HTMLCollection','DOMTokenList','DOMStringMap',
+   'CSSStyleDeclaration','Range','Selection','TreeWalker','NodeIterator',
+   'NodeFilter','MutationRecord','StaticRange','AbstractRange'
+  ].forEach(function(name) {
+    if (!globalThis[name]) {
       globalThis[name] = function() {};
       globalThis[name].prototype = {};
       globalThis[name].prototype.constructor = globalThis[name];
     }
   });
+
+  // ─── setPrototypeOf på element-objekt ─────────────────────────────
+  // make_element_object skapar plain objects — vi patchas via __patchProto
+  globalThis.__tagToConstructor = tagMap;
+  globalThis.__patchPrototype = function(el) {
+    if (!el || typeof el !== 'object' || !el.tagName) return el;
+    var nt = el.nodeType;
+    var proto = null;
+    if (nt === 1) {
+      // Element — välj via tagName
+      proto = tagMap[el.tagName] || globalThis.HTMLUnknownElement;
+    } else if (nt === 3) {
+      proto = globalThis.Text;
+    } else if (nt === 8) {
+      proto = globalThis.Comment;
+    } else if (nt === 9) {
+      proto = globalThis.Document;
+    } else if (nt === 11) {
+      proto = globalThis.DocumentFragment;
+    } else if (nt === 10) {
+      proto = globalThis.DocumentType;
+    }
+    if (proto && proto.prototype) {
+      try { Object.setPrototypeOf(el, proto.prototype); } catch(e) {}
+    }
+    return el;
+  };
 })();

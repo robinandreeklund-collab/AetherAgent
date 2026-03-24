@@ -1669,20 +1669,55 @@ struct ReplaceChild {
 }
 impl JsHandler for ReplaceChild {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Spec: replaceChild(null, ...) och replaceChild(.., null) kastar TypeError
         let new_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         let old_key = match args.get(1).and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         {
             let mut s = self.state.borrow_mut();
-            if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                if let Some(pos) = node.children.iter().position(|&c| c == old_key) {
-                    node.children[pos] = new_key;
+            // Hitta gammal child — NotFoundError om den inte finns
+            let pos = s
+                .arena
+                .nodes
+                .get(self.key)
+                .and_then(|n| n.children.iter().position(|&c| c == old_key));
+            let pos = match pos {
+                Some(p) => p,
+                None => {
+                    drop(s);
+                    return Err(ctx.throw(
+                        rquickjs::String::from_str(
+                            ctx.clone(),
+                            "NotFoundError: old child is not a child of this node",
+                        )?
+                        .into(),
+                    ));
                 }
+            };
+            // Detach new_key från gammal parent
+            if let Some(old_parent) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+                if let Some(parent_node) = s.arena.nodes.get_mut(old_parent) {
+                    parent_node.children.retain(|&c| c != new_key);
+                }
+            }
+            // Ersätt
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children[pos] = new_key;
             }
             if let Some(n) = s.arena.nodes.get_mut(new_key) {
                 n.parent = Some(self.key);
@@ -4809,6 +4844,99 @@ enum AttrOp {
 }
 
 /// Matcha en enkel selektor (utan kombinatorer)
+/// Hitta nästa oescaped delimiter i CSS-selektor.
+/// Hoppar över escaped tecken (\X, \XXXXXX).
+fn find_unescaped_delimiter(s: &str, delimiters: &[char]) -> usize {
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 1; // hoppa över backslash
+                    // Hoppa över hex-sekvens (1-6 hex + optional whitespace)
+            if i < bytes.len() && bytes[i].is_ascii_hexdigit() {
+                let mut hex_count = 0;
+                while i < bytes.len() && bytes[i].is_ascii_hexdigit() && hex_count < 6 {
+                    i += 1;
+                    hex_count += 1;
+                }
+                // Optional trailing whitespace
+                if i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') {
+                    i += 1;
+                }
+            } else if i < bytes.len() {
+                i += 1; // hoppa över escaped tecken
+            }
+            continue;
+        }
+        // Kolla om det är en delimiter (men bara om vi är på en char boundary)
+        if s.is_char_boundary(i) {
+            let ch = s[i..].chars().next().unwrap();
+            if delimiters.contains(&ch) {
+                return i;
+            }
+            i += ch.len_utf8();
+        } else {
+            i += 1;
+        }
+    }
+    s.len()
+}
+
+/// CSS escape-unescape per CSS syntax spec.
+/// Hanterar: \XX (hex 1-6 siffror + optional space), \c (escaped tecken)
+fn css_unescape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+        // Backslash — kolla nästa tecken
+        match chars.peek() {
+            None => {
+                // Backslash i slutet — ignorera per spec
+            }
+            Some(&next) if next.is_ascii_hexdigit() => {
+                // Hex escape: 1-6 hex siffror
+                let mut hex = String::with_capacity(6);
+                for _ in 0..6 {
+                    if let Some(&h) = chars.peek() {
+                        if h.is_ascii_hexdigit() {
+                            hex.push(h);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // Optional trailing whitespace (konsumeras)
+                if let Some(&ws) = chars.peek() {
+                    if ws == ' ' || ws == '\t' || ws == '\n' || ws == '\r' || ws == '\x0C' {
+                        chars.next();
+                    }
+                }
+                if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                    if cp == 0 || (0xD800..=0xDFFF).contains(&cp) || cp > 0x10FFFF {
+                        result.push('\u{FFFD}');
+                    } else if let Some(ch) = char::from_u32(cp) {
+                        result.push(ch);
+                    } else {
+                        result.push('\u{FFFD}');
+                    }
+                }
+            }
+            Some(_) => {
+                // Escaped tecken — ta bokstavligt
+                result.push(chars.next().unwrap());
+            }
+        }
+    }
+    result
+}
+
 fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
     let node = match arena.nodes.get(key) {
         Some(n) if n.node_type == NodeType::Element => n,
@@ -4909,15 +5037,11 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     // Parsea resterande delar
     while !remaining.is_empty() {
         if let Some(rest) = remaining.strip_prefix('#') {
-            let end = rest
-                .find(|c: char| ['.', '[', ':'].contains(&c))
-                .unwrap_or(rest.len());
+            let end = find_unescaped_delimiter(rest, &['.', '[', ':']);
             required_id = Some(&rest[..end]);
             remaining = &rest[end..];
         } else if let Some(rest) = remaining.strip_prefix('.') {
-            let end = rest
-                .find(|c: char| ['#', '.', '[', ':'].contains(&c))
-                .unwrap_or(rest.len());
+            let end = find_unescaped_delimiter(rest, &['#', '.', '[', ':']);
             required_classes.push(&rest[..end]);
             remaining = &rest[end..];
         } else if let Some(rest) = remaining.strip_prefix('[') {
@@ -5044,14 +5168,16 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     let _ = is_universal;
 
     if let Some(id) = required_id {
-        if node.get_attr("id") != Some(id) {
+        let unesc = css_unescape(id);
+        if node.get_attr("id") != Some(unesc.as_str()) {
             return false;
         }
     }
     for cls in &required_classes {
+        let unesc = css_unescape(cls);
         let has = node
             .get_attr("class")
-            .map(|c| c.split_whitespace().any(|x| x == *cls))
+            .map(|c| split_ascii_whitespace(c).any(|x| x == unesc))
             .unwrap_or(false);
         if !has {
             return false;
@@ -5569,15 +5695,27 @@ fn find_all_matching(arena: &ArenaDom, key: NodeKey, selector: &str, results: &m
 }
 
 /// Samla alla element med given klass
+/// Splitta sträng på ASCII whitespace per HTML-spec (space, tab, LF, FF, CR).
+/// Unicode-whitespace som \u{00A0} (NBSP) är INTE separatorer — de är giltiga class-tecken.
+fn split_ascii_whitespace(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0C' | '\r'))
+        .filter(|s| !s.is_empty())
+}
+
 fn find_all_by_class(arena: &ArenaDom, key: NodeKey, class: &str, results: &mut Vec<NodeKey>) {
     let node = match arena.nodes.get(key) {
         Some(n) => n,
         None => return,
     };
     if node.node_type == NodeType::Element {
-        if let Some(classes) = node.get_attr("class") {
-            if classes.split_whitespace().any(|c| c == class) {
-                results.push(key);
+        if let Some(attr_classes) = node.get_attr("class") {
+            // getElementsByClassName("a b") matchar element med BÅDA "a" och "b"
+            let search_tokens: Vec<&str> = split_ascii_whitespace(class).collect();
+            if !search_tokens.is_empty() {
+                let elem_tokens: Vec<&str> = split_ascii_whitespace(attr_classes).collect();
+                if search_tokens.iter().all(|t| elem_tokens.contains(t)) {
+                    results.push(key);
+                }
             }
         }
     }
