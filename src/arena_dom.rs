@@ -151,25 +151,25 @@ impl ArenaDom {
     /// Rekursiv konvertering av en Handle till arena-noder
     fn convert_handle(&mut self, handle: &Handle) -> NodeKey {
         let (node_type, tag, text, attrs) = match &handle.data {
-            NodeData::Document => (NodeType::Document, None, None, HashMap::new()),
+            NodeData::Document => (NodeType::Document, None, None, HashMap::default()),
             NodeData::Element { name, attrs, .. } => {
                 let tag = name.local.to_string();
-                let attributes: HashMap<String, String> = attrs
-                    .borrow()
-                    .iter()
-                    .map(|a| (a.name.local.to_string(), a.value.to_string()))
-                    .collect();
+                let raw_attrs = attrs.borrow();
+                let mut attributes = HashMap::with_capacity(raw_attrs.len());
+                for a in raw_attrs.iter() {
+                    attributes.insert(a.name.local.to_string(), a.value.to_string());
+                }
                 (NodeType::Element, Some(tag), None, attributes)
             }
             NodeData::Text { contents } => {
                 let t = contents.borrow().to_string();
-                (NodeType::Text, None, Some(t), HashMap::new())
+                (NodeType::Text, None, Some(t), HashMap::default())
             }
             NodeData::Comment { contents } => {
                 let t = contents.to_string();
-                (NodeType::Comment, None, Some(t), HashMap::new())
+                (NodeType::Comment, None, Some(t), HashMap::default())
             }
-            _ => (NodeType::Other, None, None, HashMap::new()),
+            _ => (NodeType::Other, None, None, HashMap::default()),
         };
 
         let key = self.nodes.insert(DomNode {
