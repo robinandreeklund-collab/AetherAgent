@@ -42,8 +42,10 @@ struct PooledRuntime {
     /// Runtime måste leva minst lika länge som context — hålls vid liv här
     _runtime: Runtime,
     context: Context,
-    /// Delad deadline (epoch-millis). Interrupt-handlern läser denna atomiskt.
-    deadline_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Delad deadline i µs relativt baseline Instant. u64::MAX = ingen timeout.
+    deadline_us: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Referenstidpunkt — alla deadlines räknas relativt denna
+    baseline: std::time::Instant,
 }
 
 #[cfg(feature = "js-eval")]
@@ -51,41 +53,23 @@ thread_local! {
     static POOLED_RT: std::cell::RefCell<Option<PooledRuntime>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Rensa globala variabler i QuickJS-context mellan anrop.
-/// Raderar alla icke-standard properties på globalThis.
+/// Snabb cleanup: bara rensa om globalThis har fler properties än standard (52 st).
+/// Undviker kostsam getOwnPropertyNames-loop i normalfallet.
 #[cfg(feature = "js-eval")]
 const CLEANUP_SCRIPT: &str = r#"
-(function() {
-    var keep = ['undefined','NaN','Infinity','globalThis',
-        'Object','Function','Error','EvalError','RangeError',
-        'ReferenceError','SyntaxError','TypeError','URIError',
-        'InternalError','AggregateError',
-        'parseInt','parseFloat','isNaN','isFinite',
-        'decodeURI','decodeURIComponent','encodeURI','encodeURIComponent',
-        'escape','unescape',
-        'NaN','Infinity','undefined',
-        'Math','JSON','Date','Number','String','Boolean','Symbol',
-        'Array','ArrayBuffer','SharedArrayBuffer','Uint8ClampedArray',
-        'Int8Array','Uint8Array','Int16Array','Uint16Array',
-        'Int32Array','Uint32Array','BigInt64Array','BigUint64Array',
-        'Float32Array','Float64Array','DataView',
-        'Map','Set','WeakMap','WeakSet',
-        'RegExp','Proxy','Reflect','Promise',
-        'BigInt','console','print','__loadScript'];
-    var names = Object.getOwnPropertyNames(globalThis);
-    for (var i = 0; i < names.length; i++) {
-        if (keep.indexOf(names[i]) === -1) {
-            try { delete globalThis[names[i]]; } catch(e) {}
-        }
-    }
+(function(){
+    var n=Object.getOwnPropertyNames(globalThis),i,s=52;
+    if(n.length<=s)return;
+    for(i=s;i<n.length;i++)try{delete globalThis[n[i]]}catch(e){}
 })();
 "#;
 
-/// Hämta eller skapa pool:ad Runtime+Context för denna tråd.
-/// Runtime+Context återanvänds — global state rensas via cleanup-script.
-/// Callback:en får en `Ctx<'_>` redo att köra eval().
+/// Intern: hämta/skapa pool:ad Runtime+Context och kör callback.
+/// `cleanup` styr om global state rensas innan eval (kostar ~100µs).
+/// `eval_js` skippar cleanup (allowlisten förhindrar sidoeffekter).
+/// `eval_js_batch` kör cleanup (snippets kan skapa variabler).
 #[cfg(feature = "js-eval")]
-fn pooled_eval<F, R>(f: F) -> R
+fn pooled_eval_inner<F, R>(cleanup: bool, f: F) -> R
 where
     F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
 {
@@ -98,19 +82,20 @@ where
             rt.set_max_stack_size(MAX_STACK_SIZE);
             rt.set_memory_limit(MAX_MEMORY);
 
-            let deadline_ms = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let deadline_clone = deadline_ms.clone();
+            // Interrupt-handler med Instant-baserad deadline (ingen SystemTime-overhead)
+            let deadline_us = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+            let deadline_clone = deadline_us.clone();
+
+            // Baseline Instant vid pool-creation — alla deadlines räknas relativt denna
+            let baseline = std::time::Instant::now();
+            let baseline_clone = baseline;
 
             rt.set_interrupt_handler(Some(Box::new(move || {
                 let dl = deadline_clone.load(std::sync::atomic::Ordering::Relaxed);
-                if dl == 0 {
-                    return false; // Ingen deadline satt
+                if dl == u64::MAX {
+                    return false;
                 }
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                now >= dl
+                baseline_clone.elapsed().as_micros() as u64 >= dl
             })));
 
             let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
@@ -118,35 +103,54 @@ where
             *opt = Some(PooledRuntime {
                 _runtime: rt,
                 context: ctx,
-                deadline_ms,
+                deadline_us,
+                baseline,
             });
         }
 
         let pooled = opt.as_ref().unwrap();
 
-        // Uppdatera deadline för detta anrop
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        pooled
-            .deadline_ms
-            .store(now_ms + MAX_EVAL_MS, std::sync::atomic::Ordering::Relaxed);
+        // Uppdatera deadline: nu + MAX_EVAL_MS (relativt baseline Instant)
+        let now_offset = pooled.baseline.elapsed().as_micros() as u64;
+        pooled.deadline_us.store(
+            now_offset + MAX_EVAL_MS * 1000,
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
-        // Rensa global state från förra anropet
-        pooled.context.with(|ctx| {
-            let _ = ctx.eval::<rquickjs::Value, _>(CLEANUP_SCRIPT);
-        });
+        // Rensa global state från förra anropet (om begärt)
+        if cleanup {
+            pooled.context.with(|ctx| {
+                let _ = ctx.eval::<rquickjs::Value, _>(CLEANUP_SCRIPT);
+            });
+        }
 
         let result = pooled.context.with(|ctx| f(&ctx));
 
-        // Rensa deadline efter eval (förhindra falska interrupts på nästa anrop)
+        // Avaktivera deadline (u64::MAX = ingen timeout)
         pooled
-            .deadline_ms
-            .store(0, std::sync::atomic::Ordering::Relaxed);
+            .deadline_us
+            .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
 
         result
     })
+}
+
+/// Pool:ad eval utan cleanup — för eval_js (allowlisten förhindrar sidoeffekter)
+#[cfg(feature = "js-eval")]
+fn pooled_eval<F, R>(f: F) -> R
+where
+    F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
+{
+    pooled_eval_inner(false, f)
+}
+
+/// Pool:ad eval med cleanup — för eval_js_batch (snippets kan skapa variabler)
+#[cfg(feature = "js-eval")]
+fn pooled_eval_with_cleanup<F, R>(f: F) -> R
+where
+    F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
+{
+    pooled_eval_inner(true, f)
 }
 
 /// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
@@ -814,8 +818,8 @@ pub fn eval_js(code: &str) -> JsEvalResult {
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
-    // Pool:ad Runtime, ny Context (delad mellan alla snippets i denna batch)
-    let results = pooled_eval(|ctx| {
+    // Pool:ad Runtime med cleanup (batch kan skapa variabler mellan snippets)
+    let results = pooled_eval_with_cleanup(|ctx| {
         let mut results = Vec::with_capacity(snippets.len());
         for code in snippets {
             let snippet_start = std::time::Instant::now();
