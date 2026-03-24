@@ -110,6 +110,20 @@
       doc.getElementsByTagNameNS = function(ns, tag) { return html.getElementsByTagNameNS ? html.getElementsByTagNameNS(ns, tag) : []; };
       doc.adoptNode = function(node) { return node; };
       doc.importNode = function(node, deep) { return node.cloneNode(deep); };
+      doc.createCDATASection = function(data) {
+        var node = document.createComment(data);
+        node.nodeType = 4; // CDATA_SECTION_NODE
+        node.nodeName = '#cdata-section';
+        return node;
+      };
+      doc.createProcessingInstruction = function(target, data) {
+        var node = document.createComment(data);
+        node.nodeType = 7;
+        node.nodeName = target;
+        node.target = target;
+        node.data = data;
+        return node;
+      };
       // Event delegation
       doc.addEventListener = function() {};
       doc.removeEventListener = function() {};
@@ -748,6 +762,24 @@
       return document.querySelectorAll(tag.toLowerCase());
     };
   }
+})();
+
+// ─── Document konstruktor → skapar riktig arena-backed doc ──────────────────
+(function() {
+  if (typeof document === 'undefined' || !document.implementation) return;
+  var _origDocProto = globalThis.Document ? globalThis.Document.prototype : {};
+  globalThis.Document = function Document() {
+    // new Document() → createHTMLDocument utan titel
+    var doc = document.implementation.createHTMLDocument('');
+    // Sätt prototype för instanceof
+    try { Object.setPrototypeOf(doc, _origDocProto); } catch(e) {}
+    return doc;
+  };
+  globalThis.Document.prototype = _origDocProto;
+  globalThis.Document.prototype.constructor = globalThis.Document;
+
+  // XMLDocument — alias
+  globalThis.XMLDocument = globalThis.Document;
 })();
 
 // ─── Patcha document.body/head/documentElement (pre-cache-skapade) ───────────
