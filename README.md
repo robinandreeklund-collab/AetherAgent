@@ -58,7 +58,7 @@ Every AI browser agent today faces the same trade-off:
 
 AetherAgent is the first engine built to occupy that empty quadrant: **fast *and* smart**.
 
-No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly — fetching pages, parsing HTML into semantic accessibility trees with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 ms per page and ~12 MB RAM. Built-in HTTP fetch with cookies, redirects, robots.txt compliance, and SSRF protection means AetherAgent works end-to-end: URL in, semantic tree out.
+No headless browser. No Chrome process. No V8. Just Rust compiled to WebAssembly — fetching pages, parsing HTML into semantic accessibility trees with goal-relevance scoring, prompt injection protection, and intent-aware actions — in under 1 ms per page and ~27 MB RAM. Built-in HTTP fetch with cookies, redirects, robots.txt compliance, and SSRF protection means AetherAgent works end-to-end: URL in, semantic tree out.
 
 ### Honest Positioning
 
@@ -69,7 +69,7 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Semantic tree with goal scoring | **Yes** | No | Partial | No |
 | Prompt injection protection | **Yes** | No | No | No |
 | Startup time | <1 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
-| Memory per instance | ~12 MB | ~150 MB | ~200 MB | ~30 MB |
+| Memory per instance | ~27 MB | ~150 MB | ~200 MB | ~30 MB |
 | Full JavaScript (V8) | No | Yes | Yes | No |
 | CSS rendering (Blitz) | **Yes** (opt) | Yes | Yes | No |
 | Embeddable in WASM | **Yes** | No | No | No |
