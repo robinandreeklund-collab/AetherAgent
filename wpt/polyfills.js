@@ -248,12 +248,18 @@
         this.cancelable = (opts && opts.cancelable) || false;
         this.defaultPrevented = false;
         this.target = null;
+        this.srcElement = null;
         this.currentTarget = null;
         this.eventPhase = 0;
         this.timeStamp = Date.now();
         this.isTrusted = false;
+        this.composed = false;
         this.detail = (opts && opts.detail) || null;
-        this.preventDefault = function() { this.defaultPrevented = true; };
+        this.view = null;
+        this.relatedTarget = null;
+        this.defaultPrevented = false;
+        this.returnValue = true;
+        this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
         this.stopPropagation = function() {};
         this.stopImmediatePropagation = function() {};
         this.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
@@ -294,7 +300,14 @@
     'dragevent': DragEvent,
     'errorevent': ErrorEvent,
     'clipboardevent': ClipboardEvent,
-    'submiteevent': SubmitEvent
+    'submitevent': SubmitEvent,
+    'devicemotionevent': DeviceMotionEvent,
+    'deviceorientationevent': DeviceOrientationEvent,
+    'gamepadevent': GamepadEvent,
+    'mediaquerylistevent': MediaQueryListEvent,
+    'formdataevent': FormDataEvent,
+    'promiserejectionevent': PromiseRejectionEvent,
+    'securitypolicyviolationevent': SecurityPolicyViolationEvent
   };
 
   document.createEvent = function(type) {
@@ -668,6 +681,90 @@
       }
     }
 
+    // moveBefore(node, child) — flytta nod utan att trigga remove/insert
+    if (!el.moveBefore) {
+      el.moveBefore = function(node, child) {
+        // Spec: moveBefore flytta noden atomiskt (utan unmount/mount)
+        // Vår impl delegerar till insertBefore som redan hanterar detach
+        if (child === null || child === undefined) {
+          this.appendChild(node);
+        } else {
+          this.insertBefore(node, child);
+        }
+        return node;
+      };
+    }
+
+    // lookupNamespaceURI(prefix)
+    if (!el.lookupNamespaceURI) {
+      el.lookupNamespaceURI = function(prefix) {
+        if (this.namespaceURI && this.prefix === prefix) return this.namespaceURI;
+        if (prefix === null || prefix === '') {
+          if (this.namespaceURI) return this.namespaceURI;
+        }
+        // Traversa uppåt
+        if (this.parentNode && this.parentNode.lookupNamespaceURI) {
+          return this.parentNode.lookupNamespaceURI(prefix);
+        }
+        return null;
+      };
+    }
+
+    // lookupPrefix(namespace)
+    if (!el.lookupPrefix) {
+      el.lookupPrefix = function(ns) {
+        if (this.namespaceURI === ns && this.prefix) return this.prefix;
+        if (this.parentNode && this.parentNode.lookupPrefix) {
+          return this.parentNode.lookupPrefix(ns);
+        }
+        return null;
+      };
+    }
+
+    // isDefaultNamespace(namespace)
+    if (!el.isDefaultNamespace) {
+      el.isDefaultNamespace = function(ns) {
+        var defaultNS = this.lookupNamespaceURI(null);
+        return defaultNS === ns;
+      };
+    }
+
+    // Namespace-metoder (NS-varianter)
+    if (el.nodeType === 1) {
+      if (!el.setAttributeNS) {
+        el.setAttributeNS = function(ns, qname, val) {
+          // Simpel impl: ignorera namespace, använd qualified name
+          var local = qname.indexOf(':') >= 0 ? qname.split(':')[1] : qname;
+          this.setAttribute(local, val);
+        };
+      }
+      if (!el.getAttributeNS) {
+        el.getAttributeNS = function(ns, local) {
+          return this.getAttribute(local);
+        };
+      }
+      if (!el.hasAttributeNS) {
+        el.hasAttributeNS = function(ns, local) {
+          return this.hasAttribute(local);
+        };
+      }
+      if (!el.removeAttributeNS) {
+        el.removeAttributeNS = function(ns, local) {
+          this.removeAttribute(local);
+        };
+      }
+      if (!el.getAttributeNodeNS) {
+        el.getAttributeNodeNS = function(ns, local) {
+          if (!this.hasAttribute(local)) return null;
+          return {
+            name: local, localName: local, value: this.getAttribute(local),
+            namespaceURI: ns, prefix: null, specified: true,
+            ownerElement: this, nodeType: 2, nodeName: local
+          };
+        };
+      }
+    }
+
     // id, className — måste skriva tillbaka till arena via setAttribute
     if (el.nodeType === 1 && el.setAttribute) {
       var _origId = el.id || '';
@@ -836,6 +933,38 @@
     } catch(e) {
       // Proxy inte tillgänglig — kopiera manuellt
     }
+  }
+})();
+
+// ─── document.createElementNS ────────────────────────────────────────────────
+(function() {
+  if (typeof document === 'undefined') return;
+  if (!document.createElementNS) {
+    document.createElementNS = function(ns, qname) {
+      var local = qname.indexOf(':') >= 0 ? qname.split(':')[1] : qname;
+      var el = document.createElement(local);
+      if (el) {
+        try {
+          Object.defineProperty(el, 'namespaceURI', { value: ns, configurable: true });
+          if (qname.indexOf(':') >= 0) {
+            Object.defineProperty(el, 'prefix', { value: qname.split(':')[0], configurable: true });
+          }
+          Object.defineProperty(el, 'localName', { value: local, configurable: true });
+        } catch(e) {}
+      }
+      return el;
+    };
+  }
+})();
+
+// ─── document.getElementsByTagNameNS ─────────────────────────────────────────
+(function() {
+  if (typeof document === 'undefined') return;
+  if (!document.getElementsByTagNameNS) {
+    document.getElementsByTagNameNS = function(ns, tag) {
+      if (tag === '*') return document.querySelectorAll('*');
+      return document.querySelectorAll(tag.toLowerCase());
+    };
   }
 })();
 

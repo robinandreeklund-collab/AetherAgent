@@ -4010,16 +4010,36 @@ fn register_window_with_viewport<'js>(
             this.type = type || '';
             this.bubbles = (opts && opts.bubbles) || false;
             this.cancelable = (opts && opts.cancelable) || false;
+            this.composed = (opts && opts.composed) || false;
+            this.target = null;
+            this.srcElement = null;
+            this.currentTarget = null;
+            this.eventPhase = 0;
+            this.defaultPrevented = false;
+            this.returnValue = true;
+            this.timeStamp = Date.now();
+            this.isTrusted = false;
             this.stopPropagation = function() {};
-            this.preventDefault = function() {};
+            this.stopImmediatePropagation = function() {};
+            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
         };
         globalThis.CustomEvent = function CustomEvent(type, opts) {
             this.type = type || '';
             this.detail = (opts && opts.detail) || null;
             this.bubbles = (opts && opts.bubbles) || false;
             this.cancelable = (opts && opts.cancelable) || false;
+            this.composed = (opts && opts.composed) || false;
+            this.target = null;
+            this.srcElement = null;
+            this.currentTarget = null;
+            this.eventPhase = 0;
+            this.defaultPrevented = false;
+            this.returnValue = true;
+            this.timeStamp = Date.now();
+            this.isTrusted = false;
             this.stopPropagation = function() {};
-            this.preventDefault = function() {};
+            this.stopImmediatePropagation = function() {};
+            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
         };
         globalThis.DOMParser = function DOMParser() {
             this.parseFromString = function(str, type) {
