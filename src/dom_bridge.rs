@@ -2713,6 +2713,201 @@ impl JsHandler for GetAttributeNode {
     }
 }
 
+// ─── compareDocumentPosition ────────────────────────────────────────────────
+struct CompareDocumentPosition {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for CompareDocumentPosition {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        if self.key == other_key {
+            return Ok(Value::new_int(ctx.clone(), 0));
+        }
+        let s = self.state.borrow();
+        // Bygg ancestor-kedjor
+        let chain_a = ancestor_chain(&s.arena, self.key);
+        let chain_b = ancestor_chain(&s.arena, other_key);
+        // Disconnected?
+        if chain_a.is_empty() || chain_b.is_empty() || chain_a.last() != chain_b.last() {
+            // DISCONNECTED | IMPLEMENTATION_SPECIFIC | PRECEDING eller FOLLOWING
+            return Ok(Value::new_int(
+                ctx.clone(),
+                1 | 32 | if self.key < other_key { 4 } else { 2 },
+            ));
+        }
+        // Hitta gemensam ancestor
+        let mut i = 0;
+        while i < chain_a.len()
+            && i < chain_b.len()
+            && chain_a[chain_a.len() - 1 - i] == chain_b[chain_b.len() - 1 - i]
+        {
+            i += 1;
+        }
+        // Contains / contained_by
+        if i == chain_a.len() {
+            // self är ancestor till other → CONTAINS | PRECEDING
+            return Ok(Value::new_int(ctx.clone(), 8 | 4));
+        }
+        if i == chain_b.len() {
+            // other är ancestor till self → CONTAINED_BY | FOLLOWING
+            return Ok(Value::new_int(ctx.clone(), 16 | 2));
+        }
+        // Sibling-ordning i gemensam parent
+        let common_parent = chain_a[chain_a.len() - i];
+        let node_a = chain_a[chain_a.len() - 1 - i]; // self-sidans nod under common
+        let node_b = chain_b[chain_b.len() - 1 - i]; // other-sidans nod under common
+        if let Some(parent) = s.arena.nodes.get(common_parent) {
+            let pos_a = parent.children.iter().position(|&c| c == node_a);
+            let pos_b = parent.children.iter().position(|&c| c == node_b);
+            match (pos_a, pos_b) {
+                (Some(a), Some(b)) if a < b => {
+                    return Ok(Value::new_int(ctx.clone(), 4)); // FOLLOWING
+                }
+                (Some(_), Some(_)) => {
+                    return Ok(Value::new_int(ctx.clone(), 2)); // PRECEDING
+                }
+                _ => {}
+            }
+        }
+        Ok(Value::new_int(ctx.clone(), 1 | 32 | 4)) // Disconnected fallback
+    }
+}
+
+/// Bygg ancestor-kedja: [self, parent, grandparent, ..., root]
+fn ancestor_chain(arena: &ArenaDom, key: NodeKey) -> Vec<NodeKey> {
+    let mut chain = vec![key];
+    let mut current = key;
+    loop {
+        match arena.nodes.get(current).and_then(|n| n.parent) {
+            Some(p) => {
+                chain.push(p);
+                current = p;
+            }
+            None => break,
+        }
+    }
+    chain
+}
+
+// ─── Node.isEqualNode ──────────────────────────────────────────────────────
+struct IsEqualNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for IsEqualNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => return Ok(Value::new_bool(ctx.clone(), false)),
+        };
+        if self.key == other_key {
+            return Ok(Value::new_bool(ctx.clone(), true));
+        }
+        let s = self.state.borrow();
+        let a = s.arena.nodes.get(self.key);
+        let b = s.arena.nodes.get(other_key);
+        let equal = match (a, b) {
+            (Some(na), Some(nb)) => {
+                na.node_type == nb.node_type
+                    && na.tag == nb.tag
+                    && na.text == nb.text
+                    && na.attributes.len() == nb.attributes.len()
+                    && na
+                        .attributes
+                        .iter()
+                        .all(|(k, v)| nb.get_attr(k) == Some(v.as_str()))
+                    && na.children.len() == nb.children.len()
+            }
+            _ => false,
+        };
+        Ok(Value::new_bool(ctx.clone(), equal))
+    }
+}
+
+// ─── Node.isSameNode ───────────────────────────────────────────────────────
+struct IsSameNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for IsSameNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = args.first().and_then(extract_node_key);
+        Ok(Value::new_bool(ctx.clone(), other_key == Some(self.key)))
+    }
+}
+
+// ─── Node.normalize ────────────────────────────────────────────────────────
+struct Normalize {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Normalize {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let children: Vec<NodeKey> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        let mut prev_text: Option<NodeKey> = None;
+        let mut to_remove = vec![];
+        for ck in &children {
+            let is_text = s
+                .arena
+                .nodes
+                .get(*ck)
+                .map(|n| n.node_type == NodeType::Text)
+                .unwrap_or(false);
+            if is_text {
+                let text = s
+                    .arena
+                    .nodes
+                    .get(*ck)
+                    .and_then(|n| n.text.as_deref())
+                    .unwrap_or("")
+                    .to_string();
+                if text.is_empty() {
+                    to_remove.push(*ck);
+                } else if let Some(prev) = prev_text {
+                    // Merga med föregående textnod
+                    let prev_text_val = s
+                        .arena
+                        .nodes
+                        .get(prev)
+                        .and_then(|n| n.text.as_deref())
+                        .unwrap_or("")
+                        .to_string();
+                    let merged = format!("{}{}", prev_text_val, text);
+                    if let Some(pn) = s.arena.nodes.get_mut(prev) {
+                        pn.text = Some(merged.into());
+                    }
+                    to_remove.push(*ck);
+                } else {
+                    prev_text = Some(*ck);
+                }
+            } else {
+                prev_text = None;
+            }
+        }
+        for rk in &to_remove {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.retain(|c| c != rk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 /// WebIDL unsigned long konvertering: ToUint32
 /// -1 → 4294967295, "test" → 0, undefined → 0
 fn webidl_unsigned_long(val: Option<&rquickjs::Value<'_>>) -> u32 {
@@ -3738,6 +3933,46 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(GetAttributeNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "compareDocumentPosition",
+        Function::new(
+            ctx.clone(),
+            JsFn(CompareDocumentPosition {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "isEqualNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(IsEqualNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "isSameNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(IsSameNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "normalize",
+        Function::new(
+            ctx.clone(),
+            JsFn(Normalize {
                 state: Rc::clone(state),
                 key,
             }),

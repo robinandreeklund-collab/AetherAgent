@@ -764,6 +764,197 @@
   }
 })();
 
+// ─── Range implementation ───────────────────────────────────────────────────
+// Riktig Range med setStart/setEnd, comparePoint, isPointInRange, intersectsNode
+(function() {
+  if (typeof document === 'undefined') return;
+
+  function AetherRange() {
+    this.startContainer = document;
+    this.startOffset = 0;
+    this.endContainer = document;
+    this.endOffset = 0;
+    this.collapsed = true;
+    this.commonAncestorContainer = document;
+  }
+
+  AetherRange.prototype._update = function() {
+    this.collapsed = (this.startContainer === this.endContainer && this.startOffset === this.endOffset);
+    // Hitta gemensam ancestor
+    var a = this.startContainer, b = this.endContainer;
+    var ancestorsA = [];
+    var node = a;
+    while (node) { ancestorsA.push(node); node = node.parentNode; }
+    node = b;
+    while (node) {
+      if (ancestorsA.indexOf(node) !== -1) { this.commonAncestorContainer = node; return; }
+      node = node.parentNode;
+    }
+    this.commonAncestorContainer = document;
+  };
+
+  AetherRange.prototype.setStart = function(node, offset) {
+    this.startContainer = node;
+    this.startOffset = offset;
+    // Om start > end, collapse till start
+    if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
+      this.endContainer = this.startContainer;
+      this.endOffset = this.startOffset;
+    }
+    this._update();
+  };
+
+  AetherRange.prototype.setEnd = function(node, offset) {
+    this.endContainer = node;
+    this.endOffset = offset;
+    if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
+      this.startContainer = this.endContainer;
+      this.startOffset = this.endOffset;
+    }
+    this._update();
+  };
+
+  AetherRange.prototype.setStartBefore = function(node) {
+    var parent = node.parentNode;
+    if (!parent) return;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    this.setStart(parent, idx);
+  };
+
+  AetherRange.prototype.setStartAfter = function(node) {
+    var parent = node.parentNode;
+    if (!parent) return;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    this.setStart(parent, idx + 1);
+  };
+
+  AetherRange.prototype.setEndBefore = function(node) {
+    var parent = node.parentNode;
+    if (!parent) return;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    this.setEnd(parent, idx);
+  };
+
+  AetherRange.prototype.setEndAfter = function(node) {
+    var parent = node.parentNode;
+    if (!parent) return;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    this.setEnd(parent, idx + 1);
+  };
+
+  AetherRange.prototype.collapse = function(toStart) {
+    if (toStart) {
+      this.endContainer = this.startContainer;
+      this.endOffset = this.startOffset;
+    } else {
+      this.startContainer = this.endContainer;
+      this.startOffset = this.endOffset;
+    }
+    this._update();
+  };
+
+  AetherRange.prototype.selectNode = function(node) {
+    var parent = node.parentNode;
+    if (!parent) return;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    this.setStart(parent, idx);
+    this.setEnd(parent, idx + 1);
+  };
+
+  AetherRange.prototype.selectNodeContents = function(node) {
+    this.startContainer = node;
+    this.startOffset = 0;
+    this.endContainer = node;
+    this.endOffset = node.childNodes ? node.childNodes.length : (node.data ? node.data.length : 0);
+    this._update();
+  };
+
+  AetherRange.prototype._compareBoundary = function(containerA, offsetA, containerB, offsetB) {
+    if (containerA === containerB) return offsetA - offsetB;
+    if (!containerA.compareDocumentPosition) return 0;
+    var pos = containerA.compareDocumentPosition(containerB);
+    if (pos & 4) return -1; // B follows A → A before B
+    if (pos & 2) return 1;  // B precedes A → A after B
+    // Contained — compare offsets
+    if (pos & 8) return -1; // A contains B
+    if (pos & 16) return 1; // B contains A
+    return 0;
+  };
+
+  AetherRange.prototype.comparePoint = function(node, offset) {
+    var cmpStart = this._compareBoundary(node, offset, this.startContainer, this.startOffset);
+    if (cmpStart < 0) return -1;
+    var cmpEnd = this._compareBoundary(node, offset, this.endContainer, this.endOffset);
+    if (cmpEnd > 0) return 1;
+    return 0;
+  };
+
+  AetherRange.prototype.isPointInRange = function(node, offset) {
+    try { return this.comparePoint(node, offset) === 0; } catch(e) { return false; }
+  };
+
+  AetherRange.prototype.intersectsNode = function(node) {
+    if (!node.parentNode) return true;
+    var parent = node.parentNode;
+    var idx = Array.from(parent.childNodes).indexOf(node);
+    var beforeStart = this._compareBoundary(parent, idx, this.startContainer, this.startOffset);
+    var afterEnd = this._compareBoundary(parent, idx + 1, this.endContainer, this.endOffset);
+    return !(beforeStart > 0 || afterEnd < 0);
+  };
+
+  AetherRange.prototype.cloneRange = function() {
+    var r = new AetherRange();
+    r.startContainer = this.startContainer;
+    r.startOffset = this.startOffset;
+    r.endContainer = this.endContainer;
+    r.endOffset = this.endOffset;
+    r._update();
+    return r;
+  };
+
+  AetherRange.prototype.detach = function() {}; // no-op per spec
+
+  AetherRange.prototype.toString = function() {
+    // Returnera text inom range
+    if (this.startContainer === this.endContainer && this.startContainer.nodeType === 3) {
+      return (this.startContainer.data || '').substring(this.startOffset, this.endOffset);
+    }
+    return '';
+  };
+
+  AetherRange.prototype.deleteContents = function() {};
+  AetherRange.prototype.extractContents = function() { return document.createDocumentFragment(); };
+  AetherRange.prototype.cloneContents = function() { return document.createDocumentFragment(); };
+  AetherRange.prototype.insertNode = function(node) {};
+  AetherRange.prototype.surroundContents = function(node) {};
+
+  AetherRange.prototype.getBoundingClientRect = function() {
+    return { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
+  };
+  AetherRange.prototype.getClientRects = function() { return []; };
+
+  AetherRange.START_TO_START = 0;
+  AetherRange.START_TO_END = 1;
+  AetherRange.END_TO_END = 2;
+  AetherRange.END_TO_START = 3;
+
+  AetherRange.prototype.compareBoundaryPoints = function(how, sourceRange) {
+    var thisC, thisO, srcC, srcO;
+    switch (how) {
+      case 0: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
+      case 1: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
+      case 2: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
+      case 3: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
+      default: return 0;
+    }
+    return this._compareBoundary(thisC, thisO, srcC, srcO) < 0 ? -1 : (this._compareBoundary(thisC, thisO, srcC, srcO) > 0 ? 1 : 0);
+  };
+
+  // Override document.createRange
+  document.createRange = function() { return new AetherRange(); };
+  globalThis.Range = AetherRange;
+})();
+
 // ─── Document konstruktor → skapar riktig arena-backed doc ──────────────────
 (function() {
   if (typeof document === 'undefined' || !document.implementation) return;
