@@ -434,24 +434,7 @@
 
     // remove(), before(), after() — nu Rust-native i dom_bridge.rs
 
-    if (!el.after) {
-      // Fallback för noder som inte gick genom make_element_object
-      el.after = function() {
-        var parent = this.parentNode;
-        if (!parent) return;
-        var ref = this.nextSibling;
-        for (var i = 0; i < arguments.length; i++) {
-          var node = toNode(arguments[i]);
-          if (ref) {
-            parent.insertBefore(node, ref);
-          } else {
-            parent.appendChild(node);
-          }
-        }
-      };
-    }
-
-    // replaceWith() — nu Rust-native i dom_bridge.rs
+    // after(), replaceWith() — nu Rust-native i dom_bridge.rs
 
     // prepend, append, replaceChildren — nu Rust-native i dom_bridge.rs
 
@@ -596,171 +579,35 @@
       });
     }
 
-    // getElementsByTagName / getElementsByClassName på element-nivå
-    if (el.nodeType === 1) {
-      if (!el.getElementsByTagName) {
-        el.getElementsByTagName = function(tag) {
-          if (!this.querySelectorAll) return [];
-          var sel = (tag === '*') ? '*' : tag.toLowerCase();
-          var arr = Array.from(this.querySelectorAll(sel));
-          // Lägg till HTMLCollection-metoder
-          arr.item = function(i) { return this[i] || null; };
-          arr.namedItem = function(name) {
-            for (var i = 0; i < this.length; i++) {
-              if (this[i].id === name || this[i].getAttribute('name') === name) return this[i];
-            }
-            return null;
-          };
-          try { Object.setPrototypeOf(arr, HTMLCollection.prototype); } catch(e) {}
-          return arr;
-        };
-      }
-      if (!el.getElementsByClassName) {
-        el.getElementsByClassName = function(cls) {
-          if (!this.querySelectorAll) return [];
-          var parts = cls.split(/\s+/).filter(function(c) { return c; });
-          var sel = parts.map(function(c) { return '.' + c; }).join('');
-          return Array.from(this.querySelectorAll(sel));
-        };
-      }
-      if (!el.getElementsByTagNameNS) {
-        el.getElementsByTagNameNS = function(ns, tag) {
-          // Simpel: ignorera namespace, sök bara på tag
-          return this.getElementsByTagName(tag);
-        };
-      }
-    }
+    // getElementsByTagName, getElementsByClassName, getElementsByTagNameNS
+    // — nu Rust-native i dom_bridge.rs
 
-    // moveBefore(node, child) — flytta nod atomiskt
-    if (!el.moveBefore && (el.nodeType === 1 || el.nodeType === 9 || el.nodeType === 11)) {
-      el.moveBefore = function(node, child) {
-        if (!node || typeof node !== 'object' || !node.nodeType) {
-          throw new TypeError("Failed to execute 'moveBefore': parameter 1 is not of type 'Node'.");
-        }
-        if (arguments.length < 2) {
-          throw new TypeError("Failed to execute 'moveBefore': 2 arguments required.");
-        }
-        if (child !== null && child !== undefined && (!child || !child.nodeType)) {
-          throw new TypeError("Failed to execute 'moveBefore': parameter 2 is not of type 'Node'.");
-        }
-        if (child === null || child === undefined) {
-          this.appendChild(node);
-        } else {
-          this.insertBefore(node, child);
-        }
-        return node;
-      };
-    }
+    // moveBefore — nu Rust-native i dom_bridge.rs
 
-    // lookupNamespaceURI(prefix)
-    if (!el.lookupNamespaceURI) {
-      el.lookupNamespaceURI = function(prefix) {
-        // DocumentFragment, DocumentType → alltid null
-        if (this.nodeType === 11 || this.nodeType === 10) return null;
-        // Element-noder: kolla egna namespace + attribut
-        if (this.nodeType === 1) {
-          if (this.namespaceURI && (prefix === this.prefix || (prefix === null && !this.prefix))) {
-            return this.namespaceURI;
-          }
-          // Kolla xmlns:prefix-attribut
-          if (this.__nsAttrs) {
-            var xmlnsKey = 'http://www.w3.org/2000/xmlns/|' + (prefix || 'xmlns');
-            if (this.__nsAttrs[xmlnsKey]) return this.__nsAttrs[xmlnsKey].value;
-          }
-          if (prefix && this.hasAttribute && this.hasAttribute('xmlns:' + prefix)) {
-            return this.getAttribute('xmlns:' + prefix);
-          }
-          if (!prefix && this.hasAttribute && this.hasAttribute('xmlns')) {
-            var val = this.getAttribute('xmlns');
-            return val || null;
-          }
-        }
-        // Text/Comment → delegera till parent
-        if (this.parentNode && this.parentNode.lookupNamespaceURI) {
-          return this.parentNode.lookupNamespaceURI(prefix);
-        }
-        return null;
-      };
-    }
-
-    // lookupPrefix(namespace)
-    if (!el.lookupPrefix) {
-      el.lookupPrefix = function(ns) {
-        if (this.namespaceURI === ns && this.prefix) return this.prefix;
-        if (this.parentNode && this.parentNode.lookupPrefix) {
-          return this.parentNode.lookupPrefix(ns);
-        }
-        return null;
-      };
-    }
-
-    // isDefaultNamespace(namespace)
-    if (!el.isDefaultNamespace) {
-      el.isDefaultNamespace = function(ns) {
-        if (this.nodeType === 11 || this.nodeType === 10) return !ns;
-        var defaultNS = this.lookupNamespaceURI(null);
-        return defaultNS === ns;
-      };
-    }
+    // lookupNamespaceURI, lookupPrefix, isDefaultNamespace
+    // — nu Rust-native i dom_bridge.rs
 
     // Namespace-metoder (NS-varianter)
     if (el.nodeType === 1) {
-      // ─── Intern NS-attribut-lagring ─────────────────────
-      // Lagrar NS-attribut i __nsAttrs map: "ns|local" → {ns, prefix, local, value}
-      if (!el.__nsAttrs) el.__nsAttrs = {};
-
-      if (!el.setAttributeNS) {
+      // NS-metadata tracking — Rust lagrar värdet, JS spårar prefix/namespace
+      if (el.setAttributeNS) {
+        var _rustSetNS = el.setAttributeNS;
+        el.__nsAttrs = el.__nsAttrs || {};
         el.setAttributeNS = function(ns, qname, val) {
           var parts = qname.split(':');
           var prefix = parts.length > 1 ? parts[0] : null;
           var local = parts.length > 1 ? parts[1] : qname;
-          // Lagra med namespace-nyckel
           var key = (ns || '') + '|' + local;
-          if (!this.__nsAttrs) this.__nsAttrs = {};
+          this.__nsAttrs = this.__nsAttrs || {};
           this.__nsAttrs[key] = { namespaceURI: ns, prefix: prefix, localName: local, value: String(val), name: qname };
-          // Lagra även i vanliga attribut (case-sensitive för NS)
-          var s = this.state_borrow_mut || null;
-          // Använd raw setAttribute utan lowercase för NS-attribut
-          if (this.getAttributeNames) {
-            // Skriv direkt — skippa lowercase via __nsAttrs lookup
-          }
-          // Synka till DOM för querySelector etc.
-          this.setAttribute(local, val);
-        };
-      }
-      if (!el.getAttributeNS) {
-        el.getAttributeNS = function(ns, local) {
-          var key = (ns || '') + '|' + local;
-          if (this.__nsAttrs && this.__nsAttrs[key]) return this.__nsAttrs[key].value;
-          return this.getAttribute(local);
-        };
-      }
-      if (!el.hasAttributeNS) {
-        el.hasAttributeNS = function(ns, local) {
-          var key = (ns || '') + '|' + local;
-          if (this.__nsAttrs && this.__nsAttrs[key]) return true;
-          return this.hasAttribute(local);
-        };
-      }
-      if (!el.removeAttributeNS) {
-        el.removeAttributeNS = function(ns, local) {
-          var key = (ns || '') + '|' + local;
-          if (this.__nsAttrs) delete this.__nsAttrs[key];
-          this.removeAttribute(local);
+          return _rustSetNS.call(this, ns, qname, val);
         };
       }
       if (!el.getAttributeNodeNS) {
         el.getAttributeNodeNS = function(ns, local) {
-          var key = (ns || '') + '|' + local;
-          var a = this.__nsAttrs && this.__nsAttrs[key];
-          if (a) return {
-            name: a.name, localName: a.localName, value: a.value,
-            namespaceURI: a.namespaceURI, prefix: a.prefix, specified: true,
-            ownerElement: this, nodeType: 2, nodeName: a.name
-          };
-          if (!this.hasAttribute(local)) return null;
+          if (!this.hasAttributeNS(ns, local)) return null;
           return {
-            name: local, localName: local, value: this.getAttribute(local),
+            name: local, localName: local, value: this.getAttributeNS(ns, local),
             namespaceURI: ns, prefix: null, specified: true,
             ownerElement: this, nodeType: 2, nodeName: local
           };
@@ -795,24 +642,7 @@
 
     // toggleAttribute — nu Rust-native i dom_bridge.rs
 
-    // getAttributeNode(name) — returnerar Attr-liknande objekt
-    if (!el.getAttributeNode) {
-      el.getAttributeNode = function(name) {
-        if (!this.hasAttribute(name)) return null;
-        var val = this.getAttribute(name);
-        return {
-          name: name.toLowerCase(),
-          localName: name.toLowerCase(),
-          value: val,
-          namespaceURI: null,
-          prefix: null,
-          specified: true,
-          ownerElement: this,
-          nodeType: 2,
-          nodeName: name.toLowerCase()
-        };
-      };
-    }
+    // getAttributeNode — nu Rust-native i dom_bridge.rs
 
     // getAttributeNames()
     if (!el.getAttributeNames && el.getAttribute) {

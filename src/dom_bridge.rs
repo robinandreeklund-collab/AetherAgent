@@ -2395,6 +2395,324 @@ impl JsHandler for InsertAdjacentText {
 }
 
 /// Hitta närmaste giltiga char boundary vid eller efter given byte-offset.
+// ─── Migration: getElementsByTagName/ClassName på element ────────────────────
+struct GetElementsByTagNameElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByTagNameElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let tag = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let keys = {
+            let s = self.state.borrow();
+            let mut results = vec![];
+            find_all_by_tag(&s.arena, self.key, &tag, &mut results);
+            results
+        };
+        let array = rquickjs::Array::new(ctx.clone())?;
+        for (i, key) in keys.into_iter().enumerate() {
+            let elem = make_element_object(ctx, key, &self.state)?;
+            array.set(i, elem)?;
+        }
+        Ok(array.into_value())
+    }
+}
+
+struct GetElementsByClassNameElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByClassNameElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let cls = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let keys = {
+            let s = self.state.borrow();
+            let mut results = vec![];
+            find_all_by_class(&s.arena, self.key, &cls, &mut results);
+            results
+        };
+        let array = rquickjs::Array::new(ctx.clone())?;
+        for (i, key) in keys.into_iter().enumerate() {
+            let elem = make_element_object(ctx, key, &self.state)?;
+            array.set(i, elem)?;
+        }
+        Ok(array.into_value())
+    }
+}
+
+// ─── Migration: moveBefore ──────────────────────────────────────────────────
+struct MoveBefore {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for MoveBefore {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "TypeError: parameter 1 is not a Node",
+                    )?
+                    .into(),
+                ));
+            }
+        };
+        if args.len() < 2 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: 2 arguments required")?.into(),
+            ));
+        }
+        let ref_key = args.get(1).and_then(extract_node_key); // null → append
+        let mut s = self.state.borrow_mut();
+        // Detach new_key
+        if let Some(old_p) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+            if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                p.children.retain(|&c| c != new_key);
+            }
+        }
+        if let Some(n) = s.arena.nodes.get_mut(new_key) {
+            n.parent = Some(self.key);
+        }
+        match ref_key {
+            Some(rk) => {
+                let pos = s
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.children.iter().position(|&c| c == rk))
+                    .unwrap_or(0);
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.insert(pos, new_key);
+                }
+            }
+            None => {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.push(new_key);
+                }
+            }
+        }
+        drop(s);
+        make_element_object(ctx, new_key, &self.state)
+    }
+}
+
+// ─── Migration: lookupNamespaceURI / lookupPrefix / isDefaultNamespace ──────
+struct LookupNamespaceURI {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for LookupNamespaceURI {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let node = s.arena.nodes.get(self.key);
+        let nt = node.map(|n| n.node_type.clone());
+        let parent_key = node.and_then(|n| n.parent);
+        drop(s);
+        match nt {
+            Some(NodeType::Element) | Some(NodeType::Document) => Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                "http://www.w3.org/1999/xhtml",
+            )?
+            .into_value()),
+            Some(NodeType::Text) | Some(NodeType::Comment) => {
+                if let Some(pk) = parent_key {
+                    let h = LookupNamespaceURI {
+                        state: Rc::clone(&self.state),
+                        key: pk,
+                    };
+                    h.handle(ctx, args)
+                } else {
+                    Ok(Value::new_null(ctx.clone()))
+                }
+            }
+            _ => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+struct LookupPrefix {
+    state: SharedState,
+    #[allow(dead_code)]
+    key: NodeKey,
+}
+impl JsHandler for LookupPrefix {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        Ok(Value::new_null(ctx.clone()))
+    }
+}
+
+struct IsDefaultNamespace {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for IsDefaultNamespace {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        let is_html = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.node_type == NodeType::Element)
+            .unwrap_or(false);
+        drop(s);
+        let result = if is_html {
+            ns == "http://www.w3.org/1999/xhtml"
+        } else {
+            ns.is_empty()
+        };
+        Ok(Value::new_bool(ctx.clone(), result))
+    }
+}
+
+// ─── Migration: NS attribute methods ────────────────────────────────────────
+struct SetAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SetAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let _ns = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok());
+        let qname = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let val = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let local = if let Some(colon) = qname.find(':') {
+            &qname[colon + 1..]
+        } else {
+            &qname
+        };
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            // NS-attribut bevarar case (lowercas ej)
+            node.attributes.insert(local.to_string(), val);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct GetAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        match s.arena.nodes.get(self.key).and_then(|n| n.get_attr(&local)) {
+            Some(val) => Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value()),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+struct HasAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for HasAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        let has = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.has_attr(&local))
+            .unwrap_or(false);
+        Ok(Value::new_bool(ctx.clone(), has))
+    }
+}
+
+struct RemoveAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for RemoveAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.attributes.remove(&local);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct GetAttributeNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetAttributeNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let s = self.state.borrow();
+        let val = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(&name))
+            .map(|v| v.to_string());
+        drop(s);
+        match val {
+            Some(v) => {
+                let obj = Object::new(ctx.clone())?;
+                obj.set("name", name.as_str())?;
+                obj.set("localName", name.as_str())?;
+                obj.set("value", v.as_str())?;
+                obj.set("namespaceURI", Value::new_null(ctx.clone()))?;
+                obj.set("prefix", Value::new_null(ctx.clone()))?;
+                obj.set("specified", true)?;
+                obj.set("nodeType", 2)?;
+                obj.set("nodeName", name.as_str())?;
+                Ok(obj.into_value())
+            }
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
 fn char_boundary(s: &str, offset: usize) -> usize {
     let offset = offset.min(s.len());
     if s.is_char_boundary(offset) {
@@ -3231,10 +3549,128 @@ fn make_element_object<'js>(
             }),
         )?,
     )?;
-    // CharacterData (substringData, appendData, etc.) — JS-polyfill behålls
-    // tills UTF-16→UTF-8 code unit konvertering implementeras i Rust.
-    // Rust-structs finns (SubstringData, AppendData etc.) men registreras inte
-    // pga att WPT-tester räknar i UTF-16 code units.
+    // CharacterData — JS-polyfill kvar pga UTF-16 code unit counting
+    // ─── Rust-native: element-level queries + NS + namespace ────────────
+    obj.set(
+        "getElementsByTagName",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getElementsByClassName",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByClassNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getElementsByTagNameNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "moveBefore",
+        Function::new(
+            ctx.clone(),
+            JsFn(MoveBefore {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "lookupNamespaceURI",
+        Function::new(
+            ctx.clone(),
+            JsFn(LookupNamespaceURI {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "lookupPrefix",
+        Function::new(
+            ctx.clone(),
+            JsFn(LookupPrefix {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "isDefaultNamespace",
+        Function::new(
+            ctx.clone(),
+            JsFn(IsDefaultNamespace {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "setAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(SetAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "hasAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(HasAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "removeAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(RemoveAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getAttributeNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetAttributeNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
     // attachShadow — skapa en shadow root (enkel implementation)
     obj.set(
         "attachShadow",
