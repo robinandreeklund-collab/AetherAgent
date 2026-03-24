@@ -540,6 +540,77 @@
     if (!el || typeof el !== 'object') return el;
     el = _origPatch(el);
 
+    // element.attributes — NamedNodeMap (live array-like av Attr-objekt)
+    if (!el.attributes && el.nodeType === 1 && el.getAttributeNames) {
+      Object.defineProperty(el, 'attributes', {
+        get: function() {
+          var self = this;
+          var names = self.getAttributeNames ? self.getAttributeNames() : [];
+          var map = [];
+          for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            var v = self.getAttribute(n);
+            map.push({
+              name: n, localName: n, value: v,
+              namespaceURI: null, prefix: null,
+              specified: true, ownerElement: self,
+              nodeType: 2, nodeName: n
+            });
+          }
+          map.getNamedItem = function(name) {
+            for (var j = 0; j < this.length; j++) {
+              if (this[j].name === name) return this[j];
+            }
+            return null;
+          };
+          map.getNamedItemNS = function(ns, name) {
+            for (var j = 0; j < this.length; j++) {
+              if (this[j].localName === name && this[j].namespaceURI === ns) return this[j];
+            }
+            return null;
+          };
+          map.item = function(idx) { return this[idx] || null; };
+          map.setNamedItem = function(attr) {
+            self.setAttribute(attr.name, attr.value);
+            return null;
+          };
+          map.removeNamedItem = function(name) {
+            var old = self.getAttribute(name);
+            self.removeAttribute(name);
+            return { name: name, value: old, nodeType: 2, nodeName: name,
+                     localName: name, namespaceURI: null, prefix: null };
+          };
+          return map;
+        },
+        configurable: true
+      });
+    }
+
+    // id, className — måste skriva tillbaka till arena via setAttribute
+    if (el.nodeType === 1 && el.setAttribute) {
+      var _origId = el.id || '';
+      Object.defineProperty(el, 'id', {
+        get: function() { return this.getAttribute('id') || ''; },
+        set: function(v) { this.setAttribute('id', v); },
+        configurable: true
+      });
+      var _origClass = el.className || '';
+      Object.defineProperty(el, 'className', {
+        get: function() { return this.getAttribute('class') || ''; },
+        set: function(v) { this.setAttribute('class', v); },
+        configurable: true
+      });
+    }
+
+    // prefix, namespaceURI, localName — HTML-element har aldrig prefix/namespace
+    if (el.nodeType === 1) {
+      if (!('prefix' in el)) el.prefix = null;
+      if (!('namespaceURI' in el)) el.namespaceURI = 'http://www.w3.org/1999/xhtml';
+      if (!('localName' in el)) {
+        el.localName = (el.tagName || '').toLowerCase();
+      }
+    }
+
     // toggleAttribute(name [, force])
     if (!el.toggleAttribute) {
       el.toggleAttribute = function(name, force) {
@@ -647,6 +718,37 @@
     Object.keys(DOMException._codes).forEach(function(name) {
       DOMException[name.toUpperCase().replace(/ERROR$/, '_ERR')] = DOMException._codes[name];
     });
+  }
+})();
+
+// ─── Synkronisera window med globalThis ─────────────────────────────────────
+// WPT-tester använder "X in window" — allt på globalThis ska finnas på window
+(function() {
+  if (typeof window !== 'undefined' && typeof globalThis !== 'undefined') {
+    // Gör window till en proxy för globalThis om möjligt
+    // (window.HTMLAnchorElement etc. ska fungera)
+    var origWindow = window;
+    try {
+      var handler = {
+        get: function(target, prop) {
+          if (prop in target) return target[prop];
+          if (prop in globalThis) return globalThis[prop];
+          return undefined;
+        },
+        has: function(target, prop) {
+          return (prop in target) || (prop in globalThis);
+        },
+        set: function(target, prop, value) {
+          target[prop] = value;
+          return true;
+        }
+      };
+      var proxyWin = new Proxy(origWindow, handler);
+      globalThis.window = proxyWin;
+      globalThis.self = proxyWin;
+    } catch(e) {
+      // Proxy inte tillgänglig — kopiera manuellt
+    }
   }
 })();
 

@@ -2250,7 +2250,29 @@ fn make_element_object<'js>(
         (nt, tag, id, cls)
     };
 
-    let obj = Object::new(ctx.clone())?;
+    // Skapa objekt med rätt prototypkedja för instanceof-stöd
+    let obj = {
+        let proto_code = match node_type_val {
+            3 => "Object.create(typeof Text!=='undefined'?Text.prototype:{})".to_string(),
+            8 => "Object.create(typeof Comment!=='undefined'?Comment.prototype:{})".to_string(),
+            9 => "Object.create(typeof Document!=='undefined'?Document.prototype:{})".to_string(),
+            11 => {
+                "Object.create(typeof DocumentFragment!=='undefined'?DocumentFragment.prototype:{})"
+                    .to_string()
+            }
+            _ => {
+                // Element — välj konstruktor via __tagToConstructor
+                format!(
+                    "(function(){{var C=globalThis.__tagToConstructor&&globalThis.__tagToConstructor['{}'];return Object.create(C?C.prototype:(typeof HTMLElement!=='undefined'?HTMLElement.prototype:{{}}))}})()",
+                    tag_name
+                )
+            }
+        };
+        match ctx.eval::<Value, _>(proto_code.as_str()) {
+            Ok(v) if v.is_object() => v.into_object().unwrap(),
+            _ => Object::new(ctx.clone())?,
+        }
+    };
     obj.set("__nodeKey__", key_bits)?;
     obj.set("nodeType", node_type_val)?;
     obj.set("tagName", tag_name.as_str())?;
@@ -3109,16 +3131,22 @@ fn make_element_object<'js>(
         obj.set("dataset", dataset)?;
     }
 
-    // Cacha objektet i __nodeCache så att samma NodeKey → samma objekt (identity)
+    // Cacha objektet + applicera JS-polyfills (prototypkedja, CharacterData, ChildNode-metoder)
     {
         let global = ctx.globals();
         let cache_key = format!("__nc_{}", key_bits as u64);
         let _ = global.set(cache_key.as_str(), obj.clone());
-        let set_code = format!(
-            "globalThis.__nodeCache && globalThis.__nodeCache.set({}, globalThis.{})",
-            key_bits, cache_key
+        let patch_code = format!(
+            concat!(
+                "globalThis.__nodeCache && globalThis.__nodeCache.set({kb}, globalThis.{ck});",
+                "if(globalThis.__patchPrototype) globalThis.__patchPrototype(globalThis.{ck});",
+                "if(globalThis.__patchCharacterData) globalThis.__patchCharacterData(globalThis.{ck});",
+                "if(globalThis.__patchChildNode) globalThis.__patchChildNode(globalThis.{ck});"
+            ),
+            kb = key_bits,
+            ck = cache_key
         );
-        let _ = ctx.eval::<Value, _>(set_code.as_str());
+        let _ = ctx.eval::<Value, _>(patch_code.as_str());
     }
 
     Ok(obj.into_value())
