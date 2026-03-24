@@ -43,45 +43,7 @@
       });
     }
 
-    // CharacterData methods — kvar som polyfill pga UTF-16 code unit counting
-    if (!node.substringData) {
-      node.substringData = function(offset, count) {
-        if (arguments.length < 2) throw new TypeError("Not enough arguments");
-        var d = this.data; offset = offset >>> 0;
-        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
-        count = count >>> 0;
-        return d.substring(offset, offset + count);
-      };
-    }
-    if (!node.appendData) {
-      node.appendData = function(data) {
-        if (arguments.length < 1) throw new TypeError("Not enough arguments");
-        this.data += String(data);
-      };
-    }
-    if (!node.insertData) {
-      node.insertData = function(offset, data) {
-        var d = this.data; offset = offset >>> 0;
-        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
-        this.data = d.substring(0, offset) + String(data) + d.substring(offset);
-      };
-    }
-    if (!node.deleteData) {
-      node.deleteData = function(offset, count) {
-        var d = this.data; offset = offset >>> 0;
-        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
-        count = count >>> 0;
-        this.data = d.substring(0, offset) + d.substring(Math.min(offset + count, d.length));
-      };
-    }
-    if (!node.replaceData) {
-      node.replaceData = function(offset, count, data) {
-        var d = this.data; offset = offset >>> 0;
-        if (offset > d.length) throw new DOMException("Offset out of range", "IndexSizeError");
-        count = count >>> 0;
-        this.data = d.substring(0, offset) + String(data) + d.substring(Math.min(offset + count, d.length));
-      };
-    }
+    // CharacterData methods — nu Rust-native med UTF-16 code unit counting
 
     return node;
   }
@@ -100,30 +62,58 @@
 
   if (!impl.createHTMLDocument) {
     impl.createHTMLDocument = function(title) {
-      // Returnera ett minimalt dokument-liknande objekt
-      var doc = {
-        nodeType: 9,
-        nodeName: '#document',
-        childNodes: [],
-        children: [],
-        documentElement: null,
-        head: null,
-        body: null,
-        title: title || '',
-        implementation: document.implementation,
-        createElement: document.createElement.bind(document),
-        createTextNode: document.createTextNode.bind(document),
-        createComment: document.createComment.bind(document),
-        createDocumentFragment: document.createDocumentFragment.bind(document),
-        getElementById: function() { return null; },
-        querySelector: function() { return null; },
-        querySelectorAll: function() { return []; },
-        getElementsByClassName: function() { return []; },
-        getElementsByTagName: function() { return []; },
-        addEventListener: function() {},
-        removeEventListener: function() {},
-        dispatchEvent: function() { return true; }
+      // Bygg en riktig DOM-struktur via vår arena
+      var html = document.createElement('html');
+      var head = document.createElement('head');
+      var body = document.createElement('body');
+      html.appendChild(head);
+      html.appendChild(body);
+      if (title !== undefined) {
+        var titleEl = document.createElement('title');
+        titleEl.textContent = title || '';
+        head.appendChild(titleEl);
+      }
+      // Skapa ett dokument-liknande objekt med delegering till riktiga element
+      var doc = document.createDocumentFragment();
+      doc.appendChild(html);
+      // Lägg till document-liknande egenskaper
+      doc.nodeType = 9;
+      doc.nodeName = '#document';
+      doc.documentElement = html;
+      doc.head = head;
+      doc.body = body;
+      doc.title = title || '';
+      doc.implementation = document.implementation;
+      doc.createElement = document.createElement.bind(document);
+      doc.createTextNode = document.createTextNode.bind(document);
+      doc.createComment = document.createComment.bind(document);
+      doc.createDocumentFragment = document.createDocumentFragment.bind(document);
+      doc.createElementNS = document.createElementNS ? document.createElementNS.bind(document) : undefined;
+      // Query-metoder söker i detta dokumentets träd
+      doc.getElementById = function(id) {
+        // Rekursiv sökning i hela dokumentträdet
+        function findById(node, target) {
+          if (node.id === target) return node;
+          var kids = node.childNodes || [];
+          for (var i = 0; i < kids.length; i++) {
+            var found = findById(kids[i], target);
+            if (found) return found;
+          }
+          return null;
+        }
+        return findById(html, id);
       };
+      doc.querySelector = function(sel) { return html.querySelector(sel); };
+      doc.querySelectorAll = function(sel) { return html.querySelectorAll(sel); };
+      doc.getElementsByTagName = function(tag) { return html.getElementsByTagName(tag); };
+      doc.getElementsByClassName = function(cls) { return html.getElementsByClassName(cls); };
+      doc.getElementsByTagNameNS = function(ns, tag) { return html.getElementsByTagNameNS ? html.getElementsByTagNameNS(ns, tag) : []; };
+      doc.adoptNode = function(node) { return node; };
+      doc.importNode = function(node, deep) { return node.cloneNode(deep); };
+      // Event delegation
+      doc.addEventListener = function() {};
+      doc.removeEventListener = function() {};
+      doc.dispatchEvent = function() { return true; };
       return doc;
     };
   }

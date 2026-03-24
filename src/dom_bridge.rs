@@ -2106,8 +2106,8 @@ impl JsHandler for SubstringData {
                 rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
             ));
         }
-        let offset = args[0].as_number().unwrap_or(0.0) as usize;
-        let count = args[1].as_number().unwrap_or(0.0) as usize;
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
         let s = self.state.borrow();
         let data = s
             .arena
@@ -2115,16 +2115,16 @@ impl JsHandler for SubstringData {
             .get(self.key)
             .and_then(|n| n.text.as_deref())
             .unwrap_or("");
-        if offset > data.len() {
+        if offset > utf16_len(data) {
             drop(s);
             return Err(ctx.throw(
                 rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
                     .into(),
             ));
         }
-        let safe_start = char_boundary(data, offset);
-        let safe_end = char_boundary(data, offset + count);
-        let result = &data[safe_start..safe_end];
+        let byte_start = utf16_offset_to_byte(data, offset);
+        let byte_end = utf16_offset_to_byte(data, offset + count);
+        let result = &data[byte_start..byte_end];
         Ok(rquickjs::String::from_str(ctx.clone(), result)?.into_value())
     }
 }
@@ -2160,7 +2160,7 @@ struct InsertData {
 }
 impl JsHandler for InsertData {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let offset = webidl_unsigned_long(args.first()) as usize;
         let data = args
             .get(1)
             .and_then(|v| v.as_string())
@@ -2172,7 +2172,7 @@ impl JsHandler for InsertData {
             .nodes
             .get(self.key)
             .and_then(|n| n.text.as_ref())
-            .map(|t| t.len())
+            .map(|t| utf16_len(t))
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
@@ -2183,7 +2183,7 @@ impl JsHandler for InsertData {
         }
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
-            let safe_offset = char_boundary(&current, offset);
+            let safe_offset = utf16_offset_to_byte(&current, offset);
             let mut new_text = String::with_capacity(current.len() + data.len());
             new_text.push_str(&current[..safe_offset]);
             new_text.push_str(&data);
@@ -2200,15 +2200,15 @@ struct DeleteData {
 }
 impl JsHandler for DeleteData {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
-        let count = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
         let mut s = self.state.borrow_mut();
         let text_len = s
             .arena
             .nodes
             .get(self.key)
             .and_then(|n| n.text.as_ref())
-            .map(|t| t.len())
+            .map(|t| utf16_len(t))
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
@@ -2220,8 +2220,8 @@ impl JsHandler for DeleteData {
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
             // Char-boundary-säker: hitta närmaste giltiga byte-offset
-            let safe_start = char_boundary(&current, offset);
-            let safe_end = char_boundary(&current, offset + count);
+            let safe_start = utf16_offset_to_byte(&current, offset);
+            let safe_end = utf16_offset_to_byte(&current, offset + count);
             let mut new_text = String::with_capacity(current.len());
             new_text.push_str(&current[..safe_start]);
             new_text.push_str(&current[safe_end..]);
@@ -2237,8 +2237,8 @@ struct ReplaceData {
 }
 impl JsHandler for ReplaceData {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let offset = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
-        let count = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0) as usize;
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
         let data = args
             .get(2)
             .and_then(|v| v.as_string())
@@ -2250,7 +2250,7 @@ impl JsHandler for ReplaceData {
             .nodes
             .get(self.key)
             .and_then(|n| n.text.as_ref())
-            .map(|t| t.len())
+            .map(|t| utf16_len(t))
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
@@ -2261,8 +2261,8 @@ impl JsHandler for ReplaceData {
         }
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
-            let safe_start = char_boundary(&current, offset);
-            let safe_end = char_boundary(&current, offset + count);
+            let safe_start = utf16_offset_to_byte(&current, offset);
+            let safe_end = utf16_offset_to_byte(&current, offset + count);
             let mut new_text = String::with_capacity(current.len());
             new_text.push_str(&current[..safe_start]);
             new_text.push_str(&data);
@@ -2713,18 +2713,38 @@ impl JsHandler for GetAttributeNode {
     }
 }
 
-fn char_boundary(s: &str, offset: usize) -> usize {
-    let offset = offset.min(s.len());
-    if s.is_char_boundary(offset) {
-        return offset;
-    }
-    // Sök framåt
-    for i in offset..=s.len() {
-        if s.is_char_boundary(i) {
-            return i;
+/// WebIDL unsigned long konvertering: ToUint32
+/// -1 → 4294967295, "test" → 0, undefined → 0
+fn webidl_unsigned_long(val: Option<&rquickjs::Value<'_>>) -> u32 {
+    match val {
+        Some(v) => {
+            let n = v.as_number().unwrap_or(0.0);
+            if n.is_nan() || n.is_infinite() {
+                0
+            } else {
+                n as i64 as u32
+            }
         }
+        None => 0,
+    }
+}
+
+/// Konvertera UTF-16 code unit offset till UTF-8 byte offset.
+/// JavaScript räknar i UTF-16 code units (surrogat-par = 2 units).
+fn utf16_offset_to_byte(s: &str, utf16_offset: usize) -> usize {
+    let mut utf16_pos = 0;
+    for (byte_idx, ch) in s.char_indices() {
+        if utf16_pos >= utf16_offset {
+            return byte_idx;
+        }
+        utf16_pos += ch.len_utf16();
     }
     s.len()
+}
+
+/// Räkna antal UTF-16 code units i en sträng (= JavaScript .length)
+fn utf16_len(s: &str) -> usize {
+    s.chars().map(|c| c.len_utf16()).sum()
 }
 
 fn args_to_node_keys<'js>(
@@ -3549,7 +3569,59 @@ fn make_element_object<'js>(
             }),
         )?,
     )?;
-    // CharacterData — JS-polyfill kvar pga UTF-16 code unit counting
+    // CharacterData-metoder — nu Rust-native med UTF-16 code unit counting
+    if node_type_val == 3 || node_type_val == 8 {
+        obj.set(
+            "substringData",
+            Function::new(
+                ctx.clone(),
+                JsFn(SubstringData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "appendData",
+            Function::new(
+                ctx.clone(),
+                JsFn(AppendData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "insertData",
+            Function::new(
+                ctx.clone(),
+                JsFn(InsertData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "deleteData",
+            Function::new(
+                ctx.clone(),
+                JsFn(DeleteData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "replaceData",
+            Function::new(
+                ctx.clone(),
+                JsFn(ReplaceData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+    }
     // ─── Rust-native: element-level queries + NS + namespace ────────────
     obj.set(
         "getElementsByTagName",
