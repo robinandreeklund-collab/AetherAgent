@@ -58,6 +58,14 @@ impl ArenaDomSink {
             .and_then(|n| n.children.last().copied())
     }
 
+    /// Kolla om text enbart innehåller whitespace (newlines, spaces, tabs).
+    /// Dessa noder fyller ingen semantisk funktion och kan skippas.
+    #[inline]
+    fn is_whitespace_only(text: &str) -> bool {
+        text.bytes()
+            .all(|b| matches!(b, b' ' | b'\n' | b'\r' | b'\t'))
+    }
+
     /// Hjälpfunktion: försök addera text till sista syskon-textnod
     fn append_to_existing_text(&self, parent: &NodeKey, text: &StrTendril) -> bool {
         if let Some(last_key) = self.last_child(parent) {
@@ -199,12 +207,13 @@ impl TreeSink for ArenaDomSink {
         key
     }
 
-    fn create_comment(&self, text: StrTendril) -> NodeKey {
+    fn create_comment(&self, _text: StrTendril) -> NodeKey {
+        // Kommentarer har ingen semantisk funktion — skippa textlagring
         self.arena.borrow_mut().nodes.insert(DomNode {
             node_type: NodeType::Comment,
             tag: None,
             attributes: Attrs::new(),
-            text: Some(text),
+            text: None,
             parent: None,
             children: vec![],
         })
@@ -227,6 +236,10 @@ impl TreeSink for ArenaDomSink {
                 self.append_node(*parent, child_key);
             }
             NodeOrText::AppendText(text) => {
+                // Skippa whitespace-only textnoder (41% av alla noder i typisk HTML)
+                if Self::is_whitespace_only(&text) {
+                    return;
+                }
                 // Försök merga med sista textnod (spec: adjacent text merging)
                 if !self.append_to_existing_text(parent, &text) {
                     self.create_and_append_text(*parent, text);
@@ -324,6 +337,10 @@ impl TreeSink for ArenaDomSink {
                 }
             }
             NodeOrText::AppendText(text) => {
+                // Skippa whitespace-only textnoder
+                if Self::is_whitespace_only(&text) {
+                    return;
+                }
                 // Försök merga med föregående syskon
                 if sibling_idx > 0 {
                     let mut arena = self.arena.borrow_mut();
