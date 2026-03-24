@@ -110,6 +110,16 @@
       doc.getElementsByTagNameNS = function(ns, tag) { return html.getElementsByTagNameNS ? html.getElementsByTagNameNS(ns, tag) : []; };
       doc.adoptNode = function(node) { return node; };
       doc.importNode = function(node, deep) { return node.cloneNode(deep); };
+      doc.createRange = function() {
+        if (typeof Range !== 'undefined') return new Range();
+        return document.createRange();
+      };
+      doc.createTreeWalker = function(root, show, filter) {
+        return document.createTreeWalker(root, show, filter);
+      };
+      doc.createNodeIterator = function(root, show, filter) {
+        return document.createNodeIterator(root, show, filter);
+      };
       doc.createCDATASection = function(data) {
         var node = document.createComment(data);
         node.nodeType = 4; // CDATA_SECTION_NODE
@@ -764,6 +774,24 @@
   }
 })();
 
+// ─── NodeFilter konstanter ──────────────────────────────────────────────────
+(function() {
+  if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
+  NodeFilter.FILTER_ACCEPT = 1;
+  NodeFilter.FILTER_REJECT = 2;
+  NodeFilter.FILTER_SKIP = 3;
+  NodeFilter.SHOW_ALL = 0xFFFFFFFF;
+  NodeFilter.SHOW_ELEMENT = 0x1;
+  NodeFilter.SHOW_ATTRIBUTE = 0x2;
+  NodeFilter.SHOW_TEXT = 0x4;
+  NodeFilter.SHOW_CDATA_SECTION = 0x8;
+  NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
+  NodeFilter.SHOW_COMMENT = 0x80;
+  NodeFilter.SHOW_DOCUMENT = 0x100;
+  NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
+  NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
+})();
+
 // ─── Range implementation ───────────────────────────────────────────────────
 // Riktig Range med setStart/setEnd, comparePoint, isPointInRange, intersectsNode
 (function() {
@@ -870,14 +898,51 @@
   };
 
   AetherRange.prototype._compareBoundary = function(containerA, offsetA, containerB, offsetB) {
-    if (containerA === containerB) return offsetA - offsetB;
+    // Same container → compare offsets
+    if (containerA === containerB ||
+        (containerA.__nodeKey__ && containerB.__nodeKey__ && containerA.__nodeKey__ === containerB.__nodeKey__)) {
+      if (offsetA < offsetB) return -1;
+      if (offsetA > offsetB) return 1;
+      return 0;
+    }
     if (!containerA.compareDocumentPosition) return 0;
     var pos = containerA.compareDocumentPosition(containerB);
-    if (pos & 4) return -1; // B follows A → A before B
-    if (pos & 2) return 1;  // B precedes A → A after B
-    // Contained — compare offsets
-    if (pos & 8) return -1; // A contains B
-    if (pos & 16) return 1; // B contains A
+    function indexOfChild(parent, child) {
+      if (!parent.childNodes) return -1;
+      for (var ci = 0; ci < parent.childNodes.length; ci++) {
+        var ck = parent.childNodes[ci];
+        if (ck === child || (ck.__nodeKey__ && child.__nodeKey__ && ck.__nodeKey__ === child.__nodeKey__)) return ci;
+      }
+      return -1;
+    }
+    if (pos & 16) {
+      // B is CONTAINED_BY A — A ancestor of B
+      var child = containerB;
+      while (child.parentNode && child.parentNode !== containerA &&
+             !(child.parentNode.__nodeKey__ && containerA.__nodeKey__ && child.parentNode.__nodeKey__ === containerA.__nodeKey__)) {
+        child = child.parentNode;
+      }
+      if (child.parentNode) {
+        var idx = indexOfChild(containerA, child);
+        if (idx >= 0 && idx < offsetA) return 1;
+        return -1;
+      }
+    }
+    if (pos & 8) {
+      // B CONTAINS A — B ancestor of A
+      var child = containerA;
+      while (child.parentNode && child.parentNode !== containerB &&
+             !(child.parentNode.__nodeKey__ && containerB.__nodeKey__ && child.parentNode.__nodeKey__ === containerB.__nodeKey__)) {
+        child = child.parentNode;
+      }
+      if (child.parentNode) {
+        var idx = indexOfChild(containerB, child);
+        if (idx >= 0 && idx < offsetB) return -1;
+        return 1;
+      }
+    }
+    if (pos & 4) return -1; // B follows A
+    if (pos & 2) return 1;  // B precedes A
     return 0;
   };
 
@@ -894,12 +959,25 @@
   };
 
   AetherRange.prototype.intersectsNode = function(node) {
-    if (!node.parentNode) return true;
+    // Spec: om node och range har olika root → false
+    var nodeRoot = node;
+    while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
+    var rangeRoot = this.startContainer;
+    while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
+    if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) return false;
+
     var parent = node.parentNode;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    var beforeStart = this._compareBoundary(parent, idx, this.startContainer, this.startOffset);
-    var afterEnd = this._compareBoundary(parent, idx + 1, this.endContainer, this.endOffset);
-    return !(beforeStart > 0 || afterEnd < 0);
+    if (!parent) return true;
+    var kids = parent.childNodes;
+    if (!kids) return true;
+    var idx = -1;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i] === node || (kids[i].__nodeKey__ && node.__nodeKey__ && kids[i].__nodeKey__ === node.__nodeKey__)) { idx = i; break; }
+    }
+    if (idx < 0) return true;
+    var afterStart = this._compareBoundary(parent, idx + 1, this.startContainer, this.startOffset);
+    var beforeEnd = this._compareBoundary(parent, idx, this.endContainer, this.endOffset);
+    return afterStart > 0 && beforeEnd < 0;
   };
 
   AetherRange.prototype.cloneRange = function() {

@@ -1009,6 +1009,13 @@ impl JsHandler for ActiveElement {
 
 fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
     let doc = Object::new(ctx.clone())?;
+    // Sätt __nodeKey__ på document så att extract_node_key fungerar
+    {
+        let s = state.borrow();
+        doc.set("__nodeKey__", node_key_to_f64(s.arena.document))?;
+        doc.set("nodeType", 9)?;
+        doc.set("nodeName", "#document")?;
+    }
 
     // Registrera alla document-metoder
     doc.set(
@@ -1097,6 +1104,25 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set(
         "createRange",
         Function::new(ctx.clone(), JsFn(CreateRange))?,
+    )?;
+
+    doc.set(
+        "createTreeWalker",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateTreeWalker {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    doc.set(
+        "createNodeIterator",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateNodeIterator {
+                state: Rc::clone(&state),
+            }),
+        )?,
     )?;
 
     // getSelection — Selection API stub
@@ -2754,12 +2780,12 @@ impl JsHandler for CompareDocumentPosition {
         }
         // Contains / contained_by
         if i == chain_a.len() {
-            // self är ancestor till other → CONTAINS | PRECEDING
-            return Ok(Value::new_int(ctx.clone(), 8 | 4));
+            // self är ancestor till other → other is CONTAINED_BY self, FOLLOWING
+            return Ok(Value::new_int(ctx.clone(), 16 | 4));
         }
         if i == chain_b.len() {
-            // other är ancestor till self → CONTAINED_BY | FOLLOWING
-            return Ok(Value::new_int(ctx.clone(), 16 | 2));
+            // other är ancestor till self → other CONTAINS self, PRECEDING
+            return Ok(Value::new_int(ctx.clone(), 8 | 2));
         }
         // Sibling-ordning i gemensam parent
         let common_parent = chain_a[chain_a.len() - i];
@@ -2905,6 +2931,293 @@ impl JsHandler for Normalize {
             }
         }
         Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── TreeWalker ────────────────────────────────────────────────────────────
+struct CreateTreeWalker {
+    state: SharedState,
+}
+impl JsHandler for CreateTreeWalker {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let root_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: root is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        let what_to_show = args
+            .get(1)
+            .and_then(|v| v.as_number())
+            .map(|n| n as u32)
+            .unwrap_or(0xFFFFFFFF);
+        let filter = args.get(2).cloned();
+
+        let tw = Object::new(ctx.clone())?;
+        let root_obj = make_element_object(ctx, root_key, &self.state)?;
+        tw.set("root", root_obj.clone())?;
+        tw.set("whatToShow", what_to_show)?;
+        tw.set("currentNode", root_obj)?;
+        tw.set("__rootKey", node_key_to_f64(root_key))?;
+        tw.set("__whatToShow", what_to_show)?;
+        if let Some(f) = &filter {
+            if !f.is_null() && !f.is_undefined() {
+                tw.set("filter", f.clone())?;
+            } else {
+                tw.set("filter", Value::new_null(ctx.clone()))?;
+            }
+        } else {
+            tw.set("filter", Value::new_null(ctx.clone()))?;
+        }
+
+        // TreeWalker-metoder via JS — behöver closure-tillgång till state
+        let state_rc = Rc::clone(&self.state);
+        let walker_code = r#"
+        (function(tw) {
+            var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
+            function accept(tw, node) {
+                var show = tw.__whatToShow || 0xFFFFFFFF;
+                var nt = node.nodeType;
+                var bit = 1 << (nt - 1);
+                if (!(show & bit)) return FILTER_SKIP;
+                var f = tw.filter;
+                if (!f) return FILTER_ACCEPT;
+                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
+                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
+                return FILTER_ACCEPT;
+            }
+            function firstChild(tw, reversed) {
+                var node = tw.currentNode;
+                var kids = node.childNodes;
+                if (!kids || !kids.length) return null;
+                var start = reversed ? kids.length - 1 : 0;
+                var end = reversed ? -1 : kids.length;
+                var step = reversed ? -1 : 1;
+                for (var i = start; i !== end; i += step) {
+                    var child = kids[i];
+                    var r = accept(tw, child);
+                    if (r === FILTER_ACCEPT) { tw.currentNode = child; return child; }
+                    if (r === FILTER_SKIP) {
+                        var inner = child.childNodes;
+                        if (inner && inner.length) {
+                            tw.currentNode = child;
+                            var result = firstChild(tw, reversed);
+                            if (result) return result;
+                            tw.currentNode = node;
+                        }
+                    }
+                }
+                return null;
+            }
+            tw.parentNode = function() {
+                var node = this.currentNode;
+                while (node && node !== this.root) {
+                    node = node.parentNode;
+                    if (node && accept(this, node) === FILTER_ACCEPT) {
+                        this.currentNode = node;
+                        return node;
+                    }
+                }
+                return null;
+            };
+            tw.firstChild = function() { return firstChild(this, false); };
+            tw.lastChild = function() { return firstChild(this, true); };
+            tw.nextSibling = function() { return sibling(this, false); };
+            tw.previousSibling = function() { return sibling(this, true); };
+            function sibling(tw, prev) {
+                var node = tw.currentNode;
+                if (node === tw.root) return null;
+                while (true) {
+                    var sib = prev ? node.previousSibling : node.nextSibling;
+                    while (sib) {
+                        var r = accept(tw, sib);
+                        if (r === FILTER_ACCEPT) { tw.currentNode = sib; return sib; }
+                        if (r === FILTER_SKIP && sib.childNodes && sib.childNodes.length) {
+                            sib = prev ? sib.lastChild : sib.firstChild;
+                        } else {
+                            sib = prev ? sib.previousSibling : sib.nextSibling;
+                        }
+                    }
+                    node = node.parentNode;
+                    if (!node || node === tw.root) return null;
+                    if (accept(tw, node) === FILTER_ACCEPT) return null;
+                }
+            }
+            tw.nextNode = function() {
+                var node = this.currentNode;
+                while (true) {
+                    if (node.childNodes && node.childNodes.length) {
+                        for (var i = 0; i < node.childNodes.length; i++) {
+                            var child = node.childNodes[i];
+                            var r = accept(this, child);
+                            if (r === FILTER_ACCEPT) { this.currentNode = child; return child; }
+                            if (r === FILTER_SKIP) { node = child; break; }
+                        }
+                        if (node !== this.currentNode && node.childNodes && node.childNodes.length) continue;
+                    }
+                    // Inget barn — sök syskon
+                    while (node && node !== this.root) {
+                        var sib = node.nextSibling;
+                        if (sib) {
+                            var r2 = accept(this, sib);
+                            if (r2 === FILTER_ACCEPT) { this.currentNode = sib; return sib; }
+                            if (r2 === FILTER_SKIP) { node = sib; break; }
+                            node = sib; continue;
+                        }
+                        node = node.parentNode;
+                    }
+                    if (!node || node === this.root) return null;
+                }
+            };
+            tw.previousNode = function() {
+                var node = this.currentNode;
+                while (node && node !== this.root) {
+                    var sib = node.previousSibling;
+                    while (sib) {
+                        var r = accept(this, sib);
+                        if (r !== FILTER_REJECT) {
+                            while (sib.lastChild) {
+                                sib = sib.lastChild;
+                                r = accept(this, sib);
+                                if (r === FILTER_REJECT) break;
+                            }
+                            if (r === FILTER_ACCEPT) { this.currentNode = sib; return sib; }
+                        }
+                        sib = sib.previousSibling;
+                    }
+                    if (node === this.root) return null;
+                    node = node.parentNode;
+                    if (node && accept(this, node) === FILTER_ACCEPT) { this.currentNode = node; return node; }
+                }
+                return null;
+            };
+        })
+        "#;
+
+        let setup_fn: Function = ctx.eval(walker_code)?;
+        setup_fn.call::<_, Value>((tw.clone(),))?;
+
+        Ok(tw.into_value())
+    }
+}
+
+// NodeIterator — samma pattern men flat iteration
+struct CreateNodeIterator {
+    state: SharedState,
+}
+impl JsHandler for CreateNodeIterator {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let root_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: root is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        let what_to_show = args
+            .get(1)
+            .and_then(|v| v.as_number())
+            .map(|n| n as u32)
+            .unwrap_or(0xFFFFFFFF);
+        let filter = args.get(2).cloned();
+
+        let ni = Object::new(ctx.clone())?;
+        let root_obj = make_element_object(ctx, root_key, &self.state)?;
+        ni.set("root", root_obj.clone())?;
+        ni.set("referenceNode", root_obj.clone())?;
+        ni.set("whatToShow", what_to_show)?;
+        ni.set("__whatToShow", what_to_show)?;
+        ni.set("pointerBeforeReferenceNode", true)?;
+        if let Some(f) = &filter {
+            if !f.is_null() && !f.is_undefined() {
+                ni.set("filter", f.clone())?;
+            } else {
+                ni.set("filter", Value::new_null(ctx.clone()))?;
+            }
+        } else {
+            ni.set("filter", Value::new_null(ctx.clone()))?;
+        }
+
+        let iter_code = r#"
+        (function(ni) {
+            var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
+            function accept(ni, node) {
+                var show = ni.__whatToShow || 0xFFFFFFFF;
+                var bit = 1 << (node.nodeType - 1);
+                if (!(show & bit)) return FILTER_SKIP;
+                var f = ni.filter;
+                if (!f) return FILTER_ACCEPT;
+                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
+                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
+                return FILTER_ACCEPT;
+            }
+            // Pre-order flat traversal
+            function traverse(root) {
+                var list = [];
+                function walk(node) {
+                    list.push(node);
+                    if (node.childNodes) for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+                }
+                walk(root);
+                return list;
+            }
+            ni.nextNode = function() {
+                var all = traverse(this.root);
+                var ref = this.referenceNode;
+                var idx = -1;
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                }
+                if (this.pointerBeforeReferenceNode) {
+                    for (var j = idx; j < all.length; j++) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = false; return all[j];
+                        }
+                    }
+                } else {
+                    for (var j = idx + 1; j < all.length; j++) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; return all[j];
+                        }
+                    }
+                }
+                return null;
+            };
+            ni.previousNode = function() {
+                var all = traverse(this.root);
+                var ref = this.referenceNode;
+                var idx = all.length;
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                }
+                if (!this.pointerBeforeReferenceNode) {
+                    for (var j = idx; j >= 0; j--) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = true; return all[j];
+                        }
+                    }
+                } else {
+                    for (var j = idx - 1; j >= 0; j--) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; return all[j];
+                        }
+                    }
+                }
+                return null;
+            };
+            ni.detach = function() {};
+        })
+        "#;
+
+        let setup_fn: Function = ctx.eval(iter_code)?;
+        setup_fn.call::<_, Value>((ni.clone(),))?;
+
+        Ok(ni.into_value())
     }
 }
 
