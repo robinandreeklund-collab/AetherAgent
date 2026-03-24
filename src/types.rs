@@ -397,12 +397,13 @@ impl SemanticNode {
     /// Beräkna action baserat på roll
     pub fn infer_action(role: &str) -> Option<String> {
         match role {
-            "button" | "link" | "menuitem" | "cta" => Some("click".to_string()),
+            "button" | "link" | "menuitem" | "cta" | "tab" => Some("click".to_string()),
             "textbox" | "searchbox" | "textarea" => Some("type".to_string()),
-            "checkbox" | "radio" => Some("toggle".to_string()),
-            "combobox" | "listbox" | "select" => Some("select".to_string()),
+            "checkbox" | "radio" | "switch" => Some("toggle".to_string()),
+            "combobox" | "listbox" | "select" | "menu" => Some("select".to_string()),
             "slider" => Some("slide".to_string()),
-            "product_card" => Some("click".to_string()),
+            "product_card" | "dialog" | "video" => Some("click".to_string()),
+            "navigation" | "complementary" => Some("click".to_string()),
             _ => None,
         }
     }
@@ -412,14 +413,16 @@ impl SemanticNode {
         match role {
             "cta" => 0.95,
             "button" => 0.9,
-            "link" => 0.8,
             "textbox" | "searchbox" => 0.85,
-            "checkbox" | "radio" => 0.75,
-            "combobox" | "select" => 0.75,
+            "link" | "tab" => 0.8,
+            "checkbox" | "radio" | "switch" => 0.75,
+            "combobox" | "select" | "menu" => 0.75,
             "product_card" => 0.7,
+            "dialog" => 0.7,
             "price" => 0.65,
-            "navigation" => 0.6,
+            "navigation" | "complementary" => 0.6,
             "heading" => 0.6,
+            "video" => 0.55,
             "form" => 0.5,
             "img" => 0.4,
             "text" | "paragraph" => 0.3,

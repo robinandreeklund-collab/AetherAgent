@@ -13,9 +13,35 @@ use crate::types::{BoundingBox, NodeState, SemanticNode, SemanticTree, TrustLeve
 
 // --- Konstanter ---
 
-/// YOLOv8 UI-elementklasser
+/// YOLO UI-elementklasser (22 klasser — matchar ONNX-modellens output-index)
+///
+/// Index 0-9: grundklasser (bakåtkompatibla med 10-klassmodeller)
+/// Index 10-21: utökade agentsemantiska klasser
 pub const UI_CLASSES: &[&str] = &[
-    "button", "input", "link", "icon", "text", "image", "checkbox", "radio", "select", "heading",
+    // Grund (0-9)
+    "button",   // 0  - generell knapp
+    "input",    // 1  - textfält
+    "link",     // 2  - klickbar länk
+    "icon",     // 3  - ikon
+    "text",     // 4  - generell text
+    "image",    // 5  - bild
+    "checkbox", // 6  - checkbox
+    "radio",    // 7  - radioknapp
+    "select",   // 8  - dropdown/combobox
+    "heading",  // 9  - rubrik
+    // Utökade (10-21)
+    "price",     // 10 - pristext (valuta + siffror)
+    "cta",       // 11 - call-to-action (köp, lägg i kundvagn)
+    "card",      // 12 - produktkort / innehållskort
+    "navbar",    // 13 - navigationsbar
+    "searchbox", // 14 - sökfält
+    "form",      // 15 - formulärgrupp
+    "dropdown",  // 16 - dropdown-meny / expanderbar lista
+    "modal",     // 17 - dialogruta / popup / overlay
+    "tab",       // 18 - flik i tab-navigering
+    "toggle",    // 19 - switch / toggle-knapp
+    "sidebar",   // 20 - sidopanel
+    "video",     // 21 - videospelare
 ];
 
 // --- Typer ---
@@ -228,6 +254,7 @@ pub fn detections_to_tree(detections: &[UiDetection], goal: &str, url: &str) -> 
 /// Mappa detektion-klass till semantisk roll
 fn map_class_to_role(class: &str) -> String {
     match class {
+        // Grund (0-9)
         "button" => "button".to_string(),
         "input" => "textbox".to_string(),
         "link" => "link".to_string(),
@@ -238,6 +265,19 @@ fn map_class_to_role(class: &str) -> String {
         "radio" => "radio".to_string(),
         "select" => "select".to_string(),
         "heading" => "heading".to_string(),
+        // Utökade (10-21)
+        "price" => "price".to_string(),
+        "cta" => "cta".to_string(),
+        "card" => "product_card".to_string(),
+        "navbar" => "navigation".to_string(),
+        "searchbox" => "searchbox".to_string(),
+        "form" => "form".to_string(),
+        "dropdown" => "menu".to_string(),
+        "modal" => "dialog".to_string(),
+        "tab" => "tab".to_string(),
+        "toggle" => "switch".to_string(),
+        "sidebar" => "complementary".to_string(),
+        "video" => "video".to_string(),
         other => other.to_string(),
     }
 }

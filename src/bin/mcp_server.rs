@@ -703,7 +703,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_screenshot",
-        description = "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings). USE THIS TOOL WHEN: you have a screenshot (PNG) of a web page or app and want to detect interactive elements visually — useful when HTML is unavailable, rendered differently from source, or for canvas/image-based UIs. Provide base64-encoded PNG and ONNX model bytes. Returns the original screenshot as image, an annotated image with bounding boxes, and JSON detections. Requires the 'vision' feature flag at compile time."
+        description = "Analyze a screenshot using YOLO object detection to find UI elements (22 classes: buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings, prices, CTAs, cards, navbars, searchboxes, forms, dropdowns, modals, tabs, toggles, sidebars, videos). USE THIS TOOL WHEN: you have a screenshot (PNG) of a web page or app and want to detect interactive elements visually — useful when HTML is unavailable, rendered differently from source, or for canvas/image-based UIs. Provide base64-encoded PNG and ONNX model bytes. Returns the original screenshot as image, an annotated image with bounding boxes, and JSON detections. Requires the 'vision' feature flag at compile time."
     )]
     fn parse_screenshot(&self, Parameters(params): Parameters<ParseScreenshotParams>) -> String {
         use base64::Engine;
@@ -721,7 +721,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "vision_parse",
-        description = "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns: 1) the original screenshot as an image, 2) an annotated screenshot with color-coded bounding boxes and labels drawn on it, and 3) the detection JSON with confidence scores and semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH on the server. USE THIS WHEN: you want visual analysis without managing model files yourself."
+        description = "Analyze a screenshot using the server's pre-loaded YOLO model. Detects 22 UI element classes (buttons, inputs, links, icons, text, images, checkboxes, radios, selects, headings, prices, CTAs, cards, navbars, searchboxes, forms, dropdowns, modals, tabs, toggles, sidebars, videos) and returns: 1) the original screenshot as an image, 2) an annotated screenshot with color-coded bounding boxes and labels drawn on it, and 3) the detection JSON with confidence scores and semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH on the server. USE THIS WHEN: you want visual analysis without managing model files yourself."
     )]
     fn vision_parse(&self, Parameters(params): Parameters<VisionParseParams>) -> String {
         // Stubba — call_tool override hanterar image blocks
@@ -731,7 +731,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "fetch_vision",
-        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap). Set obey_robots=true to respect robots.txt before fetching."
+        description = "ALL-IN-ONE: Fetch a URL, render it to a screenshot with Blitz (pure Rust browser engine), then analyze with YOLO vision (22 UI classes). Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. Set fast_render=true (default) for ~50ms render without external resources, or false for full CSS/font/image loading (~2s cap). Set obey_robots=true to respect robots.txt before fetching."
     )]
     fn fetch_vision(&self, Parameters(params): Parameters<FetchVisionParams>) -> String {
         // Stubba — call_tool override hanterar screenshot + vision + image blocks

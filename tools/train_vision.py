@@ -40,36 +40,46 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-# Basklasser — namnen matchar Rust-rollerna i parser.rs/types.rs
+# 22 UI-klasser — matchar exakt Rust UI_CLASSES i vision.rs
+# Index 0-9: grundklasser (bakåtkompatibla med äldre 10-klassmodeller)
+# Index 10-21: utökade agentsemantiska klasser
+# OBS: ordningen är kritisk — ONNX-modellens output-index måste matcha exakt.
 UI_CLASSES = [
-    "button", "textbox", "link", "icon", "text",
-    "img", "checkbox", "radio", "combobox", "heading",
-]
-
-# Utökade agentsemantiska klasser — aktiveras med --extended-classes
-# Dessa ger modellen förmågan att skilja på t.ex. pris vs vanlig text,
-# CTA-knapp vs generell knapp, produktbild vs dekorationsbild.
-# Kräver om-träning om man byter — kan inte blandas med standard 10-klassmodell.
-# Namnen matchar exakt Rust-rollerna i parser.rs/types.rs:
-#   nav → "navigation", search → "searchbox", select → "combobox"
-UI_CLASSES_EXTENDED = [
+    # Grund (0-9)
     "button",          # 0  - generell knapp
-    "textbox",         # 1  - textfält (Rust: "textbox")
+    "input",           # 1  - textfält (Rust: "textbox")
     "link",            # 2  - klickbar länk
     "icon",            # 3  - ikon
     "text",            # 4  - generell text
-    "img",             # 5  - bild (Rust: "img")
+    "image",           # 5  - bild (Rust: "img")
     "checkbox",        # 6  - checkbox
     "radio",           # 7  - radioknapp
-    "combobox",        # 8  - dropdown (Rust: "combobox")
+    "select",          # 8  - dropdown/combobox
     "heading",         # 9  - rubrik
-    "price",           # 10 - pristext (valuta, siffror)
+    # Utökade (10-21)
+    "price",           # 10 - pristext (valuta + siffror)
     "cta",             # 11 - call-to-action (köp, lägg i kundvagn)
-    "product_card",    # 12 - produktkort (bild + text + pris)
-    "navigation",      # 13 - navigering (Rust: "navigation")
-    "searchbox",       # 14 - sökfält (Rust: "searchbox")
+    "card",            # 12 - produktkort / innehållskort
+    "navbar",          # 13 - navigationsbar
+    "searchbox",       # 14 - sökfält
     "form",            # 15 - formulärgrupp
+    "dropdown",        # 16 - dropdown-meny / expanderbar lista
+    "modal",           # 17 - dialogruta / popup / overlay
+    "tab",             # 18 - flik i tab-navigering
+    "toggle",          # 19 - switch / toggle-knapp
+    "sidebar",         # 20 - sidopanel
+    "video",           # 21 - videospelare
 ]
+
+# Bakåtkompatibel alias — äldre --extended-classes flagga använder nu alltid 22
+UI_CLASSES_EXTENDED = UI_CLASSES
+
+# Bakåtkompatibel: legacy 10-klassnamn → nytt index (för konvertering av äldre datasets)
+_LEGACY_10_TO_22 = {
+    "button": 0, "textbox": 1, "input": 1, "link": 2, "icon": 3,
+    "text": 4, "img": 5, "image": 5, "checkbox": 6, "radio": 7,
+    "combobox": 8, "select": 8, "heading": 9,
+}
 
 # RTX 5090 defaults (24 GB VRAM)
 DEFAULT_EPOCHS = 300
@@ -927,16 +937,16 @@ def _map_fiftyone_label_to_ui_class(label: str) -> int | None:
     if label_lower in _ui_class_map:
         return _ui_class_map[label_lower]
 
-    # ShowUI-web → UI_CLASSES mappning
+    # ShowUI-web → UI_CLASSES (22 klasser) mappning
     _fiftyone_to_ui = {
+        # Grund (0-9)
         "button": 0,           # button
         "btn": 0,
         "submitbutton": 0,
-        "textbox": 1,          # textbox
+        "textbox": 1,          # input
         "textarea": 1,
         "input": 1,
         "textfield": 1,
-        "searchbox": 1,
         "link": 2,             # link
         "hyperlink": 2,
         "anchor": 2,
@@ -947,32 +957,48 @@ def _map_fiftyone_label_to_ui_class(label: str) -> int | None:
         "label": 4,
         "paragraph": 4,
         "span": 4,
-        "img": 5,              # img
+        "img": 5,              # image
         "image": 5,
         "figure": 5,
         "photo": 5,
         "checkbox": 6,         # checkbox
         "radio": 7,            # radio
         "radiobutton": 7,
-        "combobox": 8,         # combobox
+        "combobox": 8,         # select
         "select": 8,
-        "dropdown": 8,
         "listbox": 8,
         "heading": 9,          # heading
         "header": 9,
         "title": 9,
         "h1": 9, "h2": 9, "h3": 9, "h4": 9, "h5": 9, "h6": 9,
-        # ShowUI-specifika
-        "edit": 1,             # Edit → textbox (textinmatningsfält)
+        # Utökade (10-21) — ShowUI-specifika
+        "price": 10,
+        "cta": 11,
+        "card": 12,
+        "productcard": 12,
+        "searchbox": 14,       # searchbox
+        "search": 14,
+        "form": 15,
+        "edit": 1,             # Edit → input (textinmatningsfält)
         "listitem": 2,         # ListItem → link (interaktivt, klickbart)
-        "menuitem": 2,         # MenuItem → link
-        "tab": 0,              # Tab → button
-        "tabitem": 0,          # TabItem → button
-        "switch": 6,           # Switch → checkbox (toggle)
-        "slider": 1,           # Slider → textbox (interaktiv input)
+        "menuitem": 16,        # MenuItem → dropdown
+        "menu": 16,            # Menu → dropdown
+        "tab": 18,             # Tab → tab
+        "tabitem": 18,         # TabItem → tab
+        "switch": 19,          # Switch → toggle
+        "toggle": 19,
+        "slider": 1,           # Slider → input (interaktiv input)
         "progressbar": 4,      # ProgressBar → text (visuellt)
-        "navigation": 2,       # Navigation → link
-        "nav": 2,
+        "navigation": 13,      # Navigation → navbar
+        "nav": 13,
+        "navbar": 13,
+        "sidebar": 20,
+        "aside": 20,
+        "modal": 17,           # Modal → modal
+        "dialog": 17,
+        "popup": 17,
+        "video": 21,           # Video → video
+        "player": 21,
     }
 
     if label_lower in _fiftyone_to_ui:
@@ -1681,33 +1707,33 @@ def download_starter_dataset(output_dir: Path):
 # Mappning från externa klassnamn till våra UI_CLASSES-index
 # Klasser som inte matchar ignoreras
 _RICO_CLASS_MAP = {
-    "Text Button": 0,    # button
-    "Icon": 3,           # icon
-    "Text": 4,           # text
-    "Image": 5,          # img
-    "Input": 1,          # textbox
-    "Web View": 4,       # text (fallback)
-    "List Item": 4,      # text
-    "Card": 4,           # text
-    "Radio Button": 7,   # radio
-    "Checkbox": 6,       # checkbox
-    "Switch": 6,         # checkbox (nära nog)
-    "Spinner": 8,        # combobox
-    "Toolbar": 9,        # heading
-    "Multi-Tab": 2,      # link
-    "Slider": 1,         # textbox (fallback)
-    "Advertisement": 5,  # img
+    "Text Button": 0,      # button
+    "Icon": 3,             # icon
+    "Text": 4,             # text
+    "Image": 5,            # image
+    "Input": 1,            # input
+    "Web View": 4,         # text (fallback)
+    "List Item": 4,        # text
+    "Card": 12,            # card
+    "Radio Button": 7,     # radio
+    "Checkbox": 6,         # checkbox
+    "Switch": 19,          # toggle
+    "Spinner": 8,          # select
+    "Toolbar": 13,         # navbar
+    "Multi-Tab": 18,       # tab
+    "Slider": 1,           # input (fallback)
+    "Advertisement": 5,    # image
     "Pager Indicator": 3,  # icon
-    "Modal": 4,          # text
-    "Button Bar": 0,     # button
-    "Number Stepper": 1, # textbox
-    "Map View": 5,       # img
-    "Video": 5,          # img
-    "Date Picker": 8,    # combobox
-    "On/Off Switch": 6,  # checkbox
-    "Drawer": 2,         # link
-    "Bottom Navigation": 2,  # link
-    "Upper Tab Bar": 2,  # link
+    "Modal": 17,           # modal
+    "Button Bar": 0,       # button
+    "Number Stepper": 1,   # input
+    "Map View": 5,         # image
+    "Video": 21,           # video
+    "Date Picker": 16,     # dropdown
+    "On/Off Switch": 19,   # toggle
+    "Drawer": 20,          # sidebar
+    "Bottom Navigation": 13,  # navbar
+    "Upper Tab Bar": 18,   # tab
 }
 
 # Rico viewType-mappning (det andra vanliga formatet med "views" array)
@@ -1715,17 +1741,21 @@ _RICO_VIEWTYPE_MAP = {
     "android.widget.Button": 0,          # button
     "android.widget.ImageButton": 0,     # button
     "android.widget.EditText": 1,        # input
-    "android.widget.AutoCompleteTextView": 1,
+    "android.widget.AutoCompleteTextView": 14,  # searchbox
     "android.widget.TextView": 4,        # text (heuristik avgör vidare)
     "android.widget.ImageView": 5,       # image
     "android.widget.CheckBox": 6,        # checkbox
     "android.widget.RadioButton": 7,     # radio
     "android.widget.Spinner": 8,         # select
-    "android.widget.Switch": 6,          # checkbox
-    "android.widget.ToggleButton": 6,    # checkbox
-    "android.widget.SeekBar": 1,         # input
+    "android.widget.Switch": 19,         # toggle
+    "android.widget.ToggleButton": 19,   # toggle
+    "android.widget.SeekBar": 1,         # input (fallback)
     "android.widget.ProgressBar": 4,     # text (visuellt)
     "android.widget.RatingBar": 4,       # text
+    "android.widget.SearchView": 14,     # searchbox
+    "android.widget.VideoView": 21,      # video
+    "android.widget.TabHost": 18,        # tab
+    "android.widget.TabWidget": 18,      # tab
     # Förkortade classnamn (utan full package path)
     "Button": 0,
     "ImageButton": 0,
@@ -1735,25 +1765,13 @@ _RICO_VIEWTYPE_MAP = {
     "CheckBox": 6,
     "RadioButton": 7,
     "Spinner": 8,
-    "Switch": 6,
-    "ToggleButton": 6,
+    "Switch": 19,
+    "ToggleButton": 19,
 }
 
-# Utökad Rico-mappning för --extended-classes
-_RICO_CLASS_MAP_EXTENDED = {
-    **_RICO_CLASS_MAP,
-    "Bottom Navigation": 13,  # nav
-    "Upper Tab Bar": 13,      # nav
-    "Multi-Tab": 13,          # nav
-    "Drawer": 13,             # nav
-    "Card": 12,               # product_card (heuristik kan förbättra)
-    "Input": 1,               # input
-}
-
-_RICO_VIEWTYPE_MAP_EXTENDED = {
-    **_RICO_VIEWTYPE_MAP,
-    "android.widget.SearchView": 14,     # search
-}
+# Bakåtkompatibel alias — extended = standard nu (22 klasser alltid)
+_RICO_CLASS_MAP_EXTENDED = _RICO_CLASS_MAP
+_RICO_VIEWTYPE_MAP_EXTENDED = _RICO_VIEWTYPE_MAP
 
 # Valuta- och CTA-heuristik-mönster
 _CURRENCY_PATTERNS = [
@@ -1768,6 +1786,7 @@ _CTA_PATTERNS = [
 ]
 
 _WEBUI_CLASS_MAP = {
+    # Grund (0-9)
     "button": 0,
     "btn": 0,
     "input": 1,
@@ -1787,19 +1806,40 @@ _WEBUI_CLASS_MAP = {
     "checkbox": 6,
     "radio": 7,
     "select": 8,
-    "dropdown": 8,
     "heading": 9,
     "h1": 9,
     "h2": 9,
     "h3": 9,
     "h4": 9,
     "title": 9,
-    "nav": 2,            # fallback till link i bas; navigation(13) i extended
-    "menu": 2,
-    "search": 1,         # fallback till textbox i bas; searchbox(14) i extended
-    "searchbox": 1,
+    # Utökade (10-21)
+    "price": 10,
+    "cta": 11,
+    "card": 12,
+    "product_card": 12,
+    "product-card": 12,
+    "nav": 13,
+    "navbar": 13,
+    "navigation": 13,
+    "menu": 16,
+    "dropdown": 16,
     "combobox": 8,
-    "navigation": 2,     # fallback till link i bas
+    "search": 14,
+    "searchbox": 14,
+    "search-box": 14,
+    "form": 15,
+    "modal": 17,
+    "dialog": 17,
+    "popup": 17,
+    "overlay": 17,
+    "tab": 18,
+    "tab-item": 18,
+    "toggle": 19,
+    "switch": 19,
+    "sidebar": 20,
+    "aside": 20,
+    "video": 21,
+    "player": 21,
 }
 
 
@@ -2726,13 +2766,13 @@ def convert_klarna_to_yolo(klarna_dir: Path, output_dir: Path,
 
     active_classes = UI_CLASSES_EXTENDED if extended else UI_CLASSES
 
-    # Klarna-label → class-id
+    # Klarna-label → class-id (22-klasssystem — price/cta alltid dedikerade)
     _klarna_label_map = {
-        "Price": 10 if extended else 4,           # price / text
-        "Name": 9,                                 # heading
-        "Main picture": 5,                         # img
-        "Add to cart": 11 if extended else 0,      # cta / button
-        "Cart": 11 if extended else 0,             # cta / button
+        "Price": 10,           # price
+        "Name": 9,             # heading
+        "Main picture": 5,     # image
+        "Add to cart": 11,     # cta
+        "Cart": 11,            # cta
     }
 
     images_dir = output_dir / "images" / "train"
@@ -2890,38 +2930,51 @@ def _convert_webclick_to_yolo(ds, output_dir: Path):
 
     _class_map = {name: i for i, name in enumerate(UI_CLASSES)}
 
-    # Instruktions-nyckelord → UI-klass
+    # Instruktions-nyckelord → UI-klass (22-klasssystem)
     _intent_to_class = {
         "click": 0,          # button
         "button": 0,
         "submit": 0,
         "press": 0,
         "tap": 0,
-        "type": 1,           # textbox
+        "type": 1,           # input
         "enter": 1,
         "input": 1,
-        "search": 1,
         "fill": 1,
         "write": 1,
+        "search": 14,        # searchbox
         "link": 2,           # link
         "navigate": 2,
         "go to": 2,
         "open": 2,
-        "select": 8,         # combobox
-        "dropdown": 8,
+        "select": 8,         # select
+        "dropdown": 16,      # dropdown
         "choose": 8,
         "check": 6,          # checkbox
-        "toggle": 6,
-        "image": 5,          # img
+        "toggle": 19,        # toggle
+        "image": 5,          # image
         "photo": 5,
         "picture": 5,
         "heading": 9,        # heading
         "title": 9,
-        "menu": 2,           # link (navigation)
-        "tab": 0,            # button
-        "close": 0,
+        "menu": 16,          # dropdown
+        "tab": 18,           # tab
+        "close": 17,         # modal (stäng dialog)
         "icon": 3,           # icon
         "logo": 3,
+        "buy": 11,           # cta
+        "add to cart": 11,
+        "checkout": 11,
+        "sign up": 11,
+        "price": 10,         # price
+        "video": 21,         # video
+        "play": 21,
+        "sidebar": 20,       # sidebar
+        "form": 15,          # form
+        "card": 12,          # card
+        "navbar": 13,        # navbar
+        "modal": 17,         # modal
+        "dialog": 17,
     }
 
     # Hämta split

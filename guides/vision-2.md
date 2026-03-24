@@ -1,6 +1,39 @@
 # AetherAgent Vision — 2026 Update
 
-> YOLO26n, interaktiv modellväljare, 5 nya HuggingFace-datasets, metric-baserad early stopping.
+> YOLO26n, 22 UI-klasser, interaktiv modellväljare, 8 HuggingFace-datasets, metric-baserad early stopping.
+
+---
+
+## 22 UI-klasser
+
+Modellen detekterar 22 UI-elementklasser (upp från 10). Index 0-9 bakåtkompatibla.
+
+| Index | Klass | Beskrivning | Rust-roll | Action |
+|-------|-------|-------------|-----------|--------|
+| 0 | `button` | Generell knapp | button | click |
+| 1 | `input` | Textfält | textbox | type |
+| 2 | `link` | Klickbar länk | link | click |
+| 3 | `icon` | Ikon | img | — |
+| 4 | `text` | Generell text | text | — |
+| 5 | `image` | Bild | img | — |
+| 6 | `checkbox` | Checkbox | checkbox | toggle |
+| 7 | `radio` | Radioknapp | radio | toggle |
+| 8 | `select` | Dropdown/combobox | select | select |
+| 9 | `heading` | Rubrik | heading | — |
+| 10 | `price` | Pristext (valuta + siffror) | price | — |
+| 11 | `cta` | Call-to-action (köp, registrera) | cta | click |
+| 12 | `card` | Produktkort / innehållskort | product_card | click |
+| 13 | `navbar` | Navigationsbar | navigation | click |
+| 14 | `searchbox` | Sökfält | searchbox | type |
+| 15 | `form` | Formulärgrupp | form | — |
+| 16 | `dropdown` | Dropdown-meny / expanderbar | menu | select |
+| 17 | `modal` | Dialogruta / popup / overlay | dialog | click |
+| 18 | `tab` | Flik i tab-navigering | tab | click |
+| 19 | `toggle` | Switch / toggle-knapp | switch | toggle |
+| 20 | `sidebar` | Sidopanel | complementary | click |
+| 21 | `video` | Videospelare | video | click |
+
+`--extended-classes` behövs ej längre — 22 klasser är standard.
 
 ---
 
@@ -184,23 +217,18 @@ För produktionsmodeller med bättre data (osatlas + showui-web merged): sätt `
 51 700 e-handelssidor från 8 175 sajter i 8 regioner. WTL-snapshots med elementmetadata
 (bounding boxes, font-storlekar). 5 annoterade element per sida:
 
-| Klarna-label | Standard klass | Extended klass |
-|--------------|---------------|----------------|
-| Price | text (4) | price (10) |
-| Name | heading (9) | heading (9) |
-| Main picture | img (5) | img (5) |
-| Add to cart | button (0) | cta (11) |
-| Cart | button (0) | cta (11) |
+| Klarna-label | Klass (22-system) |
+|--------------|-------------------|
+| Price | price (10) |
+| Name | heading (9) |
+| Main picture | image (5) |
+| Add to cart | cta (11) |
+| Cart | cta (11) |
 
-Med `--extended-classes` får du bättre separation — Price mappas till dedikerad `price`-klass
-och Add to cart/Cart till `cta`.
+22-klasssystemet ger automatiskt dedikerade klasser — `--extended-classes` behövs ej längre.
 
 ```bash
-# Standard 10-klasser
 python tools/train_vision.py --download --format klarna --version v10
-
-# Med utökade klasser (rekommenderat för e-handel)
-python tools/train_vision.py --download --format klarna --extended-classes --version v10e
 ```
 
 ---
