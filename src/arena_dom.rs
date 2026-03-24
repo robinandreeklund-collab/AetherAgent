@@ -14,6 +14,50 @@ new_key_type! {
     pub struct NodeKey;
 }
 
+/// Case-insensitive substring-sökning utan allokering (ASCII only).
+/// Undviker to_lowercase()/to_uppercase()-allokeringar i hot paths.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Snabb style-hidden-check utan allokering.
+/// Normaliserar inte hela strängen — söker direkt med case-insensitive bytes.
+fn is_style_hidden_fast(style: &str) -> bool {
+    // Patterns att söka (redan lowercase, utan whitespace)
+    const PATTERNS: &[&str] = &[
+        "display:none",
+        "visibility:hidden",
+        "opacity:0",
+        "left:-9999",
+        "left:-10000",
+        "clip:rect(0",
+    ];
+    // Bygg normaliserad sträng — men gör det inline utan chars().filter().collect()
+    // Använd byte-nivå: allokera bara OM style innehåller whitespace nära patterns
+    let lower = style.to_ascii_lowercase();
+    for pat in PATTERNS {
+        // Snabbcheck: söker med och utan whitespace runt ':'
+        if lower.contains(pat) {
+            return true;
+        }
+    }
+    // Fallback: normalisera bort whitespace (bara om inget hittades direkt)
+    // Många style-strängar har "display: none" med mellanslag
+    let normalized: String = lower.chars().filter(|c| !c.is_whitespace()).collect();
+    for pat in PATTERNS {
+        if normalized.contains(pat) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Nodtyp i DOM-trädet
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -366,20 +410,9 @@ impl ArenaDom {
             None => return false,
         };
 
-        // Kolla style-attribut för osynlighet
+        // Kolla style-attribut för osynlighet — utan allokering
         if let Some(style) = node.get_attr("style") {
-            let normalized: String = style
-                .to_lowercase()
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .collect();
-            if normalized.contains("display:none")
-                || normalized.contains("visibility:hidden")
-                || normalized.contains("opacity:0")
-                || normalized.contains("left:-9999")
-                || normalized.contains("left:-10000")
-                || normalized.contains("clip:rect(0")
-            {
+            if is_style_hidden_fast(style) {
                 return false;
             }
         }
@@ -396,19 +429,21 @@ impl ArenaDom {
             }
         }
 
-        // nojs-divvar: id="nojs" eller class="no-js" — JS-varningar som python.org
+        // nojs-divvar: id="nojs" eller class="no-js" — utan to_lowercase()
         if let Some(id) = node.get_attr("id") {
-            let id_lower = id.to_lowercase();
-            if Self::NOJS_IDENTIFIERS.iter().any(|pat| id_lower == *pat) {
+            if Self::NOJS_IDENTIFIERS
+                .iter()
+                .any(|pat| id.eq_ignore_ascii_case(pat))
+            {
                 return false;
             }
         }
         if let Some(class) = node.get_attr("class") {
-            let class_lower = class.to_lowercase();
-            if Self::NOJS_IDENTIFIERS
-                .iter()
-                .any(|pat| class_lower.split_whitespace().any(|c| c == *pat))
-            {
+            if Self::NOJS_IDENTIFIERS.iter().any(|pat| {
+                class
+                    .split_whitespace()
+                    .any(|c| c.eq_ignore_ascii_case(pat))
+            }) {
                 return false;
             }
         }
@@ -504,18 +539,27 @@ impl ArenaDom {
         }
 
         let tag = self.tag_name(key).unwrap_or("");
-        let input_type = self.get_attr(key, "type").unwrap_or("").to_lowercase();
+        let input_type_raw = self.get_attr(key, "type").unwrap_or("");
 
         let base_role = match tag {
             "button" => "button",
             "a" => "link",
-            "input" => match input_type.as_str() {
-                "checkbox" => "checkbox",
-                "radio" => "radio",
-                "submit" | "button" | "reset" => "button",
-                "search" => "searchbox",
-                _ => "textbox",
-            },
+            "input" => {
+                if input_type_raw.eq_ignore_ascii_case("checkbox") {
+                    "checkbox"
+                } else if input_type_raw.eq_ignore_ascii_case("radio") {
+                    "radio"
+                } else if input_type_raw.eq_ignore_ascii_case("submit")
+                    || input_type_raw.eq_ignore_ascii_case("button")
+                    || input_type_raw.eq_ignore_ascii_case("reset")
+                {
+                    "button"
+                } else if input_type_raw.eq_ignore_ascii_case("search") {
+                    "searchbox"
+                } else {
+                    "textbox"
+                }
+            }
             "textarea" => "textarea",
             "select" => "combobox",
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading",
@@ -532,10 +576,12 @@ impl ArenaDom {
             _ => "generic",
         };
 
-        // Schema.org product_card
+        // Schema.org product_card — utan to_lowercase()
         if let Some(itemtype) = self.get_attr(key, "itemtype") {
-            let it_lower = itemtype.to_lowercase();
-            if it_lower.contains("schema.org/product") || it_lower.contains("schema.org/offer") {
+            let it = itemtype;
+            if contains_ignore_ascii_case(it, "schema.org/product")
+                || contains_ignore_ascii_case(it, "schema.org/offer")
+            {
                 return "product_card".to_string();
             }
         }
@@ -544,40 +590,45 @@ impl ArenaDom {
             || self.has_attr(key, "data-product")
             || self.has_attr(key, "data-item-id")
         {
-            let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-            if class.contains("product") || class.contains("card") || class.contains("item") {
+            let class = self.get_attr(key, "class").unwrap_or("");
+            if contains_ignore_ascii_case(class, "product")
+                || contains_ignore_ascii_case(class, "card")
+                || contains_ignore_ascii_case(class, "item")
+            {
                 return "product_card".to_string();
             }
         }
 
-        // CTA-heuristik
+        // CTA-heuristik — extrahera text en gång, återanvänd
+        let class_raw = self.get_attr(key, "class").unwrap_or("");
         if base_role == "button" || base_role == "link" {
-            let text = self.extract_text(key).to_lowercase();
+            let text = self.extract_text(key);
+            let text_lower = text.to_ascii_lowercase();
             for kw in Self::CTA_KEYWORDS {
-                if text.contains(kw) {
+                if text_lower.contains(kw) {
                     return "cta".to_string();
                 }
             }
-            let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-            if class.contains("cta")
-                || class.contains("add-to-cart")
-                || class.contains("buy-btn")
-                || class.contains("checkout")
+            let class_lower = class_raw.to_ascii_lowercase();
+            if class_lower.contains("cta")
+                || class_lower.contains("add-to-cart")
+                || class_lower.contains("buy-btn")
+                || class_lower.contains("checkout")
             {
                 return "cta".to_string();
             }
         }
 
-        // Pristext-heuristik
-        if matches!(base_role, "text" | "generic") && self.looks_like_price(key) {
+        // Pristext-heuristik — skicka med class
+        if matches!(base_role, "text" | "generic") && self.looks_like_price_fast(key, class_raw) {
             return "price".to_string();
         }
 
         base_role.to_string()
     }
 
-    /// Kontrollera om text ser ut som ett pris
-    fn looks_like_price(&self, key: NodeKey) -> bool {
+    /// Kontrollera om text ser ut som ett pris (med förextraherad class)
+    fn looks_like_price_fast(&self, key: NodeKey, class_raw: &str) -> bool {
         let text = self.extract_text(key);
         let trimmed = text.trim();
         if trimmed.is_empty() || trimmed.len() > 40 {
@@ -586,18 +637,21 @@ impl ArenaDom {
         if !trimmed.chars().any(|c| c.is_ascii_digit()) {
             return false;
         }
-        let upper = trimmed.to_uppercase();
+        // Valutaindikatorer — case-insensitive utan allokering
         for indicator in Self::PRICE_INDICATORS {
-            if upper.contains(&indicator.to_uppercase()) {
+            if contains_ignore_ascii_case(trimmed, indicator) {
                 return true;
             }
         }
-        let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-        if class.contains("price") || class.contains("pris") || class.contains("cost") {
+        // CSS-klass — utan to_lowercase()
+        if contains_ignore_ascii_case(class_raw, "price")
+            || contains_ignore_ascii_case(class_raw, "pris")
+            || contains_ignore_ascii_case(class_raw, "cost")
+        {
             return true;
         }
         if let Some(itemprop) = self.get_attr(key, "itemprop") {
-            if itemprop.to_lowercase().contains("price") {
+            if contains_ignore_ascii_case(itemprop, "price") {
                 return true;
             }
         }

@@ -859,7 +859,7 @@ async fn api_endpoints() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        serde_json::to_string_pretty(&body).unwrap_or_default(),
+        serde_json::to_string(&body).unwrap_or_default(),
     )
 }
 

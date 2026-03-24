@@ -85,15 +85,20 @@ const HIGH_RISK_COUNT: usize = HIGH_RISK_PATTERNS.len();
 
 /// Kompilerad Aho-Corasick automaton — alla patterns i en sökning, O(n)
 /// Byggs en gång vid första anrop (LazyLock). Case-insensitive via AsciiCaseInsensitive.
-static AC_AUTOMATON: LazyLock<aho_corasick::AhoCorasick> = LazyLock::new(|| {
-    let all_patterns: Vec<&str> = HIGH_RISK_PATTERNS
+/// Cachad pattern-lista — byggs en gång, återanvänds vid varje match-lookup.
+/// Eliminerar Vec-rekonstruktion per analyze_text()-anrop.
+static ALL_PATTERNS: LazyLock<Vec<&str>> = LazyLock::new(|| {
+    HIGH_RISK_PATTERNS
         .iter()
         .chain(MEDIUM_RISK_PATTERNS.iter())
         .copied()
-        .collect();
+        .collect()
+});
+
+static AC_AUTOMATON: LazyLock<aho_corasick::AhoCorasick> = LazyLock::new(|| {
     aho_corasick::AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(&all_patterns)
+        .build(&*ALL_PATTERNS)
         .expect("Aho-Corasick build: alla patterns är giltiga")
 });
 
@@ -109,13 +114,8 @@ pub fn analyze_text(node_id: u32, text: &str) -> (TrustLevel, Option<InjectionWa
         } else {
             (WarningSeverity::Medium, "Medium")
         };
-        // Hämta det matchande mönstret
-        let all_patterns: Vec<&str> = HIGH_RISK_PATTERNS
-            .iter()
-            .chain(MEDIUM_RISK_PATTERNS.iter())
-            .copied()
-            .collect();
-        let pattern = all_patterns[pattern_idx];
+        // Hämta det matchande mönstret från cachad lookup
+        let pattern = ALL_PATTERNS[pattern_idx];
         let warning = InjectionWarning {
             node_id,
             reason: format!("{} risk: innehåller mönster '{}'", severity_label, pattern),

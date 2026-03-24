@@ -66,6 +66,105 @@ pub fn get_tag_name(handle: &Handle) -> Option<String> {
     }
 }
 
+/// Cachad batch-extraktion av alla relevanta attribut i en enda pass.
+/// Eliminerar 15-20 separata `get_attr()` O(n)-sökningar per element.
+pub struct AttrCache {
+    pub tag: String,
+    pub role: Option<String>,
+    pub attr_type: Option<String>,
+    pub style: Option<String>,
+    pub class: Option<String>,
+    pub id: Option<String>,
+    pub itemtype: Option<String>,
+    pub itemprop: Option<String>,
+    pub name: Option<String>,
+    pub aria_label: Option<String>,
+    pub aria_labelledby: Option<String>,
+    pub placeholder: Option<String>,
+    pub alt: Option<String>,
+    pub title: Option<String>,
+    pub src: Option<String>,
+    pub has_hidden: bool,
+    pub is_aria_hidden: bool,
+    pub has_data_product_id: bool,
+    pub has_data_product: bool,
+    pub has_data_item_id: bool,
+    // Lazy-load bild-attribut
+    pub lazy_src: Option<String>,
+}
+
+impl AttrCache {
+    /// Extrahera alla relevanta attribut i en enda pass genom attributlistan
+    pub fn from_handle(handle: &Handle) -> Self {
+        let mut cache = AttrCache {
+            tag: String::new(),
+            role: None,
+            attr_type: None,
+            style: None,
+            class: None,
+            id: None,
+            itemtype: None,
+            itemprop: None,
+            name: None,
+            aria_label: None,
+            aria_labelledby: None,
+            placeholder: None,
+            alt: None,
+            title: None,
+            src: None,
+            has_hidden: false,
+            is_aria_hidden: false,
+            has_data_product_id: false,
+            has_data_product: false,
+            has_data_item_id: false,
+            lazy_src: None,
+        };
+
+        if let NodeData::Element { name, attrs, .. } = &handle.data {
+            cache.tag = name.local.to_string();
+            for attr in attrs.borrow().iter() {
+                let attr_name = &*attr.name.local;
+                let val = || attr.value.to_string();
+                match attr_name {
+                    "role" => cache.role = Some(val()),
+                    "type" => cache.attr_type = Some(val()),
+                    "style" => cache.style = Some(val()),
+                    "class" => cache.class = Some(val()),
+                    "id" => cache.id = Some(val()),
+                    "itemtype" => cache.itemtype = Some(val()),
+                    "itemprop" => cache.itemprop = Some(val()),
+                    "name" => cache.name = Some(val()),
+                    "aria-label" => cache.aria_label = Some(val()),
+                    "aria-labelledby" => cache.aria_labelledby = Some(val()),
+                    "placeholder" => cache.placeholder = Some(val()),
+                    "alt" => cache.alt = Some(val()),
+                    "title" => cache.title = Some(val()),
+                    "src" => cache.src = Some(val()),
+                    "hidden" => cache.has_hidden = true,
+                    "aria-hidden" => {
+                        cache.is_aria_hidden = attr.value.trim().eq_ignore_ascii_case("true");
+                    }
+                    "data-product-id" => cache.has_data_product_id = true,
+                    "data-product" => cache.has_data_product = true,
+                    "data-item-id" => cache.has_data_item_id = true,
+                    "data-src" | "data-lazy-src" | "data-original" | "data-image"
+                    | "data-thumb" | "data-thumbnail" => {
+                        if cache.lazy_src.is_none() {
+                            let v = val();
+                            let trimmed = v.trim();
+                            if !trimmed.is_empty() {
+                                cache.lazy_src = Some(trimmed.to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        cache
+    }
+}
+
 /// ID/klass-mönster som indikerar "JavaScript krävs"-meddelanden
 const NOJS_IDENTIFIERS: &[&str] = &["nojs", "no-js", "noscript-warning", "js-disabled"];
 
@@ -75,39 +174,43 @@ const NOJS_IDENTIFIERS: &[&str] = &["nojs", "no-js", "noscript-warning", "js-dis
 /// HTML hidden-attribut, off-screen positioning (left:-9999px),
 /// nojs-divvar (id="nojs", class="no-js" etc.).
 pub fn is_likely_visible(handle: &Handle) -> bool {
+    let cache = AttrCache::from_handle(handle);
+    is_likely_visible_cached(&cache)
+}
+
+/// Snabb synlighetscheck med förextraherade attribut (noll extra get_attr-anrop)
+pub fn is_likely_visible_cached(cache: &AttrCache) -> bool {
     // Kolla style-attribut för osynlighet
-    if let Some(style) = get_attr(handle, "style") {
-        if is_style_hidden(&style) {
+    if let Some(ref style) = cache.style {
+        if is_style_hidden(style) {
             return false;
         }
     }
 
-    if let NodeData::Element { attrs, .. } = &handle.data {
-        for attr in attrs.borrow().iter() {
-            // HTML5 hidden-attribut
-            if &attr.name.local == "hidden" {
-                return false;
-            }
-            // aria-hidden="true" — semantiskt dold
-            if &attr.name.local == "aria-hidden" && attr.value.trim().eq_ignore_ascii_case("true") {
-                return false;
-            }
-        }
+    // HTML5 hidden-attribut
+    if cache.has_hidden {
+        return false;
+    }
+    // aria-hidden="true"
+    if cache.is_aria_hidden {
+        return false;
     }
 
-    // nojs-divvar: id="nojs" eller class="no-js" — JS-varningar som python.org
-    if let Some(id) = get_attr(handle, "id") {
-        let id_lower = id.to_lowercase();
-        if NOJS_IDENTIFIERS.iter().any(|pat| id_lower == *pat) {
-            return false;
-        }
-    }
-    if let Some(class) = get_attr(handle, "class") {
-        let class_lower = class.to_lowercase();
+    // nojs-divvar: id="nojs" eller class="no-js"
+    if let Some(ref id) = cache.id {
         if NOJS_IDENTIFIERS
             .iter()
-            .any(|pat| class_lower.split_whitespace().any(|c| c == *pat))
+            .any(|pat| id.eq_ignore_ascii_case(pat))
         {
+            return false;
+        }
+    }
+    if let Some(ref class) = cache.class {
+        if NOJS_IDENTIFIERS.iter().any(|pat| {
+            class
+                .split_whitespace()
+                .any(|c| c.eq_ignore_ascii_case(pat))
+        }) {
             return false;
         }
     }
@@ -159,21 +262,32 @@ const PRICE_INDICATORS: &[&str] = &[
 
 /// Inferera semantisk roll från HTML-tagg + ARIA-attribut + heuristik
 pub fn infer_role(handle: &Handle) -> String {
+    let cache = AttrCache::from_handle(handle);
+    infer_role_cached(handle, &cache)
+}
+
+/// Snabb rolldetektering med förextraherade attribut
+pub fn infer_role_cached(handle: &Handle, cache: &AttrCache) -> String {
     // ARIA-roll har högst prioritet
-    if let Some(role) = get_attr(handle, "role") {
+    if let Some(ref role) = cache.role {
         if !role.is_empty() {
-            return role;
+            return role.clone();
         }
     }
 
-    let tag = get_tag_name(handle).unwrap_or_default();
-    let input_type = get_attr(handle, "type").unwrap_or_default().to_lowercase();
+    let input_type_lower: String;
+    let input_type_str = if let Some(ref t) = cache.attr_type {
+        input_type_lower = t.to_ascii_lowercase();
+        input_type_lower.as_str()
+    } else {
+        ""
+    };
 
     // Tagg-baserad roll (grundläggande)
-    let base_role = match tag.as_str() {
+    let base_role = match cache.tag.as_str() {
         "button" => "button",
         "a" => "link",
-        "input" => match input_type.as_str() {
+        "input" => match input_type_str {
             "checkbox" => "checkbox",
             "radio" => "radio",
             "submit" | "button" | "reset" => "button",
@@ -197,30 +311,40 @@ pub fn infer_role(handle: &Handle) -> String {
     };
 
     // Heuristik: Schema.org product_card
-    if let Some(itemtype) = get_attr(handle, "itemtype") {
-        let it_lower = itemtype.to_lowercase();
+    if let Some(ref itemtype) = cache.itemtype {
+        // Case-insensitive contains utan allokering
+        let it_lower_buf: String;
+        let it_lower = if itemtype.is_ascii() {
+            it_lower_buf = itemtype.to_ascii_lowercase();
+            it_lower_buf.as_str()
+        } else {
+            it_lower_buf = itemtype.to_lowercase();
+            it_lower_buf.as_str()
+        };
         if it_lower.contains("schema.org/product") || it_lower.contains("schema.org/offer") {
             return "product_card".to_string();
         }
     }
-    // Dataattribut som indikerar produktkort
-    if get_attr(handle, "data-product-id").is_some()
-        || get_attr(handle, "data-product").is_some()
-        || get_attr(handle, "data-item-id").is_some()
-    {
-        let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
-        if class.contains("product") || class.contains("card") || class.contains("item") {
-            return "product_card".to_string();
+    // Dataattribut som indikerar produktkort — redan cachade som booleans
+    if cache.has_data_product_id || cache.has_data_product || cache.has_data_item_id {
+        if let Some(ref class) = cache.class {
+            let cl = class.to_ascii_lowercase();
+            if cl.contains("product") || cl.contains("card") || cl.contains("item") {
+                return "product_card".to_string();
+            }
         }
     }
 
     // Heuristik: CTA — bara för klickbara element (button/a)
-    // Hämta class en gång, återanvänd i CTA och övriga checks
     let class_lower = if base_role == "button"
         || base_role == "link"
         || matches!(base_role, "text" | "generic")
     {
-        get_attr(handle, "class").unwrap_or_default().to_lowercase()
+        cache
+            .class
+            .as_deref()
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default()
     } else {
         String::new()
     };
@@ -243,7 +367,7 @@ pub fn infer_role(handle: &Handle) -> String {
     }
 
     // Heuristik: pristext — spans/divs med valutatecken + siffror
-    if matches!(base_role, "text" | "generic") && looks_like_price(handle, &class_lower) {
+    if matches!(base_role, "text" | "generic") && looks_like_price(handle, &class_lower, cache) {
         return "price".to_string();
     }
 
@@ -251,7 +375,7 @@ pub fn infer_role(handle: &Handle) -> String {
 }
 
 /// Kontrollera om ett elements text ser ut som ett pris
-fn looks_like_price(handle: &Handle, class_lower: &str) -> bool {
+fn looks_like_price(handle: &Handle, class_lower: &str, cache: &AttrCache) -> bool {
     let text = extract_text(handle);
     let trimmed = text.trim();
     // Tomt eller för långt → inte pris
@@ -275,9 +399,10 @@ fn looks_like_price(handle: &Handle, class_lower: &str) -> bool {
     {
         return true;
     }
-    // itemprop=price
-    if let Some(itemprop) = get_attr(handle, "itemprop") {
-        if itemprop.to_lowercase().contains("price") {
+    // itemprop=price — använd cachad version
+    if let Some(ref itemprop) = cache.itemprop {
+        if itemprop.eq_ignore_ascii_case("price") || itemprop.to_ascii_lowercase().contains("price")
+        {
             return true;
         }
     }
@@ -285,6 +410,7 @@ fn looks_like_price(handle: &Handle, class_lower: &str) -> bool {
 }
 
 /// Lazy-load attribut som kan innehålla den riktiga bild-URL:en
+#[cfg(test)]
 const LAZY_SRC_ATTRS: &[&str] = &[
     "data-src",
     "data-lazy-src",
@@ -298,6 +424,7 @@ const LAZY_SRC_ATTRS: &[&str] = &[
 ///
 /// Om `src` saknas eller är en placeholder (data: URI), letar vi i
 /// lazy-load-attribut (data-src, data-lazy-src, etc.).
+#[cfg(test)]
 /// Returnerar `None` om ingen bild-URL hittas.
 pub fn resolve_lazy_src(handle: &Handle) -> Option<String> {
     let tag = get_tag_name(handle)?;
@@ -328,38 +455,49 @@ pub fn resolve_lazy_src(handle: &Handle) -> Option<String> {
 
 /// Extrahera label för ett element (WCAG-fallback-kedja)
 pub fn extract_label(handle: &Handle) -> String {
+    let cache = AttrCache::from_handle(handle);
+    extract_label_cached(handle, &cache)
+}
+
+/// Snabb label-extraktion med förextraherade attribut
+pub fn extract_label_cached(handle: &Handle, cache: &AttrCache) -> String {
     // 1. aria-label
-    if let Some(label) = get_attr(handle, "aria-label") {
-        if !label.trim().is_empty() {
-            return label.trim().to_string();
+    if let Some(ref label) = cache.aria_label {
+        let trimmed = label.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
-    // 2. aria-labelledby (vi hämtar bara id:t, fullständig resolving kräver hela DOM-kontext)
-    if let Some(labelledby) = get_attr(handle, "aria-labelledby") {
-        if !labelledby.trim().is_empty() {
-            return format!("[ref:{}]", labelledby.trim());
+    // 2. aria-labelledby
+    if let Some(ref labelledby) = cache.aria_labelledby {
+        let trimmed = labelledby.trim();
+        if !trimmed.is_empty() {
+            return format!("[ref:{}]", trimmed);
         }
     }
 
     // 3. placeholder för inputs
-    if let Some(placeholder) = get_attr(handle, "placeholder") {
-        if !placeholder.trim().is_empty() {
-            return placeholder.trim().to_string();
+    if let Some(ref placeholder) = cache.placeholder {
+        let trimmed = placeholder.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
     // 4. alt-text för bilder
-    if let Some(alt) = get_attr(handle, "alt") {
-        if !alt.trim().is_empty() {
-            return alt.trim().to_string();
+    if let Some(ref alt) = cache.alt {
+        let trimmed = alt.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
     // 5. title-attribut
-    if let Some(title) = get_attr(handle, "title") {
-        if !title.trim().is_empty() {
-            return title.trim().to_string();
+    if let Some(ref title) = cache.title {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
@@ -373,18 +511,31 @@ pub fn extract_label(handle: &Handle) -> String {
     }
 
     // 7. name-attribut som sista utväg
-    if let Some(name) = get_attr(handle, "name") {
-        if !name.trim().is_empty() {
-            return name.trim().to_string();
+    if let Some(ref name) = cache.name {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
-    // 8. Lazy-loaded bild-URL som sista utväg för <img> utan annan label
-    if let Some(src) = resolve_lazy_src(handle) {
-        if let Some(filename) = src.rsplit('/').next() {
-            let clean = filename.split('?').next().unwrap_or(filename);
-            if !clean.is_empty() {
-                return format!("[img:{}]", clean);
+    // 8. Lazy-loaded bild-URL — använd cachad lazy_src
+    let effective_src = cache.lazy_src.as_deref().or_else(|| {
+        cache.src.as_deref().and_then(|s| {
+            let t = s.trim();
+            if !t.is_empty() && !t.starts_with("data:") {
+                Some(t)
+            } else {
+                None
+            }
+        })
+    });
+    if cache.tag == "img" {
+        if let Some(src) = effective_src {
+            if let Some(filename) = src.rsplit('/').next() {
+                let clean = filename.split('?').next().unwrap_or(filename);
+                if !clean.is_empty() {
+                    return format!("[img:{}]", clean);
+                }
             }
         }
     }
