@@ -301,6 +301,9 @@
     'errorevent': ErrorEvent,
     'clipboardevent': ClipboardEvent,
     'submitevent': SubmitEvent,
+    'svgevents': Event, 'svgevent': Event,
+    'textevent': typeof CompositionEvent !== 'undefined' ? CompositionEvent : Event,
+    'mutationevent': Event, 'mutationevents': Event,
     'devicemotionevent': DeviceMotionEvent,
     'deviceorientationevent': DeviceOrientationEvent,
     'gamepadevent': GamepadEvent,
@@ -616,16 +619,39 @@
           var self = this;
           var names = self.getAttributeNames ? self.getAttributeNames() : [];
           var map = [];
+          var nsAttrs = self.__nsAttrs || {};
+          // Samla NS-attribut
+          var nsKeys = {};
+          Object.keys(nsAttrs).forEach(function(key) {
+            var a = nsAttrs[key];
+            nsKeys[a.localName] = a;
+          });
           for (var i = 0; i < names.length; i++) {
             var n = names[i];
             var v = self.getAttribute(n);
+            var ns = nsKeys[n];
             map.push({
-              name: n, localName: n, value: v,
-              namespaceURI: null, prefix: null,
+              name: ns ? ns.name : n,
+              localName: ns ? ns.localName : n,
+              value: ns ? ns.value : v,
+              namespaceURI: ns ? ns.namespaceURI : null,
+              prefix: ns ? ns.prefix : null,
               specified: true, ownerElement: self,
-              nodeType: 2, nodeName: n
+              nodeType: 2, nodeName: ns ? ns.name : n
             });
           }
+          // Lägg till NS-attribut som inte finns i vanliga attribut
+          Object.keys(nsAttrs).forEach(function(key) {
+            var a = nsAttrs[key];
+            if (names.indexOf(a.localName) === -1) {
+              map.push({
+                name: a.name, localName: a.localName, value: a.value,
+                namespaceURI: a.namespaceURI, prefix: a.prefix,
+                specified: true, ownerElement: self,
+                nodeType: 2, nodeName: a.name
+              });
+            }
+          });
           map.getNamedItem = function(name) {
             for (var j = 0; j < this.length; j++) {
               if (this[j].name === name) return this[j];
@@ -660,9 +686,18 @@
       if (!el.getElementsByTagName) {
         el.getElementsByTagName = function(tag) {
           if (!this.querySelectorAll) return [];
-          if (tag === '*') return Array.from(this.querySelectorAll('*'));
-          // HTML-spec: case-insensitive match — querySelectorAll matchar redan ci
-          return Array.from(this.querySelectorAll(tag.toLowerCase()));
+          var sel = (tag === '*') ? '*' : tag.toLowerCase();
+          var arr = Array.from(this.querySelectorAll(sel));
+          // Lägg till HTMLCollection-metoder
+          arr.item = function(i) { return this[i] || null; };
+          arr.namedItem = function(name) {
+            for (var i = 0; i < this.length; i++) {
+              if (this[i].id === name || this[i].getAttribute('name') === name) return this[i];
+            }
+            return null;
+          };
+          try { Object.setPrototypeOf(arr, HTMLCollection.prototype); } catch(e) {}
+          return arr;
         };
       }
       if (!el.getElementsByClassName) {
@@ -681,11 +716,18 @@
       }
     }
 
-    // moveBefore(node, child) — flytta nod utan att trigga remove/insert
-    if (!el.moveBefore) {
+    // moveBefore(node, child) — flytta nod atomiskt
+    if (!el.moveBefore && (el.nodeType === 1 || el.nodeType === 9 || el.nodeType === 11)) {
       el.moveBefore = function(node, child) {
-        // Spec: moveBefore flytta noden atomiskt (utan unmount/mount)
-        // Vår impl delegerar till insertBefore som redan hanterar detach
+        if (!node || typeof node !== 'object' || !node.nodeType) {
+          throw new TypeError("Failed to execute 'moveBefore': parameter 1 is not of type 'Node'.");
+        }
+        if (arguments.length < 2) {
+          throw new TypeError("Failed to execute 'moveBefore': 2 arguments required.");
+        }
+        if (child !== null && child !== undefined && (!child || !child.nodeType)) {
+          throw new TypeError("Failed to execute 'moveBefore': parameter 2 is not of type 'Node'.");
+        }
         if (child === null || child === undefined) {
           this.appendChild(node);
         } else {
@@ -698,11 +740,27 @@
     // lookupNamespaceURI(prefix)
     if (!el.lookupNamespaceURI) {
       el.lookupNamespaceURI = function(prefix) {
-        if (this.namespaceURI && this.prefix === prefix) return this.namespaceURI;
-        if (prefix === null || prefix === '') {
-          if (this.namespaceURI) return this.namespaceURI;
+        // DocumentFragment, DocumentType → alltid null
+        if (this.nodeType === 11 || this.nodeType === 10) return null;
+        // Element-noder: kolla egna namespace + attribut
+        if (this.nodeType === 1) {
+          if (this.namespaceURI && (prefix === this.prefix || (prefix === null && !this.prefix))) {
+            return this.namespaceURI;
+          }
+          // Kolla xmlns:prefix-attribut
+          if (this.__nsAttrs) {
+            var xmlnsKey = 'http://www.w3.org/2000/xmlns/|' + (prefix || 'xmlns');
+            if (this.__nsAttrs[xmlnsKey]) return this.__nsAttrs[xmlnsKey].value;
+          }
+          if (prefix && this.hasAttribute && this.hasAttribute('xmlns:' + prefix)) {
+            return this.getAttribute('xmlns:' + prefix);
+          }
+          if (!prefix && this.hasAttribute && this.hasAttribute('xmlns')) {
+            var val = this.getAttribute('xmlns');
+            return val || null;
+          }
         }
-        // Traversa uppåt
+        // Text/Comment → delegera till parent
         if (this.parentNode && this.parentNode.lookupNamespaceURI) {
           return this.parentNode.lookupNamespaceURI(prefix);
         }
@@ -724,6 +782,7 @@
     // isDefaultNamespace(namespace)
     if (!el.isDefaultNamespace) {
       el.isDefaultNamespace = function(ns) {
+        if (this.nodeType === 11 || this.nodeType === 10) return !ns;
         var defaultNS = this.lookupNamespaceURI(null);
         return defaultNS === ns;
       };
@@ -731,30 +790,59 @@
 
     // Namespace-metoder (NS-varianter)
     if (el.nodeType === 1) {
+      // ─── Intern NS-attribut-lagring ─────────────────────
+      // Lagrar NS-attribut i __nsAttrs map: "ns|local" → {ns, prefix, local, value}
+      if (!el.__nsAttrs) el.__nsAttrs = {};
+
       if (!el.setAttributeNS) {
         el.setAttributeNS = function(ns, qname, val) {
-          // Simpel impl: ignorera namespace, använd qualified name
-          var local = qname.indexOf(':') >= 0 ? qname.split(':')[1] : qname;
+          var parts = qname.split(':');
+          var prefix = parts.length > 1 ? parts[0] : null;
+          var local = parts.length > 1 ? parts[1] : qname;
+          // Lagra med namespace-nyckel
+          var key = (ns || '') + '|' + local;
+          if (!this.__nsAttrs) this.__nsAttrs = {};
+          this.__nsAttrs[key] = { namespaceURI: ns, prefix: prefix, localName: local, value: String(val), name: qname };
+          // Lagra även i vanliga attribut (case-sensitive för NS)
+          var s = this.state_borrow_mut || null;
+          // Använd raw setAttribute utan lowercase för NS-attribut
+          if (this.getAttributeNames) {
+            // Skriv direkt — skippa lowercase via __nsAttrs lookup
+          }
+          // Synka till DOM för querySelector etc.
           this.setAttribute(local, val);
         };
       }
       if (!el.getAttributeNS) {
         el.getAttributeNS = function(ns, local) {
+          var key = (ns || '') + '|' + local;
+          if (this.__nsAttrs && this.__nsAttrs[key]) return this.__nsAttrs[key].value;
           return this.getAttribute(local);
         };
       }
       if (!el.hasAttributeNS) {
         el.hasAttributeNS = function(ns, local) {
+          var key = (ns || '') + '|' + local;
+          if (this.__nsAttrs && this.__nsAttrs[key]) return true;
           return this.hasAttribute(local);
         };
       }
       if (!el.removeAttributeNS) {
         el.removeAttributeNS = function(ns, local) {
+          var key = (ns || '') + '|' + local;
+          if (this.__nsAttrs) delete this.__nsAttrs[key];
           this.removeAttribute(local);
         };
       }
       if (!el.getAttributeNodeNS) {
         el.getAttributeNodeNS = function(ns, local) {
+          var key = (ns || '') + '|' + local;
+          var a = this.__nsAttrs && this.__nsAttrs[key];
+          if (a) return {
+            name: a.name, localName: a.localName, value: a.value,
+            namespaceURI: a.namespaceURI, prefix: a.prefix, specified: true,
+            ownerElement: this, nodeType: 2, nodeName: a.name
+          };
           if (!this.hasAttribute(local)) return null;
           return {
             name: local, localName: local, value: this.getAttribute(local),

@@ -4918,19 +4918,24 @@ fn matches_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
     }
 
     // Komma-separerade selektorer — matcha om någon matchar
-    if selector.contains(',') {
+    if find_unescaped_delimiter(selector, &[',']) < selector.len() {
         return selector
             .split(',')
             .any(|s| matches_single_selector(arena, key, s.trim()));
     }
 
-    // Descendant/child/sibling-kombinator
-    if selector.contains(' ')
-        || selector.contains('>')
-        || selector.contains('+')
-        || selector.contains('~')
+    // Descendant/child/sibling-kombinator — kolla bara oescaped combinators
     {
-        return matches_combinator_selector(arena, key, selector);
+        let has_combinator =
+            find_unescaped_delimiter(selector, &[' ', '>', '+', '~']) < selector.len();
+        if has_combinator {
+            // Dubbelkolla: hitta den faktiska split-punkten
+            let split = find_unescaped_delimiter(selector, &[' ', '>', '+', '~']);
+            // Om split == selector.len() → ingen combinator
+            if split < selector.len() {
+                return matches_combinator_selector(arena, key, selector);
+            }
+        }
     }
 
     matches_single_selector(arena, key, selector)
