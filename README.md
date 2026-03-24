@@ -1094,12 +1094,12 @@ The JS sandbox was migrated from Boa 0.21 (`boa_engine`) to QuickJS (`rquickjs` 
 
 | Metric | Boa 0.21 | QuickJS (rquickjs) | Notes |
 |--------|----------|-------------------|-------|
-| Simple expression eval | ~1,050 us | ~500 us | ~2x faster |
-| Blocked call detection | ~700 us | ~350 us | ~2x faster |
-| JS detection (static page) | ~622 us | ~300 us | ~2x faster |
-| JS detection (heavy, 20 scripts) | ~740 us | ~370 us | ~2x faster |
-| Selective exec (single DOM target) | ~1,052 us | ~530 us | ~2x faster |
-| Selective exec (heavy, 20 scripts) | ~7,895 us | ~4,000 us | ~2x faster |
+| Simple expression eval | ~1,050 us | ~1,100 us | Similar |
+| Blocked call detection | ~700 us | ~565 us | ~20% faster |
+| JS detection (static page) | ~622 us | ~670 us | Similar |
+| JS detection (heavy, 20 scripts) | ~740 us | ~666 us | ~10% faster |
+| Selective exec (single DOM target) | ~1,052 us | ~1,200 us | Similar |
+| Selective exec (heavy, 20 scripts) | ~7,895 us | ~7,100 us | ~10% faster |
 | ES2023 compliance | Partial | Full | async/await, generators, optional chaining |
 | GC integration | Workaround (f64 keys) | Direct (f64 keys) | Simpler, no Trace/Finalize |
 | Binary size impact | ~2.5 MB | ~1.5 MB | ~1 MB smaller |
@@ -1114,22 +1114,22 @@ Real benchmark results from head-to-head testing against [Lightpanda](https://gi
 
 ### Head-to-Head Summary
 
-| Benchmark | AetherAgent | Lightpanda | Speedup |
+| Benchmark | AetherAgent (QuickJS) | Lightpanda | Speedup |
 |-----------|-------------|------------|---------|
-| Campfire Commerce (100 page loads) | **139 ms** total | 29,630 ms total | **213x** |
-| Amiibo crawl (932 pages) | **835 ms** total | 243,500 ms total | **292x** |
-| Parse: simple page (3 elements) | **653 us** | 288 ms | **442x** |
-| Parse: ecommerce (10 elements) | **747 us** | 267 ms | **357x** |
-| Parse: complex (400+ elements) | **3.5 ms** | 265 ms | **77x** |
-| 100 concurrent parses | **176 ms** wall | 1,236 ms wall | **7x** |
+| Campfire Commerce (100 page loads) | **171 ms** total | 31,165 ms total | **183x** |
+| Amiibo crawl (100 pages) | **102 ms** total | 26,541 ms total | **259x** |
+| Parse: simple page (3 elements) | **760 us** | 253 ms | **333x** |
+| Parse: ecommerce (10 elements) | **818 us** | 255 ms | **312x** |
+| Parse: complex (400+ elements) | **3.7 ms** | 256 ms | **70x** |
+| 100 concurrent parses | **142 ms** wall | 785 ms wall | **6x** |
 
 ### Memory
 
-| Scenario | AetherAgent | Lightpanda |
+| Scenario | AetherAgent (QuickJS) | Lightpanda |
 |----------|-------------|------------|
-| Idle | **12 MB** RSS | -- |
-| Under load (50x complex pages) | **12.4 MB** RSS | 19 MB/instance |
-| 100 concurrent | **~12 MB** total | **~1.9 GB** total |
+| Idle | **26 MB** RSS | -- |
+| Under load (50x complex pages) | **27 MB** RSS | 19 MB/instance |
+| 100 concurrent | **~27 MB** total | **~1.9 GB** total |
 
 ### Token Savings (Semantic Diff)
 
@@ -1137,11 +1137,10 @@ In multi-step agent loops, AetherAgent's semantic diffing sends only changes to 
 
 | Scenario | Full tree | Delta | Savings |
 |----------|-----------|-------|---------|
-| Static page (no change) | 495 tokens | 54 tokens | **89%** |
-| E-commerce: add to cart | 1,823 tokens | 547 tokens | **70%** |
-| Complex page: price update | 31,898 tokens | 55 tokens | **99.8%** |
+| Simple page (no change) | 165 tokens | 54 tokens | **67%** |
+| Complex page: price update | 8,038 tokens | 55 tokens | **99.3%** |
 
-10-step agent loop: 17,505 tokens (raw) → 6,605 tokens (with diff) = **62% savings**.
+Token savings are most impactful on large pages (99%+ on complex pages).
 
 ### WebArena-Style Scenarios
 
@@ -1149,9 +1148,9 @@ Complete multi-step agent tasks (compile goal → parse pages → diff → execu
 
 | Task | Steps | Total | Per step |
 |------|-------|-------|----------|
-| Buy cheapest product | 3 | 6.7 ms | 2.2 ms |
-| Post a comment | 2 | 5.2 ms | 2.6 ms |
-| Create GitLab issue | 2 | 5.1 ms | 2.5 ms |
+| Buy cheapest product | 3 | 7.0 ms | 2.3 ms |
+| Post a comment | 2 | 4.9 ms | 2.4 ms |
+| Create GitLab issue | 2 | 4.9 ms | 2.4 ms |
 
 ### Live Site Tests (Render deployment)
 
