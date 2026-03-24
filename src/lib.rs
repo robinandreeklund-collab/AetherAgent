@@ -2,6 +2,7 @@
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 mod arena_dom;
+mod arena_dom_sink;
 mod causal;
 mod collab;
 mod compiler;
@@ -68,6 +69,7 @@ pub fn register_cdp_ready_hook() {
     });
 }
 
+#[allow(unused_imports)]
 use parser::parse_html;
 use semantic::SemanticBuilder;
 use types::{SemanticTree, WorkflowMemory};
@@ -79,8 +81,8 @@ use types::{SemanticTree, WorkflowMemory};
 /// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
 /// ~5-10x snabbare traversering och cache-friendly minnesallokering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    let rcdom = parse_html(html);
-    let mut arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    // Direkt html5ever → ArenaDom via custom TreeSink (skippar RcDom-mellansteget)
+    let mut arena = arena_dom_sink::parse_html_to_arena(html);
     // Resolva lazy-loaded bilder (data-src → src) innan semantisk analys
     arena.resolve_lazy_images();
     let title = arena.extract_title();
@@ -163,13 +165,12 @@ pub fn profile_parse_stages(html: &str, goal: &str, url: &str) -> String {
     use std::time::Instant;
 
     let t0 = Instant::now();
-    let rcdom = parser::parse_html(html);
+    let mut arena = arena_dom_sink::parse_html_to_arena(html);
+    arena.resolve_lazy_images();
     let t_parse = t0.elapsed();
 
-    let t1 = Instant::now();
-    let mut arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
-    arena.resolve_lazy_images();
-    let t_arena = t1.elapsed();
+    // Arena-konvertering eliminerad (ingår i parse-steget)
+    let t_arena = std::time::Duration::ZERO;
 
     let t2 = Instant::now();
     let title = arena.extract_title();

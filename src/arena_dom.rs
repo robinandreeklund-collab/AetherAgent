@@ -127,7 +127,8 @@ impl ArenaDom {
         }
     }
 
-    /// Konvertera från html5ever RcDom till ArenaDom
+    /// Konvertera från html5ever RcDom till ArenaDom (används av dom_bridge, css_cascade, etc.)
+    #[allow(dead_code)]
     pub fn from_rcdom(rcdom: &markup5ever_rcdom::RcDom) -> Self {
         let mut arena = ArenaDom::with_capacity(1024);
         let doc_key = arena.document;
@@ -143,6 +144,7 @@ impl ArenaDom {
     }
 
     /// Rekursiv konvertering av en Handle till arena-noder
+    #[allow(dead_code)]
     fn convert_handle(&mut self, handle: &Handle) -> NodeKey {
         let (node_type, tag, text, attrs) = match &handle.data {
             NodeData::Document => (NodeType::Document, None, None, HashMap::default()),
