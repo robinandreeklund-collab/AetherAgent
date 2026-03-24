@@ -2104,8 +2104,11 @@ impl JsHandler for InnerHTMLSetter {
                     }
                 }
             }
-            s.mutations
-                .push(format!("setInnerHTML:{}:{}", key_bits, html_str.len()));
+            s.mutations.push(std::borrow::Cow::Owned(format!(
+                "setInnerHTML:{}:{}",
+                key_bits,
+                html_str.len()
+            )));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
