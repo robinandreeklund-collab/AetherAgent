@@ -123,6 +123,11 @@ lto = "thin"       # ~3x snabbare än full LTO, 95% av vinsten
 codegen-units = 4  # snabbare kompilering, minimal perf-kostnad
 panic = "unwind"   # catch_unwind kräver unwind — abort dödar hela servern
 
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 2
+
 [profile.dev]
 opt-level = 0
 debug = true

@@ -15,28 +15,26 @@ use rquickjs::{Context, Runtime};
 #[cfg(feature = "js-eval")]
 const MAX_STACK_SIZE: usize = 1024 * 1024;
 
-/// Max minnesanvändning (64 MB — SPA-bundles behöver mer minne)
+/// Max minnesanvändning (16 MB — tillräckligt för typiska SPA-bundles)
 #[cfg(feature = "js-eval")]
-const MAX_MEMORY: usize = 64 * 1024 * 1024;
+const MAX_MEMORY: usize = 16 * 1024 * 1024;
 
 /// Max exekveringstid i millisekunder (väggklocka) innan interrupt
 /// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
 #[cfg(feature = "js-eval")]
 const MAX_EVAL_MS: u64 = 5000;
 
-/// Delad flagga som interrupt-handlern läser.
-/// Sätts till `true` av en timeout-tråd för att avbryta JS-exekvering.
+/// Interrupt-state som håller referens till deadline-baserad avbrottslogik.
+/// Ingen separat tråd behövs — interrupt-handlern kollar Instant direkt.
 #[cfg(feature = "js-eval")]
 pub(crate) struct InterruptState {
-    /// Håller Arc vid liv — timeout-tråden sätter denna till true.
-    /// Droppar vi denna stoppas interrupt-handlerns referens.
-    _abort_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    // Markörtyp — interrupt-handlern äger sin egen Arc<Instant> via closure
+    _private: (),
 }
 
 /// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
 ///
-/// Använder rquickjs set_interrupt_handler med en Arc<AtomicBool>-flagga.
-/// Anroparen kan sätta flaggan till true för att avbryta.
+/// Använder deadline-baserad interrupt-handler (ingen tråd-spawn).
 /// Returnerar (Runtime, Context, InterruptState).
 #[cfg(feature = "js-eval")]
 pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context, InterruptState) {
@@ -44,36 +42,21 @@ pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context, InterruptState) {
     rt.set_max_stack_size(MAX_STACK_SIZE);
     rt.set_memory_limit(MAX_MEMORY);
 
-    let should_abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let abort_clone = should_abort.clone();
-
-    // Interrupt-handler via rquickjs API + separat timeout-tråd
+    // Deadline-baserad interrupt: kollar väggklockan utan separat tråd
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(MAX_EVAL_MS);
     rt.set_interrupt_handler(Some(Box::new(move || {
-        abort_clone.load(std::sync::atomic::Ordering::Relaxed)
+        std::time::Instant::now() >= deadline
     })));
-
-    // Starta timeout-tråd som sätter flaggan efter MAX_EVAL_MS
-    let abort_for_timeout = should_abort.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(MAX_EVAL_MS));
-        abort_for_timeout.store(true, std::sync::atomic::Ordering::Relaxed);
-    });
 
     let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
 
-    (
-        rt,
-        ctx,
-        InterruptState {
-            _abort_flag: should_abort,
-        },
-    )
+    (rt, ctx, InterruptState { _private: () })
 }
 
-/// Cleanup för InterruptState — droppar Arc (no-op om inga referenser kvar)
+/// Cleanup för InterruptState — no-op med deadline-baserad interrupt
 #[cfg(feature = "js-eval")]
-pub(crate) fn free_interrupt_state(state: InterruptState) {
-    drop(state);
+pub(crate) fn free_interrupt_state(_state: InterruptState) {
+    // Inget att frigöra — deadline-baserad interrupt ägs av closure i runtime
 }
 
 use serde::{Deserialize, Serialize};
