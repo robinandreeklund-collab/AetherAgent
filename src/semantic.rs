@@ -128,9 +128,11 @@ impl SemanticBuilder {
                 }
             }
             crate::arena_dom::NodeType::Document => {
-                let child_keys = arena.children(key).to_vec();
-                for ck in &child_keys {
-                    self.traverse_arena(arena, *ck, output, depth);
+                let num_children = arena.children(key).len();
+                for i in 0..num_children {
+                    if let Some(ck) = arena.children(key).get(i).copied() {
+                        self.traverse_arena(arena, ck, output, depth);
+                    }
                 }
             }
             _ => {}
@@ -172,10 +174,12 @@ impl SemanticBuilder {
 
         // Skippa tomma generiska element
         if label.is_empty() && STRUCTURAL_TAGS.contains(&tag.as_str()) {
-            let child_keys = arena.children(key).to_vec();
+            let num_children = arena.children(key).len();
             let mut children = vec![];
-            for ck in &child_keys {
-                self.traverse_arena(arena, *ck, &mut children, depth + 1);
+            for i in 0..num_children {
+                if let Some(ck) = arena.children(key).get(i).copied() {
+                    self.traverse_arena(arena, ck, &mut children, depth + 1);
+                }
             }
             if children.is_empty() {
                 return None;
@@ -228,11 +232,13 @@ impl SemanticBuilder {
                 .map(|v| v.to_string())
         };
 
-        // Traversera barn
-        let child_keys = arena.children(key).to_vec();
+        // Traversera barn (undviker Vec::to_vec() per nod)
+        let num_child = arena.children(key).len();
         let mut children = vec![];
-        for ck in &child_keys {
-            self.traverse_arena(arena, *ck, &mut children, depth + 1);
+        for i in 0..num_child {
+            if let Some(ck) = arena.children(key).get(i).copied() {
+                self.traverse_arena(arena, ck, &mut children, depth + 1);
+            }
         }
 
         let filtered_children: Vec<SemanticNode> = children

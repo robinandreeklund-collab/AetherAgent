@@ -16,6 +16,7 @@ new_key_type! {
 
 /// Case-insensitive substring-sökning utan allokering (ASCII only).
 /// Undviker to_lowercase()/to_uppercase()-allokeringar i hot paths.
+#[inline]
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     if needle.len() > haystack.len() {
         return false;
@@ -81,11 +82,13 @@ pub struct DomNode {
 
 impl DomNode {
     /// Hämta attributvärde — O(1) via HashMap
+    #[inline]
     pub fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes.get(name).map(|v| v.as_str())
     }
 
     /// Kolla om attribut finns (oavsett värde) — O(1) via HashMap
+    #[inline]
     pub fn has_attr(&self, name: &str) -> bool {
         self.attributes.contains_key(name)
     }
@@ -191,16 +194,19 @@ impl ArenaDom {
     // ─── Accessor-metoder (speglar parser.rs funktioner) ────────────────────
 
     /// Hämta taggnamn för en nod
+    #[inline]
     pub fn tag_name(&self, key: NodeKey) -> Option<&str> {
         self.nodes.get(key)?.tag.as_deref()
     }
 
     /// Hämta attributvärde
+    #[inline]
     pub fn get_attr(&self, key: NodeKey, attr_name: &str) -> Option<&str> {
         self.nodes.get(key)?.get_attr(attr_name)
     }
 
     /// Kolla om noden har ett attribut
+    #[inline]
     pub fn has_attr(&self, key: NodeKey, attr_name: &str) -> bool {
         self.nodes
             .get(key)
@@ -393,6 +399,7 @@ impl ArenaDom {
     }
 
     /// Hämta barn-nycklar
+    #[inline]
     pub fn children(&self, key: NodeKey) -> &[NodeKey] {
         self.nodes
             .get(key)

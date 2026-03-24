@@ -395,6 +395,7 @@ impl SemanticNode {
     }
 
     /// Beräkna action baserat på roll
+    #[inline]
     pub fn infer_action(role: &str) -> Option<String> {
         match role {
             "button" | "link" | "menuitem" | "cta" | "tab" => Some("click".to_string()),
@@ -409,6 +410,7 @@ impl SemanticNode {
     }
 
     /// Rollens prioritet för goal-relevance scoring
+    #[inline]
     pub fn role_priority(role: &str) -> f32 {
         match role {
             "cta" => 0.95,

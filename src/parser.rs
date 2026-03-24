@@ -181,6 +181,7 @@ pub fn is_likely_visible(handle: &Handle) -> bool {
 }
 
 /// Snabb synlighetscheck med förextraherade attribut (noll extra get_attr-anrop)
+#[inline]
 pub fn is_likely_visible_cached(cache: &AttrCache) -> bool {
     // Kolla style-attribut för osynlighet
     if let Some(ref style) = cache.style {
