@@ -152,7 +152,7 @@ Format i PR-beskrivning:
 
 | Suite | Cases | Passed | Rate |
 |-------|-------|--------|------|
-| dom/ (total) | 1,957 | 1,021 | 52.2% |
+| dom/ (total) | 2,004 | 1,225 | 61.1% |
 
 #### Targeted Test Directories
 
