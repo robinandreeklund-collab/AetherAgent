@@ -108,6 +108,11 @@ These must cover:
 
 WPT tests run the official, unmodified Web Platform Tests from https://github.com/web-platform-tests/wpt directly against AetherAgent's DOM implementation via QuickJS sandbox + DOM bridge.
 
+**Important:** WPT pass rate includes both Rust-native and JS-polyfilled implementations. See `docs/dom-implementation-status.md` for the full breakdown. The goal is to migrate all polyfills to Rust-native implementations. When implementing a new DOM method:
+1. Implement it in Rust (`dom_bridge.rs`) — not as a polyfill
+2. Remove the corresponding polyfill from `wpt/polyfills.js`
+3. Verify WPT score doesn't regress
+
 #### Setup
 
 ```bash
