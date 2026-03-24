@@ -81,9 +81,9 @@ _LEGACY_10_TO_22 = {
     "combobox": 8, "select": 8, "heading": 9,
 }
 
-# RTX 5090 defaults (24 GB VRAM)
+# RTX 5090 defaults (32 GB VRAM)
 DEFAULT_EPOCHS = 300
-DEFAULT_BATCH = 32
+DEFAULT_BATCH = -1  # -1 = Ultralytics autobatch (60% VRAM target)
 DEFAULT_IMGSZ = 640
 DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
@@ -3306,7 +3306,7 @@ def train_model(
 
     model = YOLO(model_base)
 
-    # Detektera VRAM för auto-tuning av batch/workers
+    # Detektera VRAM för loggning
     vram_gb = 0
     num_cpu = os.cpu_count() or 8
     try:
@@ -3316,17 +3316,12 @@ def train_model(
     except Exception:
         pass
 
-    # Auto-tune batch om användaren valt default
-    if batch == DEFAULT_BATCH and vram_gb > 0:
-        # YOLO26n @ 640px med AMP: ~0.5 GB overhead + ~0.55 GB/batch-item
-        # Lämna 3 GB marginal för overhead, augmentation, gradients
-        usable_vram = vram_gb - 3.0
-        auto_batch = max(8, min(int(usable_vram / 0.55), 64))
-        # Avrunda nedåt till närmaste multipel av 8
-        auto_batch = (auto_batch // 8) * 8
-        if auto_batch != batch:
-            log(f"Auto-tuned batch: {batch} → {auto_batch} (baserat på {vram_gb:.0f} GB VRAM)", "OK")
-            batch = auto_batch
+    # batch=-1 → Ultralytics autobatch (probar faktiskt VRAM-usage, säkrare)
+    # Explicit batch > 0 → använd den rakt av
+    if batch == -1:
+        log(f"Batch: autobatch (Ultralytics mäter VRAM, target 60%){f' — {vram_gb:.0f} GB detekterat' if vram_gb > 0 else ''}", "INFO")
+    elif vram_gb > 0:
+        log(f"Batch: {batch} (manuellt vald, {vram_gb:.0f} GB VRAM)", "INFO")
 
     # Workers: max 4 med cache=ram (fler → RAM-explosion), annars max 8
     optimal_workers = min(num_cpu, 4)
@@ -4705,7 +4700,7 @@ def interactive_mode(args=None):
     print("\n[3/7] TRAINING CONFIG")
     epochs = input(f"  Epochs (max) [{DEFAULT_EPOCHS}]: ").strip()
     epochs = int(epochs) if epochs else DEFAULT_EPOCHS
-    batch = input(f"  Batch size [{DEFAULT_BATCH}]: ").strip()
+    batch = input(f"  Batch size [-1=auto]: ").strip()
     batch = int(batch) if batch else DEFAULT_BATCH
     version = input(f"  Model version [{cli_version}]: ").strip() or cli_version
 
@@ -4946,7 +4941,7 @@ Examples:
                         help="Download and convert dataset without training. Use with --format.")
     parser.add_argument("--download-starter", action="store_true", help="Download synthetic starter dataset")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Max training epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help=f"Batch size (default: {DEFAULT_BATCH}, auto-tuned per VRAM)")
+    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH, help="Batch size (-1 = autobatch via Ultralytics, recommended)")
     parser.add_argument("--early-stop", action="store_true",
                         help="Enable metric-based early stopping. Saves when targets reached or no improvement.")
     parser.add_argument("--target-map50", type=float, default=DEFAULT_TARGET_MAP50,
