@@ -1,7 +1,7 @@
 /// Event Loop — Fas 18
 ///
-/// Händelseloop för Boa JS-sandboxen. Ger stöd för:
-/// - Microtask-kö (Promise.then, queueMicrotask) via Boas inbyggda SimpleJobExecutor
+/// Händelseloop för QuickJS-sandboxen. Ger stöd för:
+/// - Microtask-kö (Promise.then, queueMicrotask) via QuickJS inbyggda job-kö
 /// - setTimeout / setInterval (begränsade: max 100 timers, max 5000ms delay)
 /// - clearTimeout / clearInterval
 /// - requestAnimationFrame (simulerad med 16ms tick)
@@ -10,14 +10,44 @@
 ///
 /// Alla timer-callbacks körs synkront via virtuell klocka — ingen riktig väntan.
 /// Säkerhetsbegränsningar: max 1000 ticks, max 50ms total exekvering.
-use boa_engine::{
-    js_string, object::ObjectInitializer, property::Attribute, Context, JsArgs, JsValue,
-    NativeFunction,
+use rquickjs::{
+    function::{FromParams, IntoJsFunc, ParamRequirement, Params, Rest},
+    Ctx, Function, Object, Persistent, Value,
 };
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+
+/// Typ-alias för due timers och recurring timers att spara om.
+type DueTimersResult = (
+    Vec<Persistent<Function<'static>>>,
+    Vec<(u32, Persistent<Function<'static>>, u64)>,
+);
+
+// ─── Livstidssäker IntoJsFunc-wrapper ────────────────────────────────────────
+// rquickjs closures kan inte returnera Value<'js> pga livstidsinferens.
+// Denna trait + wrapper löser problemet via explicit 'js-livstid i handle().
+
+/// Trait för JS-callback-hanterare med korrekt livstidshantering
+pub(crate) trait JsHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>>;
+}
+
+/// Wrapper som implementerar IntoJsFunc för alla JsHandler-implementationer
+pub(crate) struct JsFn<H: JsHandler>(pub(crate) H);
+
+impl<'js, H: JsHandler> IntoJsFunc<'js, (Ctx<'js>, Rest<Value<'js>>)> for JsFn<H> {
+    fn param_requirements() -> ParamRequirement {
+        ParamRequirement::any()
+    }
+    fn call(&self, params: Params<'_, 'js>) -> rquickjs::Result<Value<'js>> {
+        let ctx = params.ctx().clone();
+        let mut access = params.access();
+        let (_, rest): (Ctx<'js>, Rest<Value<'js>>) = FromParams::from_params(&mut access)?;
+        self.0.handle(&ctx, &rest.0)
+    }
+}
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
@@ -39,12 +69,11 @@ const RAF_INTERVAL_MS: u64 = 16;
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
 /// En timer-uppgift (setTimeout/setInterval)
-#[derive(Clone)]
 struct TimerTask {
     /// Unikt ID
     id: u32,
-    /// JS-callback som ska anropas
-    callback: boa_engine::JsValue,
+    /// JS-callback som ska anropas (persistent — överlever GC)
+    callback: Persistent<Function<'static>>,
     /// Tid kvar till exekvering (ms)
     delay_ms: u64,
     /// Om detta är en interval-timer (ska upprepas)
@@ -54,26 +83,25 @@ struct TimerTask {
 }
 
 /// En rAF-callback
-#[derive(Clone)]
 struct RafTask {
     /// Unikt ID
     id: u32,
     /// JS-callback
-    callback: boa_engine::JsValue,
+    callback: Persistent<Function<'static>>,
     /// Avbruten?
     cancelled: bool,
 }
 
 /// En MutationObserver-registrering
-#[derive(Clone)]
 struct ObserverEntry {
     /// JS-callback
-    callback: boa_engine::JsValue,
+    callback: Persistent<Function<'static>>,
     /// Observerade noder (NodeKey som u64)
     targets: Vec<u64>,
     /// Konfiguration
     child_list: bool,
     attributes: bool,
+    #[allow(dead_code)]
     subtree: bool,
 }
 
@@ -129,6 +157,13 @@ impl EventLoopState {
         id
     }
 
+    /// Rensa alla Persistent-referenser (måste anropas innan Runtime droppas)
+    pub fn clear_persistent(&mut self) {
+        self.timers.clear();
+        self.raf_queue.clear();
+        self.observers.clear();
+    }
+
     /// Kolla om det finns väntande arbete
     fn has_pending_work(&self) -> bool {
         !self.timers.iter().all(|t| t.cancelled)
@@ -137,191 +172,189 @@ impl EventLoopState {
     }
 }
 
-// ─── Registrera globala funktioner ──────────────────────────────────────────
+// ─── Hjälpfunktioner ────────────────────────────────────────────────────────
 
-/// Hjälpfunktion: registrera en NativeFunction som global
-fn register_global_fn(context: &mut Context, name: &str, func: NativeFunction) {
-    let js_func = func.to_js_function(context.realm());
-    context
-        .register_global_property(js_string!(name), JsValue::from(js_func), Attribute::all())
-        .unwrap_or(());
+/// Hämta argument som f64, med fallback
+fn arg_as_f64(args: &[Value], index: usize) -> f64 {
+    args.get(index)
+        .and_then(|v| v.as_float().or_else(|| v.as_int().map(|i| i as f64)))
+        .unwrap_or(0.0)
 }
 
-/// Registrera alla event-loop-globaler på Boa-kontexten
-pub fn register_event_loop(context: &mut Context, el: SharedEventLoop) {
-    register_timers(context, Rc::clone(&el));
-    register_raf(context, Rc::clone(&el));
-    register_queue_microtask(context);
-    register_mutation_observer(context, el);
+// ─── Registrera globala funktioner ──────────────────────────────────────────
+
+/// Registrera alla event-loop-globaler på QuickJS-kontexten
+pub fn register_event_loop<'js>(ctx: &Ctx<'js>, el: SharedEventLoop) -> rquickjs::Result<()> {
+    register_timers(ctx, Rc::clone(&el))?;
+    register_raf(ctx, Rc::clone(&el))?;
+    register_queue_microtask(ctx)?;
+    register_mutation_observer(ctx, el)?;
+    Ok(())
 }
 
 /// Registrera setTimeout, setInterval, clearTimeout, clearInterval
-fn register_timers(context: &mut Context, el: SharedEventLoop) {
-    // setTimeout(callback, delay)
-    let el_st = Rc::clone(&el);
-    let set_timeout = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let callback = args.get_or_undefined(0).clone();
-            if !callback.is_callable() {
-                return Ok(JsValue::from(0));
-            }
-            let delay = args
-                .get_or_undefined(1)
-                .to_number(_ctx)
-                .unwrap_or(0.0)
-                .max(0.0) as u64;
+fn register_timers(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
+    // ─── Handler-strukturer ───────────────────────────────────────────
+    struct SetTimerHandler {
+        el: SharedEventLoop,
+        recurring: bool,
+    }
+    impl JsHandler for SetTimerHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_int(ctx.clone(), 0)),
+            };
+            let delay = arg_as_f64(args, 1).max(if self.recurring { 1.0 } else { 0.0 }) as u64;
             let delay = delay.min(MAX_DELAY_MS);
 
-            let mut state = el_st.borrow_mut();
+            let mut state = self.el.borrow_mut();
             if state.timers.len() >= MAX_TIMERS {
-                return Ok(JsValue::from(-1));
+                return Ok(Value::new_int(ctx.clone(), -1));
             }
             let id = state.alloc_id();
             state.timers.push(TimerTask {
                 id,
-                callback,
+                callback: Persistent::save(ctx, func),
                 delay_ms: delay,
+                recurring: self.recurring,
+                cancelled: false,
+            });
+            Ok(Value::new_int(ctx.clone(), id as i32))
+        }
+    }
+
+    struct ClearTimerHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for ClearTimerHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let id = arg_as_f64(args, 0) as u32;
+            let mut state = self.el.borrow_mut();
+            for timer in &mut state.timers {
+                if timer.id == id {
+                    timer.cancelled = true;
+                }
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    ctx.globals().set(
+        "setTimeout",
+        Function::new(
+            ctx.clone(),
+            JsFn(SetTimerHandler {
+                el: Rc::clone(&el),
                 recurring: false,
-                cancelled: false,
-            });
-            Ok(JsValue::from(id))
-        })
-    };
-    register_global_fn(context, "setTimeout", set_timeout);
-
-    // setInterval(callback, delay)
-    let el_si = Rc::clone(&el);
-    let set_interval = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let callback = args.get_or_undefined(0).clone();
-            if !callback.is_callable() {
-                return Ok(JsValue::from(0));
-            }
-            let delay = args
-                .get_or_undefined(1)
-                .to_number(_ctx)
-                .unwrap_or(0.0)
-                .max(1.0) as u64;
-            let delay = delay.min(MAX_DELAY_MS);
-
-            let mut state = el_si.borrow_mut();
-            if state.timers.len() >= MAX_TIMERS {
-                return Ok(JsValue::from(-1));
-            }
-            let id = state.alloc_id();
-            state.timers.push(TimerTask {
-                id,
-                callback,
-                delay_ms: delay,
+            }),
+        )?,
+    )?;
+    ctx.globals().set(
+        "setInterval",
+        Function::new(
+            ctx.clone(),
+            JsFn(SetTimerHandler {
+                el: Rc::clone(&el),
                 recurring: true,
-                cancelled: false,
-            });
-            Ok(JsValue::from(id))
-        })
-    };
-    register_global_fn(context, "setInterval", set_interval);
+            }),
+        )?,
+    )?;
+    ctx.globals().set(
+        "clearTimeout",
+        Function::new(ctx.clone(), JsFn(ClearTimerHandler { el: Rc::clone(&el) }))?,
+    )?;
+    ctx.globals().set(
+        "clearInterval",
+        Function::new(ctx.clone(), JsFn(ClearTimerHandler { el: Rc::clone(&el) }))?,
+    )?;
 
-    // clearTimeout(id)
-    let el_ct = Rc::clone(&el);
-    let clear_timeout = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let id = args.get_or_undefined(0).to_number(_ctx).unwrap_or(0.0) as u32;
-            let mut state = el_ct.borrow_mut();
-            for timer in &mut state.timers {
-                if timer.id == id {
-                    timer.cancelled = true;
-                }
-            }
-            Ok(JsValue::undefined())
-        })
-    };
-    register_global_fn(context, "clearTimeout", clear_timeout);
-
-    // clearInterval(id) — samma logik
-    let el_ci = Rc::clone(&el);
-    let clear_interval = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let id = args.get_or_undefined(0).to_number(_ctx).unwrap_or(0.0) as u32;
-            let mut state = el_ci.borrow_mut();
-            for timer in &mut state.timers {
-                if timer.id == id {
-                    timer.cancelled = true;
-                }
-            }
-            Ok(JsValue::undefined())
-        })
-    };
-    register_global_fn(context, "clearInterval", clear_interval);
+    Ok(())
 }
 
 /// Registrera requestAnimationFrame / cancelAnimationFrame
-fn register_raf(context: &mut Context, el: SharedEventLoop) {
-    let el_raf = Rc::clone(&el);
-    let raf = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let callback = args.get_or_undefined(0).clone();
-            if !callback.is_callable() {
-                return Ok(JsValue::from(0));
-            }
-            let mut state = el_raf.borrow_mut();
+fn register_raf(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
+    struct RafHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for RafHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_int(ctx.clone(), 0)),
+            };
+            let mut state = self.el.borrow_mut();
             let id = state.alloc_id();
             state.raf_queue.push(RafTask {
                 id,
-                callback,
+                callback: Persistent::save(ctx, func),
                 cancelled: false,
             });
-            Ok(JsValue::from(id))
-        })
-    };
-    register_global_fn(context, "requestAnimationFrame", raf);
+            Ok(Value::new_int(ctx.clone(), id as i32))
+        }
+    }
 
-    let el_craf = Rc::clone(&el);
-    let cancel_raf = unsafe {
-        NativeFunction::from_closure(move |_this, args, _ctx| {
-            let id = args.get_or_undefined(0).to_number(_ctx).unwrap_or(0.0) as u32;
-            let mut state = el_craf.borrow_mut();
+    struct CancelRafHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for CancelRafHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let id = arg_as_f64(args, 0) as u32;
+            let mut state = self.el.borrow_mut();
             for raf_task in &mut state.raf_queue {
                 if raf_task.id == id {
                     raf_task.cancelled = true;
                 }
             }
-            Ok(JsValue::undefined())
-        })
-    };
-    register_global_fn(context, "cancelAnimationFrame", cancel_raf);
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    ctx.globals().set(
+        "requestAnimationFrame",
+        Function::new(ctx.clone(), JsFn(RafHandler { el: Rc::clone(&el) }))?,
+    )?;
+    ctx.globals().set(
+        "cancelAnimationFrame",
+        Function::new(ctx.clone(), JsFn(CancelRafHandler { el: Rc::clone(&el) }))?,
+    )?;
+
+    Ok(())
 }
 
-/// Registrera queueMicrotask (delegerar till Boas job-kö)
-fn register_queue_microtask(context: &mut Context) {
-    let queue_microtask = NativeFunction::from_fn_ptr(|_this, args, ctx| {
-        let callback = args.get_or_undefined(0).clone();
-        if let Some(callable) = callback.as_callable() {
-            let promise_job = boa_engine::job::PromiseJob::new(move |ctx: &mut Context| {
-                callable.call(&JsValue::undefined(), &[], ctx)
-            });
-            ctx.enqueue_job(boa_engine::job::Job::PromiseJob(promise_job));
-        }
-        Ok(JsValue::undefined())
-    });
-    register_global_fn(context, "queueMicrotask", queue_microtask);
+/// Registrera queueMicrotask
+///
+/// QuickJS hanterar Promises internt — queueMicrotask schemaläggs
+/// som en Promise.resolve().then(callback) under huven.
+fn register_queue_microtask(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    // Implementera queueMicrotask som Promise.resolve().then(callback)
+    ctx.eval::<(), _>(
+        r#"
+        globalThis.queueMicrotask = function(callback) {
+            Promise.resolve().then(callback);
+        };
+        "#,
+    )?;
+    Ok(())
 }
 
 /// Registrera MutationObserver-konstruktorn
-fn register_mutation_observer(context: &mut Context, el: SharedEventLoop) {
-    let el_mo = Rc::clone(&el);
-    let mo_constructor = unsafe {
-        NativeFunction::from_closure(move |_this, args, ctx| {
-            let callback = args.get_or_undefined(0).clone();
-            if !callback.is_callable() {
-                return Ok(JsValue::undefined());
-            }
+fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
+    struct MutationObserverConstructor {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for MutationObserverConstructor {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_undefined(ctx.clone())),
+            };
 
-            // Skapa observer-objekt med observe() och disconnect()
             let observer_index = {
-                let mut state = el_mo.borrow_mut();
+                let mut state = self.el.borrow_mut();
                 let idx = state.observers.len();
                 state.observers.push(ObserverEntry {
-                    callback,
+                    callback: Persistent::save(ctx, func),
                     targets: Vec::new(),
                     child_list: false,
                     attributes: false,
@@ -330,89 +363,138 @@ fn register_mutation_observer(context: &mut Context, el: SharedEventLoop) {
                 idx
             };
 
-            let el_observe = Rc::clone(&el_mo);
-            let observe_fn = NativeFunction::from_closure(move |_this, args, _ctx| {
-                // observe(targetNode, options)
-                let target = args.get_or_undefined(0);
-                let options = args.get_or_undefined(1);
+            let observer = Object::new(ctx.clone())?;
 
-                // Extrahera __nodeKey__ från target
-                let node_key = target
-                    .as_object()
-                    .and_then(|obj| {
-                        obj.get(js_string!("__nodeKey__"), _ctx)
-                            .ok()
-                            .and_then(|v| v.to_number(_ctx).ok())
-                    })
-                    .unwrap_or(0.0) as u64;
+            // observe(target, options)
+            struct ObserveHandler {
+                el: SharedEventLoop,
+                idx: usize,
+            }
+            impl JsHandler for ObserveHandler {
+                fn handle<'js>(
+                    &self,
+                    ctx: &Ctx<'js>,
+                    args: &[Value<'js>],
+                ) -> rquickjs::Result<Value<'js>> {
+                    let target = args
+                        .first()
+                        .cloned()
+                        .unwrap_or(Value::new_undefined(ctx.clone()));
+                    let options = args
+                        .get(1)
+                        .cloned()
+                        .unwrap_or(Value::new_undefined(ctx.clone()));
 
-                // Läs options
-                let child_list = options
-                    .as_object()
-                    .and_then(|obj| {
-                        obj.get(js_string!("childList"), _ctx)
-                            .ok()
-                            .map(|v| v.to_boolean())
-                    })
-                    .unwrap_or(false);
-                let attributes = options
-                    .as_object()
-                    .and_then(|obj| {
-                        obj.get(js_string!("attributes"), _ctx)
-                            .ok()
-                            .map(|v| v.to_boolean())
-                    })
-                    .unwrap_or(false);
-                let subtree = options
-                    .as_object()
-                    .and_then(|obj| {
-                        obj.get(js_string!("subtree"), _ctx)
-                            .ok()
-                            .map(|v| v.to_boolean())
-                    })
-                    .unwrap_or(false);
+                    let node_key = target
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, f64>("__nodeKey__").ok())
+                        .unwrap_or(0.0) as u64;
 
-                let mut state = el_observe.borrow_mut();
-                if let Some(entry) = state.observers.get_mut(observer_index) {
-                    entry.targets.push(node_key);
-                    entry.child_list = child_list;
-                    entry.attributes = attributes;
-                    entry.subtree = subtree;
+                    let child_list = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("childList").ok())
+                        .unwrap_or(false);
+                    let attributes = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("attributes").ok())
+                        .unwrap_or(false);
+                    let subtree = options
+                        .as_object()
+                        .and_then(|obj| obj.get::<_, bool>("subtree").ok())
+                        .unwrap_or(false);
+
+                    let mut state = self.el.borrow_mut();
+                    if let Some(entry) = state.observers.get_mut(self.idx) {
+                        entry.targets.push(node_key);
+                        entry.child_list = child_list;
+                        entry.attributes = attributes;
+                        entry.subtree = subtree;
+                    }
+                    Ok(Value::new_undefined(ctx.clone()))
                 }
+            }
 
-                Ok(JsValue::undefined())
-            });
+            observer.set(
+                "observe",
+                Function::new(
+                    ctx.clone(),
+                    JsFn(ObserveHandler {
+                        el: Rc::clone(&self.el),
+                        idx: observer_index,
+                    }),
+                )?,
+            )?;
 
-            let el_disconnect = Rc::clone(&el_mo);
-            let disconnect_fn = NativeFunction::from_closure(move |_this, _args, _ctx| {
-                let mut state = el_disconnect.borrow_mut();
-                if let Some(entry) = state.observers.get_mut(observer_index) {
-                    entry.targets.clear();
+            // disconnect()
+            struct DisconnectHandler {
+                el: SharedEventLoop,
+                idx: usize,
+            }
+            impl JsHandler for DisconnectHandler {
+                fn handle<'js>(
+                    &self,
+                    ctx: &Ctx<'js>,
+                    _args: &[Value<'js>],
+                ) -> rquickjs::Result<Value<'js>> {
+                    let mut state = self.el.borrow_mut();
+                    if let Some(entry) = state.observers.get_mut(self.idx) {
+                        entry.targets.clear();
+                    }
+                    Ok(Value::new_undefined(ctx.clone()))
                 }
-                Ok(JsValue::undefined())
-            });
+            }
 
-            let observer = ObjectInitializer::new(ctx)
-                .function(observe_fn, js_string!("observe"), 2)
-                .function(disconnect_fn, js_string!("disconnect"), 0)
-                .build();
+            observer.set(
+                "disconnect",
+                Function::new(
+                    ctx.clone(),
+                    JsFn(DisconnectHandler {
+                        el: Rc::clone(&self.el),
+                        idx: observer_index,
+                    }),
+                )?,
+            )?;
 
-            Ok(observer.into())
-        })
-    };
+            Ok(observer.into_value())
+        }
+    }
 
-    register_global_fn(context, "MutationObserver", mo_constructor);
+    ctx.globals().set(
+        "MutationObserver",
+        Function::new(
+            ctx.clone(),
+            JsFn(MutationObserverConstructor { el: Rc::clone(&el) }),
+        )?,
+    )?;
+
+    Ok(())
 }
 
 // ─── Event Loop Runner ──────────────────────────────────────────────────────
 
+/// Dränera QuickJS job-kö (Promises/microtasks)
+/// Använder raw FFI för att undvika RefCell-dubbelborrow med Context::with
+fn drain_pending_jobs_ctx(ctx: &Ctx<'_>) {
+    unsafe {
+        let ctx_ptr = ctx.as_raw().as_ptr();
+        let rt_ptr = rquickjs::qjs::JS_GetRuntime(ctx_ptr);
+        loop {
+            if !rquickjs::qjs::JS_IsJobPending(rt_ptr) {
+                break;
+            }
+            let mut pctx = std::mem::MaybeUninit::<*mut rquickjs::qjs::JSContext>::uninit();
+            let r = rquickjs::qjs::JS_ExecutePendingJob(rt_ptr, pctx.as_mut_ptr());
+            if r <= 0 {
+                break;
+            }
+        }
+    }
+}
+
 /// Kör event-loopen tills alla köer är tomma eller begränsningar nås
 ///
 /// Returnerar antal ticks som kördes och eventuella fel.
-pub fn run_event_loop(
-    context: &mut Context,
-    el: &SharedEventLoop,
-) -> Result<EventLoopStats, String> {
+pub fn run_event_loop(ctx: &Ctx<'_>, el: &SharedEventLoop) -> Result<EventLoopStats, String> {
     let mut total_ticks: usize = 0;
     let mut timers_fired: usize = 0;
     let mut rafs_fired: usize = 0;
@@ -421,10 +503,8 @@ pub fn run_event_loop(
     // Tidsbegränsning för hela event-loopen
     let wall_start = std::time::Instant::now();
 
-    // Fas 1: Dränera Boas inbyggda microtask-kö (Promises)
-    if let Err(e) = context.run_jobs() {
-        return Err(format!("Microtask error: {}", e));
-    }
+    // Fas 1: Dränera QuickJS inbyggda microtask-kö (Promises)
+    drain_pending_jobs_ctx(ctx);
     total_ticks += 1;
 
     loop {
@@ -441,42 +521,62 @@ pub fn run_event_loop(
         }
 
         // Fas 2: Avancera virtuell klocka och kör mogna timers
-        let due_timers = {
+        // Steg 1: Extrahera mogna timers (utan att anropa restore inne i borrow_mut)
+        let (due_timers, recurring_resave): DueTimersResult = {
             let mut state = el.borrow_mut();
             state.virtual_time_ms += 1; // Avancera 1ms per tick
             state.ticks += 1;
 
             let current_time = state.virtual_time_ms;
             let mut due = Vec::new();
-            let mut recurring_to_readd = Vec::new();
+            let mut recurring = Vec::new();
+            let mut remaining = Vec::new();
 
-            // Ta ut timers som är mogna
             let timers = std::mem::take(&mut state.timers);
             for timer in timers {
                 if timer.cancelled {
                     continue;
                 }
                 if timer.delay_ms <= current_time {
-                    due.push(timer.clone());
                     if timer.recurring {
-                        // Schemalägg om med nytt delay
-                        recurring_to_readd.push(TimerTask {
-                            delay_ms: current_time + timer.delay_ms.max(1),
-                            ..timer
-                        });
+                        recurring.push((
+                            timer.id,
+                            timer.callback,
+                            current_time + timer.delay_ms.max(1),
+                        ));
+                    } else {
+                        due.push(timer.callback);
                     }
                 } else {
-                    // Inte mogen ännu — behåll
-                    state.timers.push(timer);
+                    remaining.push(timer);
                 }
             }
-            state.timers.extend(recurring_to_readd);
-            due
+            state.timers = remaining;
+            (due, recurring)
         };
 
-        for timer in &due_timers {
-            if let Some(callable) = timer.callback.as_callable() {
-                let _ = callable.call(&JsValue::undefined(), &[], context);
+        // Kör mogna one-shot callbacks
+        for cb in due_timers {
+            if let Ok(func) = cb.restore(ctx) {
+                let _ = func.call::<_, Value>(());
+            }
+            timers_fired += 1;
+        }
+
+        // Kör och schemalägg om recurring timers
+        for (id, cb, new_delay) in recurring_resave {
+            if let Ok(func) = cb.restore(ctx) {
+                let _ = func.call::<_, Value>(());
+                // Schemalägg om
+                let new_persistent = Persistent::save(ctx, func);
+                let mut state = el.borrow_mut();
+                state.timers.push(TimerTask {
+                    id,
+                    callback: new_persistent,
+                    delay_ms: new_delay,
+                    recurring: true,
+                    cancelled: false,
+                });
             }
             timers_fired += 1;
         }
@@ -488,19 +588,22 @@ pub fn run_event_loop(
         };
 
         if should_fire_raf {
-            let raf_tasks = {
+            let raf_callbacks: Vec<(Persistent<Function<'static>>, bool)> = {
                 let mut state = el.borrow_mut();
-                std::mem::take(&mut state.raf_queue)
+                let tasks = std::mem::take(&mut state.raf_queue);
+                tasks
+                    .into_iter()
+                    .map(|t| (t.callback, t.cancelled))
+                    .collect()
             };
 
             let timestamp = el.borrow().virtual_time_ms as f64;
-            for raf in &raf_tasks {
-                if raf.cancelled {
+            for (cb, cancelled) in raf_callbacks {
+                if cancelled {
                     continue;
                 }
-                if let Some(callable) = raf.callback.as_callable() {
-                    let _ =
-                        callable.call(&JsValue::undefined(), &[JsValue::from(timestamp)], context);
+                if let Ok(func) = cb.restore(ctx) {
+                    let _ = func.call::<_, Value>((timestamp,));
                 }
                 rafs_fired += 1;
             }
@@ -515,20 +618,29 @@ pub fn run_event_loop(
         };
 
         if !pending.is_empty() {
-            let observers = el.borrow().observers.clone();
-            for observer in &observers {
-                if observer.targets.is_empty() {
+            // Klona observer-info för att undvika dubbel-borrow
+            let observer_info: Vec<(usize, Vec<u64>, bool, bool)> = {
+                let state = el.borrow();
+                state
+                    .observers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| (i, o.targets.clone(), o.child_list, o.attributes))
+                    .collect()
+            };
+
+            for (obs_idx, targets, child_list, attributes) in &observer_info {
+                if targets.is_empty() {
                     continue;
                 }
 
-                // Filtrera mutations som matchar observerade targets
                 let matching: Vec<&MutationRecord> = pending
                     .iter()
                     .filter(|m| {
-                        observer.targets.contains(&m.target)
+                        targets.contains(&m.target)
                             && match m.mutation_type.as_str() {
-                                "childList" => observer.child_list,
-                                "attributes" => observer.attributes,
+                                "childList" => *child_list,
+                                "attributes" => *attributes,
                                 _ => false,
                             }
                     })
@@ -538,50 +650,45 @@ pub fn run_event_loop(
                     continue;
                 }
 
-                // Skapa JS mutation records array
-                if let Some(callable) = observer.callback.as_callable() {
-                    let records = boa_engine::object::builtins::JsArray::new(context);
+                // Hämta callback från observer via index
+                let callback_persistent = {
+                    let state = el.borrow();
+                    state.observers.get(*obs_idx).map(|o| {
+                        // Vi behöver klona Persistent — restore och re-save
+                        o.callback.clone()
+                    })
+                };
+                let Some(cb) = callback_persistent else {
+                    continue;
+                };
+                if let Ok(func) = cb.restore(ctx) {
+                    let records = rquickjs::Array::new(ctx.clone())
+                        .map_err(|e| format!("Array::new failed: {}", e))
+                        .unwrap_or_else(|_| rquickjs::Array::new(ctx.clone()).unwrap());
+
                     for (i, mr) in matching.iter().enumerate() {
-                        let record_obj = ObjectInitializer::new(context)
-                            .property(
-                                js_string!("type"),
-                                JsValue::from(js_string!(mr.mutation_type.as_str())),
-                                Attribute::all(),
-                            )
-                            .property(
-                                js_string!("target"),
-                                JsValue::from(mr.target as f64),
-                                Attribute::all(),
-                            )
-                            .build();
-
-                        if let Some(attr) = &mr.attribute_name {
-                            let _ = record_obj.set(
-                                js_string!("attributeName"),
-                                JsValue::from(js_string!(attr.as_str())),
-                                false,
-                                context,
-                            );
+                        if let Ok(record_obj) = Object::new(ctx.clone()) {
+                            let _ = record_obj.set("type", mr.mutation_type.as_str());
+                            let _ = record_obj.set("target", mr.target as f64);
+                            if let Some(attr) = &mr.attribute_name {
+                                let _ = record_obj.set("attributeName", attr.as_str());
+                            }
+                            let _ = records.set(i, record_obj);
                         }
-
-                        let _ = records.set(i as u32, record_obj, false, context);
                     }
-                    let _ = callable.call(&JsValue::undefined(), &[records.into()], context);
+                    let _ = func.call::<_, Value>((records,));
                     mutations_delivered += matching.len();
                 }
             }
         }
 
         // Fas 5: Dränera microtasks igen (timer/rAF callbacks kan ha schemalagt nya)
-        if let Err(e) = context.run_jobs() {
-            return Err(format!("Microtask error in tick {}: {}", total_ticks, e));
-        }
+        drain_pending_jobs_ctx(ctx);
 
         total_ticks += 1;
 
         // Kolla om allt arbete är klart
         let still_work = el.borrow().has_pending_work();
-        // Kolla också Boas interna kö
         if !still_work {
             break;
         }
@@ -662,249 +769,215 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "js-eval")]
+    fn with_quickjs_context<F, R>(f: F) -> R
+    where
+        F: for<'js> FnOnce(&rquickjs::Runtime, Ctx<'js>, SharedEventLoop) -> R,
+    {
+        let (rt, qctx, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+        let result = qctx.with(|ctx| {
+            let el = Rc::new(RefCell::new(EventLoopState::new()));
+            register_event_loop(&ctx, Rc::clone(&el)).expect("register_event_loop borde lyckas");
+            let result = f(&rt, ctx, Rc::clone(&el));
+            el.borrow_mut().clear_persistent();
+            result
+        });
+        crate::js_eval::free_interrupt_state(interrupt_ptr);
+        result
+    }
+
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_promise_resolution() {
-        // Testa att Promises resolveras via run_jobs
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var resolved = false;
+                Promise.resolve(42).then(function(v) {
+                    resolved = true;
+                });
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let stats = run_event_loop(&ctx, &el);
+            assert!(stats.is_ok(), "Event loop borde lyckas");
 
-        // Skapa en Promise som sätter en global variabel
-        let code = r#"
-            var resolved = false;
-            Promise.resolve(42).then(function(v) {
-                resolved = true;
-            });
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        // Kör event-loopen
-        let stats = run_event_loop(&mut context, &el);
-        assert!(stats.is_ok(), "Event loop borde lyckas");
-
-        // Kolla att resolved = true
-        let check = context.eval(boa_engine::Source::from_bytes("resolved"));
-        assert!(check.is_ok(), "Borde kunna läsa resolved");
-        let val = check.unwrap();
-        assert_eq!(
-            val.to_boolean(),
-            true,
-            "resolved borde vara true efter Promise.then"
-        );
+            let val: bool = ctx.eval("resolved").expect("borde kunna läsa resolved");
+            assert!(val, "resolved borde vara true efter Promise.then");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_set_timeout_basic() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var timerFired = false;
+                var timerId = setTimeout(function() {
+                    timerFired = true;
+                }, 1);
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let stats = run_event_loop(&ctx, &el).expect("event loop borde lyckas");
+            assert!(stats.timers_fired > 0, "Minst en timer borde ha körts");
 
-        let code = r#"
-            var timerFired = false;
-            var timerId = setTimeout(function() {
-                timerFired = true;
-            }, 1);
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let stats = run_event_loop(&mut context, &el);
-        assert!(stats.is_ok(), "Event loop borde lyckas");
-        let stats = stats.unwrap();
-        assert!(stats.timers_fired > 0, "Minst en timer borde ha körts");
-
-        let check = context.eval(boa_engine::Source::from_bytes("timerFired"));
-        assert_eq!(
-            check.unwrap().to_boolean(),
-            true,
-            "timerFired borde vara true"
-        );
+            let val: bool = ctx.eval("timerFired").expect("borde kunna läsa timerFired");
+            assert!(val, "timerFired borde vara true");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_clear_timeout() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var timerFired = false;
+                var id = setTimeout(function() {
+                    timerFired = true;
+                }, 1);
+                clearTimeout(id);
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var timerFired = false;
-            var id = setTimeout(function() {
-                timerFired = true;
-            }, 1);
-            clearTimeout(id);
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("timerFired"));
-        assert_eq!(
-            check.unwrap().to_boolean(),
-            false,
-            "timerFired borde vara false efter clearTimeout"
-        );
+            let val: bool = ctx.eval("timerFired").expect("borde kunna läsa timerFired");
+            assert!(!val, "timerFired borde vara false efter clearTimeout");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_set_interval_fires_multiple() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var count = 0;
+                var id = setInterval(function() {
+                    count++;
+                    if (count >= 3) {
+                        clearInterval(id);
+                    }
+                }, 1);
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var count = 0;
-            var id = setInterval(function() {
-                count++;
-                if (count >= 3) {
-                    clearInterval(id);
-                }
-            }, 1);
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("count"));
-        let val = check.unwrap().to_number(&mut context).unwrap_or(0.0) as i32;
-        assert!(
-            val >= 3,
-            "count borde vara >= 3 efter setInterval: got {}",
-            val
-        );
+            let val: i32 = ctx.eval("count").expect("borde kunna läsa count");
+            assert!(
+                val >= 3,
+                "count borde vara >= 3 efter setInterval: got {}",
+                val
+            );
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_request_animation_frame() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var rafCalled = false;
+                var rafTimestamp = 0;
+                requestAnimationFrame(function(ts) {
+                    rafCalled = true;
+                    rafTimestamp = ts;
+                });
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let stats = run_event_loop(&ctx, &el);
+            assert!(stats.is_ok(), "Event loop borde lyckas");
 
-        let code = r#"
-            var rafCalled = false;
-            var rafTimestamp = 0;
-            requestAnimationFrame(function(ts) {
-                rafCalled = true;
-                rafTimestamp = ts;
-            });
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let stats = run_event_loop(&mut context, &el);
-        assert!(stats.is_ok(), "Event loop borde lyckas");
-
-        let check = context.eval(boa_engine::Source::from_bytes("rafCalled"));
-        assert_eq!(
-            check.unwrap().to_boolean(),
-            true,
-            "rAF callback borde ha körts"
-        );
+            let val: bool = ctx.eval("rafCalled").expect("borde kunna läsa rafCalled");
+            assert!(val, "rAF callback borde ha körts");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_cancel_animation_frame() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var rafCalled = false;
+                var id = requestAnimationFrame(function(ts) {
+                    rafCalled = true;
+                });
+                cancelAnimationFrame(id);
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var rafCalled = false;
-            var id = requestAnimationFrame(function(ts) {
-                rafCalled = true;
-            });
-            cancelAnimationFrame(id);
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("rafCalled"));
-        assert_eq!(
-            check.unwrap().to_boolean(),
-            false,
-            "rAF borde inte ha körts efter cancel"
-        );
+            let val: bool = ctx.eval("rafCalled").expect("borde kunna läsa rafCalled");
+            assert!(!val, "rAF borde inte ha körts efter cancel");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_queue_microtask() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var microtaskRan = false;
+                queueMicrotask(function() {
+                    microtaskRan = true;
+                });
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var microtaskRan = false;
-            queueMicrotask(function() {
-                microtaskRan = true;
-            });
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("microtaskRan"));
-        assert_eq!(
-            check.unwrap().to_boolean(),
-            true,
-            "Microtask borde ha körts"
-        );
+            let val: bool = ctx
+                .eval("microtaskRan")
+                .expect("borde kunna läsa microtaskRan");
+            assert!(val, "Microtask borde ha körts");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_max_timers_limit() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|_rt, ctx, _el| {
+            let code = format!(
+                r#"
+                var results = [];
+                for (var i = 0; i < {}; i++) {{
+                    results.push(setTimeout(function(){{}}, 100));
+                }}
+                var lastId = setTimeout(function(){{}}, 100);
+            "#,
+                MAX_TIMERS
+            );
+            let _: Value = ctx.eval(code.as_str()).expect("eval borde lyckas");
 
-        // Registrera MAX_TIMERS + 1 timers
-        let code = format!(
-            r#"
-            var results = [];
-            for (var i = 0; i < {}; i++) {{
-                results.push(setTimeout(function(){{}}, 100));
-            }}
-            var lastId = setTimeout(function(){{}}, 100);
-        "#,
-            MAX_TIMERS
-        );
-        let _ = context.eval(boa_engine::Source::from_bytes(code.as_bytes()));
-
-        // lastId borde vara -1 (limit nådd)
-        let check = context.eval(boa_engine::Source::from_bytes("lastId"));
-        let val = check.unwrap().to_number(&mut context).unwrap_or(0.0) as i32;
-        assert_eq!(val, -1, "Borde returnera -1 vid timer-limit");
+            let val: i32 = ctx.eval("lastId").expect("borde kunna läsa lastId");
+            assert_eq!(val, -1, "Borde returnera -1 vid timer-limit");
+        });
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_event_loop_stats() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                setTimeout(function() {}, 1);
+                requestAnimationFrame(function(ts) {});
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let stats = run_event_loop(&ctx, &el).unwrap();
+            assert!(stats.ticks > 0, "Borde ha kört minst 1 tick");
 
-        let code = r#"
-            setTimeout(function() {}, 1);
-            requestAnimationFrame(function(ts) {});
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-
-        let stats = run_event_loop(&mut context, &el).unwrap();
-        assert!(stats.ticks > 0, "Borde ha kört minst 1 tick");
-        // Kolla att Display-impl fungerar (använder alla fält)
-        let display = format!("{}", stats);
-        assert!(
-            display.contains("ticks="),
-            "Display borde innehålla ticks: {}",
-            display
-        );
-        assert!(
-            display.contains("rafs="),
-            "Display borde innehålla rafs: {}",
-            display
-        );
-        assert!(
-            display.contains("mutations="),
-            "Display borde innehålla mutations: {}",
-            display
-        );
+            let display = format!("{}", stats);
+            assert!(
+                display.contains("ticks="),
+                "Display borde innehålla ticks: {}",
+                display
+            );
+            assert!(
+                display.contains("rafs="),
+                "Display borde innehålla rafs: {}",
+                display
+            );
+            assert!(
+                display.contains("mutations="),
+                "Display borde innehålla mutations: {}",
+                display
+            );
+        });
     }
 
     #[test]
@@ -927,66 +1000,57 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "js-eval")]
     fn test_promise_chain() {
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var result = 0;
+                Promise.resolve(1)
+                    .then(function(v) { return v + 1; })
+                    .then(function(v) { return v * 10; })
+                    .then(function(v) { result = v; });
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var result = 0;
-            Promise.resolve(1)
-                .then(function(v) { return v + 1; })
-                .then(function(v) { return v * 10; })
-                .then(function(v) { result = v; });
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("result"));
-        let val = check.unwrap().to_number(&mut context).unwrap_or(0.0) as i32;
-        assert_eq!(val, 20, "Promise-kedja borde ge 20: got {}", val);
+            let val: i32 = ctx.eval("result").expect("borde kunna läsa result");
+            assert_eq!(val, 20, "Promise-kedja borde ge 20: got {}", val);
+        });
     }
 
     #[test]
-    fn test_setTimeout_with_promise() {
-        // Kombinera timers och promises
-        let mut context = Context::default();
-        let el = Rc::new(RefCell::new(EventLoopState::new()));
-        register_event_loop(&mut context, Rc::clone(&el));
+    #[cfg(feature = "js-eval")]
+    fn test_set_timeout_with_promise() {
+        with_quickjs_context(|rt, ctx, el| {
+            let code = r#"
+                var steps = [];
+                steps.push("start");
+                setTimeout(function() {
+                    steps.push("timeout");
+                }, 1);
+                Promise.resolve().then(function() {
+                    steps.push("promise");
+                });
+            "#;
+            let _: Value = ctx.eval(code).expect("eval borde lyckas");
+            let _ = run_event_loop(&ctx, &el);
 
-        let code = r#"
-            var steps = [];
-            steps.push("start");
-            setTimeout(function() {
-                steps.push("timeout");
-            }, 1);
-            Promise.resolve().then(function() {
-                steps.push("promise");
-            });
-        "#;
-        let _ = context.eval(boa_engine::Source::from_bytes(code));
-        let _ = run_event_loop(&mut context, &el);
-
-        let check = context.eval(boa_engine::Source::from_bytes("steps.join(',')"));
-        let val = check
-            .unwrap()
-            .to_string(&mut context)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_default();
-        assert!(
-            val.contains("start"),
-            "Borde innehålla 'start': got {}",
-            val
-        );
-        assert!(
-            val.contains("promise"),
-            "Borde innehålla 'promise': got {}",
-            val
-        );
-        assert!(
-            val.contains("timeout"),
-            "Borde innehålla 'timeout': got {}",
-            val
-        );
+            let val: String = ctx.eval("steps.join(',')").expect("borde kunna läsa steps");
+            assert!(
+                val.contains("start"),
+                "Borde innehålla 'start': got {}",
+                val
+            );
+            assert!(
+                val.contains("promise"),
+                "Borde innehålla 'promise': got {}",
+                val
+            );
+            assert!(
+                val.contains("timeout"),
+                "Borde innehålla 'timeout': got {}",
+                val
+            );
+        });
     }
 }

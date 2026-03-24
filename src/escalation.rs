@@ -2,7 +2,7 @@
 ///
 /// Intelligent tier-val som väljer minsta möjliga exekveringsnivå per sida.
 /// Kör aldrig mer arbete än nödvändigt: hydration-data → 0 ms JS,
-/// statisk HTML → ingen Boa, enkel JS → sandboxad Boa+DOM, etc.
+/// statisk HTML → ingen JS-motor, enkel JS → sandboxad QuickJS+DOM, etc.
 use serde::{Deserialize, Serialize};
 
 use crate::hydration;
@@ -17,8 +17,10 @@ pub enum ParseTier {
     Hydration { framework: String },
     /// Tier 1: Statisk HTML parse — ingen JS, ~1 ms
     StaticParse,
-    /// Tier 2: Sandboxad Boa + DOM — kör inline scripts mot ArenaDom, ~10-50 ms
-    BoaDom { script_count: u32 },
+    /// Tier 2: Sandboxad QuickJS + DOM — kör inline scripts mot ArenaDom, ~10-50 ms
+    QuickJsDom { script_count: u32 },
+    /// Tier 2.5: QuickJS + DOM + lifecycle — DOMContentLoaded/load events, ~50-200 ms
+    QuickJsLifecycle { script_count: u32 },
     /// Tier 3: Blitz render — ren Rust CSS-layout, ~10-50 ms
     BlitzRender,
     /// Tier 4: Chrome CDP — fullständig browser, ~500-2000 ms
@@ -159,12 +161,32 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
             };
         }
 
+        // Framework-sidor med DOMContentLoaded/load-beroende → Tier 2.5
+        let needs_lifecycle = js_info.has_framework
+            || html_lower.contains("domcontentloaded")
+            || html_lower.contains("addeventlistener")
+            || html_lower.contains("onload");
+
+        if needs_lifecycle {
+            return TierDecision {
+                tier: ParseTier::QuickJsLifecycle {
+                    script_count: js_info.total_inline_scripts,
+                },
+                reason: format!(
+                    "{} inline scripts + framework/lifecycle — QuickJS+lifecycle",
+                    js_info.total_inline_scripts
+                ),
+                confidence: 0.80,
+                analysis_time_us: start.elapsed().as_micros() as u64,
+            };
+        }
+
         return TierDecision {
-            tier: ParseTier::BoaDom {
+            tier: ParseTier::QuickJsDom {
                 script_count: js_info.total_inline_scripts,
             },
             reason: format!(
-                "{} inline scripts med DOM-åtkomst — Boa+DOM räcker",
+                "{} inline scripts med DOM-åtkomst — QuickJS+DOM räcker",
                 js_info.total_inline_scripts
             ),
             confidence: 0.85,
@@ -306,8 +328,8 @@ mod tests {
 
         let decision = select_tier(html, "https://shop.example.com");
         assert!(
-            matches!(decision.tier, ParseTier::BoaDom { .. }),
-            "Inline JS med DOM-access borde ge Tier 2 (BoaDom), fick {:?}",
+            matches!(decision.tier, ParseTier::QuickJsDom { .. }),
+            "Inline JS med DOM-access borde ge Tier 2 (QuickJsDom), fick {:?}",
             decision.tier
         );
     }
@@ -430,5 +452,25 @@ mod tests {
             !is_spa_shell(&not_spa.to_lowercase()),
             "Borde INTE flagga sida med mycket innehåll som SPA"
         );
+    }
+
+    #[test]
+    fn test_tier_lifecycle_for_framework_page() {
+        let html = r##"<html><body>
+            <div id="app">Content</div>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.getElementById('app').textContent = 'Loaded';
+                });
+            </script>
+        </body></html>"##;
+        let decision = select_tier(html, "https://example.com");
+        match &decision.tier {
+            ParseTier::QuickJsLifecycle { .. } => {}
+            other => panic!(
+                "Borde välja QuickJsLifecycle för DOMContentLoaded-sida, fick {:?}",
+                other
+            ),
+        }
     }
 }

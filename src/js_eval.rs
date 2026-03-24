@@ -1,40 +1,79 @@
 /// JavaScript Sandbox Evaluation – Fas 4b
 ///
-/// Kör små JS-snippets i en sandboxad Boa-motor.
+/// Kör små JS-snippets i en sandboxad QuickJS-motor (via rquickjs).
 /// Används för att utvärdera klientlogik som påverkar sidinnehåll,
 /// t.ex. prisuträkningar, villkorlig rendering, textinterpolering.
 ///
 /// Säkerhetsprincip: Ingen åtkomst till DOM, nätverk, filsystem eller timers.
 /// Bara ren beräkningslogik (matematik, strängar, objekt, arrayer).
 #[cfg(feature = "js-eval")]
-use boa_engine::{Context, Source};
+use rquickjs::{Context, Runtime};
 
 // ─── Sandbox-begränsningar ──────────────────────────────────────────────────
 
-/// Max loop-iterationer (förhindrar while(true) och for(;;))
+/// Max stack-storlek i bytes (höjd till 1MB för SPA-bundles med djupa anropskedjor)
 #[cfg(feature = "js-eval")]
-const MAX_LOOP_ITERATIONS: u64 = 100_000;
+const MAX_STACK_SIZE: usize = 1024 * 1024;
 
-/// Max stack-storlek (förhindrar djup rekursion)
+/// Max minnesanvändning (64 MB — SPA-bundles behöver mer minne)
 #[cfg(feature = "js-eval")]
-const MAX_STACK_SIZE: usize = 256;
+const MAX_MEMORY: usize = 64 * 1024 * 1024;
 
-/// Max rekursionsdjup
+/// Max exekveringstid i millisekunder (väggklocka) innan interrupt
+/// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
 #[cfg(feature = "js-eval")]
-const MAX_RECURSION_DEPTH: usize = 64;
+const MAX_EVAL_MS: u64 = 5000;
 
-/// Skapa en sandboxad Boa-kontext med runtime-begränsningar
+/// Delad flagga som interrupt-handlern läser.
+/// Sätts till `true` av en timeout-tråd för att avbryta JS-exekvering.
+#[cfg(feature = "js-eval")]
+pub(crate) struct InterruptState {
+    /// Håller Arc vid liv — timeout-tråden sätter denna till true.
+    /// Droppar vi denna stoppas interrupt-handlerns referens.
+    _abort_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
 ///
-/// Sätter loop-iterations-limit, stack-storlek och rekursionslimit
-/// för att förhindra denial-of-service i JS-sandboxen.
+/// Använder rquickjs set_interrupt_handler med en Arc<AtomicBool>-flagga.
+/// Anroparen kan sätta flaggan till true för att avbryta.
+/// Returnerar (Runtime, Context, InterruptState).
 #[cfg(feature = "js-eval")]
-pub(crate) fn create_sandboxed_context() -> Context {
-    let mut ctx = Context::default();
-    let limits = ctx.runtime_limits_mut();
-    limits.set_loop_iteration_limit(MAX_LOOP_ITERATIONS);
-    limits.set_stack_size_limit(MAX_STACK_SIZE);
-    limits.set_recursion_limit(MAX_RECURSION_DEPTH);
-    ctx
+pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context, InterruptState) {
+    let rt = Runtime::new().expect("QuickJS Runtime::new misslyckades");
+    rt.set_max_stack_size(MAX_STACK_SIZE);
+    rt.set_memory_limit(MAX_MEMORY);
+
+    let should_abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let abort_clone = should_abort.clone();
+
+    // Interrupt-handler via rquickjs API + separat timeout-tråd
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        abort_clone.load(std::sync::atomic::Ordering::Relaxed)
+    })));
+
+    // Starta timeout-tråd som sätter flaggan efter MAX_EVAL_MS
+    let abort_for_timeout = should_abort.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(MAX_EVAL_MS));
+        abort_for_timeout.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
+
+    (
+        rt,
+        ctx,
+        InterruptState {
+            _abort_flag: should_abort,
+        },
+    )
+}
+
+/// Cleanup för InterruptState — droppar Arc (no-op om inga referenser kvar)
+#[cfg(feature = "js-eval")]
+pub(crate) fn free_interrupt_state(state: InterruptState) {
+    drop(state);
 }
 
 use serde::{Deserialize, Serialize};
@@ -239,6 +278,165 @@ pub fn detect_js_snippets(html: &str) -> JsDetectionResult {
     }
 }
 
+/// Extrahera inline scripts i dokumentordning för lifecycle-exekvering
+///
+/// Returnerar fullständig kod (ej trunkerad) för varje inline script.
+/// Filtrerar bort externa scripts (src=), type="application/json", type="application/ld+json".
+#[cfg(feature = "js-eval")]
+pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
+    let mut scripts = Vec::new();
+    let lower = html.to_lowercase();
+    let mut search_from = 0;
+
+    while let Some(start) = lower[search_from..].find("<script") {
+        let abs_start = search_from + start;
+        if let Some(tag_end) = lower[abs_start..].find('>') {
+            let content_start = abs_start + tag_end + 1;
+            if let Some(end) = lower[content_start..].find("</script>") {
+                let tag_text = &lower[abs_start..abs_start + tag_end];
+
+                // Skippa externa scripts
+                let is_external = tag_text.contains("src=");
+                // Skippa JSON/LD+JSON (SSR-data, inte körbara)
+                let is_json = tag_text.contains("application/json")
+                    || tag_text.contains("application/ld+json")
+                    || tag_text.contains("importmap");
+
+                if !is_external && !is_json {
+                    let code = html[content_start..content_start + end].trim();
+                    if !code.is_empty() {
+                        scripts.push(code.to_string());
+                    }
+                }
+
+                search_from = content_start + end + 9;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    scripts
+}
+
+// ─── Extern script-stöd (SPA-sajter) ────────────────────────────────────────
+
+/// En script-entry i dokumentordning — antingen inline-kod eller en extern URL.
+#[cfg(feature = "js-eval")]
+#[derive(Debug, Clone)]
+pub enum ScriptEntry {
+    /// Inline script — redan i HTML, behöver ej hämtas
+    Inline,
+    /// Extern script — URL som behöver hämtas
+    External(String),
+}
+
+/// Extrahera alla scripts i dokumentordning (inline + externa)
+///
+/// Till skillnad från `extract_ordered_scripts` returnerar denna ALLA scripts,
+/// inklusive externa `<script src="...">` som behöver hämtas separat.
+/// JSON/LD+JSON/importmap-scripts filtreras bort.
+#[cfg(feature = "js-eval")]
+pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
+    let mut entries = Vec::new();
+    let lower = html.to_lowercase();
+    let mut search_from = 0;
+
+    while let Some(start) = lower[search_from..].find("<script") {
+        let abs_start = search_from + start;
+        if let Some(tag_end) = lower[abs_start..].find('>') {
+            let content_start = abs_start + tag_end + 1;
+            if let Some(end) = lower[content_start..].find("</script>") {
+                let tag_text = &lower[abs_start..abs_start + tag_end];
+
+                // Skippa JSON/LD+JSON/importmap (SSR-data, inte körbara)
+                let is_json = tag_text.contains("application/json")
+                    || tag_text.contains("application/ld+json")
+                    || tag_text.contains("importmap");
+
+                if !is_json {
+                    let is_external = tag_text.contains("src=");
+                    if is_external {
+                        // Extrahera URL från src-attribut
+                        let orig_tag = &html[abs_start..abs_start + tag_end + 1];
+                        if let Some(url) = extract_src_url(orig_tag, base_url) {
+                            entries.push(ScriptEntry::External(url));
+                        }
+                    } else {
+                        let code = html[content_start..content_start + end].trim();
+                        if !code.is_empty() {
+                            entries.push(ScriptEntry::Inline);
+                        }
+                    }
+                }
+
+                search_from = content_start + end + 9;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    entries
+}
+
+/// Extrahera URL från ett script-tags src-attribut
+#[cfg(feature = "js-eval")]
+fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let src_pos = lower.find("src=")?;
+    let after_src = &tag[src_pos + 4..];
+    let (quote, rest) = if let Some(stripped) = after_src.strip_prefix('"') {
+        ('"', stripped)
+    } else if let Some(stripped) = after_src.strip_prefix('\'') {
+        ('\'', stripped)
+    } else {
+        // Oklart format — skippa
+        return None;
+    };
+    let end = rest.find(quote)?;
+    let url = &rest[..end];
+
+    // Tomma src, data-URIs eller javascript: — skippa
+    if url.is_empty() || url.starts_with("data:") || url.starts_with("javascript:") {
+        return None;
+    }
+
+    // Resolve relativa URLer mot base_url
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url.to_string())
+    } else if url.starts_with("//") {
+        let scheme = if base_url.starts_with("https://") {
+            "https:"
+        } else {
+            "http:"
+        };
+        Some(format!("{scheme}{url}"))
+    } else if url.starts_with('/') {
+        // Absolut path — extrahera origin från base_url
+        let origin_end = base_url
+            .find("://")
+            .and_then(|i| base_url[i + 3..].find('/').map(|j| i + 3 + j));
+        if let Some(end) = origin_end {
+            Some(format!("{}{}", &base_url[..end], url))
+        } else {
+            Some(format!("{}{}", base_url.trim_end_matches('/'), url))
+        }
+    } else {
+        // Relativ path
+        let base_dir = if let Some(last_slash) = base_url.rfind('/') {
+            &base_url[..last_slash + 1]
+        } else {
+            base_url
+        };
+        Some(format!("{base_dir}{url}"))
+    }
+}
+
 /// Kolla om JS-koden troligen påverkar DOM-innehåll
 fn content_affects_dom(code: &str) -> bool {
     let lower = code.to_lowercase();
@@ -327,7 +525,7 @@ const ALLOWED_PATTERNS: &[&str] = &[
     "json.stringify(",
     "json.parse(",
     "hasownproperty(",
-    // Ternary, literals, variabler — tillåts implicit av Boa
+    // Ternary, literals, variabler — tillåts implicit av QuickJS
     "true",
     "false",
     "null",
@@ -477,13 +675,11 @@ pub fn eval_js(code: &str) -> JsEvalResult {
         };
     }
 
-    let mut context = create_sandboxed_context();
+    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
 
-    match context.eval(Source::from_bytes(code)) {
+    let result = ctx.with(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
         Ok(result) => {
-            let value_str = result
-                .to_string(&mut context)
-                .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
+            let value_str = quickjs_value_to_string(&ctx, &result);
             JsEvalResult {
                 value: Some(value_str),
                 error: None,
@@ -492,13 +688,12 @@ pub fn eval_js(code: &str) -> JsEvalResult {
             }
         }
         Err(e) => {
-            // Kolla om felet beror på runtime-begränsning
-            let err_str = format!("{}", e);
+            let err_str = quickjs_error_string(&ctx, &e);
             let err_lower = err_str.to_lowercase();
-            let timed_out = err_lower.contains("loop iteration limit")
+            let timed_out = err_lower.contains("interrupted")
                 || err_lower.contains("stack overflow")
-                || err_lower.contains("recursion limit")
-                || err_lower.contains("runtime limit");
+                || err_lower.contains("stack size exceeded")
+                || err_lower.contains("out of memory");
             JsEvalResult {
                 value: None,
                 error: Some(err_str),
@@ -506,61 +701,139 @@ pub fn eval_js(code: &str) -> JsEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
-    }
+    });
+    free_interrupt_state(interrupt_ptr);
+    result
 }
 
 /// Evalera flera JS-uttryck med delad kontext (persistent state)
 ///
-/// Alla snippets delar samma Boa Context — variabler definierade i
+/// Alla snippets delar samma QuickJS Context — variabler definierade i
 /// snippet 1 är tillgängliga i snippet 2, etc.
 #[cfg(feature = "js-eval")]
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
     // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
-    let mut context = create_sandboxed_context();
+    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
     let mut results = Vec::with_capacity(snippets.len());
 
-    for code in snippets {
-        let snippet_start = std::time::Instant::now();
+    ctx.with(|ctx| {
+        for code in snippets {
+            let snippet_start = std::time::Instant::now();
 
-        // Allowlist-kontroll per snippet
-        if let Err(reason) = check_js_safety(code) {
-            results.push(JsEvalResult {
-                value: None,
-                error: Some(reason),
-                timed_out: false,
-                eval_time_us: snippet_start.elapsed().as_micros() as u64,
-            });
-            continue;
-        }
-
-        match context.eval(Source::from_bytes(code.as_bytes())) {
-            Ok(result) => {
-                let value_str = result
-                    .to_string(&mut context)
-                    .map_or_else(|_| "undefined".to_string(), |v| v.to_std_string_escaped());
-                results.push(JsEvalResult {
-                    value: Some(value_str),
-                    error: None,
-                    timed_out: false,
-                    eval_time_us: snippet_start.elapsed().as_micros() as u64,
-                });
-            }
-            Err(e) => {
+            // Allowlist-kontroll per snippet
+            if let Err(reason) = check_js_safety(code) {
                 results.push(JsEvalResult {
                     value: None,
-                    error: Some(format!("{}", e)),
+                    error: Some(reason),
                     timed_out: false,
                     eval_time_us: snippet_start.elapsed().as_micros() as u64,
                 });
+                continue;
+            }
+
+            match ctx.eval::<rquickjs::Value, _>(code.as_str()) {
+                Ok(result) => {
+                    let value_str = quickjs_value_to_string(&ctx, &result);
+                    results.push(JsEvalResult {
+                        value: Some(value_str),
+                        error: None,
+                        timed_out: false,
+                        eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                    });
+                }
+                Err(e) => {
+                    results.push(JsEvalResult {
+                        value: None,
+                        error: Some(quickjs_error_string(&ctx, &e)),
+                        timed_out: false,
+                        eval_time_us: snippet_start.elapsed().as_micros() as u64,
+                    });
+                }
             }
         }
-    }
+    });
+
+    free_interrupt_state(interrupt_ptr);
 
     JsBatchResult {
         results,
         total_eval_time_us: start.elapsed().as_micros() as u64,
+    }
+}
+
+// ─── QuickJS hjälpfunktioner ──────────────────────────────────────────────
+
+/// Konvertera ett QuickJS Value till en Rust-sträng
+#[cfg(feature = "js-eval")]
+pub(crate) fn quickjs_value_to_string<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    val: &rquickjs::Value<'js>,
+) -> String {
+    use rquickjs::Type;
+    match val.type_of() {
+        Type::Undefined => "undefined".to_string(),
+        Type::Null => "null".to_string(),
+        Type::Bool => {
+            if val.as_bool().unwrap_or(false) {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        Type::Int => val
+            .as_int()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        Type::Float => {
+            let f = val.as_float().unwrap_or(0.0);
+            // Matcha JavaScript-formatering: 59.98, inte 5.998e1
+            if f.fract() == 0.0 && f.abs() < 1e15 {
+                format!("{}", f as i64)
+            } else {
+                format!("{}", f)
+            }
+        }
+        Type::String => val
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default(),
+        _ => {
+            // För objekt/arrayer: använd JSON.stringify eller toString()
+            if let Ok(Some(json_str)) = ctx.json_stringify(val.clone()) {
+                if let Ok(rs) = json_str.to_string() {
+                    return rs;
+                }
+            }
+            // Fallback: toString()
+            val.as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_else(|| "[object]".to_string())
+        }
+    }
+}
+
+/// Extrahera felmeddelande från QuickJS-error
+#[cfg(feature = "js-eval")]
+pub(crate) fn quickjs_error_string<'js>(ctx: &rquickjs::Ctx<'js>, err: &rquickjs::Error) -> String {
+    match err {
+        rquickjs::Error::Exception => {
+            // Hämta det kastade undantaget
+            let caught = ctx.catch();
+            if let Some(exc) = caught.as_exception() {
+                let msg = exc.message().unwrap_or_default();
+                let stack = exc.stack().unwrap_or_default();
+                if stack.is_empty() {
+                    msg
+                } else {
+                    format!("{}\n{}", msg, stack)
+                }
+            } else {
+                format!("{:?}", caught)
+            }
+        }
+        other => format!("{}", other),
     }
 }
 
@@ -999,10 +1272,10 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_infinite_loop_aborts() {
-        let result = eval_js("var x=0; while(x<200000) { x++; } x");
+        let result = eval_js("var x=0; while(true) { x++; } x");
         assert!(
             result.error.is_some(),
-            "Loop som överskrider limit borde ge fel: value={:?}",
+            "Oändlig loop borde avbrytas: value={:?}",
             result.value
         );
         assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
@@ -1011,10 +1284,10 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_large_for_loop_aborts() {
-        let result = eval_js("var s=0; for(var i=0; i<200000; i++) { s+=i; } s");
+        let result = eval_js("var s=0; for(var i=0; i<100000000; i++) { s+=i; } s");
         assert!(
             result.error.is_some(),
-            "Stor loop borde ge fel: value={:?}",
+            "Stor loop (100M) borde avbrytas: value={:?}",
             result.value
         );
         assert!(result.timed_out, "timed_out borde vara true vid loop-limit");
@@ -1041,23 +1314,135 @@ mod tests {
 
     #[test]
     #[cfg(feature = "js-eval")]
-    fn test_sandboxed_context_limits() {
-        let ctx = create_sandboxed_context();
-        let limits = ctx.runtime_limits();
+    fn test_sandboxed_runtime_creates() {
+        let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
+        // Verifiera att runtime och kontext skapas utan panik
+        ctx.with(|ctx| {
+            let result: rquickjs::Result<i32> = ctx.eval("1 + 1");
+            assert_eq!(result.unwrap(), 2, "Grundläggande eval borde fungera");
+        });
+        free_interrupt_state(interrupt_ptr);
+    }
+
+    // ─── extract_ordered_scripts tester ─────────────────────────────────────
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_basic() {
+        let html =
+            r#"<html><body><script>var x = 1;</script><script>var y = 2;</script></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 2, "Borde hitta 2 inline scripts");
+        assert_eq!(scripts[0], "var x = 1;");
+        assert_eq!(scripts[1], "var y = 2;");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_skips_external() {
+        let html = r##"<html><body><script src="app.js"></script><script>var x = 1;</script></body></html>"##;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 1, "Borde skippa extern script");
+        assert_eq!(scripts[0], "var x = 1;");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_skips_json() {
+        let html = r#"<html><body><script type="application/json">{"key":"val"}</script><script>var x = 1;</script></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert_eq!(scripts.len(), 1, "Borde skippa JSON script");
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_ordered_scripts_empty() {
+        let html = r#"<html><body><p>No scripts</p></body></html>"#;
+        let scripts = extract_ordered_scripts(html);
+        assert!(scripts.is_empty(), "Borde inte hitta scripts");
+    }
+
+    // ─── Tester för extract_all_scripts (SPA-stöd) ──────────────────────────
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_mixed() {
+        let html = r##"<html><body>
+            <script>var x = 1;</script>
+            <script src="https://cdn.example.com/bundle.js"></script>
+            <script>var y = 2;</script>
+        </body></html>"##;
+        let entries = extract_all_scripts(html, "https://example.com/");
         assert_eq!(
-            limits.loop_iteration_limit(),
-            MAX_LOOP_ITERATIONS,
-            "Loop-limit borde vara satt"
+            entries.len(),
+            3,
+            "Borde hitta 3 entries (2 inline + 1 extern)"
         );
-        assert_eq!(
-            limits.stack_size_limit(),
-            MAX_STACK_SIZE,
-            "Stack-limit borde vara satt"
+        assert!(
+            matches!(entries[0], ScriptEntry::Inline),
+            "Första borde vara inline"
         );
-        assert_eq!(
-            limits.recursion_limit(),
-            MAX_RECURSION_DEPTH,
-            "Recursion-limit borde vara satt"
+        assert!(
+            matches!(&entries[1], ScriptEntry::External(url) if url == "https://cdn.example.com/bundle.js"),
+            "Andra borde vara extern med rätt URL"
         );
+        assert!(
+            matches!(entries[2], ScriptEntry::Inline),
+            "Tredje borde vara inline"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_relative_url() {
+        let html = r##"<html><body><script src="/js/app.js"></script></body></html>"##;
+        let entries = extract_all_scripts(html, "https://www.example.com/page");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], ScriptEntry::External(url) if url == "https://www.example.com/js/app.js"),
+            "Borde resolve relativ URL korrekt"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_protocol_relative() {
+        let html =
+            r##"<html><body><script src="//cdn.example.com/lib.js"></script></body></html>"##;
+        let entries = extract_all_scripts(html, "https://example.com/");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], ScriptEntry::External(url) if url == "https://cdn.example.com/lib.js"),
+            "Borde resolve protocol-relativ URL"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_all_scripts_skips_json() {
+        let html = r#"<html><body>
+            <script type="application/json">{"data": true}</script>
+            <script src="https://cdn.example.com/app.js"></script>
+        </body></html>"#;
+        let entries = extract_all_scripts(html, "https://example.com/");
+        assert_eq!(entries.len(), 1, "Borde skippa JSON-script");
+        assert!(matches!(&entries[0], ScriptEntry::External(_)));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_src_url_single_quotes() {
+        let url = extract_src_url("<script src='/js/bundle.js'>", "https://example.com/page");
+        assert_eq!(url, Some("https://example.com/js/bundle.js".to_string()));
+    }
+
+    #[test]
+    #[cfg(feature = "js-eval")]
+    fn test_extract_src_url_skips_data_uri() {
+        let url = extract_src_url(
+            r#"<script src="data:text/javascript,alert(1)">"#,
+            "https://example.com/",
+        );
+        assert_eq!(url, None, "Borde skippa data-URI");
     }
 }

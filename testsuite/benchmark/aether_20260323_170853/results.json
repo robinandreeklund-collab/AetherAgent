@@ -1,0 +1,637 @@
+{
+  "fetch": [
+    {
+      "site": "example.com",
+      "ae_ms": 508,
+      "ae_size": -1,
+      "lp_ms": 115,
+      "lp_size": 565,
+      "winner": "LP"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 354,
+      "ae_size": -1,
+      "lp_ms": 178,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 37,
+      "ae_size": -1,
+      "lp_ms": 855,
+      "lp_size": 51312,
+      "winner": "LP"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 1133,
+      "ae_size": 459332,
+      "lp_ms": 227,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 1057,
+      "ae_size": 555341,
+      "lp_ms": 418,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 323,
+      "ae_size": -1,
+      "lp_ms": 362,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 13,
+      "ae_size": -1,
+      "lp_ms": 26,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 231,
+      "ae_size": 568997,
+      "lp_ms": 5341,
+      "lp_size": 543679,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 249,
+      "ae_size": 245493,
+      "lp_ms": 29,
+      "lp_size": 141,
+      "winner": "LP"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 13,
+      "ae_size": 24,
+      "lp_ms": 1441,
+      "lp_size": 111,
+      "winner": "AE"
+    },
+    {
+      "site": "docs.python.org",
+      "ae_ms": 27,
+      "ae_size": -1,
+      "lp_ms": 263,
+      "lp_size": 105,
+      "winner": "LP"
+    },
+    {
+      "site": "cnn.com",
+      "ae_ms": 563,
+      "ae_size": 4878984,
+      "lp_ms": 19134,
+      "lp_size": 5162598,
+      "winner": "AE"
+    },
+    {
+      "site": "linkedin.com",
+      "ae_ms": 601,
+      "ae_size": 141538,
+      "lp_ms": 924,
+      "lp_size": 141768,
+      "winner": "AE"
+    },
+    {
+      "site": "svt.se",
+      "ae_ms": 1634,
+      "ae_size": 199422,
+      "lp_ms": 2073,
+      "lp_size": 198033,
+      "winner": "AE"
+    },
+    {
+      "site": "dn.se",
+      "ae_ms": 1481,
+      "ae_size": 1006915,
+      "lp_ms": 5378,
+      "lp_size": 1007534,
+      "winner": "AE"
+    },
+    {
+      "site": "google.com",
+      "ae_ms": 338,
+      "ae_size": 78421,
+      "lp_ms": 1356,
+      "lp_size": 80616,
+      "winner": "AE"
+    },
+    {
+      "site": "rust-lang.org",
+      "ae_ms": 473,
+      "ae_size": -1,
+      "lp_ms": 318,
+      "lp_size": 105,
+      "winner": "LP"
+    },
+    {
+      "site": "mozilla.org",
+      "ae_ms": 661,
+      "ae_size": 108185,
+      "lp_ms": 1388,
+      "lp_size": 47735,
+      "winner": "AE"
+    },
+    {
+      "site": "cloudflare.com",
+      "ae_ms": 730,
+      "ae_size": 982714,
+      "lp_ms": 367,
+      "lp_size": 105,
+      "winner": "LP"
+    },
+    {
+      "site": "vercel.com",
+      "ae_ms": 269,
+      "ae_size": 944074,
+      "lp_ms": 179,
+      "lp_size": 105,
+      "winner": "LP"
+    },
+    {
+      "site": "python.org",
+      "ae_ms": 720,
+      "ae_size": -1,
+      "lp_ms": 1120,
+      "lp_size": 51874,
+      "winner": "LP"
+    },
+    {
+      "site": "httpbin.org",
+      "ae_ms": 124,
+      "ae_size": 3741,
+      "lp_ms": 378,
+      "lp_size": 3736,
+      "winner": "AE"
+    },
+    {
+      "site": "quotes.toscrape.com",
+      "ae_ms": 570,
+      "ae_size": -1,
+      "lp_ms": 519,
+      "lp_size": 10969,
+      "winner": "LP"
+    },
+    {
+      "site": "svd.se",
+      "ae_ms": 535,
+      "ae_size": 309886,
+      "lp_ms": 318,
+      "lp_size": 139,
+      "winner": "LP"
+    },
+    {
+      "site": "ebay.com",
+      "ae_ms": 1700,
+      "ae_size": 838986,
+      "lp_ms": 822,
+      "lp_size": 127,
+      "winner": "LP"
+    },
+    {
+      "site": "w3schools.com",
+      "ae_ms": 527,
+      "ae_size": 418085,
+      "lp_ms": 2427,
+      "lp_size": 357514,
+      "winner": "AE"
+    },
+    {
+      "site": "hn.algolia.com",
+      "ae_ms": 107,
+      "ae_size": 2383,
+      "lp_ms": 4541,
+      "lp_size": 42481,
+      "winner": "AE"
+    },
+    {
+      "site": "dev.to",
+      "ae_ms": 361,
+      "ae_size": 238801,
+      "lp_ms": 4077,
+      "lp_size": 234038,
+      "winner": "AE"
+    },
+    {
+      "site": "npr.org",
+      "ae_ms": 518,
+      "ae_size": 971187,
+      "lp_ms": 4787,
+      "lp_size": 1011291,
+      "winner": "AE"
+    },
+    {
+      "site": "dw.com",
+      "ae_ms": 699,
+      "ae_size": 11727,
+      "lp_ms": 565,
+      "lp_size": 11875,
+      "winner": "LP"
+    }
+  ],
+  "parse": [
+    {
+      "site": "example.com",
+      "ae_ms": 143,
+      "ae_nodes": 6,
+      "lp_ms": 405,
+      "lp_lines": 6,
+      "winner": "AE"
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ae_ms": 301,
+      "ae_nodes": 492,
+      "lp_ms": 350,
+      "lp_lines": 515,
+      "winner": "AE"
+    },
+    {
+      "site": "books.toscrape.com",
+      "ae_ms": 375,
+      "ae_nodes": 3,
+      "lp_ms": 1234,
+      "lp_lines": 272,
+      "winner": "AE"
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ae_ms": 261,
+      "ae_nodes": 363,
+      "lp_ms": 3088,
+      "lp_lines": 246,
+      "winner": "AE"
+    },
+    {
+      "site": "www.di.se",
+      "ae_ms": 3859,
+      "ae_nodes": 3,
+      "lp_ms": 253,
+      "lp_lines": 2,
+      "winner": "LP"
+    },
+    {
+      "site": "www.expressen.se",
+      "ae_ms": 5,
+      "ae_nodes": -1,
+      "lp_ms": 5226,
+      "lp_lines": 552,
+      "winner": "LP"
+    },
+    {
+      "site": "www.apple.com",
+      "ae_ms": 5,
+      "ae_nodes": -1,
+      "lp_ms": 2140,
+      "lp_lines": 515,
+      "winner": "LP"
+    },
+    {
+      "site": "github.com",
+      "ae_ms": 412,
+      "ae_nodes": 594,
+      "lp_ms": 5296,
+      "lp_lines": 359,
+      "winner": "AE"
+    },
+    {
+      "site": "x.com",
+      "ae_ms": 274,
+      "ae_nodes": 12,
+      "lp_ms": 1509,
+      "lp_lines": 8,
+      "winner": "AE"
+    },
+    {
+      "site": "www.bbc.com",
+      "ae_ms": 209,
+      "ae_nodes": 1,
+      "lp_ms": 579,
+      "lp_lines": 2,
+      "winner": "AE"
+    },
+    {
+      "site": "docs.python.org",
+      "ae_ms": 128,
+      "ae_nodes": 249,
+      "lp_ms": 1018,
+      "lp_lines": 224,
+      "winner": "AE"
+    },
+    {
+      "site": "cnn.com",
+      "ae_ms": 1607,
+      "ae_nodes": 1649,
+      "lp_ms": 6414,
+      "lp_lines": 846,
+      "winner": "AE"
+    },
+    {
+      "site": "linkedin.com",
+      "ae_ms": 418,
+      "ae_nodes": 502,
+      "lp_ms": 176,
+      "lp_lines": 2,
+      "winner": "LP"
+    },
+    {
+      "site": "svt.se",
+      "ae_ms": 408,
+      "ae_nodes": 19,
+      "lp_ms": 1658,
+      "lp_lines": 193,
+      "winner": "AE"
+    },
+    {
+      "site": "dn.se",
+      "ae_ms": 460,
+      "ae_nodes": 17,
+      "lp_ms": 5370,
+      "lp_lines": 341,
+      "winner": "AE"
+    },
+    {
+      "site": "google.com",
+      "ae_ms": 171,
+      "ae_nodes": 52,
+      "lp_ms": 1507,
+      "lp_lines": 27,
+      "winner": "AE"
+    },
+    {
+      "site": "rust-lang.org",
+      "ae_ms": 162,
+      "ae_nodes": 155,
+      "lp_ms": 448,
+      "lp_lines": 107,
+      "winner": "AE"
+    },
+    {
+      "site": "mozilla.org",
+      "ae_ms": 97,
+      "ae_nodes": 18,
+      "lp_ms": 891,
+      "lp_lines": 170,
+      "winner": "AE"
+    },
+    {
+      "site": "cloudflare.com",
+      "ae_ms": 1080,
+      "ae_nodes": 5116,
+      "lp_ms": 5651,
+      "lp_lines": 1374,
+      "winner": "AE"
+    },
+    {
+      "site": "vercel.com",
+      "ae_ms": 579,
+      "ae_nodes": 5458,
+      "lp_ms": 4167,
+      "lp_lines": 376,
+      "winner": "AE"
+    },
+    {
+      "site": "python.org",
+      "ae_ms": 116,
+      "ae_nodes": 16,
+      "lp_ms": 1461,
+      "lp_lines": 511,
+      "winner": "AE"
+    },
+    {
+      "site": "httpbin.org",
+      "ae_ms": 117,
+      "ae_nodes": 3,
+      "lp_ms": 546,
+      "lp_lines": 4,
+      "winner": "AE"
+    },
+    {
+      "site": "quotes.toscrape.com",
+      "ae_ms": 4,
+      "ae_nodes": -1,
+      "lp_ms": 631,
+      "lp_lines": 105,
+      "winner": "LP"
+    },
+    {
+      "site": "svd.se",
+      "ae_ms": 176,
+      "ae_nodes": 383,
+      "lp_ms": 625,
+      "lp_lines": 2,
+      "winner": "AE"
+    },
+    {
+      "site": "ebay.com",
+      "ae_ms": 741,
+      "ae_nodes": -1,
+      "lp_ms": 1025,
+      "lp_lines": 4,
+      "winner": "LP"
+    },
+    {
+      "site": "w3schools.com",
+      "ae_ms": 350,
+      "ae_nodes": 1603,
+      "lp_ms": 2662,
+      "lp_lines": 1255,
+      "winner": "AE"
+    },
+    {
+      "site": "hn.algolia.com",
+      "ae_ms": 42,
+      "ae_nodes": 13,
+      "lp_ms": 5099,
+      "lp_lines": 394,
+      "winner": "AE"
+    },
+    {
+      "site": "dev.to",
+      "ae_ms": 243,
+      "ae_nodes": 847,
+      "lp_ms": 3832,
+      "lp_lines": 476,
+      "winner": "AE"
+    },
+    {
+      "site": "npr.org",
+      "ae_ms": 587,
+      "ae_nodes": 14,
+      "lp_ms": 232,
+      "lp_lines": 4,
+      "winner": "LP"
+    },
+    {
+      "site": "dw.com",
+      "ae_ms": 176,
+      "ae_nodes": 1,
+      "lp_ms": 763,
+      "lp_lines": 2,
+      "winner": "AE"
+    }
+  ],
+  "render": [
+    {
+      "site": "example.com",
+      "ms": 288,
+      "png_bytes": 57053,
+      "css_inlined": false
+    },
+    {
+      "site": "news.ycombinator.com",
+      "ms": 654,
+      "png_bytes": 92360,
+      "css_inlined": true
+    },
+    {
+      "site": "books.toscrape.com",
+      "ms": 1573,
+      "png_bytes": 149501,
+      "css_inlined": true
+    },
+    {
+      "site": "www.aftonbladet.se",
+      "ms": 5988,
+      "png_bytes": 49025,
+      "css_inlined": true
+    },
+    {
+      "site": "www.di.se",
+      "ms": 3516,
+      "png_bytes": 100673,
+      "css_inlined": true
+    },
+    {
+      "site": "www.expressen.se",
+      "ms": 4569,
+      "png_bytes": 48988,
+      "css_inlined": true
+    },
+    {
+      "site": "www.apple.com",
+      "ms": 10381,
+      "png_bytes": 180520,
+      "css_inlined": true
+    },
+    {
+      "site": "x.com",
+      "ms": 835,
+      "png_bytes": 28044,
+      "css_inlined": false
+    },
+    {
+      "site": "www.bbc.com",
+      "ms": 602,
+      "png_bytes": 31914,
+      "css_inlined": false
+    },
+    {
+      "site": "docs.python.org",
+      "ms": 1422,
+      "png_bytes": 285479,
+      "css_inlined": true
+    },
+    {
+      "site": "linkedin.com",
+      "ms": 8884,
+      "png_bytes": 209959,
+      "css_inlined": true
+    },
+    {
+      "site": "svt.se",
+      "ms": 5716,
+      "png_bytes": 229245,
+      "css_inlined": true
+    },
+    {
+      "site": "dn.se",
+      "ms": 7496,
+      "png_bytes": 88241,
+      "css_inlined": true
+    },
+    {
+      "site": "google.com",
+      "ms": 668,
+      "png_bytes": 52043,
+      "css_inlined": false
+    },
+    {
+      "site": "rust-lang.org",
+      "ms": 1492,
+      "png_bytes": 99821,
+      "css_inlined": true
+    },
+    {
+      "site": "mozilla.org",
+      "ms": 2055,
+      "png_bytes": 138079,
+      "css_inlined": true
+    },
+    {
+      "site": "python.org",
+      "ms": 1891,
+      "png_bytes": 132264,
+      "css_inlined": true
+    },
+    {
+      "site": "httpbin.org",
+      "ms": 1318,
+      "png_bytes": 848769,
+      "css_inlined": false
+    },
+    {
+      "site": "quotes.toscrape.com",
+      "ms": 1376,
+      "png_bytes": 178263,
+      "css_inlined": true
+    },
+    {
+      "site": "svd.se",
+      "ms": 4888,
+      "png_bytes": 89135,
+      "css_inlined": true
+    },
+    {
+      "site": "w3schools.com",
+      "ms": 2323,
+      "png_bytes": 87266,
+      "css_inlined": true
+    },
+    {
+      "site": "hn.algolia.com",
+      "ms": 513,
+      "png_bytes": 25654,
+      "css_inlined": true
+    },
+    {
+      "site": "npr.org",
+      "ms": 8310,
+      "png_bytes": 82233,
+      "css_inlined": true
+    },
+    {
+      "site": "dw.com",
+      "ms": 1286,
+      "png_bytes": 25654,
+      "css_inlined": true
+    }
+  ],
+  "_meta": {
+    "timestamp": "20260323_170853",
+    "date": "2026-03-23T17:13:41.137906",
+    "output_dir": "/home/user/AetherAgent/testsuite/benchmark/aether_20260323_170853"
+  }
+}

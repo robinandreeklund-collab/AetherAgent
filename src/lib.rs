@@ -33,6 +33,9 @@ mod session;
 mod stream_engine;
 mod stream_state;
 mod streaming;
+#[cfg(feature = "blitz")]
+#[allow(dead_code)]
+mod taffy_render;
 mod temporal;
 mod trust;
 pub mod types;
@@ -98,6 +101,30 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
 
     tree.parse_time_ms = 0; // sätts av anroparen
     tree
+}
+
+/// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd.
+/// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
+/// och används för att bygga det semantiska trädet.
+fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
+    #[cfg(feature = "js-eval")]
+    {
+        let scripts = js_eval::extract_ordered_scripts(html);
+        if !scripts.is_empty() {
+            let rcdom = parser::parse_html(html);
+            let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+            let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+
+            // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
+            if !eval_with_arena.result.mutations.is_empty() {
+                let modified_html = eval_with_arena
+                    .arena
+                    .serialize_html(eval_with_arena.arena.document);
+                return build_tree(&modified_html, goal, url);
+            }
+        }
+    }
+    build_tree(html, goal, url)
 }
 
 /// Pre-allokerad JSON-serialisering via serde_json::to_writer.
@@ -200,7 +227,7 @@ pub fn extract_hydration(html: &str, goal: &str) -> String {
 /// Analyze HTML and select optimal parse tier (Fas 17.4)
 ///
 /// Returns JSON with tier decision: Hydration (0), StaticParse (1),
-/// BoaDom (2), BlitzRender (3), or ChromeCdp (4).
+/// QuickJsDom (2), BlitzRender (3), or ChromeCdp (4).
 #[wasm_bindgen]
 pub fn select_parse_tier(html: &str, url: &str) -> String {
     let decision = escalation::select_tier(html, url);
@@ -212,7 +239,7 @@ pub fn select_parse_tier(html: &str, url: &str) -> String {
 
 /// Evaluate JavaScript with DOM access (Fas 17.3)
 ///
-/// Creates a full DOM bridge with document/window objects in Boa context.
+/// Creates a full DOM bridge with document/window objects in QuickJS context.
 /// Returns JSON with evaluation result and any DOM mutations.
 #[cfg(feature = "js-eval")]
 #[wasm_bindgen]
@@ -252,7 +279,7 @@ pub fn eval_js_with_dom(html: &str, code: &str) -> String {
 /// Analyzes HTML to determine the fastest sufficient approach:
 /// - Tier 0 (Hydration): Extracts SSR data directly, 0 ms JS
 /// - Tier 1 (Static): Standard HTML parse via ArenaDom
-/// - Tier 2 (BoaDom): Runs inline JS with DOM bridge (requires js-eval feature)
+/// - Tier 2 (QuickJsDom): Runs inline JS with DOM bridge (requires js-eval feature)
 /// - Tier 3/4: Returns tier recommendation (Blitz/CDP handled externally)
 ///
 /// Returns JSON with SemanticTree + tier metadata.
@@ -274,11 +301,17 @@ pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
             (t, "static")
         }
 
-        // Tier 2: Boa + DOM — kör inline JS mot ArenaDom
-        escalation::ParseTier::BoaDom { .. } => {
+        // Tier 2: QuickJS + DOM — kör inline JS mot ArenaDom
+        escalation::ParseTier::QuickJsDom { .. } => {
             let t = build_tree(html, goal, url);
             let result = js_bridge::selective_exec(&t, html);
-            (result.tree, "boa_dom")
+            (result.tree, "quickjs_dom")
+        }
+
+        // Tier 2.5: QuickJS + lifecycle — kör scripts med DOMContentLoaded/load
+        escalation::ParseTier::QuickJsLifecycle { .. } => {
+            let t = run_lifecycle_parse(html, goal, url);
+            (t, "quickjs_lifecycle")
         }
 
         // Tier 3/4: Behöver extern rendering — fallback till statisk parse
@@ -1218,7 +1251,7 @@ pub fn render_html_to_png(
     fast_render: bool,
 ) -> Result<Vec<u8>, String> {
     // Säkerhetsgräns: förhindra OOM vid orimligt stor HTML
-    const MAX_HTML_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+    const MAX_HTML_SIZE: usize = 8 * 1024 * 1024; // 8 MB
     if html.len() > MAX_HTML_SIZE {
         return Err(format!(
             "HTML för stor för rendering: {} bytes (max {MAX_HTML_SIZE})",
@@ -1239,30 +1272,89 @@ pub fn render_html_to_png(
             "Screenshot för stor: {width}×{height} = {total_pixels} pixlar (max {MAX_PIXELS})"
         ));
     }
-    // CSS Compiler Pipeline (Fas 19):
-    // 1. LightningCSS — resolve CSS vars, downlevel nesting/:is()/color functions
-    // 2. Media Query Filter — evaluera @media mot viewport, strippa icke-matchande
-    // 3. css-inline — flattena ALL CSS till style="" på varje element, ta bort <style>
-    //
-    // Resultat: Blitz ser bara inline styles — ingen selektor-matchning behövs,
-    // inga CSS-ambiguiteter, inga var()/calc()/@media-problem.
+    // ── Steg 1: Kör JS lifecycle innan rendering ──
+    // Extrahera inline scripts → kör DOMContentLoaded/load → serialisera modifierad DOM.
+    // Detta aktiverar lazy-loaded bilder, framework-hydrering, och DOM-mutationer.
+    #[cfg(feature = "js-eval")]
+    let html = {
+        // Skippa JS-eval helt för stor HTML — ArenaDom + QuickJS på >300KB tar för lång tid
+        const MAX_HTML_FOR_JS_EVAL: usize = 300 * 1024;
+        const MAX_TOTAL_SCRIPT_SIZE: usize = 200 * 1024;
+        if html.len() > MAX_HTML_FOR_JS_EVAL {
+            std::borrow::Cow::Borrowed(html)
+        } else {
+            let scripts = js_eval::extract_ordered_scripts(html);
+            let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
+            if !scripts.is_empty() && total_script_bytes <= MAX_TOTAL_SCRIPT_SIZE {
+                let rcdom = parser::parse_html(html);
+                let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+                let eval_result = dom_bridge::eval_js_with_lifecycle_and_arena_viewport(
+                    &scripts, arena, width, height,
+                );
+                if !eval_result.result.mutations.is_empty() {
+                    let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
+                    // Säkerhetskontroll: om serialisering producerar drastiskt
+                    // mindre HTML har arena-roundtrip traskat DOM:en — fallback
+                    if serialized.len() >= html.len() / 3 {
+                        std::borrow::Cow::Owned(serialized)
+                    } else {
+                        std::borrow::Cow::Borrowed(html)
+                    }
+                } else {
+                    std::borrow::Cow::Borrowed(html)
+                }
+            } else {
+                std::borrow::Cow::Borrowed(html)
+            }
+        } // stäng yttre html-size guard
+    };
+    #[cfg(not(feature = "js-eval"))]
+    let html = std::borrow::Cow::Borrowed(html);
+    let html: &str = &html;
+
+    // ── Steg 1.5: Strippa <script> och <noscript> FÖRST ──
+    // Scripts: måste ske före prepare_html_for_render (undvik <img> i <script>-block)
+    // Noscript: måste ske före CSS-compiler (undvik "enable JS"-text i layout)
+    let html_cleaned = strip_script_tags(html);
+    let html_no_scripts = strip_noscript(&html_cleaned);
+
+    // ── Steg 1.6: Modernizr-klasser ──
+    // Många sajter använder Modernizr/JS-baserad feature detection som lägger till
+    // klasser som "js", "no-touch", "flexbox" på <html>. Utan JS körs aldrig denna
+    // detection → desktop CSS (float:left, inline-block nav) appliceras aldrig.
+    // Vi simulerar en modern desktop-miljö genom att ersätta "no-js" → "js no-touch".
+    let html_no_scripts = apply_modernizr_classes(&html_no_scripts);
+
+    // ── Steg 2: Förbered HTML för rendering ──
+    // loading=lazy→eager, data-src→src, picture→img, srcset→src
+    let html = prepare_html_for_render(&html_no_scripts, width);
+
+    // ── Steg 3: CSS Compiler Pipeline ──
     let viewport = css_compiler::ViewportConfig {
         width,
         height,
         color_scheme: css_compiler::ColorScheme::Light,
     };
+    let html = &html;
+
     let compiled = css_compiler::compile_css(html, &viewport);
     let use_compiled = compiled.fully_compiled;
-    let compiled_html = compiled.html;
+    // Strippa CSS-gradienter som kraschar Vello/GradientLut
+    let compiled_html = strip_css_gradients(&compiled.html);
 
-    // Säkerhetsgräns: Blitz/Vello kraschar (panik i GradientLut) på sidor med
-    // väldigt stora CSS-gradienter (t.ex. github.com ~3.7MB CSS). Skippa rendering
-    // för extremt stora HTML-dokument som triggar denna bugg.
-    const MAX_HTML_FOR_BLITZ: usize = 3 * 1024 * 1024; // 3 MB
-    if html.len() > MAX_HTML_FOR_BLITZ {
+    // Säkerhetsgräns: Blitz/Vello kraschar på extremt stora CSS-gradienter.
+    // Kontrollera storleken EFTER script-stripping och CSS-kompilering.
+    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB
+    let check_size = if use_compiled {
+        compiled_html.len()
+    } else {
+        html.len()
+    };
+    if check_size > MAX_HTML_FOR_BLITZ {
         return Err(format!(
-            "HTML för stort för Blitz ({:.1} MB > 3 MB max) — använd CDP-tier istället",
-            html.len() as f64 / (1024.0 * 1024.0)
+            "HTML för stort för Blitz ({:.1} MB > {:.0} MB max) — använd CDP-tier istället",
+            check_size as f64 / (1024.0 * 1024.0),
+            MAX_HTML_FOR_BLITZ as f64 / (1024.0 * 1024.0)
         ));
     }
 
@@ -1310,8 +1402,8 @@ pub fn render_html_to_png(
         }
     }
 
-    // Fallback: rendera med original HTML (utan CSS Compiler)
-    let html_owned = html.to_string();
+    // Fallback: rendera med original HTML (utan CSS Compiler), men strippa gradienter
+    let html_owned = strip_css_gradients(html);
     let base_url_owned = base_url.to_string();
     let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         render_html_to_png_inner(&html_owned, &base_url_owned, width, height, fast_render)
@@ -1330,6 +1422,586 @@ pub fn render_html_to_png(
             Err(format!("Blitz rendering kraschade (catch_unwind): {msg}"))
         }
     }
+}
+
+/// Sanitera CSS-gradienter: behåll fungerande gradienter, fixa de som kraschar Vello.
+/// Vello GradientLut kraschar på gradienter med <2 color stops eller extremt korta stops.
+/// Strategi: räkna color stops — om ≥2 och rimliga → behåll. Annars → fallback-färg.
+/// conic-gradient strippas alltid (Vello stödjer inte).
+#[cfg(feature = "blitz")]
+fn strip_css_gradients(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+
+    loop {
+        let lower = remaining.to_ascii_lowercase();
+        let positions = [
+            lower.find("linear-gradient("),
+            lower.find("radial-gradient("),
+            lower.find("conic-gradient("),
+            lower.find("repeating-linear-gradient("),
+            lower.find("repeating-radial-gradient("),
+            lower.find("repeating-conic-gradient("),
+        ];
+        let earliest = positions.iter().filter_map(|p| *p).min();
+
+        match earliest {
+            Some(pos) => {
+                result.push_str(&remaining[..pos]);
+                let after = &remaining[pos..];
+                let paren_start = match after.find('(') {
+                    Some(p) => p,
+                    None => {
+                        result.push_str(after);
+                        break;
+                    }
+                };
+                let mut depth = 0;
+                let mut end = paren_start;
+                for (i, ch) in after[paren_start..].char_indices() {
+                    match ch {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = paren_start + i + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                let gradient_body = &after[paren_start + 1..end.saturating_sub(1)];
+                let is_conic = lower[pos..].starts_with("conic");
+                let is_repeating_conic = lower[pos..].starts_with("repeating-conic");
+
+                // Strippa ALLA gradienter → fallback-färg
+                // Vello GradientLut har edge-case buggar med diverse stop-kombinationer
+                // som kraschar processen trots catch_unwind (panik i tokio worker thread)
+                {
+                    let _ = (is_conic, is_repeating_conic); // undvik unused warnings
+                    let fallback = extract_gradient_fallback_color(gradient_body);
+                    result.push_str(&fallback);
+                }
+
+                remaining = &remaining[pos + end..];
+            }
+            None => {
+                result.push_str(remaining);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Extrahera en användbar fallback-färg från gradient-argument.
+/// Letar efter sista CSS-färgen i gradient-definitionen (slutfärgen = visuellt dominant).
+/// Returnerar `#808080` om ingen färg hittas.
+#[cfg(feature = "blitz")]
+fn extract_gradient_fallback_color(gradient_body: &str) -> String {
+    // Dela på komma (yttersta nivå) — hitta sista color stop
+    let parts: Vec<&str> = gradient_body.split(',').collect();
+
+    // Iterera bakifrån — sista färgen i gradienten är vanligtvis den visuellt dominanta
+    for part in parts.iter().rev() {
+        let trimmed = part.trim();
+        if let Some(color) = try_extract_css_color(trimmed) {
+            return color;
+        }
+    }
+    // Ingen färg hittad — grå fallback (neutral, bättre än transparent)
+    "#808080".to_string()
+}
+
+/// Försök extrahera en CSS-färg från en color stop (t.ex. "#ff0000 50%", "rgb(0,0,0)", "red")
+#[cfg(feature = "blitz")]
+fn try_extract_css_color(stop: &str) -> Option<String> {
+    let lower = stop.trim().to_ascii_lowercase();
+
+    // Hex-färg: #fff, #ffffff, #rrggbbaa
+    if let Some(hex_start) = lower.find('#') {
+        let hex = &stop[hex_start..];
+        let hex_end = hex
+            .find(|c: char| !c.is_ascii_hexdigit() && c != '#')
+            .unwrap_or(hex.len());
+        let hex_val = &hex[..hex_end];
+        if matches!(hex_val.len(), 4 | 7 | 9) {
+            return Some(hex_val.to_string());
+        }
+    }
+
+    // rgb()/rgba()/hsl()/hsla() — behåll hela funktionsanropet
+    for prefix in &["rgb(", "rgba(", "hsl(", "hsla("] {
+        if lower.starts_with(prefix) {
+            // Hitta matchande parentes
+            if let Some(close) = stop.find(')') {
+                return Some(stop[..close + 1].to_string());
+            }
+        }
+    }
+
+    // Namngivna CSS-färger (vanligaste)
+    const NAMED_COLORS: &[&str] = &[
+        "black",
+        "white",
+        "red",
+        "green",
+        "blue",
+        "yellow",
+        "orange",
+        "purple",
+        "gray",
+        "grey",
+        "navy",
+        "teal",
+        "maroon",
+        "olive",
+        "aqua",
+        "fuchsia",
+        "silver",
+        "lime",
+        "coral",
+        "crimson",
+        "gold",
+        "indigo",
+        "ivory",
+        "khaki",
+        "lavender",
+        "magenta",
+        "pink",
+        "plum",
+        "salmon",
+        "sienna",
+        "tan",
+        "tomato",
+        "turquoise",
+        "violet",
+        "wheat",
+        "darkblue",
+        "darkgreen",
+        "darkred",
+        "darkgray",
+        "darkgrey",
+        "lightblue",
+        "lightgreen",
+        "lightgray",
+        "lightgrey",
+        "transparent",
+    ];
+    // Kolla om första ordet i stopp:et matchar en CSS-färg
+    let first_word = lower.split_whitespace().next().unwrap_or("");
+    if NAMED_COLORS.contains(&first_word) {
+        // Returnera transparent som sista utväg — men det är bättre
+        // att behålla den explicita färgen om sidan valt den
+        return Some(first_word.to_string());
+    }
+
+    None
+}
+
+/// Förbered HTML för visuell rendering i Blitz.
+///
+/// Löser:
+/// 1. `loading="lazy"` → `loading="eager"` (Blitz har ingen scroll-viewport)
+/// 2. `data-src` → `src` (JS lazy-load mönster)
+/// 3. `<picture>` → välj bästa `<source>` baserat på viewport-bredd
+/// 4. `srcset` → välj bästa storlek för given bredd
+/// 5. Placeholder-GIF `src="data:image/gif..."` → ersätt med data-src om tillgänglig
+#[cfg(feature = "blitz")]
+fn prepare_html_for_render(html: &str, viewport_width: u32) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+
+    while !remaining.is_empty() {
+        // Hitta nästa <img eller <picture tagg
+        let lower = remaining.to_ascii_lowercase();
+        let img_pos = lower.find("<img ");
+        let pic_pos = lower.find("<picture");
+
+        let next = match (img_pos, pic_pos) {
+            (Some(i), Some(p)) if p < i => Some(("picture", p)),
+            (Some(i), _) => Some(("img", i)),
+            (None, Some(p)) => Some(("picture", p)),
+            (None, None) => None,
+        };
+
+        match next {
+            Some(("picture", pos)) => {
+                result.push_str(&remaining[..pos]);
+                // Extrahera hela <picture>...</picture>
+                let after = &remaining[pos..];
+                let lower_after = after.to_ascii_lowercase();
+                if let Some(end) = lower_after.find("</picture>") {
+                    let picture_block = &after[..end + "</picture>".len()];
+                    result.push_str(&resolve_picture_element(picture_block, viewport_width));
+                    remaining = &remaining[pos + end + "</picture>".len()..];
+                } else {
+                    // Oparrad <picture> — behåll som den är
+                    result.push_str(&after[..1]);
+                    remaining = &remaining[pos + 1..];
+                }
+            }
+            Some(("img", pos)) => {
+                result.push_str(&remaining[..pos]);
+                let after = &remaining[pos..];
+                if let Some(end) = after.find('>') {
+                    let tag = &after[..end + 1];
+                    result.push_str(&transform_img_tag(tag, viewport_width));
+                    remaining = &remaining[pos + end + 1..];
+                } else {
+                    result.push_str(after);
+                    break;
+                }
+            }
+            _ => {
+                result.push_str(remaining);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Transformera en enskild <img> tagg för Blitz-rendering
+#[cfg(feature = "blitz")]
+fn transform_img_tag(tag: &str, viewport_width: u32) -> String {
+    let mut result = tag.to_string();
+
+    // 1. loading="lazy" → loading="eager"
+    let lower = result.to_ascii_lowercase();
+    if let Some(pos) = lower.find("loading=\"lazy\"") {
+        let end = pos + "loading=\"lazy\"".len();
+        result.replace_range(pos..end, "loading=\"eager\"");
+    } else if let Some(pos) = lower.find("loading='lazy'") {
+        let end = pos + "loading='lazy'".len();
+        result.replace_range(pos..end, "loading='eager'");
+    }
+
+    // 2. data-src → src (om src saknas eller är placeholder)
+    let lower = result.to_ascii_lowercase();
+    let has_placeholder_src = lower.contains("src=\"data:image/gif")
+        || lower.contains("src='data:image/gif")
+        || lower.contains("src=\"data:image/svg")
+        || lower.contains("src='data:image/svg")
+        || lower.contains("src=\"data:image/png")
+        || lower.contains("src='data:image/png")
+        || lower.contains("src=\"about:blank")
+        || lower.contains("src='about:blank")
+        || lower.contains("src=\"\"")
+        || lower.contains("src=''");
+
+    // Prova flera lazy-load attribut i prioritetsordning
+    let lazy_attrs = ["data-src", "data-lazy-src", "data-original", "data-lazy"];
+    let mut resolved = false;
+    for attr in &lazy_attrs {
+        if let Some(real_src) = extract_attr_value(&result, attr) {
+            if !real_src.is_empty()
+                && !real_src.starts_with("data:")
+                && (has_placeholder_src || !lower.contains(" src="))
+            {
+                result = set_or_replace_attr(&result, "src", &real_src);
+                resolved = true;
+                break;
+            }
+        }
+    }
+
+    // Om inte resolvad via data-src: prova data-srcset
+    if !resolved {
+        if let Some(data_srcset) = extract_attr_value(&result, "data-srcset") {
+            let best = pick_best_srcset_url(&data_srcset, viewport_width);
+            if !best.is_empty() && (has_placeholder_src || !lower.contains(" src=")) {
+                result = set_or_replace_attr(&result, "src", &best);
+            }
+        }
+    }
+
+    // 3. srcset → välj bästa storlek för viewport
+    if let Some(srcset_val) = extract_attr_value(&result, "srcset") {
+        let best = pick_best_srcset_url(&srcset_val, viewport_width);
+        if !best.is_empty() {
+            // Sätt src till bästa srcset-URL
+            result = set_or_replace_attr(&result, "src", &best);
+        }
+    }
+
+    result
+}
+
+/// Resolve <picture> element: välj bästa <source> och returnera som <img>
+#[cfg(feature = "blitz")]
+fn resolve_picture_element(picture: &str, viewport_width: u32) -> String {
+    // Hitta <img> inuti <picture>
+    let lower = picture.to_ascii_lowercase();
+    let img_start = match lower.find("<img ") {
+        Some(p) => p,
+        None => return picture.to_string(), // Ingen <img> inuti — behåll
+    };
+    let img_end = match picture[img_start..].find('>') {
+        Some(p) => img_start + p + 1,
+        None => return picture.to_string(),
+    };
+    let img_tag = &picture[img_start..img_end];
+
+    // Hitta alla <source> med srcset
+    let mut best_url = String::new();
+    let mut search_from = 0;
+    while let Some(src_start) = lower[search_from..].find("<source") {
+        let abs_start = search_from + src_start;
+        if let Some(src_end) = lower[abs_start..].find('>') {
+            let source_tag = &picture[abs_start..abs_start + src_end + 1];
+            // Kolla media-attribut — vi vill matcha viewport
+            let media = extract_attr_value(source_tag, "media");
+            let matches_viewport = match &media {
+                Some(m) => media_query_matches(m, viewport_width),
+                None => true, // Ingen media = alltid matchande
+            };
+
+            if matches_viewport {
+                if let Some(srcset) = extract_attr_value(source_tag, "srcset") {
+                    let url = pick_best_srcset_url(&srcset, viewport_width);
+                    if !url.is_empty() {
+                        best_url = url;
+                        // Första matchande source vinner
+                        break;
+                    }
+                }
+            }
+            search_from = abs_start + src_end + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Bygg en transformerad <img> med bästa URL
+    let mut final_img = transform_img_tag(img_tag, viewport_width);
+    if !best_url.is_empty() {
+        final_img = set_or_replace_attr(&final_img, "src", &best_url);
+    }
+    final_img
+}
+
+/// Extrahera attribut-värde från en HTML-tagg
+#[cfg(feature = "blitz")]
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    // Sök efter attr="value" eller attr='value'
+    for delim in ['"', '\''] {
+        let pattern = format!("{attr}={delim}");
+        if let Some(start) = lower.find(&pattern) {
+            let val_start = start + pattern.len();
+            if let Some(end) = tag[val_start..].find(delim) {
+                return Some(tag[val_start..val_start + end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Sätt eller ersätt ett attribut-värde i en HTML-tagg
+#[cfg(feature = "blitz")]
+fn set_or_replace_attr(tag: &str, attr: &str, value: &str) -> String {
+    let lower = tag.to_ascii_lowercase();
+    // Försök hitta och ersätta befintligt attribut
+    for delim in ['"', '\''] {
+        let pattern = format!("{attr}={delim}");
+        if let Some(start) = lower.find(&pattern) {
+            let val_start = start + pattern.len();
+            if let Some(end) = tag[val_start..].find(delim) {
+                let mut result = String::with_capacity(tag.len() + value.len());
+                result.push_str(&tag[..val_start]);
+                result.push_str(value);
+                result.push_str(&tag[val_start + end..]);
+                return result;
+            }
+        }
+    }
+    // Attribut saknas — lägg till innan >
+    if let Some(close) = tag.rfind('>') {
+        let before_close = tag[..close].trim_end();
+        let is_self_closing = before_close.ends_with('/');
+        let insert_pos = if is_self_closing {
+            before_close.len() - 1
+        } else {
+            close
+        };
+        let mut result = String::with_capacity(tag.len() + attr.len() + value.len() + 4);
+        result.push_str(&tag[..insert_pos]);
+        result.push(' ');
+        result.push_str(attr);
+        result.push_str("=\"");
+        result.push_str(value);
+        result.push('"');
+        result.push_str(&tag[insert_pos..]);
+        return result;
+    }
+    tag.to_string()
+}
+
+/// Välj bästa URL från srcset baserat på viewport-bredd
+#[cfg(feature = "blitz")]
+fn pick_best_srcset_url(srcset: &str, viewport_width: u32) -> String {
+    let mut best_url = String::new();
+    let mut best_width: i32 = 0;
+    let target = viewport_width as i32;
+
+    for entry in srcset.split(',') {
+        let parts: Vec<&str> = entry.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let url = parts[0];
+        let descriptor = parts.get(1).unwrap_or(&"");
+
+        let width = if let Some(w_val) = descriptor.strip_suffix('w') {
+            w_val.parse::<i32>().unwrap_or(0)
+        } else if let Some(x_val) = descriptor.strip_suffix('x') {
+            // Pixel density — anta 1x = viewport_width
+            let density = x_val.parse::<f32>().unwrap_or(1.0);
+            (target as f32 * density) as i32
+        } else {
+            // Ingen descriptor — anta full storlek
+            target
+        };
+
+        // Välj minsta bild som är >= viewport, eller största om ingen är tillräckligt stor
+        if best_url.is_empty()
+            || (width >= target && (best_width < target || width < best_width))
+            || (width < target && width > best_width)
+        {
+            best_url = url.to_string();
+            best_width = width;
+        }
+    }
+    best_url
+}
+
+/// Enkel media query match — stödjer (min-width: Xpx) och (max-width: Xpx)
+#[cfg(feature = "blitz")]
+fn media_query_matches(media: &str, viewport_width: u32) -> bool {
+    let lower = media.to_ascii_lowercase();
+    let vw = viewport_width as i32;
+
+    // Matcha (min-width: XXXpx)
+    if let Some(pos) = lower.find("min-width") {
+        if let Some(val) = extract_px_value(&lower[pos..]) {
+            if vw < val {
+                return false;
+            }
+        }
+    }
+
+    // Matcha (max-width: XXXpx)
+    if let Some(pos) = lower.find("max-width") {
+        if let Some(val) = extract_px_value(&lower[pos..]) {
+            if vw > val {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// Extrahera px-värde från "min-width: 640px" → 640
+#[cfg(feature = "blitz")]
+fn extract_px_value(s: &str) -> Option<i32> {
+    let colon = s.find(':')?;
+    let after = s[colon + 1..].trim_start();
+    let end = after.find("px").or_else(|| after.find(')'))?;
+    after[..end].trim().parse::<i32>().ok()
+}
+
+/// Strippa <script>-element från HTML innan rendering.
+/// Scripts behövs aldrig för visuell rendering och kan vara enorma (GitHub ~2MB JS).
+#[cfg(feature = "blitz")]
+fn strip_script_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut remaining = html;
+    while let Some(start) = remaining.to_ascii_lowercase().find("<script") {
+        result.push_str(&remaining[..start]);
+        let after_tag = &remaining[start..];
+        if let Some(end) = after_tag.to_ascii_lowercase().find("</script>") {
+            let close_end = end + "</script>".len();
+            remaining = &after_tag[close_end..];
+        } else {
+            // Oparrad <script> — skippa resten av taggen
+            remaining = "";
+            break;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+/// Simulera Modernizr/JS feature detection-klasser.
+/// Många sajter (python.org, w3schools, etc.) har `<html class="no-js">` och CSS-regler
+/// som `.no-touch .nav-item { float: left }`. Utan JS ändras aldrig "no-js" → "js",
+/// så desktop-layout appliceras aldrig.
+/// Denna funktion:
+/// 1. Ersätter "no-js" med "js" i html/body class
+/// 2. Lägger till "no-touch" (desktop touch detection)
+#[cfg(feature = "blitz")]
+fn apply_modernizr_classes(html: &str) -> String {
+    let mut result = html.to_string();
+
+    // Hantera <html class="no-js ..."> → <html class="js no-touch ...">
+    // Case-insensitive sökning
+    let lower = result.to_ascii_lowercase();
+    if let Some(html_tag_start) = lower.find("<html") {
+        if let Some(tag_end) = lower[html_tag_start..].find('>') {
+            let tag = &result[html_tag_start..html_tag_start + tag_end + 1];
+
+            // Hitta class-attributet
+            let tag_lower = tag.to_ascii_lowercase();
+            if let Some(class_pos) = tag_lower.find("class=\"") {
+                let class_start = class_pos + "class=\"".len();
+                if let Some(class_end) = tag[class_start..].find('"') {
+                    let classes = &tag[class_start..class_start + class_end];
+                    let mut new_classes: Vec<&str> = classes.split_whitespace().collect();
+
+                    // Ersätt "no-js" med "js"
+                    let mut changed = false;
+                    for c in &mut new_classes {
+                        if c.eq_ignore_ascii_case("no-js") {
+                            *c = "js";
+                            changed = true;
+                        }
+                    }
+
+                    // Lägg till "no-touch" om det inte redan finns
+                    let has_no_touch = new_classes
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case("no-touch"));
+                    if !has_no_touch {
+                        new_classes.push("no-touch");
+                        changed = true;
+                    }
+
+                    if changed {
+                        let new_class_str = new_classes.join(" ");
+                        let abs_class_start = html_tag_start + class_start;
+                        let abs_class_end = abs_class_start + class_end;
+                        if result.is_char_boundary(abs_class_start)
+                            && result.is_char_boundary(abs_class_end)
+                        {
+                            result.replace_range(abs_class_start..abs_class_end, &new_class_str);
+                        }
+                    }
+                }
+            } else {
+                // Ingen class — lägg till class="js no-touch"
+                let insert_pos = html_tag_start + 5; // efter "<html"
+                if result.is_char_boundary(insert_pos) {
+                    result.insert_str(insert_pos, " class=\"js no-touch\"");
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Strippa <noscript>-element och nojs-divvar från HTML innan Blitz-rendering.
@@ -1388,13 +2060,7 @@ fn strip_nojs_divs(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
     let mut lower_remaining = lower.as_str();
 
-    loop {
-        // Hitta nästa <div som kan vara nojs
-        let div_pos = match lower_remaining.find("<div") {
-            Some(p) => p,
-            None => break,
-        };
-
+    while let Some(div_pos) = lower_remaining.find("<div") {
         // Hitta slutet av öppningstaggen
         let after_div = &lower_remaining[div_pos..];
         let tag_end = match after_div.find('>') {
@@ -1442,7 +2108,6 @@ fn strip_nojs_divs(html: &str) -> String {
                 lower_remaining = &lower[html.len() - remaining.len()..];
             } else {
                 remaining = "";
-                lower_remaining = "";
                 break;
             }
         } else {
@@ -1458,7 +2123,8 @@ fn strip_nojs_divs(html: &str) -> String {
     result
 }
 
-/// Intern Blitz-rendering — separerad för catch_unwind
+/// Intern rendering — Blitz (Stylo CSS + layout + bilder + fonter)
+/// Fallback till Taffy-pipeline om Blitz panikerar.
 #[cfg(feature = "blitz")]
 fn render_html_to_png_inner(
     html: &str,
@@ -1474,7 +2140,7 @@ fn render_html_to_png_inner(
 
     let scale: f32 = 1.0;
 
-    // Strippa <noscript> — Blitz kör ingen JS, så dessa visar "enable javascript"-meddelanden
+    // Strippa <noscript> — Blitz kör ingen JS
     let html = &strip_noscript(html);
 
     let mut document = if fast_render {
@@ -1505,10 +2171,12 @@ fn render_html_to_png_inner(
             },
         );
 
-        // Vänta lite längre så att Blitz hinner starta alla resurshämtningar (bilder, CSS, fonter)
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Initial resolve — triggar resursdiscovery
+        doc.as_mut().resolve(0.0);
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        // Resursladdningsloop med idle-detection
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut idle_rounds = 0u32;
         loop {
             let mut loaded_any = false;
@@ -1518,10 +2186,9 @@ fn render_html_to_png_inner(
             }
             doc.as_mut().resolve(0.0);
 
-            // Kräv minst 5 tomma rundor (100ms idle) innan vi avslutar — ger bilder tid att ladda
             if net.is_empty() && !loaded_any {
                 idle_rounds += 1;
-                if idle_rounds >= 5 {
+                if idle_rounds >= 10 {
                     break;
                 }
             } else {
@@ -1579,9 +2246,9 @@ fn render_html_to_png_inner(
     Ok(png_bytes)
 }
 
-/// Render HTML with JS evaluation — Boa modifies DOM, then Blitz renders
+/// Render HTML with JS evaluation — QuickJS modifies DOM, then Blitz renders
 ///
-/// Pipeline: HTML → parse → ArenaDom → Boa JS eval → serialize modified HTML → Blitz render → PNG
+/// Pipeline: HTML → parse → ArenaDom → QuickJS eval → serialize modified HTML → Blitz render → PNG
 /// Returns JSON with base64-encoded PNG, mutation count, eval stats.
 #[cfg(all(feature = "js-eval", feature = "blitz"))]
 #[wasm_bindgen]

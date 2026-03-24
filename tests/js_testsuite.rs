@@ -499,8 +499,10 @@ fn test_tier_with_dom_scripts() {
     let result = parse_json(&select_parse_tier(html, "https://shop.com/product"));
     let result_str = result.to_string();
     assert!(
-        result_str.contains("Boa") || result_str.contains("Dom") || result_str.contains("script"),
-        "DOM-script ska trigga BoaDom tier, fick: {result}"
+        result_str.contains("QuickJs")
+            || result_str.contains("Dom")
+            || result_str.contains("script"),
+        "DOM-script ska trigga QuickJsDom tier, fick: {result}"
     );
 }
 

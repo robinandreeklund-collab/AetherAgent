@@ -11,15 +11,29 @@ Compares 10 real websites on:
 """
 
 import json, base64, urllib.request, subprocess, time, os, sys
+from datetime import datetime
 
 AETHER_SERVER = "http://localhost:3000"
 LIGHTPANDA = "/tmp/lightpanda"
 BASE_DIR = "/home/user/AetherAgent/testsuite/benchmark"
-AETHER_DIR = f"{BASE_DIR}/aether"
 LP_DIR = f"{BASE_DIR}/lightpanda"
 
+# Skapa datumstämplad folder för varje körning
+RUN_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+AETHER_DIR = f"{BASE_DIR}/aether_{RUN_TIMESTAMP}"
 os.makedirs(AETHER_DIR, exist_ok=True)
 os.makedirs(LP_DIR, exist_ok=True)
+
+# Uppdatera latest-symlink
+LATEST_LINK = f"{BASE_DIR}/aether_latest"
+if os.path.islink(LATEST_LINK):
+    os.unlink(LATEST_LINK)
+elif os.path.exists(LATEST_LINK):
+    os.rename(LATEST_LINK, f"{LATEST_LINK}.bak")
+os.symlink(f"aether_{RUN_TIMESTAMP}", LATEST_LINK)
+
+print(f"Resultat sparas i: aether_{RUN_TIMESTAMP}/")
+print()
 
 SITES = [
     ("example.com", "https://example.com"),
@@ -180,10 +194,18 @@ for name, url in SITES:
     results.append(result)
 
 # ─── Save results ─────────────────────────────────────────────────────
+results["_meta"] = {
+    "timestamp": RUN_TIMESTAMP,
+    "date": datetime.now().isoformat(),
+    "output_dir": AETHER_DIR,
+}
+# Spara i datumstämplad folder + BASE_DIR
+with open(f"{AETHER_DIR}/results.json", "w") as f:
+    json.dump(results, f, indent=2)
 results_path = f"{BASE_DIR}/results.json"
 with open(results_path, "w") as f:
     json.dump(results, f, indent=2)
-print(f"\nResults saved to {results_path}")
+print(f"\nResults saved to {AETHER_DIR}/results.json")
 
 # ─── Print summary table ─────────────────────────────────────────────
 print(f"\n{'='*90}")
