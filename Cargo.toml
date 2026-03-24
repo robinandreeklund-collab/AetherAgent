@@ -114,6 +114,15 @@ lto = true
 codegen-units = 1
 panic = "abort"    # mindre WASM-output
 
+# html5ever och markup5ever är parsing-tunga — full hastighetsoptimering
+# medan egen kod behåller "z" för WASM-storlek
+[profile.release.package.html5ever]
+opt-level = 3
+[profile.release.package.markup5ever]
+opt-level = 3
+[profile.release.package.slotmap]
+opt-level = 3
+
 # Server deploy profile: faster builds, still optimized
 # Usage: cargo build --profile server-release --features server,vision
 [profile.server-release]

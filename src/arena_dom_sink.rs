@@ -24,12 +24,17 @@ pub struct ArenaDomSink {
 }
 
 impl ArenaDomSink {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_estimated_capacity(1024)
+    }
+
+    pub fn with_estimated_capacity(estimated_nodes: usize) -> Self {
         ArenaDomSink {
-            arena: ArenaDom::with_capacity(1024),
+            arena: ArenaDom::with_capacity(estimated_nodes),
             template_contents: HashMap::new(),
             mathml_integration_points: HashMap::new(),
-            tag_names: HashMap::with_capacity(256),
+            tag_names: HashMap::with_capacity(estimated_nodes / 2),
         }
     }
 
@@ -360,12 +365,15 @@ impl TreeSink for ArenaDomSink {
 }
 
 /// Parsa HTML direkt till ArenaDom — skippar RcDom-mellansteget
+///
+/// Använder `.one(StrTendril)` istället för `.from_utf8().read_from()`:
+/// - Undviker 4KB chunking (hela strängen matas in direkt)
+/// - Undviker UTF-8 lossy decoding (input är redan validerad &str)
+/// - Undviker multipla tendril-allokeringar per chunk
 pub fn parse_html_to_arena(html: &str) -> ArenaDom {
-    let sink = ArenaDomSink::new();
-    html5ever::parse_document(sink, Default::default())
-        .from_utf8()
-        .read_from(&mut html.as_bytes())
-        .unwrap_or_else(|_| ArenaDom::with_capacity(0))
+    let estimated_nodes = (html.len() / 60).max(256);
+    let sink = ArenaDomSink::with_estimated_capacity(estimated_nodes);
+    html5ever::parse_document(sink, Default::default()).one(StrTendril::from(html))
 }
 
 #[cfg(test)]
