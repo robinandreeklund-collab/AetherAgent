@@ -1,0 +1,157 @@
+{
+  "parse_simple": {
+    "median_us": 792.4740000362362,
+    "p95_us": 3240.9080004072166,
+    "iterations": 20
+  },
+  "parse_ecommerce": {
+    "median_us": 773.0600000286358,
+    "p95_us": 1196.119000269391,
+    "iterations": 20
+  },
+  "parse_login": {
+    "median_us": 708.2949998675758,
+    "p95_us": 1025.1779999634891,
+    "iterations": 20
+  },
+  "parse_complex_100": {
+    "median_us": 3697.9994997636823,
+    "p95_us": 5338.692999885097,
+    "iterations": 20
+  },
+  "parse_top_5": {
+    "median_us": 3426.158499905796,
+    "p95_us": 4016.5000000342843,
+    "iterations": 20
+  },
+  "parse_top_10": {
+    "median_us": 4260.412499888844,
+    "p95_us": 5350.209999960498,
+    "iterations": 20
+  },
+  "click": {
+    "median_us": 1104.4984998989094,
+    "p95_us": 1356.90400020394,
+    "iterations": 20
+  },
+  "fill_form": {
+    "median_us": 1141.1105001570832,
+    "p95_us": 1481.478000187053,
+    "iterations": 20
+  },
+  "extract": {
+    "median_us": 1154.9570001534448,
+    "p95_us": 1308.2219998068467,
+    "iterations": 20
+  },
+  "injection_check_safe": {
+    "median_us": 875.7900000091468,
+    "p95_us": 1009.7009999299189,
+    "iterations": 20
+  },
+  "injection_check_malicious": {
+    "median_us": 874.7234999191278,
+    "p95_us": 908.0240001821949,
+    "iterations": 20
+  },
+  "firewall_classify": {
+    "median_us": 892.0820000639651,
+    "p95_us": 1037.5820002082037,
+    "iterations": 20
+  },
+  "eval_js_simple": {
+    "median_us": 1420.4219999101042,
+    "p95_us": 5525.9149999074,
+    "iterations": 20
+  },
+  "eval_js_json": {
+    "median_us": 1294.3814997470326,
+    "p95_us": 1682.5229999994917,
+    "iterations": 20
+  },
+  "eval_js_batch": {
+    "median_us": 1056.3275002368755,
+    "p95_us": 1238.6600001264014,
+    "iterations": 20
+  },
+  "detect_js": {
+    "median_us": 611.6755000675766,
+    "p95_us": 1005.9779997391161,
+    "iterations": 20
+  },
+  "detect_xhr": {
+    "median_us": 487.3435000263271,
+    "p95_us": 802.3499999580963,
+    "iterations": 20
+  },
+  "parse_with_js": {
+    "median_us": 1181.2124998868967,
+    "p95_us": 1508.7649999259156,
+    "iterations": 20
+  },
+  "diff_trees": {
+    "median_us": 558.1650000294758,
+    "p95_us": 827.4689998870599,
+    "iterations": 20
+  },
+  "compile_simple": {
+    "median_us": 624.7379999422265,
+    "p95_us": 831.0080002047471,
+    "iterations": 20
+  },
+  "compile_complex": {
+    "median_us": 729.9700000658049,
+    "p95_us": 1055.0770002737409,
+    "iterations": 20
+  },
+  "temporal_analyze": {
+    "median_us": 668.1484999262466,
+    "p95_us": 1054.9730000093405,
+    "iterations": 20
+  },
+  "temporal_predict": {
+    "median_us": 578.4254997251992,
+    "p95_us": 1022.041999931389,
+    "iterations": 20
+  },
+  "causal_predict": {
+    "median_us": 600.4680001296947,
+    "p95_us": 885.7299999363022,
+    "iterations": 20
+  },
+  "causal_safest_path": {
+    "median_us": 644.7650000609428,
+    "p95_us": 1719.2780001096253,
+    "iterations": 20
+  },
+  "stream_parse": {
+    "median_us": 3199.103000042669,
+    "p95_us": 3455.831000337639,
+    "iterations": 20
+  },
+  "session_create": {
+    "median_us": 725.8134999119648,
+    "p95_us": 892.5160000217147,
+    "iterations": 20
+  },
+  "session_cookies": {
+    "median_us": 744.4544999088976,
+    "p95_us": 1223.9279999448627,
+    "iterations": 20
+  },
+  "workflow_create": {
+    "median_us": 853.0924999377021,
+    "p95_us": 1048.5269999662705,
+    "iterations": 20
+  },
+  "markdown": {
+    "median_us": 1001.2985001139896,
+    "p95_us": 1154.2019997250463,
+    "iterations": 20
+  },
+  "webmcp_discover": {
+    "median_us": 725.9834997057624,
+    "p95_us": 1011.0819998772058,
+    "iterations": 20
+  }
+}

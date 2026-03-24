@@ -152,9 +152,9 @@ const CTA_KEYWORDS: &[&str] = &[
     "kom igång",
 ];
 
-/// Valutasymboler och nyckelord som indikerar pristext
+/// Valutasymboler och nyckelord som indikerar pristext (uppercase för snabb matchning)
 const PRICE_INDICATORS: &[&str] = &[
-    "$", "€", "£", "¥", "₹", "kr", "SEK", "NOK", "DKK", "USD", "EUR", "GBP",
+    "$", "€", "£", "¥", "₹", "KR", "SEK", "NOK", "DKK", "USD", "EUR", "GBP",
 ];
 
 /// Inferera semantisk roll från HTML-tagg + ARIA-attribut + heuristik
@@ -215,6 +215,16 @@ pub fn infer_role(handle: &Handle) -> String {
     }
 
     // Heuristik: CTA — bara för klickbara element (button/a)
+    // Hämta class en gång, återanvänd i CTA och övriga checks
+    let class_lower = if base_role == "button"
+        || base_role == "link"
+        || matches!(base_role, "text" | "generic")
+    {
+        get_attr(handle, "class").unwrap_or_default().to_lowercase()
+    } else {
+        String::new()
+    };
+
     if base_role == "button" || base_role == "link" {
         let text = extract_text(handle).to_lowercase();
         for kw in CTA_KEYWORDS {
@@ -223,18 +233,17 @@ pub fn infer_role(handle: &Handle) -> String {
             }
         }
         // CSS-klasser som antyder CTA
-        let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
-        if class.contains("cta")
-            || class.contains("add-to-cart")
-            || class.contains("buy-btn")
-            || class.contains("checkout")
+        if class_lower.contains("cta")
+            || class_lower.contains("add-to-cart")
+            || class_lower.contains("buy-btn")
+            || class_lower.contains("checkout")
         {
             return "cta".to_string();
         }
     }
 
     // Heuristik: pristext — spans/divs med valutatecken + siffror
-    if matches!(base_role, "text" | "generic") && looks_like_price(handle) {
+    if matches!(base_role, "text" | "generic") && looks_like_price(handle, &class_lower) {
         return "price".to_string();
     }
 
@@ -242,7 +251,7 @@ pub fn infer_role(handle: &Handle) -> String {
 }
 
 /// Kontrollera om ett elements text ser ut som ett pris
-fn looks_like_price(handle: &Handle) -> bool {
+fn looks_like_price(handle: &Handle, class_lower: &str) -> bool {
     let text = extract_text(handle);
     let trimmed = text.trim();
     // Tomt eller för långt → inte pris
@@ -254,15 +263,16 @@ fn looks_like_price(handle: &Handle) -> bool {
         return false;
     }
     // Kontrollera valutaindikatorer i texten (case-insensitive)
+    // PRICE_INDICATORS är redan uppercase — undvik allokering per iteration
     let upper = trimmed.to_uppercase();
     for indicator in PRICE_INDICATORS {
-        if upper.contains(&indicator.to_uppercase()) {
+        if upper.contains(indicator) {
             return true;
         }
     }
-    // CSS-klass som antyder pris
-    let class = get_attr(handle, "class").unwrap_or_default().to_lowercase();
-    if class.contains("price") || class.contains("pris") || class.contains("cost") {
+    // CSS-klass som antyder pris (använd pre-fetched class)
+    if class_lower.contains("price") || class_lower.contains("pris") || class_lower.contains("cost")
+    {
         return true;
     }
     // itemprop=price

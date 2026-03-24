@@ -458,14 +458,16 @@ fn count_nodes(nodes: &[SemanticNode]) -> usize {
 
 /// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
 fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
-    if count_nodes(nodes) <= max {
+    let mut current_count = count_nodes(nodes);
+    if current_count <= max {
         return;
     }
 
-    // Iterativt höj tröskeln och beskär löv
+    // Iterativt höj tröskeln och beskär löv — räkna om bara efter varje prune
     let mut threshold = 0.2_f32;
-    while count_nodes(nodes) > max && threshold < 0.8 {
+    while current_count > max && threshold < 0.8 {
         prune_leaves_below(nodes, threshold);
+        current_count = count_nodes(nodes);
         threshold += 0.05;
     }
 }
@@ -521,21 +523,28 @@ fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: 
         return 1.0;
     }
 
-    // Kolla även utan separatorer: "story_title" → "storytitle"
-    let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
-    let candidate_no_sep: String = candidate_lower
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
-        .collect();
-    if candidate_no_sep.contains(&query_joined) {
-        return 1.0;
-    }
-
     // Word overlap — varje del av compound key matchas separat
     let matches = query_words
         .iter()
         .filter(|w| candidate_lower.contains(w.as_str()))
         .count();
+
+    if matches == query_words.len() {
+        return 1.0;
+    }
+
+    // Fallback: kolla utan separatorer bara om word overlap missade
+    // "story_title" → "storytitle" — undvik allokering om inte nödvändigt
+    if matches == 0 && candidate_lower.len() >= query_lower.len() {
+        let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
+        let candidate_no_sep: String = candidate_lower
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+            .collect();
+        if candidate_no_sep.contains(&query_joined) {
+            return 1.0;
+        }
+    }
 
     matches as f32 / query_words.len() as f32
 }
