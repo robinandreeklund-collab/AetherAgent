@@ -412,12 +412,36 @@ struct FetchStreamParseParams {
 
 struct AetherMcpServer {
     tool_router: ToolRouter<Self>,
+    /// Pre-loaded vision model bytes (ONNX) — laddas en gång vid startup
+    vision_model_bytes: Option<Vec<u8>>,
 }
 
 impl AetherMcpServer {
     fn new() -> Self {
+        // Pre-ladda vision-modell om AETHER_MODEL_PATH är satt
+        let vision_model_bytes = std::env::var("AETHER_MODEL_PATH")
+            .ok()
+            .filter(|p| !p.is_empty())
+            .and_then(|path| match std::fs::read(&path) {
+                Ok(bytes) => {
+                    eprintln!(
+                        "[MCP] Vision model loaded: {} ({:.1} MB)",
+                        path,
+                        bytes.len() as f64 / 1_048_576.0
+                    );
+                    Some(bytes)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[MCP] WARN: Could not load vision model from '{}': {}",
+                        path, e
+                    );
+                    None
+                }
+            });
         Self {
             tool_router: Self::tool_router(),
+            vision_model_bytes,
         }
     }
 }
@@ -1420,6 +1444,7 @@ async fn handle_fetch_stream_parse(
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
 async fn handle_fetch_vision(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
+    cached_model: Option<&[u8]>,
 ) -> rmcp::model::CallToolResult {
     use base64::Engine;
     let b64 = &base64::engine::general_purpose::STANDARD;
@@ -1485,25 +1510,30 @@ async fn handle_fetch_vision(
 
     let png_b64 = b64.encode(&png_bytes);
 
-    // Ladda modell
-    let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
-    if model_path.is_empty() {
-        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-            "Vision model not available. Set AETHER_MODEL_PATH env var to your .onnx model file, or pass model_base64 in request.".to_string(),
-        )]);
-    }
-    let model_bytes = match std::fs::read(&model_path) {
-        Ok(b) => b,
-        Err(e) => {
-            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
-                "Failed to load vision model from '{}': {} (check file path and permissions)",
-                model_path, e
-            ))]);
+    // Använd pre-cached modell eller ladda från disk som fallback
+    let model_bytes_owned;
+    let model_bytes: &[u8] = if let Some(cached) = cached_model {
+        cached
+    } else {
+        let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
+        if model_path.is_empty() {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Vision model not available. Set AETHER_MODEL_PATH env var.".to_string(),
+            )]);
         }
+        model_bytes_owned = match std::fs::read(&model_path) {
+            Ok(b) => b,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!("Failed to load vision model: {e}"),
+                )]);
+            }
+        };
+        &model_bytes_owned
     };
 
     // Kör vision
-    let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
+    let result_json = aether_agent::parse_screenshot(&png_bytes, model_bytes, goal);
 
     // Lägg till tier_used i svaret (nu dynamiskt baserat på faktisk tier)
     let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
@@ -1526,6 +1556,7 @@ async fn handle_fetch_vision(
 fn handle_vision_tool(
     tool_name: &str,
     args: Option<&serde_json::Map<String, serde_json::Value>>,
+    cached_model: Option<&[u8]>,
 ) -> rmcp::model::CallToolResult {
     use base64::Engine;
     let b64 = &base64::engine::general_purpose::STANDARD;
@@ -1554,37 +1585,43 @@ fn handle_vision_tool(
         }
     };
 
-    // Bestäm modell
-    let model_bytes = if tool_name == "parse_screenshot" {
+    // Bestäm modell — prioritet: 1) pre-cached, 2) client-provided, 3) disk
+    let model_bytes_owned;
+    let model_bytes: &[u8] = if tool_name == "parse_screenshot" {
         // Client-provided model
         let model_b64 = args
             .get("model_base64")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        match b64.decode(model_b64) {
+        model_bytes_owned = match b64.decode(model_b64) {
             Ok(b) => b,
             Err(e) => {
                 return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
                     format!("Invalid model base64: {e}"),
                 )]);
             }
-        }
+        };
+        &model_bytes_owned
+    } else if let Some(cached) = cached_model {
+        // Pre-loaded model (snabbt — ingen disk-I/O)
+        cached
     } else {
-        // Server-loaded model (vision_parse)
+        // Fallback: ladda från disk
         let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
         if model_path.is_empty() {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                "Vision model not available. Set AETHER_MODEL_PATH env var to your .onnx model file, or pass model_base64 in request.".to_string(),
+                "Vision model not available. Set AETHER_MODEL_PATH env var.".to_string(),
             )]);
         }
-        match std::fs::read(&model_path) {
+        model_bytes_owned = match std::fs::read(&model_path) {
             Ok(b) => b,
             Err(e) => {
                 return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                    format!("Failed to load vision model from '{}': {} (check file path and permissions)", model_path, e),
+                    format!("Failed to load vision model: {e}"),
                 )]);
             }
-        }
+        };
+        &model_bytes_owned
     };
 
     let result_json = aether_agent::parse_screenshot(&png_bytes, &model_bytes, goal);
@@ -1801,12 +1838,13 @@ impl ServerHandler for AetherMcpServer {
         match tool_name {
             "vision_parse" | "parse_screenshot" => {
                 let args = request.arguments.as_ref();
-                let result = handle_vision_tool(tool_name, args);
+                let result =
+                    handle_vision_tool(tool_name, args, self.vision_model_bytes.as_deref());
                 Ok(result)
             }
             "fetch_vision" => {
                 let args = request.arguments.as_ref();
-                let result = handle_fetch_vision(args).await;
+                let result = handle_fetch_vision(args, self.vision_model_bytes.as_deref()).await;
                 Ok(result)
             }
             "fetch_search" => {

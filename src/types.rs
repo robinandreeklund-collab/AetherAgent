@@ -457,7 +457,7 @@ impl WorkflowMemory {
 
 impl FetchConfig {
     fn default_user_agent() -> String {
-        "AetherAgent/0.1 (LLM-native browser engine)".to_string()
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AetherAgent/0.2".to_string()
     }
 
     fn default_timeout_ms() -> u64 {

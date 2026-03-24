@@ -752,6 +752,10 @@ fn extract_href(tag: &str) -> Option<String> {
 
 /// Intern: resolva relativa URLer
 fn resolve_url(base_url: &str, href: &str) -> String {
+    // Avkoda HTML-entiteter i href (&amp; → &)
+    let href = href.replace("&amp;", "&");
+    let href = href.as_str();
+
     if href.starts_with("http://") || href.starts_with("https://") {
         return href.to_string();
     }
@@ -764,21 +768,35 @@ fn resolve_url(base_url: &str, href: &str) -> String {
         };
         return format!("{}{}", scheme, href);
     }
+
+    // Extrahera origin (scheme + host) — behövs för både absolut och relativ
+    let origin_end = base_url
+        .find("://")
+        .and_then(|i| base_url[i + 3..].find('/').map(|j| i + 3 + j));
+
     if href.starts_with('/') {
-        // Absolut sökväg — extrahera origin
-        if let Some(origin_end) = base_url
-            .find("://")
-            .and_then(|i| base_url[i + 3..].find('/').map(|j| i + 3 + j))
-        {
-            return format!("{}{}", &base_url[..origin_end], href);
+        // Absolut sökväg
+        if let Some(oe) = origin_end {
+            return format!("{}{}", &base_url[..oe], href);
         }
         return format!("{}{}", base_url.trim_end_matches('/'), href);
     }
-    // Relativ sökväg
-    let base_dir = if let Some(last_slash) = base_url.rfind('/') {
-        &base_url[..last_slash + 1]
+
+    // Relativ sökväg — hitta sista '/' EFTER origin
+    // BUG-FIX: utan detta kunde "https://news.ycombinator.com" (ingen trailing /)
+    // ge base_dir = "https://" (hittade / i ://) → felaktiga URLer
+    let base_dir = if let Some(oe) = origin_end {
+        // base_url har sökväg — hitta sista / i sökvägen
+        if let Some(last_slash) = base_url[oe..].rfind('/') {
+            &base_url[..oe + last_slash + 1]
+        } else {
+            // Sökväg utan / → använd origin + /
+            &base_url[..oe + 1]
+        }
     } else {
-        base_url
+        // Bara origin utan sökväg — lägg till /
+        // "https://example.com" → "https://example.com/"
+        return format!("{}/{}", base_url.trim_end_matches('/'), href);
     };
     format!("{}{}", base_dir, href)
 }
