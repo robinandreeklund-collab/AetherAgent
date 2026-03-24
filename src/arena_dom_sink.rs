@@ -58,6 +58,12 @@ impl ArenaDomSink {
             .and_then(|n| n.children.last().copied())
     }
 
+    /// Kolla om ett element är "inert" (text-innehåll irrelevant semantiskt)
+    #[inline]
+    fn is_inert_tag(tag: &str) -> bool {
+        matches!(tag, "script" | "style" | "noscript")
+    }
+
     /// Kolla om text enbart innehåller whitespace (newlines, spaces, tabs).
     /// Dessa noder fyller ingen semantisk funktion och kan skippas.
     #[inline]
@@ -240,6 +246,17 @@ impl TreeSink for ArenaDomSink {
                 if Self::is_whitespace_only(&text) {
                     return;
                 }
+                // Skippa text i script/style/noscript — aldrig semantiskt relevant
+                {
+                    let arena = self.arena.borrow();
+                    if let Some(parent_node) = arena.nodes.get(*parent) {
+                        if let Some(ref tag) = parent_node.tag {
+                            if Self::is_inert_tag(tag) {
+                                return;
+                            }
+                        }
+                    }
+                }
                 // Försök merga med sista textnod (spec: adjacent text merging)
                 if !self.append_to_existing_text(parent, &text) {
                     self.create_and_append_text(*parent, text);
@@ -340,6 +357,17 @@ impl TreeSink for ArenaDomSink {
                 // Skippa whitespace-only textnoder
                 if Self::is_whitespace_only(&text) {
                     return;
+                }
+                // Skippa text i script/style/noscript
+                {
+                    let arena = self.arena.borrow();
+                    if let Some(parent_node) = arena.nodes.get(parent_key) {
+                        if let Some(ref tag) = parent_node.tag {
+                            if Self::is_inert_tag(tag) {
+                                return;
+                            }
+                        }
+                    }
                 }
                 // Försök merga med föregående syskon
                 if sibling_idx > 0 {
