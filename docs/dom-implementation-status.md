@@ -12,7 +12,7 @@
 
 | Suite | Cases | Passed | Rate | Datum |
 |-------|-------|--------|------|-------|
-| dom/ | 2,004 | 1,225 | 61.1% | 2026-03-24 |
+| dom/ | 2,004 | 1,324 | 66.1% | 2026-03-24 |
 
 **OBS:** En del av pass-raten beror på polyfills. Riktig native-only score är lägre.
 
@@ -75,11 +75,11 @@
 
 | Method | Prioritet | Kommentar |
 |--------|-----------|----------|
-| `remove()` | Hög | Vanlig — `parentNode.removeChild(this)` |
-| `before()` / `after()` | Hög | ChildNode insertion, hanterar null→text |
-| `replaceWith()` | Hög | ChildNode replacement |
+| ~~`remove()`~~ | ~~Hög~~ | **Migrerad till Rust** (2026-03-24) |
+| ~~`before()` / `after()`~~ | ~~Hög~~ | **Migrerad till Rust** (2026-03-24) |
+| ~~`replaceWith()`~~ | ~~Hög~~ | **Migrerad till Rust** (2026-03-24) |
 | `prepend()` / `append()` / `replaceChildren()` | Hög | ParentNode convenience |
-| `toggleAttribute(name, force)` | Medium | Enkel logik kring has/set/remove |
+| ~~`toggleAttribute(name, force)`~~ | ~~Medium~~ | **Migrerad till Rust** (2026-03-24) |
 | `insertAdjacentElement(pos, el)` | Medium | Wrapper kring insertBefore/appendChild |
 | `insertAdjacentText(pos, text)` | Medium | Wrapper kring createTextNode + insert |
 | `setAttributeNS(ns, qname, val)` | Medium | Ignorerar namespace nu — behöver riktig NS-stöd |
