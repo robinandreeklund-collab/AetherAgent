@@ -51,6 +51,7 @@ struct WptSummary {
 
 // ─── Testharness JS-filer (inbäddade) ──────────────────────────────────────
 
+const POLYFILLS: &str = include_str!("polyfills.js");
 const TESTHARNESS_SHIM: &str = include_str!("testharness-shim.js");
 const TESTHARNESSREPORT: &str = include_str!("testharnessreport.js");
 
@@ -104,8 +105,9 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         };
     }
 
-    // Bygg script-sekvens: testharness → testharnessreport → testets scripts
+    // Bygg script-sekvens: polyfills → testharness → testharnessreport → testets scripts
     let mut all_scripts: Vec<String> = Vec::new();
+    all_scripts.push(POLYFILLS.to_string());
     all_scripts.push(TESTHARNESS_SHIM.to_string());
     all_scripts.push(TESTHARNESSREPORT.to_string());
     all_scripts.extend(test_scripts);

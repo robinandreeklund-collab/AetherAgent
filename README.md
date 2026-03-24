@@ -232,150 +232,23 @@ Embedded **QuickJS** JS engine (via `rquickjs` 0.11) for safe snippet evaluation
 
 **Persistent context:** `eval_js_batch` shares a single QuickJS Context across all snippets — variables defined in snippet 1 are available in snippet 2. `eval_js_with_dom` creates one context per call with full DOM bindings.
 
-**Event loop (Fas 18):** Full event loop with microtask queue (Promise.then, queueMicrotask), setTimeout/setInterval (capped: max 100 timers, 5000ms delay, virtual clock), requestAnimationFrame (simulated 16ms ticks), MutationObserver (tied to ArenaDom). Safety: max 1000 ticks, 50ms wall time. Integrated into `eval_js_with_dom` — all evals drain the event loop automatically.
+**Event loop (Fas 18):** Full event loop with microtask queue (Promise.then, queueMicrotask), setTimeout/setInterval (capped: max 500 timers, 5000ms delay, virtual clock), requestAnimationFrame (simulated 16ms ticks), MutationObserver (tied to ArenaDom). Safety: max 5000 ticks, 500ms wall time. Integrated into `eval_js_with_dom` — all evals drain the event loop automatically.
 
 #### DOM API Coverage
 
-55+ DOM methods exposed to the QuickJS sandbox. Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return realistic defaults without real behavior.
+**55+ DOM methods** exposed to the QuickJS sandbox, validated against real Web Platform Tests.
 
-**Document methods:**
+| Category | Methods | WPT Pass Rate |
+|----------|---------|---------------|
+| Document queries | `getElementById`, `querySelector`, `querySelectorAll`, `getElementsByClassName`, `getElementsByTagName` | |
+| Element manipulation | `appendChild`, `removeChild`, `insertBefore`, `replaceChild`, `cloneNode`, `remove`, `before`, `after`, `replaceWith` | |
+| Properties | `textContent`, `innerHTML`, `outerHTML`, `id`, `className`, `tagName`, `nodeType`, `dataset` | |
+| Traversal | `parentNode`, `childNodes`, `children`, `firstChild`, `nextSibling`, `closest`, `matches`, `contains` | |
+| Events | `addEventListener`, `removeEventListener`, `dispatchEvent`, `Event`, `CustomEvent`, `MutationObserver` | |
+| Style & layout | `classList`, `style.*`, `getComputedStyle`, `getBoundingClientRect`, `offset*`, `scroll*` | |
+| **WPT dom/ total** | **1,140 cases** | **211 passed (18.5%)** |
 
-| Method | Status | Details |
-|--------|--------|---------|
-| `getElementById(id)` | Full | O(n) recursive search by `id` attribute |
-| `querySelector(sel)` | Full | Full CSS selector matching (see below) |
-| `querySelectorAll(sel)` | Full | Returns JsArray of all matches |
-| `createElement(tag)` | Full | Inserts new Element node into arena |
-| `createTextNode(text)` | Full | Inserts new Text node into arena |
-| `createComment(text)` | Full | Inserts new Comment node (Vue support) |
-| `createDocumentFragment()` | Full | Creates fragment node for batch operations |
-| `getElementsByClassName(cls)` | Full | Recursive class search, returns JsArray |
-| `getElementsByTagName(tag)` | Full | Recursive tag search, returns JsArray |
-| `document.body` | Full | Resolved from arena at init |
-| `document.head` | Full | Resolved from arena at init |
-| `document.documentElement` | Full | Resolved from arena at init |
-| `document.activeElement` | Full | Returns focused element or body (default) |
-| `document.createRange()` | Full | Range with collapse, selectNode, setStart/End, cloneRange, getBoundingClientRect |
-| `document.getSelection()` | Full | Selection with anchorNode, focusNode, removeAllRanges, addRange, collapse |
-| `document.exitPointerLock()` | Stub | No-op |
-
-**Element methods:**
-
-| Method | Status | Details |
-|--------|--------|---------|
-| `getAttribute(name)` | Full | Reads from HashMap attributes, O(1) |
-| `setAttribute(name, value)` | Full | Writes to arena, logs mutation |
-| `removeAttribute(name)` | Full | Removes from arena, logs mutation |
-| `textContent` (getter) | Full | Recursive text extraction from arena |
-| `setTextContent(text)` | Full | Clears children, creates new text node |
-| `innerHTML` (getter) | Full | Serializes children to HTML string |
-| `outerHTML` (getter) | Full | Serializes element + children to HTML |
-| `appendChild(child)` | Full | Moves node in arena, updates parent refs |
-| `removeChild(child)` | Full | Removes from arena, clears parent ref |
-| `insertBefore(new, ref)` | Full | Index-based insertion in children vec |
-| `cloneNode(deep)` | Full | Recursive deep copy in arena |
-| `parentNode` | Full | Returns parent key from arena |
-| `childNodes` | Full | Returns JsArray of all children |
-| `children` | Full | Returns JsArray of element children only |
-| `firstChild` | Full | First child key |
-| `firstElementChild` | Full | First Element child (skips text nodes) |
-| `nextSibling` | Full | Next sibling key from parent's children |
-| `nextElementSibling` | Full | Next Element sibling (skips text nodes) |
-| `closest(selector)` | Full | Traverses ancestors, matches CSS selector |
-| `matches(selector)` | Full | Tests if element matches CSS selector |
-| `dataset` | Full | Reads `data-*` attributes, kebab→camelCase |
-| `id` / `className` / `tagName` | Full | Set as properties from arena at creation |
-| `nodeType` | Full | 1=Element, 3=Text, 8=Comment, 9=Document |
-| `isConnected` | Full | Traverses parent chain to check document connection |
-| `contains(otherElement)` | Full | Recursive descendant check via arena hierarchy |
-| `getRootNode()` | Full | Walks parent chain to root (document or shadow root) |
-| `hidden` | Full | Bound to `hidden` HTML attribute |
-| `requestPointerLock()` | Stub | No-op (accepts call without error) |
-| `classList.add(cls)` | Full | Adds class to arena attribute |
-| `classList.remove(cls)` | Full | Removes class from arena attribute |
-| `classList.toggle(cls)` | Full | Toggles class, returns boolean |
-| `classList.contains(cls)` | Full | Checks class presence |
-| `classList.replace(old, new)` | Full | Replaces class, returns boolean |
-| `classList.value()` | Full | Returns full class string |
-| `classList.length()` | Full | Returns class count |
-| `addEventListener(type, fn, capture)` | Full | Stores callbacks per node per event type |
-| `removeEventListener(type, fn)` | Full | Removes last matching listener by type |
-| `dispatchEvent(event)` | Full | Fires listeners + ancestor bubbling + stopPropagation |
-| `focus()` | Full | Tracks focused element in BridgeState |
-| `blur()` | Full | Clears focus if this element was focused |
-| `scrollIntoView(options)` | Full | Updates scroll position on document body |
-| `getBoundingClientRect()` | Full | Returns tag+style estimated rect (x, y, width, height, top, right, bottom, left) |
-| `getClientRects()` | Full | Returns array with estimated rect |
-| `style.setProperty(k, v)` | Full | Writes to style attribute on arena node |
-| `style.getPropertyValue(k)` | Full | Reads from parsed style attribute |
-| `style.removeProperty(k)` | Full | Removes property, returns old value |
-| `style.cssText()` | Full | Returns raw style attribute string |
-| `style.[property]` | Full | 21 CSS properties as direct camelCase accessors |
-| `shadowRoot` | Full | Reads `<template shadowrootmode>` children for declarative Shadow DOM |
-| `offsetTop/Left/Width/Height` | Full | Computed from tag defaults + inline style + sibling position |
-| `scrollTop/Left/Width/Height` | Full | Tracked per node, content size from children count |
-| `clientWidth/Height` | Full | Same as offsetWidth/Height |
-
-**Window & global methods:**
-
-| Method | Status | Details |
-|--------|--------|---------|
-| `window.innerWidth/innerHeight` | Stub | 1024/768 |
-| `window.location.*` | Stub | href, hostname, pathname, protocol |
-| `window.navigator.*` | Stub | userAgent="AetherAgent/0.1", language="en" |
-| `getComputedStyle(el)` | Full | Merges inline styles + tag-based defaults, 15 CSS properties + `getPropertyValue()` |
-| `IntersectionObserver` | Full | Fires callback per element on `observe()` with estimated rect + visibility |
-| `ResizeObserver` | Full | Fires callback on `observe()` with contentRect + borderBoxSize |
-| `Event` constructor | Full | `new Event('click', {bubbles, cancelable, composed})` with stopPropagation/preventDefault/stopImmediatePropagation, eventPhase, timeStamp, isTrusted |
-| `CustomEvent` constructor | Full | `new CustomEvent('x', {detail, bubbles, cancelable, composed})` with all Event fields + detail |
-| `customElements.define(name, ctor)` | Full | Stores constructor in registry, validates name contains hyphen |
-| `customElements.get(name)` | Full | Returns registered constructor or undefined |
-| `customElements.whenDefined(name)` | Full | Returns resolved Promise |
-| `MutationObserver` | Full | observe/disconnect via event loop |
-| `customElements.define/get/whenDefined` | Stub | Web Components registration (no-op) |
-| `setTimeout/setInterval` | Full | Virtual clock, max 100 timers, 5s delay |
-| `clearTimeout/clearInterval` | Full | Cancel by ID |
-| `requestAnimationFrame` | Full | Simulated 16ms ticks |
-| `cancelAnimationFrame` | Full | Cancel by ID |
-| `queueMicrotask` | Full | Delegates to QuickJS job queue |
-| `Promise.then/catch/finally` | Full | Via QuickJS job queue + executePendingJob() |
-| `console.log/warn/error/info` | Stub | No-op (accepts calls without error) |
-
-**CSS Selector support** (used by `querySelector`, `querySelectorAll`, `closest`, `matches`):
-
-| Selector | Example | Status |
-|----------|---------|--------|
-| ID | `#myid` | Full |
-| Class | `.myclass` | Full |
-| Tag | `div` | Full |
-| Combined | `div.cls` | Full |
-| Attribute presence | `[data-id]` | Full |
-| Attribute value | `[type="text"]` | Full |
-| Tag + attribute | `input[type="text"]` | Full |
-| Child combinator | `div > span` | Full |
-| Descendant combinator | `div span` | Full |
-| Pseudo-class | `:first-child` | Full |
-| Multiple selectors | `h1, h2, h3` | Full |
-| Complex combination | `div.container > a.link` | Full |
-
-**Expected framework coverage with this DOM API:**
-
-| Framework / Scenario | Coverage | Notes |
-|---------------------|----------|-------|
-| **React SSR hydration** | ~95% | getElementById, textContent, classList, appendChild, addEventListener, Event constructor |
-| **Vue 3 mount + reactivity** | ~92% | querySelector, classList, createComment, setAttribute, addEventListener, dispatchEvent |
-| **Svelte compiled output** | ~95% | Direct DOM manipulation + full event system + style.setProperty |
-| **Angular Universal** | ~88% | querySelector, classList, setAttribute, full event system, getComputedStyle |
-| **Vanilla JS / jQuery** | ~98% | All query + manipulation + event + style methods |
-| **Next.js App Router** | ~88% | RSC Flight Protocol (Tier 0) + DOM bridge + events for client components |
-| **Nuxt 3 / SvelteKit** | ~90% | Devalue hydration (Tier 0) + DOM bridge + events for interactive parts |
-| **Web Components (Lit, Stencil)** | ~82% | customElements.define med registry, shadowRoot traversal, isConnected/getRootNode |
-| **Lazy-loaded content** | ~95% | IntersectionObserver fires per-element with estimated visibility |
-| **Infinite scroll** | ~80% | IntersectionObserver + scroll position tracking via scrollIntoView |
-| **Form validation** | ~92% | getAttribute, setAttribute, classList, focus/blur/activeElement tracking |
-| **CSS-dependent visibility** | ~88% | getComputedStyle merges inline styles + tag defaults, style.display/visibility |
-| **Chart.js / D3** | ~30% | Requires SVG/Canvas + layout — escalate to Tier 3 (Blitz) or Tier 4 (CDP) |
-| **WebGL / Canvas apps** | ~5% | No Canvas API — must use Tier 4 (CDP) |
+> Full API reference with all 55+ methods, CSS selectors, framework coverage estimates, and WPT details: **[docs/dom-api-coverage.md](docs/dom-api-coverage.md)**
 
 ### 6. Temporal Memory & Adversarial Modeling
 
