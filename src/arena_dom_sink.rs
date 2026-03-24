@@ -31,8 +31,13 @@ pub struct ArenaDomSink {
     document: NodeKey,
 }
 
+impl Default for ArenaDomSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArenaDomSink {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::with_estimated_capacity(1024)
     }

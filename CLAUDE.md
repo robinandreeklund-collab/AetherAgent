@@ -62,6 +62,7 @@ Every PR, every commit, every fix — regardless of size — must pass the full 
 cargo test              # ALL tests (unit + integration)
 cargo clippy -- -D warnings
 cargo fmt --check
+cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/  # WPT baseline
 ```
 
 ### Test Levels
@@ -100,6 +101,73 @@ These must cover:
 - **No hardcoded DOM traversal paths** (e.g., `children[0].children[1]`). DOM structure can change — use semantic search by role/label.
 - **Assertions must have descriptive messages**: `assert!(x, "Borde hitta button")` — not bare `assert!(x)`.
 - **Raw strings with `#`**: Use `r##"..."##` for HTML containing `href="#"` to avoid raw string delimiter conflicts.
+
+### WPT Standard (Web Platform Tests)
+
+**Every PR must include WPT results.** This is a mandatory quality gate.
+
+WPT tests run the official, unmodified Web Platform Tests from https://github.com/web-platform-tests/wpt directly against AetherAgent's DOM implementation via QuickJS sandbox + DOM bridge.
+
+#### Setup
+
+```bash
+./wpt/setup.sh          # Sparse-checkout av relevanta WPT-tester
+```
+
+#### Running WPT
+
+```bash
+# Kör alla dom/nodes tester
+cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
+
+# Kör med verbose output (visar varje testcase)
+cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --verbose
+
+# Kör specifik fil
+cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/Document-getElementById.html
+
+# JSON-output (för CI)
+cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --json
+```
+
+#### PR Requirements
+
+Every PR that touches DOM, JS eval, event loop, CSS, or parser code MUST include:
+
+1. **WPT score before** (baseline)
+2. **WPT score after** (med ändringar)
+3. **Delta** (förbättring eller regression)
+
+Format i PR-beskrivning:
+```
+## WPT Results
+- dom/nodes: 90/1026 passed (8.8%) → XX/1026 passed (X.X%)
+- Nya pass: [lista testnamn]
+- Nya failures: [lista om regression]
+```
+
+**WPT score får aldrig gå ner utan dokumenterad motivering.**
+
+#### Baseline (2026-03-24)
+
+| Suite | Cases | Passed | Rate |
+|-------|-------|--------|------|
+| dom/nodes | 1,026 | 90 | 8.8% |
+
+#### Targeted Test Directories
+
+| Directory | Relevance |
+|-----------|-----------|
+| `dom/nodes/` | Core DOM: getElementById, querySelector, appendChild, textContent |
+| `dom/events/` | Event dispatch, bubbling, capture |
+| `dom/traversal/` | TreeWalker, NodeIterator |
+| `dom/collections/` | HTMLCollection, NodeList |
+| `html/dom/` | HTML-specific DOM APIs |
+| `html/syntax/` | HTML parsing edge cases |
+| `html/webappapis/timers/` | setTimeout, setInterval |
+| `selectors/` | CSS selector matching |
+| `shadow-dom/` | Shadow DOM (not yet implemented) |
+| `custom-elements/` | Custom elements (not yet implemented) |
 
 ### Bug Policy
 

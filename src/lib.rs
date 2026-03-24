@@ -1,8 +1,8 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
-mod arena_dom;
-mod arena_dom_sink;
+pub mod arena_dom;
+pub mod arena_dom_sink;
 mod causal;
 mod collab;
 mod compiler;
@@ -12,7 +12,7 @@ mod css_cascade;
 pub mod css_compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
-mod dom_bridge;
+pub mod dom_bridge;
 mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;
@@ -109,7 +109,7 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
 /// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
 /// och används för att bygga det semantiska trädet.
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
-    #[cfg(feature = "js-eval")]
+    #[cfg(all(feature = "js-eval", feature = "blitz"))]
     {
         let scripts = js_eval::extract_ordered_scripts(html);
         if !scripts.is_empty() {

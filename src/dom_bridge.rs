@@ -329,7 +329,6 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
 /// 3. readyState = "complete" — dispatcha load
 ///
 /// Returnerar modifierad ArenaDom med alla DOM-mutationer applicerade.
-#[cfg(test)]
 pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalResult {
     let start = std::time::Instant::now();
 
