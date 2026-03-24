@@ -49,12 +49,12 @@ impl ArenaDomSink {
     }
 
     /// Hjälpfunktion: försök addera text till sista syskon-textnod
-    fn append_to_existing_text(&mut self, parent: &NodeKey, text: &str) -> bool {
+    fn append_to_existing_text(&mut self, parent: &NodeKey, text: &StrTendril) -> bool {
         if let Some(last_key) = self.last_child(parent) {
             if let Some(node) = self.arena.nodes.get_mut(last_key) {
                 if node.node_type == NodeType::Text {
                     if let Some(ref mut existing) = node.text {
-                        existing.push_str(text);
+                        existing.push_slice(text);
                         return true;
                     }
                 }
@@ -64,7 +64,7 @@ impl ArenaDomSink {
     }
 
     /// Hjälpfunktion: skapa textnod och koppla till parent
-    fn create_and_append_text(&mut self, parent: NodeKey, text: String) {
+    fn create_and_append_text(&mut self, parent: NodeKey, text: StrTendril) {
         let key = self.arena.nodes.insert(DomNode {
             node_type: NodeType::Text,
             tag: None,
@@ -177,7 +177,7 @@ impl TreeSink for ArenaDomSink {
             node_type: NodeType::Comment,
             tag: None,
             attributes: Attrs::new(),
-            text: Some(text.to_string()),
+            text: Some(text),
             parent: None,
             children: vec![],
         })
@@ -188,7 +188,7 @@ impl TreeSink for ArenaDomSink {
             node_type: NodeType::Other,
             tag: Some(format!("?{}", target)),
             attributes: Attrs::new(),
-            text: Some(data.to_string()),
+            text: Some(data),
             parent: None,
             children: vec![],
         })
@@ -200,10 +200,9 @@ impl TreeSink for ArenaDomSink {
                 self.append_node(*parent, child_key);
             }
             NodeOrText::AppendText(text) => {
-                let text_str = text.to_string();
                 // Försök merga med sista textnod (spec: adjacent text merging)
-                if !self.append_to_existing_text(parent, &text_str) {
-                    self.create_and_append_text(*parent, text_str);
+                if !self.append_to_existing_text(parent, &text) {
+                    self.create_and_append_text(*parent, text);
                 }
             }
         }
@@ -289,7 +288,6 @@ impl TreeSink for ArenaDomSink {
                 }
             }
             NodeOrText::AppendText(text) => {
-                let text_str = text.to_string();
                 // Försök merga med föregående syskon
                 if sibling_idx > 0 {
                     if let Some(parent) = self.arena.nodes.get(parent_key) {
@@ -297,7 +295,7 @@ impl TreeSink for ArenaDomSink {
                         if let Some(prev_node) = self.arena.nodes.get_mut(prev_key) {
                             if prev_node.node_type == NodeType::Text {
                                 if let Some(ref mut existing) = prev_node.text {
-                                    existing.push_str(&text_str);
+                                    existing.push_slice(&text);
                                     return;
                                 }
                             }
@@ -309,7 +307,7 @@ impl TreeSink for ArenaDomSink {
                     node_type: NodeType::Text,
                     tag: None,
                     attributes: Attrs::new(),
-                    text: Some(text_str),
+                    text: Some(text),
                     parent: Some(parent_key),
                     children: vec![],
                 });

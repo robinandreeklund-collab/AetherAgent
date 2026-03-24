@@ -688,7 +688,7 @@ impl JsHandler for CreateTextNode {
                 node_type: NodeType::Text,
                 tag: None,
                 attributes: crate::arena_dom::Attrs::new(),
-                text: Some(text),
+                text: Some(text.into()),
                 parent: None,
                 children: vec![],
             })
@@ -713,7 +713,7 @@ impl JsHandler for CreateComment {
                 node_type: NodeType::Comment,
                 tag: None,
                 attributes: crate::arena_dom::Attrs::new(),
-                text: Some(text),
+                text: Some(text.into()),
                 parent: None,
                 children: vec![],
             })
@@ -1204,7 +1204,7 @@ fn get_text_content(arena: &ArenaDom, key: NodeKey) -> String {
         None => return String::new(),
     };
     match &node.node_type {
-        NodeType::Text => node.text.clone().unwrap_or_default(),
+        NodeType::Text => node.text.as_deref().unwrap_or("").to_string(),
         _ => {
             let mut text = String::new();
             for &child in &node.children {
@@ -1424,7 +1424,7 @@ impl JsHandler for InsertAdjacentHTML {
                     node_type: NodeType::Text,
                     tag: None,
                     attributes: crate::arena_dom::Attrs::new(),
-                    text: Some(html_str),
+                    text: Some(html_str.into()),
                     parent: None,
                     children: vec![],
                 });
@@ -2041,7 +2041,7 @@ impl JsHandler for TextContentSetter {
             node_type: NodeType::Text,
             tag: None,
             attributes: crate::arena_dom::Attrs::new(),
-            text: Some(text),
+            text: Some(text.into()),
             parent: Some(self.key),
             children: vec![],
         });
@@ -2087,7 +2087,7 @@ impl JsHandler for InnerHTMLSetter {
                     node_type: NodeType::Text,
                     tag: None,
                     attributes: crate::arena_dom::Attrs::new(),
-                    text: Some(html_str.clone()),
+                    text: Some(html_str.clone().into()),
                     parent: Some(self.key),
                     children: vec![],
                 });

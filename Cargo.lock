@@ -52,6 +52,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "taffy",
+ "tendril 0.4.3",
  "tokio",
  "tokio-stream",
  "tower-http 0.5.2",

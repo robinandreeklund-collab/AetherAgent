@@ -5,6 +5,7 @@
 ///
 /// Prestanda: ~5-10x snabbare DFS, 1 allokering istället för ~1000/sida.
 use smallvec::SmallVec;
+use tendril::StrTendril;
 
 /// Attribut-lagring optimerad för typiska DOM-element (0-4 attribut).
 ///
@@ -176,7 +177,7 @@ pub struct DomNode {
     pub node_type: NodeType,
     pub tag: Option<String>,
     pub attributes: Attrs,
-    pub text: Option<String>,
+    pub text: Option<StrTendril>,
     pub parent: Option<NodeKey>,
     pub children: Vec<NodeKey>,
 }
@@ -265,13 +266,15 @@ impl ArenaDom {
                 (NodeType::Element, Some(tag), None, attributes)
             }
             NodeData::Text { contents } => {
-                let t = contents.borrow().to_string();
+                let t = contents.borrow().clone();
                 (NodeType::Text, None, Some(t), Attrs::new())
             }
-            NodeData::Comment { contents } => {
-                let t = contents.to_string();
-                (NodeType::Comment, None, Some(t), Attrs::new())
-            }
+            NodeData::Comment { contents } => (
+                NodeType::Comment,
+                None,
+                Some(contents.clone()),
+                Attrs::new(),
+            ),
             _ => (NodeType::Other, None, None, Attrs::new()),
         };
 
@@ -442,7 +445,7 @@ impl ArenaDom {
             None => return String::new(),
         };
         match &node.node_type {
-            NodeType::Text => node.text.clone().unwrap_or_default(),
+            NodeType::Text => node.text.as_deref().unwrap_or("").to_string(),
             NodeType::Comment => format!("<!--{}-->", node.text.as_deref().unwrap_or("")),
             NodeType::Element => {
                 let tag = node.tag.as_deref().unwrap_or("div");
@@ -858,7 +861,7 @@ impl ArenaDom {
                 .filter_map(|ck| {
                     let child = self.nodes.get(*ck)?;
                     if child.node_type == NodeType::Text {
-                        child.text.clone()
+                        child.text.as_deref().map(|s| s.to_string())
                     } else {
                         None
                     }
