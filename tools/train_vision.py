@@ -4681,13 +4681,22 @@ def interactive_mode(args=None):
         if 0 <= ds_offset < len(ext_datasets):
             fmt_name = ext_datasets[ds_offset]
             info = _DATASET_REGISTRY[fmt_name]
-            log(f"Laddar ner {info['name']}...", "STEP")
             ensure_deps()
             base_dir = Path("dataset")
-            raw_dir = download_dataset(fmt_name, base_dir)
             converted_dir = base_dir / f"{fmt_name}_converted"
-            dataset_dir = convert_dataset(raw_dir, converted_dir, fmt_name,
-                                          extended=cli_extended)
+            converted_yaml = converted_dir / "data.yaml"
+            converted_has_images = (
+                (converted_dir / "images" / "train").exists()
+                or (converted_dir / "train" / "images").exists()
+            )
+            if converted_yaml.exists() and converted_has_images:
+                log(f"Dataset redan konverterat: {converted_dir}", "OK")
+                dataset_dir = converted_dir
+            else:
+                log(f"Laddar ner {info['name']}...", "STEP")
+                raw_dir = download_dataset(fmt_name, base_dir)
+                dataset_dir = convert_dataset(raw_dir, converted_dir, fmt_name,
+                                              extended=cli_extended)
         else:
             log(f"Ogiltigt val: {choice}", "ERR")
             sys.exit(1)
@@ -5074,13 +5083,25 @@ Examples:
         ensure_deps()
 
         base_dir = Path("dataset")
-        log(f"Laddar ner {args.format}-dataset...", "STEP")
-        raw_dir = download_dataset(args.format, base_dir)
 
-        log(f"Konverterar {args.format} → YOLO...", "STEP")
+        # Kolla om redan konverterat dataset finns — skippa nedladdning + konvertering
         converted_dir = base_dir / f"{args.format}_converted"
-        dataset_path = convert_dataset(raw_dir, converted_dir, args.format,
-                                       extended=args.extended_classes)
+        converted_yaml = converted_dir / "data.yaml"
+        converted_has_images = (
+            (converted_dir / "images" / "train").exists()
+            or (converted_dir / "train" / "images").exists()
+        )
+        if converted_yaml.exists() and converted_has_images:
+            log(f"Dataset redan konverterat: {converted_dir}", "OK")
+            log("  Skippar nedladdning och konvertering. Radera mappen för att tvinga om-nedladdning.", "INFO")
+            dataset_path = converted_dir
+        else:
+            log(f"Laddar ner {args.format}-dataset...", "STEP")
+            raw_dir = download_dataset(args.format, base_dir)
+
+            log(f"Konverterar {args.format} → YOLO...", "STEP")
+            dataset_path = convert_dataset(raw_dir, converted_dir, args.format,
+                                           extended=args.extended_classes)
 
         log(f"Dataset klart: {dataset_path}", "OK")
 
