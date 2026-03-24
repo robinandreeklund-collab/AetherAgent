@@ -662,7 +662,7 @@ impl JsHandler for CreateElement {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
                 tag: Some(tag),
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -687,7 +687,7 @@ impl JsHandler for CreateTextNode {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: Some(text),
                 parent: None,
                 children: vec![],
@@ -712,7 +712,7 @@ impl JsHandler for CreateComment {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Comment,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: Some(text),
                 parent: None,
                 children: vec![],
@@ -782,7 +782,7 @@ impl JsHandler for CreateDocumentFragment {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Other,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -1423,7 +1423,7 @@ impl JsHandler for InsertAdjacentHTML {
                 let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                     node_type: NodeType::Text,
                     tag: None,
-                    attributes: std::collections::HashMap::new(),
+                    attributes: crate::arena_dom::Attrs::new(),
                     text: Some(html_str),
                     parent: None,
                     children: vec![],
@@ -1528,7 +1528,7 @@ fn copy_subtree_return_key(src: &ArenaDom, src_key: NodeKey, dst: &mut ArenaDom)
             return dst.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -1729,7 +1729,7 @@ impl JsHandler for AttachShadow {
                 node_type: crate::arena_dom::NodeType::Element,
                 tag: Some("template".to_string()),
                 attributes: {
-                    let mut attrs = std::collections::HashMap::new();
+                    let mut attrs = crate::arena_dom::Attrs::new();
                     attrs.insert("shadowrootmode".to_string(), _mode);
                     attrs
                 },
@@ -2040,7 +2040,7 @@ impl JsHandler for TextContentSetter {
         let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
             node_type: NodeType::Text,
             tag: None,
-            attributes: std::collections::HashMap::new(),
+            attributes: crate::arena_dom::Attrs::new(),
             text: Some(text),
             parent: Some(self.key),
             children: vec![],
@@ -2086,7 +2086,7 @@ impl JsHandler for InnerHTMLSetter {
                 let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                     node_type: NodeType::Text,
                     tag: None,
-                    attributes: std::collections::HashMap::new(),
+                    attributes: crate::arena_dom::Attrs::new(),
                     text: Some(html_str.clone()),
                     parent: Some(self.key),
                     children: vec![],

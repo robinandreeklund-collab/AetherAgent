@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::{Attribute, ExpandedName, QualName};
+use slotmap::SecondaryMap;
 
-use crate::arena_dom::{ArenaDom, DomNode, NodeKey, NodeType};
+use crate::arena_dom::{ArenaDom, Attrs, DomNode, NodeKey, NodeType};
 
 /// Håller template-contents-mappning (NodeKey → fragment NodeKey)
 pub struct ArenaDomSink {
@@ -19,8 +20,9 @@ pub struct ArenaDomSink {
     template_contents: HashMap<NodeKey, NodeKey>,
     /// mathml annotation-xml integration point flaggor
     mathml_integration_points: HashMap<NodeKey, bool>,
-    /// Taggnamn per nod — O(1) lookup via HashMap (elem_name anropas hundratals gånger)
-    tag_names: HashMap<NodeKey, QualName>,
+    /// Taggnamn per nod — O(1) array-indexerad lookup via SecondaryMap
+    /// (elem_name anropas hundratals gånger, SecondaryMap undviker hashing)
+    tag_names: SecondaryMap<NodeKey, QualName>,
 }
 
 impl ArenaDomSink {
@@ -34,7 +36,7 @@ impl ArenaDomSink {
             arena: ArenaDom::with_capacity(estimated_nodes),
             template_contents: HashMap::new(),
             mathml_integration_points: HashMap::new(),
-            tag_names: HashMap::with_capacity(estimated_nodes / 2),
+            tag_names: SecondaryMap::with_capacity(estimated_nodes / 2),
         }
     }
 
@@ -66,7 +68,7 @@ impl ArenaDomSink {
         let key = self.arena.nodes.insert(DomNode {
             node_type: NodeType::Text,
             tag: None,
-            attributes: HashMap::default(),
+            attributes: Attrs::new(),
             text: Some(text),
             parent: Some(parent),
             children: vec![],
@@ -120,7 +122,7 @@ impl TreeSink for ArenaDomSink {
 
     fn elem_name<'a>(&'a self, target: &'a NodeKey) -> ExpandedName<'a> {
         self.tag_names
-            .get(target)
+            .get(*target)
             .expect("elem_name called on non-element node")
             .expanded()
     }
@@ -132,7 +134,7 @@ impl TreeSink for ArenaDomSink {
         flags: ElementFlags,
     ) -> NodeKey {
         let tag = name.local.to_string();
-        let mut attributes = HashMap::with_capacity(attrs.len());
+        let mut attributes = Attrs::with_capacity(attrs.len());
         for attr in &attrs {
             attributes.insert(attr.name.local.to_string(), attr.value.to_string());
         }
@@ -154,7 +156,7 @@ impl TreeSink for ArenaDomSink {
             let fragment = self.arena.nodes.insert(DomNode {
                 node_type: NodeType::Document,
                 tag: None,
-                attributes: HashMap::default(),
+                attributes: Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -174,7 +176,7 @@ impl TreeSink for ArenaDomSink {
         self.arena.nodes.insert(DomNode {
             node_type: NodeType::Comment,
             tag: None,
-            attributes: HashMap::default(),
+            attributes: Attrs::new(),
             text: Some(text.to_string()),
             parent: None,
             children: vec![],
@@ -185,7 +187,7 @@ impl TreeSink for ArenaDomSink {
         self.arena.nodes.insert(DomNode {
             node_type: NodeType::Other,
             tag: Some(format!("?{}", target)),
-            attributes: HashMap::default(),
+            attributes: Attrs::new(),
             text: Some(data.to_string()),
             parent: None,
             children: vec![],
@@ -306,7 +308,7 @@ impl TreeSink for ArenaDomSink {
                 let text_key = self.arena.nodes.insert(DomNode {
                     node_type: NodeType::Text,
                     tag: None,
-                    attributes: HashMap::default(),
+                    attributes: Attrs::new(),
                     text: Some(text_str),
                     parent: Some(parent_key),
                     children: vec![],
@@ -321,10 +323,8 @@ impl TreeSink for ArenaDomSink {
     fn add_attrs_if_missing(&mut self, target: &NodeKey, attrs: Vec<Attribute>) {
         if let Some(node) = self.arena.nodes.get_mut(*target) {
             for attr in attrs {
-                let name = attr.name.local.to_string();
-                if let std::collections::hash_map::Entry::Vacant(e) = node.attributes.entry(name) {
-                    e.insert(attr.value.to_string());
-                }
+                node.attributes
+                    .insert_if_vacant(attr.name.local.to_string(), attr.value.to_string());
             }
         }
     }
