@@ -1775,6 +1775,267 @@ impl JsHandler for CloneNode {
     }
 }
 
+// ─── Migration 1: element.remove() ──────────────────────────────────────────
+struct Remove {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Remove {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                parent.children.retain(|&c| c != self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.parent = None;
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 2: element.before(...nodes) ──────────────────────────────────
+struct Before {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Before {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach ALLA nya noder först (förhindrar position-shift vid sibling-args)
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        // Hitta position EFTER detach
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .unwrap_or(0);
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 3: element.after(...nodes) ───────────────────────────────────
+struct After {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for After {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach ALLA först
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        // Hitta position EFTER detach
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 4: element.replaceWith(...nodes) ─────────────────────────────
+struct ReplaceWith {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceWith {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach alla nya noder + self
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .unwrap_or(0);
+        if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+            parent.children.retain(|&c| c != self.key);
+        }
+        if let Some(n) = s.arena.nodes.get_mut(self.key) {
+            n.parent = None;
+        }
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 5: toggleAttribute(name [, force]) ──────────────────────────
+struct ToggleAttribute {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ToggleAttribute {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if name.is_empty() {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "InvalidCharacterError: The string contains invalid characters.",
+                )?
+                .into(),
+            ));
+        }
+        let has_force = args.len() > 1;
+        let force = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+        let mut s = self.state.borrow_mut();
+        let has_attr = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.has_attr(&name))
+            .unwrap_or(false);
+        if has_force {
+            if force {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.attributes.insert(name, String::new());
+                }
+                return Ok(Value::new_bool(ctx.clone(), true));
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.remove(&name);
+            }
+            return Ok(Value::new_bool(ctx.clone(), false));
+        }
+        if has_attr {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.remove(&name);
+            }
+            Ok(Value::new_bool(ctx.clone(), false))
+        } else {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.insert(name, String::new());
+            }
+            Ok(Value::new_bool(ctx.clone(), true))
+        }
+    }
+}
+
+/// Konvertera JS-argument till NodeKeys.
+/// Strängar och null/undefined/numbers konverteras till textnoder.
+fn args_to_node_keys<'js>(
+    ctx: &Ctx<'js>,
+    args: &[Value<'js>],
+    state: &SharedState,
+) -> rquickjs::Result<Vec<NodeKey>> {
+    let mut keys = Vec::with_capacity(args.len());
+    for arg in args {
+        if let Some(nk) = extract_node_key(arg) {
+            keys.push(nk);
+        } else {
+            // Konvertera till textinnehåll: null→"null", undefined→"undefined", etc.
+            let text = if arg.is_null() {
+                "null".to_string()
+            } else if arg.is_undefined() {
+                "undefined".to_string()
+            } else if let Some(s) = arg.as_string() {
+                s.to_string().unwrap_or_default()
+            } else if let Some(n) = arg.as_number() {
+                if n == (n as i64) as f64 {
+                    format!("{}", n as i64)
+                } else {
+                    format!("{}", n)
+                }
+            } else {
+                "".to_string()
+            };
+            let mut s = state.borrow_mut();
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: None,
+                children: vec![],
+            });
+            keys.push(text_key);
+        }
+    }
+    Ok(keys)
+}
+
 fn clone_node_recursive(state: &SharedState, key: NodeKey, deep: bool) -> NodeKey {
     let mut s = state.borrow_mut();
     let node = match s.arena.nodes.get(key) {
@@ -2450,6 +2711,57 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(CloneNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    // ─── Rust-native ChildNode/ParentNode-metoder ─────────────────────
+    obj.set(
+        "remove",
+        Function::new(
+            ctx.clone(),
+            JsFn(Remove {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "before",
+        Function::new(
+            ctx.clone(),
+            JsFn(Before {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "after",
+        Function::new(
+            ctx.clone(),
+            JsFn(After {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "replaceWith",
+        Function::new(
+            ctx.clone(),
+            JsFn(ReplaceWith {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "toggleAttribute",
+        Function::new(
+            ctx.clone(),
+            JsFn(ToggleAttribute {
                 state: Rc::clone(state),
                 key,
             }),

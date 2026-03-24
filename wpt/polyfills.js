@@ -454,25 +454,10 @@
     // CharacterData-metoder för text/comment-noder
     if (typeof __patchCharacterData === 'function') __patchCharacterData(el);
 
-    if (!el.remove) {
-      el.remove = function() {
-        if (this.parentNode) {
-          this.parentNode.removeChild(this);
-        }
-      };
-    }
-
-    if (!el.before) {
-      el.before = function() {
-        var parent = this.parentNode;
-        if (!parent) return;
-        for (var i = 0; i < arguments.length; i++) {
-          parent.insertBefore(toNode(arguments[i]), this);
-        }
-      };
-    }
+    // remove(), before(), after() — nu Rust-native i dom_bridge.rs
 
     if (!el.after) {
+      // Fallback för noder som inte gick genom make_element_object
       el.after = function() {
         var parent = this.parentNode;
         if (!parent) return;
@@ -488,22 +473,7 @@
       };
     }
 
-    if (!el.replaceWith) {
-      el.replaceWith = function() {
-        var parent = this.parentNode;
-        if (!parent) return;
-        var ref = this.nextSibling;
-        parent.removeChild(this);
-        for (var i = 0; i < arguments.length; i++) {
-          var node = toNode(arguments[i]);
-          if (ref) {
-            parent.insertBefore(node, ref);
-          } else {
-            parent.appendChild(node);
-          }
-        }
-      };
-    }
+    // replaceWith() — nu Rust-native i dom_bridge.rs
 
     if (!el.prepend) {
       el.prepend = function() {
@@ -878,17 +848,7 @@
       }
     }
 
-    // toggleAttribute(name [, force])
-    if (!el.toggleAttribute) {
-      el.toggleAttribute = function(name, force) {
-        if (arguments.length > 1) {
-          if (force) { this.setAttribute(name, ''); return true; }
-          else { this.removeAttribute(name); return false; }
-        }
-        if (this.hasAttribute(name)) { this.removeAttribute(name); return false; }
-        else { this.setAttribute(name, ''); return true; }
-      };
-    }
+    // toggleAttribute — nu Rust-native i dom_bridge.rs
 
     // getAttributeNode(name) — returnerar Attr-liknande objekt
     if (!el.getAttributeNode) {
