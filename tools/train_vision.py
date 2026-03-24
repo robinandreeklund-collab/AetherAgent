@@ -84,7 +84,7 @@ _LEGACY_10_TO_22 = {
 # RTX 5090 defaults (32 GB VRAM)
 DEFAULT_EPOCHS = 300
 DEFAULT_BATCH = -1  # -1 = Ultralytics autobatch (60% VRAM target)
-DEFAULT_IMGSZ = 640
+DEFAULT_IMGSZ = 1280  # Matchar screenshot-viewport (1280x900) för bästa precision
 DEFAULT_MODEL_BASE = "yolo26n.pt"  # YOLO26 nano — NMS-free, edge-optimized, ONNX < 6 MB
 DEFAULT_PROJECT = str(Path(__file__).resolve().parent.parent / "runs" / "detect")
 DEFAULT_NAME = "aether-ui"

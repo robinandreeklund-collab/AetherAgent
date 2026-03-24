@@ -84,7 +84,7 @@ pub struct VisionConfig {
     /// IoU-tröskel för NMS (default 0.45)
     #[serde(default = "default_nms_threshold")]
     pub nms_threshold: f32,
-    /// Input-storlek för modellen (default 640)
+    /// Input-storlek för modellen (default 1280)
     #[serde(default = "default_input_size")]
     pub input_size: u32,
     /// Max antal detektioner att returnera (default 100)
@@ -113,7 +113,7 @@ fn default_nms_threshold() -> f32 {
 }
 
 fn default_input_size() -> u32 {
-    640
+    1280
 }
 
 fn default_max_detections() -> usize {
@@ -658,7 +658,7 @@ mod tests {
             (config.nms_threshold - 0.45).abs() < 0.01,
             "NMS-tröskel borde vara 0.45"
         );
-        assert_eq!(config.input_size, 640, "Input-storlek borde vara 640");
+        assert_eq!(config.input_size, 1280, "Input-storlek borde vara 1280");
         assert_eq!(config.max_detections, 100, "Max detektioner borde vara 100");
     }
 
