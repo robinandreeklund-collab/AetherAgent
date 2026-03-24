@@ -246,7 +246,7 @@ Embedded **QuickJS** JS engine (via `rquickjs` 0.11) for safe snippet evaluation
 | Traversal | `parentNode`, `childNodes`, `children`, `firstChild`, `nextSibling`, `closest`, `matches`, `contains` | |
 | Events | `addEventListener`, `removeEventListener`, `dispatchEvent`, `Event`, `CustomEvent`, `MutationObserver` | |
 | Style & layout | `classList`, `style.*`, `getComputedStyle`, `getBoundingClientRect`, `offset*`, `scroll*` | |
-| **WPT dom/ total** | **2,004 cases** | **1,225 passed (61.1%)** |
+| **WPT dom/ total** | **2,004 cases** | **1,303 passed (65.0%)** |
 
 > Full API reference with all 55+ methods, CSS selectors, framework coverage estimates, and WPT details: **[docs/dom-api-coverage.md](docs/dom-api-coverage.md)**
 
