@@ -1,19 +1,24 @@
 # html5ever Parser Tweaks — Research 2026-03-24
 
-## Prioriterade Optimeringar
+## ALLA IMPLEMENTERADE ✅
 
-| # | Optimering | Sparar | Insats | Risk |
-|---|-----------|--------|--------|------|
-| 1 | `.one(StrTendril)` istf `.from_utf8().read_from()` | 0.5-1.0ms | 3 rader | Minimal |
-| 2 | Per-crate `opt-level = 3` for html5ever | 1.0-2.0ms | 4 rader Cargo.toml | Minimal |
-| 3 | `Option<QualName>` i DomNode, ta bort tag_names HashMap | 0.3-0.5ms | Medium refactor | Lag |
-| 4 | `SmallVec<[(String,String); 4]>` for attribut | 0.3-0.4ms | Medium | Lag |
-| 5 | `StrTendril` for text istf `String` | 0.3-0.5ms | API-andring | Medium |
-| 6 | HTML-langd-baserad pre-allokering | 0.1-0.2ms | Trivial | Minimal |
-| 7 | Uppgradera html5ever 0.27 -> 0.39 | 0.5-1.0ms | Stor refactor | Medium |
+| # | Optimering | Status | Commit |
+|---|-----------|--------|--------|
+| 1 | `.one(StrTendril)` — eliminera 4KB chunking | ✅ | `2f1d53b` |
+| 2 | Per-crate `opt-level = 3` | ✅ | `2f1d53b` |
+| 3 | SecondaryMap for tag_names (ersatte HashMap) | ✅ | `e79e435` |
+| 4 | SmallVec Attrs (ersatte HashMap per element) | ✅ | `e79e435` |
+| 5 | StrTendril for text (eliminerar .to_string()) | ✅ | `7901105` |
+| 6 | HTML-langd-baserad pre-allokering | ✅ | `2f1d53b` |
+| 7 | html5ever 0.27 → 0.38 (phf atoms, RefCell) | ✅ | `a90b10c` |
+| 8 | Whitespace text filtering (41% av noder) | ✅ | `79066a9` |
+| 9 | Script/style/noscript text skip | ✅ | `b4dbbd5` |
 
-### Konservativ uppskattning (1+2+3+4+6): 2.2-4.1ms sparad
-### Aggressiv uppskattning (alla): 3.0-5.6ms sparad
+### Slutresultat vs baseline:
+- **html5ever stage: 8.7ms → 5.2ms (-40%)**
+- **semantic stage: 6.6ms → 4.5ms (-32%)**
+- **heavy page total: ~19.9ms → 10.6ms (-47%)**
+- **click:complex: 3332µs → 1615µs (-52%)**
 
 ---
 
