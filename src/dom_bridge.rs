@@ -5222,6 +5222,55 @@ fn register_window_with_viewport<'js>(
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
         globalThis.crypto = globalThis.window.crypto;
+
+        // TextEncoder/TextDecoder — UTF-8
+        globalThis.TextEncoder = function TextEncoder() {
+            this.encoding = 'utf-8';
+        };
+        TextEncoder.prototype.encode = function(str) {
+            str = String(str || '');
+            var buf = [];
+            for (var i = 0; i < str.length; i++) {
+                var cp = str.codePointAt(i);
+                if (cp < 0x80) {
+                    buf.push(cp);
+                } else if (cp < 0x800) {
+                    buf.push(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    buf.push(0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+                } else {
+                    buf.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+                    i++;
+                }
+            }
+            return new Uint8Array(buf);
+        };
+        TextEncoder.prototype.encodeInto = function(str, dest) {
+            var encoded = this.encode(str);
+            var written = Math.min(encoded.length, dest.length);
+            for (var i = 0; i < written; i++) dest[i] = encoded[i];
+            return { read: str.length, written: written };
+        };
+
+        globalThis.TextDecoder = function TextDecoder(label) {
+            this.encoding = (label || 'utf-8').toLowerCase().replace(/[^a-z0-9-]/g, '');
+            if (this.encoding === 'utf8') this.encoding = 'utf-8';
+            this.fatal = false;
+            this.ignoreBOM = false;
+        };
+        TextDecoder.prototype.decode = function(input) {
+            if (!input || !input.length) return '';
+            var bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+            var result = '';
+            for (var i = 0; i < bytes.length;) {
+                var b = bytes[i];
+                if (b < 0x80) { result += String.fromCodePoint(b); i++; }
+                else if (b < 0xE0) { result += String.fromCodePoint(((b & 0x1F) << 6) | (bytes[i+1] & 0x3F)); i += 2; }
+                else if (b < 0xF0) { result += String.fromCodePoint(((b & 0x0F) << 12) | ((bytes[i+1] & 0x3F) << 6) | (bytes[i+2] & 0x3F)); i += 3; }
+                else { result += String.fromCodePoint(((b & 0x07) << 18) | ((bytes[i+1] & 0x3F) << 12) | ((bytes[i+2] & 0x3F) << 6) | (bytes[i+3] & 0x3F)); i += 4; }
+            }
+            return result;
+        };
         globalThis.Event = function Event(type, opts) {
             this.type = type || '';
             this.bubbles = (opts && opts.bubbles) || false;
