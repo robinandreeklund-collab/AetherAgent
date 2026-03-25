@@ -51,9 +51,15 @@ pub fn build_blitz_computed_styles(
     };
 
     // Kör Stylo CSS resolution (beräknar ALLA computed styles)
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let resolve_ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         doc.as_mut().resolve(0.0);
-    }));
+    }))
+    .is_ok();
+
+    // Om resolve kraschade, returnera tomma styles (fallback till tag defaults)
+    if !resolve_ok {
+        return styles_map;
+    }
 
     // Traversera Blitz DOM i DFS-ordning, extrahera computed styles
     let blitz_doc = doc.as_ref();

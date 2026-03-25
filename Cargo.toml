@@ -153,3 +153,6 @@ debug = true
 # Fler codegen-units → lägre peak-minnesanvändning vid länkning
 # (default 256 i dev, men explicit för tydlighet)
 codegen-units = 256
+
+[patch.crates-io]
+stylo = { path = "vendor/stylo-patched" }
