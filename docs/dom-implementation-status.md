@@ -122,27 +122,29 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `getAttributeNode(name)` | Låg | Returnerar Attr-liknande objekt |
 | `moveBefore(node, child)` | Låg | Ny spec — delegerar till insertBefore |
 
-## Range API — Polyfill (JS, hög prioritet för Rust-migration)
+## Range API — Native (migrerad 2026-03-25)
 
 | Method | Status | Kommentar |
 |--------|--------|----------|
-| `document.createRange()` | Polyfill | Skapar AetherRange i JS |
-| `setStart/setEnd(node, offset)` | Polyfill | Boundary-sättning med offset-validering |
-| `setStartBefore/After(node)` | Polyfill | Via parentNode-index |
-| `setEndBefore/After(node)` | Polyfill | Via parentNode-index |
-| `collapse(toStart)` | Polyfill | Booleansk collapse |
-| `selectNode/selectNodeContents` | Polyfill | Väljer nod/barn |
-| `compareBoundaryPoints(how, range)` | Polyfill | NotSupportedError för how>3 (2026-03-25) |
-| `comparePoint(node, offset)` | Polyfill | IndexSizeError-validering (2026-03-25) |
-| `isPointInRange(node, offset)` | Polyfill | Wrapper kring comparePoint |
-| `intersectsNode(node)` | Polyfill | Root-jämförelse |
-| `cloneRange()` | Polyfill | Kopierar state |
-| `toString()` | Polyfill | Textextraktion |
-| `deleteContents/extractContents` | Polyfill | Stubs (no-op) |
-| `getBoundingClientRect()` | Polyfill | Returnerar nollor |
-| `detach()` | Polyfill | No-op per spec |
+| `document.createRange()` | **Native** | Skapar Range via globalThis.Range |
+| `setStart/setEnd(node, offset)` | **Native** | IndexSizeError-validering |
+| `setStartBefore/After(node)` | **Native** | Via __nativeChildIndex (Rust) |
+| `setEndBefore/After(node)` | **Native** | Via __nativeChildIndex (Rust) |
+| `collapse(toStart)` | **Native** | 96.8% WPT pass |
+| `selectNode/selectNodeContents` | **Native** | 100% WPT pass |
+| `compareBoundaryPoints(how, range)` | **Native** | WrongDocumentError, NotSupportedError |
+| `comparePoint(node, offset)` | **Native** | 88.6% WPT pass |
+| `isPointInRange(node, offset)` | **Native** | Wrapper kring comparePoint |
+| `intersectsNode(node)` | **Native** | __nativeChildIndex optimization |
+| `cloneRange()` | **Native** | 90.3% WPT pass |
+| `toString()` | **Native** | Multi-nod stöd (DOM tree walk) |
+| `_compareBoundary()` | **Native** | __nativeCompareBoundary → Rust ArenaDom |
+| `deleteContents/extractContents` | Stub | No-op |
+| `getBoundingClientRect()` | Stub | Returnerar nollor |
+| `detach()` | **Native** | No-op per spec |
 
-**~4,000 WPT-tester berör Range API. Rust-migration är högsta prioritet.**
+**Migrerad från polyfill → dom_bridge.rs (2026-03-25).** Boundary-jämförelse i ren Rust.
+WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking.
 
 ## NodeType — Native (Rust)
 
@@ -177,19 +179,22 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `Event` / `CustomEvent` konstruktorer | **Native** (Rust) |
 | `MutationObserver` constructor | **Native** — new-stöd via JS klass-wrapper (2026-03-25) |
 | Passive-by-default (touchstart, wheel) | **Native** (2026-03-25) |
-| `MouseEvent`, `KeyboardEvent` etc. | Polyfill (tomma konstruktorer) |
+| `MouseEvent`, `KeyboardEvent` etc. | Polyfill (konstruktorer utan spec-properties) |
 | `document.createEvent(type)` | Polyfill |
-| `event.initEvent()` | Polyfill |
-| `stopPropagation` / `stopImmediatePropagation` | Native |
+| `event.initEvent()` | **Native** (2026-03-25) — med state reset |
+| `Event.NONE/CAPTURING_PHASE/AT_TARGET/BUBBLING_PHASE` | **Native** (2026-03-25) |
+| `cancelBubble` | **Native** (2026-03-25) |
+| `stopPropagation` / `stopImmediatePropagation` | **Native** (2026-03-25) — sätter flaggor |
 
-## DOMException — Polyfill
+## DOMException — Native (migrerad 2026-03-25)
 
 | Feature | Status |
 |---------|--------|
-| `DOMException(message, name)` constructor | Polyfill |
-| `throw_dom_exception()` Rust-helper | **Native** (2026-03-25) — skapar DOMException via JS eval |
-| DOMException.INDEX_SIZE_ERR etc. | Polyfill (statiska koder) |
-| `validate_token()` → SyntaxError/InvalidCharacterError | **Native** (2026-03-25) |
+| `DOMException(message, name)` constructor | **Native** — register_dom_exception() i dom_bridge.rs |
+| Alla error-koder (INDEX_SIZE_ERR etc.) | **Native** — 25 koder på constructor + prototype |
+| `throw_dom_exception()` Rust-helper | **Native** — skapar DOMException via JS eval |
+| `validate_token()` → SyntaxError/InvalidCharacterError | **Native** |
+| `Error.prototype` kedja | **Native** — DOMException ärver Error |
 
 ## CSS Selector Parser — Native (Rust)
 
@@ -255,11 +260,11 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 11. ~~`nodeValue` per nodeType~~ ✅
 12. ~~`MutationObserver` constructor~~ ✅
 
-### Fas 3 — Nästa (Hög prioritet)
-13. **Range API → Rust** — ~11,000 WPT-testcases, störst impact. Migrera från `wpt/polyfills.js` till `dom_bridge.rs`
-14. **DOMException constructor → Rust** — renare error-hantering, påverkar alla sviter
-15. **Event subclasses → Rust** — MouseEvent, KeyboardEvent med properties. `dom/events/` 32% → 55%
-16. `prepend()` / `append()` / `replaceChildren()` — ParentNode convenience. `dom/nodes/` +50-100 pass
+### Fas 3 — KLAR (2026-03-25)
+13. ~~**Range API → Rust**~~ ✅ — Migrerad till dom_bridge.rs med Rust-native boundary comparison
+14. ~~**DOMException constructor → Rust**~~ ✅ — register_dom_exception() med alla 25 koder
+15. **Event subclasses → Rust** — MouseEvent, KeyboardEvent med spec-properties (pågår)
+16. ~~`prepend()` / `append()` / `replaceChildren()`~~ ✅ — Redan native sedan Fas 17
 
 ### Fas 4 — Medium prioritet
 17. CSS selectors: `+`, `~` — Adjacent/general sibling combinators. `css/selectors/` 12% → 30%

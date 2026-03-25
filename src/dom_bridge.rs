@@ -6498,16 +6498,21 @@ fn register_window_with_viewport<'js>(
             this.currentTarget = null;
             this.eventPhase = 0;
             this.defaultPrevented = false;
-            this.cancelBubble = false;
             this.returnValue = true;
             this.timeStamp = Date.now();
             this.isTrusted = false;
             this._stopPropagationFlag = false;
             this._stopImmediatePropagationFlag = false;
-            this.stopPropagation = function() { this._stopPropagationFlag = true; this.cancelBubble = true; };
-            this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; this.cancelBubble = true; };
+            // cancelBubble: getter/setter per spec — set(false) = no-op, set(true) = stopPropagation
+            Object.defineProperty(this, 'cancelBubble', {
+                get: function() { return this._stopPropagationFlag; },
+                set: function(v) { if (v) this._stopPropagationFlag = true; },
+                configurable: true, enumerable: true
+            });
+            this.stopPropagation = function() { this._stopPropagationFlag = true; };
+            this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
             this.preventDefault = function() { if (this.cancelable) { this.defaultPrevented = true; this.returnValue = false; } };
-            this.initEvent = function(type, bubbles, cancelable) { this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this.cancelBubble = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; };
+            this.initEvent = function(type, bubbles, cancelable) { this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; };
         };
         Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
         Event.prototype.NONE = 0; Event.prototype.CAPTURING_PHASE = 1; Event.prototype.AT_TARGET = 2; Event.prototype.BUBBLING_PHASE = 3;

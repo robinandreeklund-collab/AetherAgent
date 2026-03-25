@@ -12,10 +12,10 @@
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~5,600+ | ~65% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~320+ | ~14% |
+| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~12,800+ | ~64% |
+| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~360+ | ~16% |
 | **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~72 | ~5% |
-| **Total alla sviter** | | **~23,600+** | **~6,000+** | — |
+| **Total alla sviter** | | **~23,600+** | **~13,200+** | — |
 
 ---
 
@@ -49,7 +49,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
-| **2026-03-25** | **160** | **311** | **109** | **35.0%** | +9 pass: Event constants, cancelBubble, initEvent |
+| 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
+| **2026-03-25** | **160** | **311** | **140** | **45.0%** | +31 pass: Event subclasses, cancelBubble spec fix |
 
 **Implementerat:**
 - addEventListener med options (capture, passive) ✅
@@ -175,7 +176,8 @@ AbortController/AbortSignal saknas helt. Låg prioritet.
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **536** | **204** | **26** | **12.7%** | Baseline |
+| 2026-03-25 | 536 | 204 | 26 | 12.7% | Baseline |
+| **2026-03-25** | **536** | **340** | **68** | **20.0%** | +42 pass: ownerDocument fix |
 
 html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 

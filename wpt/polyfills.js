@@ -219,47 +219,137 @@
   }
 })();
 
-// ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
+// ─── Event-typ-konstruktorer (med spec-korrekta properties) ──────────────────
+// Migrerad till dom_bridge.rs-stil: ärver Event, lägger till subclass-properties.
 (function() {
-  // Definiera saknade event-typer som ärver från Event
-  var eventTypes = [
-    'BeforeUnloadEvent', 'CompositionEvent', 'FocusEvent', 'InputEvent',
-    'KeyboardEvent', 'MouseEvent', 'UIEvent', 'WheelEvent', 'TouchEvent',
-    'AnimationEvent', 'TransitionEvent', 'PointerEvent', 'HashChangeEvent',
-    'PopStateEvent', 'StorageEvent', 'PageTransitionEvent', 'ProgressEvent',
-    'ClipboardEvent', 'DragEvent', 'ErrorEvent', 'MessageEvent',
-    'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
+  if (typeof Event === 'undefined') return;
+
+  // UIEvent — bas för Mouse/Keyboard/Focus/Input
+  if (!globalThis.UIEvent) {
+    globalThis.UIEvent = function UIEvent(type, opts) {
+      Event.call(this, type, opts);
+      this.view = (opts && opts.view) || null;
+      this.detail = (opts && opts.detail !== undefined) ? opts.detail : 0;
+    };
+    UIEvent.prototype = Object.create(Event.prototype);
+    UIEvent.prototype.constructor = UIEvent;
+    UIEvent.prototype.initUIEvent = function(t, b, c, v, d) { this.initEvent(t, b, c); this.view = v || null; this.detail = d || 0; };
+  }
+
+  // MouseEvent
+  if (!globalThis.MouseEvent) {
+    globalThis.MouseEvent = function MouseEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.screenX = o.screenX || 0; this.screenY = o.screenY || 0;
+      this.clientX = o.clientX || 0; this.clientY = o.clientY || 0;
+      this.pageX = o.pageX || 0; this.pageY = o.pageY || 0;
+      this.offsetX = o.offsetX || 0; this.offsetY = o.offsetY || 0;
+      this.movementX = o.movementX || 0; this.movementY = o.movementY || 0;
+      this.button = o.button || 0; this.buttons = o.buttons || 0;
+      this.relatedTarget = o.relatedTarget || null;
+      this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+      this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+    };
+    MouseEvent.prototype = Object.create(UIEvent.prototype);
+    MouseEvent.prototype.constructor = MouseEvent;
+    MouseEvent.prototype.initMouseEvent = function(t,b,c,v,d,sx,sy,cx,cy,ctrl,alt,shift,meta,btn,rt) {
+      this.initUIEvent(t,b,c,v,d); this.screenX=sx||0; this.screenY=sy||0; this.clientX=cx||0; this.clientY=cy||0;
+      this.ctrlKey=!!ctrl; this.altKey=!!alt; this.shiftKey=!!shift; this.metaKey=!!meta; this.button=btn||0; this.relatedTarget=rt||null;
+    };
+    MouseEvent.prototype.getModifierState = function(key) {
+      if (key === 'Control') return this.ctrlKey; if (key === 'Shift') return this.shiftKey;
+      if (key === 'Alt') return this.altKey; if (key === 'Meta') return this.metaKey; return false;
+    };
+  }
+
+  // KeyboardEvent
+  if (!globalThis.KeyboardEvent) {
+    globalThis.KeyboardEvent = function KeyboardEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.key = o.key || ''; this.code = o.code || '';
+      this.location = o.location || 0;
+      this.repeat = !!o.repeat; this.isComposing = !!o.isComposing;
+      this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+      this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+      this.charCode = o.charCode || 0; this.keyCode = o.keyCode || 0; this.which = o.which || 0;
+    };
+    KeyboardEvent.prototype = Object.create(UIEvent.prototype);
+    KeyboardEvent.prototype.constructor = KeyboardEvent;
+    KeyboardEvent.prototype.getModifierState = function(key) {
+      if (key === 'Control') return this.ctrlKey; if (key === 'Shift') return this.shiftKey;
+      if (key === 'Alt') return this.altKey; if (key === 'Meta') return this.metaKey; return false;
+    };
+    KeyboardEvent.DOM_KEY_LOCATION_STANDARD = 0; KeyboardEvent.DOM_KEY_LOCATION_LEFT = 1;
+    KeyboardEvent.DOM_KEY_LOCATION_RIGHT = 2; KeyboardEvent.DOM_KEY_LOCATION_NUMPAD = 3;
+  }
+
+  // FocusEvent
+  if (!globalThis.FocusEvent) {
+    globalThis.FocusEvent = function FocusEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      this.relatedTarget = (opts && opts.relatedTarget) || null;
+    };
+    FocusEvent.prototype = Object.create(UIEvent.prototype);
+    FocusEvent.prototype.constructor = FocusEvent;
+  }
+
+  // InputEvent
+  if (!globalThis.InputEvent) {
+    globalThis.InputEvent = function InputEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.data = o.data !== undefined ? o.data : null;
+      this.inputType = o.inputType || '';
+      this.isComposing = !!o.isComposing;
+      this.dataTransfer = o.dataTransfer || null;
+    };
+    InputEvent.prototype = Object.create(UIEvent.prototype);
+    InputEvent.prototype.constructor = InputEvent;
+  }
+
+  // WheelEvent
+  if (!globalThis.WheelEvent) {
+    globalThis.WheelEvent = function WheelEvent(type, opts) {
+      MouseEvent.call(this, type, opts);
+      var o = opts || {};
+      this.deltaX = o.deltaX || 0; this.deltaY = o.deltaY || 0; this.deltaZ = o.deltaZ || 0;
+      this.deltaMode = o.deltaMode || 0;
+    };
+    WheelEvent.prototype = Object.create(MouseEvent.prototype);
+    WheelEvent.prototype.constructor = WheelEvent;
+    WheelEvent.DOM_DELTA_PIXEL = 0; WheelEvent.DOM_DELTA_LINE = 1; WheelEvent.DOM_DELTA_PAGE = 2;
+  }
+
+  // PointerEvent
+  if (!globalThis.PointerEvent) {
+    globalThis.PointerEvent = function PointerEvent(type, opts) {
+      MouseEvent.call(this, type, opts);
+      var o = opts || {};
+      this.pointerId = o.pointerId || 0; this.width = o.width || 1; this.height = o.height || 1;
+      this.pressure = o.pressure || 0; this.tangentialPressure = o.tangentialPressure || 0;
+      this.tiltX = o.tiltX || 0; this.tiltY = o.tiltY || 0; this.twist = o.twist || 0;
+      this.pointerType = o.pointerType || ''; this.isPrimary = !!o.isPrimary;
+    };
+    PointerEvent.prototype = Object.create(MouseEvent.prototype);
+    PointerEvent.prototype.constructor = PointerEvent;
+  }
+
+  // Enklare event-typer (ärver Event direkt)
+  var simpleTypes = [
+    'CompositionEvent', 'TouchEvent', 'AnimationEvent', 'TransitionEvent',
+    'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
+    'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
+    'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
     'DeviceMotionEvent', 'DeviceOrientationEvent', 'GamepadEvent',
-    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent'
+    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent', 'BeforeUnloadEvent'
   ];
-  eventTypes.forEach(function(name) {
+  simpleTypes.forEach(function(name) {
     if (!globalThis[name]) {
-      globalThis[name] = function(type, opts) {
-        this.type = type || '';
-        this.bubbles = (opts && opts.bubbles) || false;
-        this.cancelable = (opts && opts.cancelable) || false;
-        this.defaultPrevented = false;
-        this.target = null;
-        this.srcElement = null;
-        this.currentTarget = null;
-        this.eventPhase = 0;
-        this.timeStamp = Date.now();
-        this.isTrusted = false;
-        this.composed = false;
-        this.detail = (opts && opts.detail) || null;
-        this.view = null;
-        this.relatedTarget = null;
-        this.defaultPrevented = false;
-        this.returnValue = true;
-        this.preventDefault = function() { if (!this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
-        this.stopPropagation = function() {};
-        this.stopImmediatePropagation = function() {};
-        this.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
-      };
-      if (typeof Event !== 'undefined') {
-        globalThis[name].prototype = Object.create(Event.prototype);
-        globalThis[name].prototype.constructor = globalThis[name];
-      }
+      globalThis[name] = function(type, opts) { Event.call(this, type, opts); };
+      globalThis[name].prototype = Object.create(Event.prototype);
+      globalThis[name].prototype.constructor = globalThis[name];
     }
   });
 })();
