@@ -3195,12 +3195,17 @@ impl JsHandler for CreateTreeWalker {
         let filter = args.get(2).cloned();
 
         let tw = Object::new(ctx.clone())?;
+        // Använd inpassat root-objekt direkt (bevarar JS-referens)
+        let root_val = args
+            .first()
+            .cloned()
+            .unwrap_or(Value::new_undefined(ctx.clone()));
         let root_obj = make_element_object(ctx, root_key, &self.state)?;
-        tw.set("root", root_obj.clone())?;
-        tw.set("whatToShow", what_to_show)?;
+        tw.set("root", root_val)?;
+        tw.set("whatToShow", what_to_show as f64)?;
         tw.set("currentNode", root_obj)?;
         tw.set("__rootKey", node_key_to_f64(root_key))?;
-        tw.set("__whatToShow", what_to_show)?;
+        tw.set("__whatToShow", what_to_show as f64)?;
         if let Some(f) = &filter {
             if !f.is_null() && !f.is_undefined() {
                 tw.set("filter", f.clone())?;
@@ -3365,11 +3370,16 @@ impl JsHandler for CreateNodeIterator {
         let filter = args.get(2).cloned();
 
         let ni = Object::new(ctx.clone())?;
-        let root_obj = make_element_object(ctx, root_key, &self.state)?;
-        ni.set("root", root_obj.clone())?;
-        ni.set("referenceNode", root_obj.clone())?;
-        ni.set("whatToShow", what_to_show)?;
-        ni.set("__whatToShow", what_to_show)?;
+        // Använd det inpassade root-objektet direkt (bevarar JS-referens-identitet)
+        let root_val = args
+            .first()
+            .cloned()
+            .unwrap_or(Value::new_undefined(ctx.clone()));
+        ni.set("root", root_val.clone())?;
+        ni.set("referenceNode", root_val)?;
+        // whatToShow som f64 för att undvika signed/unsigned problem
+        ni.set("whatToShow", what_to_show as f64)?;
+        ni.set("__whatToShow", what_to_show as f64)?;
         ni.set("pointerBeforeReferenceNode", true)?;
         if let Some(f) = &filter {
             if !f.is_null() && !f.is_undefined() {
