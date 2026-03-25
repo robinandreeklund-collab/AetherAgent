@@ -7371,17 +7371,32 @@ fn register_window_with_viewport<'js>(
         };
         globalThis.DOMParser = function DOMParser() {
             this.parseFromString = function(str, type) {
-                var doc = {
-                    documentElement: document.documentElement,
-                    body: document.body,
-                    head: document.head,
-                    querySelector: function(sel) { return document.querySelector(sel); },
-                    querySelectorAll: function(sel) { return document.querySelectorAll(sel); },
-                    getElementById: function(id) { return document.getElementById(id); },
-                    getElementsByTagName: function(tag) { return document.getElementsByTagName(tag); },
-                    getElementsByClassName: function(cls) { return document.getElementsByClassName(cls); }
-                };
-                return doc;
+                if (type && type !== 'text/html' && type !== 'text/xml' &&
+                    type !== 'application/xml' && type !== 'application/xhtml+xml' &&
+                    type !== 'image/svg+xml') {
+                    throw new TypeError("Invalid MIME type: " + type);
+                }
+                // Skapa en ny document via createHTMLDocument och parsa HTML in i den
+                var newDoc = document.implementation.createHTMLDocument('');
+                if (str && newDoc.documentElement) {
+                    newDoc.documentElement.innerHTML = str;
+                }
+                // Spec-krävda properties
+                newDoc.contentType = type || 'text/html';
+                newDoc.compatMode = (str && str.indexOf('<!DOCTYPE') !== -1) ? 'CSS1Compat' : 'BackCompat';
+                newDoc.location = null;
+                newDoc.URL = 'about:blank';
+                newDoc.documentURI = 'about:blank';
+                newDoc.nodeType = 9;
+                return newDoc;
+            };
+        };
+        globalThis.XMLSerializer = function XMLSerializer() {
+            this.serializeToString = function(node) {
+                if (node && node.outerHTML !== undefined) return node.outerHTML;
+                if (node && node.nodeType === 9 && node.documentElement) return node.documentElement.outerHTML || '';
+                if (node && node.textContent !== undefined) return node.textContent;
+                return '';
             };
         };
         globalThis.URL = function URL(url, base) {
