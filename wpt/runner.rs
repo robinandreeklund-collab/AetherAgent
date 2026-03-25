@@ -122,8 +122,7 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         "pre-insertion-validation",
         "inserting-fragment-under-shadow-host",
         "dir-shadow-",               // Orsakar stack overflow vid batch-körning
-        "Range-intersectsNode.html", // >45s, childNodes-iteration i djup DOM
-        "Range-selectNode.html",     // >45s, childNodes-iteration i djup DOM
+        "Range-intersectsNode.html", // >60s, tusentals noder × 2 boundary-jämförelser
     ];
     if skip_patterns.iter().any(|p| file_name.contains(p)) {
         return WptTestResult {

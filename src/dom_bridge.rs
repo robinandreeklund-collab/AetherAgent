@@ -832,6 +832,36 @@ impl JsHandler for CreateRange {
     }
 }
 
+// ─── __nativeChildIndex — snabb barn-index lookup i Rust ─────────────────────
+// Returnerar index av child i parent.children, eller -1 om ej funnen.
+struct NativeChildIndex {
+    state: SharedState,
+}
+impl JsHandler for NativeChildIndex {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = args.first().and_then(extract_node_key);
+        let child_key = args.get(1).and_then(extract_node_key);
+        match (parent_key, child_key) {
+            (Some(pk), Some(ck)) => {
+                let s = self.state.borrow();
+                let idx = s
+                    .arena
+                    .nodes
+                    .get(pk)
+                    .map(|n| {
+                        n.children
+                            .iter()
+                            .position(|&c| c == ck)
+                            .map_or(-1i32, |i| i as i32)
+                    })
+                    .unwrap_or(-1);
+                Ok(Value::new_int(ctx.clone(), idx))
+            }
+            _ => Ok(Value::new_int(ctx.clone(), -1)),
+        }
+    }
+}
+
 // ─── __nativeCompareBoundary — snabb Rust boundary-jämförelse ────────────────
 // Anropas av Range._compareBoundary istället för JS-baserad traversering.
 // Tar (nodeKeyA, offsetA, nodeKeyB, offsetB) → -1, 0, 1
@@ -1045,6 +1075,16 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set(
         "createRange",
         Function::new(ctx.clone(), JsFn(CreateRange))?,
+    )?;
+    // __nativeChildIndex — snabb barn-index lookup för Range
+    doc.set(
+        "__nativeChildIndex",
+        Function::new(
+            ctx.clone(),
+            JsFn(NativeChildIndex {
+                state: Rc::clone(&state),
+            }),
+        )?,
     )?;
     // __nativeCompareBoundary — snabb Rust boundary-jämförelse för Range
     doc.set(
@@ -6459,19 +6499,19 @@ fn register_window_with_viewport<'js>(
         };
         Range.prototype.setStartBefore = function(node) {
             var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
-            var idx = Array.from(p.childNodes).indexOf(node); this.setStart(p, idx);
+            var idx = (p.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(p, node) : Array.from(p.childNodes).indexOf(node); this.setStart(p, idx);
         };
         Range.prototype.setStartAfter = function(node) {
             var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
-            var idx = Array.from(p.childNodes).indexOf(node); this.setStart(p, idx + 1);
+            var idx = (p.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(p, node) : Array.from(p.childNodes).indexOf(node); this.setStart(p, idx + 1);
         };
         Range.prototype.setEndBefore = function(node) {
             var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
-            var idx = Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx);
+            var idx = (p.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(p, node) : Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx);
         };
         Range.prototype.setEndAfter = function(node) {
             var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
-            var idx = Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx + 1);
+            var idx = (p.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(p, node) : Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx + 1);
         };
         Range.prototype.collapse = function(toStart) {
             if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
@@ -6480,7 +6520,7 @@ fn register_window_with_viewport<'js>(
         };
         Range.prototype.selectNode = function(node) {
             var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
-            var idx = Array.from(p.childNodes).indexOf(node);
+            var idx = (p.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(p, node) : Array.from(p.childNodes).indexOf(node);
             this.setStart(p, idx); this.setEnd(p, idx + 1);
         };
         Range.prototype.selectNodeContents = function(node) {
@@ -6491,6 +6531,11 @@ fn register_window_with_viewport<'js>(
         Range.prototype.compareBoundaryPoints = function(how, sourceRange) {
             how = ((how | 0) & 0xFFFF) >>> 0;
             if (how > 3) throw new DOMException('The comparison method provided is not supported.', 'NotSupportedError');
+            // Spec: ranges must share same root, otherwise WrongDocumentError
+            var thisRoot = this.startContainer; while (thisRoot && thisRoot.parentNode) thisRoot = thisRoot.parentNode;
+            var srcRoot = sourceRange.startContainer; while (srcRoot && srcRoot.parentNode) srcRoot = srcRoot.parentNode;
+            if (thisRoot !== srcRoot && !(thisRoot && srcRoot && thisRoot.__nodeKey__ && srcRoot.__nodeKey__ && thisRoot.__nodeKey__ === srcRoot.__nodeKey__))
+                throw new DOMException('Wrong document', 'WrongDocumentError');
             var thisC, thisO, srcC, srcO;
             switch (how) {
                 case 0: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
@@ -6522,10 +6567,12 @@ fn register_window_with_viewport<'js>(
             if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) return false;
             var parent = node.parentNode;
             if (!parent) return true;
-            var kids = parent.childNodes; if (!kids) return true;
-            var idx = -1;
-            for (var i = 0; i < kids.length; i++) {
-                if (kids[i] === node || (kids[i].__nodeKey__ && node.__nodeKey__ && kids[i].__nodeKey__ === node.__nodeKey__)) { idx = i; break; }
+            var idx = (parent.__nodeKey__ && node.__nodeKey__ && document.__nativeChildIndex) ? document.__nativeChildIndex(parent, node) : -1;
+            if (idx < 0) {
+                var kids = parent.childNodes; if (!kids) return true;
+                for (var i = 0; i < kids.length; i++) {
+                    if (kids[i] === node || (kids[i].__nodeKey__ && node.__nodeKey__ && kids[i].__nodeKey__ === node.__nodeKey__)) { idx = i; break; }
+                }
             }
             if (idx < 0) return true;
             return this._compareBoundary(parent, idx + 1, this.startContainer, this.startOffset) > 0 &&
@@ -6537,9 +6584,31 @@ fn register_window_with_viewport<'js>(
         };
         Range.prototype.detach = function() {};
         Range.prototype.toString = function() {
-            if (this.startContainer === this.endContainer && this.startContainer.nodeType === 3)
-                return (this.startContainer.data || '').substring(this.startOffset, this.endOffset);
-            return '';
+            if (this.collapsed) return '';
+            var sc = this.startContainer, so = this.startOffset, ec = this.endContainer, eo = this.endOffset;
+            // Same text node — simple case
+            if (sc === ec && sc.nodeType === 3) return (sc.data || '').substring(so, eo);
+            // Multi-node: collect text
+            var result = '';
+            // Start node partial text
+            if (sc.nodeType === 3) { result += (sc.data || '').substring(so); }
+            // Walk DOM in document order between start and end
+            function walk(node) {
+                if (node === ec) { if (node.nodeType === 3) result += (node.data || '').substring(0, eo); return true; }
+                if (node.nodeType === 3) result += (node.data || '');
+                if (node.childNodes) { for (var i = 0; i < node.childNodes.length; i++) { if (walk(node.childNodes[i])) return true; } }
+                return false;
+            }
+            // Find next node after start
+            var current = sc;
+            if (sc.nodeType !== 3 && sc.childNodes && sc.childNodes[so]) { if (walk(sc.childNodes[so])) return result; current = sc.childNodes[so]; }
+            // Walk siblings and up
+            while (current) {
+                var next = current.nextSibling;
+                while (next) { if (walk(next)) return result; next = next.nextSibling; }
+                current = current.parentNode;
+            }
+            return result;
         };
         Range.prototype.deleteContents = function() {};
         Range.prototype.extractContents = function() { return document.createDocumentFragment(); };

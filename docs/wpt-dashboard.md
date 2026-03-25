@@ -72,15 +72,18 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | ~55 | ~11,000+ | ~7,700+ | ~70% | Baseline (polyfill, inkl. slow tester) |
 | 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
-| **2026-03-25** | **55** | **11,373** | **6,958** | **61.2%** | Rust compare_boundary_points, 4 filer re-enabled |
+| 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
+| **2026-03-25** | **55** | **10,762** | **7,182** | **66.7%** | WrongDocumentError, nativeChildIndex, toString, selectNode re-enabled |
 
-**Migrerad till native:** Range API i `dom_bridge.rs` + `compare_boundary_points` i `arena_dom.rs` (2026-03-25).
-Polyfill borttagen. Boundary-jämförelse körs nu i ren Rust utan JS round-trips.
+**Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
-**Skippade tester (2 kvar):**
-- Range-intersectsNode.html, Range-selectNode.html (>45s, childNodes-iteration i djup DOM)
+**Skippade (1 kvar):** Range-intersectsNode.html (>60s)
 
-**Mål Q2 2026:** 75% (inkl. optimering av childNodes-iteration)
+**Största kvarvarande failures:**
+- compareBoundaryPoints: 770 fail (detached/foreignDoc ranges)
+- Range-set: ~1,370 fail (foreignDoc-stöd)
+
+**Mål Q2 2026:** 80%
 
 ---
 
