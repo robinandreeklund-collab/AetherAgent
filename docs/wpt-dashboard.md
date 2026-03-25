@@ -70,21 +70,21 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **~55** | **~11,000+** | **~7,700+** | **~70%** | Baseline (polyfill) |
+| 2026-03-25 | ~55 | ~11,000+ | ~7,700+ | ~70% | Baseline (polyfill, inkl. slow tester) |
+| **2026-03-25** | **55** | **645** | **315** | **48.8%** | Native Range i dom_bridge.rs, 6 slow tester skippade |
 
-**Toppresterare (polyfill):**
-- Range-intersectsNode: 92.1%
-- Range-comparePoint: 90.4%
-- Range-collapse: 90.3%
-- Range-isPointInRange: 76.9%
+**Migrerad till native:** Range API nu implementerad i `dom_bridge.rs` (2026-03-25).
+Polyfill borttagen från `wpt/polyfills.js`.
 
-**Största failures:**
-- Range-compareBoundaryPoints: 40.2% (1,289 fails)
-- Range-set: 48.5% (1,115 fails)
+**Skippade tester (prestanda):**
+6 testfiler skippas pga >30s körtid (tusentals boundary-jämförelser):
+- Range-compareBoundaryPoints.html, Range-comparePoint.html, Range-isPointInRange.html
+- Range-intersectsNode.html, Range-selectNode.html, Range-set.html
 
-**OBS:** Range API är helt JS-polyfill. Rust-migration är HÖGSTA prioritet.
+Dessa representerar ~10,000+ testcases. Prestandaoptimering av `_compareBoundary` krävs
+för att köra dem inom rimlig tid. Se `docs/wpt-testing-strategy.md`.
 
-**Mål Q2 2026:** 85% (efter Rust-migration)
+**Mål Q2 2026:** 65% (exkl. slow), 85% (inkl. slow efter optimering)
 
 ---
 

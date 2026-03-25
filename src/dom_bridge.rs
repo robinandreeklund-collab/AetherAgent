@@ -823,101 +823,13 @@ impl JsHandler for CreateDocumentFragment {
     }
 }
 
-// ─── createRange stub ────────────────────────────────────────────────────────
+// ─── createRange — delegerar till globalThis.Range ──────────────────────────
 
 struct CreateRange;
 impl JsHandler for CreateRange {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let range = Object::new(ctx.clone())?;
-
-        // Egenskaper
-        range.set("collapsed", true)?;
-        range.set("startContainer", Value::new_null(ctx.clone()))?;
-        range.set("endContainer", Value::new_null(ctx.clone()))?;
-        range.set("startOffset", 0i32)?;
-        range.set("endOffset", 0i32)?;
-        range.set("commonAncestorContainer", Value::new_null(ctx.clone()))?;
-
-        // Stub-metoder som returnerar undefined
-        struct NoOp;
-        impl JsHandler for NoOp {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_undefined(ctx.clone()))
-            }
-        }
-
-        range.set("collapse", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set("selectNode", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set(
-            "selectNodeContents",
-            Function::new(ctx.clone(), JsFn(NoOp))?,
-        )?;
-        range.set("setStart", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set("setEnd", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set("setStartBefore", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set("setEndAfter", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        range.set("deleteContents", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-
-        // toString() returnerar tom sträng
-        struct RangeToString;
-        impl JsHandler for RangeToString {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value())
-            }
-        }
-        range.set("toString", Function::new(ctx.clone(), JsFn(RangeToString))?)?;
-
-        // cloneRange() returnerar nytt Range-liknande objekt
-        struct CloneRange;
-        impl JsHandler for CloneRange {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                let inner = Object::new(ctx.clone())?;
-                inner.set("collapsed", true)?;
-                inner.set("startOffset", 0i32)?;
-                inner.set("endOffset", 0i32)?;
-                Ok(inner.into_value())
-            }
-        }
-        range.set("cloneRange", Function::new(ctx.clone(), JsFn(CloneRange))?)?;
-
-        // getBoundingClientRect() returnerar noll-rekt
-        struct GetBoundingClientRect;
-        impl JsHandler for GetBoundingClientRect {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                let rect = Object::new(ctx.clone())?;
-                rect.set("x", 0i32)?;
-                rect.set("y", 0i32)?;
-                rect.set("width", 0i32)?;
-                rect.set("height", 0i32)?;
-                rect.set("top", 0i32)?;
-                rect.set("left", 0i32)?;
-                rect.set("right", 0i32)?;
-                rect.set("bottom", 0i32)?;
-                Ok(rect.into_value())
-            }
-        }
-        range.set(
-            "getBoundingClientRect",
-            Function::new(ctx.clone(), JsFn(GetBoundingClientRect))?,
-        )?;
-
-        Ok(range.into_value())
+        // Anropa globalThis.Range constructor
+        ctx.eval::<Value, _>("new Range()")
     }
 }
 
@@ -6450,6 +6362,171 @@ fn register_window_with_viewport<'js>(
         CustomEvent.prototype = Object.create(Event.prototype);
         CustomEvent.prototype.constructor = CustomEvent;
         CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
+        // ─── Range API (native, flyttad från polyfills.js) ────────────────────
+        globalThis.Range = function Range() {
+            this.startContainer = document;
+            this.startOffset = 0;
+            this.endContainer = document;
+            this.endOffset = 0;
+            this.collapsed = true;
+            this.commonAncestorContainer = document;
+        };
+        Range.START_TO_START = 0; Range.START_TO_END = 1; Range.END_TO_END = 2; Range.END_TO_START = 3;
+        Range.prototype.START_TO_START = 0; Range.prototype.START_TO_END = 1; Range.prototype.END_TO_END = 2; Range.prototype.END_TO_START = 3;
+        Range.prototype._nodeLen = function(node) {
+            if (!node) return 0;
+            var nt = node.nodeType;
+            if (nt === 3 || nt === 8 || nt === 7) return node.data !== undefined ? node.data.length : (node.textContent || '').length;
+            return node.childNodes ? node.childNodes.length : 0;
+        };
+        Range.prototype._update = function() {
+            this.collapsed = (this.startContainer === this.endContainer && this.startOffset === this.endOffset);
+            var a = this.startContainer, b = this.endContainer;
+            var ancestorsA = [];
+            var node = a;
+            while (node) { ancestorsA.push(node); node = node.parentNode; }
+            node = b;
+            while (node) {
+                if (ancestorsA.indexOf(node) !== -1) { this.commonAncestorContainer = node; return; }
+                node = node.parentNode;
+            }
+            this.commonAncestorContainer = document;
+        };
+        Range.prototype._compareBoundary = function(cA, oA, cB, oB) {
+            if (cA === cB || (cA.__nodeKey__ && cB.__nodeKey__ && cA.__nodeKey__ === cB.__nodeKey__)) {
+                return oA < oB ? -1 : (oA > oB ? 1 : 0);
+            }
+            if (!cA.compareDocumentPosition) return 0;
+            var pos = cA.compareDocumentPosition(cB);
+            function idxOf(parent, child) {
+                if (!parent.childNodes) return -1;
+                for (var i = 0; i < parent.childNodes.length; i++) {
+                    var ck = parent.childNodes[i];
+                    if (ck === child || (ck.__nodeKey__ && child.__nodeKey__ && ck.__nodeKey__ === child.__nodeKey__)) return i;
+                }
+                return -1;
+            }
+            if (pos & 16) {
+                var ch = cB;
+                while (ch.parentNode && ch.parentNode !== cA && !(ch.parentNode.__nodeKey__ && cA.__nodeKey__ && ch.parentNode.__nodeKey__ === cA.__nodeKey__)) ch = ch.parentNode;
+                if (ch.parentNode) { var idx = idxOf(cA, ch); if (idx >= 0 && idx < oA) return 1; return -1; }
+            }
+            if (pos & 8) {
+                var ch = cA;
+                while (ch.parentNode && ch.parentNode !== cB && !(ch.parentNode.__nodeKey__ && cB.__nodeKey__ && ch.parentNode.__nodeKey__ === cB.__nodeKey__)) ch = ch.parentNode;
+                if (ch.parentNode) { var idx = idxOf(cB, ch); if (idx >= 0 && idx < oB) return -1; return 1; }
+            }
+            if (pos & 4) return -1;
+            if (pos & 2) return 1;
+            return 0;
+        };
+        Range.prototype.setStart = function(node, offset) {
+            if (offset < 0 || offset > this._nodeLen(node)) throw new DOMException('Index out of range', 'IndexSizeError');
+            this.startContainer = node; this.startOffset = offset;
+            if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
+                this.endContainer = this.startContainer; this.endOffset = this.startOffset;
+            }
+            this._update();
+        };
+        Range.prototype.setEnd = function(node, offset) {
+            if (offset < 0 || offset > this._nodeLen(node)) throw new DOMException('Index out of range', 'IndexSizeError');
+            this.endContainer = node; this.endOffset = offset;
+            if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
+                this.startContainer = this.endContainer; this.startOffset = this.endOffset;
+            }
+            this._update();
+        };
+        Range.prototype.setStartBefore = function(node) {
+            var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
+            var idx = Array.from(p.childNodes).indexOf(node); this.setStart(p, idx);
+        };
+        Range.prototype.setStartAfter = function(node) {
+            var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
+            var idx = Array.from(p.childNodes).indexOf(node); this.setStart(p, idx + 1);
+        };
+        Range.prototype.setEndBefore = function(node) {
+            var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
+            var idx = Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx);
+        };
+        Range.prototype.setEndAfter = function(node) {
+            var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
+            var idx = Array.from(p.childNodes).indexOf(node); this.setEnd(p, idx + 1);
+        };
+        Range.prototype.collapse = function(toStart) {
+            if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
+            else { this.startContainer = this.endContainer; this.startOffset = this.endOffset; }
+            this._update();
+        };
+        Range.prototype.selectNode = function(node) {
+            var p = node.parentNode; if (!p) throw new DOMException('Invalid node type', 'InvalidNodeTypeError');
+            var idx = Array.from(p.childNodes).indexOf(node);
+            this.setStart(p, idx); this.setEnd(p, idx + 1);
+        };
+        Range.prototype.selectNodeContents = function(node) {
+            this.startContainer = node; this.startOffset = 0;
+            this.endContainer = node; this.endOffset = this._nodeLen(node);
+            this._update();
+        };
+        Range.prototype.compareBoundaryPoints = function(how, sourceRange) {
+            how = ((how | 0) & 0xFFFF) >>> 0;
+            if (how > 3) throw new DOMException('The comparison method provided is not supported.', 'NotSupportedError');
+            var thisC, thisO, srcC, srcO;
+            switch (how) {
+                case 0: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
+                case 1: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
+                case 2: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
+                case 3: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
+            }
+            var cmp = this._compareBoundary(thisC, thisO, srcC, srcO);
+            return cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
+        };
+        Range.prototype.comparePoint = function(node, offset) {
+            var nodeRoot = node; while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
+            var rangeRoot = this.startContainer; while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
+            if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__))
+                throw new DOMException('Wrong document', 'WrongDocumentError');
+            if (offset < 0 || offset > this._nodeLen(node)) throw new DOMException('Index out of range', 'IndexSizeError');
+            var cmpStart = this._compareBoundary(node, offset, this.startContainer, this.startOffset);
+            if (cmpStart < 0) return -1;
+            var cmpEnd = this._compareBoundary(node, offset, this.endContainer, this.endOffset);
+            if (cmpEnd > 0) return 1;
+            return 0;
+        };
+        Range.prototype.isPointInRange = function(node, offset) {
+            try { return this.comparePoint(node, offset) === 0; } catch(e) { return false; }
+        };
+        Range.prototype.intersectsNode = function(node) {
+            var nodeRoot = node; while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
+            var rangeRoot = this.startContainer; while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
+            if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) return false;
+            var parent = node.parentNode;
+            if (!parent) return true;
+            var kids = parent.childNodes; if (!kids) return true;
+            var idx = -1;
+            for (var i = 0; i < kids.length; i++) {
+                if (kids[i] === node || (kids[i].__nodeKey__ && node.__nodeKey__ && kids[i].__nodeKey__ === node.__nodeKey__)) { idx = i; break; }
+            }
+            if (idx < 0) return true;
+            return this._compareBoundary(parent, idx + 1, this.startContainer, this.startOffset) > 0 &&
+                   this._compareBoundary(parent, idx, this.endContainer, this.endOffset) < 0;
+        };
+        Range.prototype.cloneRange = function() {
+            var r = new Range(); r.startContainer = this.startContainer; r.startOffset = this.startOffset;
+            r.endContainer = this.endContainer; r.endOffset = this.endOffset; r._update(); return r;
+        };
+        Range.prototype.detach = function() {};
+        Range.prototype.toString = function() {
+            if (this.startContainer === this.endContainer && this.startContainer.nodeType === 3)
+                return (this.startContainer.data || '').substring(this.startOffset, this.endOffset);
+            return '';
+        };
+        Range.prototype.deleteContents = function() {};
+        Range.prototype.extractContents = function() { return document.createDocumentFragment(); };
+        Range.prototype.cloneContents = function() { return document.createDocumentFragment(); };
+        Range.prototype.insertNode = function(node) {};
+        Range.prototype.surroundContents = function(node) {};
+        Range.prototype.getBoundingClientRect = function() { return {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0}; };
+        Range.prototype.getClientRects = function() { return []; };
         // Text and Comment constructors (DOM spec)
         globalThis.Text = function Text(data) {
             var node = document.createTextNode(data !== undefined ? String(data) : '');
