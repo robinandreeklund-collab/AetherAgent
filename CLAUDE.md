@@ -106,6 +106,14 @@ These must cover:
 
 **Every PR must include WPT results.** This is a mandatory quality gate.
 
+**VIKTIG PRINCIP: Production first, WPT second.**
+WPT mäter hur bra AetherAgent fungerar — det är INTE målet i sig.
+- Implementera RIKTIG funktionalitet som fungerar i AetherAgents produktionspipeline (parse → semantic tree → intent API → fetch → render)
+- Verifiera sedan med WPT att implementationen är spec-korrekt
+- **Inga stubs eller fake-implementations bara för att höja WPT-score**
+- **Allt som görs ska fungera i produktion**, inte bara i isolerade WPT-tester
+- Om en feature inte kan implementeras ordentligt, dokumentera det istället för att stubba
+
 WPT tests run the official, unmodified Web Platform Tests from https://github.com/web-platform-tests/wpt directly against AetherAgent's DOM implementation via QuickJS sandbox + DOM bridge.
 
 **Important:** WPT pass rate includes both Rust-native and JS-polyfilled implementations. See `docs/dom-implementation-status.md` for the full breakdown. The goal is to migrate all polyfills to Rust-native implementations. When implementing a new DOM method:
