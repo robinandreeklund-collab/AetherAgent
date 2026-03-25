@@ -121,13 +121,9 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         "Node-insertBefore.html",
         "pre-insertion-validation",
         "inserting-fragment-under-shadow-host",
-        "dir-shadow-",                      // Orsakar stack overflow vid batch-körning
-        "Range-compareBoundaryPoints.html", // >30s, tusentals boundary-jämförelser
-        "Range-comparePoint.html",          // >30s, tusentals boundary-jämförelser
-        "Range-isPointInRange.html",        // >30s, wrapper kring comparePoint
-        "Range-intersectsNode.html",        // >35s timeout
-        "Range-selectNode.html",            // >35s timeout
-        "Range-set.html",                   // >30s, offset-validering × tusentals ranges
+        "dir-shadow-",               // Orsakar stack overflow vid batch-körning
+        "Range-intersectsNode.html", // >45s, childNodes-iteration i djup DOM
+        "Range-selectNode.html",     // >45s, childNodes-iteration i djup DOM
     ];
     if skip_patterns.iter().any(|p| file_name.contains(p)) {
         return WptTestResult {

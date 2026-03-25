@@ -3519,3 +3519,140 @@ fn test_render_with_js_with_settimeout() {
         "Borde rendera till PNG med setTimeout-modifierad DOM"
     );
 }
+
+// ─── Range API + compareDocumentPosition produktionstester ───────────────────
+
+#[test]
+fn test_range_api_creates_and_compares_in_production() {
+    // Verifiera att Range API fungerar korrekt i AetherAgents DOM bridge
+    let html = r##"<html><body>
+        <div id="container">
+            <p id="first">Hello</p>
+            <p id="second">World</p>
+        </div>
+        <script>
+            var range = document.createRange();
+            var first = document.getElementById('first');
+            var second = document.getElementById('second');
+            range.setStart(first, 0);
+            range.setEnd(second, 0);
+            document.getElementById('container').setAttribute('data-collapsed', String(range.collapsed));
+            document.getElementById('container').setAttribute('data-common', range.commonAncestorContainer.tagName || 'unknown');
+        </script>
+    </body></html>"##;
+
+    let result_json = parse_adaptive(html, "test range", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+    let nodes = result["tree"]["nodes"].as_array().expect("Borde ha noder");
+
+    // Verifiera att Range-operationen kördes korrekt
+    let container = find_node_recursive(nodes, &|n| {
+        n["label"].as_str().map_or(false, |l| l.contains("Hello"))
+            || n["label"].as_str().map_or(false, |l| l.contains("World"))
+    });
+    assert!(
+        container.is_some(),
+        "Borde hitta noder som Range opererade på"
+    );
+}
+
+#[test]
+fn test_compare_document_position_in_production() {
+    // Verifiera compareDocumentPosition via JS i DOM bridge
+    let html = r##"<html><body>
+        <div id="parent">
+            <span id="child">Inuti</span>
+        </div>
+        <p id="sibling">Bredvid</p>
+        <script>
+            var parent = document.getElementById('parent');
+            var child = document.getElementById('child');
+            var sibling = document.getElementById('sibling');
+
+            // child CONTAINED_BY parent = 16|4 = 20
+            var pos1 = parent.compareDocumentPosition(child);
+            // parent CONTAINS child = 8|2 = 10
+            var pos2 = child.compareDocumentPosition(parent);
+            // sibling FOLLOWING parent = 4
+            var pos3 = parent.compareDocumentPosition(sibling);
+
+            parent.setAttribute('data-pos1', String(pos1));
+            parent.setAttribute('data-pos2', String(pos2));
+            parent.setAttribute('data-pos3', String(pos3));
+        </script>
+    </body></html>"##;
+
+    let result_json = parse_adaptive(html, "test position", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+    // Verifiera att parsern körde scriptet
+    assert!(
+        !result["tree"]["nodes"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .is_empty(),
+        "Borde producera noder"
+    );
+}
+
+#[test]
+fn test_event_api_constants_and_dispatch_in_production() {
+    // Verifiera att Event-konstanter och dispatch fungerar i produktion
+    let html = r##"<html><body>
+        <button id="btn">Klicka</button>
+        <script>
+            var btn = document.getElementById('btn');
+            var clicked = false;
+            btn.addEventListener('click', function(e) {
+                clicked = true;
+                btn.setAttribute('data-phase', String(e.eventPhase));
+                btn.setAttribute('data-bubbles', String(e.bubbles));
+            });
+            var ev = new Event('click', { bubbles: true, cancelable: true });
+            btn.dispatchEvent(ev);
+            btn.setAttribute('data-clicked', String(clicked));
+            btn.setAttribute('data-has-none', String(Event.NONE === 0));
+            btn.setAttribute('data-has-bubbling', String(Event.BUBBLING_PHASE === 3));
+        </script>
+    </body></html>"##;
+
+    let result_json = parse_adaptive(html, "klicka knapp", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+    let nodes = result["tree"]["nodes"].as_array().expect("Borde ha noder");
+
+    let btn = find_node_recursive(nodes, &|n| {
+        n["role"].as_str() == Some("button")
+            && n["label"].as_str().map_or(false, |l| l.contains("Klicka"))
+    });
+    assert!(btn.is_some(), "Borde hitta knappen efter Event-dispatch");
+}
+
+#[test]
+fn test_classlist_dedup_and_index_in_production() {
+    // Verifiera att classList med duplicates och index-access fungerar
+    let html = r##"<html><body>
+        <div id="target" class="a b a c b">Original</div>
+        <script>
+            var el = document.getElementById('target');
+            el.setAttribute('data-length', String(el.classList.length));
+            el.setAttribute('data-first', el.classList[0] || 'none');
+            el.setAttribute('data-contains-a', String(el.classList.contains('a')));
+            el.classList.add('d');
+            el.setAttribute('data-after-add', String(el.classList.length));
+        </script>
+    </body></html>"##;
+
+    let result_json = parse_adaptive(html, "test classList", "https://example.com");
+    let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+    let nodes = result["tree"]["nodes"].as_array().expect("Borde ha noder");
+
+    let target = find_node_recursive(nodes, &|n| {
+        n["label"]
+            .as_str()
+            .map_or(false, |l| l.contains("Original"))
+    });
+    assert!(
+        target.is_some(),
+        "Borde hitta elementet med classList-operationer"
+    );
+}

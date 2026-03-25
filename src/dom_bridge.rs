@@ -828,8 +828,32 @@ impl JsHandler for CreateDocumentFragment {
 struct CreateRange;
 impl JsHandler for CreateRange {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // Anropa globalThis.Range constructor
         ctx.eval::<Value, _>("new Range()")
+    }
+}
+
+// ─── __nativeCompareBoundary — snabb Rust boundary-jämförelse ────────────────
+// Anropas av Range._compareBoundary istället för JS-baserad traversering.
+// Tar (nodeKeyA, offsetA, nodeKeyB, offsetB) → -1, 0, 1
+struct NativeCompareBoundary {
+    state: SharedState,
+}
+impl JsHandler for NativeCompareBoundary {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Extrahera nodeKeys och offsets
+        let key_a = args.first().and_then(extract_node_key);
+        let offset_a = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
+        let key_b = args.get(2).and_then(extract_node_key);
+        let offset_b = args.get(3).and_then(|v| v.as_int()).unwrap_or(0) as usize;
+
+        match (key_a, key_b) {
+            (Some(ka), Some(kb)) => {
+                let s = self.state.borrow();
+                let result = s.arena.compare_boundary_points(ka, offset_a, kb, offset_b);
+                Ok(Value::new_int(ctx.clone(), result))
+            }
+            _ => Ok(Value::new_int(ctx.clone(), 0)),
+        }
     }
 }
 
@@ -1017,10 +1041,20 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         )?,
     )?;
 
-    // createRange — Range API stub
+    // createRange — Range API
     doc.set(
         "createRange",
         Function::new(ctx.clone(), JsFn(CreateRange))?,
+    )?;
+    // __nativeCompareBoundary — snabb Rust boundary-jämförelse för Range
+    doc.set(
+        "__nativeCompareBoundary",
+        Function::new(
+            ctx.clone(),
+            JsFn(NativeCompareBoundary {
+                state: Rc::clone(&state),
+            }),
+        )?,
     )?;
 
     doc.set(
@@ -6393,29 +6427,16 @@ fn register_window_with_viewport<'js>(
             this.commonAncestorContainer = document;
         };
         Range.prototype._compareBoundary = function(cA, oA, cB, oB) {
-            if (cA === cB || (cA.__nodeKey__ && cB.__nodeKey__ && cA.__nodeKey__ === cB.__nodeKey__)) {
-                return oA < oB ? -1 : (oA > oB ? 1 : 0);
+            // Snabb path: Rust-native boundary-jämförelse via ArenaDom (inga JS round-trips)
+            if (cA && cB && cA.__nodeKey__ && cB.__nodeKey__ && document.__nativeCompareBoundary) {
+                return document.__nativeCompareBoundary(cA, oA, cB, oB);
             }
-            if (!cA.compareDocumentPosition) return 0;
+            // Fallback: JS-baserad jämförelse (för noder utan __nodeKey__)
+            if (cA === cB) { return oA < oB ? -1 : (oA > oB ? 1 : 0); }
+            if (!cA || !cA.compareDocumentPosition) return 0;
             var pos = cA.compareDocumentPosition(cB);
-            function idxOf(parent, child) {
-                if (!parent.childNodes) return -1;
-                for (var i = 0; i < parent.childNodes.length; i++) {
-                    var ck = parent.childNodes[i];
-                    if (ck === child || (ck.__nodeKey__ && child.__nodeKey__ && ck.__nodeKey__ === child.__nodeKey__)) return i;
-                }
-                return -1;
-            }
-            if (pos & 16) {
-                var ch = cB;
-                while (ch.parentNode && ch.parentNode !== cA && !(ch.parentNode.__nodeKey__ && cA.__nodeKey__ && ch.parentNode.__nodeKey__ === cA.__nodeKey__)) ch = ch.parentNode;
-                if (ch.parentNode) { var idx = idxOf(cA, ch); if (idx >= 0 && idx < oA) return 1; return -1; }
-            }
-            if (pos & 8) {
-                var ch = cA;
-                while (ch.parentNode && ch.parentNode !== cB && !(ch.parentNode.__nodeKey__ && cB.__nodeKey__ && ch.parentNode.__nodeKey__ === cB.__nodeKey__)) ch = ch.parentNode;
-                if (ch.parentNode) { var idx = idxOf(cB, ch); if (idx >= 0 && idx < oB) return -1; return 1; }
-            }
+            if (pos & 16) { return -1; }
+            if (pos & 8) { return 1; }
             if (pos & 4) return -1;
             if (pos & 2) return 1;
             return 0;

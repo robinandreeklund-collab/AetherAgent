@@ -71,20 +71,16 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | ~55 | ~11,000+ | ~7,700+ | ~70% | Baseline (polyfill, inkl. slow tester) |
-| **2026-03-25** | **55** | **645** | **315** | **48.8%** | Native Range i dom_bridge.rs, 6 slow tester skippade |
+| 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
+| **2026-03-25** | **55** | **11,373** | **6,958** | **61.2%** | Rust compare_boundary_points, 4 filer re-enabled |
 
-**Migrerad till native:** Range API nu implementerad i `dom_bridge.rs` (2026-03-25).
-Polyfill borttagen från `wpt/polyfills.js`.
+**Migrerad till native:** Range API i `dom_bridge.rs` + `compare_boundary_points` i `arena_dom.rs` (2026-03-25).
+Polyfill borttagen. Boundary-jämförelse körs nu i ren Rust utan JS round-trips.
 
-**Skippade tester (prestanda):**
-6 testfiler skippas pga >30s körtid (tusentals boundary-jämförelser):
-- Range-compareBoundaryPoints.html, Range-comparePoint.html, Range-isPointInRange.html
-- Range-intersectsNode.html, Range-selectNode.html, Range-set.html
+**Skippade tester (2 kvar):**
+- Range-intersectsNode.html, Range-selectNode.html (>45s, childNodes-iteration i djup DOM)
 
-Dessa representerar ~10,000+ testcases. Prestandaoptimering av `_compareBoundary` krävs
-för att köra dem inom rimlig tid. Se `docs/wpt-testing-strategy.md`.
-
-**Mål Q2 2026:** 65% (exkl. slow), 85% (inkl. slow efter optimering)
+**Mål Q2 2026:** 75% (inkl. optimering av childNodes-iteration)
 
 ---
 

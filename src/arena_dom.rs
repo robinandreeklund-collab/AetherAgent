@@ -653,6 +653,105 @@ impl ArenaDom {
         "$", "€", "£", "¥", "₹", "kr", "SEK", "NOK", "DKK", "USD", "EUR", "GBP",
     ];
 
+    /// Ancestor-kedja: [self, parent, grandparent, ..., root]
+    pub fn ancestor_chain(&self, key: NodeKey) -> Vec<NodeKey> {
+        let mut chain = vec![key];
+        let mut current = key;
+        while let Some(p) = self.nodes.get(current).and_then(|n| n.parent) {
+            chain.push(p);
+            current = p;
+        }
+        chain
+    }
+
+    /// Räkna barn (för Range node length)
+    pub fn node_length(&self, key: NodeKey) -> usize {
+        if let Some(node) = self.nodes.get(key) {
+            match node.node_type {
+                NodeType::Text | NodeType::Comment => node.text.as_ref().map_or(0, |t| t.len()),
+                _ => node.children.len(),
+            }
+        } else {
+            0
+        }
+    }
+
+    /// Jämför två boundary points: (containerA, offsetA) vs (containerB, offsetB).
+    /// Returnerar -1, 0, eller 1 (som DOM spec).
+    /// Hela operationen sker i Rust — inga JS round-trips.
+    pub fn compare_boundary_points(
+        &self,
+        container_a: NodeKey,
+        offset_a: usize,
+        container_b: NodeKey,
+        offset_b: usize,
+    ) -> i32 {
+        // Samma nod → jämför offsets direkt
+        if container_a == container_b {
+            return if offset_a < offset_b {
+                -1
+            } else if offset_a > offset_b {
+                1
+            } else {
+                0
+            };
+        }
+
+        let chain_a = self.ancestor_chain(container_a);
+        let chain_b = self.ancestor_chain(container_b);
+
+        // Disconnected
+        if chain_a.is_empty() || chain_b.is_empty() || chain_a.last() != chain_b.last() {
+            return 0;
+        }
+
+        // Hitta gemensam ancestor-nivå (kedjan slutar med root)
+        let mut i = 0;
+        while i < chain_a.len()
+            && i < chain_b.len()
+            && chain_a[chain_a.len() - 1 - i] == chain_b[chain_b.len() - 1 - i]
+        {
+            i += 1;
+        }
+
+        // B contained by A (A är ancestor till B)
+        if i == chain_a.len() {
+            // container_a är ancestor till container_b
+            // Hitta B:s barn under A
+            let child_under_a = chain_b[chain_b.len() - i]; // direkt barn av A
+            if let Some(parent) = self.nodes.get(container_a) {
+                if let Some(idx) = parent.children.iter().position(|&c| c == child_under_a) {
+                    return if idx < offset_a { 1 } else { -1 };
+                }
+            }
+            return -1;
+        }
+
+        // A contained by B (B är ancestor till A)
+        if i == chain_b.len() {
+            let child_under_b = chain_a[chain_a.len() - i]; // direkt barn av B
+            if let Some(parent) = self.nodes.get(container_b) {
+                if let Some(idx) = parent.children.iter().position(|&c| c == child_under_b) {
+                    return if idx < offset_b { -1 } else { 1 };
+                }
+            }
+            return 1;
+        }
+
+        // Syskon under gemensam parent
+        let node_a = chain_a[chain_a.len() - 1 - i];
+        let node_b = chain_b[chain_b.len() - 1 - i];
+        let common_parent = chain_a[chain_a.len() - i];
+        if let Some(parent) = self.nodes.get(common_parent) {
+            let pos_a = parent.children.iter().position(|&c| c == node_a);
+            let pos_b = parent.children.iter().position(|&c| c == node_b);
+            if let (Some(a), Some(b)) = (pos_a, pos_b) {
+                return if a < b { -1 } else { 1 };
+            }
+        }
+        0
+    }
+
     /// Inferera semantisk roll (speglar parser::infer_role)
     /// Rolldetektering med pre-extraherad text (undviker dubbla extract_text)
     pub fn infer_role_with_text(&self, key: NodeKey, precomputed_text: &str) -> String {
