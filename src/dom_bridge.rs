@@ -1916,9 +1916,19 @@ impl JsHandler for ReplaceChild {
                     parent_node.children.retain(|&c| c != new_key);
                 }
             }
-            // Ersätt
+            // Ersätt — recalkulera pos efter detach
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                node.children[pos] = new_key;
+                // pos kan ha ändrats om new_key var barn till samma parent
+                let pos = node
+                    .children
+                    .iter()
+                    .position(|&c| c == old_key)
+                    .unwrap_or(0);
+                if pos < node.children.len() {
+                    node.children[pos] = new_key;
+                } else {
+                    node.children.push(new_key);
+                }
             }
             if let Some(n) = s.arena.nodes.get_mut(new_key) {
                 n.parent = Some(self.key);
