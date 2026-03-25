@@ -2276,14 +2276,13 @@ impl JsHandler for Prepend {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let new_keys = args_to_node_keys(ctx, args, &self.state)?;
         let mut s = self.state.borrow_mut();
-        for &nk in &new_keys {
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            // Detachera precis innan infogning
             if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
                 if let Some(p) = s.arena.nodes.get_mut(old_p) {
                     p.children.retain(|&c| c != nk);
                 }
             }
-        }
-        for (i, nk) in new_keys.into_iter().enumerate() {
             if let Some(n) = s.arena.nodes.get_mut(nk) {
                 n.parent = Some(self.key);
             }
@@ -2304,14 +2303,13 @@ impl JsHandler for Append {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let new_keys = args_to_node_keys(ctx, args, &self.state)?;
         let mut s = self.state.borrow_mut();
-        for &nk in &new_keys {
+        for nk in new_keys {
+            // Detachera precis innan infogning (hanterar append(same, same))
             if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
                 if let Some(p) = s.arena.nodes.get_mut(old_p) {
                     p.children.retain(|&c| c != nk);
                 }
             }
-        }
-        for nk in new_keys {
             if let Some(n) = s.arena.nodes.get_mut(nk) {
                 n.parent = Some(self.key);
             }
@@ -3934,6 +3932,15 @@ struct TextContentGetter {
 impl JsHandler for TextContentGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        // Spec: textContent returns null for Document and Doctype nodes
+        if let Some(node) = s.arena.nodes.get(self.key) {
+            if matches!(
+                node.node_type,
+                crate::arena_dom::NodeType::Document | crate::arena_dom::NodeType::Doctype
+            ) {
+                return Ok(Value::new_null(ctx.clone()));
+            }
+        }
         let text = get_text_content(&s.arena, self.key);
         Ok(rquickjs::String::from_str(ctx.clone(), &text)?.into_value())
     }
