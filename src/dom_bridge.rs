@@ -562,7 +562,7 @@ pub fn eval_js_with_lifecycle_html(
     arena: ArenaDom,
     html: &str,
 ) -> DomEvalResult {
-    let mut result = eval_js_with_lifecycle_internal(scripts, arena, Some(html.to_string()));
+    let result = eval_js_with_lifecycle_internal(scripts, arena, Some(html.to_string()));
     result
 }
 
@@ -1655,6 +1655,35 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     }
 
     ctx.globals().set("document", doc)?;
+
+    // Named element access — HTML spec: element med id exponeras som window.id
+    // Traversera hela DOM:en och sätt globala variabler för varje element med id
+    {
+        let s = state.borrow();
+        let mut id_elements: Vec<(String, NodeKey)> = Vec::new();
+        fn collect_ids(arena: &ArenaDom, key: NodeKey, out: &mut Vec<(String, NodeKey)>) {
+            if let Some(node) = arena.nodes.get(key) {
+                if node.node_type == NodeType::Element {
+                    if let Some(id) = node.get_attr("id") {
+                        if !id.is_empty() {
+                            out.push((id.to_string(), key));
+                        }
+                    }
+                }
+                for &child in &node.children {
+                    collect_ids(arena, child, out);
+                }
+            }
+        }
+        collect_ids(&s.arena, s.arena.document, &mut id_elements);
+        drop(s);
+
+        for (id, key) in id_elements {
+            if let Ok(obj) = make_element_object(ctx, key, &state) {
+                let _ = ctx.globals().set(id.as_str(), obj);
+            }
+        }
+    }
 
     Ok(())
 }
@@ -3670,6 +3699,7 @@ impl JsHandler for CreateTreeWalker {
 }
 
 // NodeIterator — samma pattern men flat iteration
+#[allow(dead_code)]
 struct CreateNodeIterator {
     state: SharedState,
 }
