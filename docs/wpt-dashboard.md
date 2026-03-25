@@ -64,7 +64,7 @@
 - Event phases (capture → target → bubble) edge cases
 - scroll events, passive-by-default tester
 
-**Mål Q2 2026:** 55%
+**Mål Q2 2026:** 90%
 
 ---
 
@@ -88,8 +88,8 @@
 - Range-mutations: ~170 fail (Range boundary update vid DOM-mutationer)
 - OpaqueRange tentative: ~100 fail (experimentell spec, ej prioriterad)
 
-**Kända buggar:**
-- `document.documentElement.ownerDocument` = undefined (skapas innan document registreras)
+**Kända begränsningar:**
+- ~~`document.documentElement.ownerDocument` = undefined~~ ✅ Fixad med lazy Accessor getter
 - Range-set/collapse varierar ±100 pass pga 30s timeout-gräns
 
 **Mål Q2 2026:** 80%

@@ -137,10 +137,12 @@ Vid milstolpar (varje vecka eller major release):
 
 | Åtgärd | Svit | Uppskattade nya pass | Effort |
 |--------|------|---------------------|--------|
-| Range API → Native Rust | dom/ranges | +1000 (stabilitet) | Hög |
+| ~~Range API → Native Rust~~ ✅ | dom/ranges | +1000 (klar) | — |
 | CSS selectors: +, ~, :has(), :is() | css/selectors | +200 | Medium |
-| Event subclasses (MouseEvent etc.) | dom/events | +100 | Medium |
-| DOMException → Native Rust | alla | +50 (renare errors) | Medium |
+| ~~Event subclasses (MouseEvent etc.)~~ ✅ | dom/events | +55 (klar) | — |
+| ~~DOMException → Native Rust~~ ✅ | alla | +50 (klar) | — |
+| Namespace-metoder | dom/nodes | +100 | Medium |
+| TreeWalker xmlDoc-stöd | dom/traversal | +300 | Medium |
 
 ### 🔴 Stor effort, strategisk
 
@@ -168,19 +170,21 @@ Vid milstolpar (varje vecka eller major release):
 | addEventListener options | 2026-03-25 | Event-tester stabilare |
 | MutationObserver | 2026-03-25 | Observer-tester |
 
-### Nästa migration (Fas 3)
+### Fas 3 — KLAR (2026-03-25)
 
-1. **Range API** — Högsta prioritet. ~4,000 testcases. Flytta från polyfills.js till dom_bridge.rs
-2. **DOMException** — Ren error-hantering, påverkar alla sviter
-3. **prepend/append/replaceChildren** — ParentNode convenience, enkla att migrera
-4. **Event subclasses** — MouseEvent, KeyboardEvent med korrekta properties
+1. ~~**Range API**~~ ✅ — Migrerad till native dom_bridge.rs med Rust boundary comparison. 270 rader polyfill borttagna
+2. ~~**DOMException**~~ ✅ — Native med register_dom_exception(), 25 error-koder
+3. ~~**prepend/append/replaceChildren**~~ ✅ — Redan native sedan Fas 17
+4. ~~**Event subclasses**~~ ✅ — UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent, WheelEvent, PointerEvent med spec-properties
 
-### Framtida migration (Fas 4+)
+### Nästa migration (Fas 4)
 
-5. Namespace-metoder (setAttributeNS etc.)
-6. NamedNodeMap (element.attributes)
-7. document.implementation (createHTMLDocument etc.)
-8. document.createEvent()
+5. Namespace-metoder (setAttributeNS etc.) — dom/nodes +100 pass
+6. NamedNodeMap (element.attributes) — dom/collections impact
+7. TreeWalker/NodeIterator xmlDoc-stöd — dom/traversal 33% → 60%
+8. CSS selectors: +, ~, :has(), :is() — css/selectors 12% → 40%
+9. Range mutation tracking — dom/ranges +90 pass
+10. foreignDoc multi-document — dom/ranges +400 pass
 
 ---
 
@@ -232,23 +236,25 @@ done
 
 ### Kortsiktigt (Q2 2026)
 
-| Svit | Nu | Mål | Delta |
-|------|----|-----|-------|
-| dom/ | 67.1% | 80% | +13pp |
-| dom/nodes/ | ~75% | 90% | +15pp |
-| dom/ranges/ | ~70% | 85% | +15pp |
-| css/selectors/ | TBD | 60% | — |
-| domparsing/ | 5.5% | 30% | +25pp |
+| Svit | Nu | Mål | Gap |
+|------|----|-----|-----|
+| dom/nodes/ | 75.5% | 90% | -15pp |
+| dom/events/ | 62.7% | 90% | -27pp |
+| dom/ranges/ | ~69% | 80% | -11pp |
+| dom/traversal/ | 32.6% | 90% | -57pp |
+| dom/lists/ | 94.7% | 98% | -3pp |
+| css/selectors/ | 12.0% | 40% | -28pp |
+| html/syntax/ | 20.0% | 30% | -10pp |
 
 ### Långsiktigt (Q4 2026)
 
 | Svit | Mål |
 |------|-----|
-| dom/ | >90% |
+| dom/ (total) | >90% |
 | html/syntax/ | >50% |
 | css/selectors/ | >80% |
 | encoding/ | >60% |
-| Total | >75% |
+| Total | >80% |
 
 ---
 

@@ -12,22 +12,22 @@
 
 | Suite | Cases | Passed | Rate | Datum |
 |-------|-------|--------|------|-------|
-| dom/nodes | 6,624 | 4,946 | 74.7% | 2026-03-25 |
-| dom/events | 312 | 100 | 32.1% | 2026-03-25 |
-| dom/ranges | ~11,000+ | ~7,700+ | ~70% | 2026-03-25 |
+| dom/nodes | 6,624 | 5,002 | 75.5% | 2026-03-25 |
+| dom/events | 311 | 195 | 62.7% | 2026-03-25 |
+| dom/ranges | ~10,800 | ~7,400 | ~69% | 2026-03-25 |
 | dom/traversal | 1,584 | 516 | 32.6% | 2026-03-25 |
 | dom/collections | 48 | 6 | 12.5% | 2026-03-25 |
-| dom/lists | 189 | 175 | 92.6% | 2026-03-25 |
+| dom/lists | 189 | 179 | 94.7% | 2026-03-25 |
 | dom/abort | 2 | 0 | 0.0% | 2026-03-25 |
 | css/selectors | 761 | 91 | 12.0% | 2026-03-25 |
 | css/cssom | 531 | 43 | 8.1% | 2026-03-25 |
 | domparsing | 453 | 25 | 5.5% | 2026-03-25 |
-| html/syntax | 204 | 26 | 12.7% | 2026-03-25 |
+| html/syntax | 340 | 68 | 20.0% | 2026-03-25 |
 | encoding | 331 | 1 | 0.3% | 2026-03-25 |
 | xhr | 430 | 28 | 6.5% | 2026-03-25 |
 | webstorage | 7 | 0 | 0.0% | 2026-03-25 |
 
-**OBS:** En del av pass-raten beror fortfarande på polyfills (främst Range API).
+**Range API migrerad till native Rust (2026-03-25).** Polyfill borttagen.
 Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 
 ---
@@ -179,7 +179,8 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 | `Event` / `CustomEvent` konstruktorer | **Native** (Rust) |
 | `MutationObserver` constructor | **Native** — new-stöd via JS klass-wrapper (2026-03-25) |
 | Passive-by-default (touchstart, wheel) | **Native** (2026-03-25) |
-| `MouseEvent`, `KeyboardEvent` etc. | Polyfill (konstruktorer utan spec-properties) |
+| `UIEvent`, `MouseEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent` | Polyfill (spec-properties: coordinates, modifier keys, getModifierState) |
+| `WheelEvent`, `PointerEvent` | Polyfill (deltaX/Y/Z, pointerId, pressure) |
 | `document.createEvent(type)` | Polyfill |
 | `event.initEvent()` | **Native** (2026-03-25) — med state reset |
 | `Event.NONE/CAPTURING_PHASE/AT_TARGET/BUBBLING_PHASE` | **Native** (2026-03-25) |
@@ -220,17 +221,17 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 > Varje implementation mappar till en eller flera WPT-sviter.
 > Se [wpt-dashboard.md](wpt-dashboard.md) för aktuella scores.
 
-| Implementation | WPT-svit | Baseline | Mål |
-|---------------|----------|----------|-----|
-| DOM Core (createElement, appendChild, etc.) | `dom/nodes/` | 74.7% | 90% |
-| Event System (addEventListener, dispatch) | `dom/events/` | 32.1% | 55% |
-| Range API (polyfill) | `dom/ranges/` | ~70% | 85% |
-| TreeWalker/NodeIterator | `dom/traversal/` | 32.6% | 60% |
+| Implementation | WPT-svit | Score | Mål |
+|---------------|----------|-------|-----|
+| DOM Core (createElement, appendChild, etc.) | `dom/nodes/` | 75.5% | 90% |
+| Event System (addEventListener, dispatch) | `dom/events/` | 62.7% | 90% |
+| Range API (native Rust) | `dom/ranges/` | ~69% | 80% |
+| TreeWalker/NodeIterator | `dom/traversal/` | 32.6% | 90% |
 | HTMLCollection/NodeList | `dom/collections/` | 12.5% | 50% |
-| DOMTokenList (classList) | `dom/lists/` | 92.6% | 95% |
+| DOMTokenList (classList) | `dom/lists/` | 94.7% | 98% |
 | AbortController | `dom/abort/` | 0.0% | 50% |
 | DOMParser/innerHTML | `domparsing/` | 5.5% | 30% |
-| HTML5 Parsing | `html/syntax/` | 12.7% | 25% |
+| HTML5 Parsing | `html/syntax/` | 20.0% | 30% |
 | CSS Selectors | `css/selectors/` | 12.0% | 40% |
 | CSSOM (style, getComputedStyle) | `css/cssom/` | 8.1% | 20% |
 | TextEncoder/TextDecoder | `encoding/` | 0.3% | 40% |
@@ -263,7 +264,7 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 ### Fas 3 — KLAR (2026-03-25)
 13. ~~**Range API → Rust**~~ ✅ — Migrerad till dom_bridge.rs med Rust-native boundary comparison
 14. ~~**DOMException constructor → Rust**~~ ✅ — register_dom_exception() med alla 25 koder
-15. **Event subclasses → Rust** — MouseEvent, KeyboardEvent med spec-properties (pågår)
+15. ~~**Event subclasses**~~ ✅ — UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent, WheelEvent, PointerEvent med spec-properties
 16. ~~`prepend()` / `append()` / `replaceChildren()`~~ ✅ — Redan native sedan Fas 17
 
 ### Fas 4 — Medium prioritet
