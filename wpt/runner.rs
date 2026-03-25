@@ -139,24 +139,13 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         };
     }
 
-    // Kör CSS compiler BARA om HTML har <style>-taggar som getComputedStyle behöver
-    // (undvik att css-inline ändrar DOM-struktur i tester som inte behöver det)
-    let has_style_tags = html.contains("<style");
-    let html_for_dom = if has_style_tags {
-        let compiled = css_compiler::compile_css(&html, &css_compiler::ViewportConfig::default());
-        if compiled.fully_compiled {
-            compiled.html
-        } else {
-            html.clone()
-        }
-    } else {
-        html.clone()
-    };
-
-    let arena = arena_dom_sink::parse_html_to_arena(&html_for_dom);
+    // Parsa HTML direkt — ingen css-inline.
+    // getComputedStyle hanteras av Blitz Stylo (riktig CSS-motor).
+    let arena = arena_dom_sink::parse_html_to_arena(&html);
 
     // Kör alla scripts med DOM bridge + lifecycle
-    let result = dom_bridge::eval_js_with_lifecycle(&all_scripts, arena);
+    // Skicka original HTML till Blitz Stylo för riktig getComputedStyle
+    let result = dom_bridge::eval_js_with_lifecycle_html(&all_scripts, arena, &html);
 
     // Parsa report-JSON från sista evalueringen
     let duration = start.elapsed().as_secs_f64() * 1000.0;

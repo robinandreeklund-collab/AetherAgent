@@ -23,6 +23,156 @@ use std::rc::Rc;
 use crate::arena_dom::{ArenaDom, NodeKey, NodeType};
 use crate::event_loop::{self, EventLoopState, JsFn, JsHandler, SharedEventLoop};
 
+/// Bygg computed styles via Blitz Stylo från HTML.
+/// Parsear HTML med Blitz, kör Stylo CSS-resolution, och returnerar
+/// computed styles per Blitz-nod-ID.
+#[cfg(feature = "blitz")]
+pub fn build_blitz_computed_styles(
+    html: &str,
+) -> std::collections::HashMap<u64, std::collections::HashMap<String, String>> {
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let mut styles_map = std::collections::HashMap::new();
+
+    // Parsa HTML med Blitz (catch_unwind mot panics i extern CSS)
+    let Ok(mut doc) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(1280, 900, 1.0, ColorScheme::Light)),
+                base_url: Some("https://wpt.example.com".to_string()),
+                ..Default::default()
+            },
+        )
+    })) else {
+        return styles_map;
+    };
+
+    // Kör Stylo CSS resolution (beräknar ALLA computed styles)
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        doc.as_mut().resolve(0.0);
+    }));
+
+    // Traversera Blitz DOM i DFS-ordning, extrahera computed styles
+    let blitz_doc = doc.as_ref();
+    let mut blitz_dfs_elements: Vec<usize> = Vec::new();
+    fn collect_dfs(doc: &blitz_dom::BaseDocument, node_id: usize, out: &mut Vec<usize>) {
+        if let Some(node) = doc.get_node(node_id) {
+            if node.is_element() {
+                out.push(node_id);
+            }
+            for &child_id in &node.children {
+                collect_dfs(doc, child_id, out);
+            }
+        }
+    }
+    collect_dfs(blitz_doc, 0, &mut blitz_dfs_elements);
+
+    for &blitz_id in &blitz_dfs_elements {
+        if let Some(node) = blitz_doc.get_node(blitz_id) {
+            if let Some(style) = node.primary_styles() {
+                let mut props = std::collections::HashMap::new();
+
+                // Display
+                props.insert(
+                    "display".to_string(),
+                    format!("{:?}", style.clone_display()).to_lowercase(),
+                );
+
+                // Color — resolved to rgb() format
+                let color = style.clone_color().into_srgb_legacy();
+                let [r, g, b, _a] = color.raw_components();
+                props.insert(
+                    "color".to_string(),
+                    format!(
+                        "rgb({}, {}, {})",
+                        (r * 255.0).round() as u8,
+                        (g * 255.0).round() as u8,
+                        (b * 255.0).round() as u8
+                    ),
+                );
+
+                // Visibility
+                {
+                    use style_traits::values::ToCss;
+                    props.insert(
+                        "visibility".to_string(),
+                        style.clone_visibility().to_css_string(),
+                    );
+                }
+
+                // Font-size (resolved px)
+                props.insert(
+                    "font-size".to_string(),
+                    format!("{}px", style.clone_font_size().used_size().px()),
+                );
+
+                // Font-weight (resolved numeric)
+                props.insert(
+                    "font-weight".to_string(),
+                    format!("{}", style.clone_font_weight().value() as u32),
+                );
+
+                // Background-color (resolved rgb)
+                {
+                    use style_traits::values::ToCss;
+                    let bg = &style.get_background().background_color;
+                    props.insert("background-color".to_string(), bg.to_css_string());
+                }
+
+                styles_map.insert(blitz_id as u64, props);
+            }
+        }
+    }
+
+    styles_map
+}
+
+/// Mappa Blitz computed styles till ArenaDom NodeKeys via DFS-ordning.
+/// Båda DOM-träden parseas av html5ever → samma element-ordning.
+#[cfg(feature = "blitz")]
+pub fn map_blitz_styles_to_arena(
+    blitz_styles: &std::collections::HashMap<u64, std::collections::HashMap<String, String>>,
+    arena: &ArenaDom,
+) -> std::collections::HashMap<u64, std::collections::HashMap<String, String>> {
+    use slotmap::Key;
+
+    let mut arena_styles = std::collections::HashMap::new();
+
+    // Samla ArenaDom element-noder i DFS-ordning
+    let mut arena_elements: Vec<NodeKey> = Vec::new();
+    fn collect_arena_dfs(arena: &ArenaDom, key: NodeKey, out: &mut Vec<NodeKey>) {
+        if let Some(node) = arena.nodes.get(key) {
+            if node.node_type == NodeType::Element {
+                out.push(key);
+            }
+            for &child in &node.children {
+                collect_arena_dfs(arena, child, out);
+            }
+        }
+    }
+    collect_arena_dfs(arena, arena.document, &mut arena_elements);
+
+    // blitz_styles keys är Blitz node-IDs i DFS-ordning (collect_dfs ordning)
+    // Mappa 1:1 baserat på DFS-ordning: arena_elements[i] ↔ blitz_dfs[i]
+    // blitz_styles keys redan i DFS-ordning — sortera efter insertion order
+    let mut blitz_dfs: Vec<u64> = blitz_styles.keys().copied().collect();
+    blitz_dfs.sort(); // Blitz IDs ökar i DFS-ordning (parent < child)
+
+    for (i, &arena_key) in arena_elements.iter().enumerate() {
+        if let Some(&blitz_id) = blitz_dfs.get(i) {
+            if let Some(styles) = blitz_styles.get(&blitz_id) {
+                let key_bits = arena_key.data().as_ffi();
+                arena_styles.insert(key_bits, styles.clone());
+            }
+        }
+    }
+
+    arena_styles
+}
+
 /// Resultat från DOM-medveten JS-evaluering
 #[derive(Debug, Clone)]
 pub struct DomEvalResult {
@@ -66,6 +216,10 @@ struct BridgeState {
     scroll_positions: std::collections::HashMap<u64, (f64, f64)>,
     /// CSS Cascade Engine — lazy-initialiserad vid första getComputedStyle()
     css_context: Option<crate::css_cascade::CssContext>,
+    /// Blitz Stylo computed styles cache — DFS-mappade från Blitz DOM
+    /// Key: NodeKey ffi-bits, Value: CSS properties
+    #[cfg(feature = "blitz")]
+    blitz_styles: Option<std::collections::HashMap<u64, std::collections::HashMap<String, String>>>,
     /// In-memory localStorage (sandboxad, ingen persistens)
     local_storage: std::collections::HashMap<String, String>,
     /// In-memory sessionStorage (sandboxad, ingen persistens)
@@ -74,6 +228,9 @@ struct BridgeState {
     console_output: Vec<String>,
     /// document.readyState — "loading", "interactive" eller "complete"
     ready_state: String,
+    /// Original HTML — behövs för Blitz Stylo lazy-init
+    #[cfg(feature = "blitz")]
+    original_html: Option<String>,
 }
 
 type SharedState = Rc<RefCell<BridgeState>>;
@@ -124,6 +281,10 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
         ready_state: "complete".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: None,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -245,6 +406,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
         ready_state: "complete".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: None,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -317,6 +482,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 session_storage: std::collections::HashMap::new(),
                 console_output: Vec::new(),
                 ready_state: borrowed.ready_state.clone(),
+                #[cfg(feature = "blitz")]
+                blitz_styles: None,
+                #[cfg(feature = "blitz")]
+                original_html: None,
             }
         }
     };
@@ -335,7 +504,26 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
 /// 3. readyState = "complete" — dispatcha load
 ///
 /// Returnerar modifierad ArenaDom med alla DOM-mutationer applicerade.
+/// eval_js_with_lifecycle med original HTML (för Blitz Stylo computed styles)
+#[cfg(feature = "blitz")]
+pub fn eval_js_with_lifecycle_html(
+    scripts: &[String],
+    arena: ArenaDom,
+    html: &str,
+) -> DomEvalResult {
+    let mut result = eval_js_with_lifecycle_internal(scripts, arena, Some(html.to_string()));
+    result
+}
+
 pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalResult {
+    eval_js_with_lifecycle_internal(scripts, arena, None)
+}
+
+fn eval_js_with_lifecycle_internal(
+    scripts: &[String],
+    arena: ArenaDom,
+    _original_html: Option<String>,
+) -> DomEvalResult {
     let start = std::time::Instant::now();
 
     if scripts.is_empty() {
@@ -360,6 +548,10 @@ pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalRes
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
         ready_state: "loading".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: _original_html,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -484,6 +676,10 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         session_storage: std::collections::HashMap::new(),
         console_output: Vec::new(),
         ready_state: "loading".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: None,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -577,6 +773,10 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 session_storage: std::collections::HashMap::new(),
                 console_output: Vec::new(),
                 ready_state: borrowed.ready_state.clone(),
+                #[cfg(feature = "blitz")]
+                blitz_styles: None,
+                #[cfg(feature = "blitz")]
+                original_html: None,
             }
         }
     };
@@ -6124,24 +6324,86 @@ impl JsHandler for GetComputedStyleHandler {
             Some(k) => k,
             None => return Ok(Object::new(ctx.clone())?.into_value()),
         };
-        // Läs computed styles från tag defaults + inline style-attribut.
-        // CSS-regler bör redan vara inlinade av css_compiler (LightningCSS + css-inline)
-        // innan JS-exekvering — detta ger oss fullständig cascade via Blitz pipeline.
+        // Beräkna computed styles:
+        // 1. Försök Blitz Stylo (riktig CSS-motor) om tillgänglig
+        // 2. Fallback: tag defaults + inline styles
         let styles = {
-            let s = self.state.borrow();
-            let tag = s
-                .arena
-                .nodes
-                .get(k)
-                .and_then(|n| n.tag.as_deref())
-                .unwrap_or("");
-            let mut computed = get_tag_style_defaults(tag);
-            if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
-                for (prop, val) in parse_inline_styles(inline) {
-                    computed.insert(prop, val);
+            let key_bits = node_key_to_f64(k) as u64;
+
+            #[cfg(feature = "blitz")]
+            {
+                // Lazy-init: bygg Blitz styles vid första anrop
+                let needs_init = {
+                    let s = self.state.borrow();
+                    s.blitz_styles.is_none() && s.original_html.is_some()
+                };
+                if needs_init {
+                    let html = {
+                        let s = self.state.borrow();
+                        s.original_html.clone()
+                    };
+                    if let Some(html) = html {
+                        let blitz_raw = build_blitz_computed_styles(&html);
+                        let s_ref = self.state.borrow();
+                        let mapped = map_blitz_styles_to_arena(&blitz_raw, &s_ref.arena);
+                        drop(s_ref);
+                        self.state.borrow_mut().blitz_styles = Some(mapped);
+                    }
+                }
+                // Försök hämta Blitz-computed styles
+                let blitz_found = {
+                    let s = self.state.borrow();
+                    s.blitz_styles
+                        .as_ref()
+                        .and_then(|m| m.get(&key_bits))
+                        .cloned()
+                };
+                if let Some(blitz_props) = blitz_found {
+                    // Merga med inline styles (inline har högst prio)
+                    let s = self.state.borrow();
+                    let mut computed = blitz_props;
+                    if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
+                        for (prop, val) in parse_inline_styles(inline) {
+                            computed.insert(prop, val);
+                        }
+                    }
+                    computed
+                } else {
+                    // Fallback: tag defaults + inline
+                    let s = self.state.borrow();
+                    let tag = s
+                        .arena
+                        .nodes
+                        .get(k)
+                        .and_then(|n| n.tag.as_deref())
+                        .unwrap_or("");
+                    let mut computed = get_tag_style_defaults(tag);
+                    if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
+                        for (prop, val) in parse_inline_styles(inline) {
+                            computed.insert(prop, val);
+                        }
+                    }
+                    computed
                 }
             }
-            computed
+
+            #[cfg(not(feature = "blitz"))]
+            {
+                let s = self.state.borrow();
+                let tag = s
+                    .arena
+                    .nodes
+                    .get(k)
+                    .and_then(|n| n.tag.as_deref())
+                    .unwrap_or("");
+                let mut computed = get_tag_style_defaults(tag);
+                if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
+                    for (prop, val) in parse_inline_styles(inline) {
+                        computed.insert(prop, val);
+                    }
+                }
+                computed
+            }
         };
 
         let style_obj = Object::new(ctx.clone())?;
