@@ -6043,38 +6043,73 @@ impl JsHandler for GetComputedStyleHandler {
             Some(k) => k,
             None => return Ok(Object::new(ctx.clone())?.into_value()),
         };
-        // Grundläggande computed styles baserat på inline + tag defaults
-        let s = self.state.borrow();
-        let mut styles = get_tag_style_defaults(
-            s.arena
-                .nodes
-                .get(k)
-                .and_then(|n| n.tag.as_deref())
-                .unwrap_or(""),
-        );
-        if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
-            for (prop, val) in parse_inline_styles(inline) {
-                styles.insert(prop, val);
+        // Använd CssContext cascade engine (lazy-initierad)
+        // Två steg pga borrow checker: ta ut css_context, beräkna, stoppa tillbaka
+        let styles = {
+            let mut s = self.state.borrow_mut();
+            if s.css_context.is_none() {
+                s.css_context = Some(crate::css_cascade::CssContext::from_arena(&s.arena));
             }
-        }
-        drop(s);
+            let mut css_ctx = s.css_context.take();
+            let result = if let Some(ref mut ctx) = css_ctx {
+                let computed = ctx.get_computed_style(k, &s.arena);
+                computed.properties
+            } else {
+                let mut fallback = get_tag_style_defaults(
+                    s.arena
+                        .nodes
+                        .get(k)
+                        .and_then(|n| n.tag.as_deref())
+                        .unwrap_or(""),
+                );
+                if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
+                    for (prop, val) in parse_inline_styles(inline) {
+                        fallback.insert(prop, val);
+                    }
+                }
+                fallback
+            };
+            s.css_context = css_ctx;
+            result
+        };
 
         let style_obj = Object::new(ctx.clone())?;
+        // getPropertyValue metod
+        let styles_clone = styles.clone();
         style_obj.set(
             "getPropertyValue",
             Function::new(
                 ctx.clone(),
-                JsFn(StyleGetPropertyValue {
-                    state: Rc::clone(&self.state),
-                    key: k,
+                JsFn(ComputedStyleGetProperty {
+                    styles: styles_clone,
                 }),
             )?,
         )?;
         for (prop, val) in &styles {
+            // Sätt både kebab-case och camelCase
+            style_obj.set(prop.as_str(), val.as_str())?;
             let camel = kebab_to_camel(prop);
-            style_obj.set(camel.as_str(), val.as_str())?;
+            if camel != *prop {
+                style_obj.set(camel.as_str(), val.as_str())?;
+            }
         }
         Ok(style_obj.into_value())
+    }
+}
+
+/// getPropertyValue via stängda computed styles
+struct ComputedStyleGetProperty {
+    styles: std::collections::HashMap<String, String>,
+}
+impl JsHandler for ComputedStyleGetProperty {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let prop = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let val = self.styles.get(&prop).cloned().unwrap_or_default();
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -6471,11 +6506,14 @@ fn register_window_with_viewport<'js>(
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
         globalThis.crypto = globalThis.window.crypto;
-        // Synka window-funktioner till globalThis (WPT anropar addEventListener() utan window.)
+        // Synka window-funktioner till globalThis (WPT anropar utan window.)
         if (globalThis.window) {
             globalThis.addEventListener = globalThis.window.addEventListener;
             globalThis.removeEventListener = globalThis.window.removeEventListener;
             globalThis.dispatchEvent = globalThis.window.dispatchEvent;
+            globalThis.getComputedStyle = globalThis.window.getComputedStyle;
+            globalThis.getSelection = globalThis.window.getSelection;
+            globalThis.matchMedia = globalThis.window.matchMedia;
         }
 
         // TextEncoder/TextDecoder — UTF-8

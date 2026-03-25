@@ -66,7 +66,8 @@ impl ArenaDomSink {
     /// Kolla om ett element är "inert" (text-innehåll irrelevant semantiskt)
     #[inline]
     fn is_inert_tag(tag: &str) -> bool {
-        matches!(tag, "script" | "style" | "noscript")
+        // style behålls — behövs för CSS cascade (getComputedStyle)
+        matches!(tag, "script" | "noscript")
     }
 
     /// Kolla om text enbart innehåller whitespace (newlines, spaces, tabs).
