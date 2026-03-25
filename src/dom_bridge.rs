@@ -1770,6 +1770,22 @@ impl JsHandler for AppendChild {
         };
         {
             let mut s = self.state.borrow_mut();
+            // CharacterData (Text, Comment) får inte ha barn
+            if let Some(node) = s.arena.nodes.get(self.key) {
+                if matches!(
+                    node.node_type,
+                    crate::arena_dom::NodeType::Text | crate::arena_dom::NodeType::Comment
+                ) {
+                    drop(s);
+                    return Err(ctx.throw(
+                        rquickjs::String::from_str(
+                            ctx.clone(),
+                            "HierarchyRequestError: CharacterData nodes cannot have children",
+                        )?
+                        .into(),
+                    ));
+                }
+            }
             // Ta bort från gammal förälder
             if let Some(old_parent) = s.arena.nodes.get(child_key).and_then(|n| n.parent) {
                 if let Some(parent_node) = s.arena.nodes.get_mut(old_parent) {
@@ -5561,6 +5577,25 @@ impl JsHandler for ClassListItem {
     }
 }
 
+struct ClassListGetRawClass {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListGetRawClass {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let raw = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("class"))
+            .unwrap_or("")
+            .to_string();
+        drop(s);
+        Ok(rquickjs::String::from_str(ctx.clone(), &raw)?.into_value())
+    }
+}
+
 struct ClassListGetClasses {
     state: SharedState,
     key: NodeKey,
@@ -5568,14 +5603,17 @@ struct ClassListGetClasses {
 impl JsHandler for ClassListGetClasses {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let classes: Vec<String> = s
+        let raw = s
             .arena
             .nodes
             .get(self.key)
             .and_then(|n| n.get_attr("class"))
-            .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
-            .unwrap_or_default();
+            .unwrap_or("")
+            .to_string();
         drop(s);
+        // DOMTokenList: unika tokens i ordning (behåll första förekomst)
+        let mut seen = std::collections::HashSet::new();
+        let classes: Vec<&str> = raw.split_whitespace().filter(|t| seen.insert(*t)).collect();
         let arr = rquickjs::Array::new(ctx.clone())?;
         for (i, cls) in classes.iter().enumerate() {
             arr.set(i, rquickjs::String::from_str(ctx.clone(), cls)?)?;
@@ -5654,15 +5692,23 @@ fn make_class_list<'js>(
     )?;
 
     // Uppdatera length/value/index via JS-helper
-    let update_fn_code = r#"(function(obj, getClasses) {
+    // getRawClass returnerar rå class-attributet (med whitespace och duplicates)
+    let get_raw_class_fn = Function::new(
+        ctx.clone(),
+        JsFn(ClassListGetRawClass {
+            state: Rc::clone(state),
+            key,
+        }),
+    )?;
+    let update_fn_code = r#"(function(obj, getClasses, getRawClass) {
         Object.defineProperty(obj, 'length', { get: function(){ return getClasses().length; }, configurable: true });
         Object.defineProperty(obj, 'value', {
-            get: function(){ return getClasses().join(' '); },
+            get: function(){ return getRawClass(); },
             set: function(v){ /* setter via className */ },
             configurable: true
         });
         Object.defineProperty(obj, Symbol.toStringTag, { value: 'DOMTokenList' });
-        obj.toString = function(){ return getClasses().join(' '); };
+        obj.toString = function(){ return getRawClass(); };
         obj.forEach = function(cb, thisArg) {
             var cls = getClasses();
             for (var i = 0; i < cls.length; i++) cb.call(thisArg, cls[i], i, obj);
@@ -5681,7 +5727,19 @@ fn make_class_list<'js>(
         };
         obj[Symbol.iterator] = obj.values;
         obj.supports = function(){ throw new TypeError("DOMTokenList has no supported tokens"); };
-        return obj;
+        // Proxy för nummererad index-access: classList[0], classList[1] etc.
+        var proxy = new Proxy(obj, {
+            get: function(target, prop) {
+                if (typeof prop === 'string' && /^[0-9]+$/.test(prop)) {
+                    var cls = getClasses();
+                    var idx = parseInt(prop, 10);
+                    return idx < cls.length ? cls[idx] : undefined;
+                }
+                return target[prop];
+            }
+        });
+        // Kopiera metoder till proxy-objektet referens
+        return proxy;
     })"#;
     let get_classes_fn = Function::new(
         ctx.clone(),
@@ -5691,7 +5749,11 @@ fn make_class_list<'js>(
         }),
     )?;
     if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
-        let _ = update_fn.call::<_, Value>((obj.clone(), get_classes_fn));
+        if let Ok(proxy) =
+            update_fn.call::<_, Value>((obj.clone(), get_classes_fn, get_raw_class_fn))
+        {
+            return Ok(proxy);
+        }
     }
 
     Ok(obj.into_value())
@@ -6368,30 +6430,34 @@ fn register_window_with_viewport<'js>(
             this.currentTarget = null;
             this.eventPhase = 0;
             this.defaultPrevented = false;
+            this.cancelBubble = false;
             this.returnValue = true;
             this.timeStamp = Date.now();
             this.isTrusted = false;
-            this.stopPropagation = function() {};
-            this.stopImmediatePropagation = function() {};
-            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
+            this._stopPropagationFlag = false;
+            this._stopImmediatePropagationFlag = false;
+            this.stopPropagation = function() { this._stopPropagationFlag = true; this.cancelBubble = true; };
+            this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; this.cancelBubble = true; };
+            this.preventDefault = function() { if (this.cancelable) { this.defaultPrevented = true; this.returnValue = false; } };
+            this.initEvent = function(type, bubbles, cancelable) { this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this.cancelBubble = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; };
         };
+        Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
+        Event.prototype.NONE = 0; Event.prototype.CAPTURING_PHASE = 1; Event.prototype.AT_TARGET = 2; Event.prototype.BUBBLING_PHASE = 3;
         globalThis.CustomEvent = function CustomEvent(type, opts) {
-            this.type = type || '';
+            Event.call(this, type, opts);
             this.detail = (opts && opts.detail) || null;
-            this.bubbles = (opts && opts.bubbles) || false;
-            this.cancelable = (opts && opts.cancelable) || false;
-            this.composed = (opts && opts.composed) || false;
-            this.target = null;
-            this.srcElement = null;
-            this.currentTarget = null;
-            this.eventPhase = 0;
-            this.defaultPrevented = false;
-            this.returnValue = true;
-            this.timeStamp = Date.now();
-            this.isTrusted = false;
-            this.stopPropagation = function() {};
-            this.stopImmediatePropagation = function() {};
-            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
+        };
+        CustomEvent.prototype = Object.create(Event.prototype);
+        CustomEvent.prototype.constructor = CustomEvent;
+        CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
+        // Text and Comment constructors (DOM spec)
+        globalThis.Text = function Text(data) {
+            var node = document.createTextNode(data !== undefined ? String(data) : '');
+            return node;
+        };
+        globalThis.Comment = function Comment(data) {
+            var node = document.createComment(data !== undefined ? String(data) : '');
+            return node;
         };
         globalThis.DOMParser = function DOMParser() {
             this.parseFromString = function(str, type) {

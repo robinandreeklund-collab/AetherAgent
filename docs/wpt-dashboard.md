@@ -25,7 +25,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **286** | **6,624** | **4,946** | **74.7%** | Baseline |
+| 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
+| **2026-03-25** | **286** | **6,624** | **5,017** | **75.7%** | +71 pass: Event fix, classList, Text/Comment constructors |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -47,7 +48,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **160** | **312** | **100** | **32.1%** | Baseline |
+| 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
+| **2026-03-25** | **160** | **311** | **109** | **35.0%** | +9 pass: Event constants, cancelBubble, initEvent |
 
 **Implementerat:**
 - addEventListener med options (capture, passive) ✅
@@ -127,7 +129,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **5** | **189** | **175** | **92.6%** | Baseline — starkaste sviten! |
+| 2026-03-25 | 5 | 189 | 175 | 92.6% | Baseline |
+| **2026-03-25** | **5** | **189** | **179** | **94.7%** | +4 pass: classList raw value, unique tokens |
 
 Nästan komplett tack vare native classList-implementation.
 
