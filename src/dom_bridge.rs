@@ -889,6 +889,13 @@ impl JsHandler for NativeCompareBoundary {
 
 // ─── getSelection stub ──────────────────────────────────────────────────────
 
+struct OwnerDocumentGetter;
+impl JsHandler for OwnerDocumentGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        ctx.globals().get::<_, Value>("document")
+    }
+}
+
 struct GetSelectionFromDoc;
 impl JsHandler for GetSelectionFromDoc {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -4078,11 +4085,13 @@ fn make_element_object<'js>(
     obj.set("nodeType", node_type_val)?;
     obj.set("tagName", tag_name.as_str())?;
     obj.set("nodeName", tag_name.as_str())?;
-    // ownerDocument — alla noder utom document pekar på document
+    // ownerDocument — lazy getter som hämtar document från globals vid anrop
+    // Löser timing: body/head/documentElement skapas innan document registreras.
     if node_type_val != 9 {
-        if let Ok(doc) = ctx.globals().get::<_, Value>("document") {
-            obj.set("ownerDocument", doc)?;
-        }
+        obj.prop(
+            "ownerDocument",
+            Accessor::new_get(JsFn(OwnerDocumentGetter)),
+        )?;
     }
     obj.set("id", id_val.as_str())?;
     obj.set("className", class_val.as_str())?;
@@ -6450,6 +6459,40 @@ fn register_window_with_viewport<'js>(
         CustomEvent.prototype.constructor = CustomEvent;
         CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
+        globalThis.__liveRanges = [];
+        // Range mutation notification — spec: https://dom.spec.whatwg.org/#concept-range-bp-after
+        globalThis.__notifyRangeMutation = function(type, parent, node, oldParent, oldIndex) {
+            var ranges = globalThis.__liveRanges;
+            if (!ranges || !ranges.length) return;
+            for (var i = 0; i < ranges.length; i++) {
+                var r = ranges[i];
+                if (!r) continue;
+                var sc = r.startContainer, so = r.startOffset, ec = r.endContainer, eo = r.endOffset;
+                var sameKey = function(a, b) { return a === b || (a && b && a.__nodeKey__ && b.__nodeKey__ && a.__nodeKey__ === b.__nodeKey__); };
+                if (type === 'removeChild') {
+                    // Om container är parent och offset > oldIndex, minska offset
+                    if (sameKey(sc, parent) && so > oldIndex) r.startOffset = so - 1;
+                    if (sameKey(ec, parent) && eo > oldIndex) r.endOffset = eo - 1;
+                } else if (type === 'insertBefore' || type === 'appendChild') {
+                    // Om container är parent och offset > newIndex, öka offset
+                    var newIndex = 0;
+                    if (parent && parent.childNodes) {
+                        for (var ci = 0; ci < parent.childNodes.length; ci++) {
+                            if (sameKey(parent.childNodes[ci], node)) { newIndex = ci; break; }
+                        }
+                    }
+                    // Nod togs bort från oldParent
+                    if (oldParent && !sameKey(oldParent, parent)) {
+                        if (sameKey(sc, oldParent) && so > oldIndex) r.startOffset = so - 1;
+                        if (sameKey(ec, oldParent) && eo > oldIndex) r.endOffset = eo - 1;
+                    }
+                    // Nod infogades i parent
+                    if (sameKey(sc, parent) && so >= newIndex) r.startOffset = so + 1;
+                    if (sameKey(ec, parent) && eo >= newIndex) r.endOffset = eo + 1;
+                }
+                r._update();
+            }
+        };
         globalThis.Range = function Range() {
             this.startContainer = document;
             this.startOffset = 0;
@@ -6457,6 +6500,7 @@ fn register_window_with_viewport<'js>(
             this.endOffset = 0;
             this.collapsed = true;
             this.commonAncestorContainer = document;
+            globalThis.__liveRanges.push(this);
         };
         Range.START_TO_START = 0; Range.START_TO_END = 1; Range.END_TO_END = 2; Range.END_TO_START = 3;
         Range.prototype.START_TO_START = 0; Range.prototype.START_TO_END = 1; Range.prototype.END_TO_END = 2; Range.prototype.END_TO_START = 3;

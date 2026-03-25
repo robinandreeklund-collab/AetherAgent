@@ -74,7 +74,7 @@
 | 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
 | 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
 | 2026-03-25 | 55 | 10,762 | 7,182 | 66.7% | WrongDocumentError, nativeChildIndex, toString |
-| **2026-03-25** | **55** | **~10,800** | **~7,200+** | **~67%** | window.getSelection, selectNode re-enabled |
+| **2026-03-25** | **55** | **~10,800** | **~7,400+** | **~69%** | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
 
 **Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
