@@ -2060,12 +2060,38 @@ impl JsHandler for InsertAdjacentHTML {
             } else {
                 let rcdom = crate::parser::parse_html(&html_str);
                 let fragment = ArenaDom::from_rcdom(&rcdom);
-                let doc_key = fragment.document;
-                let children = fragment
-                    .nodes
-                    .get(doc_key)
+                // Extrahera body-barn (html5ever wrappar i html/head/body)
+                let body_key = {
+                    let doc_key = fragment.document;
+                    fragment
+                        .nodes
+                        .get(doc_key)
+                        .and_then(|doc| {
+                            doc.children.iter().find(|&&c| {
+                                fragment.nodes.get(c).and_then(|n| n.tag.as_deref()) == Some("html")
+                            })
+                        })
+                        .and_then(|&html_key| {
+                            fragment.nodes.get(html_key).and_then(|html| {
+                                html.children.iter().find(|&&c| {
+                                    fragment.nodes.get(c).and_then(|n| n.tag.as_deref())
+                                        == Some("body")
+                                })
+                            })
+                        })
+                        .copied()
+                };
+                let children = body_key
+                    .and_then(|bk| fragment.nodes.get(bk))
                     .map(|n| n.children.clone())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        // Fallback: document-barn
+                        fragment
+                            .nodes
+                            .get(fragment.document)
+                            .map(|n| n.children.clone())
+                            .unwrap_or_default()
+                    });
                 // Kopiera alla fragment-barn till vår arena (utan förälder ännu)
                 let mut new_keys = Vec::new();
                 // Använd temporär nyckel — vi sätter rätt förälder nedan
@@ -7358,6 +7384,14 @@ fn register_window_with_viewport<'js>(
         Range.prototype.cloneContents = function() { return document.createDocumentFragment(); };
         Range.prototype.insertNode = function(node) {};
         Range.prototype.surroundContents = function(node) {};
+        Range.prototype.createContextualFragment = function(html) {
+            // Spec: parse html as fragment, return DocumentFragment
+            var frag = document.createDocumentFragment();
+            var temp = document.createElement('div');
+            temp.innerHTML = html;
+            while (temp.firstChild) { frag.appendChild(temp.firstChild); }
+            return frag;
+        };
         Range.prototype.getBoundingClientRect = function() { return {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0}; };
         Range.prototype.getClientRects = function() { return []; };
         // Text and Comment constructors (DOM spec)

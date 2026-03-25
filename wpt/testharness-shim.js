@@ -392,7 +392,7 @@
 
   // ─── async_test() ───
   function async_test(fn_or_name, name_or_props, props) {
-    if (_completed) return;
+    // Returnera alltid ett Test-objekt (tester anropar .add_cleanup etc.)
 
     var fn, tname, tprops;
     if (typeof fn_or_name === "function") {
