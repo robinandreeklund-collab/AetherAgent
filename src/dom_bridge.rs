@@ -130,42 +130,93 @@ pub fn build_blitz_computed_styles(
     styles_map
 }
 
-/// Mappa Blitz computed styles till ArenaDom NodeKeys via DFS-ordning.
-/// Båda DOM-träden parseas av html5ever → samma element-ordning.
+/// Mappa Blitz computed styles till ArenaDom NodeKeys.
+/// Matchar noder via fingerprint (tag + id + class + DFS-position) för robusthet.
 #[cfg(feature = "blitz")]
 pub fn map_blitz_styles_to_arena(
+    html: &str,
     blitz_styles: &std::collections::HashMap<u64, std::collections::HashMap<String, String>>,
     arena: &ArenaDom,
 ) -> std::collections::HashMap<u64, std::collections::HashMap<String, String>> {
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
     use slotmap::Key;
 
     let mut arena_styles = std::collections::HashMap::new();
 
-    // Samla ArenaDom element-noder i DFS-ordning
-    let mut arena_elements: Vec<NodeKey> = Vec::new();
-    fn collect_arena_dfs(arena: &ArenaDom, key: NodeKey, out: &mut Vec<NodeKey>) {
-        if let Some(node) = arena.nodes.get(key) {
-            if node.node_type == NodeType::Element {
-                out.push(key);
+    // Re-parsea med Blitz för att traversera och skapa fingerprints
+    let Ok(doc) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(1280, 900, 1.0, ColorScheme::Light)),
+                base_url: Some("https://wpt.example.com".to_string()),
+                ..Default::default()
+            },
+        )
+    })) else {
+        return arena_styles;
+    };
+
+    let blitz_doc = doc.as_ref();
+
+    // Bygg fingerprints: (tag, id, class, nth-child-among-elements) → blitz_id
+    let mut blitz_fingerprints: Vec<(String, u64)> = Vec::new();
+    fn collect_blitz_fps(
+        doc: &blitz_dom::BaseDocument,
+        node_id: usize,
+        out: &mut Vec<(String, u64)>,
+    ) {
+        if let Some(node) = doc.get_node(node_id) {
+            if node.is_element() {
+                let tag = node
+                    .element_data()
+                    .map(|e| e.name.local.to_string())
+                    .unwrap_or_default();
+                let id = node.attr(blitz_dom::local_name!("id")).unwrap_or("");
+                let class = node.attr(blitz_dom::local_name!("class")).unwrap_or("");
+                let fp = format!("{}#{}|{}", tag, id, class);
+                out.push((fp, node_id as u64));
             }
-            for &child in &node.children {
-                collect_arena_dfs(arena, child, out);
+            for &child_id in &node.children {
+                collect_blitz_fps(doc, child_id, out);
             }
         }
     }
-    collect_arena_dfs(arena, arena.document, &mut arena_elements);
+    collect_blitz_fps(blitz_doc, 0, &mut blitz_fingerprints);
 
-    // blitz_styles keys är Blitz node-IDs i DFS-ordning (collect_dfs ordning)
-    // Mappa 1:1 baserat på DFS-ordning: arena_elements[i] ↔ blitz_dfs[i]
-    // blitz_styles keys redan i DFS-ordning — sortera efter insertion order
-    let mut blitz_dfs: Vec<u64> = blitz_styles.keys().copied().collect();
-    blitz_dfs.sort(); // Blitz IDs ökar i DFS-ordning (parent < child)
+    // Bygg ArenaDom fingerprints
+    let mut arena_fingerprints: Vec<(String, NodeKey)> = Vec::new();
+    fn collect_arena_fps(arena: &ArenaDom, key: NodeKey, out: &mut Vec<(String, NodeKey)>) {
+        if let Some(node) = arena.nodes.get(key) {
+            if node.node_type == NodeType::Element {
+                let tag = node.tag.as_deref().unwrap_or("");
+                let id = node.get_attr("id").unwrap_or("");
+                let class = node.get_attr("class").unwrap_or("");
+                let fp = format!("{}#{}|{}", tag, id, class);
+                out.push((fp, key));
+            }
+            for &child in &node.children {
+                collect_arena_fps(arena, child, out);
+            }
+        }
+    }
+    collect_arena_fps(arena, arena.document, &mut arena_fingerprints);
 
-    for (i, &arena_key) in arena_elements.iter().enumerate() {
-        if let Some(&blitz_id) = blitz_dfs.get(i) {
-            if let Some(styles) = blitz_styles.get(&blitz_id) {
-                let key_bits = arena_key.data().as_ffi();
-                arena_styles.insert(key_bits, styles.clone());
+    // Matcha: för varje ArenaDom-nod, hitta Blitz-nod med samma fingerprint
+    // Hanterar duplicates via ordningsposition
+    let mut used_blitz: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for (arena_fp, arena_key) in &arena_fingerprints {
+        // Hitta första oanvända Blitz-nod med samma fingerprint
+        for (blitz_fp, blitz_id) in &blitz_fingerprints {
+            if blitz_fp == arena_fp && !used_blitz.contains(blitz_id) {
+                if let Some(styles) = blitz_styles.get(blitz_id) {
+                    let key_bits = arena_key.data().as_ffi();
+                    arena_styles.insert(key_bits, styles.clone());
+                    used_blitz.insert(*blitz_id);
+                    break;
+                }
             }
         }
     }
@@ -6342,10 +6393,10 @@ impl JsHandler for GetComputedStyleHandler {
                         let s = self.state.borrow();
                         s.original_html.clone()
                     };
-                    if let Some(html) = html {
-                        let blitz_raw = build_blitz_computed_styles(&html);
+                    if let Some(ref html) = html {
+                        let blitz_raw = build_blitz_computed_styles(html);
                         let s_ref = self.state.borrow();
-                        let mapped = map_blitz_styles_to_arena(&blitz_raw, &s_ref.arena);
+                        let mapped = map_blitz_styles_to_arena(html, &blitz_raw, &s_ref.arena);
                         drop(s_ref);
                         self.state.borrow_mut().blitz_styles = Some(mapped);
                     }
