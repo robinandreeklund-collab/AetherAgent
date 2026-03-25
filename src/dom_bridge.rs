@@ -4435,11 +4435,33 @@ struct InnerHTMLSetter {
 }
 impl JsHandler for InnerHTMLSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let html_str = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Konvertera argument till sträng (spec: ToString(value))
+        let html_str = match args.first() {
+            Some(v) if v.is_null() => String::new(), // innerHTML = null → clear
+            Some(v) if v.is_undefined() => "undefined".to_string(),
+            Some(v) => v
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .or_else(|| {
+                    v.as_number().map(|n| {
+                        if n == (n as i64) as f64 {
+                            format!("{}", n as i64)
+                        } else {
+                            format!("{}", n)
+                        }
+                    })
+                })
+                .or_else(|| v.as_bool().map(|b| b.to_string()))
+                .or_else(|| {
+                    // Anropa .toString() på objektet
+                    v.as_object()
+                        .and_then(|obj| obj.get::<_, Function>("toString").ok())
+                        .and_then(|f| f.call::<_, rquickjs::String>(()).ok())
+                        .and_then(|s| s.to_string().ok())
+                })
+                .unwrap_or_default(),
+            None => String::new(),
+        };
         let key_bits = node_key_to_f64(self.key);
         {
             let mut s = self.state.borrow_mut();

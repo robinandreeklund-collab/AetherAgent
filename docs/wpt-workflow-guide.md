@@ -10,10 +10,10 @@
 ./wpt/setup.sh
 
 # 2. Kör tester mot den subkategori du jobbar med
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
 
 # 3. Se detaljerat resultat
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
 ```
 
 ---
@@ -33,7 +33,7 @@ Titta i `docs/wpt-dashboard.md` och välj den subkategori som ger störst impact
 
 ```bash
 # Spara baseline INNAN du gör ändringar
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --json > /tmp/wpt-before.json
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json > /tmp/wpt-before.json
 
 # Eller anteckna summary-raden:
 # dom/nodes: 1234/1500 passed (82.3%)
@@ -43,10 +43,10 @@ cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --js
 
 ```bash
 # Kör med --verbose för att se varje enskilt testcase
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose 2>&1 | grep "FAIL"
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose 2>&1 | grep "FAIL"
 
 # Kör specifik fil som failar
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Node-cloneNode.html --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Node-cloneNode.html --verbose
 ```
 
 **Vanliga failure-mönster:**
@@ -91,7 +91,7 @@ cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Node-
 
 ```bash
 # Kör samma suite igen
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --json > /tmp/wpt-after.json
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json > /tmp/wpt-after.json
 
 # Jämför
 echo "Before: $(cat /tmp/wpt-before.json | grep passed)"
@@ -102,10 +102,10 @@ echo "After:  $(cat /tmp/wpt-after.json | grep passed)"
 
 ```bash
 # Kör ALLA Tier 1 tester — ingen regression tillåten
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/traversal/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
 
 # Plus standard CI
 cargo test && cargo clippy -- -D warnings && cargo fmt --check
@@ -138,7 +138,7 @@ Notera exakt vilka metoder/properties den implementerar.
 ### Steg 2: Kör baseline med polyfill aktiv
 
 ```bash
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose > /tmp/baseline-with-polyfill.txt
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose > /tmp/baseline-with-polyfill.txt
 ```
 
 ### Steg 3: Implementera i Rust
@@ -157,7 +157,7 @@ Ta bort motsvarande kod i `wpt/polyfills.js`.
 ### Steg 5: Verifiera — score får INTE gå ner
 
 ```bash
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose > /tmp/after-migration.txt
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose > /tmp/after-migration.txt
 
 # Jämför pass-counts
 diff <(grep "passed" /tmp/baseline-with-polyfill.txt) <(grep "passed" /tmp/after-migration.txt)
@@ -195,29 +195,29 @@ I `docs/dom-implementation-status.md`:
 
 # === KÖR TESTER ===
 # Hel svit
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/
 
 # Subkategori
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
 
 # Specifik fil
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Node-cloneNode.html
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Node-cloneNode.html
 
 # Med verbose (varje testcase)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
 
 # JSON-output
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --json
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json
 
 # Filtrering
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ --filter querySelector
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ --filter querySelector
 
 # === ALLA SVITER ===
 for suite in dom/nodes dom/events dom/ranges dom/traversal dom/collections \
              dom/abort dom/lists domparsing html/syntax html/dom \
              css/selectors css/cssom encoding webstorage xhr hr-time console url; do
   echo "=== $suite ==="
-  cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/$suite/
+  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/$suite/
 done
 
 # === CI PIPELINE ===
@@ -234,8 +234,8 @@ Kör subkategorier istället för hela sviten:
 ```bash
 # Istället för: wpt-suite/html/dom/  (stack overflow)
 # Kör:
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/html/dom/elements/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/html/dom/documents/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/dom/elements/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/dom/documents/
 ```
 
 ### "TIMEOUT" på specifik fil

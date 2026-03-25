@@ -194,30 +194,30 @@ Vid milstolpar (varje vecka eller major release):
 
 ```bash
 # Kör specifik subkategori med detaljer
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
 
 # Kör specifik testfil
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
 
 # Filtrera tester
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ --filter querySelector
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ --filter querySelector
 
 # JSON-output för CI
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --json
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json
 ```
 
 ### PR-validering
 
 ```bash
 # Tier 1 baseline (OBLIGATORISKT per PR)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/traversal/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
 
 # Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/domparsing/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/selectors/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/domparsing/
 ```
 
 ### Milstolpe-körning
@@ -226,7 +226,7 @@ cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/domparsing/
 # Full körning alla sviter
 for suite in dom domparsing encoding webstorage hr-time console url css/selectors css/cssom xhr html/syntax; do
   echo "=== $suite ==="
-  cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/$suite/ --json
+  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/$suite/ --json
 done
 ```
 

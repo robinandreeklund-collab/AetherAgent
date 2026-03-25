@@ -352,26 +352,26 @@ Console-testerna kräver troligen specifik testharness-integration.
 ./wpt/setup.sh
 
 # Tier 1 (obligatoriskt per PR)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/traversal/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/collections/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/collections/
 
 # Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/lists/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/domparsing/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/html/syntax/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/cssom/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/lists/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/domparsing/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/syntax/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/selectors/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/cssom/
 
 # Tier 3 (milstolpar)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/encoding/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/webstorage/
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/xhr/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/encoding/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/webstorage/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/xhr/
 
 # Verbose (debug)
-cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
 ```
 
 ---

@@ -4,10 +4,10 @@
 /// Använder QuickJS sandbox + DOM bridge för att evaluera testharness.js-tester.
 ///
 /// Användning:
-///   cargo run --bin aether-wpt --features js-eval,blitz -- [WPT_DIR] [FILTER...]
+///   cargo run --bin aether-wpt --features js-eval,blitz,fetch -- [WPT_DIR] [FILTER...]
 ///
 /// Exempel:
-///   cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
+///   cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
 ///   cargo run --bin aether-wpt --features js-eval -- wpt-suite/ --filter getElementById
 use std::path::{Path, PathBuf};
 use std::time::Instant;
