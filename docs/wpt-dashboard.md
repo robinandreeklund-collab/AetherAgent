@@ -14,7 +14,7 @@
 |------|--------|-------|--------|------|
 | **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~13,200+ | ~66% |
 | **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~450+ | ~20% |
-| **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~72 | ~5% |
+| **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~105 | ~8% |
 | **Total alla sviter** | | **~23,600+** | **~13,700+** | — |
 
 ---
@@ -221,7 +221,8 @@ html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **210** | **531** | **43** | **8.1%** | Baseline |
+| 2026-03-25 | 210 | 531 | 43 | 8.1% | Baseline |
+| **2026-03-25** | **210** | **531** | **76** | **14.3%** | +33 pass: CSS cascade engine connected |
 
 **Implementerat:**
 - style.setProperty/getPropertyValue/removeProperty ✅
