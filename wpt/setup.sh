@@ -28,10 +28,15 @@ git sparse-checkout set \
     shadow-dom \
     html/dom \
     html/syntax \
+    html/semantics \
     html/webappapis/timers \
     console \
     hr-time \
     url \
+    css/selectors \
+    css/cssom \
+    xhr \
+    fetch \
     resources
 
 cd ..
