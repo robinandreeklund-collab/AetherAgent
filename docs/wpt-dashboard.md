@@ -27,7 +27,7 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
 | 2026-03-25 | 286 | 6,624 | 5,017 | 75.7% | +71 pass: Event fix, classList, Text/Comment constructors |
-| **2026-03-25** | **286** | **6,624** | **5,006** | **75.6%** | textContent null, append dedup |
+| **2026-03-25** | **286** | **6,624** | **5,004** | **75.5%** | blitz-bekräftad (css_compiler + LightningCSS) |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -52,7 +52,7 @@
 | 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
 | 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
 | 2026-03-25 | 160 | 311 | 140 | 45.0% | +31 pass: Event subclasses, cancelBubble spec fix |
-| **2026-03-25** | **160** | **311** | **195** | **62.7%** | +55 pass: passive preventDefault, CompositionEvent.data |
+| **2026-03-25** | **160** | **310** | **208** | **67.1%** | blitz-bekräftad (eventPhase, global addEventListener) |
 
 **Implementerat:**
 - addEventListener med options (capture, passive) ✅
@@ -102,7 +102,7 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 18 | 1,584 | 516 | 32.6% | Baseline |
-| **2026-03-25** | **18** | **1,584** | **619** | **39.1%** | +103: whatToShow unsigned fix, root identity |
+| **2026-03-25** | **18** | **1,584** | **619** | **39.1%** | blitz-bekräftad (whatToShow unsigned, root identity) |
 
 **Implementerat:**
 - TreeWalker: nextNode, previousNode, parentNode, firstChild ✅
@@ -352,26 +352,26 @@ Console-testerna kräver troligen specifik testharness-integration.
 ./wpt/setup.sh
 
 # Tier 1 (obligatoriskt per PR)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/traversal/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/collections/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/events/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ranges/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/traversal/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/collections/
 
 # Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/lists/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/domparsing/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/html/syntax/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/css/cssom/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/lists/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/domparsing/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/html/syntax/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/selectors/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/cssom/
 
 # Tier 3 (milstolpar)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/encoding/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/webstorage/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/xhr/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/encoding/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/webstorage/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/xhr/
 
 # Verbose (debug)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
 ```
 
 ---

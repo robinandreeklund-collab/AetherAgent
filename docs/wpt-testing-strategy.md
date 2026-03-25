@@ -194,30 +194,30 @@ Vid milstolpar (varje vecka eller major release):
 
 ```bash
 # Kör specifik subkategori med detaljer
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --verbose
 
 # Kör specifik testfil
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/Document-getElementById.html --verbose
 
 # Filtrera tester
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/ --filter querySelector
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ --filter querySelector
 
 # JSON-output för CI
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --json
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/ --json
 ```
 
 ### PR-validering
 
 ```bash
 # Tier 1 baseline (OBLIGATORISKT per PR)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/traversal/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/events/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/ranges/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/traversal/
 
 # Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/domparsing/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/css/selectors/
+cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/domparsing/
 ```
 
 ### Milstolpe-körning
@@ -226,7 +226,7 @@ cargo run --bin aether-wpt --features js-eval -- wpt-suite/domparsing/
 # Full körning alla sviter
 for suite in dom domparsing encoding webstorage hr-time console url css/selectors css/cssom xhr html/syntax; do
   echo "=== $suite ==="
-  cargo run --bin aether-wpt --features js-eval -- wpt-suite/$suite/ --json
+  cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/$suite/ --json
 done
 ```
 
@@ -236,15 +236,16 @@ done
 
 ### Kortsiktigt (Q2 2026)
 
-| Svit | Nu | Mål | Gap |
-|------|----|-----|-----|
+| Svit | Nu (blitz) | Mål | Gap |
+|------|-----------|-----|-----|
 | dom/nodes/ | 75.5% | 90% | -15pp |
-| dom/events/ | 62.7% | 90% | -27pp |
+| dom/events/ | 67.1% | 90% | -23pp |
 | dom/ranges/ | ~69% | 80% | -11pp |
-| dom/traversal/ | 32.6% | 90% | -57pp |
-| dom/lists/ | 94.7% | 98% | -3pp |
-| css/selectors/ | 12.0% | 40% | -28pp |
-| html/syntax/ | 20.0% | 30% | -10pp |
+| dom/traversal/ | 39.1% | 90% | -51pp |
+| dom/lists/ | 95.2% | 98% | -3pp |
+| css/selectors/ | 32.7% | 50% | -17pp |
+| css/cssom/ | 14.3% | 25% | -11pp |
+| html/syntax/ | 19.6% | 30% | -10pp |
 
 ### Långsiktigt (Q4 2026)
 

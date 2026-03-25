@@ -12,22 +12,23 @@
 
 | Suite | Cases | Passed | Rate | Datum |
 |-------|-------|--------|------|-------|
-| dom/nodes | 6,624 | 5,002 | 75.5% | 2026-03-25 |
-| dom/events | 311 | 195 | 62.7% | 2026-03-25 |
+| dom/nodes | 6,624 | 5,004 | 75.5% | 2026-03-25 |
+| dom/events | 310 | 208 | 67.1% | 2026-03-25 |
 | dom/ranges | ~10,800 | ~7,400 | ~69% | 2026-03-25 |
-| dom/traversal | 1,584 | 516 | 32.6% | 2026-03-25 |
+| dom/traversal | 1,584 | 619 | 39.1% | 2026-03-25 |
 | dom/collections | 48 | 6 | 12.5% | 2026-03-25 |
-| dom/lists | 189 | 179 | 94.7% | 2026-03-25 |
+| dom/lists | 189 | 180 | 95.2% | 2026-03-25 |
 | dom/abort | 2 | 0 | 0.0% | 2026-03-25 |
-| css/selectors | 761 | 91 | 12.0% | 2026-03-25 |
-| css/cssom | 531 | 43 | 8.1% | 2026-03-25 |
+| css/selectors | 761 | 249 | 32.7% | 2026-03-25 |
+| css/cssom | 512 | 73 | 14.3% | 2026-03-25 |
 | domparsing | 453 | 25 | 5.5% | 2026-03-25 |
-| html/syntax | 340 | 68 | 20.0% | 2026-03-25 |
+| html/syntax | 342 | 67 | 19.6% | 2026-03-25 |
 | encoding | 331 | 1 | 0.3% | 2026-03-25 |
 | xhr | 430 | 28 | 6.5% | 2026-03-25 |
 | webstorage | 7 | 0 | 0.0% | 2026-03-25 |
 
-**Range API migrerad till native Rust (2026-03-25).** Polyfill borttagen.
+> Alla scores bekräftade med `--features js-eval,blitz` (LightningCSS + css-inline).
+> Range API native i Rust. Polyfill borttagen.
 Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 
 ---
@@ -226,16 +227,16 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 | Implementation | WPT-svit | Score | Mål |
 |---------------|----------|-------|-----|
 | DOM Core (createElement, appendChild, etc.) | `dom/nodes/` | 75.5% | 90% |
-| Event System (addEventListener, dispatch) | `dom/events/` | 62.7% | 90% |
+| Event System (addEventListener, dispatch) | `dom/events/` | 67.1% | 90% |
 | Range API (native Rust) | `dom/ranges/` | ~69% | 80% |
-| TreeWalker/NodeIterator | `dom/traversal/` | 32.6% | 90% |
+| TreeWalker/NodeIterator | `dom/traversal/` | 39.1% | 90% |
 | HTMLCollection/NodeList | `dom/collections/` | 12.5% | 50% |
-| DOMTokenList (classList) | `dom/lists/` | 94.7% | 98% |
+| DOMTokenList (classList) | `dom/lists/` | 95.2% | 98% |
 | AbortController | `dom/abort/` | 0.0% | 50% |
 | DOMParser/innerHTML | `domparsing/` | 5.5% | 30% |
 | HTML5 Parsing | `html/syntax/` | 20.0% | 30% |
-| CSS Selectors | `css/selectors/` | 28.0% | 40% |
-| CSSOM (style, getComputedStyle) | `css/cssom/` | 8.1% | 20% |
+| CSS Selectors | `css/selectors/` | 32.7% | 50% |
+| CSSOM (style, getComputedStyle) | `css/cssom/` | 14.3% | 25% |
 | TextEncoder/TextDecoder | `encoding/` | 0.3% | 40% |
 | localStorage/sessionStorage | `webstorage/` | 0.0% | 60% |
 | XMLHttpRequest | `xhr/` | 6.5% | 20% |
