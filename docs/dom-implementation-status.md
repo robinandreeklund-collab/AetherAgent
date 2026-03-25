@@ -211,8 +211,10 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 | `:not(sel)` | Native |
 | Comma-separated | Native |
 | CSS escape (`\30 foo`) | Native |
-| `:has()`, `:is()`, `:where()` | Saknas |
-| `+` (adjacent sibling), `~` (general sibling) | Saknas |
+| `:has()`, `:is()`, `:where()` | **Native** (2026-03-25) |
+| `+` (adjacent sibling), `~` (general sibling) | **Native** |
+| `:nth-last-child`, `:nth-last-of-type` | **Native** (2026-03-25) |
+| `:only-of-type` | **Native** |
 
 ---
 
@@ -232,7 +234,7 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 | AbortController | `dom/abort/` | 0.0% | 50% |
 | DOMParser/innerHTML | `domparsing/` | 5.5% | 30% |
 | HTML5 Parsing | `html/syntax/` | 20.0% | 30% |
-| CSS Selectors | `css/selectors/` | 12.0% | 40% |
+| CSS Selectors | `css/selectors/` | 28.0% | 40% |
 | CSSOM (style, getComputedStyle) | `css/cssom/` | 8.1% | 20% |
 | TextEncoder/TextDecoder | `encoding/` | 0.3% | 40% |
 | localStorage/sessionStorage | `webstorage/` | 0.0% | 60% |
@@ -268,8 +270,8 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 16. ~~`prepend()` / `append()` / `replaceChildren()`~~ ✅ — Redan native sedan Fas 17
 
 ### Fas 4 — Medium prioritet
-17. CSS selectors: `+`, `~` — Adjacent/general sibling combinators. `css/selectors/` 12% → 30%
-18. CSS selectors: `:has()`, `:is()`, `:where()` — Modern pseudo-classes. `css/selectors/` → 40%
+17. ~~CSS selectors: `+`, `~`~~ ✅ — Redan native
+18. ~~CSS selectors: `:has()`, `:is()`, `:where()`, `:nth-last-child/type`~~ ✅ — Native (2026-03-25). `css/selectors/` 12% → 28%
 19. Namespace-metoder (setAttributeNS etc.) — `dom/nodes/` +100 pass
 20. `element.attributes` som riktig NamedNodeMap — `dom/collections/` impact
 21. TreeWalker/NodeIterator filter-förbättringar — `dom/traversal/` 33% → 60%

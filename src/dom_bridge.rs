@@ -7641,6 +7641,24 @@ fn find_by_tag_name(arena: &ArenaDom, key: NodeKey, tag: &str) -> Option<NodeKey
 ///
 /// Stöder: *, #id, .class, tag, tag.class, [attr], [attr="val"],
 /// [attr^="val"], [attr$="val"], [attr*="val"], [attr~="val"], [attr|="val"],
+/// Hitta matchande ) med hänsyn till nestade parenteser
+fn find_matching_paren(s: &str) -> Option<usize> {
+    let mut depth = 1;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// :first-child, :last-child, :nth-child(An+B), :only-child,
 /// :first-of-type, :last-of-type, :nth-of-type(An+B),
 /// :root, :empty, :not(sel), :checked, :disabled, :enabled, :focus,
@@ -7869,6 +7887,11 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     let mut require_focus = false;
     let mut nth_child_expr: Option<(i32, i32)> = None;
     let mut nth_of_type_expr: Option<(i32, i32)> = None;
+    let mut nth_last_child_expr: Option<(i32, i32)> = None;
+    let mut nth_last_of_type_expr: Option<(i32, i32)> = None;
+    let mut require_is: Option<String> = None;
+    let mut require_where: Option<String> = None;
+    let mut require_has: Option<String> = None;
     let mut not_selectors: Vec<String> = Vec::new();
     let mut is_universal = false;
 
@@ -7971,6 +7994,46 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
             } else {
                 break;
             }
+        } else if let Some(rest) = remaining.strip_prefix(":nth-last-child(") {
+            if let Some(end) = rest.find(')') {
+                let expr = &rest[..end];
+                nth_last_child_expr = Some(parse_nth_expression(expr));
+                remaining = &rest[end + 1..];
+            } else {
+                break;
+            }
+        } else if let Some(rest) = remaining.strip_prefix(":nth-last-of-type(") {
+            if let Some(end) = rest.find(')') {
+                let expr = &rest[..end];
+                nth_last_of_type_expr = Some(parse_nth_expression(expr));
+                remaining = &rest[end + 1..];
+            } else {
+                break;
+            }
+        } else if let Some(rest) = remaining.strip_prefix(":is(") {
+            if let Some(end) = find_matching_paren(rest) {
+                let inner = &rest[..end];
+                require_is = Some(inner.to_string());
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
+        } else if let Some(rest) = remaining.strip_prefix(":where(") {
+            if let Some(end) = find_matching_paren(rest) {
+                let inner = &rest[..end];
+                require_where = Some(inner.to_string());
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
+        } else if let Some(rest) = remaining.strip_prefix(":has(") {
+            if let Some(end) = find_matching_paren(rest) {
+                let inner = &rest[..end];
+                require_has = Some(inner.to_string());
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
         } else if let Some(rest) = remaining.strip_prefix(":first-child") {
             require_first_child = true;
             remaining = rest;
@@ -8004,6 +8067,10 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
         } else if let Some(rest) = remaining.strip_prefix(":focus") {
             require_focus = true;
             remaining = rest;
+        } else if remaining.starts_with(':') {
+            // Okänd pseudo-klass (t.ex. :heading, :has, :is, :where, :dir etc.)
+            // → kan inte matcha, returnera false
+            return false;
         } else {
             break;
         }
@@ -8179,6 +8246,71 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
         }
     }
 
+    // :nth-last-child
+    if let Some((a, b)) = nth_last_child_expr {
+        let matched = element_index_among_siblings(arena, key)
+            .map(|(pos, total)| {
+                let from_last = total - pos + 1;
+                matches_nth(from_last, a, b)
+            })
+            .unwrap_or(false);
+        if !matched {
+            return false;
+        }
+    }
+    // :nth-last-of-type
+    if let Some((a, b)) = nth_last_of_type_expr {
+        let matched = type_index_among_siblings(arena, key)
+            .map(|(pos, total)| {
+                let from_last = total - pos + 1;
+                matches_nth(from_last, a, b)
+            })
+            .unwrap_or(false);
+        if !matched {
+            return false;
+        }
+    }
+    // :is() / :where() — matcha mot kommaseparerade inre selektorer
+    if let Some(ref inner) = require_is {
+        let any_match = inner
+            .split(',')
+            .any(|s| matches_selector(arena, key, s.trim()));
+        if !any_match {
+            return false;
+        }
+    }
+    if let Some(ref inner) = require_where {
+        let any_match = inner
+            .split(',')
+            .any(|s| matches_selector(arena, key, s.trim()));
+        if !any_match {
+            return false;
+        }
+    }
+    // :has() — matcha om elementet har efterkommande som matchar
+    if let Some(ref inner) = require_has {
+        let has_match = inner.split(',').any(|sel| {
+            let sel = sel.trim();
+            // Sök bland alla efterkommande
+            fn check_descendants(arena: &ArenaDom, parent: NodeKey, sel: &str) -> bool {
+                if let Some(node) = arena.nodes.get(parent) {
+                    for &child in &node.children {
+                        if matches_selector(arena, child, sel) {
+                            return true;
+                        }
+                        if check_descendants(arena, child, sel) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+            check_descendants(arena, key, sel)
+        });
+        if !has_match {
+            return false;
+        }
+    }
     // :not()-verifiering — negera matchning mot inre selektor
     for not_sel in &not_selectors {
         if matches_single_selector(arena, key, not_sel) {
