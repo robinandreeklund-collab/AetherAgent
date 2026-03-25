@@ -1301,9 +1301,78 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         }
     }
 
+    // childNodes / firstChild / lastChild på document
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.set("childNodes", make_child_nodes(ctx, doc_key, &state)?)?;
+        doc.set("firstChild", make_first_child(ctx, doc_key, &state)?)?;
+        doc.set("lastChild", make_last_child(ctx, doc_key, &state)?)?;
+        doc.set("__nodeKey__", node_key_to_f64(doc_key))?;
+    }
+
     ctx.globals().set("document", doc)?;
 
     Ok(())
+}
+
+/// Skapa childNodes-array för en nod
+fn make_child_nodes<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let s = state.borrow();
+    let children = s
+        .arena
+        .nodes
+        .get(key)
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
+    drop(s);
+    let arr = rquickjs::Array::new(ctx.clone())?;
+    for (i, &ck) in children.iter().enumerate() {
+        let child_obj = make_element_object(ctx, ck, state)?;
+        arr.set(i, child_obj)?;
+    }
+    Ok(arr.into_value())
+}
+
+/// Skapa firstChild för en nod
+fn make_first_child<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let fc = {
+        let s = state.borrow();
+        s.arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.children.first().copied())
+    };
+    match fc {
+        Some(ck) => make_element_object(ctx, ck, state),
+        None => Ok(Value::new_null(ctx.clone())),
+    }
+}
+
+/// Skapa lastChild för en nod
+fn make_last_child<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let lc = {
+        let s = state.borrow();
+        s.arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.children.last().copied())
+    };
+    match lc {
+        Some(ck) => make_element_object(ctx, ck, state),
+        None => Ok(Value::new_null(ctx.clone())),
+    }
 }
 
 // ─── Element-objekt ─────────────────────────────────────────────────────────

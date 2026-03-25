@@ -294,11 +294,22 @@ impl TreeSink for ArenaDomSink {
 
     fn append_doctype_to_document(
         &self,
-        _name: StrTendril,
+        name: StrTendril,
         _public_id: StrTendril,
         _system_id: StrTendril,
     ) {
-        // DOCTYPE ignoreras — AetherAgent behöver inte doctype-info
+        let mut arena = self.arena.borrow_mut();
+        let doc_key = arena.document;
+        let dt_key = arena.nodes.insert(DomNode {
+            node_type: NodeType::Doctype,
+            tag: None,
+            attributes: Attrs::new(),
+            text: Some(name),
+            parent: Some(doc_key),
+            children: vec![],
+        });
+        // Sätt som första barn i document
+        arena.nodes[doc_key].children.insert(0, dt_key);
     }
 
     fn get_template_contents(&self, target: &NodeKey) -> NodeKey {
