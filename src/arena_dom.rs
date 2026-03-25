@@ -4,7 +4,115 @@
 /// Generational indices ger stale-reference safety utan Rc-overhead.
 ///
 /// Prestanda: ~5-10x snabbare DFS, 1 allokering istället för ~1000/sida.
-use std::collections::HashMap;
+use smallvec::SmallVec;
+use tendril::StrTendril;
+
+/// Attribut-lagring optimerad för typiska DOM-element (0-4 attribut).
+///
+/// Använder SmallVec<4> istället för HashMap: inget heap-allokering för ≤4 attribut,
+/// linjär sökning snabbare än hashing för <8 element, ~48 byte per nod sparad.
+#[derive(Debug, Clone, Default)]
+pub struct Attrs {
+    inner: SmallVec<[(String, String); 4]>,
+}
+
+impl Attrs {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            inner: SmallVec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            inner: SmallVec::with_capacity(cap),
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, name: &str) -> Option<&String> {
+        self.inner.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+    }
+
+    #[inline]
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.inner.iter().any(|(k, _)| k == name)
+    }
+
+    /// Infoga eller uppdatera. Returnerar Option<String> (gamla värdet) som HashMap.
+    pub fn insert(&mut self, name: String, value: String) -> Option<String> {
+        for (k, v) in self.inner.iter_mut() {
+            if *k == name {
+                let old = std::mem::replace(v, value);
+                return Some(old);
+            }
+        }
+        self.inner.push((name, value));
+        None
+    }
+
+    /// Infoga om nyckeln inte redan finns.
+    pub fn insert_if_vacant(&mut self, name: String, value: String) {
+        if !self.contains_key(&name) {
+            self.inner.push((name, value));
+        }
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<String> {
+        if let Some(pos) = self.inner.iter().position(|(k, _)| k == name) {
+            Some(self.inner.swap_remove(pos).1)
+        } else {
+            None
+        }
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.inner.iter().map(|(k, _)| k)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.inner.iter().map(|(k, v)| (k, v))
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+/// Stöd för `for (k, v) in &attrs` iteration — matchar HashMap-semantik
+impl<'a> IntoIterator for &'a Attrs {
+    type Item = (&'a String, &'a String);
+    type IntoIter = AttrsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        AttrsIter {
+            inner: self.inner.iter(),
+        }
+    }
+}
+
+pub struct AttrsIter<'a> {
+    inner: std::slice::Iter<'a, (String, String)>,
+}
+
+impl<'a> Iterator for AttrsIter<'a> {
+    type Item = (&'a String, &'a String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(k, v)| (k, v))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
 
 use markup5ever_rcdom::{Handle, NodeData};
 use slotmap::{new_key_type, SlotMap};
@@ -14,6 +122,45 @@ new_key_type! {
     pub struct NodeKey;
 }
 
+/// Case-insensitive substring-sökning utan allokering (ASCII only).
+/// Undviker to_lowercase()/to_uppercase()-allokeringar i hot paths.
+#[inline]
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Snabb style-hidden-check utan allokering.
+/// Normaliserar inte hela strängen — söker direkt med case-insensitive bytes.
+fn is_style_hidden_fast(style: &str) -> bool {
+    // Patterns att söka (redan lowercase, utan whitespace)
+    const PATTERNS: &[&[u8]] = &[
+        b"display:none",
+        b"visibility:hidden",
+        b"opacity:0",
+        b"left:-9999",
+        b"left:-10000",
+        b"clip:rect(0",
+    ];
+    // En allokering: byte-normaliserad (lowercase + strip whitespace)
+    let norm: Vec<u8> = style
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace())
+        .map(|b| b.to_ascii_lowercase())
+        .collect();
+    for pat in PATTERNS {
+        if norm.windows(pat.len()).any(|w| w == *pat) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Nodtyp i DOM-trädet
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -21,6 +168,7 @@ pub enum NodeType {
     Element,
     Text,
     Comment,
+    Doctype,
     Other,
 }
 
@@ -29,31 +177,33 @@ pub enum NodeType {
 pub struct DomNode {
     pub node_type: NodeType,
     pub tag: Option<String>,
-    pub attributes: HashMap<String, String>,
-    pub text: Option<String>,
+    pub attributes: Attrs,
+    pub text: Option<StrTendril>,
     pub parent: Option<NodeKey>,
     pub children: Vec<NodeKey>,
 }
 
 impl DomNode {
-    /// Hämta attributvärde — O(1) via HashMap
+    /// Hämta attributvärde — linjär sökning, snabbare än HashMap för ≤8 attribut
+    #[inline]
     pub fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes.get(name).map(|v| v.as_str())
     }
 
-    /// Kolla om attribut finns (oavsett värde) — O(1) via HashMap
+    /// Kolla om attribut finns (oavsett värde)
+    #[inline]
     pub fn has_attr(&self, name: &str) -> bool {
         self.attributes.contains_key(name)
     }
 
-    /// Sätt attribut — O(1) via HashMap. Används av DOM Bridge.
+    /// Sätt attribut. Används av DOM Bridge.
     #[cfg(any(feature = "js-eval", test))]
     #[allow(dead_code)]
     pub fn set_attr(&mut self, name: &str, value: &str) {
         self.attributes.insert(name.to_string(), value.to_string());
     }
 
-    /// Ta bort attribut — O(1) via HashMap. Används av DOM Bridge.
+    /// Ta bort attribut. Används av DOM Bridge.
     #[cfg(any(feature = "js-eval", test))]
     #[allow(dead_code)]
     pub fn remove_attr(&mut self, name: &str) -> bool {
@@ -75,7 +225,7 @@ impl ArenaDom {
         let doc_key = nodes.insert(DomNode {
             node_type: NodeType::Document,
             tag: None,
-            attributes: HashMap::new(),
+            attributes: Attrs::new(),
             text: None,
             parent: None,
             children: vec![],
@@ -86,7 +236,8 @@ impl ArenaDom {
         }
     }
 
-    /// Konvertera från html5ever RcDom till ArenaDom
+    /// Konvertera från html5ever RcDom till ArenaDom (används av dom_bridge, css_cascade, etc.)
+    #[allow(dead_code)]
     pub fn from_rcdom(rcdom: &markup5ever_rcdom::RcDom) -> Self {
         let mut arena = ArenaDom::with_capacity(1024);
         let doc_key = arena.document;
@@ -102,27 +253,34 @@ impl ArenaDom {
     }
 
     /// Rekursiv konvertering av en Handle till arena-noder
+    #[allow(dead_code)]
     fn convert_handle(&mut self, handle: &Handle) -> NodeKey {
         let (node_type, tag, text, attrs) = match &handle.data {
-            NodeData::Document => (NodeType::Document, None, None, HashMap::new()),
+            NodeData::Document => (NodeType::Document, None, None, Attrs::new()),
             NodeData::Element { name, attrs, .. } => {
                 let tag = name.local.to_string();
-                let attributes: HashMap<String, String> = attrs
-                    .borrow()
-                    .iter()
-                    .map(|a| (a.name.local.to_string(), a.value.to_string()))
-                    .collect();
+                let raw_attrs = attrs.borrow();
+                let mut attributes = Attrs::with_capacity(raw_attrs.len());
+                for a in raw_attrs.iter() {
+                    attributes.insert(a.name.local.to_string(), a.value.to_string());
+                }
                 (NodeType::Element, Some(tag), None, attributes)
             }
             NodeData::Text { contents } => {
-                let t = contents.borrow().to_string();
-                (NodeType::Text, None, Some(t), HashMap::new())
+                let t = contents.borrow().clone();
+                (NodeType::Text, None, Some(t), Attrs::new())
             }
-            NodeData::Comment { contents } => {
-                let t = contents.to_string();
-                (NodeType::Comment, None, Some(t), HashMap::new())
+            NodeData::Comment { contents } => (
+                NodeType::Comment,
+                None,
+                Some(contents.clone()),
+                Attrs::new(),
+            ),
+            NodeData::Doctype { name, .. } => {
+                let n = name.to_string();
+                (NodeType::Doctype, None, Some(n.into()), Attrs::new())
             }
-            _ => (NodeType::Other, None, None, HashMap::new()),
+            _ => (NodeType::Other, None, None, Attrs::new()),
         };
 
         let key = self.nodes.insert(DomNode {
@@ -147,16 +305,19 @@ impl ArenaDom {
     // ─── Accessor-metoder (speglar parser.rs funktioner) ────────────────────
 
     /// Hämta taggnamn för en nod
+    #[inline]
     pub fn tag_name(&self, key: NodeKey) -> Option<&str> {
         self.nodes.get(key)?.tag.as_deref()
     }
 
     /// Hämta attributvärde
+    #[inline]
     pub fn get_attr(&self, key: NodeKey, attr_name: &str) -> Option<&str> {
         self.nodes.get(key)?.get_attr(attr_name)
     }
 
     /// Kolla om noden har ett attribut
+    #[inline]
     pub fn has_attr(&self, key: NodeKey, attr_name: &str) -> bool {
         self.nodes
             .get(key)
@@ -164,7 +325,7 @@ impl ArenaDom {
             .unwrap_or(false)
     }
 
-    /// Sätt attribut på en nod — O(1) via HashMap.
+    /// Sätt attribut på en nod — O(n) linjär sökning, snabb för ≤8 attribut.
     /// Används av DOM Bridge (js-eval) för setAttribute-anrop.
     #[cfg(any(feature = "js-eval", test))]
     #[allow(dead_code)]
@@ -174,7 +335,7 @@ impl ArenaDom {
         }
     }
 
-    /// Ta bort attribut från en nod — O(1) via HashMap.
+    /// Ta bort attribut från en nod — O(n) linjär sökning, snabb för ≤8 attribut.
     /// Används av DOM Bridge (js-eval) för removeAttribute-anrop.
     #[cfg(any(feature = "js-eval", test))]
     #[allow(dead_code)]
@@ -289,7 +450,7 @@ impl ArenaDom {
             None => return String::new(),
         };
         match &node.node_type {
-            NodeType::Text => node.text.clone().unwrap_or_default(),
+            NodeType::Text => node.text.as_deref().unwrap_or("").to_string(),
             NodeType::Comment => format!("<!--{}-->", node.text.as_deref().unwrap_or("")),
             NodeType::Element => {
                 let tag = node.tag.as_deref().unwrap_or("div");
@@ -349,6 +510,7 @@ impl ArenaDom {
     }
 
     /// Hämta barn-nycklar
+    #[inline]
     pub fn children(&self, key: NodeKey) -> &[NodeKey] {
         self.nodes
             .get(key)
@@ -366,20 +528,9 @@ impl ArenaDom {
             None => return false,
         };
 
-        // Kolla style-attribut för osynlighet
+        // Kolla style-attribut för osynlighet — utan allokering
         if let Some(style) = node.get_attr("style") {
-            let normalized: String = style
-                .to_lowercase()
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .collect();
-            if normalized.contains("display:none")
-                || normalized.contains("visibility:hidden")
-                || normalized.contains("opacity:0")
-                || normalized.contains("left:-9999")
-                || normalized.contains("left:-10000")
-                || normalized.contains("clip:rect(0")
-            {
+            if is_style_hidden_fast(style) {
                 return false;
             }
         }
@@ -396,19 +547,21 @@ impl ArenaDom {
             }
         }
 
-        // nojs-divvar: id="nojs" eller class="no-js" — JS-varningar som python.org
+        // nojs-divvar: id="nojs" eller class="no-js" — utan to_lowercase()
         if let Some(id) = node.get_attr("id") {
-            let id_lower = id.to_lowercase();
-            if Self::NOJS_IDENTIFIERS.iter().any(|pat| id_lower == *pat) {
+            if Self::NOJS_IDENTIFIERS
+                .iter()
+                .any(|pat| id.eq_ignore_ascii_case(pat))
+            {
                 return false;
             }
         }
         if let Some(class) = node.get_attr("class") {
-            let class_lower = class.to_lowercase();
-            if Self::NOJS_IDENTIFIERS
-                .iter()
-                .any(|pat| class_lower.split_whitespace().any(|c| c == *pat))
-            {
+            if Self::NOJS_IDENTIFIERS.iter().any(|pat| {
+                class
+                    .split_whitespace()
+                    .any(|c| c.eq_ignore_ascii_case(pat))
+            }) {
                 return false;
             }
         }
@@ -418,47 +571,53 @@ impl ArenaDom {
 
     /// Extrahera all text rekursivt (speglar parser::extract_text)
     pub fn extract_text(&self, key: NodeKey) -> String {
+        let mut buf = String::new();
+        self.extract_text_into(key, &mut buf);
+        buf
+    }
+
+    /// Samla text i en delad buffer — zero-alloc per rekursiv nivå
+    fn extract_text_into(&self, key: NodeKey, buf: &mut String) {
         const TEXT_SKIP_TAGS: &[&str] = &["script", "style", "noscript", "template"];
 
         let node = match self.nodes.get(key) {
             Some(n) => n,
-            None => return String::new(),
+            None => return,
         };
 
         match &node.node_type {
             NodeType::Text => {
                 let t = node.text.as_deref().unwrap_or("");
                 let trimmed = t.trim();
-                if trimmed.is_empty() {
-                    String::new()
-                } else {
-                    let mut s = String::with_capacity(trimmed.len() + 1);
-                    s.push_str(trimmed);
-                    s.push(' ');
-                    s
+                if !trimmed.is_empty() {
+                    buf.push_str(trimmed);
+                    buf.push(' ');
                 }
             }
             NodeType::Element => {
                 if let Some(tag) = &node.tag {
                     if TEXT_SKIP_TAGS.contains(&tag.as_str()) {
-                        return String::new();
+                        return;
                     }
                 }
-                // Samla barn-nycklar först (undvik borrow-konflikt)
-                let child_keys: Vec<NodeKey> = node.children.clone();
-                let mut text = String::new();
-                for child_key in &child_keys {
-                    text.push_str(&self.extract_text(*child_key));
+                // Iterera med index — undviker Vec::clone() per nod
+                let num_children = node.children.len();
+                for i in 0..num_children {
+                    // Hämta barn-nyckel via index (säkert: i < num_children)
+                    let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
+                    if let Some(ck) = child_key {
+                        self.extract_text_into(ck, buf);
+                    }
                 }
-                text
             }
             _ => {
-                let child_keys: Vec<NodeKey> = node.children.clone();
-                let mut text = String::new();
-                for child_key in &child_keys {
-                    text.push_str(&self.extract_text(*child_key));
+                let num_children = node.children.len();
+                for i in 0..num_children {
+                    let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
+                    if let Some(ck) = child_key {
+                        self.extract_text_into(ck, buf);
+                    }
                 }
-                text
             }
         }
     }
@@ -495,7 +654,8 @@ impl ArenaDom {
     ];
 
     /// Inferera semantisk roll (speglar parser::infer_role)
-    pub fn infer_role(&self, key: NodeKey) -> String {
+    /// Rolldetektering med pre-extraherad text (undviker dubbla extract_text)
+    pub fn infer_role_with_text(&self, key: NodeKey, precomputed_text: &str) -> String {
         // ARIA-roll har högst prioritet
         if let Some(role) = self.get_attr(key, "role") {
             if !role.is_empty() {
@@ -504,18 +664,27 @@ impl ArenaDom {
         }
 
         let tag = self.tag_name(key).unwrap_or("");
-        let input_type = self.get_attr(key, "type").unwrap_or("").to_lowercase();
+        let input_type_raw = self.get_attr(key, "type").unwrap_or("");
 
         let base_role = match tag {
             "button" => "button",
             "a" => "link",
-            "input" => match input_type.as_str() {
-                "checkbox" => "checkbox",
-                "radio" => "radio",
-                "submit" | "button" | "reset" => "button",
-                "search" => "searchbox",
-                _ => "textbox",
-            },
+            "input" => {
+                if input_type_raw.eq_ignore_ascii_case("checkbox") {
+                    "checkbox"
+                } else if input_type_raw.eq_ignore_ascii_case("radio") {
+                    "radio"
+                } else if input_type_raw.eq_ignore_ascii_case("submit")
+                    || input_type_raw.eq_ignore_ascii_case("button")
+                    || input_type_raw.eq_ignore_ascii_case("reset")
+                {
+                    "button"
+                } else if input_type_raw.eq_ignore_ascii_case("search") {
+                    "searchbox"
+                } else {
+                    "textbox"
+                }
+            }
             "textarea" => "textarea",
             "select" => "combobox",
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading",
@@ -534,51 +703,57 @@ impl ArenaDom {
 
         // Schema.org product_card
         if let Some(itemtype) = self.get_attr(key, "itemtype") {
-            let it_lower = itemtype.to_lowercase();
-            if it_lower.contains("schema.org/product") || it_lower.contains("schema.org/offer") {
+            let it = itemtype;
+            if contains_ignore_ascii_case(it, "schema.org/product")
+                || contains_ignore_ascii_case(it, "schema.org/offer")
+            {
                 return "product_card".to_string();
             }
         }
-        // Data-attribut som indikerar produktkort
         if self.has_attr(key, "data-product-id")
             || self.has_attr(key, "data-product")
             || self.has_attr(key, "data-item-id")
         {
-            let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-            if class.contains("product") || class.contains("card") || class.contains("item") {
+            let class = self.get_attr(key, "class").unwrap_or("");
+            if contains_ignore_ascii_case(class, "product")
+                || contains_ignore_ascii_case(class, "card")
+                || contains_ignore_ascii_case(class, "item")
+            {
                 return "product_card".to_string();
             }
         }
 
-        // CTA-heuristik
+        // CTA-heuristik — använd pre-extraherad text
+        let class_raw = self.get_attr(key, "class").unwrap_or("");
         if base_role == "button" || base_role == "link" {
-            let text = self.extract_text(key).to_lowercase();
+            let text_lower = precomputed_text.to_ascii_lowercase();
             for kw in Self::CTA_KEYWORDS {
-                if text.contains(kw) {
+                if text_lower.contains(kw) {
                     return "cta".to_string();
                 }
             }
-            let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-            if class.contains("cta")
-                || class.contains("add-to-cart")
-                || class.contains("buy-btn")
-                || class.contains("checkout")
+            let class_lower = class_raw.to_ascii_lowercase();
+            if class_lower.contains("cta")
+                || class_lower.contains("add-to-cart")
+                || class_lower.contains("buy-btn")
+                || class_lower.contains("checkout")
             {
                 return "cta".to_string();
             }
         }
 
         // Pristext-heuristik
-        if matches!(base_role, "text" | "generic") && self.looks_like_price(key) {
+        if matches!(base_role, "text" | "generic")
+            && self.looks_like_price_from_text(precomputed_text, class_raw, key)
+        {
             return "price".to_string();
         }
 
         base_role.to_string()
     }
 
-    /// Kontrollera om text ser ut som ett pris
-    fn looks_like_price(&self, key: NodeKey) -> bool {
-        let text = self.extract_text(key);
+    /// Pris-check med pre-extraherad text (undviker dubbla extract_text)
+    fn looks_like_price_from_text(&self, text: &str, class_raw: &str, key: NodeKey) -> bool {
         let trimmed = text.trim();
         if trimmed.is_empty() || trimmed.len() > 40 {
             return false;
@@ -586,26 +761,35 @@ impl ArenaDom {
         if !trimmed.chars().any(|c| c.is_ascii_digit()) {
             return false;
         }
-        let upper = trimmed.to_uppercase();
         for indicator in Self::PRICE_INDICATORS {
-            if upper.contains(&indicator.to_uppercase()) {
+            if contains_ignore_ascii_case(trimmed, indicator) {
                 return true;
             }
         }
-        let class = self.get_attr(key, "class").unwrap_or("").to_lowercase();
-        if class.contains("price") || class.contains("pris") || class.contains("cost") {
+        if contains_ignore_ascii_case(class_raw, "price")
+            || contains_ignore_ascii_case(class_raw, "pris")
+            || contains_ignore_ascii_case(class_raw, "cost")
+        {
             return true;
         }
         if let Some(itemprop) = self.get_attr(key, "itemprop") {
-            if itemprop.to_lowercase().contains("price") {
+            if contains_ignore_ascii_case(itemprop, "price") {
                 return true;
             }
         }
         false
     }
 
+    /// Rolldetektering (convenience wrapper som extraherar text internt, används i tester)
+    #[cfg(test)]
+    pub fn infer_role(&self, key: NodeKey) -> String {
+        let text = self.extract_text(key);
+        self.infer_role_with_text(key, &text)
+    }
+
     /// Extrahera label (WCAG fallback-kedja, speglar parser::extract_label)
-    pub fn extract_label(&self, key: NodeKey) -> String {
+    /// Label-extraktion med pre-extraherad text (undviker dubbla extract_text)
+    pub fn extract_label_with_text(&self, key: NodeKey, precomputed_text: &str) -> String {
         // 1. aria-label
         if let Some(label) = self.get_attr(key, "aria-label") {
             let trimmed = label.trim();
@@ -613,7 +797,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 2. aria-labelledby
         if let Some(labelledby) = self.get_attr(key, "aria-labelledby") {
             let trimmed = labelledby.trim();
@@ -621,7 +804,6 @@ impl ArenaDom {
                 return format!("[ref:{}]", trimmed);
             }
         }
-
         // 3. placeholder
         if let Some(placeholder) = self.get_attr(key, "placeholder") {
             let trimmed = placeholder.trim();
@@ -629,7 +811,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 4. alt-text
         if let Some(alt) = self.get_attr(key, "alt") {
             let trimmed = alt.trim();
@@ -637,7 +818,6 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         // 5. title-attribut
         if let Some(title) = self.get_attr(key, "title") {
             let trimmed = title.trim();
@@ -645,15 +825,12 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
-        // 6. Inre text
-        let inner = self.extract_text(key);
-        let trimmed = inner.trim();
+        // 6. Inre text (pre-extraherad)
+        let trimmed = precomputed_text.trim();
         if !trimmed.is_empty() {
             let truncated: String = trimmed.chars().take(80).collect();
             return truncated;
         }
-
         // 7. name-attribut
         if let Some(name) = self.get_attr(key, "name") {
             let trimmed = name.trim();
@@ -661,8 +838,14 @@ impl ArenaDom {
                 return trimmed.to_string();
             }
         }
-
         String::new()
+    }
+
+    /// Label-extraktion (convenience wrapper som extraherar text internt, används i tester)
+    #[cfg(test)]
+    pub fn extract_label(&self, key: NodeKey) -> String {
+        let text = self.extract_text(key);
+        self.extract_label_with_text(key, &text)
     }
 
     /// Extrahera sidtitel (speglar semantic::extract_title)
@@ -683,7 +866,7 @@ impl ArenaDom {
                 .filter_map(|ck| {
                     let child = self.nodes.get(*ck)?;
                     if child.node_type == NodeType::Text {
-                        child.text.clone()
+                        child.text.as_deref().map(|s| s.to_string())
                     } else {
                         None
                     }

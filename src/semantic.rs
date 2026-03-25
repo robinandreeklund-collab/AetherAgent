@@ -7,7 +7,10 @@
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::arena_dom::{ArenaDom, NodeKey};
-use crate::parser::{extract_label, get_attr, get_tag_name, infer_role, is_likely_visible};
+use crate::parser::{
+    extract_label_with_text, extract_text, get_attr, get_tag_name, infer_role_with_text,
+    is_likely_visible_cached, AttrCache,
+};
 use crate::trust::{analyze_text, sanitize_text};
 use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
@@ -125,9 +128,11 @@ impl SemanticBuilder {
                 }
             }
             crate::arena_dom::NodeType::Document => {
-                let child_keys = arena.children(key).to_vec();
-                for ck in &child_keys {
-                    self.traverse_arena(arena, *ck, output, depth);
+                let num_children = arena.children(key).len();
+                for i in 0..num_children {
+                    if let Some(ck) = arena.children(key).get(i).copied() {
+                        self.traverse_arena(arena, ck, output, depth);
+                    }
                 }
             }
             _ => {}
@@ -149,8 +154,10 @@ impl SemanticBuilder {
         }
 
         let id = self.next_node_id();
-        let role = arena.infer_role(key);
-        let raw_label = arena.extract_label(key);
+        // Extrahera text EN gång — används av både rolldetektering och label-extraktion
+        let inner_text = arena.extract_text(key);
+        let role = arena.infer_role_with_text(key, &inner_text);
+        let raw_label = arena.extract_label_with_text(key, &inner_text);
 
         // Trust shield
         let (trust, warning) = analyze_text(id, &raw_label);
@@ -167,10 +174,12 @@ impl SemanticBuilder {
 
         // Skippa tomma generiska element
         if label.is_empty() && STRUCTURAL_TAGS.contains(&tag.as_str()) {
-            let child_keys = arena.children(key).to_vec();
+            let num_children = arena.children(key).len();
             let mut children = vec![];
-            for ck in &child_keys {
-                self.traverse_arena(arena, *ck, &mut children, depth + 1);
+            for i in 0..num_children {
+                if let Some(ck) = arena.children(key).get(i).copied() {
+                    self.traverse_arena(arena, ck, &mut children, depth + 1);
+                }
             }
             if children.is_empty() {
                 return None;
@@ -223,11 +232,13 @@ impl SemanticBuilder {
                 .map(|v| v.to_string())
         };
 
-        // Traversera barn
-        let child_keys = arena.children(key).to_vec();
+        // Traversera barn (undviker Vec::to_vec() per nod)
+        let num_child = arena.children(key).len();
         let mut children = vec![];
-        for ck in &child_keys {
-            self.traverse_arena(arena, *ck, &mut children, depth + 1);
+        for i in 0..num_child {
+            if let Some(ck) = arena.children(key).get(i).copied() {
+                self.traverse_arena(arena, ck, &mut children, depth + 1);
+            }
         }
 
         let filtered_children: Vec<SemanticNode> = children
@@ -288,16 +299,20 @@ impl SemanticBuilder {
 
     /// Processa ett enskilt element till en SemanticNode
     fn process_element(&mut self, handle: &Handle, depth: u32) -> Option<SemanticNode> {
-        let tag = get_tag_name(handle).unwrap_or_default();
+        // Bygg AttrCache EN gång — eliminerar 2 extra attribut-iterationer per element
+        let cache = AttrCache::from_handle(handle);
+        let tag = cache.tag.clone();
 
-        // Skippa osynliga element
-        if !is_likely_visible(handle) {
+        // Skippa osynliga element (använd cachad version)
+        if !is_likely_visible_cached(&cache) {
             return None;
         }
 
         let id = self.next_node_id();
-        let role = infer_role(handle);
-        let raw_label = extract_label(handle);
+        // Extrahera text EN gång — används av både rolldetektering och label-extraktion
+        let inner_text = extract_text(handle);
+        let role = infer_role_with_text(&cache, &inner_text);
+        let raw_label = extract_label_with_text(&cache, &inner_text);
 
         // Trust shield – analysera label-texten
         let (trust, warning) = analyze_text(id, &raw_label);
@@ -351,9 +366,9 @@ impl SemanticBuilder {
 
         let action = SemanticNode::infer_action(&role);
 
-        // Hämta HTML id och name för selector hints / formulärmatchning
-        let html_id = get_attr(handle, "id").filter(|v| !v.is_empty());
-        let name = get_attr(handle, "name").filter(|v| !v.is_empty());
+        // Hämta HTML id och name från cache (undvik extra get_attr-anrop)
+        let html_id = cache.id.filter(|v| !v.is_empty());
+        let name = cache.name.filter(|v| !v.is_empty());
 
         // Hämta value: href för länkar, value/aria-valuenow för inputs
         let value = if role == "link" {
@@ -458,23 +473,25 @@ fn count_nodes(nodes: &[SemanticNode]) -> usize {
 
 /// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
 fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
-    if count_nodes(nodes) <= max {
+    let mut current_count = count_nodes(nodes);
+    if current_count <= max {
         return;
     }
 
-    // Iterativt höj tröskeln och beskär löv
+    // Iterativt höj tröskeln och beskär löv — räkna och beskär i samma pass
     let mut threshold = 0.2_f32;
-    while count_nodes(nodes) > max && threshold < 0.8 {
-        prune_leaves_below(nodes, threshold);
+    while current_count > max && threshold < 0.8 {
+        current_count = prune_and_count(nodes, threshold);
         threshold += 0.05;
     }
 }
 
-/// Ta bort löv-noder under en viss relevans-tröskel
-fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
+/// Beskär löv-noder under tröskeln OCH returnerar ny nodcount i ett pass.
+/// Eliminerar separat count_nodes()-traversering (sparar 8x fullständiga trädtraverseringar).
+fn prune_and_count(nodes: &mut Vec<SemanticNode>, threshold: f32) -> usize {
     // Rekursivt beskär barnens löv först
     for node in nodes.iter_mut() {
-        prune_leaves_below(&mut node.children, threshold);
+        prune_and_count(&mut node.children, threshold);
     }
 
     // Ta bort löv-noder (utan barn och utan action) under tröskeln
@@ -489,6 +506,9 @@ fn prune_leaves_below(nodes: &mut Vec<SemanticNode>, threshold: f32) {
             || n.role == "cta"
             || n.role == "product_card"
     });
+
+    // Räkna i samma pass
+    nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
 }
 
 /// Beräkna textlikhet mellan query och candidate (normaliserad word overlap)
@@ -514,20 +534,11 @@ fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: 
         return 0.0;
     }
 
-    let candidate_lower = candidate.to_lowercase();
+    // Använd ascii_lowercase — snabbare, ingen UTF-8-allokering för ASCII-text
+    let candidate_lower = candidate.to_ascii_lowercase();
 
     // Exakt substring-match ger full poäng
     if candidate_lower.contains(query_lower) {
-        return 1.0;
-    }
-
-    // Kolla även utan separatorer: "story_title" → "storytitle"
-    let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
-    let candidate_no_sep: String = candidate_lower
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
-        .collect();
-    if candidate_no_sep.contains(&query_joined) {
         return 1.0;
     }
 
@@ -536,6 +547,24 @@ fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: 
         .iter()
         .filter(|w| candidate_lower.contains(w.as_str()))
         .count();
+
+    if matches == query_words.len() {
+        return 1.0;
+    }
+
+    // Fallback: kolla utan separatorer bara om word overlap missade
+    if matches == 0 && candidate_lower.len() >= query_lower.len() {
+        let query_joined: String = query_words.iter().map(|s| s.as_str()).collect();
+        // Filtrera direkt på bytes istället för chars() — undviker UTF-8-decode
+        let candidate_no_sep: String = candidate_lower
+            .bytes()
+            .filter(|b| !b.is_ascii_whitespace() && *b != b'_' && *b != b'-')
+            .map(|b| b as char)
+            .collect();
+        if candidate_no_sep.contains(&query_joined) {
+            return 1.0;
+        }
+    }
 
     matches as f32 / query_words.len() as f32
 }

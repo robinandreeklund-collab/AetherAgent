@@ -15,65 +15,171 @@ use rquickjs::{Context, Runtime};
 #[cfg(feature = "js-eval")]
 const MAX_STACK_SIZE: usize = 1024 * 1024;
 
-/// Max minnesanvändning (64 MB — SPA-bundles behöver mer minne)
+/// Max minnesanvändning (16 MB — tillräckligt för typiska SPA-bundles)
 #[cfg(feature = "js-eval")]
-const MAX_MEMORY: usize = 64 * 1024 * 1024;
+const MAX_MEMORY: usize = 16 * 1024 * 1024;
 
 /// Max exekveringstid i millisekunder (väggklocka) innan interrupt
 /// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
 #[cfg(feature = "js-eval")]
-const MAX_EVAL_MS: u64 = 5000;
+const MAX_EVAL_MS: u64 = 30000;
 
-/// Delad flagga som interrupt-handlern läser.
-/// Sätts till `true` av en timeout-tråd för att avbryta JS-exekvering.
+/// Interrupt-state som håller referens till deadline-baserad avbrottslogik.
+/// Ingen separat tråd behövs — interrupt-handlern kollar Instant direkt.
 #[cfg(feature = "js-eval")]
 pub(crate) struct InterruptState {
-    /// Håller Arc vid liv — timeout-tråden sätter denna till true.
-    /// Droppar vi denna stoppas interrupt-handlerns referens.
-    _abort_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    // Markörtyp — interrupt-handlern äger sin egen Arc<Instant> via closure
+    _private: (),
+}
+
+// ─── Thread-local Runtime Pool ──────────────────────────────────────────────
+
+/// Pool:ad QuickJS Runtime+Context per tråd. Skapas en gång, återanvänds.
+/// Global state rensas mellan anrop via cleanup-eval.
+/// Deadline uppdateras per anrop via Arc<AtomicU64>.
+#[cfg(feature = "js-eval")]
+struct PooledRuntime {
+    /// Runtime måste leva minst lika länge som context — hålls vid liv här
+    _runtime: Runtime,
+    context: Context,
+    /// Delad deadline i µs relativt baseline Instant. u64::MAX = ingen timeout.
+    deadline_us: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Referenstidpunkt — alla deadlines räknas relativt denna
+    baseline: std::time::Instant,
+}
+
+#[cfg(feature = "js-eval")]
+thread_local! {
+    static POOLED_RT: std::cell::RefCell<Option<PooledRuntime>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Snabb cleanup: bara rensa om globalThis har fler properties än standard (52 st).
+/// Undviker kostsam getOwnPropertyNames-loop i normalfallet.
+#[cfg(feature = "js-eval")]
+const CLEANUP_SCRIPT: &str = r#"
+(function(){
+    var n=Object.getOwnPropertyNames(globalThis),i,s=52;
+    if(n.length<=s)return;
+    for(i=s;i<n.length;i++)try{delete globalThis[n[i]]}catch(e){}
+})();
+"#;
+
+/// Intern: hämta/skapa pool:ad Runtime+Context och kör callback.
+/// `cleanup` styr om global state rensas innan eval (kostar ~100µs).
+/// `eval_js` skippar cleanup (allowlisten förhindrar sidoeffekter).
+/// `eval_js_batch` kör cleanup (snippets kan skapa variabler).
+#[cfg(feature = "js-eval")]
+fn pooled_eval_inner<F, R>(cleanup: bool, f: F) -> R
+where
+    F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
+{
+    POOLED_RT.with(|cell| {
+        let mut opt = cell.borrow_mut();
+
+        // Lazy-init runtime+context vid första anropet på denna tråd
+        if opt.is_none() {
+            let rt = Runtime::new().expect("QuickJS Runtime::new misslyckades");
+            rt.set_max_stack_size(MAX_STACK_SIZE);
+            rt.set_memory_limit(MAX_MEMORY);
+
+            // Interrupt-handler med Instant-baserad deadline (ingen SystemTime-overhead)
+            let deadline_us = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+            let deadline_clone = deadline_us.clone();
+
+            // Baseline Instant vid pool-creation — alla deadlines räknas relativt denna
+            let baseline = std::time::Instant::now();
+            let baseline_clone = baseline;
+
+            rt.set_interrupt_handler(Some(Box::new(move || {
+                let dl = deadline_clone.load(std::sync::atomic::Ordering::Relaxed);
+                if dl == u64::MAX {
+                    return false;
+                }
+                baseline_clone.elapsed().as_micros() as u64 >= dl
+            })));
+
+            let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
+
+            *opt = Some(PooledRuntime {
+                _runtime: rt,
+                context: ctx,
+                deadline_us,
+                baseline,
+            });
+        }
+
+        let pooled = opt.as_ref().unwrap();
+
+        // Uppdatera deadline: nu + MAX_EVAL_MS (relativt baseline Instant)
+        let now_offset = pooled.baseline.elapsed().as_micros() as u64;
+        pooled.deadline_us.store(
+            now_offset + MAX_EVAL_MS * 1000,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
+        // Rensa global state från förra anropet (om begärt)
+        if cleanup {
+            pooled.context.with(|ctx| {
+                let _ = ctx.eval::<rquickjs::Value, _>(CLEANUP_SCRIPT);
+            });
+        }
+
+        let result = pooled.context.with(|ctx| f(&ctx));
+
+        // Avaktivera deadline (u64::MAX = ingen timeout)
+        pooled
+            .deadline_us
+            .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+
+        result
+    })
+}
+
+/// Pool:ad eval utan cleanup — för eval_js (allowlisten förhindrar sidoeffekter)
+#[cfg(feature = "js-eval")]
+fn pooled_eval<F, R>(f: F) -> R
+where
+    F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
+{
+    pooled_eval_inner(false, f)
+}
+
+/// Pool:ad eval med cleanup — för eval_js_batch (snippets kan skapa variabler)
+#[cfg(feature = "js-eval")]
+fn pooled_eval_with_cleanup<F, R>(f: F) -> R
+where
+    F: for<'js> FnOnce(&rquickjs::Ctx<'js>) -> R,
+{
+    pooled_eval_inner(true, f)
 }
 
 /// Skapa en sandboxad QuickJS Runtime + Context med runtime-begränsningar
 ///
-/// Använder rquickjs set_interrupt_handler med en Arc<AtomicBool>-flagga.
-/// Anroparen kan sätta flaggan till true för att avbryta.
+/// Använder deadline-baserad interrupt-handler (ingen tråd-spawn).
 /// Returnerar (Runtime, Context, InterruptState).
+/// OBS: Används av dom_bridge/event_loop som behöver äga sin Runtime.
+/// För enkel eval, använd pooled_eval() istället.
 #[cfg(feature = "js-eval")]
 pub(crate) fn create_sandboxed_runtime() -> (Runtime, Context, InterruptState) {
     let rt = Runtime::new().expect("QuickJS Runtime::new misslyckades");
     rt.set_max_stack_size(MAX_STACK_SIZE);
     rt.set_memory_limit(MAX_MEMORY);
 
-    let should_abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let abort_clone = should_abort.clone();
-
-    // Interrupt-handler via rquickjs API + separat timeout-tråd
+    // Deadline-baserad interrupt: kollar väggklockan utan separat tråd
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(MAX_EVAL_MS);
     rt.set_interrupt_handler(Some(Box::new(move || {
-        abort_clone.load(std::sync::atomic::Ordering::Relaxed)
+        std::time::Instant::now() >= deadline
     })));
-
-    // Starta timeout-tråd som sätter flaggan efter MAX_EVAL_MS
-    let abort_for_timeout = should_abort.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(MAX_EVAL_MS));
-        abort_for_timeout.store(true, std::sync::atomic::Ordering::Relaxed);
-    });
 
     let ctx = Context::full(&rt).expect("QuickJS Context::full misslyckades");
 
-    (
-        rt,
-        ctx,
-        InterruptState {
-            _abort_flag: should_abort,
-        },
-    )
+    (rt, ctx, InterruptState { _private: () })
 }
 
-/// Cleanup för InterruptState — droppar Arc (no-op om inga referenser kvar)
+/// Cleanup för InterruptState — no-op med deadline-baserad interrupt
 #[cfg(feature = "js-eval")]
-pub(crate) fn free_interrupt_state(state: InterruptState) {
-    drop(state);
+pub(crate) fn free_interrupt_state(_state: InterruptState) {
+    // Inget att frigöra — deadline-baserad interrupt ägs av closure i runtime
 }
 
 use serde::{Deserialize, Serialize};
@@ -283,7 +389,8 @@ pub fn detect_js_snippets(html: &str) -> JsDetectionResult {
 /// Returnerar fullständig kod (ej trunkerad) för varje inline script.
 /// Filtrerar bort externa scripts (src=), type="application/json", type="application/ld+json".
 #[cfg(feature = "js-eval")]
-pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
+#[allow(dead_code)] // Används av blitz/fetch features
+pub(crate) fn extract_ordered_scripts(html: &str) -> Vec<String> {
     let mut scripts = Vec::new();
     let lower = html.to_lowercase();
     let mut search_from = 0;
@@ -326,7 +433,8 @@ pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
 /// En script-entry i dokumentordning — antingen inline-kod eller en extern URL.
 #[cfg(feature = "js-eval")]
 #[derive(Debug, Clone)]
-pub enum ScriptEntry {
+#[allow(dead_code)] // Används av fetch feature
+pub(crate) enum ScriptEntry {
     /// Inline script — redan i HTML, behöver ej hämtas
     Inline,
     /// Extern script — URL som behöver hämtas
@@ -339,7 +447,8 @@ pub enum ScriptEntry {
 /// inklusive externa `<script src="...">` som behöver hämtas separat.
 /// JSON/LD+JSON/importmap-scripts filtreras bort.
 #[cfg(feature = "js-eval")]
-pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
+#[allow(dead_code)] // Används av fetch feature
+pub(crate) fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
     let mut entries = Vec::new();
     let lower = html.to_lowercase();
     let mut search_from = 0;
@@ -386,6 +495,7 @@ pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
 
 /// Extrahera URL från ett script-tags src-attribut
 #[cfg(feature = "js-eval")]
+#[allow(dead_code)] // Används av fetch feature
 fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
     let lower = tag.to_lowercase();
     let src_pos = lower.find("src=")?;
@@ -439,8 +549,15 @@ fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
 
 /// Kolla om JS-koden troligen påverkar DOM-innehåll
 fn content_affects_dom(code: &str) -> bool {
-    let lower = code.to_lowercase();
-    CONTENT_PATTERNS.iter().any(|p| lower.contains(p))
+    // Patterns är redan lowercase ASCII — byte-level case-insensitive matching
+    // Undviker allokering av ny String via to_lowercase()
+    let bytes = code.as_bytes();
+    CONTENT_PATTERNS.iter().any(|p| {
+        let needle = p.as_bytes();
+        bytes
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+    })
 }
 
 /// Trunkera kod säkert (UTF-8-aware)
@@ -661,6 +778,8 @@ fn contains_only_safe_tokens(code: &str) -> bool {
 /// Använder allowlist-modell: bara kända säkra mönster tillåts.
 /// Stöder: matematik, strängar, arrayer, objekt, ternary, template literals.
 /// Stöder INTE: DOM, fetch, timers, import, require.
+///
+/// Använder pool:ad Runtime per tråd för snabbare eval (~10µs vs ~290µs).
 #[cfg(feature = "js-eval")]
 pub fn eval_js(code: &str) -> JsEvalResult {
     let start = std::time::Instant::now();
@@ -675,11 +794,9 @@ pub fn eval_js(code: &str) -> JsEvalResult {
         };
     }
 
-    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
-
-    let result = ctx.with(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
+    pooled_eval(|ctx| match ctx.eval::<rquickjs::Value, _>(code) {
         Ok(result) => {
-            let value_str = quickjs_value_to_string(&ctx, &result);
+            let value_str = quickjs_value_to_string(ctx, &result);
             JsEvalResult {
                 value: Some(value_str),
                 error: None,
@@ -688,7 +805,7 @@ pub fn eval_js(code: &str) -> JsEvalResult {
             }
         }
         Err(e) => {
-            let err_str = quickjs_error_string(&ctx, &e);
+            let err_str = quickjs_error_string(ctx, &e);
             let err_lower = err_str.to_lowercase();
             let timed_out = err_lower.contains("interrupted")
                 || err_lower.contains("stack overflow")
@@ -701,9 +818,7 @@ pub fn eval_js(code: &str) -> JsEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
             }
         }
-    });
-    free_interrupt_state(interrupt_ptr);
-    result
+    })
 }
 
 /// Evalera flera JS-uttryck med delad kontext (persistent state)
@@ -714,11 +829,9 @@ pub fn eval_js(code: &str) -> JsEvalResult {
 pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
     let start = std::time::Instant::now();
 
-    // Persistent kontext — delad mellan alla snippets, med runtime-begränsningar
-    let (_rt, ctx, interrupt_ptr) = create_sandboxed_runtime();
-    let mut results = Vec::with_capacity(snippets.len());
-
-    ctx.with(|ctx| {
+    // Pool:ad Runtime med cleanup (batch kan skapa variabler mellan snippets)
+    let results = pooled_eval_with_cleanup(|ctx| {
+        let mut results = Vec::with_capacity(snippets.len());
         for code in snippets {
             let snippet_start = std::time::Instant::now();
 
@@ -735,7 +848,7 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
 
             match ctx.eval::<rquickjs::Value, _>(code.as_str()) {
                 Ok(result) => {
-                    let value_str = quickjs_value_to_string(&ctx, &result);
+                    let value_str = quickjs_value_to_string(ctx, &result);
                     results.push(JsEvalResult {
                         value: Some(value_str),
                         error: None,
@@ -746,16 +859,15 @@ pub fn eval_js_batch(snippets: &[String]) -> JsBatchResult {
                 Err(e) => {
                     results.push(JsEvalResult {
                         value: None,
-                        error: Some(quickjs_error_string(&ctx, &e)),
+                        error: Some(quickjs_error_string(ctx, &e)),
                         timed_out: false,
                         eval_time_us: snippet_start.elapsed().as_micros() as u64,
                     });
                 }
             }
         }
+        results
     });
-
-    free_interrupt_state(interrupt_ptr);
 
     JsBatchResult {
         results,

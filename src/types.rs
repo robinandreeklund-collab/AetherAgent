@@ -395,31 +395,36 @@ impl SemanticNode {
     }
 
     /// Beräkna action baserat på roll
+    #[inline]
     pub fn infer_action(role: &str) -> Option<String> {
         match role {
-            "button" | "link" | "menuitem" | "cta" => Some("click".to_string()),
+            "button" | "link" | "menuitem" | "cta" | "tab" => Some("click".to_string()),
             "textbox" | "searchbox" | "textarea" => Some("type".to_string()),
-            "checkbox" | "radio" => Some("toggle".to_string()),
-            "combobox" | "listbox" | "select" => Some("select".to_string()),
+            "checkbox" | "radio" | "switch" => Some("toggle".to_string()),
+            "combobox" | "listbox" | "select" | "menu" => Some("select".to_string()),
             "slider" => Some("slide".to_string()),
-            "product_card" => Some("click".to_string()),
+            "product_card" | "dialog" | "video" => Some("click".to_string()),
+            "navigation" | "complementary" => Some("click".to_string()),
             _ => None,
         }
     }
 
     /// Rollens prioritet för goal-relevance scoring
+    #[inline]
     pub fn role_priority(role: &str) -> f32 {
         match role {
             "cta" => 0.95,
             "button" => 0.9,
-            "link" => 0.8,
             "textbox" | "searchbox" => 0.85,
-            "checkbox" | "radio" => 0.75,
-            "combobox" | "select" => 0.75,
+            "link" | "tab" => 0.8,
+            "checkbox" | "radio" | "switch" => 0.75,
+            "combobox" | "select" | "menu" => 0.75,
             "product_card" => 0.7,
+            "dialog" => 0.7,
             "price" => 0.65,
-            "navigation" => 0.6,
+            "navigation" | "complementary" => 0.6,
             "heading" => 0.6,
+            "video" => 0.55,
             "form" => 0.5,
             "img" => 0.4,
             "text" | "paragraph" => 0.3,
@@ -454,7 +459,7 @@ impl WorkflowMemory {
 
 impl FetchConfig {
     fn default_user_agent() -> String {
-        "AetherAgent/0.1 (LLM-native browser engine)".to_string()
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AetherAgent/0.2".to_string()
     }
 
     fn default_timeout_ms() -> u64 {

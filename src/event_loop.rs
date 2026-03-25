@@ -52,16 +52,16 @@ impl<'js, H: JsHandler> IntoJsFunc<'js, (Ctx<'js>, Rest<Value<'js>>)> for JsFn<H
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
 /// Max antal timers som kan registreras (förhindrar oändlig timer-skapning)
-const MAX_TIMERS: usize = 100;
+const MAX_TIMERS: usize = 500;
 
 /// Max delay för setTimeout/setInterval (ms)
 const MAX_DELAY_MS: u64 = 5000;
 
 /// Max antal ticks i event-loopen (förhindrar oändliga loopar)
-const MAX_TICKS: usize = 1000;
+const MAX_TICKS: usize = 5000;
 
-/// Max total körtid för event-loopen (µs)
-const MAX_RUNTIME_US: u64 = 50_000;
+/// Max total körtid för event-loopen (µs) — 500ms ger utrymme för WPT-tester
+const MAX_RUNTIME_US: u64 = 500_000;
 
 /// Simulerad rAF-intervall (ms) — ~60fps
 const RAF_INTERVAL_MS: u64 = 16;
@@ -459,12 +459,22 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
         }
     }
 
+    // Registrera som __MutationObserverImpl och wrappa i en JS-klass för new-stöd
     ctx.globals().set(
-        "MutationObserver",
+        "__MutationObserverImpl",
         Function::new(
             ctx.clone(),
             JsFn(MutationObserverConstructor { el: Rc::clone(&el) }),
         )?,
+    )?;
+    ctx.eval::<Value, _>(
+        r#"globalThis.MutationObserver = function MutationObserver(cb) {
+            if (!(this instanceof MutationObserver)) throw new TypeError("not a constructor");
+            var impl = __MutationObserverImpl(cb);
+            this.observe = impl.observe;
+            this.disconnect = impl.disconnect;
+            this.takeRecords = impl.takeRecords || function(){return []};
+        };"#,
     )?;
 
     Ok(())

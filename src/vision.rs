@@ -13,9 +13,35 @@ use crate::types::{BoundingBox, NodeState, SemanticNode, SemanticTree, TrustLeve
 
 // --- Konstanter ---
 
-/// YOLOv8 UI-elementklasser
+/// YOLO UI-elementklasser (22 klasser — matchar ONNX-modellens output-index)
+///
+/// Index 0-9: grundklasser (bakåtkompatibla med 10-klassmodeller)
+/// Index 10-21: utökade agentsemantiska klasser
 pub const UI_CLASSES: &[&str] = &[
-    "button", "input", "link", "icon", "text", "image", "checkbox", "radio", "select", "heading",
+    // Grund (0-9)
+    "button",   // 0  - generell knapp
+    "input",    // 1  - textfält
+    "link",     // 2  - klickbar länk
+    "icon",     // 3  - ikon
+    "text",     // 4  - generell text
+    "image",    // 5  - bild
+    "checkbox", // 6  - checkbox
+    "radio",    // 7  - radioknapp
+    "select",   // 8  - dropdown/combobox
+    "heading",  // 9  - rubrik
+    // Utökade (10-21)
+    "price",     // 10 - pristext (valuta + siffror)
+    "cta",       // 11 - call-to-action (köp, lägg i kundvagn)
+    "card",      // 12 - produktkort / innehållskort
+    "navbar",    // 13 - navigationsbar
+    "searchbox", // 14 - sökfält
+    "form",      // 15 - formulärgrupp
+    "dropdown",  // 16 - dropdown-meny / expanderbar lista
+    "modal",     // 17 - dialogruta / popup / overlay
+    "tab",       // 18 - flik i tab-navigering
+    "toggle",    // 19 - switch / toggle-knapp
+    "sidebar",   // 20 - sidopanel
+    "video",     // 21 - videospelare
 ];
 
 // --- Typer ---
@@ -58,7 +84,7 @@ pub struct VisionConfig {
     /// IoU-tröskel för NMS (default 0.45)
     #[serde(default = "default_nms_threshold")]
     pub nms_threshold: f32,
-    /// Input-storlek för modellen (default 640)
+    /// Input-storlek för modellen (default 1280)
     #[serde(default = "default_input_size")]
     pub input_size: u32,
     /// Max antal detektioner att returnera (default 100)
@@ -87,7 +113,7 @@ fn default_nms_threshold() -> f32 {
 }
 
 fn default_input_size() -> u32 {
-    640
+    1280
 }
 
 fn default_max_detections() -> usize {
@@ -228,6 +254,7 @@ pub fn detections_to_tree(detections: &[UiDetection], goal: &str, url: &str) -> 
 /// Mappa detektion-klass till semantisk roll
 fn map_class_to_role(class: &str) -> String {
     match class {
+        // Grund (0-9)
         "button" => "button".to_string(),
         "input" => "textbox".to_string(),
         "link" => "link".to_string(),
@@ -238,6 +265,19 @@ fn map_class_to_role(class: &str) -> String {
         "radio" => "radio".to_string(),
         "select" => "select".to_string(),
         "heading" => "heading".to_string(),
+        // Utökade (10-21)
+        "price" => "price".to_string(),
+        "cta" => "cta".to_string(),
+        "card" => "product_card".to_string(),
+        "navbar" => "navigation".to_string(),
+        "searchbox" => "searchbox".to_string(),
+        "form" => "form".to_string(),
+        "dropdown" => "menu".to_string(),
+        "modal" => "dialog".to_string(),
+        "tab" => "tab".to_string(),
+        "toggle" => "switch".to_string(),
+        "sidebar" => "complementary".to_string(),
+        "video" => "video".to_string(),
         other => other.to_string(),
     }
 }
@@ -328,7 +368,11 @@ pub fn load_model(model_bytes: &[u8]) -> Result<ort::session::Session, String> {
 }
 
 #[cfg(feature = "vision")]
-/// Run YOLOv8-nano inference with a pre-loaded ORT session (fast path).
+/// Run YOLOv8 inference with a pre-loaded ORT session (fast path).
+///
+/// Stödjer två output-format automatiskt:
+/// - End2end `[1, N, 6]`: x1, y1, x2, y2, confidence, class_id (NMS inbyggd)
+/// - Standard `[1, C+4, N]`: cx, cy, w, h, class_scores... (behöver NMS)
 ///
 /// ORT `run` kräver `&mut Session`. Anroparen ansvarar för synkronisering
 /// (t.ex. via Mutex i server state).
@@ -351,7 +395,6 @@ pub fn run_inference_with_model(
         .run(ort::inputs![input_ref])
         .map_err(|e| format!("ORT inference: {e}"))?;
 
-    // Hämta output — YOLOv8 output: [1, num_classes+4, num_predictions]
     let (_name, output_value) = outputs
         .iter()
         .next()
@@ -360,23 +403,116 @@ pub fn run_inference_with_model(
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("ORT output extract: {e}"))?;
 
-    // Shape deref:ar till SmallVec<[i64; 4]>
     if shape.len() < 3 {
         return Err(format!("Ovantad output-form: {:?}", &**shape));
     }
 
-    let num_attrs = shape[1] as usize; // 4 + num_classes
-    let num_preds = shape[2] as usize;
-    let num_classes = num_attrs.saturating_sub(4).min(config.num_classes());
+    let dim1 = shape[1] as usize;
+    let dim2 = shape[2] as usize;
+    let inv_size = 1.0 / input_size as f32;
 
+    // Detektera output-format baserat på shape
+    // End2end: [1, N, 6] (eller [1, N, 7]) — N detektioner, 6 attribut per detektion
+    // Standard: [1, C+4, N] — C+4 rader, N prediktioner
+    let is_end2end = dim2 <= 7 && dim1 > dim2;
+
+    let mut detections = if is_end2end {
+        // End2end-format: [1, num_detections, 6]
+        // Varje rad: [x1, y1, x2, y2, confidence, class_id]
+        parse_end2end_output(data, dim1, dim2, inv_size, config)
+    } else {
+        // Standard YOLOv8-format: [1, num_attrs, num_preds]
+        parse_standard_output(data, dim1, dim2, inv_size, config)?
+    };
+
+    if !is_end2end {
+        // Standard-format behöver NMS (end2end har inbyggd)
+        nms(&mut detections, config.nms_threshold);
+    }
+    detections.truncate(config.max_detections);
+
+    Ok(detections)
+}
+
+#[cfg(feature = "vision")]
+/// Parsa end2end ONNX-output [1, N, 6]: x1, y1, x2, y2, conf, class_id
+fn parse_end2end_output(
+    data: &[f32],
+    num_detections: usize,
+    attrs_per_det: usize,
+    inv_size: f32,
+    config: &VisionConfig,
+) -> Vec<UiDetection> {
+    let mut detections = Vec::new();
+
+    for i in 0..num_detections {
+        let base = i * attrs_per_det;
+        if base + 5 >= data.len() {
+            break;
+        }
+
+        let x1 = data[base];
+        let y1 = data[base + 1];
+        let x2 = data[base + 2];
+        let y2 = data[base + 3];
+        let conf = data[base + 4];
+        let cls_id = data[base + 5] as usize;
+
+        if conf < config.confidence_threshold {
+            continue;
+        }
+
+        let class_name = config.class_name(cls_id);
+        let threshold = config.threshold_for_class(class_name);
+        if conf < threshold {
+            continue;
+        }
+
+        // Konvertera xyxy pixelkoordinater till normaliserade xywh
+        let nx1 = (x1 * inv_size).clamp(0.0, 1.0);
+        let ny1 = (y1 * inv_size).clamp(0.0, 1.0);
+        let nx2 = (x2 * inv_size).clamp(0.0, 1.0);
+        let ny2 = (y2 * inv_size).clamp(0.0, 1.0);
+
+        let w = nx2 - nx1;
+        let h = ny2 - ny1;
+
+        if config.min_detection_area > 0.0 && w * h < config.min_detection_area {
+            continue;
+        }
+
+        if w > 0.0 && h > 0.0 {
+            detections.push(UiDetection {
+                class: class_name.to_string(),
+                confidence: conf,
+                bbox: BoundingBox {
+                    x: nx1,
+                    y: ny1,
+                    width: w,
+                    height: h,
+                },
+            });
+        }
+    }
+
+    detections
+}
+
+#[cfg(feature = "vision")]
+/// Parsa standard YOLOv8-output [1, C+4, N]: cx, cy, w, h, class_scores...
+fn parse_standard_output(
+    data: &[f32],
+    num_attrs: usize,
+    num_preds: usize,
+    inv_size: f32,
+    config: &VisionConfig,
+) -> Result<Vec<UiDetection>, String> {
+    let num_classes = num_attrs.saturating_sub(4).min(config.num_classes());
     if num_classes == 0 {
         return Err("Modellen har inga klasser".to_string());
     }
 
-    // Platt data-access: data har layout [1, num_attrs, num_preds] row-major
     let mut detections = Vec::new();
-
-    let inv_size = 1.0 / input_size as f32;
 
     for pred_idx in 0..num_preds {
         let mut best_class = 0;
@@ -402,7 +538,7 @@ pub fn run_inference_with_model(
             continue;
         }
 
-        // Koordinater i modellens pixelrymd (0..input_size) → normalisera till 0..1
+        // Koordinater i modellens pixelrymd → normalisera till 0..1
         let cx = data[pred_idx] * inv_size;
         let cy = data[num_preds + pred_idx] * inv_size;
         let w = data[2 * num_preds + pred_idx] * inv_size;
@@ -426,9 +562,6 @@ pub fn run_inference_with_model(
             },
         });
     }
-
-    nms(&mut detections, config.nms_threshold);
-    detections.truncate(config.max_detections);
 
     Ok(detections)
 }
@@ -525,7 +658,7 @@ mod tests {
             (config.nms_threshold - 0.45).abs() < 0.01,
             "NMS-tröskel borde vara 0.45"
         );
-        assert_eq!(config.input_size, 640, "Input-storlek borde vara 640");
+        assert_eq!(config.input_size, 1280, "Input-storlek borde vara 1280");
         assert_eq!(config.max_detections, 100, "Max detektioner borde vara 100");
     }
 

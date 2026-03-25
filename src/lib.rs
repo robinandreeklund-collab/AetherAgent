@@ -1,7 +1,8 @@
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
-mod arena_dom;
+pub mod arena_dom;
+pub mod arena_dom_sink;
 mod causal;
 mod collab;
 mod compiler;
@@ -11,7 +12,7 @@ mod css_cascade;
 pub mod css_compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
-mod dom_bridge;
+pub mod dom_bridge;
 mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;
@@ -30,8 +31,8 @@ mod parser;
 pub mod search;
 mod semantic;
 mod session;
-mod stream_engine;
-mod stream_state;
+pub mod stream_engine;
+pub mod stream_state;
 mod streaming;
 #[cfg(feature = "blitz")]
 #[allow(dead_code)]
@@ -68,6 +69,7 @@ pub fn register_cdp_ready_hook() {
     });
 }
 
+#[allow(unused_imports)]
 use parser::parse_html;
 use semantic::SemanticBuilder;
 use types::{SemanticTree, WorkflowMemory};
@@ -79,8 +81,8 @@ use types::{SemanticTree, WorkflowMemory};
 /// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
 /// ~5-10x snabbare traversering och cache-friendly minnesallokering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    let rcdom = parse_html(html);
-    let mut arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    // Direkt html5ever → ArenaDom via custom TreeSink (skippar RcDom-mellansteget)
+    let mut arena = arena_dom_sink::parse_html_to_arena(html);
     // Resolva lazy-loaded bilder (data-src → src) innan semantisk analys
     arena.resolve_lazy_images();
     let title = arena.extract_title();
@@ -107,7 +109,7 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
 /// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
 /// och används för att bygga det semantiska trädet.
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
-    #[cfg(feature = "js-eval")]
+    #[cfg(all(feature = "js-eval", feature = "blitz"))]
     {
         let scripts = js_eval::extract_ordered_scripts(html);
         if !scripts.is_empty() {
@@ -156,6 +158,43 @@ fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode>
         result.extend(collect_all_nodes(&node.children));
     }
     result
+}
+
+/// Profilering: mät tid per parse-steg (HTML → RcDom → Arena → Semantic → JSON)
+pub fn profile_parse_stages(html: &str, goal: &str, url: &str) -> String {
+    use std::time::Instant;
+
+    let t0 = Instant::now();
+    let mut arena = arena_dom_sink::parse_html_to_arena(html);
+    arena.resolve_lazy_images();
+    let t_parse = t0.elapsed();
+
+    // Arena-konvertering eliminerad (ingår i parse-steget)
+    let t_arena = std::time::Duration::ZERO;
+
+    let t2 = Instant::now();
+    let title = arena.extract_title();
+    let mut builder = semantic::SemanticBuilder::new(goal);
+    let tree = builder.build_from_arena(&arena, url, &title);
+    let t_semantic = t2.elapsed();
+
+    let t3 = Instant::now();
+    let _ = hydration::extract_hydration_state(html);
+    let t_hydration = t3.elapsed();
+
+    let t4 = Instant::now();
+    let _ = serialize_json(&tree, tree.nodes.len());
+    let t_json = t4.elapsed();
+
+    format!(
+        "html5ever: {:.1}ms, arena: {:.1}ms, semantic: {:.1}ms, hydration: {:.1}ms, json: {:.1}ms, nodes: {}",
+        t_parse.as_secs_f64() * 1000.0,
+        t_arena.as_secs_f64() * 1000.0,
+        t_semantic.as_secs_f64() * 1000.0,
+        t_hydration.as_secs_f64() * 1000.0,
+        t_json.as_secs_f64() * 1000.0,
+        tree.nodes.len(),
+    )
 }
 
 // ─── Fas 1: Publik API ──────────────────────────────────────────────────────
@@ -518,7 +557,7 @@ pub fn stream_parse_with_directives(
 pub fn check_injection(text: &str) -> String {
     let (_, warning) = trust::analyze_text(0, text);
     if let Some(w) = warning {
-        serde_json::to_string_pretty(&w).unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(&w).unwrap_or_else(|_| "{}".to_string())
     } else {
         r#"{"safe": true}"#.to_string()
     }
@@ -555,7 +594,7 @@ pub fn find_and_click(html: &str, goal: &str, url: &str, target_label: &str) -> 
     tree.parse_time_ms = now_ms() - start;
 
     let result = intent::find_best_clickable(&tree, target_label);
-    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Matcha formulärfält med angivna nycklar och värden
@@ -582,7 +621,7 @@ pub fn fill_form(html: &str, goal: &str, url: &str, fields_json: &str) -> String
     };
 
     let result = intent::map_form_fields(&tree, &fields);
-    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Extrahera strukturerad data från en sida baserat på nycklar
@@ -609,7 +648,7 @@ pub fn extract_data(html: &str, goal: &str, url: &str, data_keys_json: &str) -> 
     };
 
     let result = intent::extract_by_keys(&tree, &keys);
-    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ─── Fas 2: Workflow Memory ──────────────────────────────────────────────────
@@ -712,7 +751,7 @@ pub fn diff_semantic_trees(old_tree_json: &str, new_tree_json: &str) -> String {
     let mut delta = diff::diff_trees(&old_tree, &new_tree);
     delta.diff_time_ms = now_ms() - start;
 
-    match serde_json::to_string_pretty(&delta) {
+    match serde_json::to_string(&delta) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -730,7 +769,7 @@ pub fn diff_semantic_trees(old_tree_json: &str, new_tree_json: &str) -> String {
 #[wasm_bindgen]
 pub fn detect_js(html: &str) -> String {
     let result = js_eval::detect_js_snippets(html);
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -749,7 +788,7 @@ pub fn detect_js(html: &str) -> String {
 #[wasm_bindgen]
 pub fn eval_js(code: &str) -> String {
     let result = js_eval::eval_js(code);
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -770,7 +809,7 @@ pub fn eval_js_batch(snippets_json: &str) -> String {
     };
 
     let result = js_eval::eval_js_batch(&snippets);
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -800,7 +839,7 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
     result.exec_time_ms = now_ms() - start;
     result.tree.parse_time_ms = result.exec_time_ms;
 
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -821,7 +860,7 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
 #[wasm_bindgen]
 pub fn detect_xhr_urls(html: &str) -> String {
     let captures = js_bridge::extract_xhr_from_snippets(html);
-    match serde_json::to_string_pretty(&captures) {
+    match serde_json::to_string(&captures) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -891,7 +930,7 @@ pub fn analyze_temporal(memory_json: &str) -> String {
     let mut analysis = mem.analyze();
     analysis.analysis_time_ms = now_ms() - start;
 
-    match serde_json::to_string_pretty(&analysis) {
+    match serde_json::to_string(&analysis) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -912,7 +951,7 @@ pub fn predict_temporal(memory_json: &str) -> String {
     };
 
     let prediction = temporal::predict_next_state(&mem);
-    match serde_json::to_string_pretty(&prediction) {
+    match serde_json::to_string(&prediction) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -936,7 +975,7 @@ pub fn compile_goal(goal: &str) -> String {
     let mut plan = compiler::compile_goal(goal);
     plan.compile_time_ms = now_ms() - start;
 
-    match serde_json::to_string_pretty(&plan) {
+    match serde_json::to_string(&plan) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -977,7 +1016,7 @@ pub fn execute_plan(
     let tree = build_tree(html, goal, url);
     let result = compiler::execute_plan(&plan, &tree, &completed);
 
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -1079,7 +1118,7 @@ pub fn predict_action_outcome(graph_json: &str, action: &str) -> String {
     };
 
     let prediction = graph.predict_outcome(action, None);
-    match serde_json::to_string_pretty(&prediction) {
+    match serde_json::to_string(&prediction) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -1101,7 +1140,7 @@ pub fn find_safest_path(graph_json: &str, goal: &str) -> String {
     };
 
     let path = graph.find_safest_path(goal, 20);
-    match serde_json::to_string_pretty(&path) {
+    match serde_json::to_string(&path) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -1126,7 +1165,7 @@ pub fn discover_webmcp(html: &str, url: &str) -> String {
     let mut result = webmcp::discover_webmcp_tools(html, url);
     result.scan_time_ms = now_ms() - start;
 
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -1160,7 +1199,7 @@ pub fn ground_semantic_tree(html: &str, goal: &str, url: &str, annotations_json:
     let mut result = grounding::ground_tree(&tree, &annotations);
     result.grounding_time_ms = now_ms() - start;
 
-    match serde_json::to_string_pretty(&result) {
+    match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -1187,7 +1226,7 @@ pub fn match_bbox_iou(tree_json: &str, bbox_json: &str) -> String {
     };
 
     let matches = grounding::match_by_iou(&tree.nodes, &bbox);
-    match serde_json::to_string_pretty(&matches) {
+    match serde_json::to_string(&matches) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -2474,7 +2513,7 @@ pub fn screenshot_with_tier(
 /// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.
 pub fn tier_stats() -> String {
     let stats = global_tiered_backend().stats();
-    serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ─── Fas 9d: Cross-Agent Semantic Diffing ───────────────────────────────────
@@ -2562,7 +2601,7 @@ pub fn collab_stats(store_json: &str) -> String {
         Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
     };
     let stats = store.stats();
-    match serde_json::to_string_pretty(&stats) {
+    match serde_json::to_string(&stats) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }
@@ -2602,7 +2641,7 @@ pub fn get_collab_delta_for_url(store_json: &str, url: &str) -> String {
         Err(e) => return format!(r#"{{"error": "{}"}}"#, e),
     };
     match store.get_delta_for_url(url) {
-        Some(delta) => match serde_json::to_string_pretty(delta) {
+        Some(delta) => match serde_json::to_string(delta) {
             Ok(json) => json,
             Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
         },
@@ -2632,7 +2671,7 @@ pub fn fetch_collab_deltas(store_json: &str, agent_id: &str) -> String {
         "store": store,
     });
 
-    match serde_json::to_string_pretty(&response) {
+    match serde_json::to_string(&response) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
     }

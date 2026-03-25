@@ -859,7 +859,7 @@ async fn api_endpoints() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        serde_json::to_string_pretty(&body).unwrap_or_default(),
+        serde_json::to_string(&body).unwrap_or_default(),
     )
 }
 
@@ -1712,6 +1712,943 @@ fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::
     selected
 }
 
+// ─── WebSocket: Universal API Gateway (/ws/api) ─────────────────────────────
+
+/// Universell WebSocket-gateway som multiplexar alla API-anrop med realtids-progress.
+async fn ws_api_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_ws_api)
+}
+
+async fn handle_ws_api(mut socket: axum::extract::ws::WebSocket) {
+    use axum::extract::ws::Message;
+    use tokio::sync::mpsc;
+
+    // Kanal för att skicka svar tillbaka från spawnade tasks
+    let (tx, mut rx) = mpsc::channel::<String>(64);
+
+    loop {
+        tokio::select! {
+            // Skicka svar från spawnade tasks till klienten
+            Some(msg) = rx.recv() => {
+                if socket.send(Message::Text(msg)).await.is_err() {
+                    return;
+                }
+            }
+            // Ta emot meddelanden från klienten
+            result = tokio::time::timeout(std::time::Duration::from_secs(300), socket.recv()) => {
+                let msg_text = match result {
+                    Ok(Some(Ok(Message::Text(text)))) => text,
+                    Ok(Some(Ok(Message::Close(_)))) | Ok(None) => return,
+                    Ok(Some(Ok(Message::Ping(d)))) => {
+                        let _ = socket.send(Message::Pong(d)).await;
+                        continue;
+                    }
+                    Ok(Some(Ok(_))) => continue,
+                    Ok(Some(Err(_))) | Err(_) => return,
+                };
+
+                let parsed: serde_json::Value = match serde_json::from_str(&msg_text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let _ = socket.send(Message::Text(
+                            serde_json::json!({"type":"error","message":format!("JSON parse error: {e}")}).to_string()
+                        )).await;
+                        continue;
+                    }
+                };
+
+                let req_id = parsed.get("id").cloned().unwrap_or(serde_json::json!(null));
+                let method = parsed.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let params = parsed.get("params").cloned().unwrap_or(serde_json::json!({}));
+
+                if method.is_empty() {
+                    let _ = socket.send(Message::Text(
+                        serde_json::json!({"id": req_id, "type":"error","message":"Missing 'method' field"}).to_string()
+                    )).await;
+                    continue;
+                }
+
+                let tx2 = tx.clone();
+                tokio::spawn(async move {
+                    ws_api_dispatch(req_id, method, params, tx2).await;
+                });
+            }
+        }
+    }
+}
+
+/// Dispatchar ett WS API-anrop till rätt aether_agent-funktion
+async fn ws_api_dispatch(
+    id: serde_json::Value,
+    method: String,
+    params: serde_json::Value,
+    tx: tokio::sync::mpsc::Sender<String>,
+) {
+    // Skicka progress
+    let send = |msg: serde_json::Value| {
+        let tx = tx.clone();
+        async move {
+            let _ = tx.send(msg.to_string()).await;
+        }
+    };
+
+    let _ = send(serde_json::json!({
+        "id": id, "type": "progress", "stage": "processing", "method": method
+    }))
+    .await;
+
+    let result: Result<serde_json::Value, String> = match method.as_str() {
+        "parse" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::parse_to_semantic_tree(&html, &goal, &url);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "parse_top" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let top_n = params["top_n"].as_u64().unwrap_or(10) as u32;
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::parse_top_nodes(&html, &goal, &url, top_n);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "find_and_click" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let target = params["target_label"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::find_and_click(&html, &goal, &url, &target);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "fill_form" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let fields_json = serde_json::to_string(&params["fields"]).unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::fill_form(&html, &goal, &url, &fields_json);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "extract_data" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let keys_json = serde_json::to_string(&params["keys"]).unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::extract_data(&html, &goal, &url, &keys_json);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "check_injection" => {
+            let text = params["text"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::check_injection(&text);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "compile_goal" => {
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::compile_goal(&goal);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "classify_request" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let config = aether_agent::firewall::FirewallConfig::default();
+                let verdict = aether_agent::firewall::classify_request(&url, &goal, &config);
+                serde_json::to_value(&verdict).unwrap_or(serde_json::json!(null))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "diff_trees" => {
+            let old = params["old_tree_json"].as_str().unwrap_or("").to_string();
+            let new = params["new_tree_json"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::diff_semantic_trees(&old, &new);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "parse_with_js" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::parse_with_js(&html, &goal, &url);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "stream_parse" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let top_n = params["top_n"].as_u64().unwrap_or(10) as u32;
+            let threshold = params["threshold"].as_f64().unwrap_or(0.0) as f32;
+            let max_nodes = params["max_nodes"].as_u64().unwrap_or(50) as u32;
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::stream_parse_adaptive(
+                    &html, &goal, &url, top_n, threshold, max_nodes,
+                );
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "detect_xhr_urls" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::detect_xhr_urls(&html);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "build_causal_graph" => {
+            let snapshots = params["snapshots_json"].as_str().unwrap_or("").to_string();
+            let actions = params["actions_json"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::build_causal_graph(&snapshots, &actions);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "predict_action_outcome" => {
+            let graph = params["graph_json"].as_str().unwrap_or("").to_string();
+            let action = params["action"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::predict_action_outcome(&graph, &action);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "find_safest_path" => {
+            let graph = params["graph_json"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::find_safest_path(&graph, &goal);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "discover_webmcp" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::discover_webmcp(&html, &url);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "tiered_screenshot" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let width = params["width"].as_u64().unwrap_or(1280) as u32;
+            let height = params["height"].as_u64().unwrap_or(800) as u32;
+            let fast_render = params["fast_render"].as_bool().unwrap_or(true);
+            let xhr_json = params["xhr_captures_json"]
+                .as_str()
+                .unwrap_or("[]")
+                .to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::tiered_screenshot(
+                    &html,
+                    &url,
+                    &goal,
+                    width,
+                    height,
+                    fast_render,
+                    &xhr_json,
+                );
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "tier_stats" => tokio::task::spawn_blocking(|| {
+            let r = aether_agent::tier_stats();
+            serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+        })
+        .await
+        .map_err(|e| e.to_string()),
+        // Fetch-operationer — flerstegsprogress
+        "fetch_parse" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            ws_api_fetch_op(&id, &url, &goal, "parse", &params, &tx).await
+        }
+        "fetch_click" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            ws_api_fetch_op(&id, &url, &goal, "click", &params, &tx).await
+        }
+        "fetch_extract" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            ws_api_fetch_op(&id, &url, &goal, "extract", &params, &tx).await
+        }
+        "fetch_stream_parse" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            ws_api_fetch_op(&id, &url, &goal, "stream_parse", &params, &tx).await
+        }
+        other => Err(format!("Unknown method: {other}")),
+    };
+
+    match result {
+        Ok(data) => {
+            let _ = send(serde_json::json!({"id": id, "type": "result", "data": data})).await;
+        }
+        Err(e) => {
+            let _ = send(serde_json::json!({"id": id, "type": "error", "message": e})).await;
+        }
+    }
+}
+
+/// Hjälpfunktion för fetch_*-operationer med flerstegsprogress
+async fn ws_api_fetch_op(
+    id: &serde_json::Value,
+    url: &str,
+    goal: &str,
+    op: &str,
+    params: &serde_json::Value,
+    tx: &tokio::sync::mpsc::Sender<String>,
+) -> Result<serde_json::Value, String> {
+    aether_agent::fetch::validate_url(url)?;
+
+    // Progress: fetching
+    let _ = tx
+        .send(
+            serde_json::json!({
+                "id": id, "type": "progress", "stage": "fetching", "url": url
+            })
+            .to_string(),
+        )
+        .await;
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = aether_agent::fetch::fetch_page(url, &config)
+        .await
+        .map_err(|e| format!("Fetch failed: {e}"))?;
+
+    let bytes_fetched = fetch_result.body.len();
+    let final_url = fetch_result.final_url.clone();
+    let body = fetch_result.body.clone();
+
+    // Progress: parsing
+    let _ = tx
+        .send(
+            serde_json::json!({
+                "id": id, "type": "progress", "stage": "parsing", "bytes_fetched": bytes_fetched
+            })
+            .to_string(),
+        )
+        .await;
+
+    let goal_owned = goal.to_string();
+    let params_clone = params.clone();
+
+    match op {
+        "parse" => tokio::task::spawn_blocking(move || {
+            let r = aether_agent::parse_to_semantic_tree(&body, &goal_owned, &final_url);
+            serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+        })
+        .await
+        .map_err(|e| e.to_string()),
+        "click" => {
+            let target = params_clone["target_label"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::find_and_click(&body, &goal_owned, &final_url, &target);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "extract" => {
+            let keys_json = serde_json::to_string(&params_clone["keys"]).unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::extract_data(&body, &goal_owned, &final_url, &keys_json);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "stream_parse" => {
+            let top_n = params_clone["top_n"].as_u64().unwrap_or(10) as u32;
+            let threshold = params_clone["threshold"].as_f64().unwrap_or(0.0) as f32;
+            let max_nodes = params_clone["max_nodes"].as_u64().unwrap_or(50) as u32;
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::stream_parse_adaptive(
+                    &body,
+                    &goal_owned,
+                    &final_url,
+                    top_n,
+                    threshold,
+                    max_nodes,
+                );
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        _ => Err(format!("Unknown fetch op: {op}")),
+    }
+}
+
+// ─── WebSocket: MCP JSON-RPC (/ws/mcp) ──────────────────────────────────────
+
+/// MCP JSON-RPC via WebSocket — initialize, tools/list, tools/call, ping
+async fn ws_mcp_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_mcp(socket, state))
+}
+
+async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState) {
+    use axum::extract::ws::Message;
+
+    loop {
+        let msg_text =
+            match tokio::time::timeout(std::time::Duration::from_secs(300), socket.recv()).await {
+                Ok(Some(Ok(Message::Text(text)))) => text,
+                Ok(Some(Ok(Message::Close(_)))) | Ok(None) => return,
+                Ok(Some(Ok(Message::Ping(d)))) => {
+                    let _ = socket.send(Message::Pong(d)).await;
+                    continue;
+                }
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(_))) | Err(_) => return,
+            };
+
+        let msg: serde_json::Value = match serde_json::from_str(&msg_text) {
+            Ok(v) => v,
+            Err(e) => {
+                let err = jsonrpc_error(
+                    &serde_json::json!(null),
+                    -32700,
+                    &format!("Parse error: {e}"),
+                );
+                let _ = socket.send(Message::Text(err.to_string())).await;
+                continue;
+            }
+        };
+
+        let method = msg["method"].as_str().unwrap_or("");
+        let id = &msg["id"];
+        let params = &msg["params"];
+
+        // Notification (inget id) — ignorera tyst
+        if id.is_null() {
+            continue;
+        }
+
+        let response = match method {
+            "initialize" => jsonrpc_result(
+                id,
+                serde_json::json!({
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {
+                        "tools": {"listChanged": false}
+                    },
+                    "serverInfo": {
+                        "name": "aether-agent",
+                        "version": "0.3.0"
+                    }
+                }),
+            ),
+            "tools/list" => jsonrpc_result(
+                id,
+                serde_json::json!({
+                    "tools": mcp_tool_definitions()
+                }),
+            ),
+            "tools/call" => {
+                let tool_name = params["name"].as_str().unwrap_or("");
+                let arguments = &params["arguments"];
+                let call_start = std::time::Instant::now();
+                let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+                let call_ms = call_start.elapsed().as_millis();
+
+                // Broadcast tool-anrop till SSE-dashboard
+                let event = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/tool_call",
+                    "params": {
+                        "tool": tool_name,
+                        "duration_ms": call_ms,
+                        "success": result.is_ok(),
+                        "timestamp": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    }
+                });
+                let event_str = event.to_string();
+                let _ = state.mcp_events.send(event_str.clone());
+                if let Ok(mut log) = state.mcp_event_log.lock() {
+                    if log.len() >= 100 {
+                        log.pop_front();
+                    }
+                    log.push_back(event_str);
+                }
+
+                match result {
+                    Ok(content) => jsonrpc_result(
+                        id,
+                        serde_json::json!({"content": content, "isError": false}),
+                    ),
+                    Err(e) => jsonrpc_result(
+                        id,
+                        serde_json::json!({
+                            "content": [{"type": "text", "text": e}],
+                            "isError": true
+                        }),
+                    ),
+                }
+            }
+            "ping" => jsonrpc_result(id, serde_json::json!({})),
+            _ => jsonrpc_error(id, -32601, &format!("Method not found: {method}")),
+        };
+
+        if socket
+            .send(Message::Text(response.to_string()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
+// ─── WebSocket: Streaming Search (/ws/search) ───────────────────────────────
+
+/// WebSocket-baserad streaming-sökning som skickar resultat ett-i-taget
+async fn ws_search_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_search(socket, state))
+}
+
+async fn handle_ws_search(mut socket: axum::extract::ws::WebSocket, _state: AppState) {
+    use axum::extract::ws::Message;
+
+    // Vänta på sökförfrågan
+    let req_text = match tokio::time::timeout(std::time::Duration::from_secs(30), socket.recv())
+        .await
+    {
+        Ok(Some(Ok(Message::Text(text)))) => text,
+        _ => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":"Timeout or invalid start message"}).to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let req: serde_json::Value = match serde_json::from_str(&req_text) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":format!("JSON parse error: {e}")})
+                        .to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let query = req["query"].as_str().unwrap_or("");
+    let goal = req["goal"].as_str().unwrap_or("");
+    let top_n = req["top_n"].as_u64().unwrap_or(5) as usize;
+    let deep = req["deep"].as_bool().unwrap_or(true);
+    let max_nodes_per_result = req["max_nodes_per_result"].as_u64().unwrap_or(5) as usize;
+
+    if query.is_empty() {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"type":"error","message":"Missing 'query' field"}).to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let search_start = std::time::Instant::now();
+    let ddg_url = aether_agent::build_search_url(query);
+
+    // Progress: söker
+    let _ = socket
+        .send(Message::Text(
+            serde_json::json!({"type":"searching","ddg_url": ddg_url}).to_string(),
+        ))
+        .await;
+
+    // Hämta DDG-sida
+    let config = aether_agent::types::FetchConfig::default();
+    let html = match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+        Ok(r) => r.body,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":format!("DDG fetch failed: {e}")})
+                        .to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    // Parsa sökresultat
+    let search_json = aether_agent::search_from_html(query, &html, top_n, goal);
+    let mut search_result: aether_agent::search::SearchResult =
+        match serde_json::from_str(&search_json) {
+            Ok(r) => r,
+            Err(_) => {
+                let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":"Failed to parse search results"})
+                        .to_string(),
+                ))
+                .await;
+                return;
+            }
+        };
+
+    let effective_goal = if goal.is_empty() {
+        format!("hitta svar på: {}", query)
+    } else {
+        goal.to_string()
+    };
+
+    // Streama resultat ett-i-taget
+    for (idx, entry) in search_result.results.iter_mut().enumerate() {
+        let mut entry_json = serde_json::json!({
+            "title": entry.title,
+            "url": entry.url,
+            "snippet": entry.snippet,
+        });
+
+        // Deep fetch om begärt
+        if deep {
+            let fetch_cfg = aether_agent::types::FetchConfig::default();
+            let g = effective_goal.clone();
+            let url = entry.url.clone();
+            let mnpr = max_nodes_per_result;
+            if let Ok(Ok(result)) = tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                aether_agent::fetch::fetch_page(&url, &fetch_cfg),
+            )
+            .await
+            {
+                let fetch_limit = (mnpr * 8).max(30);
+                let stream_json = aether_agent::stream_parse_adaptive(
+                    &result.body,
+                    &g,
+                    &url,
+                    fetch_limit as u32,
+                    0.0,
+                    fetch_limit as u32,
+                );
+                let nodes = deep_extract_page_nodes(&stream_json, mnpr);
+                if !nodes.is_empty() {
+                    entry.page_content = Some(nodes.clone());
+                    entry_json["page_content"] = serde_json::to_value(&nodes).unwrap_or_default();
+
+                    // Berika snippet
+                    let best_text: Vec<&str> = nodes
+                        .iter()
+                        .filter(|n| n.label.len() > 30)
+                        .take(2)
+                        .map(|n| n.label.as_str())
+                        .collect();
+                    if !best_text.is_empty()
+                        && (entry.snippet.len() < 30 || entry.snippet.contains("www."))
+                    {
+                        let enriched = best_text.join(" | ");
+                        entry.snippet = enriched.clone();
+                        entry_json["snippet"] = serde_json::json!(enriched);
+                    }
+                }
+            }
+        }
+
+        let msg = serde_json::json!({
+            "type": "result",
+            "index": idx,
+            "entry": entry_json,
+        });
+        if socket.send(Message::Text(msg.to_string())).await.is_err() {
+            return;
+        }
+    }
+
+    let elapsed_ms = search_start.elapsed().as_millis() as u64;
+    let total = search_result.results.len();
+
+    let done_msg = serde_json::json!({
+        "type": "done",
+        "total": total,
+        "elapsed_ms": elapsed_ms,
+        "direct_answer": search_result.direct_answer,
+    });
+    let _ = socket.send(Message::Text(done_msg.to_string())).await;
+}
+
+// ─── Fas 16: WebSocket Stream ────────────────────────────────────────────────
+
+/// WebSocket-baserad realtidsstreaming av semantiska noder.
+///
+/// Protokoll:
+/// Client → Server:
+///   {"type":"start", "html":"...", "goal":"...", "url":"...", "config":{"top_n":10,...}}
+///   {"type":"directive", "action":"expand", "node_id": 5}
+///   {"type":"directive", "action":"stop"}
+///   {"type":"directive", "action":"next_branch"}
+///   {"type":"directive", "action":"lower_threshold", "value": 0.1}
+///
+/// Server → Client:
+///   {"type":"meta", "total_dom_nodes":372, "goal":"...", "url":"..."}
+///   {"type":"chunk", "chunk_id":0, "nodes":[...], "nodes_emitted":10, "nodes_seen":372}
+///   {"type":"warning", "warning":{...}}
+///   {"type":"done", "nodes_emitted":10, "total_dom_nodes":372, ...}
+///   {"type":"error", "message":"..."}
+async fn ws_stream_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_ws_stream)
+}
+
+async fn handle_ws_stream(mut socket: axum::extract::ws::WebSocket) {
+    use axum::extract::ws::Message;
+
+    // Vänta på start-meddelande
+    let start_msg =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), socket.recv()).await {
+            Ok(Some(Ok(Message::Text(text)))) => text,
+            _ => {
+                let _ = socket
+                    .send(Message::Text(
+                        r#"{"type":"error","message":"Timeout eller ogiltigt start-meddelande"}"#
+                            .to_string(),
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+    // Parsa start-meddelande
+    let start: serde_json::Value = match serde_json::from_str(&start_msg) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"error","message":format!("JSON-parse error: {}", e)})
+                        .to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let msg_type = start.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if msg_type != "start" {
+        let _ = socket
+            .send(Message::Text(
+                r#"{"type":"error","message":"Förväntat type: start"}"#.to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let html = start.get("html").and_then(|v| v.as_str()).unwrap_or("");
+    let goal = start.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let url = start.get("url").and_then(|v| v.as_str()).unwrap_or("");
+
+    if html.is_empty() || goal.is_empty() {
+        let _ = socket
+            .send(Message::Text(
+                r#"{"type":"error","message":"html och goal krävs"}"#.to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let config_val = start.get("config");
+    let top_n = config_val
+        .and_then(|c| c.get("top_n"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as usize;
+    let min_relevance = config_val
+        .and_then(|c| c.get("min_relevance"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.3) as f32;
+    let max_nodes = config_val
+        .and_then(|c| c.get("max_nodes"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50) as usize;
+
+    let config = aether_agent::stream_engine::StreamParseConfig {
+        chunk_size: top_n,
+        min_relevance,
+        max_nodes,
+    };
+
+    // Skapa engine och kör initial parse i blocking thread
+    let html_owned = html.to_string();
+    let goal_owned = goal.to_string();
+    let url_owned = url.to_string();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<aether_agent::stream_engine::StreamChunk>(32);
+
+    // Kör parsning + initial emission i en blocking thread
+    let parse_handle = tokio::task::spawn_blocking(move || {
+        let mut engine = aether_agent::stream_engine::StreamEngine::new(&goal_owned, config);
+        engine.run_streaming(&html_owned, &url_owned, |chunk| {
+            // Skicka via channel (blockerande om buffert full)
+            let _ = tx.blocking_send(chunk);
+        });
+        // Returnera engine för att kunna hantera directives senare
+        engine
+    });
+
+    // Skicka chunks till WebSocket medan parsning pågår
+    while let Some(c) = rx.recv().await {
+        let json = match serde_json::to_string(&c) {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+        if socket.send(Message::Text(json)).await.is_err() {
+            return; // Klient disconnectade
+        }
+    }
+
+    // Parsern är klar (tx droppades) — hämta engine för directives
+    let mut engine = match parse_handle.await {
+        Ok(eng) => eng,
+        Err(_) => return,
+    };
+
+    // Directive-loop: vänta på expand/stop/next_branch/lower_threshold
+    loop {
+        let msg = match tokio::time::timeout(
+            std::time::Duration::from_secs(300), // 5 min timeout
+            socket.recv(),
+        )
+        .await
+        {
+            Ok(Some(Ok(Message::Text(text)))) => text,
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Err(_) => break,
+            _ => continue,
+        };
+
+        let directive_val: serde_json::Value = match serde_json::from_str(&msg) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = socket
+                    .send(Message::Text(
+                        serde_json::json!({"type":"error","message":format!("JSON error: {}", e)})
+                            .to_string(),
+                    ))
+                    .await;
+                continue;
+            }
+        };
+
+        let action = directive_val
+            .get("action")
+            .or_else(|| directive_val.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let directive = match action {
+            "expand" => {
+                let node_id = directive_val
+                    .get("node_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                aether_agent::stream_state::Directive::Expand { node_id }
+            }
+            "stop" => aether_agent::stream_state::Directive::Stop,
+            "next_branch" => aether_agent::stream_state::Directive::NextBranch,
+            "lower_threshold" => {
+                let value = directive_val
+                    .get("value")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.1) as f32;
+                aether_agent::stream_state::Directive::LowerThreshold { value }
+            }
+            _ => {
+                let _ = socket
+                    .send(Message::Text(
+                        serde_json::json!({"type":"error","message":format!("Okänd directive: {}", action)})
+                            .to_string(),
+                    ))
+                    .await;
+                continue;
+            }
+        };
+
+        // Kör directive och samla chunks
+        let mut chunks = Vec::new();
+        engine.handle_directive_streaming(directive, &mut |chunk| {
+            chunks.push(chunk);
+        });
+
+        // Skicka alla genererade chunks
+        for chunk in chunks {
+            let json = match serde_json::to_string(&chunk) {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+            if socket.send(Message::Text(json)).await.is_err() {
+                return;
+            }
+        }
+
+        if engine.is_done() {
+            break;
+        }
+    }
+}
+
 // ─── Fas 16: Stream Parse handlers ──────────────────────────────────────────
 
 async fn stream_parse_handler(Json(req): Json<StreamParseRequest>) -> impl IntoResponse {
@@ -2230,7 +3167,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {
             "name": "parse",
-            "description": "Parse HTML to a semantic accessibility tree with goal-relevance scoring.",
+            "description": "Parse HTML to a semantic accessibility tree with goal-relevance scoring. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2243,7 +3180,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "parse_top",
-            "description": "Parse HTML and return only the top-N most relevant nodes.",
+            "description": "Parse HTML and return only the top-N most relevant nodes. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2257,7 +3194,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_parse",
-            "description": "Fetch a URL and parse it into a semantic tree in one call.",
+            "description": "Fetch a URL and parse it into a semantic tree in one call. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → parsing → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2269,7 +3206,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "find_and_click",
-            "description": "Find the best clickable element matching a target label.",
+            "description": "Find the best clickable element matching a target label. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2283,7 +3220,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fill_form",
-            "description": "Map form fields to provided key/value pairs.",
+            "description": "Map form fields to provided key/value pairs. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2297,7 +3234,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "extract_data",
-            "description": "Extract structured data from a page by semantic keys.",
+            "description": "Extract structured data from a page by semantic keys. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2311,7 +3248,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "check_injection",
-            "description": "Check text for prompt injection patterns.",
+            "description": "Check text for prompt injection patterns. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2322,7 +3259,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "compile_goal",
-            "description": "Compile a complex goal into an optimized action plan.",
+            "description": "Compile a complex goal into an optimized action plan. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2333,7 +3270,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "classify_request",
-            "description": "Classify URL against semantic firewall (L1/L2/L3).",
+            "description": "Classify URL against semantic firewall (L1/L2/L3). REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2345,7 +3282,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "diff_trees",
-            "description": "Compare two semantic trees and return only the delta. 70-99% token savings.",
+            "description": "Compare two semantic trees and return only the delta. 70-99% token savings. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2357,7 +3294,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_extract",
-            "description": "Fetch a URL and extract structured data in one call.",
+            "description": "Fetch a URL and extract structured data in one call. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → parsing → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2370,7 +3307,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_click",
-            "description": "Fetch a URL and find a clickable element in one call.",
+            "description": "Fetch a URL and find a clickable element in one call. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → parsing → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2383,7 +3320,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "parse_with_js",
-            "description": "Parse HTML with automatic JS evaluation in sandboxed QuickJS engine.",
+            "description": "Parse HTML with automatic JS evaluation in sandboxed QuickJS engine. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2396,7 +3333,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "build_causal_graph",
-            "description": "Build a causal action graph from temporal page snapshots and actions.",
+            "description": "Build a causal action graph from temporal page snapshots and actions. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2408,7 +3345,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "predict_action_outcome",
-            "description": "Predict the outcome of an action using the causal graph.",
+            "description": "Predict the outcome of an action using the causal graph. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2420,7 +3357,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "find_safest_path",
-            "description": "Find the safest path to a goal state through the causal graph.",
+            "description": "Find the safest path to a goal state through the causal graph. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2432,7 +3369,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "discover_webmcp",
-            "description": "Discover WebMCP tool definitions embedded in an HTML page.",
+            "description": "Discover WebMCP tool definitions embedded in an HTML page. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2444,7 +3381,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "ground_semantic_tree",
-            "description": "Ground semantic tree with visual bounding box annotations.",
+            "description": "Ground semantic tree with visual bounding box annotations. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2458,7 +3395,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "match_bbox_iou",
-            "description": "Match a bounding box against semantic tree nodes using IoU.",
+            "description": "Match a bounding box against semantic tree nodes using IoU. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2470,7 +3407,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "create_collab_store",
-            "description": "Create a shared diff store for cross-agent collaboration.",
+            "description": "Create a shared diff store for cross-agent collaboration. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -2478,7 +3415,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "register_collab_agent",
-            "description": "Register an agent in a collaboration store.",
+            "description": "Register an agent in a collaboration store. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2492,7 +3429,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "publish_collab_delta",
-            "description": "Publish a semantic delta to the collaboration store. Pass the FULL output from diff_trees as delta_json.",
+            "description": "Publish a semantic delta to the collaboration store. Pass the FULL output from diff_trees as delta_json. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2507,7 +3444,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_collab_deltas",
-            "description": "Fetch new semantic deltas from the collaboration store.",
+            "description": "Fetch new semantic deltas from the collaboration store. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2519,7 +3456,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "detect_xhr_urls",
-            "description": "Scan HTML for hidden XHR/fetch/AJAX network calls in inline scripts and event handlers. Discovers fetch(), XMLHttpRequest.open(), $.ajax(), $.get(), $.post() patterns. Returns array of {url, method, headers} objects.",
+            "description": "Scan HTML for hidden XHR/fetch/AJAX network calls in inline scripts and event handlers. Discovers fetch(), XMLHttpRequest.open(), $.ajax(), $.get(), $.post() patterns. Returns array of {url, method, headers} objects. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2530,7 +3467,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "tiered_screenshot",
-            "description": "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. Returns: tier_used, latency_ms, size_bytes, and escalation_reason if tier switching occurred.",
+            "description": "Take a screenshot using the intelligent TieredBackend. Tier 1 (Blitz, pure Rust) renders static HTML/CSS in ~10-50ms without Chrome. If Blitz fails or JavaScript rendering is needed, Tier 2 (CDP/Chrome) takes over automatically. Returns: tier_used, latency_ms, size_bytes, and escalation_reason if tier switching occurred. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2547,7 +3484,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "tier_stats",
-            "description": "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier.",
+            "description": "Get rendering tier statistics: how many screenshots were rendered by Blitz (Tier 1) vs CDP/Chrome (Tier 2), escalation count, and average latency per tier. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -2555,7 +3492,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "parse_screenshot",
-            "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag.",
+            "description": "Analyze a screenshot using YOLOv8-nano object detection to find UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings). Returns detected elements with bounding boxes, confidence scores, and a semantic tree. Requires vision feature flag. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2568,7 +3505,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "vision_parse",
-            "description": "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns bounding boxes, confidence scores, and a semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH.",
+            "description": "Analyze a screenshot using the server's pre-loaded YOLOv8-nano model. Detects UI elements (buttons, inputs, links, icons, text, images, checkboxes, selects, headings) and returns bounding boxes, confidence scores, and a semantic tree. No model upload needed — uses the model configured via AETHER_MODEL_URL/AETHER_MODEL_PATH. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2580,7 +3517,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_vision",
-            "description": "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed.",
+            "description": "ALL-IN-ONE: Fetch a URL, render it to a pixel-perfect screenshot with Blitz (pure Rust browser engine), then analyze with YOLOv8 vision. Returns: 1) the actual screenshot as image/png, 2) an annotated image with color-coded bounding boxes around detected UI elements, 3) JSON with all detections (class, confidence, bbox) and semantic tree. USE THIS TOOL WHEN: you want to visually analyze any web page — just provide the URL and goal. No external browser needed. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → rendering → vision → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2594,7 +3531,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "search",
-            "description": "Build a DuckDuckGo search URL for a query. Returns the URL to fetch. For auto-fetch, use fetch_search instead.",
+            "description": "Build a DuckDuckGo search URL for a query. Returns the URL to fetch. For auto-fetch, use fetch_search instead. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2605,7 +3542,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_search",
-            "description": "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results with title, URL, snippet, domain, confidence, and optional direct_answer. Use this when you don't know which URL to visit.",
+            "description": "Search the web via DuckDuckGo: fetches DDG HTML, parses results, and returns structured search results with title, URL, snippet, domain, confidence, and optional direct_answer. Use this when you don't know which URL to visit. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (searching → fetching → parsing → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2618,7 +3555,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "stream_parse",
-            "description": "Goal-driven adaptive DOM streaming. Parses HTML and emits only the most relevant nodes for the given goal, with 90-99% token savings. Use instead of parse/parse_top when you want minimal output focused on what matters. Returns ranked nodes, token savings ratio, and chunk metadata.",
+            "description": "Goal-driven adaptive DOM streaming. Parses HTML and emits only the most relevant nodes for the given goal, with 90-99% token savings. Use instead of parse/parse_top when you want minimal output focused on what matters. Returns ranked nodes, token savings ratio, and chunk metadata. REAL-TIME: For interactive streaming, connect to WebSocket /ws/stream. Also via /ws/api gateway.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2634,7 +3571,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "fetch_stream_parse",
-            "description": "ALL-IN-ONE: Fetch a URL and run goal-driven adaptive DOM streaming. Combines fetch + stream_parse in one call. Returns only the most relevant nodes for the given goal with 90-99% token savings. Use this instead of fetch_parse when you want minimal, goal-focused output.",
+            "description": "ALL-IN-ONE: Fetch a URL and run goal-driven adaptive DOM streaming. Combines fetch + stream_parse in one call. Returns only the most relevant nodes for the given goal with 90-99% token savings. Use this instead of fetch_parse when you want minimal, goal-focused output. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → parsing → result).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2649,7 +3586,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "stream_parse_directive",
-            "description": "Goal-driven adaptive DOM streaming with LLM directives. Like stream_parse but accepts directives to control traversal: expand(node_id) to get children, next_branch to jump to next top-ranked unsent nodes, lower_threshold(value) to reduce min_relevance, stop to halt immediately. Use for interactive multi-step exploration.",
+            "description": "Goal-driven adaptive DOM streaming with LLM directives. Like stream_parse but accepts directives to control traversal: expand(node_id) to get children, next_branch to jump to next top-ranked unsent nodes, lower_threshold(value) to reduce min_relevance, stop to halt immediately. Use for interactive multi-step exploration. REAL-TIME: For interactive streaming, connect to WebSocket /ws/stream. Also via /ws/api gateway.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2664,7 +3601,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
         },
         {
             "name": "render_with_js",
-            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via QuickJS sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing.",
+            "description": "Render HTML with JavaScript execution: evaluates JS code against the DOM (via QuickJS sandbox), then renders the modified DOM to a PNG screenshot (via Blitz). Returns: base64-encoded PNG, mutation count, JS eval stats, timing. REAL-TIME: Available via WebSocket /ws/api for streaming progress.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -4007,6 +4944,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/stream-parse", post(stream_parse_handler))
         .route("/api/fetch/stream-parse", post(fetch_stream_parse))
         .route("/api/directive", post(directive_handler))
+        .route("/ws/stream", get(ws_stream_handler))
+        .route("/ws/api", get(ws_api_handler))
+        .route("/ws/mcp", get(ws_mcp_handler))
+        .route("/ws/search", get(ws_search_handler))
         // Fas 11: Vision (kräver --features vision)
         // 50 MB body limit — ONNX-modeller + screenshots i base64
         .route("/api/parse-screenshot", {
@@ -4324,6 +5265,10 @@ async fn main() {
     println!("  POST /api/stream-parse           – Adaptive goal-driven DOM streaming");
     println!("  POST /api/fetch/stream-parse     – Fetch URL → adaptive stream parse");
     println!("  POST /api/directive              – Send directives (expand, stop, etc.)");
+    println!("  GET  /ws/stream                  – WebSocket real-time streaming parse");
+    println!("  GET  /ws/api                    – Universal WebSocket gateway (all tools)");
+    println!("  GET  /ws/mcp                    – MCP JSON-RPC over WebSocket");
+    println!("  GET  /ws/search                 – WebSocket streaming search");
     println!("  POST /api/session/*              – Session management (cookies, OAuth 2.0)");
     println!("  POST /api/workflow/*             – Multi-page workflow orchestration");
     println!("  POST /mcp                        – MCP Streamable HTTP endpoint (JSON-RPC)");

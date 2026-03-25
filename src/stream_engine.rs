@@ -502,6 +502,298 @@ impl StreamEngine {
     }
 }
 
+/// WebSocket/SSE-meddelande som pushas i realtid per chunk
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type")]
+pub enum StreamChunk {
+    /// Initialt meddelande med metadata
+    #[serde(rename = "meta")]
+    Meta {
+        total_dom_nodes: usize,
+        goal: String,
+        url: String,
+    },
+    /// En chunk av emitterade noder
+    #[serde(rename = "chunk")]
+    Chunk {
+        chunk_id: u32,
+        nodes: Vec<SemanticNode>,
+        nodes_emitted: usize,
+        nodes_seen: usize,
+    },
+    /// Injection-varning upptäckt
+    #[serde(rename = "warning")]
+    Warning { warning: InjectionWarning },
+    /// Strömmen är klar
+    #[serde(rename = "done")]
+    Done {
+        nodes_emitted: usize,
+        total_dom_nodes: usize,
+        token_savings_ratio: f32,
+        parse_ms: u64,
+    },
+    /// Fel
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
+impl StreamEngine {
+    /// Kör stream_parse med channel-baserad emission.
+    ///
+    /// Emitterar `StreamChunk` via `emit`-callbacken efter varje steg:
+    /// 1. Meta (total nodes)
+    /// 2. Initial chunk (top-N)
+    /// 3. Directive-resultat (expand/next_branch)
+    /// 4. Done
+    ///
+    /// Returnerar antal emitterade noder.
+    pub fn run_streaming<F>(&mut self, html: &str, url: &str, mut emit: F) -> usize
+    where
+        F: FnMut(StreamChunk),
+    {
+        let start = std::time::Instant::now();
+
+        // Steg 1: Parsa DOM
+        let dom = parse_document(RcDom::default(), Default::default())
+            .from_utf8()
+            .read_from(&mut html.as_bytes())
+            .unwrap_or_else(|_| RcDom::default());
+
+        // Steg 2: Traversera hela DOM:en
+        self.traverse_dom(&dom.document, 0);
+        self.state.total_dom_nodes = self.all_nodes.len();
+
+        // Emittera meta
+        emit(StreamChunk::Meta {
+            total_dom_nodes: self.all_nodes.len(),
+            goal: self.decision.goal().to_string(),
+            url: url.to_string(),
+        });
+
+        // Emittera varningar direkt
+        for w in &self.warnings {
+            emit(StreamChunk::Warning { warning: w.clone() });
+        }
+
+        // Steg 3: Scora och sortera
+        let mut scored: Vec<(usize, f32)> = self
+            .all_nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (i, self.decision.score(node)))
+            .collect();
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        // Steg 4: Emittera initial chunk
+        let mut chunk_nodes: Vec<SemanticNode> = Vec::new();
+        for &(idx, score) in &scored {
+            if self.state.is_done() {
+                break;
+            }
+            let node = &self.all_nodes[idx];
+            let route = self.decision.route(node, &self.state);
+            match route {
+                NodeDecision::Emit => {
+                    self.state.mark_sent(node.id);
+                    self.state.update_top_relevance(score);
+                    let mut emitted = node.clone_shallow();
+                    emitted.relevance = score;
+                    chunk_nodes.push(emitted);
+                    if chunk_nodes.len() >= self.config.chunk_size {
+                        break;
+                    }
+                }
+                NodeDecision::Queue { .. } | NodeDecision::Prune => {}
+            }
+        }
+        self.state.mark_seen(self.all_nodes.len());
+
+        if !chunk_nodes.is_empty() {
+            let chunk_id = self.state.next_chunk();
+            emit(StreamChunk::Chunk {
+                chunk_id,
+                nodes: chunk_nodes,
+                nodes_emitted: self.state.nodes_emitted,
+                nodes_seen: self.state.nodes_seen,
+            });
+        }
+
+        // Fyll prioritetskön
+        for &(idx, score) in &scored {
+            let node = &self.all_nodes[idx];
+            if !self.state.sent_nodes.contains(&node.id) {
+                self.priority_queue.push(ScoredEntry { score, index: idx });
+            }
+        }
+
+        // Steg 5: Processa pre-laddade directives
+        self.process_directives_streaming(&mut emit);
+
+        let parse_ms = start.elapsed().as_millis() as u64;
+        let token_savings_ratio = if self.state.total_dom_nodes > 0 {
+            1.0 - (self.state.nodes_emitted as f32 / self.state.total_dom_nodes as f32)
+        } else {
+            0.0
+        };
+
+        emit(StreamChunk::Done {
+            nodes_emitted: self.state.nodes_emitted,
+            total_dom_nodes: self.state.total_dom_nodes,
+            token_savings_ratio,
+            parse_ms,
+        });
+
+        self.state.nodes_emitted
+    }
+
+    /// Processa directives med streaming-emission
+    fn process_directives_streaming<F>(&mut self, emit: &mut F)
+    where
+        F: FnMut(StreamChunk),
+    {
+        while let Some(directive) = self.state.next_directive() {
+            if self.state.is_done() {
+                break;
+            }
+            match directive {
+                Directive::Stop => {
+                    self.state.stop();
+                    break;
+                }
+                Directive::Expand { node_id } => {
+                    self.expand_node_streaming(node_id, emit);
+                }
+                Directive::NextBranch => {
+                    self.next_branch_streaming(emit);
+                }
+                Directive::LowerThreshold { value } => {
+                    self.state.relevance_threshold = value.clamp(0.0, 1.0);
+                }
+            }
+        }
+    }
+
+    /// Expandera en nod och emittera barn som chunk
+    fn expand_node_streaming<F>(&mut self, node_id: u32, emit: &mut F)
+    where
+        F: FnMut(StreamChunk),
+    {
+        if self.state.is_expanded(node_id) {
+            return;
+        }
+        self.state.mark_expanded(node_id);
+
+        let child_indices: Vec<usize> = if let Some(&parent_idx) = self.node_index.get(&node_id) {
+            self.children_map
+                .get(&parent_idx)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let child_indices: Vec<usize> = child_indices
+            .into_iter()
+            .filter(|&idx| {
+                idx < self.all_nodes.len()
+                    && !self.state.sent_nodes.contains(&self.all_nodes[idx].id)
+            })
+            .collect();
+
+        if child_indices.is_empty() {
+            return;
+        }
+
+        let mut chunk_nodes: Vec<SemanticNode> = Vec::new();
+        for &child_idx in &child_indices {
+            if self.state.is_done() {
+                break;
+            }
+            let child = &self.all_nodes[child_idx];
+            let score = self.decision.score(child);
+            self.state.mark_sent(child.id);
+            self.state.update_top_relevance(score);
+            let mut emitted_child = child.clone_shallow();
+            emitted_child.relevance = score;
+            chunk_nodes.push(emitted_child);
+        }
+
+        if !chunk_nodes.is_empty() {
+            let chunk_id = self.state.next_chunk();
+            emit(StreamChunk::Chunk {
+                chunk_id,
+                nodes: chunk_nodes,
+                nodes_emitted: self.state.nodes_emitted,
+                nodes_seen: self.state.nodes_seen,
+            });
+        }
+    }
+
+    /// Nästa batch via prioritetskön, emitterad som chunk
+    fn next_branch_streaming<F>(&mut self, emit: &mut F)
+    where
+        F: FnMut(StreamChunk),
+    {
+        let mut chunk_nodes: Vec<SemanticNode> = Vec::new();
+
+        while let Some(entry) = self.priority_queue.pop() {
+            if self.state.is_done() || chunk_nodes.len() >= self.config.chunk_size {
+                break;
+            }
+            let node = &self.all_nodes[entry.index];
+            if self.state.sent_nodes.contains(&node.id) {
+                continue;
+            }
+            if self.state.should_emit(entry.score) {
+                self.state.mark_sent(node.id);
+                self.state.update_top_relevance(entry.score);
+                let mut n = node.clone_shallow();
+                n.relevance = entry.score;
+                chunk_nodes.push(n);
+            }
+        }
+
+        if !chunk_nodes.is_empty() {
+            let chunk_id = self.state.next_chunk();
+            emit(StreamChunk::Chunk {
+                chunk_id,
+                nodes: chunk_nodes,
+                nodes_emitted: self.state.nodes_emitted,
+                nodes_seen: self.state.nodes_seen,
+            });
+        }
+    }
+
+    /// Processa en directive från extern källa (WebSocket) och emittera resultat
+    pub fn handle_directive_streaming<F>(&mut self, directive: Directive, emit: &mut F)
+    where
+        F: FnMut(StreamChunk),
+    {
+        if self.state.is_done() {
+            return;
+        }
+        match directive {
+            Directive::Stop => {
+                self.state.stop();
+            }
+            Directive::Expand { node_id } => {
+                self.expand_node_streaming(node_id, emit);
+            }
+            Directive::NextBranch => {
+                self.next_branch_streaming(emit);
+            }
+            Directive::LowerThreshold { value } => {
+                self.state.relevance_threshold = value.clamp(0.0, 1.0);
+            }
+        }
+    }
+
+    /// Kolla om streamen är avslutad
+    pub fn is_done(&self) -> bool {
+        self.state.is_done()
+    }
+}
+
 /// Publikt API: Kör stream_parse synkront (för MCP och HTTP endpoints)
 pub fn stream_parse(
     html: &str,

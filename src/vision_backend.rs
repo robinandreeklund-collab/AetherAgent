@@ -113,11 +113,16 @@ fn init_chrome_browser() -> Result<(), String> {
 #[cfg(feature = "cdp")]
 fn restart_chrome_browser() -> Result<(), String> {
     eprintln!("CDP: restarting Chrome (WebSocket disconnected)...");
-    let browser = headless_chrome::Browser::new(chrome_launch_options())
+    // Starta ny Chrome INNAN vi dropar gamla — undviker fönster utan browser
+    let new_browser = headless_chrome::Browser::new(chrome_launch_options())
         .map_err(|e| format!("Chrome restart failed: {e}"))?;
     if let Some(mutex) = CDP_BROWSER.get() {
         if let Ok(mut guard) = mutex.lock() {
-            *guard = Some(browser);
+            // Explicit drop av gamla Browser — triggar process-kill + socket-cleanup
+            // Utan detta kan gamla Chrome-processer läcka vid upprepade restarts
+            let old = guard.take();
+            drop(old);
+            *guard = Some(new_browser);
             eprintln!("CDP: Chrome restarted successfully");
             return Ok(());
         }

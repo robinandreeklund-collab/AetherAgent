@@ -40,8 +40,8 @@ pub struct DomEvalResult {
     pub timers_fired: usize,
 }
 
-/// En mutation som JS-koden utförde på DOM:en (placeholder för framtida mutation-tracking)
-pub type DomMutation = String;
+/// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar
+pub type DomMutation = std::borrow::Cow<'static, str>;
 
 // ─── Delad state mellan JS-callbacks ────────────────────────────────────────
 
@@ -51,6 +51,7 @@ struct EventListener {
     event_type: String,
     callback: Persistent<Function<'static>>,
     capture: bool,
+    passive: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -135,7 +136,10 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         // Registrera DOM-objekt
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
+        // Node identity cache — samma NodeKey ger alltid samma JS-objekt
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(result) => {
@@ -250,7 +254,9 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(res) => {
@@ -329,7 +335,6 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
 /// 3. readyState = "complete" — dispatcha load
 ///
 /// Returnerar modifierad ArenaDom med alla DOM-mutationer applicerade.
-#[cfg(test)]
 pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalResult {
     let start = std::time::Instant::now();
 
@@ -364,7 +369,10 @@ pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalRes
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
+        // Node identity cache
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -486,7 +494,9 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ =
             register_window_with_viewport(&ctx, Rc::clone(&state), viewport_width, viewport_height);
+        let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -586,11 +596,32 @@ struct GetElementById {
 }
 impl JsHandler for GetElementById {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let id = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let id = match args.first().and_then(|v| v.as_string()) {
+            Some(s) => match s.to_string() {
+                Ok(id) if !id.is_empty() => id,
+                _ => return Ok(Value::new_null(ctx.clone())),
+            },
+            // Spec: getElementById(undefined) → söker efter "undefined"
+            // getElementById(null) → söker efter "null"
+            None => {
+                let raw = args
+                    .first()
+                    .map(|v| {
+                        if v.is_null() {
+                            "null".to_string()
+                        } else if v.is_undefined() {
+                            "undefined".to_string()
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .unwrap_or_default();
+                if raw.is_empty() {
+                    return Ok(Value::new_null(ctx.clone()));
+                }
+                raw
+            }
+        };
         let key = {
             let s = self.state.borrow();
             find_by_attr_value(&s.arena, "id", &id)
@@ -662,7 +693,7 @@ impl JsHandler for CreateElement {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
                 tag: Some(tag),
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -687,8 +718,8 @@ impl JsHandler for CreateTextNode {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
-                text: Some(text),
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
                 parent: None,
                 children: vec![],
             })
@@ -712,8 +743,8 @@ impl JsHandler for CreateComment {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Comment,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
-                text: Some(text),
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
                 parent: None,
                 children: vec![],
             })
@@ -782,7 +813,7 @@ impl JsHandler for CreateDocumentFragment {
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Other,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -983,6 +1014,13 @@ impl JsHandler for ActiveElement {
 
 fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
     let doc = Object::new(ctx.clone())?;
+    // Sätt __nodeKey__ på document så att extract_node_key fungerar
+    {
+        let s = state.borrow();
+        doc.set("__nodeKey__", node_key_to_f64(s.arena.document))?;
+        doc.set("nodeType", 9)?;
+        doc.set("nodeName", "#document")?;
+    }
 
     // Registrera alla document-metoder
     doc.set(
@@ -1073,6 +1111,25 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         Function::new(ctx.clone(), JsFn(CreateRange))?,
     )?;
 
+    doc.set(
+        "createTreeWalker",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateTreeWalker {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    doc.set(
+        "createNodeIterator",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateNodeIterator {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
     // getSelection — Selection API stub
     doc.set(
         "getSelection",
@@ -1113,6 +1170,55 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
             Function::new(
                 ctx.clone(),
                 JsFn(DispatchEventHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+    }
+
+    // compareDocumentPosition / contains / lookupNamespaceURI / isSameNode / isEqualNode på document
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.set(
+            "compareDocumentPosition",
+            Function::new(
+                ctx.clone(),
+                JsFn(CompareDocumentPosition {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "contains",
+            Function::new(
+                ctx.clone(),
+                JsFn(ContainsHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "lookupNamespaceURI",
+            Function::new(
+                ctx.clone(),
+                JsFn(LookupNamespaceURI {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "isSameNode",
+            Function::new(ctx.clone(), JsFn(IsSameNode { key: doc_key }))?,
+        )?;
+        doc.set(
+            "isEqualNode",
+            Function::new(
+                ctx.clone(),
+                JsFn(IsEqualNode {
                     state: Rc::clone(&state),
                     key: doc_key,
                 }),
@@ -1175,9 +1281,102 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         doc.set("documentElement", html_obj)?;
     }
 
+    // document.doctype — hitta Doctype-noden bland document-barn
+    {
+        let s = state.borrow();
+        let doc_key = s.arena.document;
+        let doctype_key = s.arena.nodes[doc_key]
+            .children
+            .iter()
+            .find(|&&ck| {
+                s.arena
+                    .nodes
+                    .get(ck)
+                    .map(|n| matches!(n.node_type, NodeType::Doctype))
+                    .unwrap_or(false)
+            })
+            .copied();
+        drop(s);
+        if let Some(dk) = doctype_key {
+            let dt_obj = make_element_object(ctx, dk, &state)?;
+            doc.set("doctype", dt_obj)?;
+        } else {
+            doc.set("doctype", Value::new_null(ctx.clone()))?;
+        }
+    }
+
+    // childNodes / firstChild / lastChild på document
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.set("childNodes", make_child_nodes(ctx, doc_key, &state)?)?;
+        doc.set("firstChild", make_first_child(ctx, doc_key, &state)?)?;
+        doc.set("lastChild", make_last_child(ctx, doc_key, &state)?)?;
+        doc.set("__nodeKey__", node_key_to_f64(doc_key))?;
+    }
+
     ctx.globals().set("document", doc)?;
 
     Ok(())
+}
+
+/// Skapa childNodes-array för en nod
+fn make_child_nodes<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let s = state.borrow();
+    let children = s
+        .arena
+        .nodes
+        .get(key)
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
+    drop(s);
+    let arr = rquickjs::Array::new(ctx.clone())?;
+    for (i, &ck) in children.iter().enumerate() {
+        let child_obj = make_element_object(ctx, ck, state)?;
+        arr.set(i, child_obj)?;
+    }
+    Ok(arr.into_value())
+}
+
+/// Skapa firstChild för en nod
+fn make_first_child<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let fc = {
+        let s = state.borrow();
+        s.arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.children.first().copied())
+    };
+    match fc {
+        Some(ck) => make_element_object(ctx, ck, state),
+        None => Ok(Value::new_null(ctx.clone())),
+    }
+}
+
+/// Skapa lastChild för en nod
+fn make_last_child<'js>(
+    ctx: &Ctx<'js>,
+    key: NodeKey,
+    state: &SharedState,
+) -> rquickjs::Result<Value<'js>> {
+    let lc = {
+        let s = state.borrow();
+        s.arena
+            .nodes
+            .get(key)
+            .and_then(|n| n.children.last().copied())
+    };
+    match lc {
+        Some(ck) => make_element_object(ctx, ck, state),
+        None => Ok(Value::new_null(ctx.clone())),
+    }
 }
 
 // ─── Element-objekt ─────────────────────────────────────────────────────────
@@ -1204,7 +1403,7 @@ fn get_text_content(arena: &ArenaDom, key: NodeKey) -> String {
         None => return String::new(),
     };
     match &node.node_type {
-        NodeType::Text => node.text.clone().unwrap_or_default(),
+        NodeType::Text | NodeType::Comment => node.text.as_deref().unwrap_or("").to_string(),
         _ => {
             let mut text = String::new();
             for &child in &node.children {
@@ -1286,8 +1485,14 @@ impl JsHandler for GetAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let s = self.state.borrow();
-        match s.arena.nodes.get(self.key).and_then(|n| n.get_attr(&name)) {
+        match s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(&lc_name))
+        {
             Some(val) => Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value()),
             None => Ok(Value::new_null(ctx.clone())),
         }
@@ -1313,13 +1518,15 @@ impl JsHandler for SetAttribute {
         {
             let mut s = self.state.borrow_mut();
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                node.attributes.insert(name.clone(), val);
+                // HTML-spec: attributnamn lowercasas på HTML-element
+                let lc_name = name.to_ascii_lowercase();
+                node.attributes.insert(lc_name, val);
             }
-            s.mutations.push(format!(
+            s.mutations.push(std::borrow::Cow::Owned(format!(
                 "setAttribute:{}:{}",
                 node_key_to_f64(self.key),
                 name
-            ));
+            )));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -1336,9 +1543,10 @@ impl JsHandler for RemoveAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
-            node.attributes.remove(&name);
+            node.attributes.remove(&lc_name);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -1355,12 +1563,13 @@ impl JsHandler for HasAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let lc_name = name.to_ascii_lowercase();
         let s = self.state.borrow();
         let has = s
             .arena
             .nodes
             .get(self.key)
-            .map(|n| n.has_attr(&name))
+            .map(|n| n.has_attr(&lc_name))
             .unwrap_or(false);
         Ok(Value::new_bool(ctx.clone(), has))
     }
@@ -1423,8 +1632,8 @@ impl JsHandler for InsertAdjacentHTML {
                 let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                     node_type: NodeType::Text,
                     tag: None,
-                    attributes: std::collections::HashMap::new(),
-                    text: Some(html_str),
+                    attributes: crate::arena_dom::Attrs::new(),
+                    text: Some(html_str.into()),
                     parent: None,
                     children: vec![],
                 });
@@ -1512,7 +1721,8 @@ impl JsHandler for InsertAdjacentHTML {
                 _ => {} // Ogiltig position — ignorera tyst
             }
 
-            s.mutations.push("insertAdjacentHTML".to_string());
+            s.mutations
+                .push(std::borrow::Cow::Borrowed("insertAdjacentHTML"));
         }
 
         Ok(Value::new_undefined(ctx.clone()))
@@ -1527,7 +1737,7 @@ fn copy_subtree_return_key(src: &ArenaDom, src_key: NodeKey, dst: &mut ArenaDom)
             return dst.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Text,
                 tag: None,
-                attributes: std::collections::HashMap::new(),
+                attributes: crate::arena_dom::Attrs::new(),
                 text: None,
                 parent: None,
                 children: vec![],
@@ -1567,7 +1777,7 @@ impl JsHandler for AppendChild {
                 }
             }
             s.arena.append_child(self.key, child_key);
-            s.mutations.push("appendChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("appendChild"));
         }
         make_element_object(ctx, child_key, &self.state)
     }
@@ -1581,17 +1791,39 @@ impl JsHandler for RemoveChild {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let child_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         {
             let mut s = self.state.borrow_mut();
+            // Kontrollera att child verkligen är barn till denna nod
+            let is_child = s
+                .arena
+                .nodes
+                .get(self.key)
+                .map(|n| n.children.contains(&child_key))
+                .unwrap_or(false);
+            if !is_child {
+                drop(s);
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "NotFoundError: child is not a child of this node",
+                    )?
+                    .into(),
+                ));
+            }
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.children.retain(|&c| c != child_key);
             }
             if let Some(child) = s.arena.nodes.get_mut(child_key) {
                 child.parent = None;
             }
-            s.mutations.push("removeChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("removeChild"));
         }
         make_element_object(ctx, child_key, &self.state)
     }
@@ -1630,7 +1862,7 @@ impl JsHandler for InsertBefore {
             if let Some(n) = s.arena.nodes.get_mut(new_key) {
                 n.parent = Some(self.key);
             }
-            s.mutations.push("insertBefore".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("insertBefore"));
         }
         make_element_object(ctx, new_key, &self.state)
     }
@@ -1642,19 +1874,64 @@ struct ReplaceChild {
 }
 impl JsHandler for ReplaceChild {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Spec: replaceChild(null, ...) och replaceChild(.., null) kastar TypeError
         let new_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         let old_key = match args.get(1).and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
         };
         {
             let mut s = self.state.borrow_mut();
+            // Hitta gammal child — NotFoundError om den inte finns
+            let pos = s
+                .arena
+                .nodes
+                .get(self.key)
+                .and_then(|n| n.children.iter().position(|&c| c == old_key));
+            let _pos = match pos {
+                Some(p) => p,
+                None => {
+                    drop(s);
+                    return Err(ctx.throw(
+                        rquickjs::String::from_str(
+                            ctx.clone(),
+                            "NotFoundError: old child is not a child of this node",
+                        )?
+                        .into(),
+                    ));
+                }
+            };
+            // Detach new_key från gammal parent
+            if let Some(old_parent) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+                if let Some(parent_node) = s.arena.nodes.get_mut(old_parent) {
+                    parent_node.children.retain(|&c| c != new_key);
+                }
+            }
+            // Ersätt — recalkulera pos efter detach
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                if let Some(pos) = node.children.iter().position(|&c| c == old_key) {
+                // pos kan ha ändrats om new_key var barn till samma parent
+                let pos = node
+                    .children
+                    .iter()
+                    .position(|&c| c == old_key)
+                    .unwrap_or(0);
+                if pos < node.children.len() {
                     node.children[pos] = new_key;
+                } else {
+                    node.children.push(new_key);
                 }
             }
             if let Some(n) = s.arena.nodes.get_mut(new_key) {
@@ -1663,7 +1940,7 @@ impl JsHandler for ReplaceChild {
             if let Some(n) = s.arena.nodes.get_mut(old_key) {
                 n.parent = None;
             }
-            s.mutations.push("replaceChild".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("replaceChild"));
         }
         make_element_object(ctx, old_key, &self.state)
     }
@@ -1679,6 +1956,1506 @@ impl JsHandler for CloneNode {
         let new_key = clone_node_recursive(&self.state, self.key, deep);
         make_element_object(ctx, new_key, &self.state)
     }
+}
+
+// ─── Migration 1: element.remove() ──────────────────────────────────────────
+struct Remove {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Remove {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                parent.children.retain(|&c| c != self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.parent = None;
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 2: element.before(...nodes) ──────────────────────────────────
+struct Before {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Before {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach ALLA nya noder först (förhindrar position-shift vid sibling-args)
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        // Hitta position EFTER detach
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .unwrap_or(0);
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 3: element.after(...nodes) ───────────────────────────────────
+struct After {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for After {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach ALLA först
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        // Hitta position EFTER detach
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 4: element.replaceWith(...nodes) ─────────────────────────────
+struct ReplaceWith {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceWith {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let parent_key = {
+            let s = self.state.borrow();
+            s.arena.nodes.get(self.key).and_then(|n| n.parent)
+        };
+        let parent_key = match parent_key {
+            Some(pk) => pk,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Detach alla nya noder + self
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        let pos = s
+            .arena
+            .nodes
+            .get(parent_key)
+            .and_then(|n| n.children.iter().position(|&c| c == self.key))
+            .unwrap_or(0);
+        if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+            parent.children.retain(|&c| c != self.key);
+        }
+        if let Some(n) = s.arena.nodes.get_mut(self.key) {
+            n.parent = None;
+        }
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(parent_key);
+            }
+            if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                let insert_pos = (pos + i).min(parent.children.len());
+                parent.children.insert(insert_pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration 5: toggleAttribute(name [, force]) ──────────────────────────
+struct ToggleAttribute {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ToggleAttribute {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        // Spec: om name inte matchar Name-produktionen → InvalidCharacterError
+        let invalid_name = name.is_empty() || name.contains(char::is_whitespace);
+        if invalid_name {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
+            ));
+        }
+        let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
+        let force = if has_force {
+            args.get(1)
+                .map(|v| {
+                    v.as_bool().unwrap_or_else(|| {
+                        !v.is_null()
+                            && !v.is_undefined()
+                            && v.as_int().map(|n| n != 0).unwrap_or(true)
+                    })
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        let mut s = self.state.borrow_mut();
+        let has_attr = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.has_attr(&name))
+            .unwrap_or(false);
+        if has_force {
+            if force {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.attributes.insert(name, String::new());
+                }
+                return Ok(Value::new_bool(ctx.clone(), true));
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.remove(&name);
+            }
+            return Ok(Value::new_bool(ctx.clone(), false));
+        }
+        if has_attr {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.remove(&name);
+            }
+            Ok(Value::new_bool(ctx.clone(), false))
+        } else {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.attributes.insert(name, String::new());
+            }
+            Ok(Value::new_bool(ctx.clone(), true))
+        }
+    }
+}
+
+/// Konvertera JS-argument till NodeKeys.
+/// Strängar och null/undefined/numbers konverteras till textnoder.
+// ─── Migration: prepend/append/replaceChildren ──────────────────────────────
+struct Prepend {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Prepend {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for (i, nk) in new_keys.into_iter().enumerate() {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                let pos = i.min(node.children.len());
+                node.children.insert(pos, nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct Append {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Append {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for nk in new_keys {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.push(nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ReplaceChildren {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceChildren {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_keys = args_to_node_keys(ctx, args, &self.state)?;
+        let mut s = self.state.borrow_mut();
+        // Ta bort alla befintliga barn
+        let old_children: Vec<NodeKey> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        for ck in old_children {
+            if let Some(c) = s.arena.nodes.get_mut(ck) {
+                c.parent = None;
+            }
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.children.clear();
+        }
+        // Detach + append nya
+        for &nk in &new_keys {
+            if let Some(old_p) = s.arena.nodes.get(nk).and_then(|n| n.parent) {
+                if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                    p.children.retain(|&c| c != nk);
+                }
+            }
+        }
+        for nk in new_keys {
+            if let Some(n) = s.arena.nodes.get_mut(nk) {
+                n.parent = Some(self.key);
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.push(nk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration: CharacterData metoder ───────────────────────────────────────
+struct SubstringData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SubstringData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        if args.len() < 2 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
+            ));
+        }
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
+        let s = self.state.borrow();
+        let data = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_deref())
+            .unwrap_or("");
+        if offset > utf16_len(data) {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        let byte_start = utf16_offset_to_byte(data, offset);
+        let byte_end = utf16_offset_to_byte(data, offset + count);
+        let result = &data[byte_start..byte_end];
+        Ok(rquickjs::String::from_str(ctx.clone(), result)?.into_value())
+    }
+}
+
+struct AppendData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for AppendData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        if args.is_empty() {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
+            ));
+        }
+        let data = args[0]
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let mut current = node.text.as_deref().unwrap_or("").to_string();
+            current.push_str(&data);
+            node.text = Some(current.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct InsertData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let data = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| utf16_len(t))
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            let safe_offset = utf16_offset_to_byte(&current, offset);
+            let mut new_text = String::with_capacity(current.len() + data.len());
+            new_text.push_str(&current[..safe_offset]);
+            new_text.push_str(&data);
+            new_text.push_str(&current[safe_offset..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct DeleteData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for DeleteData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| utf16_len(t))
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            // Char-boundary-säker: hitta närmaste giltiga byte-offset
+            let safe_start = utf16_offset_to_byte(&current, offset);
+            let safe_end = utf16_offset_to_byte(&current, offset + count);
+            let mut new_text = String::with_capacity(current.len());
+            new_text.push_str(&current[..safe_start]);
+            new_text.push_str(&current[safe_end..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ReplaceData {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ReplaceData {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let count = webidl_unsigned_long(args.get(1)) as usize;
+        let data = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let text_len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| utf16_len(t))
+            .unwrap_or(0);
+        if offset > text_len {
+            drop(s);
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
+                    .into(),
+            ));
+        }
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            let current = node.text.as_deref().unwrap_or("").to_string();
+            let safe_start = utf16_offset_to_byte(&current, offset);
+            let safe_end = utf16_offset_to_byte(&current, offset + count);
+            let mut new_text = String::with_capacity(current.len());
+            new_text.push_str(&current[..safe_start]);
+            new_text.push_str(&data);
+            new_text.push_str(&current[safe_end..]);
+            node.text = Some(new_text.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Migration: insertAdjacentElement/Text ──────────────────────────────────
+struct InsertAdjacentElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertAdjacentElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let position = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_lowercase();
+        let new_key = match args.get(1).and_then(extract_node_key) {
+            Some(k) => k,
+            None => return Ok(Value::new_null(ctx.clone())),
+        };
+        let mut s = self.state.borrow_mut();
+        // Detach
+        if let Some(old_p) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+            if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                p.children.retain(|&c| c != new_key);
+            }
+        }
+        match position.as_str() {
+            "beforebegin" => {
+                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                    let pos = s
+                        .arena
+                        .nodes
+                        .get(parent_key)
+                        .and_then(|n| n.children.iter().position(|&c| c == self.key))
+                        .unwrap_or(0);
+                    if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                        n.parent = Some(parent_key);
+                    }
+                    if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                        parent.children.insert(pos, new_key);
+                    }
+                }
+            }
+            "afterbegin" => {
+                if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                    n.parent = Some(self.key);
+                }
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.insert(0, new_key);
+                }
+            }
+            "beforeend" => {
+                if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                    n.parent = Some(self.key);
+                }
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.push(new_key);
+                }
+            }
+            "afterend" => {
+                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                    let pos = s
+                        .arena
+                        .nodes
+                        .get(parent_key)
+                        .and_then(|n| n.children.iter().position(|&c| c == self.key))
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                        n.parent = Some(parent_key);
+                    }
+                    if let Some(parent) = s.arena.nodes.get_mut(parent_key) {
+                        let p = pos.min(parent.children.len());
+                        parent.children.insert(p, new_key);
+                    }
+                }
+            }
+            _ => {}
+        }
+        drop(s);
+        make_element_object(ctx, new_key, &self.state)
+    }
+}
+
+struct InsertAdjacentText {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InsertAdjacentText {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let position = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let text = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Skapa textnod
+        let text_key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: None,
+                children: vec![],
+            })
+        };
+        // Delegera till InsertAdjacentElement-logik
+        let pos_val = rquickjs::String::from_str(ctx.clone(), &position)?.into_value();
+        let elem_val = make_element_object(ctx, text_key, &self.state)?;
+        let handler = InsertAdjacentElement {
+            state: Rc::clone(&self.state),
+            key: self.key,
+        };
+        handler.handle(ctx, &[pos_val, elem_val])
+    }
+}
+
+/// Hitta närmaste giltiga char boundary vid eller efter given byte-offset.
+// ─── Migration: getElementsByTagName/ClassName på element ────────────────────
+struct GetElementsByTagNameElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByTagNameElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let tag = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let keys = {
+            let s = self.state.borrow();
+            let mut results = vec![];
+            find_all_by_tag(&s.arena, self.key, &tag, &mut results);
+            results
+        };
+        let array = rquickjs::Array::new(ctx.clone())?;
+        for (i, key) in keys.into_iter().enumerate() {
+            let elem = make_element_object(ctx, key, &self.state)?;
+            array.set(i, elem)?;
+        }
+        Ok(array.into_value())
+    }
+}
+
+struct GetElementsByClassNameElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByClassNameElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let cls = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let keys = {
+            let s = self.state.borrow();
+            let mut results = vec![];
+            find_all_by_class(&s.arena, self.key, &cls, &mut results);
+            results
+        };
+        let array = rquickjs::Array::new(ctx.clone())?;
+        for (i, key) in keys.into_iter().enumerate() {
+            let elem = make_element_object(ctx, key, &self.state)?;
+            array.set(i, elem)?;
+        }
+        Ok(array.into_value())
+    }
+}
+
+// ─── Migration: moveBefore ──────────────────────────────────────────────────
+struct MoveBefore {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for MoveBefore {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "TypeError: parameter 1 is not a Node",
+                    )?
+                    .into(),
+                ));
+            }
+        };
+        if args.len() < 2 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(ctx.clone(), "TypeError: 2 arguments required")?.into(),
+            ));
+        }
+        let ref_key = args.get(1).and_then(extract_node_key); // null → append
+        let mut s = self.state.borrow_mut();
+        // Detach new_key
+        if let Some(old_p) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+            if let Some(p) = s.arena.nodes.get_mut(old_p) {
+                p.children.retain(|&c| c != new_key);
+            }
+        }
+        if let Some(n) = s.arena.nodes.get_mut(new_key) {
+            n.parent = Some(self.key);
+        }
+        match ref_key {
+            Some(rk) => {
+                let pos = s
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.children.iter().position(|&c| c == rk))
+                    .unwrap_or(0);
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.insert(pos, new_key);
+                }
+            }
+            None => {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    node.children.push(new_key);
+                }
+            }
+        }
+        drop(s);
+        make_element_object(ctx, new_key, &self.state)
+    }
+}
+
+// ─── Migration: lookupNamespaceURI / lookupPrefix / isDefaultNamespace ──────
+struct LookupNamespaceURI {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for LookupNamespaceURI {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let node = s.arena.nodes.get(self.key);
+        let nt = node.map(|n| n.node_type.clone());
+        let parent_key = node.and_then(|n| n.parent);
+        drop(s);
+        match nt {
+            Some(NodeType::Element) | Some(NodeType::Document) => Ok(rquickjs::String::from_str(
+                ctx.clone(),
+                "http://www.w3.org/1999/xhtml",
+            )?
+            .into_value()),
+            Some(NodeType::Text) | Some(NodeType::Comment) => {
+                if let Some(pk) = parent_key {
+                    let h = LookupNamespaceURI {
+                        state: Rc::clone(&self.state),
+                        key: pk,
+                    };
+                    h.handle(ctx, &[])
+                } else {
+                    Ok(Value::new_null(ctx.clone()))
+                }
+            }
+            _ => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+struct LookupPrefix {
+    _key: NodeKey,
+}
+impl JsHandler for LookupPrefix {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        Ok(Value::new_null(ctx.clone()))
+    }
+}
+
+struct IsDefaultNamespace {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for IsDefaultNamespace {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        let is_html = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.node_type == NodeType::Element)
+            .unwrap_or(false);
+        drop(s);
+        let result = if is_html {
+            ns == "http://www.w3.org/1999/xhtml"
+        } else {
+            ns.is_empty()
+        };
+        Ok(Value::new_bool(ctx.clone(), result))
+    }
+}
+
+// ─── Migration: NS attribute methods ────────────────────────────────────────
+struct SetAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SetAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let _ns = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok());
+        let qname = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let val = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let local = if let Some(colon) = qname.find(':') {
+            &qname[colon + 1..]
+        } else {
+            &qname
+        };
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            // NS-attribut bevarar case (lowercas ej)
+            node.attributes.insert(local.to_string(), val);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct GetAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        match s.arena.nodes.get(self.key).and_then(|n| n.get_attr(&local)) {
+            Some(val) => Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value()),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+struct HasAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for HasAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let s = self.state.borrow();
+        let has = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.has_attr(&local))
+            .unwrap_or(false);
+        Ok(Value::new_bool(ctx.clone(), has))
+    }
+}
+
+struct RemoveAttributeNS {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for RemoveAttributeNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let local = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.attributes.remove(&local);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct GetAttributeNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetAttributeNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let s = self.state.borrow();
+        let val = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(&name))
+            .map(|v| v.to_string());
+        drop(s);
+        match val {
+            Some(v) => {
+                let obj = Object::new(ctx.clone())?;
+                obj.set("name", name.as_str())?;
+                obj.set("localName", name.as_str())?;
+                obj.set("value", v.as_str())?;
+                obj.set("namespaceURI", Value::new_null(ctx.clone()))?;
+                obj.set("prefix", Value::new_null(ctx.clone()))?;
+                obj.set("specified", true)?;
+                obj.set("nodeType", 2)?;
+                obj.set("nodeName", name.as_str())?;
+                Ok(obj.into_value())
+            }
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+// ─── compareDocumentPosition ────────────────────────────────────────────────
+struct CompareDocumentPosition {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for CompareDocumentPosition {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: argument is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        if self.key == other_key {
+            return Ok(Value::new_int(ctx.clone(), 0));
+        }
+        let s = self.state.borrow();
+        // Bygg ancestor-kedjor
+        let chain_a = ancestor_chain(&s.arena, self.key);
+        let chain_b = ancestor_chain(&s.arena, other_key);
+        // Disconnected?
+        if chain_a.is_empty() || chain_b.is_empty() || chain_a.last() != chain_b.last() {
+            // DISCONNECTED | IMPLEMENTATION_SPECIFIC | PRECEDING eller FOLLOWING
+            return Ok(Value::new_int(
+                ctx.clone(),
+                1 | 32 | if self.key < other_key { 4 } else { 2 },
+            ));
+        }
+        // Hitta gemensam ancestor
+        let mut i = 0;
+        while i < chain_a.len()
+            && i < chain_b.len()
+            && chain_a[chain_a.len() - 1 - i] == chain_b[chain_b.len() - 1 - i]
+        {
+            i += 1;
+        }
+        // Contains / contained_by
+        if i == chain_a.len() {
+            // self är ancestor till other → other is CONTAINED_BY self, FOLLOWING
+            return Ok(Value::new_int(ctx.clone(), 16 | 4));
+        }
+        if i == chain_b.len() {
+            // other är ancestor till self → other CONTAINS self, PRECEDING
+            return Ok(Value::new_int(ctx.clone(), 8 | 2));
+        }
+        // Sibling-ordning i gemensam parent
+        let common_parent = chain_a[chain_a.len() - i];
+        let node_a = chain_a[chain_a.len() - 1 - i]; // self-sidans nod under common
+        let node_b = chain_b[chain_b.len() - 1 - i]; // other-sidans nod under common
+        if let Some(parent) = s.arena.nodes.get(common_parent) {
+            let pos_a = parent.children.iter().position(|&c| c == node_a);
+            let pos_b = parent.children.iter().position(|&c| c == node_b);
+            match (pos_a, pos_b) {
+                (Some(a), Some(b)) if a < b => {
+                    return Ok(Value::new_int(ctx.clone(), 4)); // FOLLOWING
+                }
+                (Some(_), Some(_)) => {
+                    return Ok(Value::new_int(ctx.clone(), 2)); // PRECEDING
+                }
+                _ => {}
+            }
+        }
+        Ok(Value::new_int(ctx.clone(), 1 | 32 | 4)) // Disconnected fallback
+    }
+}
+
+/// Bygg ancestor-kedja: [self, parent, grandparent, ..., root]
+fn ancestor_chain(arena: &ArenaDom, key: NodeKey) -> Vec<NodeKey> {
+    let mut chain = vec![key];
+    let mut current = key;
+    while let Some(p) = arena.nodes.get(current).and_then(|n| n.parent) {
+        chain.push(p);
+        current = p;
+    }
+    chain
+}
+
+// ─── Node.isEqualNode ──────────────────────────────────────────────────────
+struct IsEqualNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for IsEqualNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => return Ok(Value::new_bool(ctx.clone(), false)),
+        };
+        if self.key == other_key {
+            return Ok(Value::new_bool(ctx.clone(), true));
+        }
+        let s = self.state.borrow();
+        let a = s.arena.nodes.get(self.key);
+        let b = s.arena.nodes.get(other_key);
+        let equal = match (a, b) {
+            (Some(na), Some(nb)) => {
+                na.node_type == nb.node_type
+                    && na.tag == nb.tag
+                    && na.text == nb.text
+                    && na.attributes.len() == nb.attributes.len()
+                    && na
+                        .attributes
+                        .iter()
+                        .all(|(k, v)| nb.get_attr(k) == Some(v.as_str()))
+                    && na.children.len() == nb.children.len()
+            }
+            _ => false,
+        };
+        Ok(Value::new_bool(ctx.clone(), equal))
+    }
+}
+
+// ─── Node.isSameNode ───────────────────────────────────────────────────────
+struct IsSameNode {
+    key: NodeKey,
+}
+impl JsHandler for IsSameNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let other_key = args.first().and_then(extract_node_key);
+        Ok(Value::new_bool(ctx.clone(), other_key == Some(self.key)))
+    }
+}
+
+// ─── Node.normalize ────────────────────────────────────────────────────────
+struct Normalize {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for Normalize {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let children: Vec<NodeKey> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        let mut prev_text: Option<NodeKey> = None;
+        let mut to_remove = vec![];
+        for ck in &children {
+            let is_text = s
+                .arena
+                .nodes
+                .get(*ck)
+                .map(|n| n.node_type == NodeType::Text)
+                .unwrap_or(false);
+            if is_text {
+                let text = s
+                    .arena
+                    .nodes
+                    .get(*ck)
+                    .and_then(|n| n.text.as_deref())
+                    .unwrap_or("")
+                    .to_string();
+                if text.is_empty() {
+                    to_remove.push(*ck);
+                } else if let Some(prev) = prev_text {
+                    // Merga med föregående textnod
+                    let prev_text_val = s
+                        .arena
+                        .nodes
+                        .get(prev)
+                        .and_then(|n| n.text.as_deref())
+                        .unwrap_or("")
+                        .to_string();
+                    let merged = format!("{}{}", prev_text_val, text);
+                    if let Some(pn) = s.arena.nodes.get_mut(prev) {
+                        pn.text = Some(merged.into());
+                    }
+                    to_remove.push(*ck);
+                } else {
+                    prev_text = Some(*ck);
+                }
+            } else {
+                prev_text = None;
+            }
+        }
+        for rk in &to_remove {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.retain(|c| c != rk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── TreeWalker ────────────────────────────────────────────────────────────
+struct CreateTreeWalker {
+    state: SharedState,
+}
+impl JsHandler for CreateTreeWalker {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let root_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: root is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        let what_to_show = args
+            .get(1)
+            .and_then(|v| v.as_number())
+            .map(|n| n as i64 as u32)
+            .unwrap_or(0xFFFFFFFF);
+        let filter = args.get(2).cloned();
+
+        let tw = Object::new(ctx.clone())?;
+        let root_obj = make_element_object(ctx, root_key, &self.state)?;
+        tw.set("root", root_obj.clone())?;
+        tw.set("whatToShow", what_to_show)?;
+        tw.set("currentNode", root_obj)?;
+        tw.set("__rootKey", node_key_to_f64(root_key))?;
+        tw.set("__whatToShow", what_to_show)?;
+        if let Some(f) = &filter {
+            if !f.is_null() && !f.is_undefined() {
+                tw.set("filter", f.clone())?;
+            } else {
+                tw.set("filter", Value::new_null(ctx.clone()))?;
+            }
+        } else {
+            tw.set("filter", Value::new_null(ctx.clone()))?;
+        }
+
+        // TreeWalker-metoder via JS
+        let walker_code = r#"
+        (function(tw) {
+            var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
+            function accept(tw, node) {
+                var show = tw.__whatToShow || 0xFFFFFFFF;
+                var nt = node.nodeType;
+                var bit = 1 << (nt - 1);
+                if (!(show & bit)) return FILTER_SKIP;
+                var f = tw.filter;
+                if (!f) return FILTER_ACCEPT;
+                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
+                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
+                return FILTER_ACCEPT;
+            }
+            function firstChild(tw, reversed) {
+                var node = tw.currentNode;
+                var kids = node.childNodes;
+                if (!kids || !kids.length) return null;
+                var start = reversed ? kids.length - 1 : 0;
+                var end = reversed ? -1 : kids.length;
+                var step = reversed ? -1 : 1;
+                for (var i = start; i !== end; i += step) {
+                    var child = kids[i];
+                    var r = accept(tw, child);
+                    if (r === FILTER_ACCEPT) { tw.currentNode = child; return child; }
+                    if (r === FILTER_SKIP) {
+                        var inner = child.childNodes;
+                        if (inner && inner.length) {
+                            tw.currentNode = child;
+                            var result = firstChild(tw, reversed);
+                            if (result) return result;
+                            tw.currentNode = node;
+                        }
+                    }
+                }
+                return null;
+            }
+            tw.parentNode = function() {
+                var node = this.currentNode;
+                while (node && node !== this.root) {
+                    node = node.parentNode;
+                    if (node && accept(this, node) === FILTER_ACCEPT) {
+                        this.currentNode = node;
+                        return node;
+                    }
+                }
+                return null;
+            };
+            tw.firstChild = function() { return firstChild(this, false); };
+            tw.lastChild = function() { return firstChild(this, true); };
+            tw.nextSibling = function() { return sibling(this, false); };
+            tw.previousSibling = function() { return sibling(this, true); };
+            function sibling(tw, prev) {
+                var node = tw.currentNode;
+                if (node === tw.root) return null;
+                while (true) {
+                    var sib = prev ? node.previousSibling : node.nextSibling;
+                    while (sib) {
+                        var r = accept(tw, sib);
+                        if (r === FILTER_ACCEPT) { tw.currentNode = sib; return sib; }
+                        if (r === FILTER_SKIP && sib.childNodes && sib.childNodes.length) {
+                            sib = prev ? sib.lastChild : sib.firstChild;
+                        } else {
+                            sib = prev ? sib.previousSibling : sib.nextSibling;
+                        }
+                    }
+                    node = node.parentNode;
+                    if (!node || node === tw.root) return null;
+                    if (accept(tw, node) === FILTER_ACCEPT) return null;
+                }
+            }
+            tw.nextNode = function() {
+                var node = this.currentNode;
+                while (true) {
+                    if (node.childNodes && node.childNodes.length) {
+                        for (var i = 0; i < node.childNodes.length; i++) {
+                            var child = node.childNodes[i];
+                            var r = accept(this, child);
+                            if (r === FILTER_ACCEPT) { this.currentNode = child; return child; }
+                            if (r === FILTER_SKIP) { node = child; break; }
+                        }
+                        if (node !== this.currentNode && node.childNodes && node.childNodes.length) continue;
+                    }
+                    // Inget barn — sök syskon
+                    while (node && node !== this.root) {
+                        var sib = node.nextSibling;
+                        if (sib) {
+                            var r2 = accept(this, sib);
+                            if (r2 === FILTER_ACCEPT) { this.currentNode = sib; return sib; }
+                            if (r2 === FILTER_SKIP) { node = sib; break; }
+                            node = sib; continue;
+                        }
+                        node = node.parentNode;
+                    }
+                    if (!node || node === this.root) return null;
+                }
+            };
+            tw.previousNode = function() {
+                var node = this.currentNode;
+                while (node && node !== this.root) {
+                    var sib = node.previousSibling;
+                    while (sib) {
+                        var r = accept(this, sib);
+                        if (r !== FILTER_REJECT) {
+                            while (sib.lastChild) {
+                                sib = sib.lastChild;
+                                r = accept(this, sib);
+                                if (r === FILTER_REJECT) break;
+                            }
+                            if (r === FILTER_ACCEPT) { this.currentNode = sib; return sib; }
+                        }
+                        sib = sib.previousSibling;
+                    }
+                    if (node === this.root) return null;
+                    node = node.parentNode;
+                    if (node && accept(this, node) === FILTER_ACCEPT) { this.currentNode = node; return node; }
+                }
+                return null;
+            };
+            Object.defineProperty(tw, Symbol.toStringTag, { value: 'TreeWalker' });
+        })
+        "#;
+
+        let setup_fn: Function = ctx.eval(walker_code)?;
+        setup_fn.call::<_, Value>((tw.clone(),))?;
+
+        Ok(tw.into_value())
+    }
+}
+
+// NodeIterator — samma pattern men flat iteration
+struct CreateNodeIterator {
+    state: SharedState,
+}
+impl JsHandler for CreateNodeIterator {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let root_key = match args.first().and_then(extract_node_key) {
+            Some(k) => k,
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "TypeError: root is not a Node")?
+                        .into(),
+                ));
+            }
+        };
+        let what_to_show = args
+            .get(1)
+            .and_then(|v| v.as_number())
+            .map(|n| n as i64 as u32)
+            .unwrap_or(0xFFFFFFFF);
+        let filter = args.get(2).cloned();
+
+        let ni = Object::new(ctx.clone())?;
+        let root_obj = make_element_object(ctx, root_key, &self.state)?;
+        ni.set("root", root_obj.clone())?;
+        ni.set("referenceNode", root_obj.clone())?;
+        ni.set("whatToShow", what_to_show)?;
+        ni.set("__whatToShow", what_to_show)?;
+        ni.set("pointerBeforeReferenceNode", true)?;
+        if let Some(f) = &filter {
+            if !f.is_null() && !f.is_undefined() {
+                ni.set("filter", f.clone())?;
+            } else {
+                ni.set("filter", Value::new_null(ctx.clone()))?;
+            }
+        } else {
+            ni.set("filter", Value::new_null(ctx.clone()))?;
+        }
+
+        let iter_code = r#"
+        (function(ni) {
+            var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
+            function accept(ni, node) {
+                var show = ni.__whatToShow || 0xFFFFFFFF;
+                var bit = 1 << (node.nodeType - 1);
+                if (!(show & bit)) return FILTER_SKIP;
+                var f = ni.filter;
+                if (!f) return FILTER_ACCEPT;
+                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
+                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
+                return FILTER_ACCEPT;
+            }
+            // Pre-order flat traversal
+            function traverse(root) {
+                var list = [];
+                function walk(node) {
+                    list.push(node);
+                    if (node.childNodes) for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+                }
+                walk(root);
+                return list;
+            }
+            ni.nextNode = function() {
+                var all = traverse(this.root);
+                var ref = this.referenceNode;
+                var idx = -1;
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                }
+                if (this.pointerBeforeReferenceNode) {
+                    for (var j = idx; j < all.length; j++) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = false; return all[j];
+                        }
+                    }
+                } else {
+                    for (var j = idx + 1; j < all.length; j++) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; return all[j];
+                        }
+                    }
+                }
+                return null;
+            };
+            ni.previousNode = function() {
+                var all = traverse(this.root);
+                var ref = this.referenceNode;
+                var idx = all.length;
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                }
+                if (!this.pointerBeforeReferenceNode) {
+                    for (var j = idx; j >= 0; j--) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = true; return all[j];
+                        }
+                    }
+                } else {
+                    for (var j = idx - 1; j >= 0; j--) {
+                        if (accept(this, all[j]) === FILTER_ACCEPT) {
+                            this.referenceNode = all[j]; return all[j];
+                        }
+                    }
+                }
+                return null;
+            };
+            ni.detach = function() {};
+            Object.defineProperty(ni, Symbol.toStringTag, { value: 'NodeIterator' });
+        })
+        "#;
+
+        let setup_fn: Function = ctx.eval(iter_code)?;
+        setup_fn.call::<_, Value>((ni.clone(),))?;
+
+        Ok(ni.into_value())
+    }
+}
+
+/// WebIDL unsigned long konvertering: ToUint32
+/// -1 → 4294967295, "test" → 0, undefined → 0
+fn webidl_unsigned_long(val: Option<&rquickjs::Value<'_>>) -> u32 {
+    match val {
+        Some(v) => {
+            let n = v.as_number().unwrap_or(0.0);
+            if n.is_nan() || n.is_infinite() {
+                0
+            } else {
+                n as i64 as u32
+            }
+        }
+        None => 0,
+    }
+}
+
+/// Konvertera UTF-16 code unit offset till UTF-8 byte offset.
+/// JavaScript räknar i UTF-16 code units (surrogat-par = 2 units).
+fn utf16_offset_to_byte(s: &str, utf16_offset: usize) -> usize {
+    let mut utf16_pos = 0;
+    for (byte_idx, ch) in s.char_indices() {
+        if utf16_pos >= utf16_offset {
+            return byte_idx;
+        }
+        utf16_pos += ch.len_utf16();
+    }
+    s.len()
+}
+
+/// Räkna antal UTF-16 code units i en sträng (= JavaScript .length)
+fn utf16_len(s: &str) -> usize {
+    s.chars().map(|c| c.len_utf16()).sum()
+}
+
+fn args_to_node_keys<'js>(
+    _ctx: &Ctx<'js>,
+    args: &[Value<'js>],
+    state: &SharedState,
+) -> rquickjs::Result<Vec<NodeKey>> {
+    let mut keys = Vec::with_capacity(args.len());
+    for arg in args {
+        if let Some(nk) = extract_node_key(arg) {
+            keys.push(nk);
+        } else {
+            // Konvertera till textinnehåll: null→"null", undefined→"undefined", etc.
+            let text = if arg.is_null() {
+                "null".to_string()
+            } else if arg.is_undefined() {
+                "undefined".to_string()
+            } else if let Some(s) = arg.as_string() {
+                s.to_string().unwrap_or_default()
+            } else if let Some(n) = arg.as_number() {
+                if n == (n as i64) as f64 {
+                    format!("{}", n as i64)
+                } else {
+                    format!("{}", n)
+                }
+            } else {
+                "".to_string()
+            };
+            let mut s = state.borrow_mut();
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: None,
+                children: vec![],
+            });
+            keys.push(text_key);
+        }
+    }
+    Ok(keys)
 }
 
 fn clone_node_recursive(state: &SharedState, key: NodeKey, deep: bool) -> NodeKey {
@@ -1728,7 +3505,7 @@ impl JsHandler for AttachShadow {
                 node_type: crate::arena_dom::NodeType::Element,
                 tag: Some("template".to_string()),
                 attributes: {
-                    let mut attrs = std::collections::HashMap::new();
+                    let mut attrs = crate::arena_dom::Attrs::new();
                     attrs.insert("shadowrootmode".to_string(), _mode);
                     attrs
                 },
@@ -1741,7 +3518,7 @@ impl JsHandler for AttachShadow {
             if let Some(parent) = s.arena.nodes.get_mut(self.key) {
                 parent.children.insert(0, sk);
             }
-            s.mutations.push("attachShadow".to_string());
+            s.mutations.push(std::borrow::Cow::Borrowed("attachShadow"));
             sk
         };
         make_element_object(ctx, shadow_key, &self.state)
@@ -1893,7 +3670,26 @@ impl JsHandler for AddEventListenerHandler {
             Some(f) => f.clone(),
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
-        let capture = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
+        let (capture, passive) = if let Some(opts) = args.get(2) {
+            if let Some(b) = opts.as_bool() {
+                (b, None)
+            } else if let Some(obj) = opts.as_object() {
+                let cap = obj
+                    .get::<_, Value>("capture")
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let pas = obj
+                    .get::<_, Value>("passive")
+                    .ok()
+                    .and_then(|v| v.as_bool());
+                (cap, pas)
+            } else {
+                (false, None)
+            }
+        } else {
+            (false, None)
+        };
         let persistent = Persistent::save(ctx, func);
         let key_bits = node_key_to_f64(self.key) as u64;
         let mut s = self.state.borrow_mut();
@@ -1904,6 +3700,7 @@ impl JsHandler for AddEventListenerHandler {
                 event_type,
                 callback: persistent,
                 capture,
+                passive,
             });
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -1935,13 +3732,17 @@ struct DispatchEventHandler {
 }
 impl JsHandler for DispatchEventHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let event_type = args
-            .first()
-            .and_then(|v| v.as_object())
+        let event_obj = args.first().and_then(|v| v.as_object());
+        let event_type = event_obj
             .and_then(|obj| obj.get::<_, String>("type").ok())
             .unwrap_or_default();
+
+        // Passive-by-default: touchstart, touchmove, wheel, mousewheel på window/document/body
+        let passive_default_types = ["touchstart", "touchmove", "wheel", "mousewheel"];
+        let is_passive_default = passive_default_types.contains(&event_type.as_str());
+
         let key_bits = node_key_to_f64(self.key) as u64;
-        let callbacks: Vec<Persistent<Function<'static>>> = {
+        let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>)> = {
             let s = self.state.borrow();
             s.event_listeners
                 .get(&key_bits)
@@ -1949,21 +3750,32 @@ impl JsHandler for DispatchEventHandler {
                     listeners
                         .iter()
                         .filter(|l| l.event_type == event_type)
-                        .map(|l| l.callback.clone())
+                        .map(|l| (l.callback.clone(), l.passive))
                         .collect()
                 })
                 .unwrap_or_default()
         };
-        for cb in callbacks {
+        for (cb, passive) in callbacks {
             if let Ok(func) = cb.restore(ctx) {
                 let event = args
                     .first()
                     .cloned()
                     .unwrap_or(Value::new_undefined(ctx.clone()));
+                // Om passive (explicit eller default) → sätt __passive flagga
+                let is_passive = passive.unwrap_or(is_passive_default);
+                if is_passive {
+                    if let Some(obj) = event.as_object() {
+                        let _ = obj.set("__passive", true);
+                    }
+                }
                 let _ = func.call::<_, Value>((event,));
             }
         }
-        Ok(Value::new_bool(ctx.clone(), true))
+        // Returnera !defaultPrevented
+        let default_prevented = event_obj
+            .and_then(|obj| obj.get::<_, bool>("defaultPrevented").ok())
+            .unwrap_or(false);
+        Ok(Value::new_bool(ctx.clone(), !default_prevented))
     }
 }
 
@@ -2029,23 +3841,56 @@ impl JsHandler for TextContentSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let text = args
             .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
+            .map(|v| {
+                if v.is_null() {
+                    String::new()
+                } else {
+                    v.as_string()
+                        .and_then(|s| s.to_string().ok())
+                        .unwrap_or_else(|| {
+                            // Konvertera nummer/boolean till sträng
+                            if let Some(n) = v.as_number() {
+                                if n == (n as i64) as f64 {
+                                    format!("{}", n as i64)
+                                } else {
+                                    format!("{}", n)
+                                }
+                            } else {
+                                String::new()
+                            }
+                        })
+                }
+            })
             .unwrap_or_default();
         let mut s = self.state.borrow_mut();
-        if let Some(node) = s.arena.nodes.get_mut(self.key) {
-            node.children.clear();
+        // Text/Comment-noder: uppdatera .text direkt (data-alias)
+        let is_text_or_comment = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| matches!(n.node_type, NodeType::Text | NodeType::Comment))
+            .unwrap_or(false);
+        if is_text_or_comment {
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.text = Some(text.into());
+            }
+        } else {
+            // Element: rensa barn och skapa ny textnod
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.children.clear();
+            }
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(text.into()),
+                parent: Some(self.key),
+                children: vec![],
+            });
+            s.arena.append_child(self.key, text_key);
         }
-        let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
-            node_type: NodeType::Text,
-            tag: None,
-            attributes: std::collections::HashMap::new(),
-            text: Some(text),
-            parent: Some(self.key),
-            children: vec![],
-        });
-        s.arena.append_child(self.key, text_key);
-        s.mutations.push("setTextContent".to_string());
+        s.mutations
+            .push(std::borrow::Cow::Borrowed("setTextContent"));
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -2084,8 +3929,8 @@ impl JsHandler for InnerHTMLSetter {
                 let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
                     node_type: NodeType::Text,
                     tag: None,
-                    attributes: std::collections::HashMap::new(),
-                    text: Some(html_str.clone()),
+                    attributes: crate::arena_dom::Attrs::new(),
+                    text: Some(html_str.clone().into()),
                     parent: Some(self.key),
                     children: vec![],
                 });
@@ -2102,8 +3947,11 @@ impl JsHandler for InnerHTMLSetter {
                     }
                 }
             }
-            s.mutations
-                .push(format!("setInnerHTML:{}:{}", key_bits, html_str.len()));
+            s.mutations.push(std::borrow::Cow::Owned(format!(
+                "setInnerHTML:{}:{}",
+                key_bits,
+                html_str.len()
+            )));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -2144,6 +3992,20 @@ fn make_element_object<'js>(
 ) -> rquickjs::Result<Value<'js>> {
     let key_bits = node_key_to_f64(key);
 
+    // ─── Node identity cache: samma NodeKey → samma JS-objekt ───
+    // Krävs av WPT: getElementById(x) === getElementById(x)
+    {
+        let code = format!(
+            "globalThis.__nodeCache && globalThis.__nodeCache.get({})",
+            key_bits
+        );
+        if let Ok(cached) = ctx.eval::<Value, _>(code.as_str()) {
+            if !cached.is_undefined() && !cached.is_null() {
+                return Ok(cached);
+            }
+        }
+    }
+
     // Läs grundläggande egenskaper
     let (node_type_val, tag_name, id_val, class_val) = {
         let s = state.borrow();
@@ -2153,12 +4015,19 @@ fn make_element_object<'js>(
             Some(NodeType::Text) => 3,
             Some(NodeType::Comment) => 8,
             Some(NodeType::Document) => 9,
+            Some(NodeType::Doctype) => 10,
             _ => 1,
         };
-        let tag = node
-            .and_then(|n| n.tag.as_ref())
-            .map(|t| t.to_uppercase())
-            .unwrap_or_default();
+        let tag = if nt == 10 {
+            // Doctype — nodeName/name = doctypens namn (t.ex. "html")
+            node.and_then(|n| n.text.as_ref())
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "html".to_string())
+        } else {
+            node.and_then(|n| n.tag.as_ref())
+                .map(|t| t.to_uppercase())
+                .unwrap_or_default()
+        };
         let id = node
             .and_then(|n| n.get_attr("id"))
             .unwrap_or("")
@@ -2170,13 +4039,69 @@ fn make_element_object<'js>(
         (nt, tag, id, cls)
     };
 
-    let obj = Object::new(ctx.clone())?;
+    // Skapa objekt med rätt prototypkedja för instanceof-stöd
+    let obj = {
+        let proto_code = match node_type_val {
+            3 => "Object.create(typeof Text!=='undefined'?Text.prototype:{})".to_string(),
+            8 => "Object.create(typeof Comment!=='undefined'?Comment.prototype:{})".to_string(),
+            9 => "Object.create(typeof Document!=='undefined'?Document.prototype:{})".to_string(),
+            10 => "Object.create(typeof DocumentType!=='undefined'?DocumentType.prototype:{})"
+                .to_string(),
+            11 => {
+                "Object.create(typeof DocumentFragment!=='undefined'?DocumentFragment.prototype:{})"
+                    .to_string()
+            }
+            _ => {
+                // Element — välj konstruktor via __tagToConstructor
+                format!(
+                    "(function(){{var C=globalThis.__tagToConstructor&&globalThis.__tagToConstructor['{}'];return Object.create(C?C.prototype:(typeof HTMLElement!=='undefined'?HTMLElement.prototype:{{}}))}})()",
+                    tag_name
+                )
+            }
+        };
+        match ctx.eval::<Value, _>(proto_code.as_str()) {
+            Ok(v) if v.is_object() => v.into_object().unwrap(),
+            _ => Object::new(ctx.clone())?,
+        }
+    };
     obj.set("__nodeKey__", key_bits)?;
     obj.set("nodeType", node_type_val)?;
     obj.set("tagName", tag_name.as_str())?;
     obj.set("nodeName", tag_name.as_str())?;
+    // ownerDocument — alla noder utom document pekar på document
+    if node_type_val != 9 {
+        if let Ok(doc) = ctx.globals().get::<_, Value>("document") {
+            obj.set("ownerDocument", doc)?;
+        }
+    }
     obj.set("id", id_val.as_str())?;
     obj.set("className", class_val.as_str())?;
+    // Doctype-specifika egenskaper
+    if node_type_val == 10 {
+        obj.set("name", tag_name.as_str())?;
+        obj.set("publicId", "")?;
+        obj.set("systemId", "")?;
+    }
+    // nodeValue: null för Element/Document/Doctype/Fragment, data för Text/Comment
+    match node_type_val {
+        1 | 9 | 10 | 11 => {
+            obj.set("nodeValue", Value::new_null(ctx.clone()))?;
+        }
+        3 | 8 => {
+            // Text/Comment — sätt nodeValue till textinnehållet
+            let text_val = {
+                let s = state.borrow();
+                s.arena
+                    .nodes
+                    .get(key)
+                    .and_then(|n| n.text.as_ref())
+                    .map(|t| t.to_string())
+                    .unwrap_or_default()
+            };
+            obj.set("nodeValue", text_val.as_str())?;
+        }
+        _ => {}
+    }
 
     // ─── Metoder ───────────────────────────────────────────────────
     obj.set(
@@ -2284,6 +4209,309 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(CloneNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    // ─── Rust-native ChildNode/ParentNode-metoder ─────────────────────
+    obj.set(
+        "remove",
+        Function::new(
+            ctx.clone(),
+            JsFn(Remove {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "before",
+        Function::new(
+            ctx.clone(),
+            JsFn(Before {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "after",
+        Function::new(
+            ctx.clone(),
+            JsFn(After {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "replaceWith",
+        Function::new(
+            ctx.clone(),
+            JsFn(ReplaceWith {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "toggleAttribute",
+        Function::new(
+            ctx.clone(),
+            JsFn(ToggleAttribute {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "prepend",
+        Function::new(
+            ctx.clone(),
+            JsFn(Prepend {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "append",
+        Function::new(
+            ctx.clone(),
+            JsFn(Append {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "replaceChildren",
+        Function::new(
+            ctx.clone(),
+            JsFn(ReplaceChildren {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "insertAdjacentElement",
+        Function::new(
+            ctx.clone(),
+            JsFn(InsertAdjacentElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "insertAdjacentText",
+        Function::new(
+            ctx.clone(),
+            JsFn(InsertAdjacentText {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    // CharacterData-metoder — nu Rust-native med UTF-16 code unit counting
+    if node_type_val == 3 || node_type_val == 8 {
+        obj.set(
+            "substringData",
+            Function::new(
+                ctx.clone(),
+                JsFn(SubstringData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "appendData",
+            Function::new(
+                ctx.clone(),
+                JsFn(AppendData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "insertData",
+            Function::new(
+                ctx.clone(),
+                JsFn(InsertData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "deleteData",
+            Function::new(
+                ctx.clone(),
+                JsFn(DeleteData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "replaceData",
+            Function::new(
+                ctx.clone(),
+                JsFn(ReplaceData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+    }
+    // ─── Rust-native: element-level queries + NS + namespace ────────────
+    obj.set(
+        "getElementsByTagName",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getElementsByClassName",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByClassNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getElementsByTagNameNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameElement {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "moveBefore",
+        Function::new(
+            ctx.clone(),
+            JsFn(MoveBefore {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "lookupNamespaceURI",
+        Function::new(
+            ctx.clone(),
+            JsFn(LookupNamespaceURI {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "lookupPrefix",
+        Function::new(ctx.clone(), JsFn(LookupPrefix { _key: key }))?,
+    )?;
+    obj.set(
+        "isDefaultNamespace",
+        Function::new(
+            ctx.clone(),
+            JsFn(IsDefaultNamespace {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "setAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(SetAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "hasAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(HasAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "removeAttributeNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(RemoveAttributeNS {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "getAttributeNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetAttributeNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "compareDocumentPosition",
+        Function::new(
+            ctx.clone(),
+            JsFn(CompareDocumentPosition {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "isEqualNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(IsEqualNode {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "isSameNode",
+        Function::new(ctx.clone(), JsFn(IsSameNode { key }))?,
+    )?;
+    obj.set(
+        "normalize",
+        Function::new(
+            ctx.clone(),
+            JsFn(Normalize {
                 state: Rc::clone(state),
                 key,
             }),
@@ -3008,8 +5236,14 @@ fn make_element_object<'js>(
         }
     }
 
-    // classList
-    obj.set("classList", make_class_list(ctx, key, state)?)?;
+    // classList — read-only (assignment = no-op per spec)
+    {
+        let cl = make_class_list(ctx, key, state)?;
+        let define_code = ctx.eval::<Function, _>(
+            "(function(obj, cl){ Object.defineProperty(obj, 'classList', { get: function(){ return cl; }, set: function(){}, configurable: true }); })",
+        )?;
+        define_code.call::<_, Value>((obj.clone(), cl))?;
+    }
 
     // style
     obj.set("style", make_style_object(ctx, key, state)?)?;
@@ -3027,6 +5261,24 @@ fn make_element_object<'js>(
             }
         }
         obj.set("dataset", dataset)?;
+    }
+
+    // Cacha objektet + applicera JS-polyfills (prototypkedja, CharacterData, ChildNode-metoder)
+    {
+        let global = ctx.globals();
+        let cache_key = format!("__nc_{}", key_bits as u64);
+        let _ = global.set(cache_key.as_str(), obj.clone());
+        let patch_code = format!(
+            concat!(
+                "globalThis.__nodeCache && globalThis.__nodeCache.set({kb}, globalThis.{ck});",
+                "if(globalThis.__patchPrototype) globalThis.__patchPrototype(globalThis.{ck});",
+                "if(globalThis.__patchCharacterData) globalThis.__patchCharacterData(globalThis.{ck});",
+                "if(globalThis.__patchChildNode) globalThis.__patchChildNode(globalThis.{ck});"
+            ),
+            kb = key_bits,
+            ck = cache_key
+        );
+        let _ = ctx.eval::<Value, _>(patch_code.as_str());
     }
 
     Ok(obj.into_value())
@@ -3051,29 +5303,79 @@ fn data_attr_to_camel(name: &str) -> String {
 
 // ─── classList ───────────────────────────────────────────────────────────────
 
+/// Skapa ett DOMException-objekt med name och message
+fn throw_dom_exception(ctx: &Ctx<'_>, name: &str, message: &str) -> rquickjs::Error {
+    let code = format!(
+        "(function(){{ var e = new DOMException('{}', '{}'); return e; }})()",
+        message.replace('\'', "\\'"),
+        name
+    );
+    match ctx.eval::<Value, _>(code.as_str()) {
+        Ok(ex) => ctx.throw(ex),
+        Err(_) => {
+            // Fallback: skapa vanligt objekt med name/message
+            if let Ok(obj) = Object::new(ctx.clone()) {
+                let _ = obj.set("name", name);
+                let _ = obj.set("message", message);
+                ctx.throw(obj.into_value())
+            } else {
+                ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), &format!("{}: {}", name, message))
+                        .unwrap()
+                        .into(),
+                )
+            }
+        }
+    }
+}
+
+/// Validera DOMTokenList-token: tom → SyntaxError, whitespace → InvalidCharacterError
+fn validate_token(ctx: &Ctx<'_>, token: &str) -> rquickjs::Result<()> {
+    if token.is_empty() {
+        return Err(throw_dom_exception(
+            ctx,
+            "SyntaxError",
+            "The token must not be empty.",
+        ));
+    }
+    if token.contains(char::is_whitespace) {
+        return Err(throw_dom_exception(
+            ctx,
+            "InvalidCharacterError",
+            "The token must not contain whitespace.",
+        ));
+    }
+    Ok(())
+}
+
 struct ClassListAdd {
     state: SharedState,
     key: NodeKey,
 }
 impl JsHandler for ClassListAdd {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Stöd för flera tokens: classList.add("a", "b", "c")
+        let mut tokens = Vec::new();
+        for arg in args {
+            let t = arg
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            validate_token(ctx, &t)?;
+            tokens.push(t);
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let classes: Vec<&str> = current.split_whitespace().collect();
-            if !classes.contains(&cls.as_str()) {
-                let new_cls = if current.is_empty() {
-                    cls
-                } else {
-                    format!("{} {}", current, cls)
-                };
-                node.attributes.insert("class".to_string(), new_cls);
+            let mut classes: Vec<String> =
+                current.split_whitespace().map(|s| s.to_string()).collect();
+            for t in tokens {
+                if !classes.iter().any(|c| c == &t) {
+                    classes.push(t);
+                }
             }
+            node.attributes
+                .insert("class".to_string(), classes.join(" "));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -3085,15 +5387,23 @@ struct ClassListRemove {
 }
 impl JsHandler for ClassListRemove {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Stöd för flera tokens
+        let mut tokens = Vec::new();
+        for arg in args {
+            let t = arg
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            validate_token(ctx, &t)?;
+            tokens.push(t);
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let new_cls: Vec<&str> = current.split_whitespace().filter(|&c| c != cls).collect();
+            let new_cls: Vec<&str> = current
+                .split_whitespace()
+                .filter(|&c| !tokens.iter().any(|t| t == c))
+                .collect();
             node.attributes
                 .insert("class".to_string(), new_cls.join(" "));
         }
@@ -3112,6 +5422,7 @@ impl JsHandler for ClassListContains {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        validate_token(ctx, &cls)?;
         let s = self.state.borrow();
         let has = s
             .arena
@@ -3135,6 +5446,35 @@ impl JsHandler for ClassListToggle {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        validate_token(ctx, &cls)?;
+        // Stöd för force-argument
+        let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
+        let force = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+        if has_force {
+            let mut s = self.state.borrow_mut();
+            if force {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    let current = node.get_attr("class").unwrap_or("").to_string();
+                    let classes: Vec<&str> = current.split_whitespace().collect();
+                    if !classes.contains(&cls.as_str()) {
+                        let new_cls = if current.is_empty() {
+                            cls
+                        } else {
+                            format!("{} {}", current, cls)
+                        };
+                        node.attributes.insert("class".to_string(), new_cls);
+                    }
+                }
+                return Ok(Value::new_bool(ctx.clone(), true));
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                let new_cls: Vec<&str> = current.split_whitespace().filter(|&c| c != cls).collect();
+                node.attributes
+                    .insert("class".to_string(), new_cls.join(" "));
+            }
+            return Ok(Value::new_bool(ctx.clone(), false));
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
@@ -3198,6 +5538,52 @@ impl JsHandler for ClassListReplace {
     }
 }
 
+struct ClassListItem {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListItem {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let idx = args.first().and_then(|v| v.as_int()).unwrap_or(-1) as usize;
+        let s = self.state.borrow();
+        let classes: Vec<&str> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("class"))
+            .map(|c| c.split_whitespace().collect())
+            .unwrap_or_default();
+        if idx < classes.len() {
+            Ok(rquickjs::String::from_str(ctx.clone(), classes[idx])?.into_value())
+        } else {
+            Ok(Value::new_null(ctx.clone()))
+        }
+    }
+}
+
+struct ClassListGetClasses {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListGetClasses {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let classes: Vec<String> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("class"))
+            .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+        drop(s);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, cls) in classes.iter().enumerate() {
+            arr.set(i, rquickjs::String::from_str(ctx.clone(), cls)?)?;
+        }
+        Ok(arr.into_value())
+    }
+}
+
 fn make_class_list<'js>(
     ctx: &Ctx<'js>,
     key: NodeKey,
@@ -3255,21 +5641,57 @@ fn make_class_list<'js>(
         )?,
     )?;
 
-    // length + item
-    let s = state.borrow();
-    let classes: Vec<String> = s
-        .arena
-        .nodes
-        .get(key)
-        .and_then(|n| n.get_attr("class"))
-        .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
-        .unwrap_or_default();
-    obj.set("length", classes.len() as i32)?;
-    // Populera numeriska index + value
-    let val = classes.join(" ");
-    obj.set("value", val.as_str())?;
-    for (i, cls) in classes.iter().enumerate() {
-        obj.set(i as u32, cls.as_str())?;
+    // item(index) — dynamisk (läser från arena)
+    obj.set(
+        "item",
+        Function::new(
+            ctx.clone(),
+            JsFn(ClassListItem {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+
+    // Uppdatera length/value/index via JS-helper
+    let update_fn_code = r#"(function(obj, getClasses) {
+        Object.defineProperty(obj, 'length', { get: function(){ return getClasses().length; }, configurable: true });
+        Object.defineProperty(obj, 'value', {
+            get: function(){ return getClasses().join(' '); },
+            set: function(v){ /* setter via className */ },
+            configurable: true
+        });
+        Object.defineProperty(obj, Symbol.toStringTag, { value: 'DOMTokenList' });
+        obj.toString = function(){ return getClasses().join(' '); };
+        obj.forEach = function(cb, thisArg) {
+            var cls = getClasses();
+            for (var i = 0; i < cls.length; i++) cb.call(thisArg, cls[i], i, obj);
+        };
+        obj.entries = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:[i,cls[i++]],done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj.keys = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:i++,done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj.values = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:cls[i++],done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj[Symbol.iterator] = obj.values;
+        obj.supports = function(){ throw new TypeError("DOMTokenList has no supported tokens"); };
+        return obj;
+    })"#;
+    let get_classes_fn = Function::new(
+        ctx.clone(),
+        JsFn(ClassListGetClasses {
+            state: Rc::clone(state),
+            key,
+        }),
+    )?;
+    if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
+        let _ = update_fn.call::<_, Value>((obj.clone(), get_classes_fn));
     }
 
     Ok(obj.into_value())
@@ -3521,6 +5943,71 @@ impl JsHandler for MatchMediaHandler {
         )?;
         Ok(result.into_value())
     }
+}
+
+/// Registrera DOMException-konstruktorn som native Rust
+/// Ersätter polyfill i polyfills.js — skapar DOMException med name/message/code
+fn register_dom_exception(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<Value, _>(
+        r#"(function(){
+  if (typeof globalThis.DOMException !== 'undefined') return;
+  var _codes = {
+    IndexSizeError:1, HierarchyRequestError:3, WrongDocumentError:4,
+    InvalidCharacterError:5, NoModificationAllowedError:7, NotFoundError:8,
+    NotSupportedError:9, InUseAttributeError:10, InvalidStateError:11,
+    SyntaxError:12, InvalidModificationError:13, NamespaceError:14,
+    InvalidAccessError:15, TypeMismatchError:17, SecurityError:18,
+    NetworkError:19, AbortError:20, URLMismatchError:21,
+    QuotaExceededError:22, TimeoutError:23, InvalidNodeTypeError:24,
+    DataCloneError:25
+  };
+  globalThis.DOMException = function DOMException(message, name) {
+    this.message = message || '';
+    this.name = name || 'Error';
+    this.code = _codes[this.name] || 0;
+    this.stack = (new Error()).stack;
+  };
+  DOMException.prototype = Object.create(Error.prototype);
+  DOMException.prototype.constructor = DOMException;
+  Object.defineProperty(DOMException.prototype, Symbol.toStringTag, {value:'DOMException'});
+  DOMException.prototype.toString = function(){ return 'DOMException: ' + this.message; };
+  DOMException._codes = _codes;
+  Object.keys(_codes).forEach(function(n){
+    var c = n.replace(/Error$/, '').replace(/([A-Z])/g, '_$1').toUpperCase();
+    if (c.charAt(0)==='_') c = c.substring(1);
+    c = c + '_ERR';
+    DOMException[c] = _codes[n];
+    DOMException.prototype[c] = _codes[n];
+  });
+  // Enklare alias
+  DOMException.INDEX_SIZE_ERR = 1;
+  DOMException.DOMSTRING_SIZE_ERR = 2;
+  DOMException.HIERARCHY_REQUEST_ERR = 3;
+  DOMException.WRONG_DOCUMENT_ERR = 4;
+  DOMException.INVALID_CHARACTER_ERR = 5;
+  DOMException.NO_DATA_ALLOWED_ERR = 6;
+  DOMException.NO_MODIFICATION_ALLOWED_ERR = 7;
+  DOMException.NOT_FOUND_ERR = 8;
+  DOMException.NOT_SUPPORTED_ERR = 9;
+  DOMException.INUSE_ATTRIBUTE_ERR = 10;
+  DOMException.INVALID_STATE_ERR = 11;
+  DOMException.SYNTAX_ERR = 12;
+  DOMException.INVALID_MODIFICATION_ERR = 13;
+  DOMException.NAMESPACE_ERR = 14;
+  DOMException.INVALID_ACCESS_ERR = 15;
+  DOMException.VALIDATION_ERR = 16;
+  DOMException.TYPE_MISMATCH_ERR = 17;
+  DOMException.SECURITY_ERR = 18;
+  DOMException.NETWORK_ERR = 19;
+  DOMException.ABORT_ERR = 20;
+  DOMException.URL_MISMATCH_ERR = 21;
+  DOMException.QUOTA_EXCEEDED_ERR = 22;
+  DOMException.TIMEOUT_ERR = 23;
+  DOMException.INVALID_NODE_TYPE_ERR = 24;
+  DOMException.DATA_CLONE_ERR = 25;
+})()"#,
+    )?;
+    Ok(())
 }
 
 fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
@@ -3822,20 +6309,89 @@ fn register_window_with_viewport<'js>(
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
         globalThis.crypto = globalThis.window.crypto;
+
+        // TextEncoder/TextDecoder — UTF-8
+        globalThis.TextEncoder = function TextEncoder() {
+            this.encoding = 'utf-8';
+        };
+        TextEncoder.prototype.encode = function(str) {
+            str = String(str || '');
+            var buf = [];
+            for (var i = 0; i < str.length; i++) {
+                var cp = str.codePointAt(i);
+                if (cp < 0x80) {
+                    buf.push(cp);
+                } else if (cp < 0x800) {
+                    buf.push(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    buf.push(0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+                } else {
+                    buf.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+                    i++;
+                }
+            }
+            return new Uint8Array(buf);
+        };
+        TextEncoder.prototype.encodeInto = function(str, dest) {
+            var encoded = this.encode(str);
+            var written = Math.min(encoded.length, dest.length);
+            for (var i = 0; i < written; i++) dest[i] = encoded[i];
+            return { read: str.length, written: written };
+        };
+
+        globalThis.TextDecoder = function TextDecoder(label) {
+            this.encoding = (label || 'utf-8').toLowerCase().replace(/[^a-z0-9-]/g, '');
+            if (this.encoding === 'utf8') this.encoding = 'utf-8';
+            this.fatal = false;
+            this.ignoreBOM = false;
+        };
+        TextDecoder.prototype.decode = function(input) {
+            if (!input || !input.length) return '';
+            var bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+            var result = '';
+            for (var i = 0; i < bytes.length;) {
+                var b = bytes[i];
+                if (b < 0x80) { result += String.fromCodePoint(b); i++; }
+                else if (b < 0xE0) { result += String.fromCodePoint(((b & 0x1F) << 6) | (bytes[i+1] & 0x3F)); i += 2; }
+                else if (b < 0xF0) { result += String.fromCodePoint(((b & 0x0F) << 12) | ((bytes[i+1] & 0x3F) << 6) | (bytes[i+2] & 0x3F)); i += 3; }
+                else { result += String.fromCodePoint(((b & 0x07) << 18) | ((bytes[i+1] & 0x3F) << 12) | ((bytes[i+2] & 0x3F) << 6) | (bytes[i+3] & 0x3F)); i += 4; }
+            }
+            return result;
+        };
         globalThis.Event = function Event(type, opts) {
             this.type = type || '';
             this.bubbles = (opts && opts.bubbles) || false;
             this.cancelable = (opts && opts.cancelable) || false;
+            this.composed = (opts && opts.composed) || false;
+            this.target = null;
+            this.srcElement = null;
+            this.currentTarget = null;
+            this.eventPhase = 0;
+            this.defaultPrevented = false;
+            this.returnValue = true;
+            this.timeStamp = Date.now();
+            this.isTrusted = false;
             this.stopPropagation = function() {};
-            this.preventDefault = function() {};
+            this.stopImmediatePropagation = function() {};
+            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
         };
         globalThis.CustomEvent = function CustomEvent(type, opts) {
             this.type = type || '';
             this.detail = (opts && opts.detail) || null;
             this.bubbles = (opts && opts.bubbles) || false;
             this.cancelable = (opts && opts.cancelable) || false;
+            this.composed = (opts && opts.composed) || false;
+            this.target = null;
+            this.srcElement = null;
+            this.currentTarget = null;
+            this.eventPhase = 0;
+            this.defaultPrevented = false;
+            this.returnValue = true;
+            this.timeStamp = Date.now();
+            this.isTrusted = false;
             this.stopPropagation = function() {};
-            this.preventDefault = function() {};
+            this.stopImmediatePropagation = function() {};
+            this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
         };
         globalThis.DOMParser = function DOMParser() {
             this.parseFromString = function(str, type) {
@@ -4714,19 +7270,24 @@ fn matches_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
     }
 
     // Komma-separerade selektorer — matcha om någon matchar
-    if selector.contains(',') {
+    if find_unescaped_delimiter(selector, &[',']) < selector.len() {
         return selector
             .split(',')
             .any(|s| matches_single_selector(arena, key, s.trim()));
     }
 
-    // Descendant/child/sibling-kombinator
-    if selector.contains(' ')
-        || selector.contains('>')
-        || selector.contains('+')
-        || selector.contains('~')
+    // Descendant/child/sibling-kombinator — kolla bara oescaped combinators
     {
-        return matches_combinator_selector(arena, key, selector);
+        let has_combinator =
+            find_unescaped_delimiter(selector, &[' ', '>', '+', '~']) < selector.len();
+        if has_combinator {
+            // Dubbelkolla: hitta den faktiska split-punkten
+            let split = find_unescaped_delimiter(selector, &[' ', '>', '+', '~']);
+            // Om split == selector.len() → ingen combinator
+            if split < selector.len() {
+                return matches_combinator_selector(arena, key, selector);
+            }
+        }
     }
 
     matches_single_selector(arena, key, selector)
@@ -4752,6 +7313,99 @@ enum AttrOp {
 }
 
 /// Matcha en enkel selektor (utan kombinatorer)
+/// Hitta nästa oescaped delimiter i CSS-selektor.
+/// Hoppar över escaped tecken (\X, \XXXXXX).
+fn find_unescaped_delimiter(s: &str, delimiters: &[char]) -> usize {
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 1; // hoppa över backslash
+                    // Hoppa över hex-sekvens (1-6 hex + optional whitespace)
+            if i < bytes.len() && bytes[i].is_ascii_hexdigit() {
+                let mut hex_count = 0;
+                while i < bytes.len() && bytes[i].is_ascii_hexdigit() && hex_count < 6 {
+                    i += 1;
+                    hex_count += 1;
+                }
+                // Optional trailing whitespace
+                if i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') {
+                    i += 1;
+                }
+            } else if i < bytes.len() {
+                i += 1; // hoppa över escaped tecken
+            }
+            continue;
+        }
+        // Kolla om det är en delimiter (men bara om vi är på en char boundary)
+        if s.is_char_boundary(i) {
+            let ch = s[i..].chars().next().unwrap();
+            if delimiters.contains(&ch) {
+                return i;
+            }
+            i += ch.len_utf8();
+        } else {
+            i += 1;
+        }
+    }
+    s.len()
+}
+
+/// CSS escape-unescape per CSS syntax spec.
+/// Hanterar: \XX (hex 1-6 siffror + optional space), \c (escaped tecken)
+fn css_unescape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+        // Backslash — kolla nästa tecken
+        match chars.peek() {
+            None => {
+                // Backslash i slutet — ignorera per spec
+            }
+            Some(&next) if next.is_ascii_hexdigit() => {
+                // Hex escape: 1-6 hex siffror
+                let mut hex = String::with_capacity(6);
+                for _ in 0..6 {
+                    if let Some(&h) = chars.peek() {
+                        if h.is_ascii_hexdigit() {
+                            hex.push(h);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // Optional trailing whitespace (konsumeras)
+                if let Some(&ws) = chars.peek() {
+                    if ws == ' ' || ws == '\t' || ws == '\n' || ws == '\r' || ws == '\x0C' {
+                        chars.next();
+                    }
+                }
+                if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                    if cp == 0 || (0xD800..=0xDFFF).contains(&cp) || cp > 0x10FFFF {
+                        result.push('\u{FFFD}');
+                    } else if let Some(ch) = char::from_u32(cp) {
+                        result.push(ch);
+                    } else {
+                        result.push('\u{FFFD}');
+                    }
+                }
+            }
+            Some(_) => {
+                // Escaped tecken — ta bokstavligt
+                result.push(chars.next().unwrap());
+            }
+        }
+    }
+    result
+}
+
 fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
     let node = match arena.nodes.get(key) {
         Some(n) if n.node_type == NodeType::Element => n,
@@ -4852,15 +7506,11 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     // Parsea resterande delar
     while !remaining.is_empty() {
         if let Some(rest) = remaining.strip_prefix('#') {
-            let end = rest
-                .find(|c: char| ['.', '[', ':'].contains(&c))
-                .unwrap_or(rest.len());
+            let end = find_unescaped_delimiter(rest, &['.', '[', ':']);
             required_id = Some(&rest[..end]);
             remaining = &rest[end..];
         } else if let Some(rest) = remaining.strip_prefix('.') {
-            let end = rest
-                .find(|c: char| ['#', '.', '[', ':'].contains(&c))
-                .unwrap_or(rest.len());
+            let end = find_unescaped_delimiter(rest, &['#', '.', '[', ':']);
             required_classes.push(&rest[..end]);
             remaining = &rest[end..];
         } else if let Some(rest) = remaining.strip_prefix('[') {
@@ -4987,14 +7637,16 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     let _ = is_universal;
 
     if let Some(id) = required_id {
-        if node.get_attr("id") != Some(id) {
+        let unesc = css_unescape(id);
+        if node.get_attr("id") != Some(unesc.as_str()) {
             return false;
         }
     }
     for cls in &required_classes {
+        let unesc = css_unescape(cls);
         let has = node
             .get_attr("class")
-            .map(|c| c.split_whitespace().any(|x| x == *cls))
+            .map(|c| split_ascii_whitespace(c).any(|x| x == unesc))
             .unwrap_or(false);
         if !has {
             return false;
@@ -5512,15 +8164,27 @@ fn find_all_matching(arena: &ArenaDom, key: NodeKey, selector: &str, results: &m
 }
 
 /// Samla alla element med given klass
+/// Splitta sträng på ASCII whitespace per HTML-spec (space, tab, LF, FF, CR).
+/// Unicode-whitespace som \u{00A0} (NBSP) är INTE separatorer — de är giltiga class-tecken.
+fn split_ascii_whitespace(s: &str) -> impl Iterator<Item = &str> {
+    s.split([' ', '\t', '\n', '\x0C', '\r'])
+        .filter(|s| !s.is_empty())
+}
+
 fn find_all_by_class(arena: &ArenaDom, key: NodeKey, class: &str, results: &mut Vec<NodeKey>) {
     let node = match arena.nodes.get(key) {
         Some(n) => n,
         None => return,
     };
     if node.node_type == NodeType::Element {
-        if let Some(classes) = node.get_attr("class") {
-            if classes.split_whitespace().any(|c| c == class) {
-                results.push(key);
+        if let Some(attr_classes) = node.get_attr("class") {
+            // getElementsByClassName("a b") matchar element med BÅDA "a" och "b"
+            let search_tokens: Vec<&str> = split_ascii_whitespace(class).collect();
+            if !search_tokens.is_empty() {
+                let elem_tokens: Vec<&str> = split_ascii_whitespace(attr_classes).collect();
+                if search_tokens.iter().all(|t| elem_tokens.contains(t)) {
+                    results.push(key);
+                }
             }
         }
     }

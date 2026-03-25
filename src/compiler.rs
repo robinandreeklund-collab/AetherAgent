@@ -851,7 +851,7 @@ mod tests {
     #[test]
     fn test_compile_plan_serialization() {
         let plan = compile_goal("köp produkt");
-        let json = serde_json::to_string_pretty(&plan).unwrap_or_default();
+        let json = serde_json::to_string(&plan).unwrap_or_default();
         assert!(!json.is_empty());
         let restored: ActionPlan = serde_json::from_str(&json).expect("Borde gå att deserialisera");
         assert_eq!(restored.goal, plan.goal);
