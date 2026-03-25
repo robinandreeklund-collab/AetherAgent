@@ -2052,12 +2052,10 @@ impl JsHandler for ToggleAttribute {
         // Spec: om name inte matchar Name-produktionen → InvalidCharacterError
         let invalid_name = name.is_empty() || name.contains(char::is_whitespace);
         if invalid_name {
-            return Err(ctx.throw(
-                rquickjs::String::from_str(
-                    ctx.clone(),
-                    "InvalidCharacterError: The string contains invalid characters.",
-                )?
-                .into(),
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
             ));
         }
         let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
@@ -3032,7 +3030,7 @@ impl JsHandler for CreateTreeWalker {
         let what_to_show = args
             .get(1)
             .and_then(|v| v.as_number())
-            .map(|n| n as u32)
+            .map(|n| n as i64 as u32)
             .unwrap_or(0xFFFFFFFF);
         let filter = args.get(2).cloned();
 
@@ -3173,6 +3171,7 @@ impl JsHandler for CreateTreeWalker {
                 }
                 return null;
             };
+            Object.defineProperty(tw, Symbol.toStringTag, { value: 'TreeWalker' });
         })
         "#;
 
@@ -3201,7 +3200,7 @@ impl JsHandler for CreateNodeIterator {
         let what_to_show = args
             .get(1)
             .and_then(|v| v.as_number())
-            .map(|n| n as u32)
+            .map(|n| n as i64 as u32)
             .unwrap_or(0xFFFFFFFF);
         let filter = args.get(2).cloned();
 
@@ -3290,6 +3289,7 @@ impl JsHandler for CreateNodeIterator {
                 return null;
             };
             ni.detach = function() {};
+            Object.defineProperty(ni, Symbol.toStringTag, { value: 'NodeIterator' });
         })
         "#;
 
@@ -5133,8 +5133,14 @@ fn make_element_object<'js>(
         }
     }
 
-    // classList
-    obj.set("classList", make_class_list(ctx, key, state)?)?;
+    // classList — read-only (assignment = no-op per spec)
+    {
+        let cl = make_class_list(ctx, key, state)?;
+        let define_code = ctx.eval::<Function, _>(
+            "(function(obj, cl){ Object.defineProperty(obj, 'classList', { get: function(){ return cl; }, set: function(){}, configurable: true }); })",
+        )?;
+        define_code.call::<_, Value>((obj.clone(), cl))?;
+    }
 
     // style
     obj.set("style", make_style_object(ctx, key, state)?)?;
@@ -5194,29 +5200,79 @@ fn data_attr_to_camel(name: &str) -> String {
 
 // ─── classList ───────────────────────────────────────────────────────────────
 
+/// Skapa ett DOMException-objekt med name och message
+fn throw_dom_exception(ctx: &Ctx<'_>, name: &str, message: &str) -> rquickjs::Error {
+    let code = format!(
+        "(function(){{ var e = new DOMException('{}', '{}'); return e; }})()",
+        message.replace('\'', "\\'"),
+        name
+    );
+    match ctx.eval::<Value, _>(code.as_str()) {
+        Ok(ex) => ctx.throw(ex),
+        Err(_) => {
+            // Fallback: skapa vanligt objekt med name/message
+            if let Ok(obj) = Object::new(ctx.clone()) {
+                let _ = obj.set("name", name);
+                let _ = obj.set("message", message);
+                ctx.throw(obj.into_value())
+            } else {
+                ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), &format!("{}: {}", name, message))
+                        .unwrap()
+                        .into(),
+                )
+            }
+        }
+    }
+}
+
+/// Validera DOMTokenList-token: tom → SyntaxError, whitespace → InvalidCharacterError
+fn validate_token(ctx: &Ctx<'_>, token: &str) -> rquickjs::Result<()> {
+    if token.is_empty() {
+        return Err(throw_dom_exception(
+            ctx,
+            "SyntaxError",
+            "The token must not be empty.",
+        ));
+    }
+    if token.contains(char::is_whitespace) {
+        return Err(throw_dom_exception(
+            ctx,
+            "InvalidCharacterError",
+            "The token must not contain whitespace.",
+        ));
+    }
+    Ok(())
+}
+
 struct ClassListAdd {
     state: SharedState,
     key: NodeKey,
 }
 impl JsHandler for ClassListAdd {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Stöd för flera tokens: classList.add("a", "b", "c")
+        let mut tokens = Vec::new();
+        for arg in args {
+            let t = arg
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            validate_token(ctx, &t)?;
+            tokens.push(t);
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let classes: Vec<&str> = current.split_whitespace().collect();
-            if !classes.contains(&cls.as_str()) {
-                let new_cls = if current.is_empty() {
-                    cls
-                } else {
-                    format!("{} {}", current, cls)
-                };
-                node.attributes.insert("class".to_string(), new_cls);
+            let mut classes: Vec<String> =
+                current.split_whitespace().map(|s| s.to_string()).collect();
+            for t in tokens {
+                if !classes.iter().any(|c| c == &t) {
+                    classes.push(t);
+                }
             }
+            node.attributes
+                .insert("class".to_string(), classes.join(" "));
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -5228,15 +5284,23 @@ struct ClassListRemove {
 }
 impl JsHandler for ClassListRemove {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Stöd för flera tokens
+        let mut tokens = Vec::new();
+        for arg in args {
+            let t = arg
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            validate_token(ctx, &t)?;
+            tokens.push(t);
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let new_cls: Vec<&str> = current.split_whitespace().filter(|&c| c != cls).collect();
+            let new_cls: Vec<&str> = current
+                .split_whitespace()
+                .filter(|&c| !tokens.iter().any(|t| t == c))
+                .collect();
             node.attributes
                 .insert("class".to_string(), new_cls.join(" "));
         }
@@ -5255,6 +5319,7 @@ impl JsHandler for ClassListContains {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        validate_token(ctx, &cls)?;
         let s = self.state.borrow();
         let has = s
             .arena
@@ -5278,6 +5343,35 @@ impl JsHandler for ClassListToggle {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        validate_token(ctx, &cls)?;
+        // Stöd för force-argument
+        let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
+        let force = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+        if has_force {
+            let mut s = self.state.borrow_mut();
+            if force {
+                if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                    let current = node.get_attr("class").unwrap_or("").to_string();
+                    let classes: Vec<&str> = current.split_whitespace().collect();
+                    if !classes.contains(&cls.as_str()) {
+                        let new_cls = if current.is_empty() {
+                            cls
+                        } else {
+                            format!("{} {}", current, cls)
+                        };
+                        node.attributes.insert("class".to_string(), new_cls);
+                    }
+                }
+                return Ok(Value::new_bool(ctx.clone(), true));
+            }
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                let new_cls: Vec<&str> = current.split_whitespace().filter(|&c| c != cls).collect();
+                node.attributes
+                    .insert("class".to_string(), new_cls.join(" "));
+            }
+            return Ok(Value::new_bool(ctx.clone(), false));
+        }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
@@ -5341,6 +5435,52 @@ impl JsHandler for ClassListReplace {
     }
 }
 
+struct ClassListItem {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListItem {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let idx = args.first().and_then(|v| v.as_int()).unwrap_or(-1) as usize;
+        let s = self.state.borrow();
+        let classes: Vec<&str> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("class"))
+            .map(|c| c.split_whitespace().collect())
+            .unwrap_or_default();
+        if idx < classes.len() {
+            Ok(rquickjs::String::from_str(ctx.clone(), classes[idx])?.into_value())
+        } else {
+            Ok(Value::new_null(ctx.clone()))
+        }
+    }
+}
+
+struct ClassListGetClasses {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListGetClasses {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let classes: Vec<String> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("class"))
+            .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+        drop(s);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, cls) in classes.iter().enumerate() {
+            arr.set(i, rquickjs::String::from_str(ctx.clone(), cls)?)?;
+        }
+        Ok(arr.into_value())
+    }
+}
+
 fn make_class_list<'js>(
     ctx: &Ctx<'js>,
     key: NodeKey,
@@ -5398,29 +5538,58 @@ fn make_class_list<'js>(
         )?,
     )?;
 
-    // length + item
-    let s = state.borrow();
-    let classes: Vec<String> = s
-        .arena
-        .nodes
-        .get(key)
-        .and_then(|n| n.get_attr("class"))
-        .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
-        .unwrap_or_default();
-    obj.set("length", classes.len() as i32)?;
-    // Populera numeriska index + value
-    let val = classes.join(" ");
-    obj.set("value", val.as_str())?;
-    for (i, cls) in classes.iter().enumerate() {
-        obj.set(i as u32, cls.as_str())?;
-    }
+    // item(index) — dynamisk (läser från arena)
+    obj.set(
+        "item",
+        Function::new(
+            ctx.clone(),
+            JsFn(ClassListItem {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
 
-    // Symbol.toStringTag = "DOMTokenList"
-    let _ = ctx
-        .eval::<Value, _>(
-            "(function(o){Object.defineProperty(o,Symbol.toStringTag,{value:'DOMTokenList'})})",
-        )
-        .and_then(|f| f.as_function().unwrap().call::<_, Value>((obj.clone(),)));
+    // Uppdatera length/value/index via JS-helper
+    let update_fn_code = r#"(function(obj, getClasses) {
+        Object.defineProperty(obj, 'length', { get: function(){ return getClasses().length; }, configurable: true });
+        Object.defineProperty(obj, 'value', {
+            get: function(){ return getClasses().join(' '); },
+            set: function(v){ /* setter via className */ },
+            configurable: true
+        });
+        Object.defineProperty(obj, Symbol.toStringTag, { value: 'DOMTokenList' });
+        obj.toString = function(){ return getClasses().join(' '); };
+        obj.forEach = function(cb, thisArg) {
+            var cls = getClasses();
+            for (var i = 0; i < cls.length; i++) cb.call(thisArg, cls[i], i, obj);
+        };
+        obj.entries = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:[i,cls[i++]],done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj.keys = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:i++,done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj.values = function() {
+            var cls = getClasses(); var i = 0;
+            return { next: function(){ return i < cls.length ? {value:cls[i++],done:false} : {done:true}; }, [Symbol.iterator]: function(){return this;} };
+        };
+        obj[Symbol.iterator] = obj.values;
+        obj.supports = function(){ throw new TypeError("DOMTokenList has no supported tokens"); };
+        return obj;
+    })"#;
+    let get_classes_fn = Function::new(
+        ctx.clone(),
+        JsFn(ClassListGetClasses {
+            state: Rc::clone(state),
+            key,
+        }),
+    )?;
+    if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
+        let _ = update_fn.call::<_, Value>((obj.clone(), get_classes_fn));
+    }
 
     Ok(obj.into_value())
 }

@@ -1032,13 +1032,15 @@
   AetherRange.END_TO_START = 3;
 
   AetherRange.prototype.compareBoundaryPoints = function(how, sourceRange) {
+    // WebIDL: ToUint16(how)
+    how = ((how | 0) & 0xFFFF) >>> 0;
+    if (how > 3) throw new DOMException("The comparison method provided is not supported.", "NotSupportedError");
     var thisC, thisO, srcC, srcO;
     switch (how) {
       case 0: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
       case 1: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
       case 2: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
       case 3: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
-      default: return 0;
     }
     return this._compareBoundary(thisC, thisO, srcC, srcO) < 0 ? -1 : (this._compareBoundary(thisC, thisO, srcC, srcO) > 0 ? 1 : 0);
   };

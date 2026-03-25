@@ -459,12 +459,22 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
         }
     }
 
+    // Registrera som __MutationObserverImpl och wrappa i en JS-klass för new-stöd
     ctx.globals().set(
-        "MutationObserver",
+        "__MutationObserverImpl",
         Function::new(
             ctx.clone(),
             JsFn(MutationObserverConstructor { el: Rc::clone(&el) }),
         )?,
+    )?;
+    ctx.eval::<Value, _>(
+        r#"globalThis.MutationObserver = function MutationObserver(cb) {
+            if (!(this instanceof MutationObserver)) throw new TypeError("not a constructor");
+            var impl = __MutationObserverImpl(cb);
+            this.observe = impl.observe;
+            this.disconnect = impl.disconnect;
+            this.takeRecords = impl.takeRecords || function(){return []};
+        };"#,
     )?;
 
     Ok(())
