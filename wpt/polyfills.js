@@ -670,41 +670,8 @@
 })();
 
 // ─── DOMException ───────────────────────────────────────────────────────────
-// WPT-tester kontrollerar DOMException-typ
-(function() {
-  if (typeof globalThis.DOMException === 'undefined') {
-    globalThis.DOMException = function(message, name) {
-      this.message = message || '';
-      this.name = name || 'Error';
-      this.code = DOMException._codes[this.name] || 0;
-    };
-    DOMException.prototype = Object.create(Error.prototype);
-    DOMException.prototype.constructor = DOMException;
-    DOMException._codes = {
-      IndexSizeError: 1,
-      HierarchyRequestError: 3,
-      WrongDocumentError: 4,
-      InvalidCharacterError: 5,
-      NoModificationAllowedError: 7,
-      NotFoundError: 8,
-      NotSupportedError: 9,
-      InvalidStateError: 11,
-      SyntaxError: 12,
-      InvalidModificationError: 13,
-      NamespaceError: 14,
-      SecurityError: 18,
-      NetworkError: 19,
-      AbortError: 20,
-      TypeMismatchError: 17,
-      QuotaExceededError: 22,
-      DataCloneError: 25
-    };
-    // Statiska konstanter
-    Object.keys(DOMException._codes).forEach(function(name) {
-      DOMException[name.toUpperCase().replace(/ERROR$/, '_ERR')] = DOMException._codes[name];
-    });
-  }
-})();
+// MIGRERAD TILL RUST (2026-03-25) — registreras native via register_dom_exception()
+// Polyfill borttagen. DOMException skapas nu i dom_bridge.rs innan polyfills laddas.
 
 // ─── Synkronisera window med globalThis ─────────────────────────────────────
 // WPT-tester använder "X in window" — allt på globalThis ska finnas på window

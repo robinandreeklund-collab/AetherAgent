@@ -12,9 +12,12 @@
 
 | Suite | Cases | Passed | Rate | Datum |
 |-------|-------|--------|------|-------|
-| dom/ | 2,004 | 1,324 | 66.1% | 2026-03-24 |
+| dom/ | 19,938 | 13,383 | 67.1% | 2026-03-25 |
+| dom/ (baseline) | 2,004 | 1,382 | 69.0% | 2026-03-24 |
 
-**OBS:** En del av pass-raten beror på polyfills. Riktig native-only score är lägre.
+**OBS:** Testfall ökade 10x (2,004 → 19,938) tack vare att Range-tester nu körs helt med 30s timeout istället för 5s.
+Pass-raten sjunker marginellt men absolut antal pass ökade med +12,001.
+En del av pass-raten beror fortfarande på polyfills. Riktig native-only score är lägre.
 
 ---
 
@@ -34,9 +37,17 @@
 | `createElementNS(ns, qname)` | Polyfill | JS — delegerar till createElement |
 | `getElementsByTagNameNS(ns, tag)` | Polyfill | JS — ignorerar namespace |
 | `createEvent(type)` | Polyfill | JS — skapar Event-objekt med rätt typ |
-| `document.implementation` | Polyfill | JS — createDocument/createHTMLDocument |
+| `createAttribute(name)` | Polyfill | JS — skapar Attr-objekt med nodeType=2 |
+| `document.implementation` | Polyfill | JS — createDocument/createHTMLDocument/createDocumentType |
 | `document.title` | Polyfill | JS — getter/setter via `<title>` element |
 | `document.URL` | Polyfill | JS — alias för location.href |
+| `document.doctype` | **Native** | Rust — exponerar Doctype-nod från ArenaDom (2026-03-25) |
+| `document.childNodes` | **Native** | Rust — returnerar alla document-barn inkl. doctype (2026-03-25) |
+| `document.firstChild/lastChild` | **Native** | Rust — (2026-03-25) |
+| `document.compareDocumentPosition()` | **Native** | Rust — (2026-03-25) |
+| `document.contains()` | **Native** | Rust — (2026-03-25) |
+| `document.lookupNamespaceURI()` | **Native** | Rust — (2026-03-25) |
+| `document.isSameNode/isEqualNode` | **Native** | Rust — (2026-03-25) |
 
 ## Element Methods — Native (Rust)
 
@@ -64,12 +75,23 @@
 | `contains(other)` | Rekursiv descendant-check |
 | `isConnected` | Parent-chain till document |
 | `getRootNode()` | Traverserar till rot |
+| `ownerDocument` | Sätts på alla parsade DOM-noder, pekar på document (2026-03-25) |
+| `nodeValue` | null för Element/Document/Doctype, data för Text/Comment (2026-03-25) |
 | `classList.add/remove/toggle/contains/replace` | Modifierar class-attribut |
+| `classList.item/forEach/entries/keys/values` | DOMTokenList-iteration (2026-03-25) |
+| `classList.length/value` | Live getters via defineProperty (2026-03-25) |
+| `classList` (property) | Read-only getter, assignment = no-op per spec (2026-03-25) |
+| `compareDocumentPosition(other)` | Returnerar DOCUMENT_POSITION_* bitmask |
+| `isSameNode(other)` | Jämför NodeKey |
+| `isEqualNode(other)` | Djup jämförelse |
+| `lookupNamespaceURI(prefix)` | Parent-chain traversal |
+| `toggleAttribute(name, force)` | DOMException vid ogiltig name (2026-03-25) |
 | `style.setProperty/getPropertyValue/removeProperty` | Inline style manipulation |
-| `addEventListener/removeEventListener/dispatchEvent` | Event-system med bubbling |
+| `addEventListener(type, fn, options)` | Stöd för options-objekt {capture, passive} (2026-03-25) |
+| `removeEventListener(type, fn)` | Event-system |
+| `dispatchEvent(event)` | Med passive-stöd och !defaultPrevented returnvärde (2026-03-25) |
 | `focus()` / `blur()` / `click()` | Focus-tracking + event dispatch |
 | `getBoundingClientRect()` | Estimerad rect från tag+style |
-| `id` / `className` | Polyfill-accessor som skriver till setAttribute |
 
 ## Element Methods — Polyfill (JS, behöver Rust-migration)
 
@@ -87,53 +109,76 @@
 | `hasAttributeNS(ns, local)` | Medium | Samma |
 | `removeAttributeNS(ns, local)` | Medium | Samma |
 | `getAttributeNode(name)` | Låg | Returnerar Attr-liknande objekt |
-| `getAttributeNodeNS(ns, local)` | Låg | Samma |
 | `moveBefore(node, child)` | Låg | Ny spec — delegerar till insertBefore |
-| `lookupNamespaceURI(prefix)` | Låg | Traverserar parent-chain |
-| `lookupPrefix(ns)` | Låg | Samma |
-| `isDefaultNamespace(ns)` | Låg | Wrapper |
 
-## CharacterData — Polyfill (JS, behöver Rust-migration)
+## Range API — Polyfill (JS, hög prioritet för Rust-migration)
 
-| Method | Prioritet |
-|--------|-----------|
-| `.data` (get/set) | **Hög** — alias för textContent, men korrekt null→"" hantering |
-| `.length` | Hög |
-| `.substringData(offset, count)` | Hög |
-| `.appendData(data)` | Hög |
-| `.insertData(offset, data)` | Hög |
-| `.deleteData(offset, count)` | Hög |
-| `.replaceData(offset, count, data)` | Hög |
+| Method | Status | Kommentar |
+|--------|--------|----------|
+| `document.createRange()` | Polyfill | Skapar AetherRange i JS |
+| `setStart/setEnd(node, offset)` | Polyfill | Boundary-sättning med offset-validering |
+| `setStartBefore/After(node)` | Polyfill | Via parentNode-index |
+| `setEndBefore/After(node)` | Polyfill | Via parentNode-index |
+| `collapse(toStart)` | Polyfill | Booleansk collapse |
+| `selectNode/selectNodeContents` | Polyfill | Väljer nod/barn |
+| `compareBoundaryPoints(how, range)` | Polyfill | NotSupportedError för how>3 (2026-03-25) |
+| `comparePoint(node, offset)` | Polyfill | IndexSizeError-validering (2026-03-25) |
+| `isPointInRange(node, offset)` | Polyfill | Wrapper kring comparePoint |
+| `intersectsNode(node)` | Polyfill | Root-jämförelse |
+| `cloneRange()` | Polyfill | Kopierar state |
+| `toString()` | Polyfill | Textextraktion |
+| `deleteContents/extractContents` | Polyfill | Stubs (no-op) |
+| `getBoundingClientRect()` | Polyfill | Returnerar nollor |
+| `detach()` | Polyfill | No-op per spec |
 
-## element.attributes (NamedNodeMap) — Polyfill
+**~4,000 WPT-tester berör Range API. Rust-migration är högsta prioritet.**
 
-Returnerar nytt array-objekt vid varje anrop. **Inte live** som spec kräver.
-Behöver Rust-native NamedNodeMap med:
-- Live-koppling till ArenaDom
-- `.length`, `.item(i)`, `[i]`-access
-- `.getNamedItem(name)`, `.getNamedItemNS(ns, name)`
-- `.setNamedItem(attr)`, `.removeNamedItem(name)`
+## NodeType — Native (Rust)
 
-## Prototypkedja — Polyfill
+| NodeType | Värde | Status |
+|----------|-------|--------|
+| Element | 1 | **Native** |
+| Text | 3 | **Native** |
+| Comment | 8 | **Native** |
+| Document | 9 | **Native** |
+| Doctype | 10 | **Native** (2026-03-25) |
+| DocumentFragment | 11 | **Native** |
 
-`Object.create(HTMLDivElement.prototype)` i `make_element_object`. Fungerar för `instanceof` men:
-- Konstruktorer är tomma funktioner (inga properties)
-- Ingen riktig WebIDL-kompatibilitet
-- `typeof HTMLElement === "function"` men det är en stub-funktion
+## CharacterData — Native (Rust, migrerad Fas 17)
 
-## Event-system — Delvis native
+| Method | Status |
+|--------|--------|
+| `.data` (get/set) | **Native** — UTF-16 code unit aware |
+| `.length` | **Native** |
+| `.substringData(offset, count)` | **Native** |
+| `.appendData(data)` | **Native** |
+| `.insertData(offset, data)` | **Native** |
+| `.deleteData(offset, count)` | **Native** |
+| `.replaceData(offset, count, data)` | **Native** |
+
+## Event-system
 
 | Del | Status |
 |-----|--------|
-| `addEventListener/removeEventListener` | **Native** |
-| `dispatchEvent` med bubbling | **Native** |
+| `addEventListener(type, fn, options)` | **Native** — stöd för {capture, passive} (2026-03-25) |
+| `removeEventListener(type, fn)` | **Native** |
+| `dispatchEvent` med bubbling + passive | **Native** (2026-03-25) |
 | `Event` / `CustomEvent` konstruktorer | **Native** (Rust) |
+| `MutationObserver` constructor | **Native** — new-stöd via JS klass-wrapper (2026-03-25) |
+| Passive-by-default (touchstart, wheel) | **Native** (2026-03-25) |
 | `MouseEvent`, `KeyboardEvent` etc. | Polyfill (tomma konstruktorer) |
 | `document.createEvent(type)` | Polyfill |
 | `event.initEvent()` | Polyfill |
-| `event.target/currentTarget` | Delvis (target=null vid skapande) |
-| Capture phase | Inte implementerad |
-| `stopPropagation` / `stopImmediatePropagation` | Native (flagga sätts, bubbling stoppas) |
+| `stopPropagation` / `stopImmediatePropagation` | Native |
+
+## DOMException — Polyfill
+
+| Feature | Status |
+|---------|--------|
+| `DOMException(message, name)` constructor | Polyfill |
+| `throw_dom_exception()` Rust-helper | **Native** (2026-03-25) — skapar DOMException via JS eval |
+| DOMException.INDEX_SIZE_ERR etc. | Polyfill (statiska koder) |
+| `validate_token()` → SyntaxError/InvalidCharacterError | **Native** (2026-03-25) |
 
 ## CSS Selector Parser — Native (Rust)
 
@@ -148,7 +193,7 @@ Behöver Rust-native NamedNodeMap med:
 | `:root`, `:empty`, `:checked`, `:disabled`, `:enabled`, `:focus` | Native |
 | `:not(sel)` | Native |
 | Comma-separated | Native |
-| CSS escape (`\30 foo`) | Native (css_unescape) |
+| CSS escape (`\30 foo`) | Native |
 | `:has()`, `:is()`, `:where()` | Saknas |
 | `+` (adjacent sibling), `~` (general sibling) | Saknas |
 
@@ -156,23 +201,30 @@ Behöver Rust-native NamedNodeMap med:
 
 ## Migrationsplan: Polyfill → Rust
 
-### Fas 1 (Hög prioritet — vanligaste API:erna)
-1. `element.remove()` — trivial i Rust
-2. `before()` / `after()` / `replaceWith()` — ChildNode i Rust
-3. `prepend()` / `append()` / `replaceChildren()` — ParentNode i Rust
-4. CharacterData `.data`, `.substringData()`, etc. — direkt på text/comment-noder
-5. `toggleAttribute()` — enkel logik
+### Fas 1 — KLAR (2026-03-24)
+1. ~~`element.remove()`~~ ✅
+2. ~~`before()` / `after()` / `replaceWith()`~~ ✅
+3. ~~`toggleAttribute()`~~ ✅
+4. ~~CharacterData `.data`, `.substringData()`, etc.~~ ✅
 
-### Fas 2 (Medium — namespace-stöd)
-6. `setAttributeNS` / `getAttributeNS` / `hasAttributeNS` / `removeAttributeNS`
-7. `element.attributes` som riktig NamedNodeMap
-8. `createElementNS`
+### Fas 2 — KLAR (2026-03-25)
+5. ~~`ownerDocument` på alla parsade noder~~ ✅
+6. ~~`document.doctype` + NodeType::Doctype~~ ✅
+7. ~~`document.childNodes/firstChild/lastChild`~~ ✅
+8. ~~`document.compareDocumentPosition/contains/lookupNamespaceURI`~~ ✅
+9. ~~`classList` live-update + DOMTokenList-metoder~~ ✅
+10. ~~`addEventListener` options-objekt (passive)~~ ✅
+11. ~~`nodeValue` per nodeType~~ ✅
+12. ~~`MutationObserver` constructor~~ ✅
 
-### Fas 3 (Event-förbättringar)
-9. `MouseEvent`, `KeyboardEvent` etc. som riktiga typer
-10. `createEvent()` i Rust
-11. Capture phase i event dispatch
+### Fas 3 — Nästa (Hög prioritet)
+13. **Range API → Rust** — 4,000+ WPT-tester, störst impact
+14. **DOMException constructor → Rust** — renare error-hantering
+15. **Event subclasses → Rust** — MouseEvent, KeyboardEvent med properties
+16. `prepend()` / `append()` / `replaceChildren()`
 
-### Fas 4 (CSS selectors)
-12. `+` och `~` combinators
-13. `:has()`, `:is()`, `:where()` pseudo-classes
+### Fas 4 — Medium prioritet
+17. Namespace-metoder (setAttributeNS etc.)
+18. `element.attributes` som riktig NamedNodeMap
+19. TreeWalker/NodeIterator filter-förbättringar
+20. CSS selectors: `+`, `~`, `:has()`, `:is()`

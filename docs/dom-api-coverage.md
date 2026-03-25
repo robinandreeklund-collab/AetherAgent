@@ -9,7 +9,8 @@ Real, unmodified tests from https://github.com/web-platform-tests/wpt run direct
 
 | Suite | Cases | Passed | Rate | Date |
 |-------|-------|--------|------|------|
-| **dom/** (total) | 2,004 | 1,324 | **66.1%** | 2026-03-24 |
+| **dom/** (total) | 19,938 | 13,383 | **67.1%** | 2026-03-25 |
+| dom/ (baseline) | 2,004 | 1,382 | 69.0% | 2026-03-24 |
 
 Run WPT yourself:
 ```bash
@@ -19,9 +20,9 @@ cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --verbose
 
 ---
 
-## DOM Methods (55+)
+## DOM Methods (70+)
 
-Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return realistic defaults without real behavior.
+Methods marked **Full** read/write the Arena DOM in Rust. Methods marked **Polyfill** use JS shims.
 
 ### Document methods
 
@@ -39,15 +40,22 @@ Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return
 | `document.body` | Full | Resolved from arena at init |
 | `document.head` | Full | Resolved from arena at init |
 | `document.documentElement` | Full | Resolved from arena at init |
+| `document.doctype` | Full | Doctype node from arena (NodeType::Doctype) |
+| `document.childNodes` | Full | All document children incl. doctype |
+| `document.firstChild/lastChild` | Full | Navigation |
 | `document.activeElement` | Full | Returns focused element or body (default) |
 | `document.readyState` | Full | "loading" → "interactive" → "complete" lifecycle |
-| `document.createRange()` | Full | Range with collapse, selectNode, setStart/End, cloneRange, getBoundingClientRect |
-| `document.getSelection()` | Full | Selection with anchorNode, focusNode, removeAllRanges, addRange, collapse |
-| `document.title` | Polyfill | Getter/setter via `<title>` element (WPT polyfill) |
+| `document.createRange()` | Polyfill | Range with full boundary tracking (JS AetherRange) |
+| `document.getSelection()` | Full | Selection with anchorNode, focusNode, etc. |
+| `document.compareDocumentPosition()` | Full | Returns DOCUMENT_POSITION_* bitmask |
+| `document.contains()` | Full | Recursive descendant check |
+| `document.lookupNamespaceURI()` | Full | Parent-chain traversal |
+| `document.isSameNode/isEqualNode` | Full | NodeKey comparison / deep equality |
+| `document.title` | Polyfill | Getter/setter via `<title>` element |
 | `document.URL` | Polyfill | Returns window.location.href |
-| `document.location` | Polyfill | Alias for window.location |
 | `document.createEvent()` | Polyfill | Basic Event factory with initEvent() |
-| `document.exitPointerLock()` | Stub | No-op |
+| `document.createAttribute(name)` | Polyfill | Creates Attr object (nodeType=2) |
+| `document.implementation` | Polyfill | createDocument/createHTMLDocument/createDocumentType |
 
 ### Element methods
 
@@ -58,13 +66,14 @@ Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return
 | `removeAttribute(name)` | Full | Removes from arena, logs mutation |
 | `hasAttribute(name)` | Full | Checks presence |
 | `getAttributeNames()` | Full | Returns all attribute names |
+| `toggleAttribute(name, force)` | Full | DOMException on invalid name |
 | `textContent` (getter/setter) | Full | Recursive text extraction / replacement |
 | `innerHTML` (getter/setter) | Full | Serializes/parses HTML |
 | `outerHTML` (getter) | Full | Serializes element + children |
 | `appendChild(child)` | Full | Moves node in arena, updates parent refs |
 | `removeChild(child)` | Full | Removes from arena, clears parent ref |
 | `insertBefore(new, ref)` | Full | Index-based insertion in children vec |
-| `replaceChild(new, old)` | Full | Combined remove + insert |
+| `replaceChild(new, old)` | Full | Combined remove + insert, recalculates pos |
 | `cloneNode(deep)` | Full | Recursive deep copy in arena |
 | `parentNode` / `parentElement` | Full | Returns parent key from arena |
 | `childNodes` | Full | Returns JsArray of all children |
@@ -79,24 +88,22 @@ Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return
 | `contains(other)` | Full | Recursive descendant check |
 | `isConnected` | Full | Traverses parent chain to document |
 | `getRootNode()` | Full | Walks parent chain to root |
+| `ownerDocument` | Full | Set on all parsed nodes, points to document |
+| `nodeValue` | Full | null for Element/Document/Doctype, data for Text/Comment |
+| `nodeType` | Full | 1=Element, 3=Text, 8=Comment, 9=Document, 10=Doctype |
+| `compareDocumentPosition(other)` | Full | DOCUMENT_POSITION_* bitmask |
+| `isSameNode(other)` / `isEqualNode(other)` | Full | NodeKey / deep equality |
+| `lookupNamespaceURI(prefix)` | Full | Parent-chain traversal |
 | `dataset` | Full | Reads `data-*` attributes, kebab→camelCase |
 | `id` / `className` / `tagName` / `nodeName` | Full | Properties from arena |
-| `nodeType` | Full | 1=Element, 3=Text, 8=Comment, 9=Document |
 | `hidden` | Full | Bound to `hidden` HTML attribute |
-| `remove()` | Polyfill | `parentNode.removeChild(this)` |
-| `before()` / `after()` | Polyfill | ChildNode insertion methods |
-| `replaceWith()` | Polyfill | ChildNode replacement |
-| `prepend()` / `append()` | Polyfill | ParentNode convenience methods |
-| `replaceChildren()` | Polyfill | Clear + append |
-| `insertAdjacentElement()` | Polyfill | Position-based element insertion |
-| `insertAdjacentHTML()` | Full | Position-based HTML insertion |
-| `insertAdjacentText()` | Polyfill | Position-based text insertion |
-| `ownerDocument` | Polyfill | Returns document (on created elements) |
-| `classList.add/remove/toggle/contains/replace` | Full | Class manipulation |
-| `classList.value()` / `classList.length()` | Full | Class string / count |
-| `addEventListener(type, fn, capture)` | Full | Per-node event registration |
+| `classList.add/remove/toggle/contains/replace` | Full | Token validation (SyntaxError/InvalidCharacterError) |
+| `classList.item/forEach/entries/keys/values` | Full | DOMTokenList iteration, Symbol.toStringTag |
+| `classList.length/value` | Full | Live getters via defineProperty |
+| `classList` (property) | Full | Read-only getter, assignment = no-op |
+| `addEventListener(type, fn, options)` | Full | Supports {capture, passive} options object |
 | `removeEventListener(type, fn)` | Full | Removes matching listener |
-| `dispatchEvent(event)` | Full | Fires listeners + ancestor bubbling |
+| `dispatchEvent(event)` | Full | Passive support, returns !defaultPrevented |
 | `focus()` / `blur()` | Full | Focus tracking in BridgeState |
 | `click()` | Full | Dispatches click event |
 | `scrollIntoView(options)` | Full | Updates scroll position |
@@ -105,12 +112,46 @@ Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return
 | `style.setProperty/getPropertyValue/removeProperty` | Full | Inline style manipulation |
 | `style.cssText` | Full | Raw style attribute |
 | `style.[property]` | Full | 21 CSS properties as camelCase |
-| `shadowRoot` | Full | Declarative Shadow DOM via `<template shadowrootmode>` |
+| `shadowRoot` | Full | Declarative Shadow DOM |
 | `attachShadow()` | Full | Creates shadow root |
-| `offsetTop/Left/Width/Height` | Full | Estimated from tag+style |
-| `scrollTop/Left/Width/Height` | Full | Tracked per node |
-| `clientWidth/Height` | Full | Same as offset dimensions |
-| `requestPointerLock()` | Stub | No-op |
+| `remove()` | Full | Migrated to Rust (2026-03-24) |
+| `before()` / `after()` | Full | Migrated to Rust (2026-03-24) |
+| `replaceWith()` | Full | Migrated to Rust (2026-03-24) |
+| `prepend()` / `append()` | Polyfill | ParentNode convenience methods |
+| `replaceChildren()` | Polyfill | Clear + append |
+| `insertAdjacentElement()` | Polyfill | Position-based element insertion |
+| `insertAdjacentHTML()` | Full | Position-based HTML insertion |
+| `insertAdjacentText()` | Polyfill | Position-based text insertion |
+
+### CharacterData methods (Native Rust)
+
+| Method | Status | Details |
+|--------|--------|---------|
+| `.data` (get/set) | Full | UTF-16 code unit aware |
+| `.length` | Full | UTF-16 length |
+| `.nodeValue` | Full | Alias for data |
+| `.substringData(offset, count)` | Full | UTF-16 boundary safe |
+| `.appendData(data)` | Full | Appends to text |
+| `.insertData(offset, data)` | Full | UTF-16 offset insert |
+| `.deleteData(offset, count)` | Full | UTF-16 range delete |
+| `.replaceData(offset, count, data)` | Full | UTF-16 range replace |
+
+### Range API (Polyfill — migration priority)
+
+| Method | Status | Details |
+|--------|--------|---------|
+| `setStart/setEnd(node, offset)` | Polyfill | Boundary tracking |
+| `setStartBefore/After(node)` | Polyfill | Parent-index based |
+| `setEndBefore/After(node)` | Polyfill | Parent-index based |
+| `collapse(toStart)` | Polyfill | Boolean collapse |
+| `selectNode/selectNodeContents` | Polyfill | Node selection |
+| `compareBoundaryPoints(how, range)` | Polyfill | NotSupportedError for how>3 |
+| `comparePoint(node, offset)` | Polyfill | IndexSizeError validation |
+| `isPointInRange(node, offset)` | Polyfill | Wrapper around comparePoint |
+| `intersectsNode(node)` | Polyfill | Root comparison |
+| `cloneRange()` | Polyfill | State copy |
+| `toString()` | Polyfill | Text extraction |
+| `START_TO_START/END_TO_END` | Polyfill | Constants |
 
 ### Window & global methods
 
@@ -119,26 +160,25 @@ Methods marked **Full** read/write the Arena DOM. Methods marked **Stub** return
 | `window.innerWidth/innerHeight` | Stub | 1024/768 |
 | `window.location.*` | Full | href, hostname, pathname, protocol, search, hash, origin, port, searchParams |
 | `window.navigator.*` | Stub | userAgent="AetherAgent/0.1", language="en" |
-| `getComputedStyle(el)` | Full | Merges inline styles + tag defaults, 15 CSS properties |
-| `matchMedia(query)` | Stub | Returns matches=true for all queries |
-| `IntersectionObserver` | Full | Fires callback per element on observe() |
-| `ResizeObserver` | Full | Fires callback on observe() with contentRect |
+| `getComputedStyle(el)` | Full | Merges inline styles + tag defaults |
+| `matchMedia(query)` | Stub | Returns matches=true |
+| `IntersectionObserver` | Full | Fires callback per element |
+| `ResizeObserver` | Full | Fires callback with contentRect |
 | `Event` constructor | Full | `new Event('click', {bubbles, cancelable, composed})` |
 | `CustomEvent` constructor | Full | `new CustomEvent('x', {detail, ...})` |
-| `customElements.define/get/whenDefined` | Full | Web Components registry |
-| `MutationObserver` | Full | observe/disconnect via event loop |
+| `MutationObserver` | Full | Constructor + observe/disconnect (2026-03-25) |
 | `setTimeout/setInterval` | Full | Virtual clock, max 500 timers, 5s delay |
 | `clearTimeout/clearInterval` | Full | Cancel by ID |
-| `requestAnimationFrame/cancelAnimationFrame` | Full | Simulated 16ms ticks |
-| `queueMicrotask` | Full | Delegates to QuickJS job queue |
-| `Promise` | Full | Via QuickJS native Promise + job queue |
+| `requestAnimationFrame` | Full | Simulated 16ms ticks |
+| `queueMicrotask` | Full | QuickJS job queue |
+| `Promise` | Full | Via QuickJS native Promise |
 | `DOMParser` | Full | parseFromString() creates document |
-| `URL/URLSearchParams` | Full | URL parsing and search param manipulation |
+| `URL/URLSearchParams` | Full | URL parsing and search params |
 | `crypto.randomUUID/getRandomValues` | Full | Crypto API |
 | `atob/btoa` | Full | Base64 encode/decode |
 | `console.log/warn/error/info` | Stub | Captured in BridgeState |
 | `performance.now()` | Full | Monotonic time |
-| `scrollTo/scrollBy/scroll` | Full | Scroll position tracking |
+| `DOMException` | Polyfill | Constructor with name/message/code |
 
 ### CSS Selector support
 
@@ -154,20 +194,15 @@ Used by `querySelector`, `querySelectorAll`, `closest`, `matches`:
 | Attribute value | `[type="text"]` | Full |
 | Attribute word | `[class~="word"]` | Full |
 | Attribute prefix | `[lang\|="en"]` | Full |
-| Tag + attribute | `input[type="text"]` | Full |
 | Child combinator | `div > span` | Full |
 | Descendant combinator | `div span` | Full |
-| Pseudo-class | `:first-child` | Full |
-| Nth-child | `:nth-child(n)` | Full |
-| Nth-of-type | `:nth-of-type(n)` | Full |
+| `:first-child` / `:last-child` | Full |
+| `:nth-child(n)` / `:nth-of-type(n)` | Full |
+| `:root` / `:empty` / `:checked` / `:not()` | Full |
 | Multiple selectors | `h1, h2, h3` | Full |
-| Complex combination | `div.container > a.link` | Full |
-
-### Global type constructors (WPT polyfill)
-
-These are defined as constructor stubs for `instanceof` checks in WPT tests:
-
-`HTMLElement`, `HTMLDivElement`, `HTMLSpanElement`, `HTMLAnchorElement`, `HTMLButtonElement`, `HTMLInputElement`, `HTMLFormElement`, `HTMLSelectElement`, `HTMLImageElement`, `HTMLTableElement`, `Text`, `Comment`, `DocumentFragment`, `Document`, `Element`, `CharacterData`, `Attr`, `NamedNodeMap`, `NodeList`, `HTMLCollection`, `DOMTokenList`, `Node`, `DOMException`, and 40+ more.
+| `+` (adjacent sibling) | `h1 + p` | Not yet |
+| `~` (general sibling) | `h1 ~ p` | Not yet |
+| `:has()` / `:is()` / `:where()` | Not yet |
 
 ---
 
@@ -188,12 +223,12 @@ These are defined as constructor stubs for `instanceof` checks in WPT tests:
 
 ---
 
-## Known Limitations (from WPT analysis)
+## Known Limitations
 
-1. **Element identity**: Each `getElementById`/`querySelector` call creates a new JS proxy object. WPT tests using `===` to compare DOM nodes will fail. This is a fundamental limitation of the proxy-based DOM bridge.
-2. **Missing prototype chain**: Elements are plain JS objects, not `HTMLDivElement` instances. `instanceof` checks fail (stubs provided via polyfill for WPT).
-3. **No `compareDocumentPosition()`**: Tree ordering comparison not yet implemented in Rust DOM bridge.
-4. **No `TreeWalker` / `NodeIterator`**: DOM traversal interfaces not implemented.
-5. **No `Attr` objects**: `getAttributeNode()` / `setAttributeNode()` not supported.
-6. **No `NamedNodeMap`**: `element.attributes` returns plain object, not NamedNodeMap.
-7. **Event phases**: Capture phase partially supported. `AT_TARGET` and `BUBBLING_PHASE` constants may be missing.
+1. **Range API is polyfill-only**: ~4,000 WPT tests use Range. Migration to Rust is highest priority.
+2. **NodeIterator/TreeWalker**: Rust handlers + JS implementation. Filter callbacks work for basic cases but `common.js` test nodes (ProcessingInstruction, foreignDoc) need more support.
+3. **Event subclasses**: MouseEvent, KeyboardEvent etc. are empty constructors — missing default property initialization.
+4. **No `Attr` node type**: `getAttributeNode()` / `setAttributeNode()` return JS objects, not spec Attr.
+5. **No `NamedNodeMap`**: `element.attributes` returns array-like object, not live NamedNodeMap.
+6. **Namespace methods**: setAttributeNS/getAttributeNS work but ignore namespace.
+7. **CSS selectors**: Missing `+`, `~`, `:has()`, `:is()`, `:where()`.
