@@ -50,7 +50,8 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
 | 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
-| **2026-03-25** | **160** | **311** | **140** | **45.0%** | +31 pass: Event subclasses, cancelBubble spec fix |
+| 2026-03-25 | 160 | 311 | 140 | 45.0% | +31 pass: Event subclasses, cancelBubble spec fix |
+| **2026-03-25** | **160** | **311** | **195** | **62.7%** | +55 pass: passive preventDefault, CompositionEvent.data |
 
 **Implementerat:**
 - addEventListener med options (capture, passive) ✅

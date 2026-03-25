@@ -5790,19 +5790,19 @@ fn make_class_list<'js>(
         };
         obj[Symbol.iterator] = obj.values;
         obj.supports = function(){ throw new TypeError("DOMTokenList has no supported tokens"); };
-        // Proxy för nummererad index-access: classList[0], classList[1] etc.
-        var proxy = new Proxy(obj, {
-            get: function(target, prop) {
-                if (typeof prop === 'string' && /^[0-9]+$/.test(prop)) {
-                    var cls = getClasses();
-                    var idx = parseInt(prop, 10);
-                    return idx < cls.length ? cls[idx] : undefined;
-                }
-                return target[prop];
-            }
-        });
-        // Kopiera metoder till proxy-objektet referens
-        return proxy;
+        // Index-access: uppdatera [0], [1], etc. dynamiskt
+        var origAdd = obj.add, origRemove = obj.remove, origToggle = obj.toggle, origReplace = obj.replace;
+        function syncIndices() {
+            var cls = getClasses();
+            for (var j = 0; j < 20; j++) { delete obj[j]; }
+            for (var j = 0; j < cls.length; j++) { obj[j] = cls[j]; }
+        }
+        syncIndices();
+        obj.add = function() { origAdd.apply(this, arguments); syncIndices(); };
+        obj.remove = function() { origRemove.apply(this, arguments); syncIndices(); };
+        obj.toggle = function() { var r = origToggle.apply(this, arguments); syncIndices(); return r; };
+        obj.replace = function() { var r = origReplace.apply(this, arguments); syncIndices(); return r; };
+        return obj;
     })"#;
     let get_classes_fn = Function::new(
         ctx.clone(),
@@ -5812,11 +5812,7 @@ fn make_class_list<'js>(
         }),
     )?;
     if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
-        if let Ok(proxy) =
-            update_fn.call::<_, Value>((obj.clone(), get_classes_fn, get_raw_class_fn))
-        {
-            return Ok(proxy);
-        }
+        let _ = update_fn.call::<_, Value>((obj.clone(), get_classes_fn, get_raw_class_fn));
     }
 
     Ok(obj.into_value())
@@ -6511,7 +6507,7 @@ fn register_window_with_viewport<'js>(
             });
             this.stopPropagation = function() { this._stopPropagationFlag = true; };
             this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-            this.preventDefault = function() { if (this.cancelable) { this.defaultPrevented = true; this.returnValue = false; } };
+            this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
             this.initEvent = function(type, bubbles, cancelable) { this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; };
         };
         Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;

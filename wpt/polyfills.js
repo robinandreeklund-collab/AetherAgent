@@ -337,8 +337,18 @@
   }
 
   // Enklare event-typer (ärver Event direkt)
+  // CompositionEvent — har data property
+  if (!globalThis.CompositionEvent) {
+    globalThis.CompositionEvent = function CompositionEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      this.data = (opts && opts.data !== undefined) ? opts.data : '';
+    };
+    CompositionEvent.prototype = Object.create(UIEvent.prototype);
+    CompositionEvent.prototype.constructor = CompositionEvent;
+  }
+
   var simpleTypes = [
-    'CompositionEvent', 'TouchEvent', 'AnimationEvent', 'TransitionEvent',
+    'TouchEvent', 'AnimationEvent', 'TransitionEvent',
     'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
     'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
     'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
