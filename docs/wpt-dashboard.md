@@ -12,10 +12,10 @@
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~12,800+ | ~64% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~360+ | ~16% |
+| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~13,200+ | ~66% |
+| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~450+ | ~20% |
 | **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~72 | ~5% |
-| **Total alla sviter** | | **~23,600+** | **~13,200+** | — |
+| **Total alla sviter** | | **~23,600+** | **~13,700+** | — |
 
 ---
 
@@ -26,7 +26,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
-| **2026-03-25** | **286** | **6,624** | **5,017** | **75.7%** | +71 pass: Event fix, classList, Text/Comment constructors |
+| 2026-03-25 | 286 | 6,624 | 5,017 | 75.7% | +71 pass: Event fix, classList, Text/Comment constructors |
+| **2026-03-25** | **286** | **6,624** | **5,006** | **75.6%** | textContent null, append dedup |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -100,7 +101,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **18** | **1,584** | **516** | **32.6%** | Baseline |
+| 2026-03-25 | 18 | 1,584 | 516 | 32.6% | Baseline |
+| **2026-03-25** | **18** | **1,584** | **619** | **39.1%** | +103: whatToShow unsigned fix, root identity |
 
 **Implementerat:**
 - TreeWalker: nextNode, previousNode, parentNode, firstChild ✅
