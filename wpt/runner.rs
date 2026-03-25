@@ -139,17 +139,21 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         };
     }
 
-    // Kör CSS compiler (LightningCSS + css-inline) för att inlina <style>-regler
-    // till style=""-attribut INNAN JS-exekvering. Detta ger getComputedStyle
-    // tillgång till alla CSS-regler via inline styles.
-    let compiled = css_compiler::compile_css(&html, &css_compiler::ViewportConfig::default());
-    let html_for_dom = if compiled.fully_compiled {
-        &compiled.html
+    // Kör CSS compiler BARA om HTML har <style>-taggar som getComputedStyle behöver
+    // (undvik att css-inline ändrar DOM-struktur i tester som inte behöver det)
+    let has_style_tags = html.contains("<style");
+    let html_for_dom = if has_style_tags {
+        let compiled = css_compiler::compile_css(&html, &css_compiler::ViewportConfig::default());
+        if compiled.fully_compiled {
+            compiled.html
+        } else {
+            html.clone()
+        }
     } else {
-        &html
+        html.clone()
     };
 
-    let arena = arena_dom_sink::parse_html_to_arena(html_for_dom);
+    let arena = arena_dom_sink::parse_html_to_arena(&html_for_dom);
 
     // Kör alla scripts med DOM bridge + lifecycle
     let result = dom_bridge::eval_js_with_lifecycle(&all_scripts, arena);

@@ -62,9 +62,6 @@
 
   if (!impl.createHTMLDocument) {
     impl.createHTMLDocument = function(title) {
-      // Skapa en riktig Document-nod i ArenaDom (om __createDocumentNode finns)
-      var docNode = (document.__createDocumentNode) ? document.__createDocumentNode() : null;
-      var docKey = docNode ? docNode.__nodeKey__ : null;
       // Bygg en riktig DOM-struktur via vår arena
       var html = document.createElement('html');
       var head = document.createElement('head');
@@ -87,33 +84,11 @@
       doc.body = body;
       doc.title = title || '';
       doc.implementation = document.implementation;
-      // Factory-funktioner sätter owner_doc till foreignDoc
-      var _setOwnerDoc = document.__setOwnerDoc;
-      doc.createElement = function(tag) {
-        var el = document.createElement(tag);
-        if (el && docKey && _setOwnerDoc) _setOwnerDoc(el, docNode);
-        return el;
-      };
-      doc.createTextNode = function(text) {
-        var n = document.createTextNode(text);
-        if (n && docKey && _setOwnerDoc) _setOwnerDoc(n, docNode);
-        return n;
-      };
-      doc.createComment = function(text) {
-        var n = document.createComment(text);
-        if (n && docKey && _setOwnerDoc) _setOwnerDoc(n, docNode);
-        return n;
-      };
-      doc.createDocumentFragment = function() {
-        var n = document.createDocumentFragment();
-        if (n && docKey && _setOwnerDoc) _setOwnerDoc(n, docNode);
-        return n;
-      };
-      doc.createElementNS = document.createElementNS ? function(ns, qname) {
-        var el = document.createElementNS(ns, qname);
-        if (el && docKey && _setOwnerDoc) _setOwnerDoc(el, docNode);
-        return el;
-      } : undefined;
+      doc.createElement = document.createElement.bind(document);
+      doc.createTextNode = document.createTextNode.bind(document);
+      doc.createComment = document.createComment.bind(document);
+      doc.createDocumentFragment = document.createDocumentFragment.bind(document);
+      doc.createElementNS = document.createElementNS ? document.createElementNS.bind(document) : undefined;
       // Query-metoder söker i detta dokumentets träd
       doc.getElementById = function(id) {
         // Rekursiv sökning i hela dokumentträdet
@@ -163,18 +138,6 @@
       doc.addEventListener = function() {};
       doc.removeEventListener = function() {};
       doc.dispatchEvent = function() { return true; };
-      // Cacha foreignDoc i globals så OwnerDocumentGetter kan hitta den
-      if (docKey && _setOwnerDoc) {
-        doc.__nodeKey__ = docKey;
-        doc.nodeType = 9;
-        globalThis['__foreignDoc_' + docKey] = doc;
-        // Sätt owner_doc på alla initiala barn
-        function setOwnerDeep(node) {
-          if (node && node.__nodeKey__) { _setOwnerDoc(node, docNode); }
-          if (node && node.childNodes) { for (var i = 0; i < node.childNodes.length; i++) setOwnerDeep(node.childNodes[i]); }
-        }
-        setOwnerDeep(html);
-      }
       return doc;
     };
   }

@@ -957,30 +957,9 @@ fn notify_range_mutation(
     let _ = ctx.eval::<Value, _>(code.as_str());
 }
 
-struct OwnerDocumentGetter {
-    state: SharedState,
-    key: NodeKey,
-}
+struct OwnerDocumentGetter;
 impl JsHandler for OwnerDocumentGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // Kolla om noden tillhör ett foreignDoc (owner_doc)
-        let owner_doc_key = {
-            if let Ok(s) = self.state.try_borrow() {
-                s.arena.nodes.get(self.key).and_then(|n| n.owner_doc)
-            } else {
-                None
-            }
-        };
-        if let Some(doc_key) = owner_doc_key {
-            // Returnera foreignDoc-objektet från cache
-            let cache_key = format!("__foreignDoc_{}", node_key_to_f64(doc_key) as u64);
-            if let Ok(v) = ctx.globals().get::<_, Value>(cache_key.as_str()) {
-                if !v.is_undefined() && !v.is_null() {
-                    return Ok(v);
-                }
-            }
-        }
-        // Fallback: huvuddokumentet
         ctx.globals().get::<_, Value>("document")
     }
 }
@@ -4288,10 +4267,7 @@ fn make_element_object<'js>(
     if node_type_val != 9 {
         obj.prop(
             "ownerDocument",
-            Accessor::new_get(JsFn(OwnerDocumentGetter {
-                state: Rc::clone(state),
-                key,
-            })),
+            Accessor::new_get(JsFn(OwnerDocumentGetter)),
         )?;
     }
     obj.set("id", id_val.as_str())?;
