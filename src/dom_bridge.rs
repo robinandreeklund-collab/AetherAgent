@@ -889,6 +889,14 @@ impl JsHandler for NativeCompareBoundary {
 
 // ─── getSelection stub ──────────────────────────────────────────────────────
 
+struct GetSelectionFromDoc;
+impl JsHandler for GetSelectionFromDoc {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Delegerar till document.getSelection()
+        ctx.eval::<Value, _>("document.getSelection()")
+    }
+}
+
 struct GetSelection;
 impl JsHandler for GetSelection {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -6101,6 +6109,11 @@ fn register_window_with_viewport<'js>(
     win.set("scroll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
     win.set("scrollX", 0)?;
     win.set("scrollY", 0)?;
+    // getSelection — delegerar till document.getSelection
+    win.set(
+        "getSelection",
+        Function::new(ctx.clone(), JsFn(GetSelectionFromDoc))?,
+    )?;
 
     // addEventListener / removeEventListener / dispatchEvent på window
     {

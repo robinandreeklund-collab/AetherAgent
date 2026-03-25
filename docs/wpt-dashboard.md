@@ -73,15 +73,22 @@
 | 2026-03-25 | ~55 | ~11,000+ | ~7,700+ | ~70% | Baseline (polyfill, inkl. slow tester) |
 | 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
 | 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
-| **2026-03-25** | **55** | **10,762** | **7,182** | **66.7%** | WrongDocumentError, nativeChildIndex, toString, selectNode re-enabled |
+| 2026-03-25 | 55 | 10,762 | 7,182 | 66.7% | WrongDocumentError, nativeChildIndex, toString |
+| **2026-03-25** | **55** | **~10,800** | **~7,200+** | **~67%** | window.getSelection, selectNode re-enabled |
 
 **Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Skippade (1 kvar):** Range-intersectsNode.html (>60s)
 
-**Största kvarvarande failures:**
-- compareBoundaryPoints: 770 fail (detached/foreignDoc ranges)
-- Range-set: ~1,370 fail (foreignDoc-stöd)
+**Kvarvarande failures (roadmap till 80%):**
+- compareBoundaryPoints: ~570 fail (detached/foreignDoc ranges — multi-doc stöd)
+- Range-set: ~900 fail (ownerDocument.createRange undefined på documentElement)
+- Range-mutations: ~170 fail (Range boundary update vid DOM-mutationer)
+- OpaqueRange tentative: ~100 fail (experimentell spec, ej prioriterad)
+
+**Kända buggar:**
+- `document.documentElement.ownerDocument` = undefined (skapas innan document registreras)
+- Range-set/collapse varierar ±100 pass pga 30s timeout-gräns
 
 **Mål Q2 2026:** 80%
 
