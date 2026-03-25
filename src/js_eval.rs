@@ -22,7 +22,7 @@ const MAX_MEMORY: usize = 16 * 1024 * 1024;
 /// Max exekveringstid i millisekunder (väggklocka) innan interrupt
 /// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
 #[cfg(feature = "js-eval")]
-const MAX_EVAL_MS: u64 = 5000;
+const MAX_EVAL_MS: u64 = 30000;
 
 /// Interrupt-state som håller referens till deadline-baserad avbrottslogik.
 /// Ingen separat tråd behövs — interrupt-handlern kollar Instant direkt.
@@ -389,7 +389,8 @@ pub fn detect_js_snippets(html: &str) -> JsDetectionResult {
 /// Returnerar fullständig kod (ej trunkerad) för varje inline script.
 /// Filtrerar bort externa scripts (src=), type="application/json", type="application/ld+json".
 #[cfg(feature = "js-eval")]
-pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
+#[allow(dead_code)] // Används av blitz/fetch features
+pub(crate) fn extract_ordered_scripts(html: &str) -> Vec<String> {
     let mut scripts = Vec::new();
     let lower = html.to_lowercase();
     let mut search_from = 0;
@@ -432,7 +433,8 @@ pub fn extract_ordered_scripts(html: &str) -> Vec<String> {
 /// En script-entry i dokumentordning — antingen inline-kod eller en extern URL.
 #[cfg(feature = "js-eval")]
 #[derive(Debug, Clone)]
-pub enum ScriptEntry {
+#[allow(dead_code)] // Används av fetch feature
+pub(crate) enum ScriptEntry {
     /// Inline script — redan i HTML, behöver ej hämtas
     Inline,
     /// Extern script — URL som behöver hämtas
@@ -445,7 +447,8 @@ pub enum ScriptEntry {
 /// inklusive externa `<script src="...">` som behöver hämtas separat.
 /// JSON/LD+JSON/importmap-scripts filtreras bort.
 #[cfg(feature = "js-eval")]
-pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
+#[allow(dead_code)] // Används av fetch feature
+pub(crate) fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
     let mut entries = Vec::new();
     let lower = html.to_lowercase();
     let mut search_from = 0;
@@ -492,6 +495,7 @@ pub fn extract_all_scripts(html: &str, base_url: &str) -> Vec<ScriptEntry> {
 
 /// Extrahera URL från ett script-tags src-attribut
 #[cfg(feature = "js-eval")]
+#[allow(dead_code)] // Används av fetch feature
 fn extract_src_url(tag: &str, base_url: &str) -> Option<String> {
     let lower = tag.to_lowercase();
     let src_pos = lower.find("src=")?;

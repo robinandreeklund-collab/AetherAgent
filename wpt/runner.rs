@@ -230,12 +230,12 @@ fn extract_src_attr(tag: &str) -> Option<String> {
     let idx = lower.find("src=")?;
     let after = &tag[idx + 4..];
     let after = after.trim_start();
-    if after.starts_with('"') {
-        let end = after[1..].find('"')?;
-        Some(after[1..1 + end].to_string())
-    } else if after.starts_with('\'') {
-        let end = after[1..].find('\'')?;
-        Some(after[1..1 + end].to_string())
+    if let Some(rest) = after.strip_prefix('"') {
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    } else if let Some(rest) = after.strip_prefix('\'') {
+        let end = rest.find('\'')?;
+        Some(rest[..end].to_string())
     } else {
         let end = after
             .find(|c: char| c.is_whitespace() || c == '>')
@@ -246,9 +246,9 @@ fn extract_src_attr(tag: &str) -> Option<String> {
 
 /// Resolva en script-sökväg relativt HTML-dir eller WPT-root
 fn resolve_script_path(src: &str, html_dir: &Path, wpt_root: &Path) -> PathBuf {
-    if src.starts_with('/') {
+    if let Some(rest) = src.strip_prefix('/') {
         // Absolut sökväg relativt WPT-root
-        wpt_root.join(&src[1..])
+        wpt_root.join(rest)
     } else {
         // Relativ sökväg relativt HTML-filen
         html_dir.join(src)

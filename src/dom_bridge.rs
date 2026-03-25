@@ -2539,7 +2539,7 @@ struct LookupNamespaceURI {
     key: NodeKey,
 }
 impl JsHandler for LookupNamespaceURI {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
         let node = s.arena.nodes.get(self.key);
         let nt = node.map(|n| n.node_type.clone());
@@ -2557,7 +2557,7 @@ impl JsHandler for LookupNamespaceURI {
                         state: Rc::clone(&self.state),
                         key: pk,
                     };
-                    h.handle(ctx, args)
+                    h.handle(ctx, &[])
                 } else {
                     Ok(Value::new_null(ctx.clone()))
                 }
@@ -2568,9 +2568,7 @@ impl JsHandler for LookupNamespaceURI {
 }
 
 struct LookupPrefix {
-    state: SharedState,
-    #[allow(dead_code)]
-    key: NodeKey,
+    _key: NodeKey,
 }
 impl JsHandler for LookupPrefix {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -2812,14 +2810,9 @@ impl JsHandler for CompareDocumentPosition {
 fn ancestor_chain(arena: &ArenaDom, key: NodeKey) -> Vec<NodeKey> {
     let mut chain = vec![key];
     let mut current = key;
-    loop {
-        match arena.nodes.get(current).and_then(|n| n.parent) {
-            Some(p) => {
-                chain.push(p);
-                current = p;
-            }
-            None => break,
-        }
+    while let Some(p) = arena.nodes.get(current).and_then(|n| n.parent) {
+        chain.push(p);
+        current = p;
     }
     chain
 }
@@ -2861,7 +2854,6 @@ impl JsHandler for IsEqualNode {
 
 // ─── Node.isSameNode ───────────────────────────────────────────────────────
 struct IsSameNode {
-    state: SharedState,
     key: NodeKey,
 }
 impl JsHandler for IsSameNode {
@@ -2973,8 +2965,7 @@ impl JsHandler for CreateTreeWalker {
             tw.set("filter", Value::new_null(ctx.clone()))?;
         }
 
-        // TreeWalker-metoder via JS — behöver closure-tillgång till state
-        let state_rc = Rc::clone(&self.state);
+        // TreeWalker-metoder via JS
         let walker_code = r#"
         (function(tw) {
             var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
@@ -3256,7 +3247,7 @@ fn utf16_len(s: &str) -> usize {
 }
 
 fn args_to_node_keys<'js>(
-    ctx: &Ctx<'js>,
+    _ctx: &Ctx<'js>,
     args: &[Value<'js>],
     state: &SharedState,
 ) -> rquickjs::Result<Vec<NodeKey>> {
@@ -3862,6 +3853,12 @@ fn make_element_object<'js>(
     obj.set("nodeType", node_type_val)?;
     obj.set("tagName", tag_name.as_str())?;
     obj.set("nodeName", tag_name.as_str())?;
+    // ownerDocument — alla noder utom document pekar på document
+    if node_type_val != 9 {
+        if let Ok(doc) = ctx.globals().get::<_, Value>("document") {
+            obj.set("ownerDocument", doc)?;
+        }
+    }
     obj.set("id", id_val.as_str())?;
     obj.set("className", class_val.as_str())?;
 
@@ -4183,13 +4180,7 @@ fn make_element_object<'js>(
     )?;
     obj.set(
         "lookupPrefix",
-        Function::new(
-            ctx.clone(),
-            JsFn(LookupPrefix {
-                state: Rc::clone(state),
-                key,
-            }),
-        )?,
+        Function::new(ctx.clone(), JsFn(LookupPrefix { _key: key }))?,
     )?;
     obj.set(
         "isDefaultNamespace",
@@ -4273,13 +4264,7 @@ fn make_element_object<'js>(
     )?;
     obj.set(
         "isSameNode",
-        Function::new(
-            ctx.clone(),
-            JsFn(IsSameNode {
-                state: Rc::clone(state),
-                key,
-            }),
-        )?,
+        Function::new(ctx.clone(), JsFn(IsSameNode { key }))?,
     )?;
     obj.set(
         "normalize",
@@ -7700,7 +7685,7 @@ fn find_all_matching(arena: &ArenaDom, key: NodeKey, selector: &str, results: &m
 /// Splitta sträng på ASCII whitespace per HTML-spec (space, tab, LF, FF, CR).
 /// Unicode-whitespace som \u{00A0} (NBSP) är INTE separatorer — de är giltiga class-tecken.
 fn split_ascii_whitespace(s: &str) -> impl Iterator<Item = &str> {
-    s.split(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0C' | '\r'))
+    s.split([' ', '\t', '\n', '\x0C', '\r'])
         .filter(|s| !s.is_empty())
 }
 
