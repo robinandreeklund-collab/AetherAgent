@@ -889,6 +889,25 @@ impl JsHandler for NativeCompareBoundary {
 
 // ─── getSelection stub ──────────────────────────────────────────────────────
 
+/// Notifiera aktiva Range-objekt om en DOM-mutation via __nodeKey__-jämförelse.
+fn notify_range_mutation(
+    ctx: &Ctx<'_>,
+    mutation_type: &str,
+    parent_key: NodeKey,
+    _node_key: NodeKey,
+    old_parent_key: Option<NodeKey>,
+    old_index: Option<usize>,
+) {
+    let parent_bits = node_key_to_f64(parent_key);
+    let old_parent_bits = old_parent_key.map_or(-1.0, node_key_to_f64);
+    let oi = old_index.unwrap_or(0);
+    let code = format!(
+        "if(globalThis.__notifyRangeMutationByKey)globalThis.__notifyRangeMutationByKey('{}',{},{},{})",
+        mutation_type, parent_bits, old_parent_bits, oi
+    );
+    let _ = ctx.eval::<Value, _>(code.as_str());
+}
+
 struct OwnerDocumentGetter;
 impl JsHandler for OwnerDocumentGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -1769,6 +1788,8 @@ impl JsHandler for AppendChild {
             Some(k) => k,
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
+        let old_parent_key;
+        let old_index;
         {
             let mut s = self.state.borrow_mut();
             // CharacterData (Text, Comment) får inte ha barn
@@ -1787,8 +1808,16 @@ impl JsHandler for AppendChild {
                     ));
                 }
             }
+            // Spara gammal position för Range-mutation
+            old_parent_key = s.arena.nodes.get(child_key).and_then(|n| n.parent);
+            old_index = old_parent_key.and_then(|pk| {
+                s.arena
+                    .nodes
+                    .get(pk)
+                    .and_then(|p| p.children.iter().position(|&c| c == child_key))
+            });
             // Ta bort från gammal förälder
-            if let Some(old_parent) = s.arena.nodes.get(child_key).and_then(|n| n.parent) {
+            if let Some(old_parent) = old_parent_key {
                 if let Some(parent_node) = s.arena.nodes.get_mut(old_parent) {
                     parent_node.children.retain(|&c| c != child_key);
                 }
@@ -1796,6 +1825,15 @@ impl JsHandler for AppendChild {
             s.arena.append_child(self.key, child_key);
             s.mutations.push(std::borrow::Cow::Borrowed("appendChild"));
         }
+        // Notifiera Range-objekt om mutationen
+        notify_range_mutation(
+            ctx,
+            "appendChild",
+            self.key,
+            child_key,
+            old_parent_key,
+            old_index,
+        );
         make_element_object(ctx, child_key, &self.state)
     }
 }
@@ -1815,9 +1853,9 @@ impl JsHandler for RemoveChild {
                 ));
             }
         };
+        let old_index;
         {
             let mut s = self.state.borrow_mut();
-            // Kontrollera att child verkligen är barn till denna nod
             let is_child = s
                 .arena
                 .nodes
@@ -1834,6 +1872,11 @@ impl JsHandler for RemoveChild {
                     .into(),
                 ));
             }
+            old_index = s
+                .arena
+                .nodes
+                .get(self.key)
+                .and_then(|n| n.children.iter().position(|&c| c == child_key));
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.children.retain(|&c| c != child_key);
             }
@@ -1842,6 +1885,7 @@ impl JsHandler for RemoveChild {
             }
             s.mutations.push(std::borrow::Cow::Borrowed("removeChild"));
         }
+        notify_range_mutation(ctx, "removeChild", self.key, child_key, None, old_index);
         make_element_object(ctx, child_key, &self.state)
     }
 }
@@ -1857,10 +1901,18 @@ impl JsHandler for InsertBefore {
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
         let ref_key = args.get(1).and_then(extract_node_key);
+        let old_parent_key;
+        let old_index;
         {
             let mut s = self.state.borrow_mut();
-            // Ta bort från gammal förälder
-            if let Some(old_parent) = s.arena.nodes.get(new_key).and_then(|n| n.parent) {
+            old_parent_key = s.arena.nodes.get(new_key).and_then(|n| n.parent);
+            old_index = old_parent_key.and_then(|pk| {
+                s.arena
+                    .nodes
+                    .get(pk)
+                    .and_then(|p| p.children.iter().position(|&c| c == new_key))
+            });
+            if let Some(old_parent) = old_parent_key {
                 if let Some(p) = s.arena.nodes.get_mut(old_parent) {
                     p.children.retain(|&c| c != new_key);
                 }
@@ -1881,6 +1933,14 @@ impl JsHandler for InsertBefore {
             }
             s.mutations.push(std::borrow::Cow::Borrowed("insertBefore"));
         }
+        notify_range_mutation(
+            ctx,
+            "insertBefore",
+            self.key,
+            new_key,
+            old_parent_key,
+            old_index,
+        );
         make_element_object(ctx, new_key, &self.state)
     }
 }
@@ -6460,35 +6520,24 @@ fn register_window_with_viewport<'js>(
         CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];
-        // Range mutation notification — spec: https://dom.spec.whatwg.org/#concept-range-bp-after
-        globalThis.__notifyRangeMutation = function(type, parent, node, oldParent, oldIndex) {
+        // Range mutation notification via __nodeKey__ (anropas från Rust)
+        globalThis.__notifyRangeMutationByKey = function(type, parentKey, oldParentKey, oldIndex) {
             var ranges = globalThis.__liveRanges;
             if (!ranges || !ranges.length) return;
             for (var i = 0; i < ranges.length; i++) {
                 var r = ranges[i];
                 if (!r) continue;
                 var sc = r.startContainer, so = r.startOffset, ec = r.endContainer, eo = r.endOffset;
-                var sameKey = function(a, b) { return a === b || (a && b && a.__nodeKey__ && b.__nodeKey__ && a.__nodeKey__ === b.__nodeKey__); };
+                var scKey = sc && sc.__nodeKey__, ecKey = ec && ec.__nodeKey__;
                 if (type === 'removeChild') {
-                    // Om container är parent och offset > oldIndex, minska offset
-                    if (sameKey(sc, parent) && so > oldIndex) r.startOffset = so - 1;
-                    if (sameKey(ec, parent) && eo > oldIndex) r.endOffset = eo - 1;
-                } else if (type === 'insertBefore' || type === 'appendChild') {
-                    // Om container är parent och offset > newIndex, öka offset
-                    var newIndex = 0;
-                    if (parent && parent.childNodes) {
-                        for (var ci = 0; ci < parent.childNodes.length; ci++) {
-                            if (sameKey(parent.childNodes[ci], node)) { newIndex = ci; break; }
-                        }
-                    }
+                    if (scKey === parentKey && so > oldIndex) r.startOffset = so - 1;
+                    if (ecKey === parentKey && eo > oldIndex) r.endOffset = eo - 1;
+                } else if (type === 'appendChild' || type === 'insertBefore') {
                     // Nod togs bort från oldParent
-                    if (oldParent && !sameKey(oldParent, parent)) {
-                        if (sameKey(sc, oldParent) && so > oldIndex) r.startOffset = so - 1;
-                        if (sameKey(ec, oldParent) && eo > oldIndex) r.endOffset = eo - 1;
+                    if (oldParentKey >= 0 && oldParentKey !== parentKey) {
+                        if (scKey === oldParentKey && so > oldIndex) r.startOffset = Math.max(0, so - 1);
+                        if (ecKey === oldParentKey && eo > oldIndex) r.endOffset = Math.max(0, eo - 1);
                     }
-                    // Nod infogades i parent
-                    if (sameKey(sc, parent) && so >= newIndex) r.startOffset = so + 1;
-                    if (sameKey(ec, parent) && eo >= newIndex) r.endOffset = eo + 1;
                 }
                 r._update();
             }
