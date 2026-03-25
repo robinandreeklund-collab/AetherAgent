@@ -595,6 +595,10 @@
     // Assertions
     globalThis.assert_true = assert_true;
     globalThis.assert_false = assert_false;
+    // setup() — kör fn direkt (WPT setup-hook)
+    globalThis.setup = function(fn) {
+      if (typeof fn === 'function') fn();
+    };
     globalThis.assert_equals = assert_equals;
     globalThis.assert_not_equals = assert_not_equals;
     globalThis.assert_in_array = assert_in_array;

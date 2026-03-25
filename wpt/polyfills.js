@@ -1047,6 +1047,18 @@
 
   // Override document.createRange
   document.createRange = function() { return new AetherRange(); };
+
+  // document.createAttribute
+  if (!document.createAttribute) {
+    document.createAttribute = function(name) {
+      var attr = { nodeType: 2, nodeName: name.toLowerCase(), name: name.toLowerCase(), value: '', nodeValue: '', specified: true,
+        ownerElement: null, ownerDocument: document,
+        toString: function() { return '[object Attr]'; }
+      };
+      Object.defineProperty(attr, Symbol.toStringTag, { value: 'Attr' });
+      return attr;
+    };
+  }
   globalThis.Range = AetherRange;
 })();
 

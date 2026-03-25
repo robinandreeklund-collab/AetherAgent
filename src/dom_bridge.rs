@@ -1897,7 +1897,7 @@ impl JsHandler for ReplaceChild {
                 .nodes
                 .get(self.key)
                 .and_then(|n| n.children.iter().position(|&c| c == old_key));
-            let pos = match pos {
+            let _pos = match pos {
                 Some(p) => p,
                 None => {
                     drop(s);
@@ -4077,6 +4077,26 @@ fn make_element_object<'js>(
         obj.set("name", tag_name.as_str())?;
         obj.set("publicId", "")?;
         obj.set("systemId", "")?;
+    }
+    // nodeValue: null för Element/Document/Doctype/Fragment, data för Text/Comment
+    match node_type_val {
+        1 | 9 | 10 | 11 => {
+            obj.set("nodeValue", Value::new_null(ctx.clone()))?;
+        }
+        3 | 8 => {
+            // Text/Comment — sätt nodeValue till textinnehållet
+            let text_val = {
+                let s = state.borrow();
+                s.arena
+                    .nodes
+                    .get(key)
+                    .and_then(|n| n.text.as_ref())
+                    .map(|t| t.to_string())
+                    .unwrap_or_default()
+            };
+            obj.set("nodeValue", text_val.as_str())?;
+        }
+        _ => {}
     }
 
     // ─── Metoder ───────────────────────────────────────────────────
