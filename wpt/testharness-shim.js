@@ -614,6 +614,14 @@
     globalThis.assert_own_property = assert_own_property;
     globalThis.assert_inherits = assert_inherits;
     globalThis.assert_regexp_match = assert_regexp_match;
+    globalThis.assert_greater_than = function(a, b, d) { if (!(a > b)) throw new AssertionError(d || ('expected ' + a + ' > ' + b)); };
+    globalThis.assert_less_than = function(a, b, d) { if (!(a < b)) throw new AssertionError(d || ('expected ' + a + ' < ' + b)); };
+    globalThis.assert_greater_than_equal = function(a, b, d) { if (!(a >= b)) throw new AssertionError(d || ('expected ' + a + ' >= ' + b)); };
+    globalThis.assert_less_than_equal = function(a, b, d) { if (!(a <= b)) throw new AssertionError(d || ('expected ' + a + ' <= ' + b)); };
+    globalThis.assert_between_exclusive = function(a, lo, hi, d) { if (!(a > lo && a < hi)) throw new AssertionError(d || ('expected ' + lo + ' < ' + a + ' < ' + hi)); };
+    globalThis.assert_between_inclusive = function(a, lo, hi, d) { if (!(a >= lo && a <= hi)) throw new AssertionError(d || ('expected ' + lo + ' <= ' + a + ' <= ' + hi)); };
+    globalThis.assert_object_equals = function(a, b, d) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new AssertionError(d || ('expected ' + JSON.stringify(a) + ' equals ' + JSON.stringify(b))); };
+    globalThis.assert_approx_equals = function(a, b, eps, d) { if (Math.abs(a - b) > (eps || 0)) throw new AssertionError(d || ('expected ' + a + ' ~= ' + b)); };
 
     // Test-objekt och statusar
     globalThis.Test = Test;

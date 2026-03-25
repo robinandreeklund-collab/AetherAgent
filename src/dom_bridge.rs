@@ -3842,13 +3842,26 @@ impl JsHandler for DispatchEventHandler {
                 })
                 .unwrap_or_default()
         };
+        // Sätt event.target och eventPhase per spec
+        let target_obj = args
+            .first()
+            .and_then(|_| {
+                // Skapa target-referens till detta element
+                make_element_object(ctx, self.key, &self.state).ok()
+            })
+            .unwrap_or(Value::new_null(ctx.clone()));
+        if let Some(ev) = event_obj {
+            let _ = ev.set("target", target_obj.clone());
+            let _ = ev.set("srcElement", target_obj.clone());
+            let _ = ev.set("currentTarget", target_obj);
+            let _ = ev.set("eventPhase", 2i32); // AT_TARGET
+        }
         for (cb, passive) in callbacks {
             if let Ok(func) = cb.restore(ctx) {
                 let event = args
                     .first()
                     .cloned()
                     .unwrap_or(Value::new_undefined(ctx.clone()));
-                // Om passive (explicit eller default) → sätt __passive flagga
                 let is_passive = passive.unwrap_or(is_passive_default);
                 if is_passive {
                     if let Some(obj) = event.as_object() {
@@ -3858,8 +3871,14 @@ impl JsHandler for DispatchEventHandler {
                 let _ = func.call::<_, Value>((event,));
             }
         }
-        // Returnera !defaultPrevented
-        let default_prevented = event_obj
+        // Resätt eventPhase efter dispatch
+        if let Some(ev) = args.first().and_then(|v| v.as_object()) {
+            let _ = ev.set("eventPhase", 0i32); // NONE
+            let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
+        }
+        let default_prevented = args
+            .first()
+            .and_then(|v| v.as_object())
             .and_then(|obj| obj.get::<_, bool>("defaultPrevented").ok())
             .unwrap_or(false);
         Ok(Value::new_bool(ctx.clone(), !default_prevented))
@@ -6445,6 +6464,12 @@ fn register_window_with_viewport<'js>(
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
         globalThis.crypto = globalThis.window.crypto;
+        // Synka window-funktioner till globalThis (WPT anropar addEventListener() utan window.)
+        if (globalThis.window) {
+            globalThis.addEventListener = globalThis.window.addEventListener;
+            globalThis.removeEventListener = globalThis.window.removeEventListener;
+            globalThis.dispatchEvent = globalThis.window.dispatchEvent;
+        }
 
         // TextEncoder/TextDecoder — UTF-8
         globalThis.TextEncoder = function TextEncoder() {
