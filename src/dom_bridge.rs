@@ -282,6 +282,12 @@ struct BridgeState {
     /// Original HTML — behövs för Blitz Stylo lazy-init
     #[cfg(feature = "blitz")]
     original_html: Option<String>,
+    /// Mutation counter — ökas vid DOM-mutationer, invaliderar Blitz cache
+    #[cfg(feature = "blitz")]
+    blitz_style_generation: u64,
+    /// Generation vid senaste Blitz-cache-build
+    #[cfg(feature = "blitz")]
+    blitz_cache_generation: u64,
 }
 
 type SharedState = Rc<RefCell<BridgeState>>;
@@ -336,6 +342,10 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         blitz_styles: None,
         #[cfg(feature = "blitz")]
         original_html: None,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -461,6 +471,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         blitz_styles: None,
         #[cfg(feature = "blitz")]
         original_html: None,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -537,6 +551,10 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 blitz_styles: None,
                 #[cfg(feature = "blitz")]
                 original_html: None,
+                #[cfg(feature = "blitz")]
+                blitz_style_generation: 0,
+                #[cfg(feature = "blitz")]
+                blitz_cache_generation: 0,
             }
         }
     };
@@ -603,6 +621,10 @@ fn eval_js_with_lifecycle_internal(
         blitz_styles: None,
         #[cfg(feature = "blitz")]
         original_html: _original_html,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -731,6 +753,10 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         blitz_styles: None,
         #[cfg(feature = "blitz")]
         original_html: None,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -828,6 +854,10 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 blitz_styles: None,
                 #[cfg(feature = "blitz")]
                 original_html: None,
+                #[cfg(feature = "blitz")]
+                blitz_style_generation: 0,
+                #[cfg(feature = "blitz")]
+                blitz_cache_generation: 0,
             }
         }
     };
@@ -1206,6 +1236,14 @@ fn notify_range_mutation(
         mutation_type, parent_bits, old_parent_bits, oi
     );
     let _ = ctx.eval::<Value, _>(code.as_str());
+}
+
+/// Invalidera Blitz computed styles-cache vid DOM-mutation
+#[cfg(feature = "blitz")]
+fn invalidate_blitz_cache(state: &SharedState) {
+    if let Ok(mut s) = state.try_borrow_mut() {
+        s.blitz_styles = None;
+    }
 }
 
 struct OwnerDocumentGetter;
@@ -1897,6 +1935,8 @@ impl JsHandler for SetAttribute {
                 name
             )));
         }
+        #[cfg(feature = "blitz")]
+        invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -1917,6 +1957,9 @@ impl JsHandler for RemoveAttribute {
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             node.attributes.remove(&lc_name);
         }
+        drop(s);
+        #[cfg(feature = "blitz")]
+        invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -5854,6 +5897,8 @@ impl JsHandler for ClassListAdd {
             node.attributes
                 .insert("class".to_string(), classes.join(" "));
         }
+        #[cfg(feature = "blitz")]
+        invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -5884,6 +5929,8 @@ impl JsHandler for ClassListRemove {
             node.attributes
                 .insert("class".to_string(), new_cls.join(" "));
         }
+        #[cfg(feature = "blitz")]
+        invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -6413,23 +6460,25 @@ impl JsHandler for GetComputedStyleHandler {
 
             #[cfg(feature = "blitz")]
             {
-                // Lazy-init: bygg Blitz styles vid första anrop
-                let needs_init = {
+                // Bygg/re-bygg Blitz computed styles.
+                // Serialiserar AKTUELL ArenaDom → HTML → Blitz Stylo.
+                // Ger live computed styles efter DOM-mutationer.
+                let needs_rebuild = {
                     let s = self.state.borrow();
-                    s.blitz_styles.is_none() && s.original_html.is_some()
+                    s.blitz_styles.is_none()
                 };
-                if needs_init {
+                if needs_rebuild {
                     let html = {
                         let s = self.state.borrow();
-                        s.original_html.clone()
+                        // Serialisera aktuell ArenaDom (inkl. JS-mutationer)
+                        let doc_key = s.arena.document;
+                        s.arena.serialize_inner_html(doc_key)
                     };
-                    if let Some(ref html) = html {
-                        let blitz_raw = build_blitz_computed_styles(html);
-                        let s_ref = self.state.borrow();
-                        let mapped = map_blitz_styles_to_arena(html, &blitz_raw, &s_ref.arena);
-                        drop(s_ref);
-                        self.state.borrow_mut().blitz_styles = Some(mapped);
-                    }
+                    let blitz_raw = build_blitz_computed_styles(&html);
+                    let s_ref = self.state.borrow();
+                    let mapped = map_blitz_styles_to_arena(&html, &blitz_raw, &s_ref.arena);
+                    drop(s_ref);
+                    self.state.borrow_mut().blitz_styles = Some(mapped);
                 }
                 // Försök hämta Blitz-computed styles
                 let blitz_found = {
