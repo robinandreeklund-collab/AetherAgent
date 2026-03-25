@@ -8466,6 +8466,10 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     let mut require_has: Option<String> = None;
     let mut require_heading = false;
     let mut require_heading_levels: Option<Vec<u32>> = None;
+    let mut require_lang: Option<String> = None;
+    let mut require_dir: Option<String> = None;
+    let mut require_placeholder_shown = false;
+    let mut require_any_link = false;
     let mut not_selectors: Vec<String> = Vec::new();
     let mut is_universal = false;
 
@@ -8658,9 +8662,41 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
             // :heading (utan parentes) — matchar alla h1-h6
             require_heading = true;
             remaining = &remaining[8..]; // len(":heading") = 8
+        } else if let Some(rest) = remaining.strip_prefix(":lang(") {
+            // :lang(xx) — matchar element med lang-attribut
+            if let Some(end) = find_matching_paren(rest) {
+                let lang_arg = rest[..end].trim().trim_matches('"').trim_matches('\'');
+                require_lang = Some(lang_arg.to_string());
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
+        } else if let Some(rest) = remaining.strip_prefix(":dir(") {
+            // :dir(ltr|rtl)
+            if let Some(end) = rest.find(')') {
+                let dir_arg = rest[..end].trim();
+                require_dir = Some(dir_arg.to_string());
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
+        } else if remaining.starts_with(":placeholder-shown") {
+            require_placeholder_shown = true;
+            remaining = &remaining[18..];
+        } else if remaining.starts_with(":any-link") {
+            require_any_link = true;
+            remaining = &remaining[9..];
+        } else if remaining.starts_with(":link") {
+            require_any_link = true; // :link ≈ :any-link i vår kontext
+            remaining = &remaining[5..];
+        } else if remaining.starts_with(":visited") {
+            // :visited — aldrig matchad (ingen browsing history)
+            return false;
+        } else if remaining.starts_with(":hover") || remaining.starts_with(":active") {
+            // Dynamiska pseudo-klasser — aldrig matchade i statisk parse
+            return false;
         } else if remaining.starts_with(':') {
-            // Okänd pseudo-klass (t.ex. :dir, :focus-within, etc.)
-            // → kan inte matcha, returnera false
+            // Okänd pseudo-klass
             return false;
         } else {
             break;
@@ -8922,6 +8958,74 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
             _ => 0,
         };
         if heading_level == 0 || !levels.contains(&heading_level) {
+            return false;
+        }
+    }
+    // :lang(xx) — matchar element eller ancestors med lang-attribut
+    if let Some(ref lang) = require_lang {
+        let lang_lower = lang.to_lowercase();
+        let mut found = false;
+        let mut current = Some(key);
+        while let Some(k) = current {
+            if let Some(n) = arena.nodes.get(k) {
+                if let Some(node_lang) = n.get_attr("lang").or_else(|| n.get_attr("xml:lang")) {
+                    let node_lang_lower = node_lang.to_lowercase();
+                    // :lang(en) matchar "en", "en-US", "en-GB" etc.
+                    if node_lang_lower == lang_lower
+                        || node_lang_lower.starts_with(&format!("{}-", lang_lower))
+                    {
+                        found = true;
+                    }
+                    break; // Närmaste lang-attribut bestämmer
+                }
+                current = n.parent;
+            } else {
+                break;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    // :dir(ltr|rtl)
+    if let Some(ref dir) = require_dir {
+        let mut found_dir = "ltr".to_string(); // default
+        let mut current = Some(key);
+        while let Some(k) = current {
+            if let Some(n) = arena.nodes.get(k) {
+                if let Some(d) = n.get_attr("dir") {
+                    found_dir = d.to_lowercase();
+                    break;
+                }
+                current = n.parent;
+            } else {
+                break;
+            }
+        }
+        if found_dir != dir.to_lowercase() {
+            return false;
+        }
+    }
+    // :placeholder-shown
+    if require_placeholder_shown {
+        let has_placeholder = node.get_attr("placeholder").is_some();
+        let is_input = node
+            .tag
+            .as_deref()
+            .map_or(false, |t| t == "input" || t == "textarea");
+        let value_empty = node.get_attr("value").map_or(true, |v| v.is_empty());
+        if !(is_input && has_placeholder && value_empty) {
+            return false;
+        }
+    }
+    // :any-link / :link
+    if require_any_link {
+        let is_link = node
+            .tag
+            .as_deref()
+            .map_or(false, |t| t == "a" || t == "area")
+            && node.has_attr("href");
+        if !is_link {
             return false;
         }
     }
