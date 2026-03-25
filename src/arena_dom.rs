@@ -181,6 +181,9 @@ pub struct DomNode {
     pub text: Option<StrTendril>,
     pub parent: Option<NodeKey>,
     pub children: Vec<NodeKey>,
+    /// Vilket document denna nod tillhör (för multi-document stöd).
+    /// None = huvuddokumentet.
+    pub owner_doc: Option<NodeKey>,
 }
 
 impl DomNode {
@@ -229,6 +232,7 @@ impl ArenaDom {
             text: None,
             parent: None,
             children: vec![],
+            owner_doc: None,
         });
         ArenaDom {
             nodes,
@@ -290,6 +294,7 @@ impl ArenaDom {
             text,
             parent: None,
             children: vec![],
+            owner_doc: None,
         });
 
         // Konvertera barn rekursivt
@@ -431,6 +436,7 @@ impl ArenaDom {
             text: node.text,
             parent: None,
             children: vec![],
+            owner_doc: None,
         });
         // Rekursivt klona barn
         for child in children_to_clone {

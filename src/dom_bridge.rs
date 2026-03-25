@@ -677,6 +677,51 @@ impl JsHandler for QuerySelectorAll {
     }
 }
 
+/// Skapar en Document-nod i ArenaDom (för foreignDoc / createHTMLDocument)
+struct CreateDocumentNode {
+    state: SharedState,
+}
+impl JsHandler for CreateDocumentNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let doc_key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Document,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: None,
+                parent: None,
+                children: vec![],
+                owner_doc: None,
+            })
+        };
+        // Returnera doc-nod med __nodeKey__ och nodeType=9
+        let obj = Object::new(ctx.clone())?;
+        obj.set("__nodeKey__", node_key_to_f64(doc_key))?;
+        obj.set("nodeType", 9i32)?;
+        obj.set("nodeName", "#document")?;
+        Ok(obj.into_value())
+    }
+}
+
+/// Sätter owner_doc på en nod i ArenaDom
+struct SetOwnerDoc {
+    state: SharedState,
+}
+impl JsHandler for SetOwnerDoc {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let node_key = args.first().and_then(extract_node_key);
+        let doc_key = args.get(1).and_then(extract_node_key);
+        if let (Some(nk), Some(dk)) = (node_key, doc_key) {
+            let mut s = self.state.borrow_mut();
+            if let Some(node) = s.arena.nodes.get_mut(nk) {
+                node.owner_doc = Some(dk);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 struct CreateElement {
     state: SharedState,
 }
@@ -697,6 +742,7 @@ impl JsHandler for CreateElement {
                 text: None,
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             })
         };
         make_element_object(ctx, key, &self.state)
@@ -722,6 +768,7 @@ impl JsHandler for CreateTextNode {
                 text: Some(text.into()),
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             })
         };
         make_element_object(ctx, key, &self.state)
@@ -747,6 +794,7 @@ impl JsHandler for CreateComment {
                 text: Some(text.into()),
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             })
         };
         make_element_object(ctx, key, &self.state)
@@ -817,6 +865,7 @@ impl JsHandler for CreateDocumentFragment {
                 text: None,
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             })
         };
         make_element_object(ctx, key, &self.state)
@@ -908,9 +957,30 @@ fn notify_range_mutation(
     let _ = ctx.eval::<Value, _>(code.as_str());
 }
 
-struct OwnerDocumentGetter;
+struct OwnerDocumentGetter {
+    state: SharedState,
+    key: NodeKey,
+}
 impl JsHandler for OwnerDocumentGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Kolla om noden tillhör ett foreignDoc (owner_doc)
+        let owner_doc_key = {
+            if let Ok(s) = self.state.try_borrow() {
+                s.arena.nodes.get(self.key).and_then(|n| n.owner_doc)
+            } else {
+                None
+            }
+        };
+        if let Some(doc_key) = owner_doc_key {
+            // Returnera foreignDoc-objektet från cache
+            let cache_key = format!("__foreignDoc_{}", node_key_to_f64(doc_key) as u64);
+            if let Ok(v) = ctx.globals().get::<_, Value>(cache_key.as_str()) {
+                if !v.is_undefined() && !v.is_null() {
+                    return Ok(v);
+                }
+            }
+        }
+        // Fallback: huvuddokumentet
         ctx.globals().get::<_, Value>("document")
     }
 }
@@ -1109,6 +1179,26 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set(
         "createRange",
         Function::new(ctx.clone(), JsFn(CreateRange))?,
+    )?;
+    // __createDocumentNode — skapar Document-nod i ArenaDom (för createHTMLDocument)
+    doc.set(
+        "__createDocumentNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateDocumentNode {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    // __setOwnerDoc — sätter owner_doc på en nod (för foreignDoc)
+    doc.set(
+        "__setOwnerDoc",
+        Function::new(
+            ctx.clone(),
+            JsFn(SetOwnerDoc {
+                state: Rc::clone(&state),
+            }),
+        )?,
     )?;
     // __nativeChildIndex — snabb barn-index lookup för Range
     doc.set(
@@ -1656,6 +1746,7 @@ impl JsHandler for InsertAdjacentHTML {
                     text: Some(html_str.into()),
                     parent: None,
                     children: vec![],
+                    owner_doc: None,
                 });
                 vec![text_key]
             } else {
@@ -1761,6 +1852,7 @@ fn copy_subtree_return_key(src: &ArenaDom, src_key: NodeKey, dst: &mut ArenaDom)
                 text: None,
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             });
         }
     };
@@ -1771,6 +1863,7 @@ fn copy_subtree_return_key(src: &ArenaDom, src_key: NodeKey, dst: &mut ArenaDom)
         text: node.text,
         parent: None,
         children: vec![],
+        owner_doc: None,
     });
     for &child in &node.children {
         copy_subtree(src, child, new_key, dst);
@@ -2651,6 +2744,7 @@ impl JsHandler for InsertAdjacentText {
                 text: Some(text.into()),
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             })
         };
         // Delegera till InsertAdjacentElement-logik
@@ -3536,6 +3630,7 @@ fn args_to_node_keys<'js>(
                 text: Some(text.into()),
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             });
             keys.push(text_key);
         }
@@ -3556,6 +3651,7 @@ fn clone_node_recursive(state: &SharedState, key: NodeKey, deep: bool) -> NodeKe
         text: node.text.clone(),
         parent: None,
         children: vec![],
+        owner_doc: None,
     });
     if deep {
         let children = node.children.clone();
@@ -3597,6 +3693,7 @@ impl JsHandler for AttachShadow {
                 text: None,
                 parent: Some(self.key),
                 children: vec![],
+                owner_doc: None,
             };
             let sk = s.arena.nodes.insert(shadow_node);
             // Lägg till som första barn
@@ -4001,6 +4098,7 @@ impl JsHandler for TextContentSetter {
                 text: Some(text.into()),
                 parent: Some(self.key),
                 children: vec![],
+                owner_doc: None,
             });
             s.arena.append_child(self.key, text_key);
         }
@@ -4048,6 +4146,7 @@ impl JsHandler for InnerHTMLSetter {
                     text: Some(html_str.clone().into()),
                     parent: Some(self.key),
                     children: vec![],
+                    owner_doc: None,
                 });
                 s.arena.append_child(self.key, text_key);
             } else {
@@ -4085,6 +4184,7 @@ fn copy_subtree(src: &ArenaDom, src_key: NodeKey, parent: NodeKey, dst: &mut Are
         text: node.text,
         parent: Some(parent),
         children: vec![],
+        owner_doc: None,
     });
     dst.append_child(parent, new_key);
     for &child in &node.children {
@@ -4188,7 +4288,10 @@ fn make_element_object<'js>(
     if node_type_val != 9 {
         obj.prop(
             "ownerDocument",
-            Accessor::new_get(JsFn(OwnerDocumentGetter)),
+            Accessor::new_get(JsFn(OwnerDocumentGetter {
+                state: Rc::clone(state),
+                key,
+            })),
         )?;
     }
     obj.set("id", id_val.as_str())?;
