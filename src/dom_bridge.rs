@@ -51,6 +51,7 @@ struct EventListener {
     event_type: String,
     callback: Persistent<Function<'static>>,
     capture: bool,
+    passive: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -1172,6 +1173,55 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         )?;
     }
 
+    // compareDocumentPosition / contains / lookupNamespaceURI / isSameNode / isEqualNode på document
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.set(
+            "compareDocumentPosition",
+            Function::new(
+                ctx.clone(),
+                JsFn(CompareDocumentPosition {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "contains",
+            Function::new(
+                ctx.clone(),
+                JsFn(ContainsHandler {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "lookupNamespaceURI",
+            Function::new(
+                ctx.clone(),
+                JsFn(LookupNamespaceURI {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
+            "isSameNode",
+            Function::new(ctx.clone(), JsFn(IsSameNode { key: doc_key }))?,
+        )?;
+        doc.set(
+            "isEqualNode",
+            Function::new(
+                ctx.clone(),
+                JsFn(IsEqualNode {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+    }
+
     // activeElement — getter som returnerar fokuserat element eller body
     doc.prop(
         "activeElement",
@@ -1225,6 +1275,30 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     if let Some(key) = html_key {
         let html_obj = make_element_object(ctx, key, &state)?;
         doc.set("documentElement", html_obj)?;
+    }
+
+    // document.doctype — hitta Doctype-noden bland document-barn
+    {
+        let s = state.borrow();
+        let doc_key = s.arena.document;
+        let doctype_key = s.arena.nodes[doc_key]
+            .children
+            .iter()
+            .find(|&&ck| {
+                s.arena
+                    .nodes
+                    .get(ck)
+                    .map(|n| matches!(n.node_type, NodeType::Doctype))
+                    .unwrap_or(false)
+            })
+            .copied();
+        drop(s);
+        if let Some(dk) = doctype_key {
+            let dt_obj = make_element_object(ctx, dk, &state)?;
+            doc.set("doctype", dt_obj)?;
+        } else {
+            doc.set("doctype", Value::new_null(ctx.clone()))?;
+        }
     }
 
     ctx.globals().set("document", doc)?;
@@ -1975,7 +2049,9 @@ impl JsHandler for ToggleAttribute {
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if name.is_empty() {
+        // Spec: om name inte matchar Name-produktionen → InvalidCharacterError
+        let invalid_name = name.is_empty() || name.contains(char::is_whitespace);
+        if invalid_name {
             return Err(ctx.throw(
                 rquickjs::String::from_str(
                     ctx.clone(),
@@ -1984,8 +2060,20 @@ impl JsHandler for ToggleAttribute {
                 .into(),
             ));
         }
-        let has_force = args.len() > 1;
-        let force = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+        let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
+        let force = if has_force {
+            args.get(1)
+                .map(|v| {
+                    v.as_bool().unwrap_or_else(|| {
+                        !v.is_null()
+                            && !v.is_undefined()
+                            && v.as_int().map(|n| n != 0).unwrap_or(true)
+                    })
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
         let mut s = self.state.borrow_mut();
         let has_attr = s
             .arena
@@ -3499,7 +3587,26 @@ impl JsHandler for AddEventListenerHandler {
             Some(f) => f.clone(),
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
-        let capture = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
+        let (capture, passive) = if let Some(opts) = args.get(2) {
+            if let Some(b) = opts.as_bool() {
+                (b, None)
+            } else if let Some(obj) = opts.as_object() {
+                let cap = obj
+                    .get::<_, Value>("capture")
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let pas = obj
+                    .get::<_, Value>("passive")
+                    .ok()
+                    .and_then(|v| v.as_bool());
+                (cap, pas)
+            } else {
+                (false, None)
+            }
+        } else {
+            (false, None)
+        };
         let persistent = Persistent::save(ctx, func);
         let key_bits = node_key_to_f64(self.key) as u64;
         let mut s = self.state.borrow_mut();
@@ -3510,6 +3617,7 @@ impl JsHandler for AddEventListenerHandler {
                 event_type,
                 callback: persistent,
                 capture,
+                passive,
             });
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -3541,13 +3649,17 @@ struct DispatchEventHandler {
 }
 impl JsHandler for DispatchEventHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let event_type = args
-            .first()
-            .and_then(|v| v.as_object())
+        let event_obj = args.first().and_then(|v| v.as_object());
+        let event_type = event_obj
             .and_then(|obj| obj.get::<_, String>("type").ok())
             .unwrap_or_default();
+
+        // Passive-by-default: touchstart, touchmove, wheel, mousewheel på window/document/body
+        let passive_default_types = ["touchstart", "touchmove", "wheel", "mousewheel"];
+        let is_passive_default = passive_default_types.contains(&event_type.as_str());
+
         let key_bits = node_key_to_f64(self.key) as u64;
-        let callbacks: Vec<Persistent<Function<'static>>> = {
+        let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>)> = {
             let s = self.state.borrow();
             s.event_listeners
                 .get(&key_bits)
@@ -3555,21 +3667,32 @@ impl JsHandler for DispatchEventHandler {
                     listeners
                         .iter()
                         .filter(|l| l.event_type == event_type)
-                        .map(|l| l.callback.clone())
+                        .map(|l| (l.callback.clone(), l.passive))
                         .collect()
                 })
                 .unwrap_or_default()
         };
-        for cb in callbacks {
+        for (cb, passive) in callbacks {
             if let Ok(func) = cb.restore(ctx) {
                 let event = args
                     .first()
                     .cloned()
                     .unwrap_or(Value::new_undefined(ctx.clone()));
+                // Om passive (explicit eller default) → sätt __passive flagga
+                let is_passive = passive.unwrap_or(is_passive_default);
+                if is_passive {
+                    if let Some(obj) = event.as_object() {
+                        let _ = obj.set("__passive", true);
+                    }
+                }
                 let _ = func.call::<_, Value>((event,));
             }
         }
-        Ok(Value::new_bool(ctx.clone(), true))
+        // Returnera !defaultPrevented
+        let default_prevented = event_obj
+            .and_then(|obj| obj.get::<_, bool>("defaultPrevented").ok())
+            .unwrap_or(false);
+        Ok(Value::new_bool(ctx.clone(), !default_prevented))
     }
 }
 
@@ -3809,12 +3932,19 @@ fn make_element_object<'js>(
             Some(NodeType::Text) => 3,
             Some(NodeType::Comment) => 8,
             Some(NodeType::Document) => 9,
+            Some(NodeType::Doctype) => 10,
             _ => 1,
         };
-        let tag = node
-            .and_then(|n| n.tag.as_ref())
-            .map(|t| t.to_uppercase())
-            .unwrap_or_default();
+        let tag = if nt == 10 {
+            // Doctype — nodeName/name = doctypens namn (t.ex. "html")
+            node.and_then(|n| n.text.as_ref())
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "html".to_string())
+        } else {
+            node.and_then(|n| n.tag.as_ref())
+                .map(|t| t.to_uppercase())
+                .unwrap_or_default()
+        };
         let id = node
             .and_then(|n| n.get_attr("id"))
             .unwrap_or("")
@@ -3832,6 +3962,8 @@ fn make_element_object<'js>(
             3 => "Object.create(typeof Text!=='undefined'?Text.prototype:{})".to_string(),
             8 => "Object.create(typeof Comment!=='undefined'?Comment.prototype:{})".to_string(),
             9 => "Object.create(typeof Document!=='undefined'?Document.prototype:{})".to_string(),
+            10 => "Object.create(typeof DocumentType!=='undefined'?DocumentType.prototype:{})"
+                .to_string(),
             11 => {
                 "Object.create(typeof DocumentFragment!=='undefined'?DocumentFragment.prototype:{})"
                     .to_string()
@@ -3861,6 +3993,12 @@ fn make_element_object<'js>(
     }
     obj.set("id", id_val.as_str())?;
     obj.set("className", class_val.as_str())?;
+    // Doctype-specifika egenskaper
+    if node_type_val == 10 {
+        obj.set("name", tag_name.as_str())?;
+        obj.set("publicId", "")?;
+        obj.set("systemId", "")?;
+    }
 
     // ─── Metoder ───────────────────────────────────────────────────
     obj.set(
@@ -5276,6 +5414,13 @@ fn make_class_list<'js>(
     for (i, cls) in classes.iter().enumerate() {
         obj.set(i as u32, cls.as_str())?;
     }
+
+    // Symbol.toStringTag = "DOMTokenList"
+    let _ = ctx
+        .eval::<Value, _>(
+            "(function(o){Object.defineProperty(o,Symbol.toStringTag,{value:'DOMTokenList'})})",
+        )
+        .and_then(|f| f.as_function().unwrap().call::<_, Value>((obj.clone(),)));
 
     Ok(obj.into_value())
 }

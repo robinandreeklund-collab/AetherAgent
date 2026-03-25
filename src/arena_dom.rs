@@ -168,6 +168,7 @@ pub enum NodeType {
     Element,
     Text,
     Comment,
+    Doctype,
     Other,
 }
 
@@ -275,6 +276,10 @@ impl ArenaDom {
                 Some(contents.clone()),
                 Attrs::new(),
             ),
+            NodeData::Doctype { name, .. } => {
+                let n = name.to_string();
+                (NodeType::Doctype, None, Some(n.into()), Attrs::new())
+            }
             _ => (NodeType::Other, None, None, Attrs::new()),
         };
 

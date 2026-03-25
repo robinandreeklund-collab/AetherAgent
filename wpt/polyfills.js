@@ -251,7 +251,7 @@
         this.relatedTarget = null;
         this.defaultPrevented = false;
         this.returnValue = true;
-        this.preventDefault = function() { this.defaultPrevented = true; this.returnValue = false; };
+        this.preventDefault = function() { if (!this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
         this.stopPropagation = function() {};
         this.stopImmediatePropagation = function() {};
         this.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
@@ -947,6 +947,21 @@
   };
 
   AetherRange.prototype.comparePoint = function(node, offset) {
+    // Spec: root must match
+    var nodeRoot = node;
+    while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
+    var rangeRoot = this.startContainer;
+    while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
+    if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) {
+      throw new DOMException("Wrong document", "WrongDocumentError");
+    }
+    // Spec: offset must be valid
+    var nodeLen = (node.nodeType === 3 || node.nodeType === 8 || node.nodeType === 7)
+      ? (node.data !== undefined ? node.data.length : (node.textContent || "").length)
+      : (node.childNodes ? node.childNodes.length : 0);
+    if (offset < 0 || offset > nodeLen) {
+      throw new DOMException("Index out of range", "IndexSizeError");
+    }
     var cmpStart = this._compareBoundary(node, offset, this.startContainer, this.startOffset);
     if (cmpStart < 0) return -1;
     var cmpEnd = this._compareBoundary(node, offset, this.endContainer, this.endOffset);

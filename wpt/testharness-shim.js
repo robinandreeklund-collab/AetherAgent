@@ -356,6 +356,8 @@
     if (Array.isArray(v)) return "[" + v.map(_format_value).join(", ") + "]";
     try { return String(v); } catch(e) { return "??"; }
   }
+  // WPT-tester refererar format_value som global
+  globalThis.format_value = _format_value;
 
   // ─── Core test() ───
   function test(fn, name, properties) {
