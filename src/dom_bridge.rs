@@ -7892,6 +7892,8 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     let mut require_is: Option<String> = None;
     let mut require_where: Option<String> = None;
     let mut require_has: Option<String> = None;
+    let mut require_heading = false;
+    let mut require_heading_levels: Option<Vec<u32>> = None;
     let mut not_selectors: Vec<String> = Vec::new();
     let mut is_universal = false;
 
@@ -8067,8 +8069,25 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
         } else if let Some(rest) = remaining.strip_prefix(":focus") {
             require_focus = true;
             remaining = rest;
+        } else if let Some(rest) = remaining.strip_prefix(":heading(") {
+            // :heading(n, m, ...) — matchar h<n>, h<m>, etc.
+            if let Some(end) = rest.find(')') {
+                let args = &rest[..end];
+                require_heading_levels = Some(
+                    args.split(',')
+                        .filter_map(|s| s.trim().parse::<u32>().ok())
+                        .collect(),
+                );
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
+        } else if remaining.starts_with(":heading") {
+            // :heading (utan parentes) — matchar alla h1-h6
+            require_heading = true;
+            remaining = &remaining[8..]; // len(":heading") = 8
         } else if remaining.starts_with(':') {
-            // Okänd pseudo-klass (t.ex. :heading, :has, :is, :where, :dir etc.)
+            // Okänd pseudo-klass (t.ex. :dir, :focus-within, etc.)
             // → kan inte matcha, returnera false
             return false;
         } else {
@@ -8308,6 +8327,29 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
             check_descendants(arena, key, sel)
         });
         if !has_match {
+            return false;
+        }
+    }
+    // :heading / :heading(n) — matchar h1-h6
+    if require_heading {
+        let tag = node.tag.as_deref().unwrap_or("");
+        let is_heading = matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+        if !is_heading {
+            return false;
+        }
+    }
+    if let Some(ref levels) = require_heading_levels {
+        let tag = node.tag.as_deref().unwrap_or("");
+        let heading_level: u32 = match tag {
+            "h1" => 1,
+            "h2" => 2,
+            "h3" => 3,
+            "h4" => 4,
+            "h5" => 5,
+            "h6" => 6,
+            _ => 0,
+        };
+        if heading_level == 0 || !levels.contains(&heading_level) {
             return false;
         }
     }
