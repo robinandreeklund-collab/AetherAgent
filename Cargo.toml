@@ -109,7 +109,7 @@ path = "benches/bench_main.rs"
 [[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
-required-features = ["js-eval"]
+required-features = ["js-eval", "blitz"]
 
 [[example]]
 name = "render_demo"

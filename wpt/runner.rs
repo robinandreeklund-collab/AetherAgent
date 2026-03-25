@@ -4,15 +4,16 @@
 /// Använder QuickJS sandbox + DOM bridge för att evaluera testharness.js-tester.
 ///
 /// Användning:
-///   cargo run --bin aether-wpt --features js-eval -- [WPT_DIR] [FILTER...]
+///   cargo run --bin aether-wpt --features js-eval,blitz -- [WPT_DIR] [FILTER...]
 ///
 /// Exempel:
-///   cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
+///   cargo run --bin aether-wpt --features js-eval,blitz -- wpt-suite/dom/nodes/
 ///   cargo run --bin aether-wpt --features js-eval -- wpt-suite/ --filter getElementById
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use aether_agent::arena_dom_sink;
+use aether_agent::css_compiler;
 use aether_agent::dom_bridge;
 
 // ─── Resultattyper ──────────────────────────────────────────────────────────
@@ -138,7 +139,17 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         };
     }
 
-    let arena = arena_dom_sink::parse_html_to_arena(&html);
+    // Kör CSS compiler (LightningCSS + css-inline) för att inlina <style>-regler
+    // till style=""-attribut INNAN JS-exekvering. Detta ger getComputedStyle
+    // tillgång till alla CSS-regler via inline styles.
+    let compiled = css_compiler::compile_css(&html, &css_compiler::ViewportConfig::default());
+    let html_for_dom = if compiled.fully_compiled {
+        &compiled.html
+    } else {
+        &html
+    };
+
+    let arena = arena_dom_sink::parse_html_to_arena(html_for_dom);
 
     // Kör alla scripts med DOM bridge + lifecycle
     let result = dom_bridge::eval_js_with_lifecycle(&all_scripts, arena);

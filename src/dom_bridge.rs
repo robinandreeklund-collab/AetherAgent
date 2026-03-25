@@ -6043,34 +6043,24 @@ impl JsHandler for GetComputedStyleHandler {
             Some(k) => k,
             None => return Ok(Object::new(ctx.clone())?.into_value()),
         };
-        // Använd CssContext cascade engine (lazy-initierad)
-        // Två steg pga borrow checker: ta ut css_context, beräkna, stoppa tillbaka
+        // Läs computed styles från tag defaults + inline style-attribut.
+        // CSS-regler bör redan vara inlinade av css_compiler (LightningCSS + css-inline)
+        // innan JS-exekvering — detta ger oss fullständig cascade via Blitz pipeline.
         let styles = {
-            let mut s = self.state.borrow_mut();
-            if s.css_context.is_none() {
-                s.css_context = Some(crate::css_cascade::CssContext::from_arena(&s.arena));
-            }
-            let mut css_ctx = s.css_context.take();
-            let result = if let Some(ref mut ctx) = css_ctx {
-                let computed = ctx.get_computed_style(k, &s.arena);
-                computed.properties
-            } else {
-                let mut fallback = get_tag_style_defaults(
-                    s.arena
-                        .nodes
-                        .get(k)
-                        .and_then(|n| n.tag.as_deref())
-                        .unwrap_or(""),
-                );
-                if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
-                    for (prop, val) in parse_inline_styles(inline) {
-                        fallback.insert(prop, val);
-                    }
+            let s = self.state.borrow();
+            let tag = s
+                .arena
+                .nodes
+                .get(k)
+                .and_then(|n| n.tag.as_deref())
+                .unwrap_or("");
+            let mut computed = get_tag_style_defaults(tag);
+            if let Some(inline) = s.arena.nodes.get(k).and_then(|n| n.get_attr("style")) {
+                for (prop, val) in parse_inline_styles(inline) {
+                    computed.insert(prop, val);
                 }
-                fallback
-            };
-            s.css_context = css_ctx;
-            result
+            }
+            computed
         };
 
         let style_obj = Object::new(ctx.clone())?;
