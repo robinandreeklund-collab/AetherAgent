@@ -3869,10 +3869,12 @@ impl JsHandler for DispatchEventHandler {
                 let _ = func.call::<_, Value>((event,));
             }
         }
-        // Resätt eventPhase efter dispatch
+        // Resätt eventPhase och propagation flags efter dispatch
         if let Some(ev) = args.first().and_then(|v| v.as_object()) {
             let _ = ev.set("eventPhase", 0i32); // NONE
             let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
+            let _ = ev.set("_stopPropagationFlag", false);
+            let _ = ev.set("_stopImmediatePropagationFlag", false);
         }
         let default_prevented = args
             .first()
