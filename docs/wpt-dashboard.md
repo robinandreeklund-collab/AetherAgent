@@ -12,10 +12,10 @@
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,800+ | ~15,100+ | ~73% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~4,600+ | ~2,100+ | ~46% |
+| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~19,569 | ~14,759 | ~75.4% |
+| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~4,439+ | ~2,174+ | ~49% |
 | **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~105 | ~8% |
-| **Total alla sviter** | | **~26,700+** | **~17,300+** | — |
+| **Total alla sviter** | | **~25,300+** | **~17,000+** | — |
 
 ---
 
@@ -29,7 +29,8 @@
 | 2026-03-26 | 286 | 6,659 | 5,089 | 76.4% | +hasChildNodes, HierarchyRequestError, unskip insertBefore |
 | 2026-03-26 | 286 | 6,676 | 5,243 | 78.5% | +native createDocumentType/PI, nodeName per spec |
 | 2026-03-26 | 286 | 6,674 | 5,332 | 79.9% | +ownerDocument configurable, DOMString, TypeError |
-| **2026-03-26** | **286** | **6,676** | **5,348** | **80.1%** | +DOM prototype chain (Node→CharacterData→Comment) |
+| 2026-03-26 | 286 | 6,676 | 5,348 | 80.1% | +DOM prototype chain (Node→CharacterData→Comment) |
+| **2026-03-26** | **286** | **6,676** | **5,666** | **84.9%** | +live HTMLCollection, createElementNS, createAttribute |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -40,7 +41,6 @@
 
 **Största kvarvarande failures:**
 - Node-textContent: 37/81 pass (44 fail — foreign doc issues)
-- attributes: 16/58 pass (42 fail — NamedNodeMap/namespace)
 - Node-removeChild: 4/28 pass (24 fail — leaf node TypeError)
 - "no test suite completion": ~81 tester (async patterns)
 
@@ -53,14 +53,16 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad baseline |
-| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +click() dispatchar MouseEvent |
+| 2026-03-26 | 160 | 318 | 213 | 67.0% | +click() dispatchar MouseEvent |
+| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +event listener {once: true} stöd |
 
 **Implementerat:**
-- addEventListener med options (capture, passive) ✅
+- addEventListener med options (capture, passive, once) ✅
 - dispatchEvent med bubbling ✅
 - stopPropagation/stopImmediatePropagation ✅
 - Event/CustomEvent constructors ✅
 - click() dispatchar riktig MouseEvent ✅
+- addEventListener({once: true}) ✅
 
 **Saknas:**
 - 105 tester: "no test suite completion" (async_test med iframe/DOMContentLoaded)
@@ -76,9 +78,10 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | Baseline |
-| **2026-03-26** | **55** | **11,431** | **7,842** | **68.6%** | Stabil (hasChildNodes hjälper common.js) |
+| 2026-03-26 | 55 | 11,431 | 7,842 | 68.6% | Stabil (hasChildNodes hjälper common.js) |
+| **2026-03-26** | **55** | **~10,943** | **~7,404** | **~67.7%** | Verifierad efter refaktorering |
 
-**Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
+**Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Mål Q2 2026:** 80%
 
@@ -111,14 +114,19 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **9** | **48** | **6** | **12.5%** | Baseline (oförändrad) |
+| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
+| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+
+**Implementerat:**
+- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
+- NamedNodeMap Proxy (element.attributes) ✅
+- item(), namedItem(), Symbol.iterator ✅
 
 **Saknas:**
-- Live HTMLCollection (getElementsBy* returnerar statisk array)
-- Named property access
-- NodeList iteration
+- Named property access edge cases
+- NodeList iteration edge cases
 
-**Mål Q2 2026:** 50%
+**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
 
 ---
 
@@ -128,7 +136,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | **5** | **189** | **180** | **95.2%** | Stabil |
+| 2026-03-26 | 5 | 189 | 180 | 95.2% | Stabil |
+| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
 
 ---
 
@@ -137,7 +146,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
-| **2026-03-26** | **53** | **453** | **83** | **18.3%** | +native createDocumentType, nodeName fix |
+| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
+| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
 
 **Mål Q2 2026:** 30%
 
@@ -176,9 +186,10 @@
 |-------|-----------|-------------|-----------|
 | 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
 | 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
-| **2026-03-26** | **15,100+/20,800+ (~73%)** | **~17,300+/26,700+** | Runda 1-4: +2979 nya pass |
+| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
+| **2026-03-26** | **~14,759/~19,569 (~75.4%)** | **~17,000+/~25,300+** | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
 
-### Förbättringslogg 2026-03-26 (Runda 1-4)
+### Förbättringslogg 2026-03-26 (Runda 1-5)
 
 | Runda | Nyckelfixar | dom/nodes | dom/traversal | css/selectors |
 |-------|-------------|-----------|---------------|---------------|
@@ -186,7 +197,14 @@
 | 2 | Native createDocumentType/PI, document props, nodeName | +154 | +37 | — |
 | 3 | ownerDocument configurable, DOMString, TypeError | +89 | — | — |
 | 4 | DOM prototype chain (Node→CharacterData→Comment) | +16 | — | — |
-| **Total** | | **+339** | **+830** | **+1749** |
+| 5 | live HTMLCollection, createElementNS, NamedNodeMap, outerHTML setter, event once | +318 | — | — |
+| **Total** | | **+657** | **+830** | **+1749** |
+
+#### Runda 5 detaljer
+- dom/nodes: 5,348 → 5,666 (+318)
+- dom/collections: 6 → 27 (+21)
+- domparsing: 83 → 85 (+2)
+- dom/lists: 180 → 181 (+1)
 
 ---
 
@@ -227,10 +245,10 @@ Se detaljerad API-täckning:
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~13,200+ | ~66% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~450+ | ~20% |
+| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~19,569 | ~14,759 | ~75.4% |
+| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~4,439+ | ~2,174+ | ~49% |
 | **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~105 | ~8% |
-| **Total alla sviter** | | **~23,600+** | **~13,700+** | — |
+| **Total alla sviter** | | **~25,300+** | **~17,000+** | — |
 
 ---
 
@@ -242,19 +260,20 @@ Se detaljerad API-täckning:
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
 | 2026-03-25 | 286 | 6,624 | 5,017 | 75.7% | +71 pass: Event fix, classList, Text/Comment constructors |
-| **2026-03-25** | **286** | **6,624** | **5,004** | **75.5%** | blitz-bekräftad (css_compiler + LightningCSS) |
+| 2026-03-25 | 286 | 6,624 | 5,004 | 75.5% | blitz-bekräftad (css_compiler + LightningCSS) |
+| **2026-03-26** | **286** | **6,676** | **5,666** | **84.9%** | Runda 1-5: +662 pass |
 
 **Toppresterare:**
 - CharacterData: ~100%
 - ChildNode (before/after/replaceWith): 100%
 - Node-cloneNode: 93%
-- Document-createEvent: 94%
+- DOMImplementation-createDocumentType: 97.6%
 - querySelector-escapes: 91%
 
 **Största failures:**
-- Node-insertBefore (skipped — hänger)
-- Namespace-relaterade tester
-- ProcessingInstruction-stöd
+- Node-textContent: foreign doc issues
+- Node-removeChild: leaf node TypeError
+- "no test suite completion": ~81 tester (async patterns)
 
 **Mål Q2 2026:** 90%
 
@@ -267,18 +286,21 @@ Se detaljerad API-täckning:
 | 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
 | 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
 | 2026-03-25 | 160 | 311 | 140 | 45.0% | +31 pass: Event subclasses, cancelBubble spec fix |
-| **2026-03-25** | **160** | **310** | **208** | **67.1%** | blitz-bekräftad (eventPhase, global addEventListener) |
+| 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad (eventPhase, global addEventListener) |
+| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +click(), addEventListener({once: true}) |
 
 **Implementerat:**
-- addEventListener med options (capture, passive) ✅
+- addEventListener med options (capture, passive, once) ✅
 - dispatchEvent med bubbling ✅
 - stopPropagation/stopImmediatePropagation ✅
 - Event/CustomEvent constructors ✅
+- click() dispatchar riktig MouseEvent ✅
+- addEventListener({once: true}) ✅
 
 **Saknas:**
-- Event subclasses (MouseEvent, KeyboardEvent med properties)
-- Event phases (capture → target → bubble) edge cases
-- scroll events, passive-by-default tester
+- 105 tester: "no test suite completion" (async_test med iframe/DOMContentLoaded)
+- window.event stöd
+- Event.composedPath()
 
 **Mål Q2 2026:** 90%
 
@@ -292,9 +314,10 @@ Se detaljerad API-täckning:
 | 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
 | 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
 | 2026-03-25 | 55 | 10,762 | 7,182 | 66.7% | WrongDocumentError, nativeChildIndex, toString |
-| **2026-03-25** | **55** | **~10,800** | **~7,400+** | **~69%** | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
+| 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
+| **2026-03-26** | **55** | **~10,943** | **~7,404** | **~67.7%** | Verifierad efter dom_bridge refaktorering |
 
-**Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
+**Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Skippade (1 kvar):** Range-intersectsNode.html (>60s)
 
@@ -317,19 +340,23 @@ Se detaljerad API-täckning:
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 18 | 1,584 | 516 | 32.6% | Baseline |
-| **2026-03-25** | **18** | **1,584** | **619** | **39.1%** | blitz-bekräftad (whatToShow unsigned, root identity) |
+| 2026-03-25 | 18 | 1,584 | 619 | 39.1% | blitz-bekräftad (whatToShow unsigned, root identity) |
+| **2026-03-26** | **18** | **1,584** | **1,449** | **91.5%** | +hasChildNodes, NodeIterator fix, createDocumentType, TreeWalker filter |
 
 **Implementerat:**
 - TreeWalker: nextNode, previousNode, parentNode, firstChild ✅
-- NodeIterator: nextNode, previousNode ✅
+- NodeIterator: nextNode, previousNode, filter boolean→number ✅
 - whatToShow filter ✅
+- hasChildNodes() — fixade common.js blockering ✅
+- Native createDocumentType — doctype-noder med __nodeKey__ ✅
+- ProcessingInstruction nodeType=7 i arena ✅
 
 **Saknas:**
-- ProcessingInstruction-stöd (common.js testNodes)
-- NodeIterator: referenceNode tracking efter DOM-mutation
-- Avancerade filter-callbacks
+- xmlDoctype foreignDoctype: ~48 (polyfill doctype utan __nodeKey__ för foreign docs)
+- Recursive filter InvalidStateError: 2
+- ProcessingInstruction edge cases
 
-**Mål Q2 2026:** 60%
+**Mål Q2 2026:** ~~60%~~ **91.5% — UPPNATT!** Nytt mål: 95%
 
 ---
 
@@ -337,14 +364,19 @@ Se detaljerad API-täckning:
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **9** | **48** | **6** | **12.5%** | Baseline |
+| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
+| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+
+**Implementerat:**
+- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
+- NamedNodeMap Proxy (element.attributes) ✅
+- item(), namedItem(), Symbol.iterator ✅
 
 **Saknas:**
-- Live HTMLCollection (getElementsBy* returnerar statisk array)
-- Named property access (collection["id"])
-- NodeList iteration
+- Named property access edge cases
+- NodeList iteration edge cases
 
-**Mål Q2 2026:** 50%
+**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
 
 ---
 
