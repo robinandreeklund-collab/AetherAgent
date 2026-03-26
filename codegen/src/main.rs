@@ -10,6 +10,7 @@ use std::path::Path;
 
 mod rust_gen;
 mod type_map;
+mod webidl_parser;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -20,17 +21,36 @@ fn main() {
         .map(String::as_str)
         .unwrap_or("../src/dom_bridge/generated");
 
-    // Samla alla .webidl-filer
+    // Samla alla .webidl-filer — försök webidl-rs först, fallback till regex-parser
     let mut interfaces: Vec<Interface> = Vec::new();
 
     for entry in fs::read_dir(webidl_dir).expect("Kan inte läsa webidl-katalog") {
         let entry = entry.unwrap();
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("webidl") {
-            println!("Parsar: {}", path.display());
             let source = fs::read_to_string(&path).expect("Kan inte läsa fil");
-            let parsed = parse_webidl(&source);
-            interfaces.extend(parsed);
+
+            // Försök webidl-rs (fullständig spec-parser) först
+            match webidl_parser::parse_webidl_full(&source) {
+                Ok(parsed) => {
+                    println!(
+                        "Parsar (webidl-rs): {} — {} interfaces",
+                        path.display(),
+                        parsed.len()
+                    );
+                    interfaces.extend(parsed);
+                }
+                Err(e) => {
+                    // Fallback till regex-parser
+                    println!(
+                        "Parsar (fallback): {} (webidl-rs: {})",
+                        path.display(),
+                        e
+                    );
+                    let parsed = parse_webidl(&source);
+                    interfaces.extend(parsed);
+                }
+            }
         }
     }
 
