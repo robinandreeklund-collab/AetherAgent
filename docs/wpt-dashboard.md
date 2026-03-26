@@ -1,7 +1,7 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-26
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-26 (codegen v3)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
@@ -15,7 +15,7 @@
 | **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
 | **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
 | **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
-| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~870+ | ~15% |
+| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~1,650+ | ~28% |
 | **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
 | **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
 | **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
@@ -33,7 +33,8 @@
 | 2026-03-26 | 286 | 6,676 | 5,243 | 78.5% | +native createDocumentType/PI, nodeName per spec |
 | 2026-03-26 | 286 | 6,674 | 5,332 | 79.9% | +ownerDocument configurable, DOMString, TypeError |
 | 2026-03-26 | 286 | 6,676 | 5,348 | 80.1% | +DOM prototype chain (Node→CharacterData→Comment) |
-| **2026-03-26** | **286** | **6,676** | **5,666** | **84.9%** | +live HTMLCollection, createElementNS, createAttribute |
+| 2026-03-26 | 286 | 6,676 | 5,666 | 84.9% | +live HTMLCollection, createElementNS, createAttribute |
+| **2026-03-26** | **286** | **6,676** | **5,659** | **84.8%** | codegen v3 (setup fix korrigerar falska positiva) |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -57,7 +58,8 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad baseline |
 | 2026-03-26 | 160 | 318 | 213 | 67.0% | +click() dispatchar MouseEvent |
-| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +event listener {once: true} stöd |
+| 2026-03-26 | 160 | 318 | 213 | 67.0% | +event listener {once: true} stöd |
+| **2026-03-26** | **161** | **318** | **221** | **69.5%** | codegen v3 (+on_event global) |
 
 **Implementerat:**
 - addEventListener med options (capture, passive, once) ✅
@@ -118,7 +120,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
-| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+| 2026-03-26 | 9 | 48 | 27 | 56.2% | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+| **2026-03-26** | **9** | **48** | **28** | **58.3%** | codegen v3 (+1) |
 
 **Implementerat:**
 - Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
@@ -253,7 +256,7 @@ Se detaljerad API-täckning:
 | **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
 | **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
 | **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
-| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~870+ | ~15% |
+| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~1,650+ | ~28% |
 | **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
 | **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
 | **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
@@ -373,7 +376,8 @@ Se detaljerad API-täckning:
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
-| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+| 2026-03-26 | 9 | 48 | 27 | 56.2% | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+| **2026-03-26** | **9** | **48** | **28** | **58.3%** | codegen v3 (+1) |
 
 **Implementerat:**
 - Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
@@ -665,7 +669,9 @@ Console-testerna kräver troligen specifik testharness-integration.
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 2,803 | TBD | TBD | TBD | Stack overflow vid batch-körning |
-| **2026-03-26** | — | ~4,900 | 697 | 14.3% | Baseline |
+| 2026-03-26 | — | ~4,900 | 697 | 14.3% | Baseline |
+| 2026-03-26 | 3,007 | 4,856 | 1,068 | 22.0% | +codegen v1/v1.5 (+311 properties) |
+| **2026-03-26** | **3,007** | **4,897** | **1,484** | **30.3%** | +codegen v3: ValidityState, input dirty state, form association, select (+416) |
 
 ---
 
