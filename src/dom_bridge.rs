@@ -7464,6 +7464,169 @@ fn register_window_with_viewport<'js>(
         CustomEvent.prototype = Object.create(Event.prototype);
         CustomEvent.prototype.constructor = CustomEvent;
         CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
+
+        // ─── DOM Type Hierarchy (native, migrerad från polyfills.js) ─────────
+        // EventTarget → Node → Element/CharacterData → HTMLElement/Text/Comment
+        (function() {
+            function EventTargetBase() {}
+            function NodeBase() {}
+            NodeBase.prototype = Object.create(EventTargetBase.prototype);
+            NodeBase.prototype.constructor = NodeBase;
+            function CharacterDataBase() {}
+            CharacterDataBase.prototype = Object.create(NodeBase.prototype);
+            CharacterDataBase.prototype.constructor = CharacterDataBase;
+            function ElementBase() {}
+            ElementBase.prototype = Object.create(NodeBase.prototype);
+            ElementBase.prototype.constructor = ElementBase;
+            function HTMLElementBase() {}
+            HTMLElementBase.prototype = Object.create(ElementBase.prototype);
+            HTMLElementBase.prototype.constructor = HTMLElementBase;
+
+            // Node-konstanter
+            var nc = {ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,
+                PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,
+                DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,
+                DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,
+                DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,
+                DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
+            for (var k in nc) { NodeBase[k] = nc[k]; NodeBase.prototype[k] = nc[k]; }
+
+            if (!globalThis.EventTarget) globalThis.EventTarget = EventTargetBase;
+            globalThis.Node = NodeBase;
+            if (!globalThis.Element) globalThis.Element = ElementBase;
+            if (!globalThis.CharacterData) globalThis.CharacterData = CharacterDataBase;
+            if (!globalThis.HTMLElement) globalThis.HTMLElement = HTMLElementBase;
+
+            // Icke-HTML-typer med korrekt prototypkedja
+            var nonHtml = {
+                'Text': CharacterDataBase, 'Comment': CharacterDataBase,
+                'DocumentFragment': NodeBase, 'Document': NodeBase,
+                'DocumentType': NodeBase, 'ProcessingInstruction': CharacterDataBase,
+                'CDATASection': CharacterDataBase, 'Attr': NodeBase, 'XMLDocument': NodeBase
+            };
+            for (var name in nonHtml) {
+                var existing = globalThis[name];
+                if (!existing || typeof existing !== 'function') {
+                    var C = function() {}; C.prototype = Object.create(nonHtml[name].prototype);
+                    C.prototype.constructor = C; globalThis[name] = C;
+                } else {
+                    var parent = nonHtml[name].prototype;
+                    if (!parent.isPrototypeOf(existing.prototype)) {
+                        var np = Object.create(parent);
+                        var props = Object.getOwnPropertyNames(existing.prototype);
+                        for (var i = 0; i < props.length; i++) {
+                            if (props[i] !== '__proto__') {
+                                try { var d = Object.getOwnPropertyDescriptor(existing.prototype, props[i]);
+                                    if (d) Object.defineProperty(np, props[i], d); } catch(e) {}
+                            }
+                        }
+                        np.constructor = existing; existing.prototype = np;
+                    }
+                }
+            }
+        })();
+
+        // ─── Event Subclass Constructors (native, migrerad från polyfills.js) ─
+        // UIEvent → MouseEvent/KeyboardEvent/FocusEvent/InputEvent/WheelEvent/PointerEvent
+        (function() {
+            if (!globalThis.UIEvent) {
+                globalThis.UIEvent = function UIEvent(type, opts) {
+                    Event.call(this, type, opts);
+                    this.view = (opts && opts.view) || null;
+                    this.detail = (opts && opts.detail !== undefined) ? opts.detail : 0;
+                };
+                UIEvent.prototype = Object.create(Event.prototype);
+                UIEvent.prototype.constructor = UIEvent;
+                UIEvent.prototype.initUIEvent = function(t,b,c,v,d) { this.initEvent(t,b,c); this.view=v||null; this.detail=d||0; };
+            }
+            if (!globalThis.MouseEvent) {
+                globalThis.MouseEvent = function MouseEvent(type, opts) {
+                    UIEvent.call(this, type, opts);
+                    var o = opts || {};
+                    this.screenX=o.screenX||0; this.screenY=o.screenY||0;
+                    this.clientX=o.clientX||0; this.clientY=o.clientY||0;
+                    this.pageX=o.pageX||0; this.pageY=o.pageY||0;
+                    this.offsetX=o.offsetX||0; this.offsetY=o.offsetY||0;
+                    this.movementX=o.movementX||0; this.movementY=o.movementY||0;
+                    this.button=o.button||0; this.buttons=o.buttons||0;
+                    this.relatedTarget=o.relatedTarget||null;
+                    this.ctrlKey=!!o.ctrlKey; this.shiftKey=!!o.shiftKey;
+                    this.altKey=!!o.altKey; this.metaKey=!!o.metaKey;
+                };
+                MouseEvent.prototype = Object.create(UIEvent.prototype);
+                MouseEvent.prototype.constructor = MouseEvent;
+                MouseEvent.prototype.initMouseEvent = function(t,b,c,v,d,sx,sy,cx,cy,ctrl,alt,shift,meta,btn,rt) {
+                    this.initUIEvent(t,b,c,v,d); this.screenX=sx||0; this.screenY=sy||0; this.clientX=cx||0; this.clientY=cy||0;
+                    this.ctrlKey=!!ctrl; this.altKey=!!alt; this.shiftKey=!!shift; this.metaKey=!!meta; this.button=btn||0; this.relatedTarget=rt||null;
+                };
+                MouseEvent.prototype.getModifierState = function(key) {
+                    if(key==='Control')return this.ctrlKey; if(key==='Shift')return this.shiftKey;
+                    if(key==='Alt')return this.altKey; if(key==='Meta')return this.metaKey; return false;
+                };
+            }
+            if (!globalThis.KeyboardEvent) {
+                globalThis.KeyboardEvent = function KeyboardEvent(type, opts) {
+                    UIEvent.call(this, type, opts); var o = opts || {};
+                    this.key=o.key||''; this.code=o.code||''; this.location=o.location||0;
+                    this.repeat=!!o.repeat; this.isComposing=!!o.isComposing;
+                    this.ctrlKey=!!o.ctrlKey; this.shiftKey=!!o.shiftKey;
+                    this.altKey=!!o.altKey; this.metaKey=!!o.metaKey;
+                    this.charCode=o.charCode||0; this.keyCode=o.keyCode||0; this.which=o.which||0;
+                };
+                KeyboardEvent.prototype = Object.create(UIEvent.prototype);
+                KeyboardEvent.prototype.constructor = KeyboardEvent;
+                KeyboardEvent.prototype.getModifierState = MouseEvent.prototype.getModifierState;
+                KeyboardEvent.DOM_KEY_LOCATION_STANDARD=0; KeyboardEvent.DOM_KEY_LOCATION_LEFT=1;
+                KeyboardEvent.DOM_KEY_LOCATION_RIGHT=2; KeyboardEvent.DOM_KEY_LOCATION_NUMPAD=3;
+            }
+            if (!globalThis.FocusEvent) {
+                globalThis.FocusEvent = function FocusEvent(type, opts) {
+                    UIEvent.call(this, type, opts);
+                    this.relatedTarget = (opts && opts.relatedTarget) || null;
+                };
+                FocusEvent.prototype = Object.create(UIEvent.prototype);
+                FocusEvent.prototype.constructor = FocusEvent;
+            }
+            if (!globalThis.InputEvent) {
+                globalThis.InputEvent = function InputEvent(type, opts) {
+                    UIEvent.call(this, type, opts); var o = opts || {};
+                    this.data=o.data!==undefined?o.data:null; this.inputType=o.inputType||'';
+                    this.isComposing=!!o.isComposing; this.dataTransfer=o.dataTransfer||null;
+                };
+                InputEvent.prototype = Object.create(UIEvent.prototype);
+                InputEvent.prototype.constructor = InputEvent;
+            }
+            if (!globalThis.WheelEvent) {
+                globalThis.WheelEvent = function WheelEvent(type, opts) {
+                    MouseEvent.call(this, type, opts); var o = opts || {};
+                    this.deltaX=o.deltaX||0; this.deltaY=o.deltaY||0; this.deltaZ=o.deltaZ||0;
+                    this.deltaMode=o.deltaMode||0;
+                };
+                WheelEvent.prototype = Object.create(MouseEvent.prototype);
+                WheelEvent.prototype.constructor = WheelEvent;
+                WheelEvent.DOM_DELTA_PIXEL=0; WheelEvent.DOM_DELTA_LINE=1; WheelEvent.DOM_DELTA_PAGE=2;
+            }
+            if (!globalThis.PointerEvent) {
+                globalThis.PointerEvent = function PointerEvent(type, opts) {
+                    MouseEvent.call(this, type, opts); var o = opts || {};
+                    this.pointerId=o.pointerId||0; this.width=o.width||1; this.height=o.height||1;
+                    this.pressure=o.pressure||0; this.tangentialPressure=o.tangentialPressure||0;
+                    this.tiltX=o.tiltX||0; this.tiltY=o.tiltY||0; this.twist=o.twist||0;
+                    this.pointerType=o.pointerType||''; this.isPrimary=!!o.isPrimary;
+                };
+                PointerEvent.prototype = Object.create(MouseEvent.prototype);
+                PointerEvent.prototype.constructor = PointerEvent;
+            }
+            if (!globalThis.CompositionEvent) {
+                globalThis.CompositionEvent = function CompositionEvent(type, opts) {
+                    UIEvent.call(this, type, opts);
+                    this.data = (opts && opts.data !== undefined) ? opts.data : '';
+                };
+                CompositionEvent.prototype = Object.create(UIEvent.prototype);
+                CompositionEvent.prototype.constructor = CompositionEvent;
+            }
+        })();
+
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];
         // Range mutation notification via __nodeKey__ (anropas från Rust)
