@@ -4,7 +4,7 @@
 
 ## Princip
 
-- **Native (Rust)** = Implementerad i `dom_bridge.rs`, läser/skriver ArenaDom direkt. Riktig implementation.
+- **Native (Rust)** = Implementerad i `dom_bridge/` (modulkatalog), läser/skriver ArenaDom direkt. Riktig implementation.
 - **Polyfill (JS)** = Shim i `wpt/polyfills.js`. Fungerar för WPT-validering men är **inte** riktig implementation. Mål: migrera till Rust.
 - **Stub** = Returnerar hårdkodat värde. Ingen riktig logik.
 
@@ -12,22 +12,22 @@
 
 | Suite | Cases | Passed | Rate | Datum |
 |-------|-------|--------|------|-------|
-| dom/nodes | 6,624 | 5,004 | 75.5% | 2026-03-25 |
-| dom/events | 310 | 208 | 67.1% | 2026-03-25 |
-| dom/ranges | ~10,800 | ~7,400 | ~69% | 2026-03-25 |
-| dom/traversal | 1,584 | 619 | 39.1% | 2026-03-25 |
-| dom/collections | 48 | 6 | 12.5% | 2026-03-25 |
-| dom/lists | 189 | 180 | 95.2% | 2026-03-25 |
+| dom/nodes | 6,676 | 5,666 | 84.9% | 2026-03-26 |
+| dom/events | 318 | 213 | 67.0% | 2026-03-26 |
+| dom/ranges | ~10,943 | ~7,404 | ~67.7% | 2026-03-26 |
+| dom/traversal | 1,584 | 1,449 | 91.5% | 2026-03-26 |
+| dom/collections | 48 | 27 | 56.2% | 2026-03-26 |
+| dom/lists | 189 | 181 | 95.8% | 2026-03-26 |
 | dom/abort | 2 | 0 | 0.0% | 2026-03-25 |
-| css/selectors | 761 | 249 | 32.7% | 2026-03-25 |
-| css/cssom | 512 | 73 | 14.3% | 2026-03-25 |
-| domparsing | 453 | 25 | 5.5% | 2026-03-25 |
-| html/syntax | 342 | 67 | 19.6% | 2026-03-25 |
+| css/selectors | 3,457 | 1,840 | 53.2% | 2026-03-26 |
+| css/cssom | 531 | 76 | 14.3% | 2026-03-26 |
+| domparsing | 453 | 85 | 18.8% | 2026-03-26 |
+| html/syntax | 340 | 68 | 20.0% | 2026-03-26 |
 | encoding | 331 | 1 | 0.3% | 2026-03-25 |
 | xhr | 430 | 28 | 6.5% | 2026-03-25 |
 | webstorage | 7 | 0 | 0.0% | 2026-03-25 |
 
-> Alla scores bekräftade med `--features js-eval,blitz` (LightningCSS + css-inline).
+> Alla scores bekräftade med `--features js-eval,blitz,fetch` (LightningCSS + css-inline).
 > Range API native i Rust. Polyfill borttagen.
 Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 
@@ -44,12 +44,12 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `createTextNode(text)` | **Native** | Rust — skapar Text-nod |
 | `createComment(text)` | **Native** | Rust — skapar Comment-nod |
 | `createDocumentFragment()` | **Native** | Rust — skapar fragment |
-| `getElementsByClassName(cls)` | **Native** | Rust — rekursiv sökning |
-| `getElementsByTagName(tag)` | **Native** | Rust — rekursiv sökning |
-| `createElementNS(ns, qname)` | Polyfill | JS — delegerar till createElement |
+| `getElementsByClassName(cls)` | **Native** | Rust — rekursiv sökning, live Proxy HTMLCollection (2026-03-26) |
+| `getElementsByTagName(tag)` | **Native** | Rust — rekursiv sökning med "*" wildcard, live Proxy HTMLCollection (2026-03-26) |
+| `createElementNS(ns, qname)` | **Native** | Rust — full namespace validation (xml/xmlns constraints, qualified name parsing) (2026-03-26) |
 | `getElementsByTagNameNS(ns, tag)` | Polyfill | JS — ignorerar namespace |
 | `createEvent(type)` | Polyfill | JS — skapar Event-objekt med rätt typ |
-| `createAttribute(name)` | Polyfill | JS — skapar Attr-objekt med nodeType=2 |
+| `createAttribute(name)` | **Native** | Rust — name validation, DOMString conversion (2026-03-26) |
 | `document.implementation` | Polyfill | JS — createDocument/createHTMLDocument/createDocumentType |
 | `document.title` | Polyfill | JS — getter/setter via `<title>` element |
 | `document.URL` | Polyfill | JS — alias för location.href |
@@ -72,7 +72,7 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `getAttributeNames()` | Returnerar alla attributnamn |
 | `textContent` (get/set) | Accessor — rekursiv text extraction/replacement |
 | `innerHTML` (get/set) | Accessor — serialiserar/parsar HTML |
-| `outerHTML` (get) | Serialiserar element + barn |
+| `outerHTML` (get/set) | Serialiserar element + barn; setter parser-baserad med DOMException för root (2026-03-26) |
 | `insertAdjacentHTML(pos, html)` | Parsar och infogar HTML |
 | `appendChild(child)` | Flyttar nod i ArenaDom |
 | `removeChild(child)` | Tar bort, kastar NotFoundError |
@@ -99,7 +99,7 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `lookupNamespaceURI(prefix)` | Parent-chain traversal |
 | `toggleAttribute(name, force)` | DOMException vid ogiltig name (2026-03-25) |
 | `style.setProperty/getPropertyValue/removeProperty` | Inline style manipulation |
-| `addEventListener(type, fn, options)` | Stöd för options-objekt {capture, passive} (2026-03-25) |
+| `addEventListener(type, fn, options)` | Stöd för options-objekt {capture, passive, once} (2026-03-26) |
 | `removeEventListener(type, fn)` | Event-system |
 | `dispatchEvent(event)` | Med passive-stöd och !defaultPrevented returnvärde (2026-03-25) |
 | `focus()` / `blur()` / `click()` | Focus-tracking + event dispatch |
@@ -144,7 +144,7 @@ Se [wpt-dashboard.md](wpt-dashboard.md) för fullständig detaljerad breakdown.
 | `getBoundingClientRect()` | Stub | Returnerar nollor |
 | `detach()` | **Native** | No-op per spec |
 
-**Migrerad från polyfill → dom_bridge.rs (2026-03-25).** Boundary-jämförelse i ren Rust.
+**Migrerad från polyfill → dom_bridge/mod.rs (2026-03-25).** Boundary-jämförelse i ren Rust.
 WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking.
 
 ## NodeType — Native (Rust)
@@ -174,7 +174,7 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 
 | Del | Status |
 |-----|--------|
-| `addEventListener(type, fn, options)` | **Native** — stöd för {capture, passive} (2026-03-25) |
+| `addEventListener(type, fn, options)` | **Native** — stöd för {capture, passive, once} (2026-03-26) |
 | `removeEventListener(type, fn)` | **Native** |
 | `dispatchEvent` med bubbling + passive | **Native** (2026-03-25) |
 | `Event` / `CustomEvent` konstruktorer | **Native** (Rust) |
@@ -226,16 +226,16 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 
 | Implementation | WPT-svit | Score | Mål |
 |---------------|----------|-------|-----|
-| DOM Core (createElement, appendChild, etc.) | `dom/nodes/` | 75.5% | 90% |
-| Event System (addEventListener, dispatch) | `dom/events/` | 67.1% | 90% |
-| Range API (native Rust) | `dom/ranges/` | ~69% | 80% |
-| TreeWalker/NodeIterator | `dom/traversal/` | 39.1% | 90% |
-| HTMLCollection/NodeList | `dom/collections/` | 12.5% | 50% |
-| DOMTokenList (classList) | `dom/lists/` | 95.2% | 98% |
+| DOM Core (createElement, appendChild, etc.) | `dom/nodes/` | 84.9% | 90% |
+| Event System (addEventListener, dispatch) | `dom/events/` | 67.0% | 90% |
+| Range API (native Rust) | `dom/ranges/` | ~67.7% | 80% |
+| TreeWalker/NodeIterator | `dom/traversal/` | 91.5% | 95% |
+| HTMLCollection/NodeList (live Proxy) | `dom/collections/` | 56.2% | 70% |
+| DOMTokenList (classList) | `dom/lists/` | 95.8% | 98% |
 | AbortController | `dom/abort/` | 0.0% | 50% |
-| DOMParser/innerHTML | `domparsing/` | 5.5% | 30% |
+| DOMParser/innerHTML/outerHTML | `domparsing/` | 18.8% | 30% |
 | HTML5 Parsing | `html/syntax/` | 20.0% | 30% |
-| CSS Selectors | `css/selectors/` | 32.7% | 50% |
+| CSS Selectors | `css/selectors/` | 53.2% | 65% |
 | CSSOM (style, getComputedStyle) | `css/cssom/` | 14.3% | 25% |
 | TextEncoder/TextDecoder | `encoding/` | 0.3% | 40% |
 | localStorage/sessionStorage | `webstorage/` | 0.0% | 60% |
@@ -270,17 +270,24 @@ WPT dom/ranges: ~69%. Kvarvarande: foreignDoc/detached ranges, mutation tracking
 15. ~~**Event subclasses**~~ ✅ — UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent, WheelEvent, PointerEvent med spec-properties
 16. ~~`prepend()` / `append()` / `replaceChildren()`~~ ✅ — Redan native sedan Fas 17
 
-### Fas 4 — Medium prioritet
+### Fas 4 — KLAR (2026-03-26)
 17. ~~CSS selectors: `+`, `~`~~ ✅ — Redan native
-18. ~~CSS selectors: `:has()`, `:is()`, `:where()`, `:nth-last-child/type`~~ ✅ — Native (2026-03-25). `css/selectors/` 12% → 28%
-19. Namespace-metoder (setAttributeNS etc.) — `dom/nodes/` +100 pass
-20. `element.attributes` som riktig NamedNodeMap — `dom/collections/` impact
-21. TreeWalker/NodeIterator filter-förbättringar — `dom/traversal/` 33% → 60%
+18. ~~CSS selectors: `:has()`, `:is()`, `:where()`, `:nth-last-child/type`~~ ✅ — Native (2026-03-25). `css/selectors/` 12% → 53.2%
+19. ~~Namespace-metoder (createElementNS)~~ ✅ — Native med full namespace validation (2026-03-26)
+20. ~~`element.attributes` som riktig NamedNodeMap~~ ✅ — Proxy-baserad med Object.getOwnPropertyNames (2026-03-26)
+21. ~~TreeWalker/NodeIterator filter-förbättringar~~ ✅ — `dom/traversal/` 33% → 91.5%
 22. TextEncoder/TextDecoder — `encoding/` 0% → 40%
 
-### Fas 5 — Lägre prioritet
-23. AbortController/AbortSignal — `dom/abort/`
-24. Live HTMLCollection — `dom/collections/`
-25. DOMParser fullständig — `domparsing/` 6% → 30%
-26. XMLSerializer — `domparsing/`
-27. document.implementation fullständig — `dom/nodes/`
+### Fas 5 — KLAR (2026-03-26)
+23. ~~Live HTMLCollection~~ ✅ — Proxy-baserad, getElementsByTagName/ClassName, item(), namedItem(), Symbol.iterator (2026-03-26)
+24. ~~createAttribute (native)~~ ✅ — Name validation, DOMString conversion (2026-03-26)
+25. ~~outerHTML setter~~ ✅ — Parser-baserad med DOMException för root element (2026-03-26)
+26. ~~addEventListener({once: true})~~ ✅ — {once: true} support (2026-03-26)
+27. ~~document.implementation stub~~ ✅ — hasFeature för pre-polyfill availability (2026-03-26)
+
+### Fas 6 — Lägre prioritet
+28. AbortController/AbortSignal — `dom/abort/`
+29. DOMParser fullständig — `domparsing/` 18.8% → 30%
+30. XMLSerializer — `domparsing/`
+31. setAttributeNS/getAttributeNS riktig NS-stöd — `dom/nodes/` impact
+32. TextEncoder/TextDecoder — `encoding/` 0% → 40%

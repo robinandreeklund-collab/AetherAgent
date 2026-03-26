@@ -35,6 +35,17 @@ It provides a semantic perception layer for AI agents with built-in prompt injec
   - `fetch.rs` — HTTP page fetching, cookies, redirects, robots.txt, SSRF protection
   - `firewall.rs` — Semantic Firewall: 3-level goal-aware request filtering (L1/L2/L3)
   - `lib.rs` — WASM API surface, orchestration, serialization
+  - `dom_bridge/` — JS-Rust DOM bridge (module directory):
+    - `mod.rs` — Core: entry points, make_element_object, register_document
+    - `window.rs` — Window/Console/Storage/DOMException registration
+    - `selectors.rs` — CSS selector matching engine
+    - `node_ops.rs` — Node tree manipulation (append/remove/insert/clone)
+    - `attributes.rs` — Attribute get/set/remove/NS variants
+    - `style.rs` — classList + inline style property handling
+    - `utils.rs` — Pure utility functions (base64, URL, layout, media)
+    - `events.rs` — Event listener add/remove/dispatch/click/focus
+    - `chardata.rs` — CharacterData methods (substring/append/insert/delete)
+    - `state.rs` — Shared types (BridgeState, SharedState, DomEvalResult)
 - **No feature creep**: Only implement what the current Fas (phase) requires. Do not add speculative abstractions, unused helpers, or future-proofing code.
 
 ### Naming
@@ -62,7 +73,7 @@ Every PR, every commit, every fix — regardless of size — must pass the full 
 cargo test              # ALL tests (unit + integration)
 cargo clippy -- -D warnings
 cargo fmt --check
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/  # WPT baseline
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/  # WPT baseline
 ```
 
 ### Test Levels
@@ -117,7 +128,7 @@ WPT mäter hur bra AetherAgent fungerar — det är INTE målet i sig.
 WPT tests run the official, unmodified Web Platform Tests from https://github.com/web-platform-tests/wpt directly against AetherAgent's DOM implementation via QuickJS sandbox + DOM bridge.
 
 **Important:** WPT pass rate includes both Rust-native and JS-polyfilled implementations. See `docs/dom-implementation-status.md` for the full breakdown. The goal is to migrate all polyfills to Rust-native implementations. When implementing a new DOM method:
-1. Implement it in Rust (`dom_bridge.rs`) — not as a polyfill
+1. Implement it in Rust (`dom_bridge/`) — not as a polyfill
 2. Remove the corresponding polyfill from `wpt/polyfills.js`
 3. Verify WPT score doesn't regress
 
@@ -131,16 +142,16 @@ WPT tests run the official, unmodified Web Platform Tests from https://github.co
 
 ```bash
 # Kör alla dom/nodes tester
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
 
 # Kör med verbose output (visar varje testcase)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --verbose
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
 
 # Kör specifik fil
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/Document-getElementById.html
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Document-getElementById.html
 
 # JSON-output (för CI)
-cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/ --json
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json
 ```
 
 #### PR Requirements
@@ -161,11 +172,20 @@ Format i PR-beskrivning:
 
 **WPT score får aldrig gå ner utan dokumenterad motivering.**
 
-#### Baseline (2026-03-24)
+#### Baseline (2026-03-26)
 
 | Suite | Cases | Passed | Rate |
 |-------|-------|--------|------|
-| dom/ (total) | 2,004 | 1,382 | 69.0% |
+| dom/nodes | 6,676 | 5,666 | 84.9% |
+| dom/events | 318 | 213 | 67.0% |
+| dom/ranges | ~10,943 | ~7,404 | ~67.7% |
+| dom/traversal | 1,584 | 1,449 | 91.5% |
+| dom/collections | 48 | 27 | 56.2% |
+| dom/lists | 189 | 181 | 95.8% |
+| domparsing | 453 | 85 | 18.8% |
+| css/selectors | 3,457 | 1,840 | 53.2% |
+| css/cssom | 531 | 76 | 14.3% |
+| html/syntax | 340 | 68 | 20.0% |
 
 #### Targeted Test Directories
 
@@ -274,9 +294,9 @@ Types:
 
 **Fas 16 (Complete)**: Goal-Driven Adaptive DOM Streaming — `stream_state.rs` (StreamState, DecisionLayer, Directive enum), `stream_engine.rs` (StreamEngine with relevance-ranked chunked emission). LLM-directed branch expansion via directives: `expand(node_id)`, `stop`, `next_branch`, `lower_threshold(value)`. 95–99% token savings on real-world pages (10 noder av 372 på SVT-liknande sida). MCP tools: `stream_parse`, `stream_parse_directive`. HTTP endpoints: `/api/stream-parse`, `/api/fetch/stream-parse`, `/api/directive`. WASM API: `stream_parse_adaptive`, `stream_parse_with_directives`.
 
-**Fas 17 (Complete)**: JS Hardening — Arena DOM (`arena_dom.rs`), DOM Bridge (`dom_bridge.rs`), SSR Hydration (`hydration.rs`: 10 ramverk inkl. devalue-parser för Nuxt 3+/SvelteKit, RSC Flight Protocol, Qwik QRL), Progressive Escalation (`escalation.rs`: Tier 0-4), allowlist-säkerhet i `js_eval.rs`, persistent QuickJS Context i `eval_js_batch`.
+**Fas 17 (Complete)**: JS Hardening — Arena DOM (`arena_dom.rs`), DOM Bridge (`dom_bridge/` module directory, refactored from single file), SSR Hydration (`hydration.rs`: 10 ramverk inkl. devalue-parser för Nuxt 3+/SvelteKit, RSC Flight Protocol, Qwik QRL), Progressive Escalation (`escalation.rs`: Tier 0-4), allowlist-säkerhet i `js_eval.rs`, persistent QuickJS Context i `eval_js_batch`.
 
-**Fas 18 (Complete)**: Event Loop — `event_loop.rs`: microtask-kö (Promise.then, queueMicrotask via QuickJS inbyggda job-kö), setTimeout/setInterval (begränsade: max 100 timers, max 5000ms delay, virtuell klocka), requestAnimationFrame/cancelAnimationFrame (simulerad 16ms tick), MutationObserver (kopplad till ArenaDom med observe/disconnect). Säkerhetsbegränsningar: max 1000 ticks, max 50ms väggklocka. Integrerat i `dom_bridge.rs` — alla eval-anrop dränerar event-loopen automatiskt.
+**Fas 18 (Complete)**: Event Loop — `event_loop.rs`: microtask-kö (Promise.then, queueMicrotask via QuickJS inbyggda job-kö), setTimeout/setInterval (begränsade: max 100 timers, max 5000ms delay, virtuell klocka), requestAnimationFrame/cancelAnimationFrame (simulerad 16ms tick), MutationObserver (kopplad till ArenaDom med observe/disconnect). Säkerhetsbegränsningar: max 1000 ticks, max 50ms väggklocka. Integrerat i `dom_bridge/` — alla eval-anrop dränerar event-loopen automatiskt.
 
 ## Roadmap (ej påbörjad)
 

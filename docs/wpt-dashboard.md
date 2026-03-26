@@ -317,7 +317,7 @@ Se detaljerad API-täckning:
 | 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
 | **2026-03-26** | **55** | **~10,943** | **~7,404** | **~67.7%** | Verifierad efter dom_bridge refaktorering |
 
-**Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
+**Native:** Range i `src/dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Skippade (1 kvar):** Range-intersectsNode.html (>60s)
 
@@ -387,7 +387,8 @@ Se detaljerad API-täckning:
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 5 | 189 | 175 | 92.6% | Baseline |
-| **2026-03-25** | **5** | **189** | **179** | **94.7%** | +4 pass: classList raw value, unique tokens |
+| 2026-03-25 | 5 | 189 | 179 | 94.7% | +4 pass: classList raw value, unique tokens |
+| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
 
 Nästan komplett tack vare native classList-implementation.
 
@@ -407,11 +408,15 @@ AbortController/AbortSignal saknas helt. Låg prioritet.
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **53** | **453** | **25** | **5.5%** | Baseline |
+| 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
+| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
+| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
 
 **Implementerat:**
 - DOMParser.parseFromString (basic) ✅
 - innerHTML getter/setter ✅
+- outerHTML setter ✅
+- createAttribute native ✅
 
 **Saknas:**
 - XMLSerializer
@@ -444,23 +449,21 @@ html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **636** | **761** | **91** | **12.0%** | Baseline |
+| 2026-03-25 | 636 | 761 | 91 | 12.0% | Baseline |
+| **2026-03-26** | **636** | **3,457** | **1,840** | **53.2%** | +hasChildNodes fixade common.js → massiv förbättring |
 
 **Implementerat (native Rust):**
 - ID, class, tag selectors ✅
-- Attribute selectors ([attr], [attr="val"], [attr~="val"]) ✅
+- Attribute selectors ([attr], [attr="val"], [attr~="val"], [attr^="val"], [attr$="val"], [attr*="val"]) ✅
 - Child (>) / descendant ( ) combinators ✅
+- Adjacent sibling (+) / General sibling (~) ✅
 - :first-child, :last-child, :nth-child, :nth-of-type ✅
+- :nth-last-child, :nth-last-of-type ✅
+- :only-of-type ✅
 - :root, :empty, :checked, :not() ✅
+- :has(), :is(), :where() ✅
 
-**Saknas:**
-- Adjacent sibling (+) / General sibling (~)
-- :has(), :is(), :where()
-- :nth-last-child, :nth-last-of-type
-- :only-child, :only-of-type
-- Attribute selectors: ^=, $=, *=
-
-**Mål Q2 2026:** 40%
+**Mål Q2 2026:** ~~40%~~ **53.2% — UPPNATT!** Nytt mål: 65%
 
 ---
 
@@ -589,6 +592,8 @@ Console-testerna kräver troligen specifik testharness-integration.
 | 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
 | 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
 | 2026-03-25 | — | Se ovan per svit | Ny detaljerad baseline med alla sviter |
+| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
+| **2026-03-26** | **~14,759/~19,569 (~75.4%)** | **~17,000+/~25,300+** | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
 
 ---
 
