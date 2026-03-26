@@ -407,6 +407,20 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
             } else {
                 return false;
             }
+        } else if let Some(rest) = remaining.strip_prefix(":dir(") {
+            if let Some(end) = rest.find(')') {
+                let dir_val = rest[..end].trim();
+                let node_dir = node
+                    .get_attr("dir")
+                    .map(|d| d.to_ascii_lowercase())
+                    .unwrap_or_else(|| "ltr".to_string());
+                if node_dir != dir_val {
+                    return false;
+                }
+                remaining = &rest[end + 1..];
+            } else {
+                return false;
+            }
         } else if let Some(rest) = remaining.strip_prefix(":first-child") {
             require_first_child = true;
             remaining = rest;
@@ -916,19 +930,22 @@ fn is_first_child(arena: &ArenaDom, key: NodeKey) -> bool {
         Some(p) => p,
         None => return false,
     };
-    arena
-        .nodes
-        .get(parent)
-        .map(|n| {
-            n.children.iter().find(|&&c| {
-                arena
-                    .nodes
-                    .get(c)
-                    .map(|cn| cn.node_type == NodeType::Element)
-                    .unwrap_or(false)
-            }) == Some(&key)
-        })
-        .unwrap_or(false)
+    // Spec: :first-child gäller bara element med element-parent (inte Document)
+    let parent_node = match arena.nodes.get(parent) {
+        Some(n)
+            if n.node_type == NodeType::Element || n.node_type == NodeType::DocumentFragment =>
+        {
+            n
+        }
+        _ => return false,
+    };
+    parent_node.children.iter().find(|&&c| {
+        arena
+            .nodes
+            .get(c)
+            .map(|cn| cn.node_type == NodeType::Element)
+            .unwrap_or(false)
+    }) == Some(&key)
 }
 
 /// Kolla om nod är sista element-barnet
@@ -937,19 +954,22 @@ fn is_last_child(arena: &ArenaDom, key: NodeKey) -> bool {
         Some(p) => p,
         None => return false,
     };
-    arena
-        .nodes
-        .get(parent)
-        .map(|n| {
-            n.children.iter().rfind(|&&c| {
-                arena
-                    .nodes
-                    .get(c)
-                    .map(|cn| cn.node_type == NodeType::Element)
-                    .unwrap_or(false)
-            }) == Some(&key)
-        })
-        .unwrap_or(false)
+    // Spec: :last-child gäller bara element med element-parent
+    let parent_node = match arena.nodes.get(parent) {
+        Some(n)
+            if n.node_type == NodeType::Element || n.node_type == NodeType::DocumentFragment =>
+        {
+            n
+        }
+        _ => return false,
+    };
+    parent_node.children.iter().rfind(|&&c| {
+        arena
+            .nodes
+            .get(c)
+            .map(|cn| cn.node_type == NodeType::Element)
+            .unwrap_or(false)
+    }) == Some(&key)
 }
 
 /// Räkna nodens element-position bland sina syskon (1-indexed)
@@ -957,6 +977,13 @@ fn is_last_child(arena: &ArenaDom, key: NodeKey) -> bool {
 fn element_index_among_siblings(arena: &ArenaDom, key: NodeKey) -> Option<(usize, usize)> {
     let parent = arena.nodes.get(key)?.parent?;
     let parent_node = arena.nodes.get(parent)?;
+    // Spec: child-indexed pseudo-klasser kräver element-parent
+    if !matches!(
+        parent_node.node_type,
+        NodeType::Element | NodeType::DocumentFragment
+    ) {
+        return None;
+    }
     let mut pos = 0usize;
     let mut total = 0usize;
     let mut found = false;
@@ -988,6 +1015,13 @@ fn type_index_among_siblings(arena: &ArenaDom, key: NodeKey) -> Option<(usize, u
     let my_tag = node.tag.as_deref()?;
     let parent = node.parent?;
     let parent_node = arena.nodes.get(parent)?;
+    // Spec: :*-of-type kräver element-parent
+    if !matches!(
+        parent_node.node_type,
+        NodeType::Element | NodeType::DocumentFragment
+    ) {
+        return None;
+    }
     let mut pos = 0usize;
     let mut total = 0usize;
     let mut found = false;
