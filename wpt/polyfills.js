@@ -127,6 +127,10 @@
         return node;
       };
       doc.createProcessingInstruction = function(target, data) {
+        // Delegera till native om möjlig
+        if (document.createProcessingInstruction) {
+          return document.createProcessingInstruction(target, data);
+        }
         var node = document.createComment(data);
         node.nodeType = 7;
         node.nodeName = target;
@@ -152,6 +156,10 @@
 
   if (!impl.createDocumentType) {
     impl.createDocumentType = function(qualifiedName, publicId, systemId) {
+      // Använd native arena-nod om tillgänglig (har ownerDocument getter)
+      if (document.__createDocumentType) {
+        return document.__createDocumentType(qualifiedName || '', publicId || '', systemId || '');
+      }
       return {
         nodeType: 10,
         nodeName: qualifiedName || '',

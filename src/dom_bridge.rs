@@ -1158,6 +1158,94 @@ impl JsHandler for CreateDocumentFragment {
     }
 }
 
+// ─── createDocumentType — skapar en Doctype-nod i ArenaDom ──────────────────
+
+struct CreateDocumentType {
+    state: SharedState,
+}
+impl JsHandler for CreateDocumentType {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let public_id = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let system_id = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Doctype,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(name.clone().into()),
+                parent: None,
+                children: vec![],
+                owner_doc: None,
+            })
+        };
+        let val = make_element_object(ctx, key, &self.state)?;
+        // Doctype-specifika egenskaper
+        if let Some(obj) = val.as_object() {
+            let _ = obj.set("publicId", public_id.as_str());
+            let _ = obj.set("systemId", system_id.as_str());
+        }
+        Ok(val)
+    }
+}
+
+// ─── createProcessingInstruction — skapar en PI-nod i ArenaDom ──────────────
+
+struct CreateProcessingInstruction {
+    state: SharedState,
+}
+impl JsHandler for CreateProcessingInstruction {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let target = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let data = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        if target.is_empty() {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "InvalidCharacterError: target must not be empty",
+            ));
+        }
+        let key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::ProcessingInstruction,
+                tag: Some(target.clone()),
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(data.into()),
+                parent: None,
+                children: vec![],
+                owner_doc: None,
+            })
+        };
+        let val = make_element_object(ctx, key, &self.state)?;
+        if let Some(obj) = val.as_object() {
+            let _ = obj.set("target", target.as_str());
+        }
+        Ok(val)
+    }
+}
+
 // ─── createRange — delegerar till globalThis.Range ──────────────────────────
 
 struct CreateRange;
@@ -1448,6 +1536,26 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         )?,
     )?;
 
+    // createDocumentType — native Doctype-nod
+    doc.set(
+        "__createDocumentType",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateDocumentType {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    // createProcessingInstruction — native PI-nod
+    doc.set(
+        "createProcessingInstruction",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateProcessingInstruction {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
     // createRange — Range API
     doc.set(
         "createRange",
@@ -1696,6 +1804,15 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         doc.set("lastChild", make_last_child(ctx, doc_key, &state)?)?;
         doc.set("__nodeKey__", node_key_to_f64(doc_key))?;
     }
+    // Standard-egenskaper som WPT förväntar sig
+    doc.set("characterSet", "UTF-8")?;
+    doc.set("charset", "UTF-8")?;
+    doc.set("inputEncoding", "UTF-8")?;
+    doc.set("contentType", "text/html")?;
+    doc.set("compatMode", "CSS1Compat")?;
+    doc.set("baseURI", "about:blank")?;
+    doc.set("URL", "about:blank")?;
+    doc.set("documentURI", "about:blank")?;
 
     ctx.globals().set("document", doc)?;
 
@@ -4795,7 +4912,16 @@ fn make_element_object<'js>(
     obj.set("__nodeKey__", key_bits)?;
     obj.set("nodeType", node_type_val)?;
     obj.set("tagName", tag_name.as_str())?;
-    obj.set("nodeName", tag_name.as_str())?;
+    // nodeName enligt DOM-spec
+    let node_name = match node_type_val {
+        3 => "#text".to_string(),
+        7 => tag_name.clone(), // PI: target (tag_name är redan target)
+        8 => "#comment".to_string(),
+        10 => tag_name.clone(), // Doctype: name
+        11 => "#document-fragment".to_string(),
+        _ => tag_name.clone(),
+    };
+    obj.set("nodeName", node_name.as_str())?;
     // ownerDocument — lazy getter som hämtar document från globals vid anrop
     // Löser timing: body/head/documentElement skapas innan document registreras.
     if node_type_val != 9 {
@@ -4806,6 +4932,8 @@ fn make_element_object<'js>(
     }
     obj.set("id", id_val.as_str())?;
     obj.set("className", class_val.as_str())?;
+    // baseURI per DOM spec (alla noder ärver document.baseURI)
+    obj.set("baseURI", "about:blank")?;
     // Doctype-specifika egenskaper
     if node_type_val == 10 {
         obj.set("name", tag_name.as_str())?;
