@@ -7422,6 +7422,26 @@ fn register_window_with_viewport<'js>(
                 newDoc.URL = 'about:blank';
                 newDoc.documentURI = 'about:blank';
                 newDoc.nodeType = 9;
+                // Bygg styleSheets från <style>-taggar i det parsade dokumentet
+                var sheets = [];
+                if (newDoc.getElementsByTagName) {
+                    var styles = newDoc.getElementsByTagName('style');
+                    if (styles && styles.length) {
+                        for (var si = 0; si < styles.length; si++) {
+                            var sheet = new CSSStyleSheet();
+                            sheet.ownerNode = styles[si];
+                            var text = styles[si].textContent || '';
+                            text.replace(/\/\*[\s\S]*?\*\//g, '').split('}').forEach(function(block) {
+                                block = block.trim();
+                                if (block && block.indexOf('{') !== -1) {
+                                    sheet.cssRules.push(new CSSRule(block + '}'));
+                                }
+                            });
+                            sheets.push(sheet);
+                        }
+                    }
+                }
+                newDoc.styleSheets = sheets;
                 return newDoc;
             };
         };
