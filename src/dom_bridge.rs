@@ -4692,56 +4692,64 @@ struct TextContentSetter {
 }
 impl JsHandler for TextContentSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let text = args
-            .first()
-            .map(|v| {
-                if v.is_null() {
-                    String::new()
-                } else {
-                    v.as_string()
-                        .and_then(|s| s.to_string().ok())
-                        .unwrap_or_else(|| {
-                            // Konvertera nummer/boolean till sträng
-                            if let Some(n) = v.as_number() {
-                                if n == (n as i64) as f64 {
-                                    format!("{}", n as i64)
-                                } else {
-                                    format!("{}", n)
-                                }
-                            } else {
-                                String::new()
-                            }
-                        })
-                }
-            })
-            .unwrap_or_default();
+        let val = args.first();
+        let is_null = val.map(|v| v.is_null()).unwrap_or(true);
         let mut s = self.state.borrow_mut();
-        // Text/Comment-noder: uppdatera .text direkt (data-alias)
-        let is_text_or_comment = s
+        let node_type = s
             .arena
             .nodes
             .get(self.key)
-            .map(|n| matches!(n.node_type, NodeType::Text | NodeType::Comment))
-            .unwrap_or(false);
-        if is_text_or_comment {
+            .map(|n| n.node_type.clone())
+            .unwrap_or(NodeType::Other);
+        // Spec: textContent setter på Document/Doctype = no-op
+        if matches!(node_type, NodeType::Document | NodeType::Doctype) {
+            return Ok(Value::new_undefined(ctx.clone()));
+        }
+        // Text/Comment/PI: uppdatera .text direkt
+        if matches!(
+            node_type,
+            NodeType::Text | NodeType::Comment | NodeType::ProcessingInstruction
+        ) {
+            let text = if is_null {
+                String::new()
+            } else {
+                js_value_to_dom_string(val)
+            };
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.text = Some(text.into());
             }
         } else {
-            // Element: rensa barn och skapa ny textnod
+            // Element/DocumentFragment: rensa barn först (uppdatera parent-pekare)
+            let old_children: Vec<NodeKey> = s
+                .arena
+                .nodes
+                .get(self.key)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
+            for ck in &old_children {
+                if let Some(child) = s.arena.nodes.get_mut(*ck) {
+                    child.parent = None;
+                }
+            }
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 node.children.clear();
             }
-            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
-                node_type: NodeType::Text,
-                tag: None,
-                attributes: crate::arena_dom::Attrs::new(),
-                text: Some(text.into()),
-                parent: Some(self.key),
-                children: vec![],
-                owner_doc: None,
-            });
-            s.arena.append_child(self.key, text_key);
+            // Spec: null → ta bort barn, skapa INTE textnod
+            if !is_null {
+                let text = js_value_to_dom_string(val);
+                if !text.is_empty() {
+                    let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                        node_type: NodeType::Text,
+                        tag: None,
+                        attributes: crate::arena_dom::Attrs::new(),
+                        text: Some(text.into()),
+                        parent: Some(self.key),
+                        children: vec![],
+                        owner_doc: None,
+                    });
+                    s.arena.append_child(self.key, text_key);
+                }
+            }
         }
         s.mutations
             .push(std::borrow::Cow::Borrowed("setTextContent"));
@@ -5635,6 +5643,38 @@ fn make_element_object<'js>(
             }
         }
     }
+    struct ParentElementGetter {
+        state: SharedState,
+        key: NodeKey,
+    }
+    impl JsHandler for ParentElementGetter {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let s = self.state.borrow();
+            let parent = s.arena.nodes.get(self.key).and_then(|n| n.parent);
+            match parent {
+                Some(pk) => {
+                    // Spec: parentElement returnerar null om parent inte är Element
+                    let is_element = s
+                        .arena
+                        .nodes
+                        .get(pk)
+                        .map(|n| matches!(n.node_type, NodeType::Element))
+                        .unwrap_or(false);
+                    drop(s);
+                    if is_element {
+                        make_element_object(ctx, pk, &self.state)
+                    } else {
+                        Ok(Value::new_null(ctx.clone()))
+                    }
+                }
+                None => Ok(Value::new_null(ctx.clone())),
+            }
+        }
+    }
     struct ChildNodesGetter {
         state: SharedState,
         key: NodeKey,
@@ -5794,7 +5834,7 @@ fn make_element_object<'js>(
     )?;
     obj.prop(
         "parentElement",
-        Accessor::new_get(JsFn(ParentNodeGetter {
+        Accessor::new_get(JsFn(ParentElementGetter {
             state: Rc::clone(state),
             key,
         }))
@@ -6279,10 +6319,7 @@ impl JsHandler for ClassListAdd {
         // Stöd för flera tokens: classList.add("a", "b", "c")
         let mut tokens = Vec::new();
         for arg in args {
-            let t = arg
-                .as_string()
-                .and_then(|s| s.to_string().ok())
-                .unwrap_or_default();
+            let t = js_value_to_dom_string(Some(arg));
             validate_token(ctx, &t)?;
             tokens.push(t);
         }
@@ -6311,13 +6348,9 @@ struct ClassListRemove {
 }
 impl JsHandler for ClassListRemove {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // Stöd för flera tokens
         let mut tokens = Vec::new();
         for arg in args {
-            let t = arg
-                .as_string()
-                .and_then(|s| s.to_string().ok())
-                .unwrap_or_default();
+            let t = js_value_to_dom_string(Some(arg));
             validate_token(ctx, &t)?;
             tokens.push(t);
         }
@@ -6343,11 +6376,7 @@ struct ClassListContains {
 }
 impl JsHandler for ClassListContains {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let cls = js_value_to_dom_string(args.first());
         validate_token(ctx, &cls)?;
         let s = self.state.borrow();
         let has = s
@@ -6367,11 +6396,7 @@ struct ClassListToggle {
 }
 impl JsHandler for ClassListToggle {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let cls = js_value_to_dom_string(args.first());
         validate_token(ctx, &cls)?;
         // Stöd för force-argument
         let has_force = args.len() > 1 && !args.get(1).map(|v| v.is_undefined()).unwrap_or(true);
@@ -6430,16 +6455,10 @@ struct ClassListReplace {
 }
 impl JsHandler for ClassListReplace {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let old_cls = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let new_cls = args
-            .get(1)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let old_cls = js_value_to_dom_string(args.first());
+        validate_token(ctx, &old_cls)?;
+        let new_cls_str = js_value_to_dom_string(args.get(1));
+        validate_token(ctx, &new_cls_str)?;
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
@@ -6449,7 +6468,7 @@ impl JsHandler for ClassListReplace {
                     .into_iter()
                     .map(|c| {
                         if c == old_cls {
-                            new_cls.clone()
+                            new_cls_str.clone()
                         } else {
                             c.to_string()
                         }
