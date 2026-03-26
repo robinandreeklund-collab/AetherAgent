@@ -53,8 +53,8 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 
 | Mönster | Orsak | Lösning |
 |---------|-------|---------|
-| `TypeError: X is not a function` | API saknas | Implementera i dom_bridge.rs eller polyfills.js |
-| `X is undefined` | Property saknas | Lägg till getter i dom_bridge.rs |
+| `TypeError: X is not a function` | API saknas | Implementera i dom_bridge/ eller polyfills.js |
+| `X is undefined` | Property saknas | Lägg till getter i dom_bridge/ |
 | `assert_equals: got null expected "..."` | Returnerar fel värde | Fixa logik i Rust-implementation |
 | `assert_throws_dom` | DOMException saknas | Lägg till felhantering |
 | `TIMEOUT` | Oändlig loop eller för långsam | Optimera eller öka timeout |
@@ -81,7 +81,16 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 
 | Fil | Vad |
 |-----|-----|
-| `src/dom_bridge.rs` | JS ↔ Rust DOM bridge — alla DOM-metoder exponerade till QuickJS |
+| `src/dom_bridge/mod.rs` | Core DOM bridge — entry points, make_element_object, register_document |
+| `src/dom_bridge/attributes.rs` | Attribute get/set/remove/NS variants |
+| `src/dom_bridge/events.rs` | Event listener add/remove/dispatch/click/focus |
+| `src/dom_bridge/node_ops.rs` | Node tree manipulation (appendChild/removeChild/insertBefore/cloneNode) |
+| `src/dom_bridge/style.rs` | classList + inline style property handling |
+| `src/dom_bridge/window.rs` | Window, Console, Storage, DOMException registration |
+| `src/dom_bridge/selectors.rs` | CSS selector matching engine |
+| `src/dom_bridge/chardata.rs` | CharacterData methods (substring/append/insert/delete) |
+| `src/dom_bridge/state.rs` | Shared types (BridgeState, SharedState, DomEvalResult) |
+| `src/dom_bridge/utils.rs` | Utility functions (base64, URL, layout, media) |
 | `src/arena_dom.rs` | ArenaDom — underliggande DOM-datastruktur och operationer |
 | `src/event_loop.rs` | Event loop — setTimeout, rAF, MutationObserver |
 | `src/js_eval.rs` | JS sandbox — eval, säkerhetsfilter |
@@ -143,7 +152,7 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 
 ### Steg 3: Implementera i Rust
 
-Lägg till implementation i `src/dom_bridge.rs`:
+Lägg till implementation i `src/dom_bridge/` (relevant submodul):
 
 ```rust
 // I register_element_methods() eller liknande

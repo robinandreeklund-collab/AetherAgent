@@ -8,14 +8,17 @@
 
 ---
 
-## Sammanfattning
+## Sammanfattning (2026-03-26)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,800+ | ~15,100+ | ~73% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~4,600+ | ~2,100+ | ~46% |
-| **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~105 | ~8% |
-| **Total alla sviter** | | **~26,700+** | **~17,300+** | — |
+| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
+| **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
+| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
+| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~870+ | ~15% |
+| **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
+| **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
+| **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
 
 ---
 
@@ -29,7 +32,8 @@
 | 2026-03-26 | 286 | 6,659 | 5,089 | 76.4% | +hasChildNodes, HierarchyRequestError, unskip insertBefore |
 | 2026-03-26 | 286 | 6,676 | 5,243 | 78.5% | +native createDocumentType/PI, nodeName per spec |
 | 2026-03-26 | 286 | 6,674 | 5,332 | 79.9% | +ownerDocument configurable, DOMString, TypeError |
-| **2026-03-26** | **286** | **6,676** | **5,348** | **80.1%** | +DOM prototype chain (Node→CharacterData→Comment) |
+| 2026-03-26 | 286 | 6,676 | 5,348 | 80.1% | +DOM prototype chain (Node→CharacterData→Comment) |
+| **2026-03-26** | **286** | **6,676** | **5,666** | **84.9%** | +live HTMLCollection, createElementNS, createAttribute |
 
 **Toppresterare:**
 - CharacterData: ~100%
@@ -40,7 +44,6 @@
 
 **Största kvarvarande failures:**
 - Node-textContent: 37/81 pass (44 fail — foreign doc issues)
-- attributes: 16/58 pass (42 fail — NamedNodeMap/namespace)
 - Node-removeChild: 4/28 pass (24 fail — leaf node TypeError)
 - "no test suite completion": ~81 tester (async patterns)
 
@@ -53,14 +56,16 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad baseline |
-| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +click() dispatchar MouseEvent |
+| 2026-03-26 | 160 | 318 | 213 | 67.0% | +click() dispatchar MouseEvent |
+| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +event listener {once: true} stöd |
 
 **Implementerat:**
-- addEventListener med options (capture, passive) ✅
+- addEventListener med options (capture, passive, once) ✅
 - dispatchEvent med bubbling ✅
 - stopPropagation/stopImmediatePropagation ✅
 - Event/CustomEvent constructors ✅
 - click() dispatchar riktig MouseEvent ✅
+- addEventListener({once: true}) ✅
 
 **Saknas:**
 - 105 tester: "no test suite completion" (async_test med iframe/DOMContentLoaded)
@@ -76,9 +81,10 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | Baseline |
-| **2026-03-26** | **55** | **11,431** | **7,842** | **68.6%** | Stabil (hasChildNodes hjälper common.js) |
+| 2026-03-26 | 55 | 11,431 | 7,842 | 68.6% | Stabil (hasChildNodes hjälper common.js) |
+| **2026-03-26** | **55** | **~11,400** | **~7,752** | **~68.0%** | Verifierad efter refaktorering |
 
-**Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
+**Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Mål Q2 2026:** 80%
 
@@ -111,14 +117,19 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **9** | **48** | **6** | **12.5%** | Baseline (oförändrad) |
+| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
+| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+
+**Implementerat:**
+- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
+- NamedNodeMap Proxy (element.attributes) ✅
+- item(), namedItem(), Symbol.iterator ✅
 
 **Saknas:**
-- Live HTMLCollection (getElementsBy* returnerar statisk array)
-- Named property access
-- NodeList iteration
+- Named property access edge cases
+- NodeList iteration edge cases
 
-**Mål Q2 2026:** 50%
+**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
 
 ---
 
@@ -128,7 +139,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | **5** | **189** | **180** | **95.2%** | Stabil |
+| 2026-03-26 | 5 | 189 | 180 | 95.2% | Stabil |
+| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
 
 ---
 
@@ -137,7 +149,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
-| **2026-03-26** | **53** | **453** | **83** | **18.3%** | +native createDocumentType, nodeName fix |
+| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
+| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
 
 **Mål Q2 2026:** 30%
 
@@ -166,7 +179,8 @@
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **536** | **340** | **68** | **20.0%** | Baseline (oförändrad) |
+| 2026-03-25 | 536 | 340 | 68 | 20.0% | Baseline |
+| **2026-03-26** | **536** | **298** | **85** | **28.5%** | +17 pass |
 
 ---
 
@@ -176,9 +190,11 @@
 |-------|-----------|-------------|-----------|
 | 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
 | 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
-| **2026-03-26** | **15,100+/20,800+ (~73%)** | **~17,300+/26,700+** | Runda 1-4: +2979 nya pass |
+| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
+| 2026-03-26 | ~14,759/~19,569 (~75.4%) | ~17,000+/~25,300+ | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
+| **2026-03-26** | — | **26,000+/67,000+** | Utökning från 16→45 sviter, +nya baselines |
 
-### Förbättringslogg 2026-03-26 (Runda 1-4)
+### Förbättringslogg 2026-03-26 (Runda 1-5)
 
 | Runda | Nyckelfixar | dom/nodes | dom/traversal | css/selectors |
 |-------|-------------|-----------|---------------|---------------|
@@ -186,7 +202,14 @@
 | 2 | Native createDocumentType/PI, document props, nodeName | +154 | +37 | — |
 | 3 | ownerDocument configurable, DOMString, TypeError | +89 | — | — |
 | 4 | DOM prototype chain (Node→CharacterData→Comment) | +16 | — | — |
-| **Total** | | **+339** | **+830** | **+1749** |
+| 5 | live HTMLCollection, createElementNS, NamedNodeMap, outerHTML setter, event once | +318 | — | — |
+| **Total** | | **+657** | **+830** | **+1749** |
+
+#### Runda 5 detaljer
+- dom/nodes: 5,348 → 5,666 (+318)
+- dom/collections: 6 → 27 (+21)
+- domparsing: 83 → 85 (+2)
+- dom/lists: 180 → 181 (+1)
 
 ---
 
@@ -223,14 +246,17 @@ Se detaljerad API-täckning:
 
 ---
 
-## Sammanfattning
+## Sammanfattning (2026-03-26)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Kärna) | dom/nodes, events, ranges, traversal, collections | ~20,000+ | ~13,200+ | ~66% |
-| **Tier 2** (Stödjande) | dom/abort, lists, domparsing, html/syntax, html/dom, css/selectors | ~2,300+ | ~450+ | ~20% |
-| **Tier 3** (Utökad) | encoding, webstorage, xhr, css/cssom, hr-time, console, url | ~1,300+ | ~105 | ~8% |
-| **Total alla sviter** | | **~23,600+** | **~13,700+** | — |
+| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
+| **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
+| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
+| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~870+ | ~15% |
+| **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
+| **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
+| **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
 
 ---
 
@@ -242,19 +268,20 @@ Se detaljerad API-täckning:
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
 | 2026-03-25 | 286 | 6,624 | 5,017 | 75.7% | +71 pass: Event fix, classList, Text/Comment constructors |
-| **2026-03-25** | **286** | **6,624** | **5,004** | **75.5%** | blitz-bekräftad (css_compiler + LightningCSS) |
+| 2026-03-25 | 286 | 6,624 | 5,004 | 75.5% | blitz-bekräftad (css_compiler + LightningCSS) |
+| **2026-03-26** | **286** | **6,676** | **5,666** | **84.9%** | Runda 1-5: +662 pass |
 
 **Toppresterare:**
 - CharacterData: ~100%
 - ChildNode (before/after/replaceWith): 100%
 - Node-cloneNode: 93%
-- Document-createEvent: 94%
+- DOMImplementation-createDocumentType: 97.6%
 - querySelector-escapes: 91%
 
 **Största failures:**
-- Node-insertBefore (skipped — hänger)
-- Namespace-relaterade tester
-- ProcessingInstruction-stöd
+- Node-textContent: foreign doc issues
+- Node-removeChild: leaf node TypeError
+- "no test suite completion": ~81 tester (async patterns)
 
 **Mål Q2 2026:** 90%
 
@@ -267,18 +294,21 @@ Se detaljerad API-täckning:
 | 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
 | 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
 | 2026-03-25 | 160 | 311 | 140 | 45.0% | +31 pass: Event subclasses, cancelBubble spec fix |
-| **2026-03-25** | **160** | **310** | **208** | **67.1%** | blitz-bekräftad (eventPhase, global addEventListener) |
+| 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad (eventPhase, global addEventListener) |
+| **2026-03-26** | **160** | **318** | **213** | **67.0%** | +click(), addEventListener({once: true}) |
 
 **Implementerat:**
-- addEventListener med options (capture, passive) ✅
+- addEventListener med options (capture, passive, once) ✅
 - dispatchEvent med bubbling ✅
 - stopPropagation/stopImmediatePropagation ✅
 - Event/CustomEvent constructors ✅
+- click() dispatchar riktig MouseEvent ✅
+- addEventListener({once: true}) ✅
 
 **Saknas:**
-- Event subclasses (MouseEvent, KeyboardEvent med properties)
-- Event phases (capture → target → bubble) edge cases
-- scroll events, passive-by-default tester
+- 105 tester: "no test suite completion" (async_test med iframe/DOMContentLoaded)
+- window.event stöd
+- Event.composedPath()
 
 **Mål Q2 2026:** 90%
 
@@ -292,9 +322,10 @@ Se detaljerad API-täckning:
 | 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
 | 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
 | 2026-03-25 | 55 | 10,762 | 7,182 | 66.7% | WrongDocumentError, nativeChildIndex, toString |
-| **2026-03-25** | **55** | **~10,800** | **~7,400+** | **~69%** | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
+| 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
+| **2026-03-26** | **55** | **~11,400** | **~7,752** | **~68.0%** | Verifierad efter dom_bridge refaktorering |
 
-**Native:** Range i `dom_bridge.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
+**Native:** Range i `src/dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
 **Skippade (1 kvar):** Range-intersectsNode.html (>60s)
 
@@ -317,19 +348,23 @@ Se detaljerad API-täckning:
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 18 | 1,584 | 516 | 32.6% | Baseline |
-| **2026-03-25** | **18** | **1,584** | **619** | **39.1%** | blitz-bekräftad (whatToShow unsigned, root identity) |
+| 2026-03-25 | 18 | 1,584 | 619 | 39.1% | blitz-bekräftad (whatToShow unsigned, root identity) |
+| **2026-03-26** | **18** | **1,584** | **1,449** | **91.5%** | +hasChildNodes, NodeIterator fix, createDocumentType, TreeWalker filter |
 
 **Implementerat:**
 - TreeWalker: nextNode, previousNode, parentNode, firstChild ✅
-- NodeIterator: nextNode, previousNode ✅
+- NodeIterator: nextNode, previousNode, filter boolean→number ✅
 - whatToShow filter ✅
+- hasChildNodes() — fixade common.js blockering ✅
+- Native createDocumentType — doctype-noder med __nodeKey__ ✅
+- ProcessingInstruction nodeType=7 i arena ✅
 
 **Saknas:**
-- ProcessingInstruction-stöd (common.js testNodes)
-- NodeIterator: referenceNode tracking efter DOM-mutation
-- Avancerade filter-callbacks
+- xmlDoctype foreignDoctype: ~48 (polyfill doctype utan __nodeKey__ för foreign docs)
+- Recursive filter InvalidStateError: 2
+- ProcessingInstruction edge cases
 
-**Mål Q2 2026:** 60%
+**Mål Q2 2026:** ~~60%~~ **91.5% — UPPNATT!** Nytt mål: 95%
 
 ---
 
@@ -337,25 +372,29 @@ Se detaljerad API-täckning:
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **9** | **48** | **6** | **12.5%** | Baseline |
+| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
+| **2026-03-26** | **9** | **48** | **27** | **56.2%** | +live Proxy HTMLCollection, NamedNodeMap Proxy |
+
+**Implementerat:**
+- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
+- NamedNodeMap Proxy (element.attributes) ✅
+- item(), namedItem(), Symbol.iterator ✅
 
 **Saknas:**
-- Live HTMLCollection (getElementsBy* returnerar statisk array)
-- Named property access (collection["id"])
-- NodeList iteration
+- Named property access edge cases
+- NodeList iteration edge cases
 
-**Mål Q2 2026:** 50%
+**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
 
 ---
-
-## Tier 2 — Stödjande (kör vid relevanta ändringar)
 
 ### dom/lists/ — DOMTokenList
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 5 | 189 | 175 | 92.6% | Baseline |
-| **2026-03-25** | **5** | **189** | **179** | **94.7%** | +4 pass: classList raw value, unique tokens |
+| 2026-03-25 | 5 | 189 | 179 | 94.7% | +4 pass: classList raw value, unique tokens |
+| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
 
 Nästan komplett tack vare native classList-implementation.
 
@@ -371,15 +410,27 @@ AbortController/AbortSignal saknas helt. Låg prioritet.
 
 ---
 
+### selection/ — Selection API
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 29,775 | 7,293 | 24.5% | Baseline |
+
+---
+
 ### domparsing/ — DOMParser & Serialization
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **53** | **453** | **25** | **5.5%** | Baseline |
+| 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
+| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
+| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
 
 **Implementerat:**
 - DOMParser.parseFromString (basic) ✅
 - innerHTML getter/setter ✅
+- outerHTML setter ✅
+- createAttribute native ✅
 
 **Saknas:**
 - XMLSerializer
@@ -395,7 +446,8 @@ AbortController/AbortSignal saknas helt. Låg prioritet.
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 536 | 204 | 26 | 12.7% | Baseline |
-| **2026-03-25** | **536** | **340** | **68** | **20.0%** | +42 pass: ownerDocument fix |
+| 2026-03-25 | 536 | 340 | 68 | 20.0% | +42 pass: ownerDocument fix |
+| **2026-03-26** | **536** | **298** | **85** | **28.5%** | +17 pass |
 
 html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 
@@ -412,23 +464,21 @@ html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **636** | **761** | **91** | **12.0%** | Baseline |
+| 2026-03-25 | 636 | 761 | 91 | 12.0% | Baseline |
+| **2026-03-26** | **636** | **3,457** | **1,840** | **53.2%** | +hasChildNodes fixade common.js → massiv förbättring |
 
 **Implementerat (native Rust):**
 - ID, class, tag selectors ✅
-- Attribute selectors ([attr], [attr="val"], [attr~="val"]) ✅
+- Attribute selectors ([attr], [attr="val"], [attr~="val"], [attr^="val"], [attr$="val"], [attr*="val"]) ✅
 - Child (>) / descendant ( ) combinators ✅
+- Adjacent sibling (+) / General sibling (~) ✅
 - :first-child, :last-child, :nth-child, :nth-of-type ✅
+- :nth-last-child, :nth-last-of-type ✅
+- :only-of-type ✅
 - :root, :empty, :checked, :not() ✅
+- :has(), :is(), :where() ✅
 
-**Saknas:**
-- Adjacent sibling (+) / General sibling (~)
-- :has(), :is(), :where()
-- :nth-last-child, :nth-last-of-type
-- :only-child, :only-of-type
-- Attribute selectors: ^=, $=, *=
-
-**Mål Q2 2026:** 40%
+**Mål Q2 2026:** ~~40%~~ **53.2% — UPPNATT!** Nytt mål: 65%
 
 ---
 
@@ -449,6 +499,46 @@ html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
 - window.getComputedStyle med cascading
 
 **Mål Q2 2026:** 20%
+
+---
+
+### css/css-values/ — CSS Values
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 1,523 | 164 | 10.8% | Baseline |
+
+---
+
+### css/css-cascade/ — CSS Cascade
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 402 | 23 | 5.7% | Baseline |
+
+---
+
+### css/css-display/ — CSS Display
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 44 | 16 | 36.4% | Baseline |
+
+---
+
+### css/css-color/ — CSS Color
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 84 | 12 | 14.3% | Baseline |
+
+---
+
+### css/css-flexbox/ — CSS Flexbox
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 124 | 11 | 8.9% | Baseline |
 
 ---
 
@@ -528,25 +618,162 @@ Console-testerna kräver troligen specifik testharness-integration.
 
 ---
 
-## Tier 4 — Framtida
+## Tier 2 — Events & Interaction (NY)
 
-### custom-elements/
+### pointerevents/
 
-| Datum | Filer | Cases | Passed | Rate |
-|-------|-------|-------|--------|------|
-| 2026-03-25 | 172 | 930 | 18 | 1.9% |
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 322 | 133 | 41.3% | Baseline |
 
-### shadow-dom/
+### uievents/
 
-| Datum | Filer | Cases | Passed | Rate |
-|-------|-------|-------|--------|------|
-| 2026-03-25 | 295 | 1,393 | 24 | 1.7% |
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 24 | 9 | 37.5% | Baseline |
+
+### touch-events/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 16 | 6 | 37.5% | Baseline |
+
+### input-events/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 29 | 9 | 31.0% | Baseline |
+
+### focus/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 1 | 0 | 0.0% | Baseline |
+
+### editing/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 229 | 3 | 1.3% | Baseline |
+
+---
+
+## Tier 4 — HTML
 
 ### html/semantics/
 
-| Datum | Filer | Cases | Passed | Rate |
-|-------|-------|-------|--------|------|
-| 2026-03-25 | 2,803 | TBD | TBD | TBD |
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| 2026-03-25 | 2,803 | TBD | TBD | TBD | Stack overflow vid batch-körning |
+| **2026-03-26** | — | ~4,900 | 697 | 14.3% | Baseline |
+
+---
+
+## Tier 5 — JS & Standards
+
+### ecmascript/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 21 | 18 | 85.7% | Baseline |
+
+### webidl/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 94 | 20 | 21.3% | Baseline |
+
+### quirks/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 75 | 58 | 77.3% | Baseline |
+
+---
+
+## Tier 6 — Övriga
+
+### FileAPI/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 23 | 10 | 43.5% | Baseline |
+
+### trusted-types/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 238 | 25 | 10.5% | Baseline |
+
+### svg/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 869 | 53 | 6.1% | Baseline |
+
+### xhr/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| 2026-03-25 | 244 | 430 | 28 | 6.5% | Baseline |
+| **2026-03-26** | — | 463 | 31 | 6.7% | Uppdaterad baseline |
+
+### fetch/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 400 | 10 | 2.5% | Baseline |
+
+### encoding/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| 2026-03-25 | 160 | 331 | 1 | 0.3% | Baseline |
+| **2026-03-26** | — | 331 | 2 | 0.6% | +1 pass |
+
+### webmessaging/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 70 | 10 | 14.3% | Baseline |
+
+### inert/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 49 | 6 | 12.2% | Baseline |
+
+### domxpath/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 105 | 2 | 1.9% | Baseline |
+
+### shadow-dom/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| 2026-03-25 | 295 | 1,393 | 24 | 1.7% | Baseline |
+| **2026-03-26** | — | ~100+ | ~15 | ~5% | Uppdaterad baseline |
+
+### custom-elements/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| 2026-03-25 | 172 | 930 | 18 | 1.9% | Baseline |
+| **2026-03-26** | — | 950 | 19 | 2.0% | +1 pass |
+
+### user-timing/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 7 | 3 | 42.9% | Baseline |
+
+### mathml/
+
+| Datum | Filer | Cases | Passed | Rate | Kommentar |
+|-------|-------|-------|--------|------|-----------|
+| **2026-03-26** | — | 143 | 2 | 1.4% | Baseline |
 
 ---
 
@@ -557,6 +784,9 @@ Console-testerna kräver troligen specifik testharness-integration.
 | 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
 | 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
 | 2026-03-25 | — | Se ovan per svit | Ny detaljerad baseline med alla sviter |
+| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
+| 2026-03-26 | ~14,759/~19,569 (~75.4%) | ~17,000+/~25,300+ | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
+| **2026-03-26** | — | **26,000+/67,000+** | Utökning från 16→45 sviter, +nya baselines |
 
 ---
 

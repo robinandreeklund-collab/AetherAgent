@@ -1,3 +1,6 @@
+[workspace]
+exclude = ["codegen"]
+
 [package]
 name = "aether-agent"
 version = "0.1.0"

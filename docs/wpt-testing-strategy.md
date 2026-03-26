@@ -14,7 +14,7 @@ DOM-implementation mäter vi exakt hur spec-kompatibel AetherAgent är och var v
 ```
 1. POLYFILL  — Implementera API i JS (wpt/polyfills.js) för att snabbt se WPT-score
 2. VERIFY    — Kör WPT-tester, bekräfta att integrationen fungerar (pass-rate stabil)
-3. MIGRATE   — Flytta till native Rust i dom_bridge.rs / arena_dom.rs
+3. MIGRATE   — Flytta till native Rust i dom_bridge/ (modulkatalog) / arena_dom.rs
 4. NATIVE    — Ta bort polyfill, verifiera att WPT-score inte reggressar
 ```
 
@@ -132,7 +132,7 @@ Vid milstolpar (varje vecka eller major release):
 | ~~Implementera prepend/append/replaceChildren~~ ✅ | dom/nodes | +50-100 (klar) | — |
 | TextEncoder/TextDecoder | encoding/ | +100 | Låg |
 | ~~Fixa NodeIterator ProcessingInstruction~~ ✅ | dom/traversal | +830 (klar) | — |
-| Live HTMLCollection | dom/collections | +30 | Medium |
+| ~~Live HTMLCollection~~ ✅ | dom/collections | +21 (klar) | — |
 | async_test hantering | dom/events | +50-100 | Medium |
 
 ### 🟡 Medium effort, hög impact
@@ -143,7 +143,7 @@ Vid milstolpar (varje vecka eller major release):
 | ~~CSS selectors: +, ~, :has(), :is()~~ ✅ | css/selectors | +1749 (klar) | — |
 | ~~Event subclasses (MouseEvent etc.)~~ ✅ | dom/events | +55 (klar) | — |
 | ~~DOMException → Native Rust~~ ✅ | alla | +50 (klar) | — |
-| Namespace-metoder | dom/nodes | +100 | Medium |
+| ~~Namespace-metoder (createElementNS)~~ ✅ | dom/nodes | +318 (klar) | — |
 | ~~TreeWalker xmlDoc-stöd~~ ✅ | dom/traversal | +830 (klar) | — |
 
 ### 🔴 Stor effort, strategisk
@@ -191,14 +191,22 @@ Vid milstolpar (varje vecka eller major release):
 12. ~~**ownerDocument configurable**~~ ✅ — Tillåter foreign doc override
 13. ~~**document properties**~~ ✅ — characterSet, contentType, compatMode, baseURI
 
-### Nästa migration (Fas 5)
+### Fas 5 — KLAR (2026-03-26, Runda 5)
 
-14. Namespace-metoder (setAttributeNS etc.) — dom/nodes +100 pass
-15. NamedNodeMap (element.attributes) — dom/collections impact
-16. Live HTMLCollection — dom/collections 12% → 50%
-17. Range mutation tracking — dom/ranges +90 pass
-18. foreignDoc multi-document — dom/ranges +400 pass
-19. async_test completion — dom/events +50-100 pass
+14. ~~**createElementNS (native)**~~ ✅ — Full namespace validation (xml/xmlns constraints, qualified name parsing)
+15. ~~**NamedNodeMap (element.attributes)**~~ ✅ — Proxy-baserad med Object.getOwnPropertyNames
+16. ~~**Live HTMLCollection**~~ ✅ — Proxy-baserad, getElementsByTagName/ClassName, item(), namedItem(), Symbol.iterator
+17. ~~**createAttribute (native)**~~ ✅ — Name validation, DOMString conversion
+18. ~~**outerHTML setter**~~ ✅ — Parser-baserad med DOMException för root element
+19. ~~**addEventListener({once: true})**~~ ✅ — {once: true} support
+20. ~~**document.implementation**~~ ✅ — Stub med hasFeature för pre-polyfill availability
+
+### Nästa migration (Fas 6)
+
+21. Range mutation tracking — dom/ranges +90 pass
+22. foreignDoc multi-document — dom/ranges +400 pass
+23. async_test completion — dom/events +50-100 pass
+24. setAttributeNS/getAttributeNS riktig NS-stöd — dom/nodes impact
 
 ---
 
@@ -252,15 +260,16 @@ done
 
 | Svit | Baseline (03-25) | Nu (03-26) | Mål | Gap |
 |------|-------------------|-----------|-----|-----|
-| dom/nodes/ | 75.5% | **80.1%** | 90% | -10pp |
+| dom/nodes/ | 75.5% | **84.9%** | 90% | -5pp |
 | dom/events/ | 67.1% | **67.0%** | 90% | -23pp |
-| dom/ranges/ | ~69% | **68.6%** | 80% | -11pp |
+| dom/ranges/ | ~69% | **~67.7%** | 80% | -12pp |
 | dom/traversal/ | 39.1% | **91.5%** ✅ | ~~90%~~ 95% | -4pp |
-| dom/lists/ | 95.2% | **95.2%** | 98% | -3pp |
+| dom/collections/ | 12.5% | **56.2%** ✅ | ~~50%~~ 70% | -14pp |
+| dom/lists/ | 95.2% | **95.8%** | 98% | -2pp |
 | css/selectors/ | 12.0% | **53.2%** ✅ | ~~50%~~ 65% | -12pp |
 | css/cssom/ | 14.3% | **14.3%** | 25% | -11pp |
 | html/syntax/ | 19.6% | **20.0%** | 30% | -10pp |
-| domparsing/ | 5.5% | **18.3%** | 30% | -12pp |
+| domparsing/ | 5.5% | **18.8%** | 30% | -11pp |
 
 ### Långsiktigt (Q4 2026)
 
