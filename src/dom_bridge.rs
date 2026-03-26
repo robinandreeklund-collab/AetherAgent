@@ -6225,6 +6225,112 @@ fn make_element_object<'js>(
         obj.set("dataset", dataset)?;
     }
 
+    // relList / sandbox / sizes / htmlFor — DOMTokenList, bara på HTML-element
+    // Använder lazy getter som checkar namespaceURI vid access
+    {
+        let tag_lc = tag_name.to_ascii_lowercase();
+        let needs_rel_list = matches!(tag_lc.as_str(), "a" | "area" | "link");
+        let needs_sandbox = tag_lc == "iframe";
+        let needs_sizes = tag_lc == "link";
+        let needs_html_for = tag_lc == "output";
+        if needs_rel_list || needs_sandbox || needs_sizes || needs_html_for {
+            // Skapa DOMTokenList-objekt som läser/skriver valfritt attribut
+            let make_dtl_code = r#"(function(elem, attrName) {
+                var dtl = {};
+                function getTokens() {
+                    var v = elem.getAttribute(attrName) || '';
+                    if (!v) return [];
+                    var seen = {}, result = [];
+                    v.split(/\s+/).forEach(function(t) { if (t && !seen[t]) { seen[t]=1; result.push(t); } });
+                    return result;
+                }
+                dtl.add = function() {
+                    var tokens = getTokens();
+                    for (var i=0;i<arguments.length;i++) {
+                        var t = String(arguments[i]);
+                        if (!t) throw new DOMException('The token must not be empty.','SyntaxError');
+                        if (/\s/.test(t)) throw new DOMException('The token must not contain whitespace.','InvalidCharacterError');
+                        if (tokens.indexOf(t)===-1) tokens.push(t);
+                    }
+                    elem.setAttribute(attrName, tokens.join(' '));
+                };
+                dtl.remove = function() {
+                    var tokens = getTokens();
+                    for (var i=0;i<arguments.length;i++) {
+                        var t = String(arguments[i]);
+                        tokens = tokens.filter(function(c){return c!==t;});
+                    }
+                    elem.setAttribute(attrName, tokens.join(' '));
+                };
+                dtl.contains = function(t) { return getTokens().indexOf(String(t)) !== -1; };
+                dtl.toggle = function(t, force) {
+                    t = String(t);
+                    var tokens = getTokens();
+                    var idx = tokens.indexOf(t);
+                    if (force !== undefined) {
+                        if (force) { if (idx===-1) tokens.push(t); elem.setAttribute(attrName, tokens.join(' ')); return true; }
+                        else { tokens = tokens.filter(function(c){return c!==t;}); elem.setAttribute(attrName, tokens.join(' ')); return false; }
+                    }
+                    if (idx!==-1) { tokens.splice(idx,1); elem.setAttribute(attrName, tokens.join(' ')); return false; }
+                    tokens.push(t); elem.setAttribute(attrName, tokens.join(' ')); return true;
+                };
+                dtl.item = function(i) { var t = getTokens(); return i < t.length ? t[i] : null; };
+                dtl.replace = function(o, n) { var t = getTokens(); var i = t.indexOf(String(o)); if (i===-1) return false; t[i]=String(n); elem.setAttribute(attrName, t.join(' ')); return true; };
+                Object.defineProperty(dtl, 'length', { get: function() { return getTokens().length; } });
+                Object.defineProperty(dtl, 'value', { get: function() { return elem.getAttribute(attrName)||''; }, set: function(v) { elem.setAttribute(attrName, String(v)); } });
+                Object.defineProperty(dtl, Symbol.toStringTag, { value: 'DOMTokenList' });
+                dtl.toString = function() { return elem.getAttribute(attrName)||''; };
+                dtl.forEach = function(cb, thisArg) { var t=getTokens(); for(var i=0;i<t.length;i++) cb.call(thisArg,t[i],i,dtl); };
+                return dtl;
+            })"#;
+            if let Ok(make_dtl) = ctx.eval::<Function, _>(make_dtl_code) {
+                // Lazy getter — returnerar DOMTokenList bara om namespaceURI är HTML
+                let lazy_dtl_code = r#"(function(elem, make, attrName, propName) {
+                    var cached = null;
+                    Object.defineProperty(elem, propName, {
+                        get: function() {
+                            var ns = this.namespaceURI;
+                            if (ns && ns !== 'http://www.w3.org/1999/xhtml') return undefined;
+                            if (!cached) cached = make(this, attrName);
+                            return cached;
+                        },
+                        configurable: true, enumerable: true
+                    });
+                })"#;
+                if let Ok(lazy_fn) = ctx.eval::<Function, _>(lazy_dtl_code) {
+                    let elem_val: Value = obj.clone().into();
+                    if needs_rel_list {
+                        let _ = lazy_fn.call::<_, Value>((
+                            elem_val.clone(),
+                            make_dtl.clone(),
+                            "rel",
+                            "relList",
+                        ));
+                    }
+                    if needs_sandbox {
+                        let _ = lazy_fn.call::<_, Value>((
+                            elem_val.clone(),
+                            make_dtl.clone(),
+                            "sandbox",
+                            "sandbox",
+                        ));
+                    }
+                    if needs_sizes {
+                        let _ = lazy_fn.call::<_, Value>((
+                            elem_val.clone(),
+                            make_dtl.clone(),
+                            "sizes",
+                            "sizes",
+                        ));
+                    }
+                    if needs_html_for {
+                        let _ = lazy_fn.call::<_, Value>((elem_val, make_dtl, "for", "htmlFor"));
+                    }
+                }
+            }
+        }
+    }
+
     // Cacha objektet + applicera JS-polyfills (prototypkedja, CharacterData, ChildNode-metoder)
     {
         let global = ctx.globals();
@@ -6551,6 +6657,21 @@ impl JsHandler for ClassListGetClasses {
     }
 }
 
+struct ClassListSetValue {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClassListSetValue {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = js_value_to_dom_string(args.first());
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.attributes.insert("class".to_string(), val);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 fn make_class_list<'js>(
     ctx: &Ctx<'js>,
     key: NodeKey,
@@ -6629,11 +6750,18 @@ fn make_class_list<'js>(
             key,
         }),
     )?;
-    let update_fn_code = r#"(function(obj, getClasses, getRawClass) {
+    let set_value_fn = Function::new(
+        ctx.clone(),
+        JsFn(ClassListSetValue {
+            state: Rc::clone(state),
+            key,
+        }),
+    )?;
+    let update_fn_code = r#"(function(obj, getClasses, getRawClass, setValue) {
         Object.defineProperty(obj, 'length', { get: function(){ return getClasses().length; }, configurable: true });
         Object.defineProperty(obj, 'value', {
             get: function(){ return getRawClass(); },
-            set: function(v){ /* setter via className */ },
+            set: function(v){ setValue(String(v)); },
             configurable: true
         });
         Object.defineProperty(obj, Symbol.toStringTag, { value: 'DOMTokenList' });
@@ -6678,7 +6806,12 @@ fn make_class_list<'js>(
         }),
     )?;
     if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
-        let _ = update_fn.call::<_, Value>((obj.clone(), get_classes_fn, get_raw_class_fn));
+        let _ = update_fn.call::<_, Value>((
+            obj.clone(),
+            get_classes_fn,
+            get_raw_class_fn,
+            set_value_fn,
+        ));
     }
 
     Ok(obj.into_value())
