@@ -1040,11 +1040,7 @@ struct CreateTextNode {
 }
 impl JsHandler for CreateTextNode {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let text = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let text = js_value_to_dom_string(args.first());
         let key = {
             let mut s = self.state.borrow_mut();
             s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -1066,11 +1062,8 @@ struct CreateComment {
 }
 impl JsHandler for CreateComment {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let text = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // Spec: DOMString-konvertering — null→"null", undefined→"undefined", number→string
+        let text = js_value_to_dom_string(args.first());
         let key = {
             let mut s = self.state.borrow_mut();
             s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -2426,7 +2419,15 @@ impl JsHandler for AppendChild {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let child_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "TypeError: Failed to execute 'appendChild': parameter 1 is not of type 'Node'.",
+                    )?
+                    .into(),
+                ));
+            }
         };
         let old_parent_key;
         let old_index;
@@ -2558,7 +2559,15 @@ impl JsHandler for InsertBefore {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let new_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_undefined(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "TypeError: Failed to execute 'insertBefore': parameter 1 is not of type 'Node'.",
+                    )?
+                    .into(),
+                ));
+            }
         };
         let ref_key = args.get(1).and_then(extract_node_key);
         let old_parent_key;
@@ -4162,6 +4171,32 @@ fn webidl_unsigned_long(val: Option<&rquickjs::Value<'_>>) -> u32 {
     }
 }
 
+/// WebIDL DOMString-konvertering: null→"null", undefined→"undefined", number→string
+fn js_value_to_dom_string(val: Option<&rquickjs::Value<'_>>) -> String {
+    match val {
+        None => String::new(),
+        Some(v) => {
+            if v.is_null() {
+                "null".to_string()
+            } else if v.is_undefined() {
+                "undefined".to_string()
+            } else if let Some(s) = v.as_string() {
+                s.to_string().unwrap_or_default()
+            } else if let Some(b) = v.as_bool() {
+                if b { "true" } else { "false" }.to_string()
+            } else if let Some(n) = v.as_number() {
+                if n == (n as i64) as f64 {
+                    format!("{}", n as i64)
+                } else {
+                    format!("{}", n)
+                }
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
 /// Konvertera UTF-16 code unit offset till UTF-8 byte offset.
 /// JavaScript räknar i UTF-16 code units (surrogat-par = 2 units).
 fn utf16_offset_to_byte(s: &str, utf16_offset: usize) -> usize {
@@ -4927,7 +4962,7 @@ fn make_element_object<'js>(
     if node_type_val != 9 {
         obj.prop(
             "ownerDocument",
-            Accessor::new_get(JsFn(OwnerDocumentGetter)),
+            Accessor::new_get(JsFn(OwnerDocumentGetter)).configurable(),
         )?;
     }
     obj.set("id", id_val.as_str())?;

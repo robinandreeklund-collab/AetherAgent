@@ -83,7 +83,10 @@
       doc.head = head;
       doc.body = body;
       doc.title = title || '';
-      doc.implementation = document.implementation;
+      // Per-doc implementation med ownerDoc-referens
+      var docImpl = Object.create(document.implementation);
+      docImpl._ownerDoc = doc;
+      doc.implementation = docImpl;
       doc.createElement = document.createElement.bind(document);
       doc.createTextNode = document.createTextNode.bind(document);
       doc.createComment = document.createComment.bind(document);
@@ -156,9 +159,22 @@
 
   if (!impl.createDocumentType) {
     impl.createDocumentType = function(qualifiedName, publicId, systemId) {
-      // Använd native arena-nod om tillgänglig (har ownerDocument getter)
-      if (document.__createDocumentType) {
+      var ownerDoc = this._ownerDoc || document;
+      // Använd native arena-nod
+      if (ownerDoc === document && document.__createDocumentType) {
         return document.__createDocumentType(qualifiedName || '', publicId || '', systemId || '');
+      }
+      var dt = document.__createDocumentType
+        ? document.__createDocumentType(qualifiedName || '', publicId || '', systemId || '')
+        : null;
+      if (dt) {
+        // Override ownerDocument getter om det är en foreign doc
+        if (ownerDoc !== document) {
+          try {
+            Object.defineProperty(dt, 'ownerDocument', { get: function() { return ownerDoc; }, configurable: true });
+          } catch(e) {}
+        }
+        return dt;
       }
       return {
         nodeType: 10,
@@ -166,7 +182,7 @@
         name: qualifiedName || '',
         publicId: publicId || '',
         systemId: systemId || '',
-        ownerDocument: document
+        ownerDocument: ownerDoc
       };
     };
   }
