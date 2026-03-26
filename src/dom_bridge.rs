@@ -6445,13 +6445,19 @@ impl JsHandler for ClassListAdd {
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let mut classes: Vec<String> =
-                current.split_whitespace().map(|s| s.to_string()).collect();
+            // Ordered set: deduplicera existerande
+            let mut seen = std::collections::HashSet::new();
+            let mut classes: Vec<String> = current
+                .split_whitespace()
+                .filter(|c| seen.insert(c.to_string()))
+                .map(|s| s.to_string())
+                .collect();
             for t in tokens {
                 if !classes.iter().any(|c| c == &t) {
                     classes.push(t);
                 }
             }
+            // Ordered set serialize: unika, single-space, ingen leading/trailing
             node.attributes
                 .insert("class".to_string(), classes.join(" "));
         }
@@ -6476,8 +6482,11 @@ impl JsHandler for ClassListRemove {
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
+            // Ordered set: dedup + remove
+            let mut seen = std::collections::HashSet::new();
             let new_cls: Vec<&str> = current
                 .split_whitespace()
+                .filter(|c| seen.insert(*c))
                 .filter(|&c| !tokens.iter().any(|t| t == c))
                 .collect();
             node.attributes
@@ -6525,15 +6534,17 @@ impl JsHandler for ClassListToggle {
             if force {
                 if let Some(node) = s.arena.nodes.get_mut(self.key) {
                     let current = node.get_attr("class").unwrap_or("").to_string();
-                    let classes: Vec<&str> = current.split_whitespace().collect();
+                    // Ordered set: dedup + append om saknas
+                    let mut seen = std::collections::HashSet::new();
+                    let mut classes: Vec<&str> = current
+                        .split_whitespace()
+                        .filter(|c| seen.insert(*c))
+                        .collect();
                     if !classes.contains(&cls.as_str()) {
-                        let new_cls = if current.is_empty() {
-                            cls
-                        } else {
-                            format!("{} {}", current, cls)
-                        };
-                        node.attributes.insert("class".to_string(), new_cls);
+                        classes.push(&cls);
                     }
+                    node.attributes
+                        .insert("class".to_string(), classes.join(" "));
                 }
                 return Ok(Value::new_bool(ctx.clone(), true));
             }
@@ -6593,17 +6604,25 @@ impl JsHandler for ClassListReplace {
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let classes: Vec<&str> = current.split_whitespace().collect();
-            if classes.contains(&old_cls.as_str()) {
-                let replaced: Vec<String> = classes
+            // Ordered set: dedup, first occurrence wins
+            let mut seen = std::collections::HashSet::new();
+            let unique: Vec<&str> = current
+                .split_whitespace()
+                .filter(|c| seen.insert(*c))
+                .collect();
+            if unique.iter().any(|&c| c == old_cls) {
+                // Replace first occurrence, dedup result
+                let mut result_seen = std::collections::HashSet::new();
+                let replaced: Vec<&str> = unique
                     .into_iter()
                     .map(|c| {
                         if c == old_cls {
-                            new_cls_str.clone()
+                            new_cls_str.as_str()
                         } else {
-                            c.to_string()
+                            c
                         }
                     })
+                    .filter(|c| result_seen.insert(*c))
                     .collect();
                 node.attributes
                     .insert("class".to_string(), replaced.join(" "));
