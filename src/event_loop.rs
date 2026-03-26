@@ -799,7 +799,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_promise_resolution() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var resolved = false;
                 Promise.resolve(42).then(function(v) {
@@ -818,7 +818,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_set_timeout_basic() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var timerFired = false;
                 var timerId = setTimeout(function() {
@@ -837,7 +837,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_clear_timeout() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var timerFired = false;
                 var id = setTimeout(function() {
@@ -856,7 +856,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_set_interval_fires_multiple() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var count = 0;
                 var id = setInterval(function() {
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_request_animation_frame() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var rafCalled = false;
                 var rafTimestamp = 0;
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_cancel_animation_frame() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var rafCalled = false;
                 var id = requestAnimationFrame(function(ts) {
@@ -921,7 +921,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_queue_microtask() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var microtaskRan = false;
                 queueMicrotask(function() {
@@ -962,7 +962,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_event_loop_stats() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 setTimeout(function() {}, 1);
                 requestAnimationFrame(function(ts) {});
@@ -1012,7 +1012,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_promise_chain() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var result = 0;
                 Promise.resolve(1)
@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     #[cfg(feature = "js-eval")]
     fn test_set_timeout_with_promise() {
-        with_quickjs_context(|rt, ctx, el| {
+        with_quickjs_context(|_rt, ctx, el| {
             let code = r#"
                 var steps = [];
                 steps.push("start");

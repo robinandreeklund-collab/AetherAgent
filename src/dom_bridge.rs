@@ -1035,6 +1035,197 @@ impl JsHandler for CreateElement {
     }
 }
 
+// ─── createElementNS — native namespace-element ─────────────────────────────
+
+struct CreateElementNS {
+    state: SharedState,
+}
+
+/// Validera XML-qualified name enligt DOM spec.
+/// Returnerar (prefix, localName) eller None om ogiltigt.
+fn validate_and_split_qname(qname: &str) -> Result<(Option<String>, String), &'static str> {
+    if qname.is_empty() {
+        return Err("InvalidCharacterError");
+    }
+    // Kontrollera ogiltiga tecken
+    for ch in qname.chars() {
+        if matches!(ch, '<' | '>' | '&' | ' ' | '\t' | '\n' | '\r' | '^')
+            || (ch == ':' && qname.matches(':').count() > 1)
+        {
+            return Err("InvalidCharacterError");
+        }
+    }
+    // Namn får inte börja med siffra, punkt eller bindestreck (förutom XML-undantag)
+    let first = qname.chars().next().unwrap_or(' ');
+    if first.is_ascii_digit() || first == '.' || first == '-' {
+        return Err("InvalidCharacterError");
+    }
+    // Split på kolon
+    if let Some(colon_pos) = qname.find(':') {
+        let prefix = &qname[..colon_pos];
+        let local = &qname[colon_pos + 1..];
+        if prefix.is_empty() || local.is_empty() || local.contains(':') {
+            return Err("InvalidCharacterError");
+        }
+        // Prefix får inte börja med siffra
+        let pf = prefix.chars().next().unwrap_or(' ');
+        if pf.is_ascii_digit() || pf == '.' || pf == '-' {
+            return Err("InvalidCharacterError");
+        }
+        let lf = local.chars().next().unwrap_or(' ');
+        if lf.is_ascii_digit() || lf == '.' || lf == '-' {
+            return Err("InvalidCharacterError");
+        }
+        Ok((Some(prefix.to_string()), local.to_string()))
+    } else {
+        Ok((None, qname.to_string()))
+    }
+}
+
+const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
+const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
+const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+
+impl JsHandler for CreateElementNS {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // arg0 = namespace (kan vara null/undefined/"")
+        let namespace = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() || v.is_undefined() {
+                    None
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+        let qname = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+
+        // Validera qualified name
+        let (prefix, local_name) = match validate_and_split_qname(&qname) {
+            Ok(r) => r,
+            Err(err_type) => {
+                return Err(ctx.throw(rquickjs::String::from_str(ctx.clone(), err_type)?.into()));
+            }
+        };
+
+        // Namespace constraints (DOM spec)
+        if prefix.is_some() && namespace.is_none() {
+            return Err(
+                ctx.throw(rquickjs::String::from_str(ctx.clone(), "NamespaceError")?.into())
+            );
+        }
+        if prefix.as_deref() == Some("xml") && namespace.as_deref() != Some(XML_NAMESPACE) {
+            return Err(
+                ctx.throw(rquickjs::String::from_str(ctx.clone(), "NamespaceError")?.into())
+            );
+        }
+        if (prefix.as_deref() == Some("xmlns") || qname == "xmlns")
+            && namespace.as_deref() != Some(XMLNS_NAMESPACE)
+        {
+            return Err(
+                ctx.throw(rquickjs::String::from_str(ctx.clone(), "NamespaceError")?.into())
+            );
+        }
+        if namespace.as_deref() == Some(XMLNS_NAMESPACE)
+            && prefix.as_deref() != Some("xmlns")
+            && qname != "xmlns"
+        {
+            return Err(
+                ctx.throw(rquickjs::String::from_str(ctx.clone(), "NamespaceError")?.into())
+            );
+        }
+
+        // Skapa elementet — använd localName som tag
+        let is_html_ns = namespace.as_deref() == Some(XHTML_NAMESPACE);
+        let tag_name = if is_html_ns {
+            local_name.to_ascii_lowercase()
+        } else {
+            local_name.clone()
+        };
+
+        let key = {
+            let mut s = self.state.borrow_mut();
+            s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Element,
+                tag: Some(tag_name),
+                attributes: crate::arena_dom::Attrs::new(),
+                text: None,
+                parent: None,
+                children: vec![],
+                owner_doc: None,
+            })
+        };
+
+        let elem = make_element_object(ctx, key, &self.state)?;
+        if let Some(obj) = elem.as_object() {
+            // För non-HTML namespace, sätt Element.prototype (inte HTMLElement)
+            if !is_html_ns {
+                let _ = ctx.eval::<Value, _>(
+                    "(function(el){try{Object.setPrototypeOf(el, typeof Element!=='undefined'?Element.prototype:Object.prototype)}catch(e){}})",
+                ).and_then(|f| {
+                    if let Some(func) = f.as_object().and_then(|o| o.as_function()) {
+                        func.call::<_, Value>((obj.clone(),))
+                    } else {
+                        Ok(Value::new_undefined(ctx.clone()))
+                    }
+                });
+            }
+            // Sätt namespace-relaterade properties
+            if let Some(ref ns) = namespace {
+                obj.set("namespaceURI", rquickjs::String::from_str(ctx.clone(), ns)?)?;
+            } else {
+                obj.set("namespaceURI", Value::new_null(ctx.clone()))?;
+            }
+            if let Some(ref pfx) = prefix {
+                obj.set("prefix", rquickjs::String::from_str(ctx.clone(), pfx)?)?;
+                // tagName = prefix:localName (uppercase i HTML namespace)
+                let tag_name_full = format!("{}:{}", pfx, local_name);
+                let display_name = if is_html_ns {
+                    tag_name_full.to_ascii_uppercase()
+                } else {
+                    tag_name_full
+                };
+                obj.set(
+                    "tagName",
+                    rquickjs::String::from_str(ctx.clone(), &display_name)?,
+                )?;
+                obj.set(
+                    "nodeName",
+                    rquickjs::String::from_str(ctx.clone(), &display_name)?,
+                )?;
+            } else {
+                obj.set("prefix", Value::new_null(ctx.clone()))?;
+                // tagName utan prefix: uppercase bara för HTML namespace
+                let display_name = if is_html_ns {
+                    local_name.to_ascii_uppercase()
+                } else {
+                    local_name.clone()
+                };
+                obj.set(
+                    "tagName",
+                    rquickjs::String::from_str(ctx.clone(), &display_name)?,
+                )?;
+                obj.set(
+                    "nodeName",
+                    rquickjs::String::from_str(ctx.clone(), &display_name)?,
+                )?;
+            }
+            obj.set(
+                "localName",
+                rquickjs::String::from_str(ctx.clone(), &local_name)?,
+            )?;
+        }
+
+        Ok(elem)
+    }
+}
+
 struct CreateTextNode {
     state: SharedState,
 }
@@ -1080,6 +1271,74 @@ impl JsHandler for CreateComment {
     }
 }
 
+// ─── createAttribute — native Attr-objekt ─────────────────────────────────
+
+struct CreateAttribute;
+impl JsHandler for CreateAttribute {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let name = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+
+        // Validera namn
+        if name.is_empty() {
+            return Err(
+                ctx.throw(rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into())
+            );
+        }
+        // Kontrollera ogiltiga tecken i attributnamn
+        for ch in name.chars() {
+            if matches!(ch, ' ' | '\t' | '\n' | '\r' | '<' | '>' | '&' | '"' | '\'') {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into(),
+                ));
+            }
+        }
+
+        // HTML-dokument: lowercase
+        let lower_name = name.to_ascii_lowercase();
+
+        let attr = Object::new(ctx.clone())?;
+        attr.set("nodeType", 2)?;
+        attr.set(
+            "nodeName",
+            rquickjs::String::from_str(ctx.clone(), &lower_name)?,
+        )?;
+        attr.set(
+            "name",
+            rquickjs::String::from_str(ctx.clone(), &lower_name)?,
+        )?;
+        attr.set("value", rquickjs::String::from_str(ctx.clone(), "")?)?;
+        attr.set("nodeValue", rquickjs::String::from_str(ctx.clone(), "")?)?;
+        attr.set("textContent", rquickjs::String::from_str(ctx.clone(), "")?)?;
+        attr.set(
+            "localName",
+            rquickjs::String::from_str(ctx.clone(), &lower_name)?,
+        )?;
+        attr.set("namespaceURI", Value::new_null(ctx.clone()))?;
+        attr.set("prefix", Value::new_null(ctx.clone()))?;
+        attr.set("specified", true)?;
+        attr.set("ownerElement", Value::new_null(ctx.clone()))?;
+
+        // Sätt Attr prototype om det finns
+        let _ = ctx
+            .eval::<Value, _>(
+                "(function(a){try{Object.setPrototypeOf(a, globalThis.Attr ? globalThis.Attr.prototype : Object.prototype)}catch(e){}})",
+            )
+            .and_then(|f| {
+                if let Some(func) = f.as_object().and_then(|o| o.as_function()) {
+                    func.call::<_, Value>((attr.clone(),))
+                } else {
+                    Ok(Value::new_undefined(ctx.clone()))
+                }
+            });
+
+        Ok(attr.into_value())
+    }
+}
+
 struct GetElementsByClassName {
     state: SharedState,
 }
@@ -1090,18 +1349,11 @@ impl JsHandler for GetElementsByClassName {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let keys = {
+        let root_key = {
             let s = self.state.borrow();
-            let mut results = vec![];
-            find_all_by_class(&s.arena, s.arena.document, &cls, &mut results);
-            results
+            s.arena.document
         };
-        let array = rquickjs::Array::new(ctx.clone())?;
-        for (i, key) in keys.into_iter().enumerate() {
-            let elem = make_element_object(ctx, key, &self.state)?;
-            array.set(i, elem)?;
-        }
-        Ok(array.into_value())
+        make_live_html_collection(ctx, &self.state, root_key, "class", &cls)
     }
 }
 
@@ -1115,18 +1367,97 @@ impl JsHandler for GetElementsByTagName {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        let root_key = {
+            let s = self.state.borrow();
+            s.arena.document
+        };
+        make_live_html_collection(ctx, &self.state, root_key, "tag", &tag)
+    }
+}
+
+// ─── Native query-helpers för live HTMLCollection ─────────────────────────────
+
+/// Returnerar en array av element-objekt som matchar sökningen.
+/// Används av live HTMLCollection Proxy för att re-query vid varje access.
+struct NativeQueryElements {
+    state: SharedState,
+}
+impl JsHandler for NativeQueryElements {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let root_f64 = args
+            .first()
+            .and_then(|v| v.as_float())
+            .or_else(|| args.first().and_then(|v| v.as_int().map(|i| i as f64)))
+            .unwrap_or(-1.0);
+        let query_type = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let query_val = args
+            .get(2)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+
         let keys = {
             let s = self.state.borrow();
+            let root = if root_f64 < 0.0 {
+                s.arena.document
+            } else {
+                f64_to_node_key(root_f64)
+            };
             let mut results = vec![];
-            find_all_by_tag(&s.arena, s.arena.document, &tag, &mut results);
+            match query_type.as_str() {
+                "tag" => find_all_by_tag(&s.arena, root, &query_val, &mut results),
+                "class" => find_all_by_class(&s.arena, root, &query_val, &mut results),
+                _ => {}
+            }
             results
         };
         let array = rquickjs::Array::new(ctx.clone())?;
-        for (i, key) in keys.into_iter().enumerate() {
-            let elem = make_element_object(ctx, key, &self.state)?;
+        for (i, key) in keys.iter().enumerate() {
+            let elem = make_element_object(ctx, *key, &self.state)?;
             array.set(i, elem)?;
         }
         Ok(array.into_value())
+    }
+}
+
+/// Skapar en live HTMLCollection via JS Proxy som delegerar till Rust vid varje access.
+fn make_live_html_collection<'js>(
+    ctx: &Ctx<'js>,
+    state: &SharedState,
+    root_key: NodeKey,
+    query_type: &str,
+    query_val: &str,
+) -> rquickjs::Result<Value<'js>> {
+    let root_f64 = node_key_to_f64(root_key);
+    // Skapa en snapshot först för att sätta initial items
+    let keys = {
+        let s = state.borrow();
+        let mut results = vec![];
+        match query_type {
+            "tag" => find_all_by_tag(&s.arena, root_key, query_val, &mut results),
+            "class" => find_all_by_class(&s.arena, root_key, query_val, &mut results),
+            _ => {}
+        }
+        results
+    };
+    // Bygg element-array
+    let items = rquickjs::Array::new(ctx.clone())?;
+    for (i, key) in keys.iter().enumerate() {
+        let elem = make_element_object(ctx, *key, state)?;
+        items.set(i, elem)?;
+    }
+    // Anropa JS-helper __createLiveHTMLCollection(items, rootKey, queryType, queryVal)
+    let global = ctx.globals();
+    let create_fn: Value = global.get("__createLiveHTMLCollection")?;
+    if let Some(func) = create_fn.as_object().and_then(|o| o.as_function()) {
+        func.call((items, root_f64, query_type, query_val))
+    } else {
+        // Fallback: returnera items som vanlig array om __createLiveHTMLCollection inte finns
+        Ok(items.into_value())
     }
 }
 
@@ -1484,6 +1815,15 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         )?,
     )?;
     doc.set(
+        "createElementNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(CreateElementNS {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    doc.set(
         "createTextNode",
         Function::new(
             ctx.clone(),
@@ -1527,6 +1867,12 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 state: Rc::clone(&state),
             }),
         )?,
+    )?;
+
+    // createAttribute — native Attr-objekt
+    doc.set(
+        "createAttribute",
+        Function::new(ctx.clone(), JsFn(CreateAttribute))?,
     )?;
 
     // createDocumentType — native Doctype-nod
@@ -1710,6 +2056,23 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         )?;
     }
 
+    // implementation — minimalt DOMImplementation-objekt (utökas av polyfills)
+    {
+        struct HasFeature;
+        impl JsHandler for HasFeature {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                Ok(Value::new_bool(ctx.clone(), true))
+            }
+        }
+        let impl_obj = Object::new(ctx.clone())?;
+        impl_obj.set("hasFeature", Function::new(ctx.clone(), JsFn(HasFeature))?)?;
+        doc.set("implementation", impl_obj)?;
+    }
+
     // activeElement — getter som returnerar fokuserat element eller body
     doc.prop(
         "activeElement",
@@ -1807,7 +2170,169 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set("URL", "about:blank")?;
     doc.set("documentURI", "about:blank")?;
 
+    // __nativeQueryElements — returnerar element-objekt för live HTMLCollection
+    doc.set(
+        "__nativeQueryElements",
+        Function::new(
+            ctx.clone(),
+            JsFn(NativeQueryElements {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
     ctx.globals().set("document", doc)?;
+
+    // Registrera __createLiveHTMLCollection — JS Proxy-baserad live HTMLCollection
+    let _ = ctx.eval::<Value, _>(
+        r#"
+(function() {
+    globalThis.__createLiveHTMLCollection = function(initialItems, rootKey, queryType, queryVal) {
+        var _expando = {};
+        var _queryFn = function() {
+            return document.__nativeQueryElements(rootKey, queryType, queryVal);
+        };
+        var handler = {
+            get: function(target, prop, receiver) {
+                if (prop === Symbol.iterator) {
+                    return function() {
+                        var items = _queryFn();
+                        var idx = 0;
+                        return { next: function() {
+                            if (idx < items.length) return { value: items[idx++], done: false };
+                            return { done: true };
+                        }};
+                    };
+                }
+                if (prop === Symbol.toStringTag) return 'HTMLCollection';
+                if (prop === 'length') return _queryFn().length;
+                if (prop === 'item') return function(index) {
+                    index = (index >>> 0);
+                    var items = _queryFn();
+                    return (index < items.length) ? items[index] : null;
+                };
+                if (prop === 'namedItem') return function(name) {
+                    name = String(name);
+                    var items = _queryFn();
+                    for (var i = 0; i < items.length; i++) {
+                        if (items[i].id === name || items[i].getAttribute('name') === name) return items[i];
+                    }
+                    return null;
+                };
+                // Numerisk index
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    var items = _queryFn();
+                    var idx = parseInt(prop, 10);
+                    return idx < items.length ? items[idx] : undefined;
+                }
+                // Named property access (id/name)
+                if (typeof prop === 'string' && prop !== '__proto__') {
+                    if (prop in _expando) return _expando[prop];
+                    var items = _queryFn();
+                    for (var i = 0; i < items.length; i++) {
+                        if (items[i].id === prop || items[i].getAttribute('name') === prop) return items[i];
+                    }
+                }
+                return undefined;
+            },
+            set: function(target, prop, value, receiver) {
+                // Numeriska index — tyst ignorera
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    return true;
+                }
+                // Named property finns redan — tyst ignorera
+                var items = _queryFn();
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].id === prop || items[i].getAttribute('name') === prop) {
+                        return true;
+                    }
+                }
+                _expando[prop] = value;
+                return true;
+            },
+            has: function(target, prop) {
+                if (prop === 'length' || prop === 'item' || prop === 'namedItem') return true;
+                if (prop === Symbol.iterator) return true;
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    return parseInt(prop, 10) < _queryFn().length;
+                }
+                if (typeof prop === 'string') {
+                    if (prop in _expando) return true;
+                    var items = _queryFn();
+                    for (var i = 0; i < items.length; i++) {
+                        if (items[i].id === prop || items[i].getAttribute('name') === prop) return true;
+                    }
+                }
+                return false;
+            },
+            ownKeys: function(target) {
+                var items = _queryFn();
+                var keys = [];
+                for (var i = 0; i < items.length; i++) keys.push(String(i));
+                var seen = {};
+                for (var i = 0; i < items.length; i++) {
+                    var el = items[i];
+                    var eid = el.id; var ename = el.getAttribute ? el.getAttribute('name') : null;
+                    if (eid && !seen[eid]) { keys.push(eid); seen[eid] = true; }
+                    if (ename && !seen[ename]) { keys.push(ename); seen[ename] = true; }
+                }
+                for (var k in _expando) {
+                    if (!seen[k]) keys.push(k);
+                }
+                return keys;
+            },
+            getOwnPropertyDescriptor: function(target, prop) {
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    var items = _queryFn();
+                    var idx = parseInt(prop, 10);
+                    if (idx < items.length) return { value: items[idx], enumerable: true, configurable: true, writable: false };
+                    return undefined;
+                }
+                if (prop in _expando) {
+                    var desc = Object.getOwnPropertyDescriptor(_expando, prop);
+                    return desc;
+                }
+                // Named property
+                var items = _queryFn();
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].id === prop || items[i].getAttribute('name') === prop) {
+                        return { value: items[i], enumerable: false, configurable: true, writable: false };
+                    }
+                }
+                return undefined;
+            },
+            defineProperty: function(target, prop, desc) {
+                // Numeric — reject
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) return false;
+                // If named element matches, reject
+                var items = _queryFn();
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].id === prop || items[i].getAttribute('name') === prop) {
+                        throw new TypeError("Cannot define property '" + prop + "' on HTMLCollection");
+                    }
+                }
+                Object.defineProperty(_expando, prop, desc);
+                return true;
+            },
+            deleteProperty: function(target, prop) {
+                // Indexed — tyst ignorera
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) return true;
+                // Named element — tyst ignorera (kan inte radera)
+                var items = _queryFn();
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].id === prop || items[i].getAttribute('name') === prop) return true;
+                }
+                if (prop in _expando) { delete _expando[prop]; return true; }
+                return true;
+            }
+        };
+        var p = new Proxy({}, handler);
+        Object.setPrototypeOf(p, (globalThis.HTMLCollection && globalThis.HTMLCollection.prototype) || Object.prototype);
+        return p;
+    };
+})()
+"#,
+    );
 
     // Registrera document-objektet i node identity cache
     // Kritiskt: parentNode-traversal från html-element → document måste returnera
@@ -3421,18 +3946,7 @@ impl JsHandler for GetElementsByTagNameElement {
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let keys = {
-            let s = self.state.borrow();
-            let mut results = vec![];
-            find_all_by_tag(&s.arena, self.key, &tag, &mut results);
-            results
-        };
-        let array = rquickjs::Array::new(ctx.clone())?;
-        for (i, key) in keys.into_iter().enumerate() {
-            let elem = make_element_object(ctx, key, &self.state)?;
-            array.set(i, elem)?;
-        }
-        Ok(array.into_value())
+        make_live_html_collection(ctx, &self.state, self.key, "tag", &tag)
     }
 }
 
@@ -3447,18 +3961,7 @@ impl JsHandler for GetElementsByClassNameElement {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let keys = {
-            let s = self.state.borrow();
-            let mut results = vec![];
-            find_all_by_class(&s.arena, self.key, &cls, &mut results);
-            results
-        };
-        let array = rquickjs::Array::new(ctx.clone())?;
-        for (i, key) in keys.into_iter().enumerate() {
-            let elem = make_element_object(ctx, key, &self.state)?;
-            array.set(i, elem)?;
-        }
-        Ok(array.into_value())
+        make_live_html_collection(ctx, &self.state, self.key, "class", &cls)
     }
 }
 
@@ -8117,8 +8620,25 @@ fn register_window_with_viewport<'js>(
                     type !== 'image/svg+xml') {
                     throw new TypeError("Invalid MIME type: " + type);
                 }
-                // Skapa en ny document via createHTMLDocument och parsa HTML in i den
-                var newDoc = document.implementation.createHTMLDocument('');
+                // Skapa en ny document via createHTMLDocument eller fallback
+                var newDoc;
+                if (document.implementation && document.implementation.createHTMLDocument) {
+                    newDoc = document.implementation.createHTMLDocument('');
+                } else {
+                    // Fallback: skapa ett enkelt doc-liknande objekt
+                    newDoc = { nodeType: 9, nodeName: '#document',
+                        querySelector: document.querySelector ? document.querySelector.bind(document) : function(){return null;},
+                        querySelectorAll: document.querySelectorAll ? document.querySelectorAll.bind(document) : function(){return [];},
+                        createElement: document.createElement.bind(document),
+                        createTextNode: document.createTextNode.bind(document),
+                        getElementById: function(id){return null;},
+                        documentElement: document.createElement('html'),
+                        body: document.createElement('body'),
+                        head: document.createElement('head')
+                    };
+                    newDoc.documentElement.appendChild(newDoc.head);
+                    newDoc.documentElement.appendChild(newDoc.body);
+                }
                 if (str && newDoc.documentElement) {
                     newDoc.documentElement.innerHTML = str;
                 }
@@ -10371,7 +10891,13 @@ fn find_all_by_tag(arena: &ArenaDom, key: NodeKey, tag: &str, results: &mut Vec<
         Some(n) => n,
         None => return,
     };
-    if node.tag.as_deref() == Some(tag) {
+    if node.node_type == NodeType::Element
+        && (tag == "*"
+            || node
+                .tag
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case(tag)))
+    {
         results.push(key);
     }
     let children: Vec<NodeKey> = node.children.clone();
