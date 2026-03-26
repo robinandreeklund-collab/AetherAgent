@@ -67,9 +67,19 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         .to_string();
     let start = Instant::now();
 
-    // Läs HTML
-    let html = match std::fs::read_to_string(html_path) {
-        Ok(h) => h,
+    // Läs HTML — stöd för icke-UTF-8 filer (charset-tester)
+    let html = match std::fs::read(html_path) {
+        Ok(bytes) => {
+            // Försök UTF-8 först
+            match String::from_utf8(bytes.clone()) {
+                Ok(s) => s,
+                Err(_) => {
+                    // Fallback: tolka som Latin-1 (ISO-8859-1) — superset av ASCII
+                    // Varje byte blir ett Unicode code point (lossless)
+                    bytes.iter().map(|&b| b as char).collect::<String>()
+                }
+            }
+        }
         Err(e) => {
             return WptTestResult {
                 file: file_name,

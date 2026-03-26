@@ -12,7 +12,9 @@ use super::style::kebab_to_camel;
 use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_query_matches};
 #[cfg(feature = "blitz")]
 use super::{build_blitz_computed_styles, map_blitz_styles_to_arena};
-use super::{extract_node_key, node_key_to_f64, GetSelectionFromDoc, NoOpHandler};
+use super::{
+    extract_node_key, node_key_to_f64, GetSelectionFromDoc, NoOpHandler, XmlSerializeNodeHandler,
+};
 
 pub(super) struct GetComputedStyleHandler {
     state: SharedState,
@@ -286,6 +288,17 @@ pub(super) fn register_window_with_viewport<'js>(
         Function::new(ctx.clone(), JsFn(GetSelectionFromDoc))?,
     )?;
 
+    // __xmlSerializeNode — native XML-serialisering via Rust
+    win.set(
+        "__xmlSerializeNode",
+        Function::new(
+            ctx.clone(),
+            JsFn(XmlSerializeNodeHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
     // addEventListener / removeEventListener / dispatchEvent på window
     {
         // Använd document-nyckel som proxy — window-events lagras där
@@ -549,6 +562,7 @@ pub(super) fn register_window_with_viewport<'js>(
             globalThis.getComputedStyle = globalThis.window.getComputedStyle;
             globalThis.getSelection = globalThis.window.getSelection;
             globalThis.matchMedia = globalThis.window.matchMedia;
+            globalThis.__xmlSerializeNode = globalThis.window.__xmlSerializeNode;
         }
 
         // TextEncoder/TextDecoder — UTF-8
@@ -1145,8 +1159,30 @@ pub(super) fn register_window_with_viewport<'js>(
         };
         globalThis.XMLSerializer = function XMLSerializer() {
             this.serializeToString = function(node) {
+                // Försök native XML-serialisering via Rust
+                if (node && node.__nodeKey__ !== undefined && typeof __xmlSerializeNode === 'function') {
+                    return __xmlSerializeNode(node.__nodeKey__);
+                }
+                // Fallback för DocumentFragment och liknande
+                if (node && node.nodeType === 11) {
+                    var result = '';
+                    var kids = node.childNodes || [];
+                    for (var i = 0; i < kids.length; i++) {
+                        if (kids[i] && kids[i].__nodeKey__ !== undefined && typeof __xmlSerializeNode === 'function') {
+                            result += __xmlSerializeNode(kids[i].__nodeKey__);
+                        } else if (kids[i] && kids[i].outerHTML !== undefined) {
+                            result += kids[i].outerHTML;
+                        }
+                    }
+                    return result;
+                }
+                if (node && node.nodeType === 9 && node.documentElement) {
+                    if (typeof __xmlSerializeNode === 'function' && node.documentElement.__nodeKey__ !== undefined) {
+                        return __xmlSerializeNode(node.documentElement.__nodeKey__);
+                    }
+                    return node.documentElement.outerHTML || '';
+                }
                 if (node && node.outerHTML !== undefined) return node.outerHTML;
-                if (node && node.nodeType === 9 && node.documentElement) return node.documentElement.outerHTML || '';
                 if (node && node.textContent !== undefined) return node.textContent;
                 return '';
             };

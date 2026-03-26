@@ -1648,6 +1648,20 @@ impl JsHandler for GetSelectionFromDoc {
     }
 }
 
+/// Native XML-serialisering — tar nodeKey som f64, returnerar XML-sträng
+pub(super) struct XmlSerializeNodeHandler {
+    pub(super) state: SharedState,
+}
+impl JsHandler for XmlSerializeNodeHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let key_f64 = args.first().and_then(|v| v.as_number()).unwrap_or(0.0);
+        let key = f64_to_node_key(key_f64);
+        let s = self.state.borrow();
+        let xml = dom_impls::xml_serializer::serialize_to_xml(&s.arena, key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &xml)?.into_value())
+    }
+}
+
 struct GetSelection;
 impl JsHandler for GetSelection {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {

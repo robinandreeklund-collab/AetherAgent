@@ -7,3 +7,4 @@ pub(super) mod constraint_validation;
 pub(super) mod form_association;
 pub(super) mod input_value;
 pub(super) mod select_element;
+pub(super) mod xml_serializer;
