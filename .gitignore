@@ -16,3 +16,4 @@ runs/
 dataset/
 models/
 wpt-suite/
+testsuite/benchmark/aether_*
