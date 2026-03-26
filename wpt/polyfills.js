@@ -515,46 +515,53 @@
     if (!el || typeof el !== 'object') return el;
     el = _origPatch(el);
 
-    // element.attributes — NamedNodeMap (live array-like av Attr-objekt)
+    // element.attributes — NamedNodeMap (live, Proxy-baserad om tillgänglig)
     if (!el.attributes && el.nodeType === 1 && el.getAttributeNames) {
       Object.defineProperty(el, 'attributes', {
         get: function() {
           var self = this;
-          var names = self.getAttributeNames ? self.getAttributeNames() : [];
-          var map = [];
-          var nsAttrs = self.__nsAttrs || {};
-          // Samla NS-attribut
-          var nsKeys = {};
-          Object.keys(nsAttrs).forEach(function(key) {
-            var a = nsAttrs[key];
-            nsKeys[a.localName] = a;
-          });
-          for (var i = 0; i < names.length; i++) {
-            var n = names[i];
-            var v = self.getAttribute(n);
-            var ns = nsKeys[n];
-            map.push({
-              name: ns ? ns.name : n,
-              localName: ns ? ns.localName : n,
-              value: ns ? ns.value : v,
-              namespaceURI: ns ? ns.namespaceURI : null,
-              prefix: ns ? ns.prefix : null,
-              specified: true, ownerElement: self,
-              nodeType: 2, nodeName: ns ? ns.name : n
+          var getAttrsFn = function() {
+            var names = self.getAttributeNames ? self.getAttributeNames() : [];
+            var map = [];
+            var nsAttrs = self.__nsAttrs || {};
+            var nsKeys = {};
+            Object.keys(nsAttrs).forEach(function(key) {
+              var a = nsAttrs[key];
+              nsKeys[a.localName] = a;
             });
-          }
-          // Lägg till NS-attribut som inte finns i vanliga attribut
-          Object.keys(nsAttrs).forEach(function(key) {
-            var a = nsAttrs[key];
-            if (names.indexOf(a.localName) === -1) {
+            for (var i = 0; i < names.length; i++) {
+              var n = names[i];
+              var v = self.getAttribute(n);
+              var ns = nsKeys[n];
               map.push({
-                name: a.name, localName: a.localName, value: a.value,
-                namespaceURI: a.namespaceURI, prefix: a.prefix,
+                name: ns ? ns.name : n,
+                localName: ns ? ns.localName : n,
+                value: ns ? ns.value : v,
+                namespaceURI: ns ? ns.namespaceURI : null,
+                prefix: ns ? ns.prefix : null,
                 specified: true, ownerElement: self,
-                nodeType: 2, nodeName: a.name
+                nodeType: 2, nodeName: ns ? ns.name : n
               });
             }
-          });
+            Object.keys(nsAttrs).forEach(function(key) {
+              var a = nsAttrs[key];
+              if (names.indexOf(a.localName) === -1) {
+                map.push({
+                  name: a.name, localName: a.localName, value: a.value,
+                  namespaceURI: a.namespaceURI, prefix: a.prefix,
+                  specified: true, ownerElement: self,
+                  nodeType: 2, nodeName: a.name
+                });
+              }
+            });
+            return map;
+          };
+          // Använd Proxy-baserad NamedNodeMap om tillgänglig
+          if (typeof __createNamedNodeMap === 'function') {
+            return __createNamedNodeMap(getAttrsFn, self);
+          }
+          // Fallback: vanlig array med metoder
+          var map = getAttrsFn();
           map.getNamedItem = function(name) {
             for (var j = 0; j < this.length; j++) {
               if (this[j].name === name) return this[j];

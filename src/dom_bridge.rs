@@ -259,6 +259,7 @@ struct EventListener {
     callback: Persistent<Function<'static>>,
     capture: bool,
     passive: Option<bool>,
+    once: bool,
 }
 
 #[allow(dead_code)]
@@ -1276,11 +1277,8 @@ impl JsHandler for CreateComment {
 struct CreateAttribute;
 impl JsHandler for CreateAttribute {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let name = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        // DOMString-konvertering: null→"null", undefined→"undefined"
+        let name = js_value_to_dom_string(args.first());
 
         // Validera namn
         if name.is_empty() {
@@ -2213,9 +2211,11 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 };
                 if (prop === 'namedItem') return function(name) {
                     name = String(name);
+                    if (!name) return null;
                     var items = _queryFn();
                     for (var i = 0; i < items.length; i++) {
-                        if (items[i].id === name || items[i].getAttribute('name') === name) return items[i];
+                        var eid = items[i].id, ename = items[i].getAttribute('name');
+                        if ((eid && eid === name) || (ename && ename === name)) return items[i];
                     }
                     return null;
                 };
@@ -2225,12 +2225,13 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                     var idx = parseInt(prop, 10);
                     return idx < items.length ? items[idx] : undefined;
                 }
-                // Named property access (id/name)
-                if (typeof prop === 'string' && prop !== '__proto__') {
+                // Named property access (id/name) — tom sträng matchas ej
+                if (typeof prop === 'string' && prop !== '__proto__' && prop !== '') {
                     if (prop in _expando) return _expando[prop];
                     var items = _queryFn();
                     for (var i = 0; i < items.length; i++) {
-                        if (items[i].id === prop || items[i].getAttribute('name') === prop) return items[i];
+                        var eid = items[i].id, ename = items[i].getAttribute('name');
+                        if ((eid && eid === prop) || (ename && ename === prop)) return items[i];
                     }
                 }
                 return undefined;
@@ -2256,11 +2257,12 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 if (typeof prop === 'string' && /^\d+$/.test(prop)) {
                     return parseInt(prop, 10) < _queryFn().length;
                 }
-                if (typeof prop === 'string') {
+                if (typeof prop === 'string' && prop !== '') {
                     if (prop in _expando) return true;
                     var items = _queryFn();
                     for (var i = 0; i < items.length; i++) {
-                        if (items[i].id === prop || items[i].getAttribute('name') === prop) return true;
+                        var eid = items[i].id, ename = items[i].getAttribute('name');
+                        if ((eid && eid === prop) || (ename && ename === prop)) return true;
                     }
                 }
                 return false;
@@ -2328,6 +2330,88 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         };
         var p = new Proxy({}, handler);
         Object.setPrototypeOf(p, (globalThis.HTMLCollection && globalThis.HTMLCollection.prototype) || Object.prototype);
+        return p;
+    };
+    // NamedNodeMap — Proxy-baserad med indexerade + namngivna properties
+    globalThis.__createNamedNodeMap = function(getAttrsFn, ownerEl) {
+        var handler = {
+            get: function(target, prop) {
+                if (prop === Symbol.iterator) {
+                    return function() {
+                        var attrs = getAttrsFn();
+                        var idx = 0;
+                        return { next: function() {
+                            if (idx < attrs.length) return { value: attrs[idx++], done: false };
+                            return { done: true };
+                        }};
+                    };
+                }
+                if (prop === Symbol.toStringTag) return 'NamedNodeMap';
+                if (prop === 'length') return getAttrsFn().length;
+                if (prop === 'item') return function(i) { var a = getAttrsFn(); return (i >= 0 && i < a.length) ? a[i] : null; };
+                if (prop === 'getNamedItem') return function(name) {
+                    var a = getAttrsFn();
+                    for (var i = 0; i < a.length; i++) if (a[i].name === name) return a[i];
+                    return null;
+                };
+                if (prop === 'getNamedItemNS') return function(ns, name) {
+                    var a = getAttrsFn();
+                    for (var i = 0; i < a.length; i++) if (a[i].localName === name && a[i].namespaceURI === ns) return a[i];
+                    return null;
+                };
+                if (prop === 'setNamedItem') return function(attr) {
+                    if (ownerEl && ownerEl.setAttribute) ownerEl.setAttribute(attr.name, attr.value);
+                    return attr;
+                };
+                if (prop === 'removeNamedItem') return function(name) {
+                    var old = null;
+                    var a = getAttrsFn();
+                    for (var i = 0; i < a.length; i++) if (a[i].name === name) { old = a[i]; break; }
+                    if (ownerEl && ownerEl.removeAttribute) ownerEl.removeAttribute(name);
+                    return old;
+                };
+                // Numeriskt index
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    var a = getAttrsFn();
+                    var i = parseInt(prop, 10);
+                    return i < a.length ? a[i] : undefined;
+                }
+                // Namngivet attribut
+                if (typeof prop === 'string') {
+                    var a = getAttrsFn();
+                    for (var i = 0; i < a.length; i++) if (a[i].name === prop) return a[i];
+                }
+                return undefined;
+            },
+            ownKeys: function() {
+                var a = getAttrsFn();
+                var keys = [];
+                for (var i = 0; i < a.length; i++) keys.push(String(i));
+                for (var i = 0; i < a.length; i++) keys.push(a[i].name);
+                return keys;
+            },
+            getOwnPropertyDescriptor: function(target, prop) {
+                var a = getAttrsFn();
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+                    var i = parseInt(prop, 10);
+                    if (i < a.length) return { value: a[i], enumerable: true, configurable: true };
+                    return undefined;
+                }
+                for (var i = 0; i < a.length; i++) {
+                    if (a[i].name === prop) return { value: a[i], enumerable: false, configurable: true };
+                }
+                return undefined;
+            },
+            has: function(target, prop) {
+                if (typeof prop === 'string' && /^\d+$/.test(prop)) return parseInt(prop, 10) < getAttrsFn().length;
+                if (prop === 'length' || prop === 'item' || prop === 'getNamedItem') return true;
+                var a = getAttrsFn();
+                for (var i = 0; i < a.length; i++) if (a[i].name === prop) return true;
+                return false;
+            }
+        };
+        var p = new Proxy({}, handler);
+        Object.setPrototypeOf(p, (globalThis.NamedNodeMap && globalThis.NamedNodeMap.prototype) || Object.prototype);
         return p;
     };
 })()
@@ -2485,6 +2569,33 @@ fn get_inner_html(arena: &ArenaDom, key: NodeKey) -> String {
         serialize_node_html(arena, child, &mut html);
     }
     html
+}
+
+/// Importera en nod (rekursivt) från en arena till en annan.
+/// Returnerar den nya nyckeln i dest_arena.
+fn import_node(
+    src_arena: &ArenaDom,
+    src_key: NodeKey,
+    dest_arena: &mut ArenaDom,
+) -> Option<NodeKey> {
+    let src_node = src_arena.nodes.get(src_key)?;
+    let new_key = dest_arena.nodes.insert(crate::arena_dom::DomNode {
+        node_type: src_node.node_type.clone(),
+        tag: src_node.tag.clone(),
+        attributes: src_node.attributes.clone(),
+        text: src_node.text.clone(),
+        parent: None,
+        children: vec![],
+        owner_doc: None,
+    });
+    // Rekursivt importera barn
+    let children: Vec<NodeKey> = src_node.children.clone();
+    for child_key in children {
+        if let Some(new_child) = import_node(src_arena, child_key, dest_arena) {
+            dest_arena.append_child(new_key, new_child);
+        }
+    }
+    Some(new_key)
 }
 
 fn serialize_node_html(arena: &ArenaDom, key: NodeKey, out: &mut String) {
@@ -4987,9 +5098,9 @@ impl JsHandler for AddEventListenerHandler {
             Some(f) => f.clone(),
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
-        let (capture, passive) = if let Some(opts) = args.get(2) {
+        let (capture, passive, once) = if let Some(opts) = args.get(2) {
             if let Some(b) = opts.as_bool() {
-                (b, None)
+                (b, None, false)
             } else if let Some(obj) = opts.as_object() {
                 let cap = obj
                     .get::<_, Value>("capture")
@@ -5000,12 +5111,17 @@ impl JsHandler for AddEventListenerHandler {
                     .get::<_, Value>("passive")
                     .ok()
                     .and_then(|v| v.as_bool());
-                (cap, pas)
+                let onc = obj
+                    .get::<_, Value>("once")
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                (cap, pas, onc)
             } else {
-                (false, None)
+                (false, None, false)
             }
         } else {
-            (false, None)
+            (false, None, false)
         };
         let persistent = Persistent::save(ctx, func);
         let key_bits = node_key_to_f64(self.key) as u64;
@@ -5018,6 +5134,7 @@ impl JsHandler for AddEventListenerHandler {
                 callback: persistent,
                 capture,
                 passive,
+                once,
             });
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -5059,7 +5176,7 @@ impl JsHandler for DispatchEventHandler {
         let is_passive_default = passive_default_types.contains(&event_type.as_str());
 
         let key_bits = node_key_to_f64(self.key) as u64;
-        let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>)> = {
+        let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>, bool)> = {
             let s = self.state.borrow();
             s.event_listeners
                 .get(&key_bits)
@@ -5067,7 +5184,7 @@ impl JsHandler for DispatchEventHandler {
                     listeners
                         .iter()
                         .filter(|l| l.event_type == event_type)
-                        .map(|l| (l.callback.clone(), l.passive))
+                        .map(|l| (l.callback.clone(), l.passive, l.once))
                         .collect()
                 })
                 .unwrap_or_default()
@@ -5086,7 +5203,8 @@ impl JsHandler for DispatchEventHandler {
             let _ = ev.set("currentTarget", target_obj);
             let _ = ev.set("eventPhase", 2i32); // AT_TARGET
         }
-        for (cb, passive) in callbacks {
+        let mut once_indices = vec![];
+        for (idx, (cb, passive, once)) in callbacks.into_iter().enumerate() {
             if let Ok(func) = cb.restore(ctx) {
                 let event = args
                     .first()
@@ -5099,6 +5217,30 @@ impl JsHandler for DispatchEventHandler {
                     }
                 }
                 let _ = func.call::<_, Value>((event,));
+                if once {
+                    once_indices.push(idx);
+                }
+            }
+        }
+        // Ta bort once-listeners efter dispatch
+        if !once_indices.is_empty() {
+            let mut s = self.state.borrow_mut();
+            if let Some(listeners) = s.event_listeners.get_mut(&key_bits) {
+                // Räkna ut vilka listeners-index som matchar (baserat på event_type och position)
+                let mut type_idx = 0usize;
+                let mut remove_set: Vec<usize> = vec![];
+                for (i, l) in listeners.iter().enumerate() {
+                    if l.event_type == event_type {
+                        if once_indices.contains(&type_idx) {
+                            remove_set.push(i);
+                        }
+                        type_idx += 1;
+                    }
+                }
+                // Ta bort bakifrån för att bevara index
+                for &i in remove_set.iter().rev() {
+                    listeners.remove(i);
+                }
             }
         }
         // Resätt eventPhase och propagation flags efter dispatch
@@ -6588,15 +6730,114 @@ fn make_element_object<'js>(
             .get(key)
             .map(|n| n.has_attr("hidden"))
             .unwrap_or(false);
-        let outer_html = {
-            let mut out = String::new();
-            serialize_node_html(&s.arena, key, &mut out);
-            out
-        };
         drop(s);
         obj.set("isConnected", connected)?;
         obj.set("hidden", hidden)?;
-        obj.set("outerHTML", outer_html.as_str())?;
+
+        // outerHTML — getter/setter
+        struct OuterHtmlGetter {
+            state: SharedState,
+            key: NodeKey,
+        }
+        impl JsHandler for OuterHtmlGetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let s = self.state.borrow();
+                let mut out = String::new();
+                serialize_node_html(&s.arena, self.key, &mut out);
+                Ok(rquickjs::String::from_str(ctx.clone(), &out)?.into_value())
+            }
+        }
+        struct OuterHtmlSetter {
+            state: SharedState,
+            key: NodeKey,
+        }
+        impl JsHandler for OuterHtmlSetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                // Kontrollera om det är document.documentElement (rot-element)
+                let parent_key = {
+                    let s = self.state.borrow();
+                    let parent = s.arena.nodes.get(self.key).and_then(|n| n.parent);
+                    // Om parent är Document-noden, kasta NO_MODIFICATION_ALLOWED_ERR
+                    if let Some(pk) = parent {
+                        if s.arena
+                            .nodes
+                            .get(pk)
+                            .map(|n| matches!(n.node_type, NodeType::Document))
+                            .unwrap_or(false)
+                        {
+                            return Err(ctx.throw(
+                                rquickjs::String::from_str(
+                                    ctx.clone(),
+                                    "NoModificationAllowedError",
+                                )?
+                                .into(),
+                            ));
+                        }
+                    }
+                    parent
+                };
+
+                let html_str = js_value_to_dom_string(args.first());
+
+                if let Some(parent_key) = parent_key {
+                    // Parsa HTML till nya noder
+                    let new_keys = {
+                        let mut s = self.state.borrow_mut();
+                        // Ta bort den nuvarande noden från parent
+                        s.arena.remove_child(parent_key, self.key);
+
+                        // Parsa nya HTML-noder
+                        let frag = crate::parser::parse_html(&html_str);
+                        let temp_arena = crate::arena_dom::ArenaDom::from_rcdom(&frag);
+                        // Importera nya noder till vår arena
+                        let mut imported = vec![];
+                        let body_key = find_by_tag_name(&temp_arena, temp_arena.document, "body");
+                        if let Some(bk) = body_key {
+                            if let Some(body) = temp_arena.nodes.get(bk) {
+                                for &child_key in &body.children {
+                                    let new_key = import_node(&temp_arena, child_key, &mut s.arena);
+                                    if let Some(nk) = new_key {
+                                        imported.push(nk);
+                                    }
+                                }
+                            }
+                        }
+                        imported
+                    };
+
+                    // Lägg till importerade noder i parent
+                    {
+                        let mut s = self.state.borrow_mut();
+                        for nk in &new_keys {
+                            s.arena.append_child(parent_key, *nk);
+                        }
+                    }
+                }
+
+                Ok(Value::new_undefined(ctx.clone()))
+            }
+        }
+        obj.prop(
+            "outerHTML",
+            Accessor::new(
+                JsFn(OuterHtmlGetter {
+                    state: Rc::clone(state),
+                    key,
+                }),
+                JsFn(OuterHtmlSetter {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            ),
+        )?;
     }
 
     // shadowRoot
