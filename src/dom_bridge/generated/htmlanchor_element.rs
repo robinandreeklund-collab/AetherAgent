@@ -338,13 +338,8 @@ pub(crate) struct HTMLAnchorElementGetOrigin {
 impl JsHandler for HTMLAnchorElementGetOrigin {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("origin"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_origin(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -355,13 +350,8 @@ pub(crate) struct HTMLAnchorElementGetProtocol {
 impl JsHandler for HTMLAnchorElementGetProtocol {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("protocol"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_protocol(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -371,15 +361,6 @@ pub(crate) struct HTMLAnchorElementSetProtocol {
 }
 impl JsHandler for HTMLAnchorElementSetProtocol {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("protocol", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -391,13 +372,8 @@ pub(crate) struct HTMLAnchorElementGetUsername {
 impl JsHandler for HTMLAnchorElementGetUsername {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("username"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_username(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -407,15 +383,6 @@ pub(crate) struct HTMLAnchorElementSetUsername {
 }
 impl JsHandler for HTMLAnchorElementSetUsername {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("username", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -427,13 +394,8 @@ pub(crate) struct HTMLAnchorElementGetPassword {
 impl JsHandler for HTMLAnchorElementGetPassword {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("password"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_password(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -443,15 +405,6 @@ pub(crate) struct HTMLAnchorElementSetPassword {
 }
 impl JsHandler for HTMLAnchorElementSetPassword {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("password", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -463,13 +416,8 @@ pub(crate) struct HTMLAnchorElementGetHost {
 impl JsHandler for HTMLAnchorElementGetHost {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("host"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_host(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -479,15 +427,6 @@ pub(crate) struct HTMLAnchorElementSetHost {
 }
 impl JsHandler for HTMLAnchorElementSetHost {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("host", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -499,13 +438,8 @@ pub(crate) struct HTMLAnchorElementGetHostname {
 impl JsHandler for HTMLAnchorElementGetHostname {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("hostname"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_hostname(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -515,15 +449,6 @@ pub(crate) struct HTMLAnchorElementSetHostname {
 }
 impl JsHandler for HTMLAnchorElementSetHostname {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("hostname", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -535,13 +460,8 @@ pub(crate) struct HTMLAnchorElementGetPort {
 impl JsHandler for HTMLAnchorElementGetPort {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("port"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_port(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -551,15 +471,6 @@ pub(crate) struct HTMLAnchorElementSetPort {
 }
 impl JsHandler for HTMLAnchorElementSetPort {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("port", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -571,13 +482,8 @@ pub(crate) struct HTMLAnchorElementGetPathname {
 impl JsHandler for HTMLAnchorElementGetPathname {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("pathname"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_pathname(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -587,15 +493,6 @@ pub(crate) struct HTMLAnchorElementSetPathname {
 }
 impl JsHandler for HTMLAnchorElementSetPathname {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("pathname", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -607,13 +504,8 @@ pub(crate) struct HTMLAnchorElementGetSearch {
 impl JsHandler for HTMLAnchorElementGetSearch {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("search"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_search(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -623,15 +515,6 @@ pub(crate) struct HTMLAnchorElementSetSearch {
 }
 impl JsHandler for HTMLAnchorElementSetSearch {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("search", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -643,13 +526,8 @@ pub(crate) struct HTMLAnchorElementGetHash {
 impl JsHandler for HTMLAnchorElementGetHash {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("hash"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_url_hash(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -659,15 +537,6 @@ pub(crate) struct HTMLAnchorElementSetHash {
 }
 impl JsHandler for HTMLAnchorElementSetHash {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args
-            .get(0)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("hash", &val);
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

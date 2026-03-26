@@ -33,12 +33,12 @@ impl JsHandler for HTMLMeterElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val.to_string());
+            n.set_attr("value", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -70,12 +70,12 @@ impl JsHandler for HTMLMeterElementSetMin {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("min", &val.to_string());
+            n.set_attr("min", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -107,12 +107,12 @@ impl JsHandler for HTMLMeterElementSetMax {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("max", &val.to_string());
+            n.set_attr("max", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -144,12 +144,12 @@ impl JsHandler for HTMLMeterElementSetLow {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("low", &val.to_string());
+            n.set_attr("low", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -181,12 +181,12 @@ impl JsHandler for HTMLMeterElementSetHigh {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("high", &val.to_string());
+            n.set_attr("high", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -218,12 +218,12 @@ impl JsHandler for HTMLMeterElementSetOptimum {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("optimum", &val.to_string());
+            n.set_attr("optimum", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }

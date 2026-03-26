@@ -2,6 +2,7 @@
 //!
 //! Genererar JsHandler-structs och registreringsfunktioner från parsade WebIDL-interfaces.
 
+use crate::attr_classify::{self, AttrCategory, OpCategory};
 use crate::type_map;
 use crate::Interface;
 use std::fmt::Write;
@@ -86,63 +87,151 @@ fn generate_interface(iface: &Interface) -> String {
 fn generate_attribute_getter(code: &mut String, iface: &Interface, attr: &crate::Attribute) {
     let struct_name = format!("{}Get{}", iface.name, to_pascal_case(&attr.name));
     let default = type_map::attr_default(&iface.name, &attr.name, &attr.idl_type);
-    let attr_key = to_html_attr_name(&attr.name);
+    let category = attr_classify::classify(&iface.name, &attr.name, &attr.idl_type, attr.readonly);
 
     writeln!(code, "pub(crate) struct {} {{", struct_name).unwrap();
     writeln!(code, "    pub(crate) state: SharedState,").unwrap();
     writeln!(code, "    pub(crate) key: NodeKey,").unwrap();
     writeln!(code, "}}").unwrap();
-
     writeln!(code, "impl JsHandler for {} {{", struct_name).unwrap();
-    writeln!(
-        code,
-        "    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{"
-    )
-    .unwrap();
-    writeln!(code, "        let s = self.state.borrow();").unwrap();
+    writeln!(code, "    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{").unwrap();
 
-    let base_type = attr.idl_type.trim_end_matches('?');
-    match base_type {
-        "boolean" => {
-            writeln!(
-                code,
-                "        let val = s.arena.nodes.get(self.key).map(|n| n.has_attr(\"{}\")).unwrap_or({});",
-                attr_key, default
-            )
-            .unwrap();
-            writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+    match category {
+        AttrCategory::Reflected { html_attr } => {
+            // Läs direkt från HTML-attribut (befintlig logik)
+            writeln!(code, "        let s = self.state.borrow();").unwrap();
+            let base_type = attr.idl_type.trim_end_matches('?');
+            match base_type {
+                "boolean" => {
+                    writeln!(code, "        let val = s.arena.nodes.get(self.key).map(|n| n.has_attr(\"{}\")).unwrap_or({});", html_attr, default).unwrap();
+                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+                }
+                "long" | "unsigned long" => {
+                    writeln!(code, "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).and_then(|v| v.parse::<i32>().ok()).unwrap_or({});", html_attr, default).unwrap();
+                    writeln!(code, "        Ok(Value::new_int(ctx.clone(), val))").unwrap();
+                }
+                "double" => {
+                    writeln!(code, "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).and_then(|v| v.parse::<f64>().ok()).unwrap_or({});", html_attr, default).unwrap();
+                    writeln!(code, "        Ok(Value::new_float(ctx.clone(), val))").unwrap();
+                }
+                _ => {
+                    writeln!(code, "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).unwrap_or({});", html_attr, default).unwrap();
+                    writeln!(
+                        code,
+                        "        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())"
+                    )
+                    .unwrap();
+                }
+            }
         }
-        "long" | "unsigned long" => {
+        AttrCategory::StateBacked { state_field } => {
+            // Läs från element_state med fallback till attribut
+            writeln!(code, "        let s = self.state.borrow();").unwrap();
             writeln!(
                 code,
-                "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).and_then(|v| v.parse::<i32>().ok()).unwrap_or({});",
-                attr_key, default
+                "        let key_bits = super::super::node_key_to_f64(self.key) as u64;"
             )
             .unwrap();
-            writeln!(code, "        Ok(Value::new_int(ctx.clone(), val))").unwrap();
+            let base_type = attr.idl_type.trim_end_matches('?');
+            match state_field.as_str() {
+                "checked" => {
+                    writeln!(code, "        let val = s.element_state.get(&key_bits).and_then(|es| es.checked).unwrap_or_else(|| s.arena.nodes.get(self.key).map(|n| n.has_attr(\"checked\")).unwrap_or(false));").unwrap();
+                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+                }
+                "indeterminate" => {
+                    writeln!(code, "        let val = s.element_state.get(&key_bits).map(|es| es.indeterminate).unwrap_or(false);").unwrap();
+                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+                }
+                "selected" => {
+                    writeln!(code, "        let val = s.element_state.get(&key_bits).and_then(|es| es.selected).unwrap_or_else(|| s.arena.nodes.get(self.key).map(|n| n.has_attr(\"selected\")).unwrap_or(false));").unwrap();
+                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+                }
+                "selected_index" => {
+                    writeln!(code, "        let val = s.element_state.get(&key_bits).and_then(|es| es.selected_index).unwrap_or({});", default).unwrap();
+                    writeln!(code, "        Ok(Value::new_int(ctx.clone(), val))").unwrap();
+                }
+                _ => {
+                    // value (DOMString)
+                    let attr_fallback = to_html_attr_name(&attr.name);
+                    writeln!(code, "        let val = s.element_state.get(&key_bits).and_then(|es| es.value.as_deref()).or_else(|| s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\"))).unwrap_or({});", attr_fallback, default).unwrap();
+                    writeln!(
+                        code,
+                        "        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())"
+                    )
+                    .unwrap();
+                }
+            }
         }
-        "double" => {
-            writeln!(
-                code,
-                "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).and_then(|v| v.parse::<f64>().ok()).unwrap_or({});",
-                attr_key, default
-            )
-            .unwrap();
-            writeln!(code, "        Ok(Value::new_float(ctx.clone(), val))").unwrap();
-        }
-        _ => {
-            // DOMString
-            writeln!(
-                code,
-                "        let val = s.arena.nodes.get(self.key).and_then(|n| n.get_attr(\"{}\")).unwrap_or({});",
-                attr_key, default
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())"
-            )
-            .unwrap();
+        AttrCategory::Computed { compute_fn } => {
+            // Anropa beräkningsfunktion i computed.rs
+            writeln!(code, "        let s = self.state.borrow();").unwrap();
+            let base_type = attr.idl_type.trim_end_matches('?');
+            match base_type {
+                "boolean" => {
+                    writeln!(
+                        code,
+                        "        let val = super::super::computed::{}(&s, self.key);",
+                        compute_fn
+                    )
+                    .unwrap();
+                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+                }
+                "long" | "unsigned long" => {
+                    writeln!(
+                        code,
+                        "        let val = super::super::computed::{}(&s, self.key);",
+                        compute_fn
+                    )
+                    .unwrap();
+                    writeln!(code, "        Ok(Value::new_int(ctx.clone(), val as i32))").unwrap();
+                }
+                "double" => {
+                    writeln!(
+                        code,
+                        "        let val = super::super::computed::{}(&s, self.key);",
+                        compute_fn
+                    )
+                    .unwrap();
+                    writeln!(code, "        Ok(Value::new_float(ctx.clone(), val))").unwrap();
+                }
+                _ => {
+                    // DOMString or node reference
+                    if compute_fn.starts_with("find_form_owner") {
+                        writeln!(code, "        let owner = super::super::computed::find_form_owner(&s, self.key);").unwrap();
+                        writeln!(code, "        drop(s);").unwrap();
+                        writeln!(code, "        match owner {{").unwrap();
+                        writeln!(code, "            Some(fk) => super::super::make_element_object(ctx, fk, &self.state),").unwrap();
+                        writeln!(
+                            code,
+                            "            None => Ok(Value::new_null(ctx.clone())),"
+                        )
+                        .unwrap();
+                        writeln!(code, "        }}").unwrap();
+                    } else if compute_fn.starts_with("find_labels") {
+                        writeln!(code, "        let labels = super::super::computed::find_labels(&s, self.key);").unwrap();
+                        writeln!(code, "        drop(s);").unwrap();
+                        writeln!(
+                            code,
+                            "        let arr = rquickjs::Array::new(ctx.clone())?;"
+                        )
+                        .unwrap();
+                        writeln!(code, "        for (i, lk) in labels.iter().enumerate() {{")
+                            .unwrap();
+                        writeln!(code, "            let el = super::super::make_element_object(ctx, *lk, &self.state)?;").unwrap();
+                        writeln!(code, "            arr.set(i, el)?;").unwrap();
+                        writeln!(code, "        }}").unwrap();
+                        writeln!(code, "        Ok(arr.into_value())").unwrap();
+                    } else {
+                        writeln!(
+                            code,
+                            "        let val = super::super::computed::{}(&s, self.key);",
+                            compute_fn
+                        )
+                        .unwrap();
+                        writeln!(code, "        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())").unwrap();
+                    }
+                }
+            }
         }
     }
 
@@ -153,78 +242,91 @@ fn generate_attribute_getter(code: &mut String, iface: &Interface, attr: &crate:
 /// Generera setter-struct för ett attribut
 fn generate_attribute_setter(code: &mut String, iface: &Interface, attr: &crate::Attribute) {
     let struct_name = format!("{}Set{}", iface.name, to_pascal_case(&attr.name));
-    let attr_key = to_html_attr_name(&attr.name);
+    let category = attr_classify::classify(&iface.name, &attr.name, &attr.idl_type, attr.readonly);
 
     writeln!(code, "pub(crate) struct {} {{", struct_name).unwrap();
     writeln!(code, "    pub(crate) state: SharedState,").unwrap();
     writeln!(code, "    pub(crate) key: NodeKey,").unwrap();
     writeln!(code, "}}").unwrap();
-
     writeln!(code, "impl JsHandler for {} {{", struct_name).unwrap();
-    writeln!(
-        code,
-        "    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{"
-    )
-    .unwrap();
+    writeln!(code, "    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{").unwrap();
 
-    let base_type = attr.idl_type.trim_end_matches('?');
-    match base_type {
-        "boolean" => {
-            writeln!(
-                code,
-                "        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);"
-            )
-            .unwrap();
+    match category {
+        AttrCategory::StateBacked { state_field } => {
+            // Skriv till element_state (INTE attribut)
             writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
             writeln!(
                 code,
-                "        if let Some(n) = s.arena.nodes.get_mut(self.key) {{"
+                "        let key_bits = super::super::node_key_to_f64(self.key) as u64;"
             )
             .unwrap();
             writeln!(
                 code,
-                "            if val {{ n.set_attr(\"{}\", \"\"); }} else {{ n.remove_attr(\"{}\"); }}",
-                attr_key, attr_key
+                "        let es = s.element_state.entry(key_bits).or_default();"
             )
             .unwrap();
-            writeln!(code, "        }}").unwrap();
+            match state_field.as_str() {
+                "checked" => {
+                    writeln!(code, "        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);").unwrap();
+                    writeln!(code, "        es.checked = Some(val);").unwrap();
+                    writeln!(code, "        es.checked_dirty = true;").unwrap();
+                }
+                "indeterminate" => {
+                    writeln!(code, "        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);").unwrap();
+                    writeln!(code, "        es.indeterminate = val;").unwrap();
+                }
+                "selected" => {
+                    writeln!(code, "        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);").unwrap();
+                    writeln!(code, "        es.selected = Some(val);").unwrap();
+                }
+                "selected_index" => {
+                    writeln!(code, "        let val = args.first().and_then(|v| v.as_int()).unwrap_or(-1) as i32;").unwrap();
+                    writeln!(code, "        es.selected_index = Some(val);").unwrap();
+                }
+                _ => {
+                    // value (DOMString)
+                    writeln!(code, "        let val = args.get(0).and_then(|v| v.as_string()).and_then(|s| s.to_string().ok()).unwrap_or_default();").unwrap();
+                    writeln!(code, "        es.value = Some(val);").unwrap();
+                    writeln!(code, "        es.value_dirty = true;").unwrap();
+                }
+            }
         }
-        "long" | "unsigned long" | "double" => {
-            writeln!(
-                code,
-                "        let val = {};",
-                type_map::arg_extraction(&attr.idl_type, 0)
-            )
-            .unwrap();
-            writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
-            writeln!(
-                code,
-                "        if let Some(n) = s.arena.nodes.get_mut(self.key) {{"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "            n.set_attr(\"{}\", &val.to_string());",
-                attr_key
-            )
-            .unwrap();
-            writeln!(code, "        }}").unwrap();
+        AttrCategory::Reflected { html_attr } => {
+            // Skriv till HTML-attribut (befintlig logik)
+            let base_type = attr.idl_type.trim_end_matches('?');
+            match base_type {
+                "boolean" => {
+                    writeln!(code, "        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);").unwrap();
+                    writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
+                    writeln!(
+                        code,
+                        "        if let Some(n) = s.arena.nodes.get_mut(self.key) {{"
+                    )
+                    .unwrap();
+                    writeln!(code, "            if val {{ n.set_attr(\"{}\", \"\"); }} else {{ n.remove_attr(\"{}\"); }}", html_attr, html_attr).unwrap();
+                    writeln!(code, "        }}").unwrap();
+                }
+                _ => {
+                    writeln!(
+                        code,
+                        "        let val = {};",
+                        type_map::arg_extraction("DOMString", 0)
+                    )
+                    .unwrap();
+                    writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
+                    writeln!(
+                        code,
+                        "        if let Some(n) = s.arena.nodes.get_mut(self.key) {{"
+                    )
+                    .unwrap();
+                    writeln!(code, "            n.set_attr(\"{}\", &val);", html_attr).unwrap();
+                    writeln!(code, "        }}").unwrap();
+                }
+            }
         }
-        _ => {
-            writeln!(
-                code,
-                "        let val = {};",
-                type_map::arg_extraction("DOMString", 0)
-            )
-            .unwrap();
-            writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
-            writeln!(
-                code,
-                "        if let Some(n) = s.arena.nodes.get_mut(self.key) {{"
-            )
-            .unwrap();
-            writeln!(code, "            n.set_attr(\"{}\", &val);", attr_key).unwrap();
-            writeln!(code, "        }}").unwrap();
+        AttrCategory::Computed { .. } => {
+            // Computed properties are readonly — setter should not be generated
+            // But if called, no-op
         }
     }
 
@@ -235,52 +337,66 @@ fn generate_attribute_setter(code: &mut String, iface: &Interface, attr: &crate:
 
 /// Generera operation-struct
 fn generate_operation(code: &mut String, iface: &Interface, op: &crate::Operation) {
-    let struct_name = format!(
-        "{}{}",
-        iface.name,
-        to_pascal_case(&op.name)
-    );
+    let struct_name = format!("{}{}", iface.name, to_pascal_case(&op.name));
+
+    let op_category = attr_classify::classify_operation(&iface.name, &op.name);
 
     writeln!(code, "pub(crate) struct {} {{", struct_name).unwrap();
     writeln!(code, "    pub(crate) state: SharedState,").unwrap();
     writeln!(code, "    pub(crate) key: NodeKey,").unwrap();
     writeln!(code, "}}").unwrap();
-
     writeln!(code, "impl JsHandler for {} {{", struct_name).unwrap();
-    writeln!(
-        code,
-        "    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{"
-    )
-    .unwrap();
+    writeln!(code, "    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {{").unwrap();
 
-    // Generera stub-implementationer baserat på returtyp
-    match op.return_type.as_str() {
-        "void" | "undefined" => {
-            writeln!(
-                code,
-                "        // TODO: Implementera {}.{}()",
-                iface.name, op.name
-            )
-            .unwrap();
-            writeln!(code, "        Ok(Value::new_undefined(ctx.clone()))").unwrap();
-        }
-        "boolean" => {
-            match op.name.as_str() {
-                "checkValidity" | "reportValidity" => {
-                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), true))").unwrap();
+    match op_category {
+        OpCategory::ComputedCall { compute_fn } => match op.return_type.as_str() {
+            "boolean" => {
+                writeln!(code, "        let s = self.state.borrow();").unwrap();
+                writeln!(
+                    code,
+                    "        let val = super::super::computed::{}(&s, self.key);",
+                    compute_fn
+                )
+                .unwrap();
+                writeln!(code, "        Ok(Value::new_bool(ctx.clone(), val))").unwrap();
+            }
+            _ => {
+                writeln!(code, "        Ok(Value::new_undefined(ctx.clone()))").unwrap();
+            }
+        },
+        OpCategory::StateMutator { state_field } => {
+            match state_field.as_str() {
+                "custom_validity" => {
+                    writeln!(code, "        let msg = args.get(0).and_then(|v| v.as_string()).and_then(|s| s.to_string().ok()).unwrap_or_default();").unwrap();
+                    writeln!(code, "        let mut s = self.state.borrow_mut();").unwrap();
+                    writeln!(
+                        code,
+                        "        let key_bits = super::super::node_key_to_f64(self.key) as u64;"
+                    )
+                    .unwrap();
+                    writeln!(code, "        s.element_state.entry(key_bits).or_default().custom_validity = msg;").unwrap();
                 }
                 _ => {
-                    writeln!(code, "        Ok(Value::new_bool(ctx.clone(), false))").unwrap();
+                    writeln!(code, "        // StateMutator: {}", state_field).unwrap();
                 }
             }
+            writeln!(code, "        Ok(Value::new_undefined(ctx.clone()))").unwrap();
         }
-        _ => {
-            writeln!(
-                code,
-                "        Ok(rquickjs::String::from_str(ctx.clone(), \"\")?.into_value())"
-            )
-            .unwrap();
-        }
+        OpCategory::Stub => match op.return_type.as_str() {
+            "void" | "undefined" => {
+                writeln!(code, "        Ok(Value::new_undefined(ctx.clone()))").unwrap();
+            }
+            "boolean" => {
+                writeln!(code, "        Ok(Value::new_bool(ctx.clone(), true))").unwrap();
+            }
+            _ => {
+                writeln!(
+                    code,
+                    "        Ok(rquickjs::String::from_str(ctx.clone(), \"\")?.into_value())"
+                )
+                .unwrap();
+            }
+        },
     }
 
     writeln!(code, "    }}").unwrap();
@@ -291,7 +407,12 @@ fn generate_operation(code: &mut String, iface: &Interface, op: &crate::Operatio
 fn generate_register_fn(code: &mut String, iface: &Interface) {
     let fn_name = format!("register_{}", to_snake_case(&iface.name));
 
-    writeln!(code, "/// Registrera alla {}-properties och metoder på ett JS-objekt.", iface.name).unwrap();
+    writeln!(
+        code,
+        "/// Registrera alla {}-properties och metoder på ett JS-objekt.",
+        iface.name
+    )
+    .unwrap();
     writeln!(code, "pub(crate) fn {}<'js>(", fn_name).unwrap();
     writeln!(code, "    ctx: &Ctx<'js>,").unwrap();
     writeln!(code, "    obj: &rquickjs::Object<'js>,").unwrap();
@@ -299,11 +420,7 @@ fn generate_register_fn(code: &mut String, iface: &Interface) {
     writeln!(code, "    key: NodeKey,").unwrap();
     writeln!(code, ") -> rquickjs::Result<()> {{").unwrap();
     writeln!(code, "    use std::rc::Rc;").unwrap();
-    writeln!(
-        code,
-        "    use rquickjs::{{Function, object::Accessor}};"
-    )
-    .unwrap();
+    writeln!(code, "    use rquickjs::{{Function, object::Accessor}};").unwrap();
     writeln!(code, "    use crate::event_loop::JsFn;\n").unwrap();
 
     for attr in &iface.attributes {
@@ -312,25 +429,36 @@ fn generate_register_fn(code: &mut String, iface: &Interface) {
 
         if attr.readonly {
             // Readonly: getter-only accessor
-            writeln!(code, "    obj.prop(\"{}\", Accessor::new_get(JsFn({} {{", js_name, getter_name).unwrap();
+            writeln!(
+                code,
+                "    obj.prop(\"{}\", Accessor::new_get(JsFn({} {{",
+                js_name, getter_name
+            )
+            .unwrap();
             writeln!(code, "        state: Rc::clone(state), key,").unwrap();
             writeln!(code, "    }})))?;").unwrap();
         } else {
             // Read-write: getter + setter accessor
             let setter_name = format!("{}Set{}", iface.name, to_pascal_case(&attr.name));
             writeln!(code, "    obj.prop(\"{}\", Accessor::new(", js_name).unwrap();
-            writeln!(code, "        JsFn({} {{ state: Rc::clone(state), key }}),", getter_name).unwrap();
-            writeln!(code, "        JsFn({} {{ state: Rc::clone(state), key }}),", setter_name).unwrap();
+            writeln!(
+                code,
+                "        JsFn({} {{ state: Rc::clone(state), key }}),",
+                getter_name
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "        JsFn({} {{ state: Rc::clone(state), key }}),",
+                setter_name
+            )
+            .unwrap();
             writeln!(code, "    ))?;").unwrap();
         }
     }
 
     for op in &iface.operations {
-        let struct_name = format!(
-            "{}{}",
-            iface.name,
-            to_pascal_case(&op.name)
-        );
+        let struct_name = format!("{}{}", iface.name, to_pascal_case(&op.name));
         writeln!(
             code,
             "    obj.set(\"{}\", Function::new(ctx.clone(), JsFn({} {{",
@@ -364,11 +492,7 @@ fn generate_master_register(interfaces: &[Interface]) -> String {
         "/// Registrera auto-genererade HTML element properties baserat på tag-namn."
     )
     .unwrap();
-    writeln!(
-        code,
-        "pub(crate) fn register_html_element_properties<'js>("
-    )
-    .unwrap();
+    writeln!(code, "pub(crate) fn register_html_element_properties<'js>(").unwrap();
     writeln!(code, "    ctx: &Ctx<'js>,").unwrap();
     writeln!(code, "    obj: &Object<'js>,").unwrap();
     writeln!(code, "    state: &SharedState,").unwrap();
@@ -402,7 +526,10 @@ fn generate_master_register(interfaces: &[Interface]) -> String {
         ("HTMLDivElement", vec!["div"]),
         ("HTMLSpanElement", vec!["span"]),
         ("HTMLParagraphElement", vec!["p"]),
-        ("HTMLHeadingElement", vec!["h1", "h2", "h3", "h4", "h5", "h6"]),
+        (
+            "HTMLHeadingElement",
+            vec!["h1", "h2", "h3", "h4", "h5", "h6"],
+        ),
         ("HTMLPreElement", vec!["pre"]),
         ("HTMLQuoteElement", vec!["blockquote", "q"]),
         ("HTMLOListElement", vec!["ol"]),

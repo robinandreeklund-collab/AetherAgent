@@ -122,12 +122,18 @@ pub(crate) struct HTMLOptionElementGetSelected {
 impl JsHandler for HTMLOptionElementGetSelected {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.has_attr("selected"))
-            .unwrap_or(false);
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.selected)
+            .unwrap_or_else(|| {
+                s.arena
+                    .nodes
+                    .get(self.key)
+                    .map(|n| n.has_attr("selected"))
+                    .unwrap_or(false)
+            });
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -138,15 +144,11 @@ pub(crate) struct HTMLOptionElementSetSelected {
 }
 impl JsHandler for HTMLOptionElementSetSelected {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
         let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            if val {
-                n.set_attr("selected", "");
-            } else {
-                n.remove_attr("selected");
-            }
-        }
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
+        let val = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
+        es.selected = Some(val);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -158,11 +160,17 @@ pub(crate) struct HTMLOptionElementGetValue {
 impl JsHandler for HTMLOptionElementGetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("value"))
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.value.as_deref())
+            .or_else(|| {
+                s.arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.get_attr("value"))
+            })
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -174,15 +182,16 @@ pub(crate) struct HTMLOptionElementSetValue {
 }
 impl JsHandler for HTMLOptionElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
         let val = args
             .get(0)
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val);
-        }
+        es.value = Some(val);
+        es.value_dirty = true;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -230,14 +239,8 @@ pub(crate) struct HTMLOptionElementGetIndex {
 impl JsHandler for HTMLOptionElementGetIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("index"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_option_index(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 

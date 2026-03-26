@@ -97,9 +97,7 @@ fn convert_partial_mixin(p: &ast::PartialMixin) -> Interface {
     }
 }
 
-fn extract_interface_members(
-    members: &[ast::InterfaceMember],
-) -> (Vec<Attribute>, Vec<Operation>) {
+fn extract_interface_members(members: &[ast::InterfaceMember]) -> (Vec<Attribute>, Vec<Operation>) {
     let mut attrs = Vec::new();
     let mut ops = Vec::new();
     for m in members {

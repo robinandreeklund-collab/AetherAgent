@@ -85,7 +85,6 @@ pub(crate) struct HTMLDialogElementShow {
 }
 impl JsHandler for HTMLDialogElementShow {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLDialogElement.show()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -96,7 +95,6 @@ pub(crate) struct HTMLDialogElementShowModal {
 }
 impl JsHandler for HTMLDialogElementShowModal {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLDialogElement.showModal()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -107,7 +105,6 @@ pub(crate) struct HTMLDialogElementClose {
 }
 impl JsHandler for HTMLDialogElementClose {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLDialogElement.close()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

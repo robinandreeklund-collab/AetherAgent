@@ -31,10 +31,14 @@ pub(crate) struct HTMLVideoElementSetWidth {
 }
 impl JsHandler for HTMLVideoElementSetWidth {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("width", &val.to_string());
+            n.set_attr("width", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -64,10 +68,14 @@ pub(crate) struct HTMLVideoElementSetHeight {
 }
 impl JsHandler for HTMLVideoElementSetHeight {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("height", &val.to_string());
+            n.set_attr("height", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }

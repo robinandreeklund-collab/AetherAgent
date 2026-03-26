@@ -228,12 +228,12 @@ impl JsHandler for HTMLMediaElementSetCurrentTime {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("currenttime", &val.to_string());
+            n.set_attr("currenttime", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -300,12 +300,12 @@ impl JsHandler for HTMLMediaElementSetDefaultPlaybackRate {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("defaultplaybackrate", &val.to_string());
+            n.set_attr("defaultplaybackrate", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -337,12 +337,12 @@ impl JsHandler for HTMLMediaElementSetPlaybackRate {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("playbackrate", &val.to_string());
+            n.set_attr("playbackrate", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -499,12 +499,12 @@ impl JsHandler for HTMLMediaElementSetVolume {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("volume", &val.to_string());
+            n.set_attr("volume", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -588,7 +588,6 @@ pub(crate) struct HTMLMediaElementPlay {
 }
 impl JsHandler for HTMLMediaElementPlay {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLMediaElement.play()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -599,7 +598,6 @@ pub(crate) struct HTMLMediaElementPause {
 }
 impl JsHandler for HTMLMediaElementPause {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLMediaElement.pause()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -610,7 +608,6 @@ pub(crate) struct HTMLMediaElementLoad {
 }
 impl JsHandler for HTMLMediaElementLoad {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLMediaElement.load()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -631,7 +628,6 @@ pub(crate) struct HTMLMediaElementFastSeek {
 }
 impl JsHandler for HTMLMediaElementFastSeek {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLMediaElement.fastSeek()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

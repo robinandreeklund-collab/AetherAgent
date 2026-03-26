@@ -18,7 +18,7 @@ impl JsHandler for HTMLOutputElementGetDefaultValue {
             .arena
             .nodes
             .get(self.key)
-            .and_then(|n| n.get_attr("value"))
+            .and_then(|n| n.get_attr("defaultvalue"))
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -37,7 +37,7 @@ impl JsHandler for HTMLOutputElementSetDefaultValue {
             .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val);
+            n.set_attr("defaultvalue", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -103,11 +103,17 @@ pub(crate) struct HTMLOutputElementGetValue {
 impl JsHandler for HTMLOutputElementGetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("value"))
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.value.as_deref())
+            .or_else(|| {
+                s.arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.get_attr("value"))
+            })
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -119,15 +125,16 @@ pub(crate) struct HTMLOutputElementSetValue {
 }
 impl JsHandler for HTMLOutputElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
         let val = args
             .get(0)
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val);
-        }
+        es.value = Some(val);
+        es.value_dirty = true;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -139,12 +146,7 @@ pub(crate) struct HTMLOutputElementGetWillValidate {
 impl JsHandler for HTMLOutputElementGetWillValidate {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.has_attr("willvalidate"))
-            .unwrap_or(false);
+        let val = super::super::computed::compute_will_validate(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -156,13 +158,8 @@ pub(crate) struct HTMLOutputElementGetValidationMessage {
 impl JsHandler for HTMLOutputElementGetValidationMessage {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("validationmessage"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::get_validation_message(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -172,7 +169,9 @@ pub(crate) struct HTMLOutputElementCheckValidity {
 }
 impl JsHandler for HTMLOutputElementCheckValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -182,7 +181,9 @@ pub(crate) struct HTMLOutputElementReportValidity {
 }
 impl JsHandler for HTMLOutputElementReportValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -192,7 +193,14 @@ pub(crate) struct HTMLOutputElementSetCustomValidity {
 }
 impl JsHandler for HTMLOutputElementSetCustomValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLOutputElement.setCustomValidity()
+        let msg = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        s.element_state.entry(key_bits).or_default().custom_validity = msg;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

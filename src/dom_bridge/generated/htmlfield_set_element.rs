@@ -102,7 +102,9 @@ pub(crate) struct HTMLFieldSetElementCheckValidity {
 }
 impl JsHandler for HTMLFieldSetElementCheckValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -112,7 +114,9 @@ pub(crate) struct HTMLFieldSetElementReportValidity {
 }
 impl JsHandler for HTMLFieldSetElementReportValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -122,7 +126,14 @@ pub(crate) struct HTMLFieldSetElementSetCustomValidity {
 }
 impl JsHandler for HTMLFieldSetElementSetCustomValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLFieldSetElement.setCustomValidity()
+        let msg = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        s.element_state.entry(key_bits).or_default().custom_validity = msg;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

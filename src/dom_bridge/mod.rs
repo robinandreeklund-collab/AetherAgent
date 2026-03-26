@@ -25,6 +25,8 @@ use crate::event_loop::{self, EventLoopState, JsFn, JsHandler, SharedEventLoop};
 
 mod attributes;
 mod chardata;
+mod computed;
+pub(crate) mod element_state;
 mod events;
 #[allow(
     dead_code,
@@ -301,6 +303,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         arena,
         mutations: vec![],
         event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
         focused_element: None,
         scroll_positions: std::collections::HashMap::new(),
         css_context: None,
@@ -430,6 +433,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         arena,
         mutations: vec![],
         event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
         focused_element: None,
         scroll_positions: std::collections::HashMap::new(),
         css_context: None,
@@ -510,6 +514,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 arena: borrowed.arena.clone(),
                 mutations: borrowed.mutations.clone(),
                 event_listeners: std::collections::HashMap::new(),
+                element_state: std::collections::HashMap::new(),
                 focused_element: borrowed.focused_element,
                 scroll_positions: std::collections::HashMap::new(),
                 css_context: None,
@@ -579,6 +584,7 @@ fn eval_js_with_lifecycle_internal(
         arena,
         mutations: vec![],
         event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
         focused_element: None,
         scroll_positions: std::collections::HashMap::new(),
         css_context: None,
@@ -711,6 +717,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         arena,
         mutations: vec![],
         event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
         focused_element: None,
         scroll_positions: std::collections::HashMap::new(),
         css_context: None,
@@ -812,6 +819,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 arena: borrowed.arena.clone(),
                 mutations: borrowed.mutations.clone(),
                 event_listeners: std::collections::HashMap::new(),
+                element_state: std::collections::HashMap::new(),
                 focused_element: borrowed.focused_element,
                 scroll_positions: std::collections::HashMap::new(),
                 css_context: None,

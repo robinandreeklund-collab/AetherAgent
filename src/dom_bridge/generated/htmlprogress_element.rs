@@ -33,12 +33,12 @@ impl JsHandler for HTMLProgressElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val.to_string());
+            n.set_attr("value", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -70,12 +70,12 @@ impl JsHandler for HTMLProgressElementSetMax {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args
             .get(0)
-            .and_then(|v| v.as_float())
-            .or_else(|| args.get(0).and_then(|v| v.as_int().map(|i| i as f64)))
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("max", &val.to_string());
+            n.set_attr("max", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -88,13 +88,7 @@ pub(crate) struct HTMLProgressElementGetPosition {
 impl JsHandler for HTMLProgressElementGetPosition {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("position"))
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(-1.0);
+        let val = super::super::computed::compute_progress_position(&s, self.key);
         Ok(Value::new_float(ctx.clone(), val))
     }
 }

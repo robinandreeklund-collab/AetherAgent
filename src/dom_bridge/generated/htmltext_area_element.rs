@@ -67,10 +67,14 @@ pub(crate) struct HTMLTextAreaElementSetCols {
 }
 impl JsHandler for HTMLTextAreaElementSetCols {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("cols", &val.to_string());
+            n.set_attr("cols", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -208,10 +212,14 @@ pub(crate) struct HTMLTextAreaElementSetMaxLength {
 }
 impl JsHandler for HTMLTextAreaElementSetMaxLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("maxlength", &val.to_string());
+            n.set_attr("maxlength", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -241,10 +249,14 @@ pub(crate) struct HTMLTextAreaElementSetMinLength {
 }
 impl JsHandler for HTMLTextAreaElementSetMinLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("minlength", &val.to_string());
+            n.set_attr("minlength", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -418,10 +430,14 @@ pub(crate) struct HTMLTextAreaElementSetRows {
 }
 impl JsHandler for HTMLTextAreaElementSetRows {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("rows", &val.to_string());
+            n.set_attr("rows", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -434,11 +450,17 @@ pub(crate) struct HTMLTextAreaElementGetValue {
 impl JsHandler for HTMLTextAreaElementGetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("value"))
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.value.as_deref())
+            .or_else(|| {
+                s.arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.get_attr("value"))
+            })
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -450,15 +472,16 @@ pub(crate) struct HTMLTextAreaElementSetValue {
 }
 impl JsHandler for HTMLTextAreaElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
         let val = args
             .get(0)
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val);
-        }
+        es.value = Some(val);
+        es.value_dirty = true;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -506,13 +529,8 @@ pub(crate) struct HTMLTextAreaElementGetType {
 impl JsHandler for HTMLTextAreaElementGetType {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("type"))
-            .unwrap_or("textarea");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_textarea_type(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -523,14 +541,8 @@ pub(crate) struct HTMLTextAreaElementGetTextLength {
 impl JsHandler for HTMLTextAreaElementGetTextLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("textlength"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_text_length(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -541,12 +553,7 @@ pub(crate) struct HTMLTextAreaElementGetWillValidate {
 impl JsHandler for HTMLTextAreaElementGetWillValidate {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.has_attr("willvalidate"))
-            .unwrap_or(false);
+        let val = super::super::computed::compute_will_validate(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -558,13 +565,8 @@ pub(crate) struct HTMLTextAreaElementGetValidationMessage {
 impl JsHandler for HTMLTextAreaElementGetValidationMessage {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("validationmessage"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::get_validation_message(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -575,13 +577,14 @@ pub(crate) struct HTMLTextAreaElementGetLabels {
 impl JsHandler for HTMLTextAreaElementGetLabels {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("labels"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let labels = super::super::computed::find_labels(&s, self.key);
+        drop(s);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, lk) in labels.iter().enumerate() {
+            let el = super::super::make_element_object(ctx, *lk, &self.state)?;
+            arr.set(i, el)?;
+        }
+        Ok(arr.into_value())
     }
 }
 
@@ -591,7 +594,9 @@ pub(crate) struct HTMLTextAreaElementCheckValidity {
 }
 impl JsHandler for HTMLTextAreaElementCheckValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -601,7 +606,9 @@ pub(crate) struct HTMLTextAreaElementReportValidity {
 }
 impl JsHandler for HTMLTextAreaElementReportValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -611,7 +618,14 @@ pub(crate) struct HTMLTextAreaElementSetCustomValidity {
 }
 impl JsHandler for HTMLTextAreaElementSetCustomValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLTextAreaElement.setCustomValidity()
+        let msg = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        s.element_state.entry(key_bits).or_default().custom_validity = msg;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -622,7 +636,6 @@ pub(crate) struct HTMLTextAreaElementSelect {
 }
 impl JsHandler for HTMLTextAreaElementSelect {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLTextAreaElement.select()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

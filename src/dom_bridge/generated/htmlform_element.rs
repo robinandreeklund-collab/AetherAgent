@@ -338,14 +338,8 @@ pub(crate) struct HTMLFormElementGetLength {
 impl JsHandler for HTMLFormElementGetLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("length"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_form_length(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -355,7 +349,6 @@ pub(crate) struct HTMLFormElementSubmit {
 }
 impl JsHandler for HTMLFormElementSubmit {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLFormElement.submit()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -366,7 +359,6 @@ pub(crate) struct HTMLFormElementRequestSubmit {
 }
 impl JsHandler for HTMLFormElementRequestSubmit {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLFormElement.requestSubmit()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -377,7 +369,6 @@ pub(crate) struct HTMLFormElementReset {
 }
 impl JsHandler for HTMLFormElementReset {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLFormElement.reset()
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -388,7 +379,9 @@ pub(crate) struct HTMLFormElementCheckValidity {
 }
 impl JsHandler for HTMLFormElementCheckValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -398,7 +391,9 @@ pub(crate) struct HTMLFormElementReportValidity {
 }
 impl JsHandler for HTMLFormElementReportValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 

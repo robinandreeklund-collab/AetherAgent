@@ -67,10 +67,14 @@ pub(crate) struct HTMLOListElementSetStart {
 }
 impl JsHandler for HTMLOListElementSetStart {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("start", &val.to_string());
+            n.set_attr("start", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }

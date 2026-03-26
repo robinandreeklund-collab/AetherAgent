@@ -14,14 +14,8 @@ pub(crate) struct HTMLTableRowElementGetRowIndex {
 impl JsHandler for HTMLTableRowElementGetRowIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("rowindex"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_row_index(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -32,14 +26,8 @@ pub(crate) struct HTMLTableRowElementGetSectionRowIndex {
 impl JsHandler for HTMLTableRowElementGetSectionRowIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("sectionrowindex"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_section_row_index(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 

@@ -31,10 +31,14 @@ pub(crate) struct HTMLTableCellElementSetColSpan {
 }
 impl JsHandler for HTMLTableCellElementSetColSpan {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("colspan", &val.to_string());
+            n.set_attr("colspan", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -64,10 +68,14 @@ pub(crate) struct HTMLTableCellElementSetRowSpan {
 }
 impl JsHandler for HTMLTableCellElementSetRowSpan {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("rowspan", &val.to_string());
+            n.set_attr("rowspan", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -116,14 +124,8 @@ pub(crate) struct HTMLTableCellElementGetCellIndex {
 impl JsHandler for HTMLTableCellElementGetCellIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("cellindex"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_cell_index(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 

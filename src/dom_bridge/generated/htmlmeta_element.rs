@@ -54,7 +54,7 @@ impl JsHandler for HTMLMetaElementGetHttpEquiv {
             .arena
             .nodes
             .get(self.key)
-            .and_then(|n| n.get_attr("httpequiv"))
+            .and_then(|n| n.get_attr("http-equiv"))
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -73,7 +73,7 @@ impl JsHandler for HTMLMetaElementSetHttpEquiv {
             .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("httpequiv", &val);
+            n.set_attr("http-equiv", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }

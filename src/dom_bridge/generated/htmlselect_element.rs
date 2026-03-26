@@ -86,14 +86,8 @@ pub(crate) struct HTMLSelectElementGetLength {
 impl JsHandler for HTMLSelectElementGetLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("length"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_select_length(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -103,11 +97,6 @@ pub(crate) struct HTMLSelectElementSetLength {
 }
 impl JsHandler for HTMLSelectElementSetLength {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("length", &val.to_string());
-        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -227,12 +216,11 @@ pub(crate) struct HTMLSelectElementGetSelectedIndex {
 impl JsHandler for HTMLSelectElementGetSelectedIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("selectedindex"))
-            .and_then(|v| v.parse::<i32>().ok())
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.selected_index)
             .unwrap_or(-1);
         Ok(Value::new_int(ctx.clone(), val))
     }
@@ -244,11 +232,11 @@ pub(crate) struct HTMLSelectElementSetSelectedIndex {
 }
 impl JsHandler for HTMLSelectElementSetSelectedIndex {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as i32;
         let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("selectedindex", &val.to_string());
-        }
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
+        let val = args.first().and_then(|v| v.as_int()).unwrap_or(-1) as i32;
+        es.selected_index = Some(val);
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -277,10 +265,14 @@ pub(crate) struct HTMLSelectElementSetSize {
 }
 impl JsHandler for HTMLSelectElementSetSize {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("size", &val.to_string());
+            n.set_attr("size", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -293,11 +285,17 @@ pub(crate) struct HTMLSelectElementGetValue {
 impl JsHandler for HTMLSelectElementGetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
         let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("value"))
+            .element_state
+            .get(&key_bits)
+            .and_then(|es| es.value.as_deref())
+            .or_else(|| {
+                s.arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.get_attr("value"))
+            })
             .unwrap_or("");
         Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
     }
@@ -309,15 +307,16 @@ pub(crate) struct HTMLSelectElementSetValue {
 }
 impl JsHandler for HTMLSelectElementSetValue {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
         let val = args
             .get(0)
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let mut s = self.state.borrow_mut();
-        if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("value", &val);
-        }
+        es.value = Some(val);
+        es.value_dirty = true;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -329,13 +328,8 @@ pub(crate) struct HTMLSelectElementGetType {
 impl JsHandler for HTMLSelectElementGetType {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("type"))
-            .unwrap_or("select-one");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_select_type(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -346,12 +340,7 @@ pub(crate) struct HTMLSelectElementGetWillValidate {
 impl JsHandler for HTMLSelectElementGetWillValidate {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.has_attr("willvalidate"))
-            .unwrap_or(false);
+        let val = super::super::computed::compute_will_validate(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -363,13 +352,8 @@ pub(crate) struct HTMLSelectElementGetValidationMessage {
 impl JsHandler for HTMLSelectElementGetValidationMessage {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("validationmessage"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::get_validation_message(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 
@@ -380,13 +364,14 @@ pub(crate) struct HTMLSelectElementGetLabels {
 impl JsHandler for HTMLSelectElementGetLabels {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("labels"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let labels = super::super::computed::find_labels(&s, self.key);
+        drop(s);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, lk) in labels.iter().enumerate() {
+            let el = super::super::make_element_object(ctx, *lk, &self.state)?;
+            arr.set(i, el)?;
+        }
+        Ok(arr.into_value())
     }
 }
 
@@ -396,7 +381,9 @@ pub(crate) struct HTMLSelectElementCheckValidity {
 }
 impl JsHandler for HTMLSelectElementCheckValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -406,7 +393,9 @@ pub(crate) struct HTMLSelectElementReportValidity {
 }
 impl JsHandler for HTMLSelectElementReportValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        Ok(Value::new_bool(ctx.clone(), true))
+        let s = self.state.borrow();
+        let val = super::super::computed::check_validity(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), val))
     }
 }
 
@@ -416,7 +405,14 @@ pub(crate) struct HTMLSelectElementSetCustomValidity {
 }
 impl JsHandler for HTMLSelectElementSetCustomValidity {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // TODO: Implementera HTMLSelectElement.setCustomValidity()
+        let msg = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let key_bits = super::super::node_key_to_f64(self.key) as u64;
+        s.element_state.entry(key_bits).or_default().custom_validity = msg;
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

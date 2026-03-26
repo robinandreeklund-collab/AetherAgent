@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 use crate::arena_dom::ArenaDom;
 
+use super::element_state::ElementStateStore;
+
 /// Resultat från DOM-medveten JS-evaluering
 #[derive(Debug, Clone)]
 pub struct DomEvalResult {
@@ -68,6 +70,9 @@ pub(crate) struct BridgeState {
     pub(super) session_storage: std::collections::HashMap<String, String>,
     /// Fångade console-meddelanden
     pub(super) console_output: Vec<String>,
+    /// Per-element mutable state (value, checked, validity, etc.)
+    /// Key: NodeKey ffi-bits (u64), Value: ElementState
+    pub(super) element_state: ElementStateStore,
     /// document.readyState — "loading", "interactive" eller "complete"
     pub(super) ready_state: String,
     /// Original HTML — behövs för Blitz Stylo lazy-init

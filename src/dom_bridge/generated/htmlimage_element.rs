@@ -283,10 +283,14 @@ pub(crate) struct HTMLImageElementSetWidth {
 }
 impl JsHandler for HTMLImageElementSetWidth {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("width", &val.to_string());
+            n.set_attr("width", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -316,10 +320,14 @@ pub(crate) struct HTMLImageElementSetHeight {
 }
 impl JsHandler for HTMLImageElementSetHeight {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let val = args.get(0).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+        let val = args
+            .get(0)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
         let mut s = self.state.borrow_mut();
         if let Some(n) = s.arena.nodes.get_mut(self.key) {
-            n.set_attr("height", &val.to_string());
+            n.set_attr("height", &val);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -440,14 +448,8 @@ pub(crate) struct HTMLImageElementGetNaturalWidth {
 impl JsHandler for HTMLImageElementGetNaturalWidth {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("naturalwidth"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_img_natural_width(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -458,14 +460,8 @@ pub(crate) struct HTMLImageElementGetNaturalHeight {
 impl JsHandler for HTMLImageElementGetNaturalHeight {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("naturalheight"))
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        Ok(Value::new_int(ctx.clone(), val))
+        let val = super::super::computed::compute_img_natural_height(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), val as i32))
     }
 }
 
@@ -476,12 +472,7 @@ pub(crate) struct HTMLImageElementGetComplete {
 impl JsHandler for HTMLImageElementGetComplete {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.has_attr("complete"))
-            .unwrap_or(false);
+        let val = super::super::computed::compute_img_complete(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -493,13 +484,8 @@ pub(crate) struct HTMLImageElementGetCurrentSrc {
 impl JsHandler for HTMLImageElementGetCurrentSrc {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = s
-            .arena
-            .nodes
-            .get(self.key)
-            .and_then(|n| n.get_attr("currentsrc"))
-            .unwrap_or("");
-        Ok(rquickjs::String::from_str(ctx.clone(), val)?.into_value())
+        let val = super::super::computed::compute_img_current_src(&s, self.key);
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
     }
 }
 

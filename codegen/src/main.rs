@@ -8,6 +8,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+mod attr_classify;
 mod rust_gen;
 mod type_map;
 mod webidl_parser;
@@ -42,11 +43,7 @@ fn main() {
                 }
                 Err(e) => {
                     // Fallback till regex-parser
-                    println!(
-                        "Parsar (fallback): {} (webidl-rs: {})",
-                        path.display(),
-                        e
-                    );
+                    println!("Parsar (fallback): {} (webidl-rs: {})", path.display(), e);
                     let parsed = parse_webidl(&source);
                     interfaces.extend(parsed);
                 }
@@ -177,10 +174,7 @@ fn parse_webidl(source: &str) -> Vec<Interface> {
                     .unwrap_or(trimmed)
                     .trim()
             } else {
-                trimmed
-                    .strip_prefix("attribute")
-                    .unwrap_or(trimmed)
-                    .trim()
+                trimmed.strip_prefix("attribute").unwrap_or(trimmed).trim()
             };
 
             let attr_part = attr_part.trim_end_matches(';').trim();
