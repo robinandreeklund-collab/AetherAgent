@@ -177,8 +177,7 @@ tree = agent.fetch_parse("https://example.com", goal="buy cheapest flight")
 | **[docs/architecture.md](docs/architecture.md)** | System diagram, tier breakdown, comparison table |
 | **[docs/dom-api-coverage.md](docs/dom-api-coverage.md)** | 55+ DOM methods, CSS selectors, framework coverage |
 | **[docs/dom-implementation-status.md](docs/dom-implementation-status.md)** | Rust-native vs JS-polyfill breakdown |
-| **[docs/wpt-dashboard.md](docs/wpt-dashboard.md)** | Web Platform Tests results per suite |
-| **[docs/wpt-testing-strategy.md](docs/wpt-testing-strategy.md)** | WPT testing strategy and workflow |
+| **[docs/wpt-dashboard.md](docs/wpt-dashboard.md)** | Web Platform Tests results (69.0% dom/ pass rate) |
 
 ---
 
