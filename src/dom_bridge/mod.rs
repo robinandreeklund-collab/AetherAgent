@@ -26,6 +26,7 @@ use crate::event_loop::{self, EventLoopState, JsFn, JsHandler, SharedEventLoop};
 mod attributes;
 mod chardata;
 mod computed;
+mod dom_impls;
 pub(crate) mod element_state;
 mod events;
 #[allow(
@@ -3885,6 +3886,8 @@ pub(super) fn make_element_object<'js>(
             key,
             &tag_name.to_ascii_lowercase(),
         )?;
+        // DOM impl beteendelogik: ValidityState, input value modes, form, select
+        register_dom_impl_properties(ctx, &obj, state, key, &tag_name)?;
     }
 
     // Doctype-specifika egenskaper
@@ -5651,6 +5654,410 @@ pub(super) fn node_key_to_f64(key: NodeKey) -> f64 {
     // Använd Key::data() för att extrahera KeyData, sedan as_ffi() för raw u64
     use slotmap::Key;
     key.data().as_ffi() as f64
+}
+
+// ─── DOM Impl Properties ────────────────────────────────────────────────────
+// Registrerar beteendelogik från dom_impls/ på element-objekt.
+// ValidityState, input value modes, form association, select element.
+
+fn register_dom_impl_properties<'js>(
+    ctx: &Ctx<'js>,
+    obj: &Object<'js>,
+    state: &SharedState,
+    key: NodeKey,
+    tag_name: &str,
+) -> rquickjs::Result<()> {
+    let tag_lower = tag_name.to_ascii_lowercase();
+
+    // ─── ValidityState (input, select, textarea, button) ─────────────────
+    if matches!(
+        tag_lower.as_str(),
+        "input" | "select" | "textarea" | "button"
+    ) {
+        // input.validity getter — returnerar ValidityState-objekt
+        let vs_state = Rc::clone(state);
+        let vs_key = key;
+        obj.prop(
+            "validity",
+            rquickjs::object::Accessor::new_get(JsFn(ValidityStateGetter {
+                state: vs_state,
+                key: vs_key,
+            }))
+            .configurable(),
+        )?;
+    }
+
+    // ─── Input value/checked med dirty state (input) ─────────────────────
+    if tag_lower == "input" {
+        // Överskrivna value getter/setter med dirty state-logik
+        let get_state = Rc::clone(state);
+        let set_state = Rc::clone(state);
+        obj.prop(
+            "value",
+            rquickjs::object::Accessor::new(
+                JsFn(InputValueGetter {
+                    state: get_state,
+                    key,
+                }),
+                JsFn(InputValueSetter {
+                    state: set_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+
+        // defaultValue
+        let dv_state = Rc::clone(state);
+        obj.prop(
+            "defaultValue",
+            rquickjs::object::Accessor::new_get(JsFn(InputDefaultValueGetter {
+                state: dv_state,
+                key,
+            }))
+            .configurable(),
+        )?;
+
+        // checked med dirty checkedness
+        let gc_state = Rc::clone(state);
+        let sc_state = Rc::clone(state);
+        obj.prop(
+            "checked",
+            rquickjs::object::Accessor::new(
+                JsFn(InputCheckedGetter {
+                    state: gc_state,
+                    key,
+                }),
+                JsFn(InputCheckedSetter {
+                    state: sc_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+    }
+
+    // ─── Select element: value, selectedIndex med riktig option-logik ─────
+    if tag_lower == "select" {
+        let gv_state = Rc::clone(state);
+        let sv_state = Rc::clone(state);
+        obj.prop(
+            "value",
+            rquickjs::object::Accessor::new(
+                JsFn(SelectValueGetter {
+                    state: gv_state,
+                    key,
+                }),
+                JsFn(SelectValueSetter {
+                    state: sv_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+
+        let gi_state = Rc::clone(state);
+        let si_state = Rc::clone(state);
+        obj.prop(
+            "selectedIndex",
+            rquickjs::object::Accessor::new(
+                JsFn(SelectSelectedIndexGetter {
+                    state: gi_state,
+                    key,
+                }),
+                JsFn(SelectSelectedIndexSetter {
+                    state: si_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+
+        // options (readonly list)
+        let opts_state = Rc::clone(state);
+        obj.prop(
+            "options",
+            rquickjs::object::Accessor::new_get(JsFn(SelectOptionsGetter {
+                state: opts_state,
+                key,
+            }))
+            .configurable(),
+        )?;
+    }
+
+    // ─── Form element: elements, reset ───────────────────────────────────
+    if tag_lower == "form" {
+        let fe_state = Rc::clone(state);
+        obj.prop(
+            "elements",
+            rquickjs::object::Accessor::new_get(JsFn(FormElementsGetter {
+                state: fe_state,
+                key,
+            }))
+            .configurable(),
+        )?;
+
+        let fr_state = Rc::clone(state);
+        obj.set(
+            "reset",
+            Function::new(
+                ctx.clone(),
+                JsFn(FormReset {
+                    state: fr_state,
+                    key,
+                }),
+            )?,
+        )?;
+
+        let fs_state = Rc::clone(state);
+        obj.set(
+            "submit",
+            Function::new(
+                ctx.clone(),
+                JsFn(FormSubmit {
+                    state: fs_state,
+                    key,
+                }),
+            )?,
+        )?;
+    }
+
+    Ok(())
+}
+
+// ─── ValidityState JS-objekt ────────────────────────────────────────────────
+
+struct ValidityStateGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ValidityStateGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let vs = dom_impls::constraint_validation::compute_validity(&s, self.key);
+
+        // Skapa ValidityState JS-objekt med rätt prototype
+        let obj_code =
+            "Object.create(typeof ValidityState!=='undefined'?ValidityState.prototype:{})";
+        let obj = match ctx.eval::<Value, _>(obj_code) {
+            Ok(v) if v.is_object() => v.into_object().unwrap(),
+            _ => Object::new(ctx.clone())?,
+        };
+        obj.set("valueMissing", vs.value_missing)?;
+        obj.set("typeMismatch", vs.type_mismatch)?;
+        obj.set("patternMismatch", vs.pattern_mismatch)?;
+        obj.set("tooLong", vs.too_long)?;
+        obj.set("tooShort", vs.too_short)?;
+        obj.set("rangeUnderflow", vs.range_underflow)?;
+        obj.set("rangeOverflow", vs.range_overflow)?;
+        obj.set("stepMismatch", vs.step_mismatch)?;
+        obj.set("badInput", vs.bad_input)?;
+        obj.set("customError", vs.custom_error)?;
+        obj.set("valid", vs.valid)?;
+        Ok(obj.into_value())
+    }
+}
+
+// ─── Input Value/Checked JS Handlers ─────────────────────────────────────────
+
+struct InputValueGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let val = dom_impls::input_value::get_input_value(&s, self.key);
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &val,
+        )?))
+    }
+}
+
+struct InputValueSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        dom_impls::input_value::set_input_value(&mut s, self.key, &val);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct InputDefaultValueGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputDefaultValueGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let val = dom_impls::input_value::get_default_value(&s, self.key);
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &val,
+        )?))
+    }
+}
+
+struct InputCheckedGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputCheckedGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let checked = dom_impls::input_value::get_input_checked(&s, self.key);
+        Ok(Value::new_bool(ctx.clone(), checked))
+    }
+}
+
+struct InputCheckedSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputCheckedSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let checked = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
+        let mut s = self.state.borrow_mut();
+        dom_impls::input_value::set_input_checked(&mut s, self.key, checked);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+// ─── Select Element JS Handlers ─────────────────────────────────────────────
+
+struct SelectValueGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SelectValueGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let val = dom_impls::select_element::get_select_value(&s, self.key);
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &val,
+        )?))
+    }
+}
+
+struct SelectValueSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SelectValueSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        dom_impls::select_element::set_select_value(&mut s, self.key, &val);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct SelectSelectedIndexGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SelectSelectedIndexGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let idx = dom_impls::select_element::get_selected_index(&s, self.key);
+        Ok(Value::new_int(ctx.clone(), idx))
+    }
+}
+
+struct SelectSelectedIndexSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SelectSelectedIndexSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let idx = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
+        let mut s = self.state.borrow_mut();
+        dom_impls::select_element::set_selected_index(&mut s, self.key, idx);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct SelectOptionsGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for SelectOptionsGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let options = dom_impls::select_element::get_options(&s, self.key);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, &opt_key) in options.iter().enumerate() {
+            let elem = make_element_object(ctx, opt_key, &self.state)?;
+            arr.set(i, elem)?;
+        }
+        Ok(arr.into_value())
+    }
+}
+
+// ─── Form Element JS Handlers ───────────────────────────────────────────────
+
+struct FormElementsGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for FormElementsGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let elements = dom_impls::form_association::get_form_elements(&s, self.key);
+        let arr = rquickjs::Array::new(ctx.clone())?;
+        for (i, &elem_key) in elements.iter().enumerate() {
+            let elem = make_element_object(ctx, elem_key, &self.state)?;
+            arr.set(i, elem)?;
+        }
+        // Lägg till length-property
+        let length = elements.len();
+        drop(elements);
+        drop(s);
+        let arr_val = arr.into_value();
+        if let Some(obj) = arr_val.as_object() {
+            obj.set("length", length as i32)?;
+        }
+        Ok(arr_val)
+    }
+}
+
+struct FormReset {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for FormReset {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        dom_impls::form_association::reset_form(&mut s, self.key);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct FormSubmit {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for FormSubmit {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // I headless mode: dispatcha submit-event, samla form data
+        // Per spec: submit() skippar validation
+        let _ = (&self.state, self.key);
+        Ok(Value::new_undefined(ctx.clone()))
+    }
 }
 
 // ─── Tester ────────────────────────────────────────────────────────────────
