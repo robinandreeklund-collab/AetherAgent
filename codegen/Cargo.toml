@@ -1,0 +1,8 @@
+[package]
+name = "aether-webidl-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "WebIDL → QuickJS code generator for AetherAgent DOM bridge"
+
+[dependencies]
+webidl = "0.9"

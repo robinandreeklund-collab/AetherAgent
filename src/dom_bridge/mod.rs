@@ -26,6 +26,15 @@ use crate::event_loop::{self, EventLoopState, JsFn, JsHandler, SharedEventLoop};
 mod attributes;
 mod chardata;
 mod events;
+#[allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery
+)]
+mod generated;
 mod html_properties;
 mod node_ops;
 mod selectors;
@@ -3860,6 +3869,14 @@ pub(super) fn make_element_object<'js>(
     // HTML Element Reflected Properties (.type, .value, .checked, etc.)
     if node_type_val == 1 {
         html_properties::set_html_reflected_properties(ctx, &obj, state, key)?;
+        // Auto-genererade HTML element bindings (getter/setter/metoder per tag)
+        generated::register::register_html_element_properties(
+            ctx,
+            &obj,
+            state,
+            key,
+            &tag_name.to_ascii_lowercase(),
+        )?;
     }
 
     // Doctype-specifika egenskaper
