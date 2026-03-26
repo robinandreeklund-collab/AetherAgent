@@ -153,7 +153,8 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
 | 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
-| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
+| 2026-03-26 | 53 | 453 | 85 | 18.8% | +outerHTML setter, createAttribute fix |
+| **2026-03-26** | **53** | **457** | **85** | **18.6%** | codegen v3 WebIDL wrappers |
 
 **Mål Q2 2026:** 30%
 
@@ -183,7 +184,8 @@
 | Datum | Filer | Cases | Passed | Rate | Kommentar |
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 536 | 340 | 68 | 20.0% | Baseline |
-| **2026-03-26** | **536** | **298** | **85** | **28.5%** | +17 pass |
+| 2026-03-26 | 536 | 298 | 85 | 28.5% | +17 pass |
+| **2026-03-26** | **536** | **450** | **214** | **47.6%** | codegen v3: void elements, text escaping, doctype serialization |
 
 ---
 
@@ -428,7 +430,8 @@ AbortController/AbortSignal saknas helt. Låg prioritet.
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
 | 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
-| **2026-03-26** | **53** | **453** | **85** | **18.8%** | +outerHTML setter, createAttribute fix |
+| 2026-03-26 | 53 | 453 | 85 | 18.8% | +outerHTML setter, createAttribute fix |
+| **2026-03-26** | **53** | **457** | **85** | **18.6%** | codegen v3 WebIDL wrappers |
 
 **Implementerat:**
 - DOMParser.parseFromString (basic) ✅
