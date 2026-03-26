@@ -26,6 +26,7 @@ use crate::event_loop::{self, EventLoopState, JsFn, JsHandler, SharedEventLoop};
 mod attributes;
 mod chardata;
 mod events;
+mod html_properties;
 mod node_ops;
 mod selectors;
 mod state;
@@ -3855,6 +3856,12 @@ pub(super) fn make_element_object<'js>(
     obj.set("className", class_val.as_str())?;
     // baseURI per DOM spec (alla noder ärver document.baseURI)
     obj.set("baseURI", "about:blank")?;
+
+    // HTML Element Reflected Properties (.type, .value, .checked, etc.)
+    if node_type_val == 1 {
+        html_properties::set_html_reflected_properties(ctx, &obj, state, key)?;
+    }
+
     // Doctype-specifika egenskaper
     if node_type_val == 10 {
         obj.set("name", tag_name.as_str())?;
