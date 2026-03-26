@@ -377,34 +377,92 @@ fn generate_master_register(interfaces: &[Interface]) -> String {
     writeln!(code, ") -> rquickjs::Result<()> {{").unwrap();
     writeln!(code, "    match tag {{").unwrap();
 
-    // Mappa interface-namn till HTML-tag
-    let tag_map: Vec<(&str, &str)> = vec![
-        ("HTMLInputElement", "input"),
-        ("HTMLButtonElement", "button"),
-        ("HTMLSelectElement", "select"),
-        ("HTMLTextAreaElement", "textarea"),
-        ("HTMLFormElement", "form"),
-        ("HTMLAnchorElement", "a"),
-        ("HTMLImageElement", "img"),
-        ("HTMLOptionElement", "option"),
-        ("HTMLLabelElement", "label"),
-        ("HTMLFieldSetElement", "fieldset"),
-        ("HTMLOutputElement", "output"),
-        ("HTMLLegendElement", "legend"),
-        ("HTMLProgressElement", "progress"),
-        ("HTMLMeterElement", "meter"),
+    // Mappa interface-namn till HTML-tag(s)
+    let tag_map: Vec<(&str, Vec<&str>)> = vec![
+        ("HTMLInputElement", vec!["input"]),
+        ("HTMLButtonElement", vec!["button"]),
+        ("HTMLSelectElement", vec!["select"]),
+        ("HTMLTextAreaElement", vec!["textarea"]),
+        ("HTMLFormElement", vec!["form"]),
+        ("HTMLAnchorElement", vec!["a"]),
+        ("HTMLImageElement", vec!["img"]),
+        ("HTMLOptionElement", vec!["option"]),
+        ("HTMLLabelElement", vec!["label"]),
+        ("HTMLFieldSetElement", vec!["fieldset"]),
+        ("HTMLOutputElement", vec!["output"]),
+        ("HTMLLegendElement", vec!["legend"]),
+        ("HTMLProgressElement", vec!["progress"]),
+        ("HTMLMeterElement", vec!["meter"]),
+        // Media elements
+        ("HTMLVideoElement", vec!["video"]),
+        ("HTMLAudioElement", vec!["audio"]),
+        ("HTMLSourceElement", vec!["source"]),
+        ("HTMLTrackElement", vec!["track"]),
+        // Structural elements
+        ("HTMLDivElement", vec!["div"]),
+        ("HTMLSpanElement", vec!["span"]),
+        ("HTMLParagraphElement", vec!["p"]),
+        ("HTMLHeadingElement", vec!["h1", "h2", "h3", "h4", "h5", "h6"]),
+        ("HTMLPreElement", vec!["pre"]),
+        ("HTMLQuoteElement", vec!["blockquote", "q"]),
+        ("HTMLOListElement", vec!["ol"]),
+        ("HTMLUListElement", vec!["ul"]),
+        ("HTMLLIElement", vec!["li"]),
+        ("HTMLDListElement", vec!["dl"]),
+        ("HTMLHRElement", vec!["hr"]),
+        ("HTMLBRElement", vec!["br"]),
+        // Table elements
+        ("HTMLTableElement", vec!["table"]),
+        ("HTMLTableSectionElement", vec!["thead", "tbody", "tfoot"]),
+        ("HTMLTableRowElement", vec!["tr"]),
+        ("HTMLTableCellElement", vec!["td", "th"]),
+        ("HTMLTableCaptionElement", vec!["caption"]),
+        ("HTMLTableColElement", vec!["col", "colgroup"]),
+        // Embedded content
+        ("HTMLIFrameElement", vec!["iframe"]),
+        ("HTMLEmbedElement", vec!["embed"]),
+        ("HTMLObjectElement", vec!["object"]),
+        ("HTMLCanvasElement", vec!["canvas"]),
+        // Interactive
+        ("HTMLDialogElement", vec!["dialog"]),
+        ("HTMLDetailsElement", vec!["details"]),
+        ("HTMLSummaryElement", vec!["summary"]),
+        // Scripting/metadata
+        ("HTMLScriptElement", vec!["script"]),
+        ("HTMLStyleElement", vec!["style"]),
+        ("HTMLLinkElement", vec!["link"]),
+        ("HTMLMetaElement", vec!["meta"]),
+        ("HTMLBaseElement", vec!["base"]),
+        ("HTMLTitleElement", vec!["title"]),
+        // Document structure
+        ("HTMLBodyElement", vec!["body"]),
+        ("HTMLHtmlElement", vec!["html"]),
+        ("HTMLHeadElement", vec!["head"]),
+        // Misc
+        ("HTMLAreaElement", vec!["area"]),
+        ("HTMLMapElement", vec!["map"]),
+        ("HTMLDataElement", vec!["data"]),
+        ("HTMLTimeElement", vec!["time"]),
+        ("HTMLPictureElement", vec!["picture"]),
+        ("HTMLOptGroupElement", vec!["optgroup"]),
+        ("HTMLDataListElement", vec!["datalist"]),
+        ("HTMLMenuElement", vec!["menu"]),
+        ("HTMLTemplateElement", vec!["template"]),
+        ("HTMLSlotElement", vec!["slot"]),
     ];
 
-    for (iface_name, tag) in &tag_map {
+    for (iface_name, tags) in &tag_map {
         if interfaces.iter().any(|i| i.name == *iface_name) {
             let mod_name = to_snake_case(iface_name);
             let fn_name = format!("register_{}", mod_name);
-            writeln!(
-                code,
-                "        \"{}\" => super::{}::{}(ctx, obj, state, key)?,",
-                tag, mod_name, fn_name
-            )
-            .unwrap();
+            for tag in tags {
+                writeln!(
+                    code,
+                    "        \"{}\" => super::{}::{}(ctx, obj, state, key)?,",
+                    tag, mod_name, fn_name
+                )
+                .unwrap();
+            }
         }
     }
 
