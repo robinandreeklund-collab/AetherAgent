@@ -1809,6 +1809,19 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
 
     ctx.globals().set("document", doc)?;
 
+    // Registrera document-objektet i node identity cache
+    // Kritiskt: parentNode-traversal från html-element → document måste returnera
+    // exakt samma JS-objekt som globalThis.document
+    {
+        let doc_key = state.borrow().arena.document;
+        let doc_key_bits = node_key_to_f64(doc_key);
+        let code = format!(
+            "globalThis.__nodeCache && globalThis.__nodeCache.set({}, globalThis.document)",
+            doc_key_bits
+        );
+        let _ = ctx.eval::<Value, _>(code.as_str());
+    }
+
     // Named element access — HTML spec: element med id exponeras som window.id
     // Traversera hela DOM:en och sätt globala variabler för varje element med id
     {
@@ -6524,30 +6537,42 @@ impl JsHandler for ClassListToggle {
                 }
                 return Ok(Value::new_bool(ctx.clone(), true));
             }
+            // force=false → ta bort token om den finns, annars no-op
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 let current = node.get_attr("class").unwrap_or("").to_string();
-                let new_cls: Vec<&str> = current.split_whitespace().filter(|&c| c != cls).collect();
-                node.attributes
-                    .insert("class".to_string(), new_cls.join(" "));
+                let has_token = current.split_whitespace().any(|c| c == cls);
+                if has_token {
+                    // Per spec: kör "ordered set remove" — normaliserar
+                    let new_cls: Vec<&str> =
+                        current.split_whitespace().filter(|&c| c != cls).collect();
+                    node.attributes
+                        .insert("class".to_string(), new_cls.join(" "));
+                }
+                // Om token inte fanns, skriv INTE (bevarar whitespace)
             }
             return Ok(Value::new_bool(ctx.clone(), false));
         }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.get_attr("class").unwrap_or("").to_string();
-            let classes: Vec<&str> = current.split_whitespace().collect();
-            if classes.contains(&cls.as_str()) {
-                let new_cls: Vec<&str> = classes.into_iter().filter(|&c| c != cls).collect();
+            // Ordered set: deduplicera
+            let mut seen = std::collections::HashSet::new();
+            let unique: Vec<&str> = current
+                .split_whitespace()
+                .filter(|c| seen.insert(*c))
+                .collect();
+            if unique.iter().any(|&c| c == cls) {
+                // Ta bort → ordered set serialize (normaliserat)
+                let new_cls: Vec<&str> = unique.into_iter().filter(|&c| c != cls).collect();
                 node.attributes
                     .insert("class".to_string(), new_cls.join(" "));
                 return Ok(Value::new_bool(ctx.clone(), false));
             } else {
-                let new_cls = if current.is_empty() {
-                    cls
-                } else {
-                    format!("{} {}", current, cls)
-                };
-                node.attributes.insert("class".to_string(), new_cls);
+                // Lägg till → ordered set serialize med ny token
+                let mut result: Vec<&str> = unique;
+                result.push(&cls);
+                node.attributes
+                    .insert("class".to_string(), result.join(" "));
                 return Ok(Value::new_bool(ctx.clone(), true));
             }
         }
