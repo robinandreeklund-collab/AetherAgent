@@ -2578,7 +2578,29 @@ fn serialize_node_html(arena: &ArenaDom, key: NodeKey, out: &mut String) {
     match &node.node_type {
         NodeType::Text => {
             if let Some(text) = &node.text {
-                out.push_str(text);
+                // Per spec: escape text content i vanliga element
+                // Men RAW text element (script, style, xmp, iframe, noembed, noframes, plaintext)
+                // ska INTE escapas
+                let parent_tag = node
+                    .parent
+                    .and_then(|p| arena.nodes.get(p))
+                    .and_then(|n| n.tag.as_deref())
+                    .unwrap_or("");
+                if matches!(
+                    parent_tag,
+                    "script"
+                        | "style"
+                        | "xmp"
+                        | "iframe"
+                        | "noembed"
+                        | "noframes"
+                        | "plaintext"
+                        | "noscript"
+                ) {
+                    out.push_str(text);
+                } else {
+                    escape_html_text(text, out);
+                }
             }
         }
         NodeType::Comment => {
@@ -2588,6 +2610,22 @@ fn serialize_node_html(arena: &ArenaDom, key: NodeKey, out: &mut String) {
                 out.push_str("-->");
             }
         }
+        NodeType::ProcessingInstruction => {
+            let target = node.tag.as_deref().unwrap_or("");
+            let data = node.text.as_deref().unwrap_or("");
+            out.push_str("<?");
+            out.push_str(target);
+            if !data.is_empty() {
+                out.push(' ');
+                out.push_str(data);
+            }
+            out.push_str("?>");
+        }
+        NodeType::Doctype => {
+            out.push_str("<!DOCTYPE ");
+            out.push_str(node.text.as_deref().unwrap_or("html"));
+            out.push('>');
+        }
         NodeType::Element => {
             let tag = node.tag.as_deref().unwrap_or("div");
             out.push('<');
@@ -2596,8 +2634,13 @@ fn serialize_node_html(arena: &ArenaDom, key: NodeKey, out: &mut String) {
                 out.push(' ');
                 out.push_str(k);
                 out.push_str("=\"");
-                out.push_str(v);
+                escape_html_attr(v, out);
                 out.push('"');
+            }
+            // Void elements — per HTML spec, inga closing tags
+            if is_void_element(tag) {
+                out.push('>');
+                return;
             }
             out.push('>');
             for &child in &node.children {
@@ -2611,6 +2654,52 @@ fn serialize_node_html(arena: &ArenaDom, key: NodeKey, out: &mut String) {
             for &child in &node.children {
                 serialize_node_html(arena, child, out);
             }
+        }
+    }
+}
+
+/// Kolla om ett HTML-element är ett void element (inget closing tag)
+fn is_void_element(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+/// Escape text content per HTML serialization spec
+fn escape_html_text(text: &str, out: &mut String) {
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\u{00A0}' => out.push_str("&nbsp;"),
+            _ => out.push(ch),
+        }
+    }
+}
+
+/// Escape attribute value per HTML serialization spec
+fn escape_html_attr(text: &str, out: &mut String) {
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\u{00A0}' => out.push_str("&nbsp;"),
+            _ => out.push(ch),
         }
     }
 }
