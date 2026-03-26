@@ -108,8 +108,8 @@ We fetched 5 real websites and compared what the LLM receives:
 | Metric | AetherAgent | Traditional (WebFetch) |
 |--------|-------------|----------------------|
 | **API calls** | 30 (parse, diff, causal, security...) | 3 (WebFetch only) |
-| **Total time** | **4.6 seconds** | **45.5 seconds** |
-| **Tokens consumed** | 16,423* | 16,423 |
+| **Total time (measured)** | **4.6 seconds** | **45.5 seconds** |
+| **Agent tokens consumed** | ~16,000 | 16,423 |
 | **Security checks** | Yes (injection + firewall per site) | None |
 | **Structured diff** | Yes (semantic diff in 3ms) | No |
 | **Causal graph** | Yes (action consequences modeled) | No |
@@ -301,11 +301,15 @@ All verified and working:
 
 ## 6. Head-to-Head: AetherAgent vs Traditional Web Search
 
-| What you're comparing | AetherAgent | Traditional (raw HTML → LLM) | Winner |
-|-----------------------|-------------|------------------------------|--------|
-| **3 simple queries** | 14.2 seconds | 73 seconds | **AE 5.1x faster** |
-| **30-step multi-site query** | 4.6 seconds | ~120 seconds (est.) | **AE ~26x faster** |
-| **Tokens to LLM** | 37-50% less | Full HTML | **AetherAgent** |
+All numbers below are **measured, not estimated**. Traditional agent = Claude with WebFetch/WebSearch tools.
+
+| What you're comparing | AetherAgent | Traditional (measured) | Winner |
+|-----------------------|-------------|------------------------|--------|
+| **Query 1-3 (simple, 3 sites)** | 14.2s total | 73s total | **AE 5.1x faster** |
+| **Query 4 (multi-site, 3 sites)** | 4.6s (30 API calls) | 45.5s (3 WebFetch calls) | **AE 9.9x faster** |
+| **Query 6 (semantic diff)** | 1.4s | 40.5s | **AE 29x faster** |
+| **Query 7 (price monitoring diff)** | 0.03s | ~37s | **AE ~1000x faster** |
+| **Tokens to LLM** | 37-99% less | Full HTML | **AetherAgent** |
 | **Security** | Auto injection check + firewall | Nothing | **AetherAgent** |
 | **Can click buttons?** | Yes (find_and_click) | No | **AetherAgent** |
 | **Can fill forms?** | Yes (fill_form) | No | **AetherAgent** |
