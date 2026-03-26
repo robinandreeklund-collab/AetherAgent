@@ -527,21 +527,39 @@
 // Returnerar bitmask: DISCONNECTED=1, PRECEDING=2, FOLLOWING=4,
 // CONTAINS=8, CONTAINED_BY=16, IMPLEMENTATION_SPECIFIC=32
 (function() {
-  if (typeof Node === 'undefined') {
+  if (typeof Node === 'undefined' || typeof Node !== 'function') {
     if (typeof globalThis !== 'undefined') {
-      globalThis.Node = {
-        ELEMENT_NODE: 1,
-        TEXT_NODE: 3,
-        COMMENT_NODE: 8,
-        DOCUMENT_NODE: 9,
-        DOCUMENT_FRAGMENT_NODE: 11,
-        DOCUMENT_POSITION_DISCONNECTED: 1,
-        DOCUMENT_POSITION_PRECEDING: 2,
-        DOCUMENT_POSITION_FOLLOWING: 4,
-        DOCUMENT_POSITION_CONTAINS: 8,
-        DOCUMENT_POSITION_CONTAINED_BY: 16,
-        DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32
-      };
+      // Skapa som konstruktor-funktion så att instanceof fungerar
+      var NodeCtor = function Node() {};
+      NodeCtor.ELEMENT_NODE = 1;
+      NodeCtor.TEXT_NODE = 3;
+      NodeCtor.CDATA_SECTION_NODE = 4;
+      NodeCtor.PROCESSING_INSTRUCTION_NODE = 7;
+      NodeCtor.COMMENT_NODE = 8;
+      NodeCtor.DOCUMENT_NODE = 9;
+      NodeCtor.DOCUMENT_TYPE_NODE = 10;
+      NodeCtor.DOCUMENT_FRAGMENT_NODE = 11;
+      NodeCtor.DOCUMENT_POSITION_DISCONNECTED = 1;
+      NodeCtor.DOCUMENT_POSITION_PRECEDING = 2;
+      NodeCtor.DOCUMENT_POSITION_FOLLOWING = 4;
+      NodeCtor.DOCUMENT_POSITION_CONTAINS = 8;
+      NodeCtor.DOCUMENT_POSITION_CONTAINED_BY = 16;
+      NodeCtor.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
+      NodeCtor.prototype.ELEMENT_NODE = 1;
+      NodeCtor.prototype.TEXT_NODE = 3;
+      NodeCtor.prototype.CDATA_SECTION_NODE = 4;
+      NodeCtor.prototype.PROCESSING_INSTRUCTION_NODE = 7;
+      NodeCtor.prototype.COMMENT_NODE = 8;
+      NodeCtor.prototype.DOCUMENT_NODE = 9;
+      NodeCtor.prototype.DOCUMENT_TYPE_NODE = 10;
+      NodeCtor.prototype.DOCUMENT_FRAGMENT_NODE = 11;
+      NodeCtor.prototype.DOCUMENT_POSITION_DISCONNECTED = 1;
+      NodeCtor.prototype.DOCUMENT_POSITION_PRECEDING = 2;
+      NodeCtor.prototype.DOCUMENT_POSITION_FOLLOWING = 4;
+      NodeCtor.prototype.DOCUMENT_POSITION_CONTAINS = 8;
+      NodeCtor.prototype.DOCUMENT_POSITION_CONTAINED_BY = 16;
+      NodeCtor.prototype.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
+      globalThis.Node = NodeCtor;
     }
   }
 })();
@@ -945,31 +963,35 @@
   NodeBase.prototype = Object.create(EventTarget.prototype);
   NodeBase.prototype.constructor = NodeBase;
 
-  function ElementBase() {}
-  ElementBase.prototype = Object.create(NodeBase.prototype);
-  ElementBase.prototype.constructor = ElementBase;
-
   function CharacterDataBase() {}
   CharacterDataBase.prototype = Object.create(NodeBase.prototype);
   CharacterDataBase.prototype.constructor = CharacterDataBase;
+
+  function ElementBase() {}
+  ElementBase.prototype = Object.create(NodeBase.prototype);
+  ElementBase.prototype.constructor = ElementBase;
 
   function HTMLElementBase() {}
   HTMLElementBase.prototype = Object.create(ElementBase.prototype);
   HTMLElementBase.prototype.constructor = HTMLElementBase;
 
-  // Registrera bas-typer (om inte redan definierade)
+  // Registrera bas-typer — alltid uppdatera för riktig prototypkedja
   if (!globalThis.EventTarget) globalThis.EventTarget = EventTarget;
-  if (!globalThis.Node) {
-    globalThis.Node = NodeBase;
-    // Node-konstanter
-    Node.ELEMENT_NODE = 1; Node.ATTRIBUTE_NODE = 2; Node.TEXT_NODE = 3;
-    Node.CDATA_SECTION_NODE = 4; Node.PROCESSING_INSTRUCTION_NODE = 7;
-    Node.COMMENT_NODE = 8; Node.DOCUMENT_NODE = 9; Node.DOCUMENT_TYPE_NODE = 10;
-    Node.DOCUMENT_FRAGMENT_NODE = 11;
-    Node.DOCUMENT_POSITION_DISCONNECTED = 1; Node.DOCUMENT_POSITION_PRECEDING = 2;
-    Node.DOCUMENT_POSITION_FOLLOWING = 4; Node.DOCUMENT_POSITION_CONTAINS = 8;
-    Node.DOCUMENT_POSITION_CONTAINED_BY = 16; Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
+  // Kopiera Node-konstanter till NodeBase och dess prototype
+  var nodeConsts = {
+    ELEMENT_NODE: 1, ATTRIBUTE_NODE: 2, TEXT_NODE: 3,
+    CDATA_SECTION_NODE: 4, PROCESSING_INSTRUCTION_NODE: 7,
+    COMMENT_NODE: 8, DOCUMENT_NODE: 9, DOCUMENT_TYPE_NODE: 10,
+    DOCUMENT_FRAGMENT_NODE: 11,
+    DOCUMENT_POSITION_DISCONNECTED: 1, DOCUMENT_POSITION_PRECEDING: 2,
+    DOCUMENT_POSITION_FOLLOWING: 4, DOCUMENT_POSITION_CONTAINS: 8,
+    DOCUMENT_POSITION_CONTAINED_BY: 16, DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32
+  };
+  for (var k in nodeConsts) {
+    NodeBase[k] = nodeConsts[k];
+    NodeBase.prototype[k] = nodeConsts[k];
   }
+  globalThis.Node = NodeBase;
   if (!globalThis.Element) globalThis.Element = ElementBase;
   if (!globalThis.CharacterData) globalThis.CharacterData = CharacterDataBase;
   if (!globalThis.HTMLElement) globalThis.HTMLElement = HTMLElementBase;
@@ -1074,11 +1096,31 @@
     'XMLDocument': NodeBase
   };
   Object.keys(nonHtml).forEach(function(name) {
-    if (!globalThis[name]) {
+    // Alltid uppdatera prototypkedjan, även om konstruktorn redan finns
+    var existing = globalThis[name];
+    if (!existing || typeof existing !== 'function') {
       var Ctor = function() {};
       Ctor.prototype = Object.create(nonHtml[name].prototype);
       Ctor.prototype.constructor = Ctor;
       globalThis[name] = Ctor;
+    } else {
+      // Uppdatera existerande konstruktors prototype-kedja
+      var parent = nonHtml[name].prototype;
+      if (!parent.isPrototypeOf(existing.prototype)) {
+        var newProto = Object.create(parent);
+        // Kopiera existerande egenskaper
+        var props = Object.getOwnPropertyNames(existing.prototype);
+        for (var i = 0; i < props.length; i++) {
+          if (props[i] !== '__proto__') {
+            try {
+              var desc = Object.getOwnPropertyDescriptor(existing.prototype, props[i]);
+              if (desc) Object.defineProperty(newProto, props[i], desc);
+            } catch(e) {}
+          }
+        }
+        newProto.constructor = existing;
+        existing.prototype = newProto;
+      }
     }
   });
 
