@@ -3,6 +3,15 @@
 // Genererat av codegen/src/rust_gen.rs — REDIGERA INTE MANUELLT.
 // Kör: cd codegen && cargo run -- ../webidl/ ../src/dom_bridge/generated/
 
+pub(super) mod cssimport_rule;
+pub(super) mod cssmedia_rule;
+pub(super) mod cssrule;
+pub(super) mod cssrule_list;
+pub(super) mod cssstyle_declaration;
+pub(super) mod cssstyle_rule;
+pub(super) mod cssstyle_sheet;
+pub(super) mod domparser;
+pub(super) mod domtoken_list;
 pub(super) mod htmlanchor_element;
 pub(super) mod htmlarea_element;
 pub(super) mod htmlaudio_element;
@@ -11,6 +20,7 @@ pub(super) mod htmlbody_element;
 pub(super) mod htmlbrelement;
 pub(super) mod htmlbutton_element;
 pub(super) mod htmlcanvas_element;
+pub(super) mod htmlcollection;
 pub(super) mod htmldata_element;
 pub(super) mod htmldata_list_element;
 pub(super) mod htmldetails_element;
@@ -19,6 +29,7 @@ pub(super) mod htmldiv_element;
 pub(super) mod htmldlist_element;
 pub(super) mod htmlembed_element;
 pub(super) mod htmlfield_set_element;
+pub(super) mod htmlform_controls_collection;
 pub(super) mod htmlform_element;
 pub(super) mod htmlhead_element;
 pub(super) mod htmlheading_element;
@@ -40,6 +51,7 @@ pub(super) mod htmlobject_element;
 pub(super) mod htmlolist_element;
 pub(super) mod htmlopt_group_element;
 pub(super) mod htmloption_element;
+pub(super) mod htmloptions_collection;
 pub(super) mod htmloutput_element;
 pub(super) mod htmlparagraph_element;
 pub(super) mod htmlpicture_element;
@@ -66,5 +78,13 @@ pub(super) mod htmltitle_element;
 pub(super) mod htmltrack_element;
 pub(super) mod htmlulist_element;
 pub(super) mod htmlvideo_element;
+pub(super) mod inner_html;
+pub(super) mod media_list;
+pub(super) mod named_node_map;
+pub(super) mod node_list;
+pub(super) mod range_fragment;
+pub(super) mod style_sheet;
+pub(super) mod style_sheet_list;
+pub(super) mod xmlserializer;
 
 pub(super) mod register;
