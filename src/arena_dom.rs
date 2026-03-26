@@ -62,7 +62,8 @@ impl Attrs {
 
     pub fn remove(&mut self, name: &str) -> Option<String> {
         if let Some(pos) = self.inner.iter().position(|(k, _)| k == name) {
-            Some(self.inner.swap_remove(pos).1)
+            // Använd remove() istället för swap_remove() — bevarar attributordning per DOM-spec
+            Some(self.inner.remove(pos).1)
         } else {
             None
         }
@@ -169,6 +170,8 @@ pub enum NodeType {
     Text,
     Comment,
     Doctype,
+    DocumentFragment,
+    ProcessingInstruction,
     Other,
 }
 

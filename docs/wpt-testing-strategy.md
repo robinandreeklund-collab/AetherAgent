@@ -1,7 +1,7 @@
 # WPT Testing Strategy — AetherAgent
 
 > Huvudstrategi för hur vi använder Web Platform Tests för att bygga kvalitet i AetherAgent.
-> Senast uppdaterad: 2026-03-25
+> Senast uppdaterad: 2026-03-26
 
 ## Översikt
 
@@ -129,20 +129,22 @@ Vid milstolpar (varje vecka eller major release):
 |--------|------|---------------------|--------|
 | Fixa Range.compareBoundaryPoints edge cases | dom/ranges | +500-1000 | Medium |
 | Fixa Range.set offset-validering | dom/ranges | +500 | Medium |
-| Implementera prepend/append/replaceChildren | dom/nodes | +50-100 | Låg |
+| ~~Implementera prepend/append/replaceChildren~~ ✅ | dom/nodes | +50-100 (klar) | — |
 | TextEncoder/TextDecoder | encoding/ | +100 | Låg |
-| Fixa NodeIterator ProcessingInstruction | dom/traversal | +300 | Medium |
+| ~~Fixa NodeIterator ProcessingInstruction~~ ✅ | dom/traversal | +830 (klar) | — |
+| Live HTMLCollection | dom/collections | +30 | Medium |
+| async_test hantering | dom/events | +50-100 | Medium |
 
 ### 🟡 Medium effort, hög impact
 
 | Åtgärd | Svit | Uppskattade nya pass | Effort |
 |--------|------|---------------------|--------|
 | ~~Range API → Native Rust~~ ✅ | dom/ranges | +1000 (klar) | — |
-| CSS selectors: +, ~, :has(), :is() | css/selectors | +200 | Medium |
+| ~~CSS selectors: +, ~, :has(), :is()~~ ✅ | css/selectors | +1749 (klar) | — |
 | ~~Event subclasses (MouseEvent etc.)~~ ✅ | dom/events | +55 (klar) | — |
 | ~~DOMException → Native Rust~~ ✅ | alla | +50 (klar) | — |
 | Namespace-metoder | dom/nodes | +100 | Medium |
-| TreeWalker xmlDoc-stöd | dom/traversal | +300 | Medium |
+| ~~TreeWalker xmlDoc-stöd~~ ✅ | dom/traversal | +830 (klar) | — |
 
 ### 🔴 Stor effort, strategisk
 
@@ -177,14 +179,26 @@ Vid milstolpar (varje vecka eller major release):
 3. ~~**prepend/append/replaceChildren**~~ ✅ — Redan native sedan Fas 17
 4. ~~**Event subclasses**~~ ✅ — UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent, WheelEvent, PointerEvent med spec-properties
 
-### Nästa migration (Fas 4)
+### Fas 4 — KLAR (2026-03-26, Runda 1-4)
 
-5. Namespace-metoder (setAttributeNS etc.) — dom/nodes +100 pass
-6. NamedNodeMap (element.attributes) — dom/collections impact
-7. TreeWalker/NodeIterator xmlDoc-stöd — dom/traversal 33% → 60%
-8. CSS selectors: +, ~, :has(), :is() — css/selectors 12% → 40%
-9. Range mutation tracking — dom/ranges +90 pass
-10. foreignDoc multi-document — dom/ranges +400 pass
+5. ~~**hasChildNodes()**~~ ✅ — Native Rust, fixade common.js blockering (+2500 tester)
+6. ~~**normalize()**~~ ✅ — Native Rust, DOM spec
+7. ~~**NodeIterator filter/readonly**~~ ✅ — boolean→number, __referenceNode
+8. ~~**HierarchyRequestError**~~ ✅ — appendChild/insertBefore/replaceChild validering
+9. ~~**createDocumentType**~~ ✅ — Native arena Doctype-noder med __nodeKey__
+10. ~~**createProcessingInstruction**~~ ✅ — Native PI-noder (nodeType=7)
+11. ~~**DOM prototype chain**~~ ✅ — Node→CharacterData→Comment korrekt inheritance
+12. ~~**ownerDocument configurable**~~ ✅ — Tillåter foreign doc override
+13. ~~**document properties**~~ ✅ — characterSet, contentType, compatMode, baseURI
+
+### Nästa migration (Fas 5)
+
+14. Namespace-metoder (setAttributeNS etc.) — dom/nodes +100 pass
+15. NamedNodeMap (element.attributes) — dom/collections impact
+16. Live HTMLCollection — dom/collections 12% → 50%
+17. Range mutation tracking — dom/ranges +90 pass
+18. foreignDoc multi-document — dom/ranges +400 pass
+19. async_test completion — dom/events +50-100 pass
 
 ---
 
@@ -236,16 +250,17 @@ done
 
 ### Kortsiktigt (Q2 2026)
 
-| Svit | Nu (blitz) | Mål | Gap |
-|------|-----------|-----|-----|
-| dom/nodes/ | 75.5% | 90% | -15pp |
-| dom/events/ | 67.1% | 90% | -23pp |
-| dom/ranges/ | ~69% | 80% | -11pp |
-| dom/traversal/ | 39.1% | 90% | -51pp |
-| dom/lists/ | 95.2% | 98% | -3pp |
-| css/selectors/ | 32.7% | 50% | -17pp |
-| css/cssom/ | 14.3% | 25% | -11pp |
-| html/syntax/ | 19.6% | 30% | -10pp |
+| Svit | Baseline (03-25) | Nu (03-26) | Mål | Gap |
+|------|-------------------|-----------|-----|-----|
+| dom/nodes/ | 75.5% | **80.1%** | 90% | -10pp |
+| dom/events/ | 67.1% | **67.0%** | 90% | -23pp |
+| dom/ranges/ | ~69% | **68.6%** | 80% | -11pp |
+| dom/traversal/ | 39.1% | **91.5%** ✅ | ~~90%~~ 95% | -4pp |
+| dom/lists/ | 95.2% | **95.2%** | 98% | -3pp |
+| css/selectors/ | 12.0% | **53.2%** ✅ | ~~50%~~ 65% | -12pp |
+| css/cssom/ | 14.3% | **14.3%** | 25% | -11pp |
+| html/syntax/ | 19.6% | **20.0%** | 30% | -10pp |
+| domparsing/ | 5.5% | **18.3%** | 30% | -12pp |
 
 ### Långsiktigt (Q4 2026)
 
