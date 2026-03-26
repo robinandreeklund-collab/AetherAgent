@@ -16,4 +16,6 @@ runs/
 dataset/
 models/
 wpt-suite/
-testsuite/benchmark/aether_*
+# Benchmark: ignorera symlink och lightpanda
+testsuite/benchmark/aether_latest
+testsuite/benchmark/lightpanda/
