@@ -169,6 +169,8 @@ pub enum NodeType {
     Text,
     Comment,
     Doctype,
+    DocumentFragment,
+    ProcessingInstruction,
     Other,
 }
 

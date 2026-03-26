@@ -586,8 +586,7 @@ pub fn eval_js_with_lifecycle_html(
     arena: ArenaDom,
     html: &str,
 ) -> DomEvalResult {
-    let result = eval_js_with_lifecycle_internal(scripts, arena, Some(html.to_string()));
-    result
+    eval_js_with_lifecycle_internal(scripts, arena, Some(html.to_string()))
 }
 
 pub fn eval_js_with_lifecycle(scripts: &[String], arena: ArenaDom) -> DomEvalResult {
@@ -1146,7 +1145,7 @@ impl JsHandler for CreateDocumentFragment {
         let key = {
             let mut s = self.state.borrow_mut();
             s.arena.nodes.insert(crate::arena_dom::DomNode {
-                node_type: NodeType::Other,
+                node_type: NodeType::DocumentFragment,
                 tag: None,
                 attributes: crate::arena_dom::Attrs::new(),
                 text: None,
@@ -1993,6 +1992,103 @@ impl JsHandler for HasAttribute {
     }
 }
 
+// ─── hasChildNodes ──────────────────────────────────────────────────────────
+
+struct HasChildNodes {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for HasChildNodes {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let has = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| !n.children.is_empty())
+            .unwrap_or(false);
+        Ok(Value::new_bool(ctx.clone(), has))
+    }
+}
+
+// ─── normalize ──────────────────────────────────────────────────────────────
+
+struct NormalizeNode {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for NormalizeNode {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        // DOM spec: merge adjacent text nodes, remove empty text nodes
+        let children: Vec<NodeKey> = s
+            .arena
+            .nodes
+            .get(self.key)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+
+        let mut new_children: Vec<NodeKey> = Vec::new();
+        let mut last_text_key: Option<NodeKey> = None;
+
+        for child in children {
+            let is_text = s
+                .arena
+                .nodes
+                .get(child)
+                .map(|n| matches!(n.node_type, NodeType::Text))
+                .unwrap_or(false);
+
+            if is_text {
+                let text = s
+                    .arena
+                    .nodes
+                    .get(child)
+                    .and_then(|n| n.text.as_ref())
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+
+                if text.is_empty() {
+                    // Ta bort tom textnod
+                    if let Some(n) = s.arena.nodes.get_mut(child) {
+                        n.parent = None;
+                    }
+                    continue;
+                }
+
+                if let Some(prev_key) = last_text_key {
+                    // Merge med föregående textnod
+                    let prev_text = s
+                        .arena
+                        .nodes
+                        .get(prev_key)
+                        .and_then(|n| n.text.as_ref())
+                        .map(|t| t.to_string())
+                        .unwrap_or_default();
+                    let merged = format!("{}{}", prev_text, text);
+                    if let Some(n) = s.arena.nodes.get_mut(prev_key) {
+                        n.text = Some(merged.into());
+                    }
+                    if let Some(n) = s.arena.nodes.get_mut(child) {
+                        n.parent = None;
+                    }
+                } else {
+                    new_children.push(child);
+                    last_text_key = Some(child);
+                }
+            } else {
+                new_children.push(child);
+                last_text_key = None;
+            }
+        }
+
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.children = new_children;
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 // ─── getAttributeNames ──────────────────────────────────────────────────────
 
 struct GetAttributeNames {
@@ -2219,21 +2315,15 @@ impl JsHandler for AppendChild {
         let old_index;
         {
             let mut s = self.state.borrow_mut();
-            // CharacterData (Text, Comment) får inte ha barn
-            if let Some(node) = s.arena.nodes.get(self.key) {
-                if matches!(
-                    node.node_type,
-                    crate::arena_dom::NodeType::Text | crate::arena_dom::NodeType::Comment
-                ) {
-                    drop(s);
-                    return Err(ctx.throw(
-                        rquickjs::String::from_str(
-                            ctx.clone(),
-                            "HierarchyRequestError: CharacterData nodes cannot have children",
-                        )?
-                        .into(),
-                    ));
-                }
+            // Validera pre-insertion (DOM spec)
+            if let Err(msg) = validate_pre_insertion(&s.arena, self.key, child_key, None) {
+                drop(s);
+                let err_name = if msg.starts_with("HierarchyRequestError") {
+                    "HierarchyRequestError"
+                } else {
+                    "NotFoundError"
+                };
+                return Err(throw_dom_exception(ctx, err_name, msg));
             }
             // Spara gammal position för Range-mutation
             old_parent_key = s.arena.nodes.get(child_key).and_then(|n| n.parent);
@@ -2243,6 +2333,32 @@ impl JsHandler for AppendChild {
                     .get(pk)
                     .and_then(|p| p.children.iter().position(|&c| c == child_key))
             });
+            // Hantera DocumentFragment: flytta alla barn istället
+            let is_fragment = s
+                .arena
+                .nodes
+                .get(child_key)
+                .map(|n| matches!(n.node_type, NodeType::DocumentFragment))
+                .unwrap_or(false);
+            if is_fragment {
+                let frag_children: Vec<NodeKey> = s
+                    .arena
+                    .nodes
+                    .get(child_key)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                // Töm fragmentet
+                if let Some(frag) = s.arena.nodes.get_mut(child_key) {
+                    frag.children.clear();
+                }
+                for fc in &frag_children {
+                    s.arena.append_child(self.key, *fc);
+                }
+                s.mutations.push(std::borrow::Cow::Borrowed("appendChild"));
+                drop(s);
+                // Returnera fragmentet
+                return make_element_object(ctx, child_key, &self.state);
+            }
             // Ta bort från gammal förälder
             if let Some(old_parent) = old_parent_key {
                 if let Some(parent_node) = s.arena.nodes.get_mut(old_parent) {
@@ -2332,6 +2448,16 @@ impl JsHandler for InsertBefore {
         let old_index;
         {
             let mut s = self.state.borrow_mut();
+            // Validera pre-insertion (DOM spec)
+            if let Err(msg) = validate_pre_insertion(&s.arena, self.key, new_key, ref_key) {
+                drop(s);
+                let err_name = if msg.starts_with("NotFoundError") {
+                    "NotFoundError"
+                } else {
+                    "HierarchyRequestError"
+                };
+                return Err(throw_dom_exception(ctx, err_name, msg));
+            }
             old_parent_key = s.arena.nodes.get(new_key).and_then(|n| n.parent);
             old_index = old_parent_key.and_then(|pk| {
                 s.arena
@@ -2339,6 +2465,49 @@ impl JsHandler for InsertBefore {
                     .get(pk)
                     .and_then(|p| p.children.iter().position(|&c| c == new_key))
             });
+            // Hantera DocumentFragment
+            let is_fragment = s
+                .arena
+                .nodes
+                .get(new_key)
+                .map(|n| matches!(n.node_type, NodeType::DocumentFragment))
+                .unwrap_or(false);
+            if is_fragment {
+                let frag_children: Vec<NodeKey> = s
+                    .arena
+                    .nodes
+                    .get(new_key)
+                    .map(|n| n.children.clone())
+                    .unwrap_or_default();
+                if let Some(frag) = s.arena.nodes.get_mut(new_key) {
+                    frag.children.clear();
+                }
+                for fc in &frag_children {
+                    // Detach from old parent
+                    if let Some(old_p) = s.arena.nodes.get(*fc).and_then(|n| n.parent) {
+                        if let Some(pn) = s.arena.nodes.get_mut(old_p) {
+                            pn.children.retain(|&c| c != *fc);
+                        }
+                    }
+                    if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                        if let Some(rk) = ref_key {
+                            if let Some(pos) = node.children.iter().position(|&c| c == rk) {
+                                node.children.insert(pos, *fc);
+                            } else {
+                                node.children.push(*fc);
+                            }
+                        } else {
+                            node.children.push(*fc);
+                        }
+                    }
+                    if let Some(n) = s.arena.nodes.get_mut(*fc) {
+                        n.parent = Some(self.key);
+                    }
+                }
+                s.mutations.push(std::borrow::Cow::Borrowed("insertBefore"));
+                drop(s);
+                return make_element_object(ctx, new_key, &self.state);
+            }
             if let Some(old_parent) = old_parent_key {
                 if let Some(p) = s.arena.nodes.get_mut(old_parent) {
                     p.children.retain(|&c| c != new_key);
@@ -2399,6 +2568,16 @@ impl JsHandler for ReplaceChild {
         };
         {
             let mut s = self.state.borrow_mut();
+            // Validera pre-insertion (DOM spec) — child = old_key
+            if let Err(msg) = validate_pre_insertion(&s.arena, self.key, new_key, Some(old_key)) {
+                drop(s);
+                let err_name = if msg.starts_with("NotFoundError") {
+                    "NotFoundError"
+                } else {
+                    "HierarchyRequestError"
+                };
+                return Err(throw_dom_exception(ctx, err_name, msg));
+            }
             // Hitta gammal child — NotFoundError om den inte finns
             let pos = s
                 .arena
@@ -2409,12 +2588,10 @@ impl JsHandler for ReplaceChild {
                 Some(p) => p,
                 None => {
                     drop(s);
-                    return Err(ctx.throw(
-                        rquickjs::String::from_str(
-                            ctx.clone(),
-                            "NotFoundError: old child is not a child of this node",
-                        )?
-                        .into(),
+                    return Err(throw_dom_exception(
+                        ctx,
+                        "NotFoundError",
+                        "NotFoundError: old child is not a child of this node",
                     ));
                 }
             };
@@ -2426,7 +2603,6 @@ impl JsHandler for ReplaceChild {
             }
             // Ersätt — recalkulera pos efter detach
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                // pos kan ha ändrats om new_key var barn till samma parent
                 let pos = node
                     .children
                     .iter()
@@ -3535,68 +3711,7 @@ impl JsHandler for IsSameNode {
     }
 }
 
-// ─── Node.normalize ────────────────────────────────────────────────────────
-struct Normalize {
-    state: SharedState,
-    key: NodeKey,
-}
-impl JsHandler for Normalize {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let mut s = self.state.borrow_mut();
-        let children: Vec<NodeKey> = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.children.clone())
-            .unwrap_or_default();
-        let mut prev_text: Option<NodeKey> = None;
-        let mut to_remove = vec![];
-        for ck in &children {
-            let is_text = s
-                .arena
-                .nodes
-                .get(*ck)
-                .map(|n| n.node_type == NodeType::Text)
-                .unwrap_or(false);
-            if is_text {
-                let text = s
-                    .arena
-                    .nodes
-                    .get(*ck)
-                    .and_then(|n| n.text.as_deref())
-                    .unwrap_or("")
-                    .to_string();
-                if text.is_empty() {
-                    to_remove.push(*ck);
-                } else if let Some(prev) = prev_text {
-                    // Merga med föregående textnod
-                    let prev_text_val = s
-                        .arena
-                        .nodes
-                        .get(prev)
-                        .and_then(|n| n.text.as_deref())
-                        .unwrap_or("")
-                        .to_string();
-                    let merged = format!("{}{}", prev_text_val, text);
-                    if let Some(pn) = s.arena.nodes.get_mut(prev) {
-                        pn.text = Some(merged.into());
-                    }
-                    to_remove.push(*ck);
-                } else {
-                    prev_text = Some(*ck);
-                }
-            } else {
-                prev_text = None;
-            }
-        }
-        for rk in &to_remove {
-            if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                node.children.retain(|c| c != rk);
-            }
-        }
-        Ok(Value::new_undefined(ctx.clone()))
-    }
-}
+// (Old Normalize struct removed — see NormalizeNode above)
 
 // ─── TreeWalker ────────────────────────────────────────────────────────────
 struct CreateTreeWalker {
@@ -3613,15 +3728,15 @@ impl JsHandler for CreateTreeWalker {
                 ));
             }
         };
-        let what_to_show = args
-            .get(1)
-            .and_then(|v| v.as_number())
-            .map(|n| n as i64 as u32)
-            .unwrap_or(0xFFFFFFFF);
+        // WebIDL: whatToShow = ToUint32(arg)
+        let what_to_show = match args.get(1) {
+            None => 0xFFFFFFFF_u32,
+            Some(v) if v.is_undefined() => 0xFFFFFFFF_u32,
+            Some(v) => webidl_unsigned_long(Some(v)),
+        };
         let filter = args.get(2).cloned();
 
         let tw = Object::new(ctx.clone())?;
-        // Använd inpassat root-objekt direkt (bevarar JS-referens)
         let root_val = args
             .first()
             .cloned()
@@ -3632,30 +3747,30 @@ impl JsHandler for CreateTreeWalker {
         tw.set("currentNode", root_obj)?;
         tw.set("__rootKey", node_key_to_f64(root_key))?;
         tw.set("__whatToShow", what_to_show as f64)?;
-        if let Some(f) = &filter {
-            if !f.is_null() && !f.is_undefined() {
-                tw.set("filter", f.clone())?;
-            } else {
-                tw.set("filter", Value::new_null(ctx.clone()))?;
-            }
-        } else {
-            tw.set("filter", Value::new_null(ctx.clone()))?;
-        }
+        let filter_val = match &filter {
+            Some(f) if !f.is_null() && !f.is_undefined() => f.clone(),
+            _ => Value::new_null(ctx.clone()),
+        };
+        tw.set("filter", filter_val)?;
 
         // TreeWalker-metoder via JS
         let walker_code = r#"
         (function(tw) {
             var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
             function accept(tw, node) {
-                var show = tw.__whatToShow || 0xFFFFFFFF;
+                var show = tw.__whatToShow;
+                if (show === undefined || show === null) show = 0xFFFFFFFF;
+                show = show >>> 0;
                 var nt = node.nodeType;
                 var bit = 1 << (nt - 1);
                 if (!(show & bit)) return FILTER_SKIP;
                 var f = tw.filter;
                 if (!f) return FILTER_ACCEPT;
-                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
-                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
-                return FILTER_ACCEPT;
+                var result;
+                if (typeof f === 'function') result = f(node);
+                else if (typeof f === 'object' && typeof f.acceptNode === 'function') result = f.acceptNode(node);
+                else return FILTER_ACCEPT;
+                return (Number(result) | 0);
             }
             function firstChild(tw, reversed) {
                 var node = tw.currentNode;
@@ -3780,7 +3895,7 @@ struct CreateNodeIterator {
 }
 impl JsHandler for CreateNodeIterator {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let root_key = match args.first().and_then(extract_node_key) {
+        let _root_key = match args.first().and_then(extract_node_key) {
             Some(k) => k,
             None => {
                 return Err(ctx.throw(
@@ -3789,97 +3904,114 @@ impl JsHandler for CreateNodeIterator {
                 ));
             }
         };
-        let what_to_show = args
-            .get(1)
-            .and_then(|v| v.as_number())
-            .map(|n| n as i64 as u32)
-            .unwrap_or(0xFFFFFFFF);
+        // WebIDL: whatToShow = ToUint32(arg). undefined → 0xFFFFFFFF, null → 0
+        let what_to_show = match args.get(1) {
+            None => 0xFFFFFFFF_u32,
+            Some(v) if v.is_undefined() => 0xFFFFFFFF_u32,
+            Some(v) => webidl_unsigned_long(Some(v)),
+        };
         let filter = args.get(2).cloned();
 
         let ni = Object::new(ctx.clone())?;
-        // Använd det inpassade root-objektet direkt (bevarar JS-referens-identitet)
         let root_val = args
             .first()
             .cloned()
             .unwrap_or(Value::new_undefined(ctx.clone()));
-        ni.set("root", root_val.clone())?;
-        ni.set("referenceNode", root_val)?;
-        // whatToShow som f64 för att undvika signed/unsigned problem
-        ni.set("whatToShow", what_to_show as f64)?;
-        ni.set("__whatToShow", what_to_show as f64)?;
-        ni.set("pointerBeforeReferenceNode", true)?;
-        if let Some(f) = &filter {
-            if !f.is_null() && !f.is_undefined() {
-                ni.set("filter", f.clone())?;
-            } else {
-                ni.set("filter", Value::new_null(ctx.clone()))?;
-            }
-        } else {
-            ni.set("filter", Value::new_null(ctx.clone()))?;
-        }
+        // Readonly-egenskaper via defineProperty
+        let what_show_f64 = what_to_show as f64;
+        let filter_val = match &filter {
+            Some(f) if !f.is_null() && !f.is_undefined() => f.clone(),
+            _ => Value::new_null(ctx.clone()),
+        };
+        let readonly_code = r#"
+        (function(ni, root, filter, whatToShow) {
+            Object.defineProperty(ni, 'root', { get: function() { return root; }, configurable: false });
+            Object.defineProperty(ni, 'referenceNode', { get: function() { return ni.__referenceNode; }, configurable: false });
+            Object.defineProperty(ni, 'pointerBeforeReferenceNode', { get: function() { return ni.__pointerBefore; }, configurable: false });
+            Object.defineProperty(ni, 'whatToShow', { value: whatToShow, writable: false, configurable: false });
+            Object.defineProperty(ni, 'filter', { value: filter, writable: false, configurable: false });
+        })
+        "#;
+        ni.set("__referenceNode", root_val.clone())?;
+        ni.set("__pointerBefore", true)?;
+        ni.set("__whatToShow", what_show_f64)?;
+        let readonly_fn: Function = ctx.eval(readonly_code)?;
+        readonly_fn.call::<_, Value>((ni.clone(), root_val, filter_val, what_show_f64))?;
 
         let iter_code = r#"
         (function(ni) {
             var FILTER_ACCEPT = 1, FILTER_REJECT = 2, FILTER_SKIP = 3;
             function accept(ni, node) {
-                var show = ni.__whatToShow || 0xFFFFFFFF;
+                var show = ni.__whatToShow;
+                if (show === undefined || show === null) show = 0xFFFFFFFF;
+                show = show >>> 0;
                 var bit = 1 << (node.nodeType - 1);
                 if (!(show & bit)) return FILTER_SKIP;
                 var f = ni.filter;
                 if (!f) return FILTER_ACCEPT;
-                if (typeof f === 'function') return f(node) || FILTER_ACCEPT;
-                if (typeof f === 'object' && typeof f.acceptNode === 'function') return f.acceptNode(node) || FILTER_ACCEPT;
-                return FILTER_ACCEPT;
+                var result;
+                if (typeof f === 'function') result = f(node);
+                else if (typeof f === 'object' && typeof f.acceptNode === 'function') result = f.acceptNode(node);
+                else return FILTER_ACCEPT;
+                return (Number(result) | 0);
             }
             // Pre-order flat traversal
             function traverse(root) {
                 var list = [];
                 function walk(node) {
                     list.push(node);
-                    if (node.childNodes) for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+                    var cn = node.childNodes;
+                    if (cn) for (var i = 0; i < cn.length; i++) walk(cn[i]);
                 }
                 walk(root);
                 return list;
             }
+            function sameNode(a, b) {
+                if (a === b) return true;
+                if (a && b && a.__nodeKey__ !== undefined && a.__nodeKey__ === b.__nodeKey__) return true;
+                return false;
+            }
             ni.nextNode = function() {
-                var all = traverse(this.root);
-                var ref = this.referenceNode;
+                var root = this.root;
+                var all = traverse(root);
+                var ref = this.__referenceNode;
                 var idx = -1;
                 for (var i = 0; i < all.length; i++) {
-                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                    if (sameNode(all[i], ref)) { idx = i; break; }
                 }
-                if (this.pointerBeforeReferenceNode) {
+                if (this.__pointerBefore) {
                     for (var j = idx; j < all.length; j++) {
                         if (accept(this, all[j]) === FILTER_ACCEPT) {
-                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = false; return all[j];
+                            this.__referenceNode = all[j]; this.__pointerBefore = false; return all[j];
                         }
                     }
                 } else {
                     for (var j = idx + 1; j < all.length; j++) {
                         if (accept(this, all[j]) === FILTER_ACCEPT) {
-                            this.referenceNode = all[j]; return all[j];
+                            this.__referenceNode = all[j]; return all[j];
                         }
                     }
                 }
                 return null;
             };
             ni.previousNode = function() {
-                var all = traverse(this.root);
-                var ref = this.referenceNode;
+                var root = this.root;
+                var all = traverse(root);
+                var ref = this.__referenceNode;
                 var idx = all.length;
                 for (var i = 0; i < all.length; i++) {
-                    if (all[i] === ref || (all[i].__nodeKey__ && ref.__nodeKey__ && all[i].__nodeKey__ === ref.__nodeKey__)) { idx = i; break; }
+                    if (sameNode(all[i], ref)) { idx = i; break; }
                 }
-                if (!this.pointerBeforeReferenceNode) {
+                if (!this.__pointerBefore) {
                     for (var j = idx; j >= 0; j--) {
                         if (accept(this, all[j]) === FILTER_ACCEPT) {
-                            this.referenceNode = all[j]; this.pointerBeforeReferenceNode = true; return all[j];
+                            this.__referenceNode = all[j]; this.__pointerBefore = true; return all[j];
                         }
                     }
                 } else {
                     for (var j = idx - 1; j >= 0; j--) {
                         if (accept(this, all[j]) === FILTER_ACCEPT) {
-                            this.referenceNode = all[j]; return all[j];
+                            this.__referenceNode = all[j]; return all[j];
                         }
                     }
                 }
@@ -4317,6 +4449,28 @@ impl JsHandler for DispatchEventHandler {
     }
 }
 
+struct ClickHandler {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for ClickHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Skapa element och dispatcha via global helper
+        let elem = make_element_object(ctx, self.key, &self.state)?;
+        let code = r#"
+        (function(el) {
+            if (el && el.dispatchEvent) {
+                var evt = new MouseEvent('click', {bubbles:true, cancelable:true, composed:true});
+                el.dispatchEvent(evt);
+            }
+        })
+        "#;
+        let f: Function = ctx.eval(code)?;
+        let _ = f.call::<_, Value>((elem,));
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 struct FocusHandler {
     state: SharedState,
     key: NodeKey,
@@ -4585,9 +4739,11 @@ fn make_element_object<'js>(
         let nt = match node.map(|n| &n.node_type) {
             Some(NodeType::Element) => 1,
             Some(NodeType::Text) => 3,
+            Some(NodeType::ProcessingInstruction) => 7,
             Some(NodeType::Comment) => 8,
             Some(NodeType::Document) => 9,
             Some(NodeType::Doctype) => 10,
+            Some(NodeType::DocumentFragment) => 11,
             _ => 1,
         };
         let tag = if nt == 10 {
@@ -4713,6 +4869,26 @@ fn make_element_object<'js>(
         Function::new(
             ctx.clone(),
             JsFn(HasAttribute {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "hasChildNodes",
+        Function::new(
+            ctx.clone(),
+            JsFn(HasChildNodes {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "normalize",
+        Function::new(
+            ctx.clone(),
+            JsFn(NormalizeNode {
                 state: Rc::clone(state),
                 key,
             }),
@@ -5085,7 +5261,7 @@ fn make_element_object<'js>(
         "normalize",
         Function::new(
             ctx.clone(),
-            JsFn(Normalize {
+            JsFn(NormalizeNode {
                 state: Rc::clone(state),
                 key,
             }),
@@ -5221,7 +5397,16 @@ fn make_element_object<'js>(
             }),
         )?,
     )?;
-    obj.set("click", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    obj.set(
+        "click",
+        Function::new(
+            ctx.clone(),
+            JsFn(ClickHandler {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
     obj.set(
         "scrollIntoView",
         Function::new(ctx.clone(), JsFn(NoOpHandler))?,
@@ -8259,6 +8444,152 @@ fn node_contains(arena: &ArenaDom, ancestor: NodeKey, descendant: NodeKey) -> bo
     false
 }
 
+/// Validerar pre-insertion enligt DOM spec steg 1-6.
+/// Returnerar Ok(()) om insertion är tillåten, annars felmeddelande.
+fn validate_pre_insertion(
+    arena: &ArenaDom,
+    parent: NodeKey,
+    node: NodeKey,
+    child: Option<NodeKey>,
+) -> Result<(), &'static str> {
+    let parent_type = arena
+        .nodes
+        .get(parent)
+        .map(|n| &n.node_type)
+        .cloned()
+        .unwrap_or(NodeType::Other);
+
+    // Steg 1: parent måste vara Document, DocumentFragment eller Element
+    if !matches!(
+        parent_type,
+        NodeType::Document | NodeType::DocumentFragment | NodeType::Element
+    ) {
+        return Err(
+            "HierarchyRequestError: parent is not a Document, DocumentFragment, or Element",
+        );
+    }
+
+    // Steg 2: node får inte vara host-including inclusive ancestor av parent
+    if node_contains(arena, node, parent) {
+        return Err("HierarchyRequestError: node is an inclusive ancestor of parent");
+    }
+
+    // Steg 3: child (om Some) måste vara barn till parent
+    if let Some(c) = child {
+        let is_child = arena
+            .nodes
+            .get(parent)
+            .map(|n| n.children.contains(&c))
+            .unwrap_or(false);
+        if !is_child {
+            return Err("NotFoundError: child is not a child of parent");
+        }
+    }
+
+    let node_type = arena
+        .nodes
+        .get(node)
+        .map(|n| &n.node_type)
+        .cloned()
+        .unwrap_or(NodeType::Other);
+
+    // Steg 4: node måste vara DocumentFragment, DocumentType, Element, Text, PI, eller Comment
+    if !matches!(
+        node_type,
+        NodeType::DocumentFragment
+            | NodeType::Doctype
+            | NodeType::Element
+            | NodeType::Text
+            | NodeType::Comment
+            | NodeType::ProcessingInstruction
+    ) {
+        return Err("HierarchyRequestError: invalid node type for insertion");
+    }
+
+    // Steg 5: Text i Document eller Doctype utanför Document
+    if matches!(node_type, NodeType::Text) && matches!(parent_type, NodeType::Document) {
+        return Err("HierarchyRequestError: cannot insert Text node into Document");
+    }
+    if matches!(node_type, NodeType::Doctype) && !matches!(parent_type, NodeType::Document) {
+        return Err("HierarchyRequestError: DocumentType must be child of Document");
+    }
+
+    // Steg 6: Document-specifika begränsningar
+    if matches!(parent_type, NodeType::Document) {
+        let parent_node = arena.nodes.get(parent);
+        let existing_element_count = parent_node
+            .map(|n| {
+                n.children
+                    .iter()
+                    .filter(|&&c| c != node) // Exkludera noden om redan barn
+                    .filter(|&&c| {
+                        arena
+                            .nodes
+                            .get(c)
+                            .map(|cn| matches!(cn.node_type, NodeType::Element))
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        let existing_doctype_count = parent_node
+            .map(|n| {
+                n.children
+                    .iter()
+                    .filter(|&&c| c != node)
+                    .filter(|&&c| {
+                        arena
+                            .nodes
+                            .get(c)
+                            .map(|cn| matches!(cn.node_type, NodeType::Doctype))
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+
+        match node_type {
+            NodeType::DocumentFragment => {
+                let frag_elements = arena
+                    .nodes
+                    .get(node)
+                    .map(|n| {
+                        n.children
+                            .iter()
+                            .filter(|&&c| {
+                                arena
+                                    .nodes
+                                    .get(c)
+                                    .map(|cn| matches!(cn.node_type, NodeType::Element))
+                                    .unwrap_or(false)
+                            })
+                            .count()
+                    })
+                    .unwrap_or(0);
+                if frag_elements > 1 {
+                    return Err("HierarchyRequestError: DocumentFragment has multiple elements for Document parent");
+                }
+                if frag_elements == 1 && existing_element_count > 0 {
+                    return Err("HierarchyRequestError: Document already has an element child");
+                }
+            }
+            NodeType::Element => {
+                if existing_element_count > 0 {
+                    return Err("HierarchyRequestError: Document already has an element child");
+                }
+            }
+            NodeType::Doctype => {
+                if existing_doctype_count > 0 {
+                    return Err("HierarchyRequestError: Document already has a doctype child");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 // ─── DOM Query Helpers ──────────────────────────────────────────────────────
 
 /// Hitta element via attributvärde (rekursiv)
@@ -9100,21 +9431,16 @@ fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bo
     // :placeholder-shown
     if require_placeholder_shown {
         let has_placeholder = node.get_attr("placeholder").is_some();
-        let is_input = node
-            .tag
-            .as_deref()
-            .map_or(false, |t| t == "input" || t == "textarea");
-        let value_empty = node.get_attr("value").map_or(true, |v| v.is_empty());
+        let is_input =
+            node.tag.as_deref() == Some("input") || node.tag.as_deref() == Some("textarea");
+        let value_empty = node.get_attr("value").is_none_or(|v| v.is_empty());
         if !(is_input && has_placeholder && value_empty) {
             return false;
         }
     }
     // :any-link / :link
     if require_any_link {
-        let is_link = node
-            .tag
-            .as_deref()
-            .map_or(false, |t| t == "a" || t == "area")
+        let is_link = (node.tag.as_deref() == Some("a") || node.tag.as_deref() == Some("area"))
             && node.has_attr("href");
         if !is_link {
             return false;

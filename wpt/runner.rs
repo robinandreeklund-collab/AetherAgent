@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use aether_agent::arena_dom_sink;
-use aether_agent::css_compiler;
 use aether_agent::dom_bridge;
 
 // ─── Resultattyper ──────────────────────────────────────────────────────────
@@ -119,8 +118,6 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
     // Parsa HTML till ArenaDom (detta ger testet en DOM att jobba med)
     // Skippa kända hängande tester (oändliga loopar i extern JS)
     let skip_patterns = [
-        "Node-insertBefore.html",
-        "pre-insertion-validation",
         "inserting-fragment-under-shadow-host",
         "dir-shadow-",               // Orsakar stack overflow vid batch-körning
         "Range-intersectsNode.html", // >60s, tusentals noder × 2 boundary-jämförelser
