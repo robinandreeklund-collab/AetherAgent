@@ -53,6 +53,11 @@ const INHERITED_PROPERTIES: &[&str] = &[
 ];
 
 impl CssContext {
+    /// Invalidera cache (anropas vid DOM-mutationer som kan påverka styles)
+    pub fn invalidate_cache(&mut self) {
+        self.cache.clear();
+    }
+
     /// Build a CssContext by extracting and parsing all `<style>` tags from the DOM.
     pub fn from_arena(arena: &ArenaDom) -> Self {
         let mut rules = Vec::new();

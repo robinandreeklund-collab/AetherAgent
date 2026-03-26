@@ -1,0 +1,9 @@
+--- a/servo/selector_parser.rs
++++ b/servo/selector_parser.rs
+@@ -527,7 +527,7 @@
+ 
+     #[inline]
+     fn parse_has(&self) -> bool {
+-        false
++        true
+     }

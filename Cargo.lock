@@ -51,6 +51,7 @@ dependencies = [
  "skrifa",
  "slotmap",
  "smallvec",
+ "stylo_traits",
  "taffy",
  "tendril 0.5.0",
  "tokio",
@@ -4198,8 +4199,6 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "stylo"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff45c788bcb0230aff156dce747d4d0d7f793f525764fd6690d51bbfe1f5bbd5"
 dependencies = [
  "app_units",
  "arrayvec",

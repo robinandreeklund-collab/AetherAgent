@@ -64,6 +64,7 @@ blitz-dom = { version = "0.2", optional = true }
 blitz-paint = { version = "0.2", optional = true }
 blitz-net = { version = "0.2", optional = true }
 blitz-traits = { version = "0.2", optional = true }
+style_traits = { version = "0.8", package = "stylo_traits", optional = true }
 anyrender = { version = "0.6", optional = true }
 anyrender_vello_cpu = { version = "0.7", optional = true }
 # Peniko version must match anyrender 0.6's dep (peniko 0.5)
@@ -89,7 +90,7 @@ fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch", "js-eval", "axum", "tower-http"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
-blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
+blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "style_traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
 cdp = ["headless_chrome"]
 
 [[bin]]
@@ -109,7 +110,7 @@ path = "benches/bench_main.rs"
 [[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
-required-features = ["js-eval"]
+required-features = ["js-eval", "blitz", "fetch"]
 
 [[example]]
 name = "render_demo"
@@ -152,3 +153,6 @@ debug = true
 # Fler codegen-units → lägre peak-minnesanvändning vid länkning
 # (default 256 i dev, men explicit för tydlighet)
 codegen-units = 256
+
+[patch.crates-io]
+stylo = { path = "vendor/stylo-patched" }

@@ -66,7 +66,8 @@ impl ArenaDomSink {
     /// Kolla om ett element är "inert" (text-innehåll irrelevant semantiskt)
     #[inline]
     fn is_inert_tag(tag: &str) -> bool {
-        matches!(tag, "script" | "style" | "noscript")
+        // style behålls — behövs för CSS cascade (getComputedStyle)
+        matches!(tag, "script" | "noscript")
     }
 
     /// Kolla om text enbart innehåller whitespace (newlines, spaces, tabs).
@@ -103,6 +104,7 @@ impl ArenaDomSink {
             text: Some(text),
             parent: Some(parent),
             children: vec![],
+            owner_doc: None,
         });
         if let Some(parent_node) = arena.nodes.get_mut(parent) {
             parent_node.children.push(key);
@@ -189,6 +191,7 @@ impl TreeSink for ArenaDomSink {
             text: None,
             parent: None,
             children: vec![],
+            owner_doc: None,
         });
         drop(arena);
 
@@ -204,6 +207,7 @@ impl TreeSink for ArenaDomSink {
                 text: None,
                 parent: None,
                 children: vec![],
+                owner_doc: None,
             });
             self.template_contents.borrow_mut().insert(key, fragment);
         }
@@ -227,6 +231,7 @@ impl TreeSink for ArenaDomSink {
             text: Some(text),
             parent: None,
             children: vec![],
+            owner_doc: None,
         })
     }
 
@@ -238,6 +243,7 @@ impl TreeSink for ArenaDomSink {
             text: Some(data),
             parent: None,
             children: vec![],
+            owner_doc: None,
         })
     }
 
@@ -307,6 +313,7 @@ impl TreeSink for ArenaDomSink {
             text: Some(name),
             parent: Some(doc_key),
             children: vec![],
+            owner_doc: None,
         });
         // Sätt som första barn i document
         arena.nodes[doc_key].children.insert(0, dt_key);
@@ -410,6 +417,7 @@ impl TreeSink for ArenaDomSink {
                     text: Some(text),
                     parent: Some(parent_key),
                     children: vec![],
+                    owner_doc: None,
                 });
                 if let Some(parent) = arena.nodes.get_mut(parent_key) {
                     parent.children.insert(sibling_idx, text_key);

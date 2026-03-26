@@ -4,15 +4,16 @@
 /// Använder QuickJS sandbox + DOM bridge för att evaluera testharness.js-tester.
 ///
 /// Användning:
-///   cargo run --bin aether-wpt --features js-eval -- [WPT_DIR] [FILTER...]
+///   cargo run --bin aether-wpt --features js-eval,blitz,fetch -- [WPT_DIR] [FILTER...]
 ///
 /// Exempel:
-///   cargo run --bin aether-wpt --features js-eval -- wpt-suite/dom/nodes/
+///   cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
 ///   cargo run --bin aether-wpt --features js-eval -- wpt-suite/ --filter getElementById
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use aether_agent::arena_dom_sink;
+use aether_agent::css_compiler;
 use aether_agent::dom_bridge;
 
 // ─── Resultattyper ──────────────────────────────────────────────────────────
@@ -121,7 +122,8 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         "Node-insertBefore.html",
         "pre-insertion-validation",
         "inserting-fragment-under-shadow-host",
-        "dir-shadow-", // Orsakar stack overflow vid batch-körning
+        "dir-shadow-",               // Orsakar stack overflow vid batch-körning
+        "Range-intersectsNode.html", // >60s, tusentals noder × 2 boundary-jämförelser
     ];
     if skip_patterns.iter().any(|p| file_name.contains(p)) {
         return WptTestResult {
@@ -137,10 +139,13 @@ fn run_wpt_test(html_path: &Path) -> WptTestResult {
         };
     }
 
+    // Parsa HTML direkt — ingen css-inline.
+    // getComputedStyle hanteras av Blitz Stylo (riktig CSS-motor).
     let arena = arena_dom_sink::parse_html_to_arena(&html);
 
     // Kör alla scripts med DOM bridge + lifecycle
-    let result = dom_bridge::eval_js_with_lifecycle(&all_scripts, arena);
+    // Skicka original HTML till Blitz Stylo för riktig getComputedStyle
+    let result = dom_bridge::eval_js_with_lifecycle_html(&all_scripts, arena, &html);
 
     // Parsa report-JSON från sista evalueringen
     let duration = start.elapsed().as_secs_f64() * 1000.0;

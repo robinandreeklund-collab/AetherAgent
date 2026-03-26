@@ -219,47 +219,147 @@
   }
 })();
 
-// ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
+// ─── Event-typ-konstruktorer (med spec-korrekta properties) ──────────────────
+// Migrerad till dom_bridge.rs-stil: ärver Event, lägger till subclass-properties.
 (function() {
-  // Definiera saknade event-typer som ärver från Event
-  var eventTypes = [
-    'BeforeUnloadEvent', 'CompositionEvent', 'FocusEvent', 'InputEvent',
-    'KeyboardEvent', 'MouseEvent', 'UIEvent', 'WheelEvent', 'TouchEvent',
-    'AnimationEvent', 'TransitionEvent', 'PointerEvent', 'HashChangeEvent',
-    'PopStateEvent', 'StorageEvent', 'PageTransitionEvent', 'ProgressEvent',
-    'ClipboardEvent', 'DragEvent', 'ErrorEvent', 'MessageEvent',
-    'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
+  if (typeof Event === 'undefined') return;
+
+  // UIEvent — bas för Mouse/Keyboard/Focus/Input
+  if (!globalThis.UIEvent) {
+    globalThis.UIEvent = function UIEvent(type, opts) {
+      Event.call(this, type, opts);
+      this.view = (opts && opts.view) || null;
+      this.detail = (opts && opts.detail !== undefined) ? opts.detail : 0;
+    };
+    UIEvent.prototype = Object.create(Event.prototype);
+    UIEvent.prototype.constructor = UIEvent;
+    UIEvent.prototype.initUIEvent = function(t, b, c, v, d) { this.initEvent(t, b, c); this.view = v || null; this.detail = d || 0; };
+  }
+
+  // MouseEvent
+  if (!globalThis.MouseEvent) {
+    globalThis.MouseEvent = function MouseEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.screenX = o.screenX || 0; this.screenY = o.screenY || 0;
+      this.clientX = o.clientX || 0; this.clientY = o.clientY || 0;
+      this.pageX = o.pageX || 0; this.pageY = o.pageY || 0;
+      this.offsetX = o.offsetX || 0; this.offsetY = o.offsetY || 0;
+      this.movementX = o.movementX || 0; this.movementY = o.movementY || 0;
+      this.button = o.button || 0; this.buttons = o.buttons || 0;
+      this.relatedTarget = o.relatedTarget || null;
+      this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+      this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+    };
+    MouseEvent.prototype = Object.create(UIEvent.prototype);
+    MouseEvent.prototype.constructor = MouseEvent;
+    MouseEvent.prototype.initMouseEvent = function(t,b,c,v,d,sx,sy,cx,cy,ctrl,alt,shift,meta,btn,rt) {
+      this.initUIEvent(t,b,c,v,d); this.screenX=sx||0; this.screenY=sy||0; this.clientX=cx||0; this.clientY=cy||0;
+      this.ctrlKey=!!ctrl; this.altKey=!!alt; this.shiftKey=!!shift; this.metaKey=!!meta; this.button=btn||0; this.relatedTarget=rt||null;
+    };
+    MouseEvent.prototype.getModifierState = function(key) {
+      if (key === 'Control') return this.ctrlKey; if (key === 'Shift') return this.shiftKey;
+      if (key === 'Alt') return this.altKey; if (key === 'Meta') return this.metaKey; return false;
+    };
+  }
+
+  // KeyboardEvent
+  if (!globalThis.KeyboardEvent) {
+    globalThis.KeyboardEvent = function KeyboardEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.key = o.key || ''; this.code = o.code || '';
+      this.location = o.location || 0;
+      this.repeat = !!o.repeat; this.isComposing = !!o.isComposing;
+      this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+      this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+      this.charCode = o.charCode || 0; this.keyCode = o.keyCode || 0; this.which = o.which || 0;
+    };
+    KeyboardEvent.prototype = Object.create(UIEvent.prototype);
+    KeyboardEvent.prototype.constructor = KeyboardEvent;
+    KeyboardEvent.prototype.getModifierState = function(key) {
+      if (key === 'Control') return this.ctrlKey; if (key === 'Shift') return this.shiftKey;
+      if (key === 'Alt') return this.altKey; if (key === 'Meta') return this.metaKey; return false;
+    };
+    KeyboardEvent.DOM_KEY_LOCATION_STANDARD = 0; KeyboardEvent.DOM_KEY_LOCATION_LEFT = 1;
+    KeyboardEvent.DOM_KEY_LOCATION_RIGHT = 2; KeyboardEvent.DOM_KEY_LOCATION_NUMPAD = 3;
+  }
+
+  // FocusEvent
+  if (!globalThis.FocusEvent) {
+    globalThis.FocusEvent = function FocusEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      this.relatedTarget = (opts && opts.relatedTarget) || null;
+    };
+    FocusEvent.prototype = Object.create(UIEvent.prototype);
+    FocusEvent.prototype.constructor = FocusEvent;
+  }
+
+  // InputEvent
+  if (!globalThis.InputEvent) {
+    globalThis.InputEvent = function InputEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      var o = opts || {};
+      this.data = o.data !== undefined ? o.data : null;
+      this.inputType = o.inputType || '';
+      this.isComposing = !!o.isComposing;
+      this.dataTransfer = o.dataTransfer || null;
+    };
+    InputEvent.prototype = Object.create(UIEvent.prototype);
+    InputEvent.prototype.constructor = InputEvent;
+  }
+
+  // WheelEvent
+  if (!globalThis.WheelEvent) {
+    globalThis.WheelEvent = function WheelEvent(type, opts) {
+      MouseEvent.call(this, type, opts);
+      var o = opts || {};
+      this.deltaX = o.deltaX || 0; this.deltaY = o.deltaY || 0; this.deltaZ = o.deltaZ || 0;
+      this.deltaMode = o.deltaMode || 0;
+    };
+    WheelEvent.prototype = Object.create(MouseEvent.prototype);
+    WheelEvent.prototype.constructor = WheelEvent;
+    WheelEvent.DOM_DELTA_PIXEL = 0; WheelEvent.DOM_DELTA_LINE = 1; WheelEvent.DOM_DELTA_PAGE = 2;
+  }
+
+  // PointerEvent
+  if (!globalThis.PointerEvent) {
+    globalThis.PointerEvent = function PointerEvent(type, opts) {
+      MouseEvent.call(this, type, opts);
+      var o = opts || {};
+      this.pointerId = o.pointerId || 0; this.width = o.width || 1; this.height = o.height || 1;
+      this.pressure = o.pressure || 0; this.tangentialPressure = o.tangentialPressure || 0;
+      this.tiltX = o.tiltX || 0; this.tiltY = o.tiltY || 0; this.twist = o.twist || 0;
+      this.pointerType = o.pointerType || ''; this.isPrimary = !!o.isPrimary;
+    };
+    PointerEvent.prototype = Object.create(MouseEvent.prototype);
+    PointerEvent.prototype.constructor = PointerEvent;
+  }
+
+  // Enklare event-typer (ärver Event direkt)
+  // CompositionEvent — har data property
+  if (!globalThis.CompositionEvent) {
+    globalThis.CompositionEvent = function CompositionEvent(type, opts) {
+      UIEvent.call(this, type, opts);
+      this.data = (opts && opts.data !== undefined) ? opts.data : '';
+    };
+    CompositionEvent.prototype = Object.create(UIEvent.prototype);
+    CompositionEvent.prototype.constructor = CompositionEvent;
+  }
+
+  var simpleTypes = [
+    'TouchEvent', 'AnimationEvent', 'TransitionEvent',
+    'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
+    'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
+    'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
     'DeviceMotionEvent', 'DeviceOrientationEvent', 'GamepadEvent',
-    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent'
+    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent', 'BeforeUnloadEvent'
   ];
-  eventTypes.forEach(function(name) {
+  simpleTypes.forEach(function(name) {
     if (!globalThis[name]) {
-      globalThis[name] = function(type, opts) {
-        this.type = type || '';
-        this.bubbles = (opts && opts.bubbles) || false;
-        this.cancelable = (opts && opts.cancelable) || false;
-        this.defaultPrevented = false;
-        this.target = null;
-        this.srcElement = null;
-        this.currentTarget = null;
-        this.eventPhase = 0;
-        this.timeStamp = Date.now();
-        this.isTrusted = false;
-        this.composed = false;
-        this.detail = (opts && opts.detail) || null;
-        this.view = null;
-        this.relatedTarget = null;
-        this.defaultPrevented = false;
-        this.returnValue = true;
-        this.preventDefault = function() { if (!this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
-        this.stopPropagation = function() {};
-        this.stopImmediatePropagation = function() {};
-        this.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
-      };
-      if (typeof Event !== 'undefined') {
-        globalThis[name].prototype = Object.create(Event.prototype);
-        globalThis[name].prototype.constructor = globalThis[name];
-      }
+      globalThis[name] = function(type, opts) { Event.call(this, type, opts); };
+      globalThis[name].prototype = Object.create(Event.prototype);
+      globalThis[name].prototype.constructor = globalThis[name];
     }
   });
 })();
@@ -759,263 +859,10 @@
   NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
 })();
 
-// ─── Range implementation ───────────────────────────────────────────────────
-// Riktig Range med setStart/setEnd, comparePoint, isPointInRange, intersectsNode
+// Range API — nu native i dom_bridge.rs (migrerad 2026-03-25)
+// document.createAttribute (behövs fortfarande som polyfill)
 (function() {
   if (typeof document === 'undefined') return;
-
-  function AetherRange() {
-    this.startContainer = document;
-    this.startOffset = 0;
-    this.endContainer = document;
-    this.endOffset = 0;
-    this.collapsed = true;
-    this.commonAncestorContainer = document;
-  }
-
-  AetherRange.prototype._update = function() {
-    this.collapsed = (this.startContainer === this.endContainer && this.startOffset === this.endOffset);
-    // Hitta gemensam ancestor
-    var a = this.startContainer, b = this.endContainer;
-    var ancestorsA = [];
-    var node = a;
-    while (node) { ancestorsA.push(node); node = node.parentNode; }
-    node = b;
-    while (node) {
-      if (ancestorsA.indexOf(node) !== -1) { this.commonAncestorContainer = node; return; }
-      node = node.parentNode;
-    }
-    this.commonAncestorContainer = document;
-  };
-
-  AetherRange.prototype.setStart = function(node, offset) {
-    this.startContainer = node;
-    this.startOffset = offset;
-    // Om start > end, collapse till start
-    if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
-      this.endContainer = this.startContainer;
-      this.endOffset = this.startOffset;
-    }
-    this._update();
-  };
-
-  AetherRange.prototype.setEnd = function(node, offset) {
-    this.endContainer = node;
-    this.endOffset = offset;
-    if (this._compareBoundary(this.startContainer, this.startOffset, this.endContainer, this.endOffset) > 0) {
-      this.startContainer = this.endContainer;
-      this.startOffset = this.endOffset;
-    }
-    this._update();
-  };
-
-  AetherRange.prototype.setStartBefore = function(node) {
-    var parent = node.parentNode;
-    if (!parent) return;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    this.setStart(parent, idx);
-  };
-
-  AetherRange.prototype.setStartAfter = function(node) {
-    var parent = node.parentNode;
-    if (!parent) return;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    this.setStart(parent, idx + 1);
-  };
-
-  AetherRange.prototype.setEndBefore = function(node) {
-    var parent = node.parentNode;
-    if (!parent) return;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    this.setEnd(parent, idx);
-  };
-
-  AetherRange.prototype.setEndAfter = function(node) {
-    var parent = node.parentNode;
-    if (!parent) return;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    this.setEnd(parent, idx + 1);
-  };
-
-  AetherRange.prototype.collapse = function(toStart) {
-    if (toStart) {
-      this.endContainer = this.startContainer;
-      this.endOffset = this.startOffset;
-    } else {
-      this.startContainer = this.endContainer;
-      this.startOffset = this.endOffset;
-    }
-    this._update();
-  };
-
-  AetherRange.prototype.selectNode = function(node) {
-    var parent = node.parentNode;
-    if (!parent) return;
-    var idx = Array.from(parent.childNodes).indexOf(node);
-    this.setStart(parent, idx);
-    this.setEnd(parent, idx + 1);
-  };
-
-  AetherRange.prototype.selectNodeContents = function(node) {
-    this.startContainer = node;
-    this.startOffset = 0;
-    this.endContainer = node;
-    this.endOffset = node.childNodes ? node.childNodes.length : (node.data ? node.data.length : 0);
-    this._update();
-  };
-
-  AetherRange.prototype._compareBoundary = function(containerA, offsetA, containerB, offsetB) {
-    // Same container → compare offsets
-    if (containerA === containerB ||
-        (containerA.__nodeKey__ && containerB.__nodeKey__ && containerA.__nodeKey__ === containerB.__nodeKey__)) {
-      if (offsetA < offsetB) return -1;
-      if (offsetA > offsetB) return 1;
-      return 0;
-    }
-    if (!containerA.compareDocumentPosition) return 0;
-    var pos = containerA.compareDocumentPosition(containerB);
-    function indexOfChild(parent, child) {
-      if (!parent.childNodes) return -1;
-      for (var ci = 0; ci < parent.childNodes.length; ci++) {
-        var ck = parent.childNodes[ci];
-        if (ck === child || (ck.__nodeKey__ && child.__nodeKey__ && ck.__nodeKey__ === child.__nodeKey__)) return ci;
-      }
-      return -1;
-    }
-    if (pos & 16) {
-      // B is CONTAINED_BY A — A ancestor of B
-      var child = containerB;
-      while (child.parentNode && child.parentNode !== containerA &&
-             !(child.parentNode.__nodeKey__ && containerA.__nodeKey__ && child.parentNode.__nodeKey__ === containerA.__nodeKey__)) {
-        child = child.parentNode;
-      }
-      if (child.parentNode) {
-        var idx = indexOfChild(containerA, child);
-        if (idx >= 0 && idx < offsetA) return 1;
-        return -1;
-      }
-    }
-    if (pos & 8) {
-      // B CONTAINS A — B ancestor of A
-      var child = containerA;
-      while (child.parentNode && child.parentNode !== containerB &&
-             !(child.parentNode.__nodeKey__ && containerB.__nodeKey__ && child.parentNode.__nodeKey__ === containerB.__nodeKey__)) {
-        child = child.parentNode;
-      }
-      if (child.parentNode) {
-        var idx = indexOfChild(containerB, child);
-        if (idx >= 0 && idx < offsetB) return -1;
-        return 1;
-      }
-    }
-    if (pos & 4) return -1; // B follows A
-    if (pos & 2) return 1;  // B precedes A
-    return 0;
-  };
-
-  AetherRange.prototype.comparePoint = function(node, offset) {
-    // Spec: root must match
-    var nodeRoot = node;
-    while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
-    var rangeRoot = this.startContainer;
-    while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
-    if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) {
-      throw new DOMException("Wrong document", "WrongDocumentError");
-    }
-    // Spec: offset must be valid
-    var nodeLen = (node.nodeType === 3 || node.nodeType === 8 || node.nodeType === 7)
-      ? (node.data !== undefined ? node.data.length : (node.textContent || "").length)
-      : (node.childNodes ? node.childNodes.length : 0);
-    if (offset < 0 || offset > nodeLen) {
-      throw new DOMException("Index out of range", "IndexSizeError");
-    }
-    var cmpStart = this._compareBoundary(node, offset, this.startContainer, this.startOffset);
-    if (cmpStart < 0) return -1;
-    var cmpEnd = this._compareBoundary(node, offset, this.endContainer, this.endOffset);
-    if (cmpEnd > 0) return 1;
-    return 0;
-  };
-
-  AetherRange.prototype.isPointInRange = function(node, offset) {
-    try { return this.comparePoint(node, offset) === 0; } catch(e) { return false; }
-  };
-
-  AetherRange.prototype.intersectsNode = function(node) {
-    // Spec: om node och range har olika root → false
-    var nodeRoot = node;
-    while (nodeRoot.parentNode) nodeRoot = nodeRoot.parentNode;
-    var rangeRoot = this.startContainer;
-    while (rangeRoot.parentNode) rangeRoot = rangeRoot.parentNode;
-    if (nodeRoot !== rangeRoot && !(nodeRoot.__nodeKey__ && rangeRoot.__nodeKey__ && nodeRoot.__nodeKey__ === rangeRoot.__nodeKey__)) return false;
-
-    var parent = node.parentNode;
-    if (!parent) return true;
-    var kids = parent.childNodes;
-    if (!kids) return true;
-    var idx = -1;
-    for (var i = 0; i < kids.length; i++) {
-      if (kids[i] === node || (kids[i].__nodeKey__ && node.__nodeKey__ && kids[i].__nodeKey__ === node.__nodeKey__)) { idx = i; break; }
-    }
-    if (idx < 0) return true;
-    var afterStart = this._compareBoundary(parent, idx + 1, this.startContainer, this.startOffset);
-    var beforeEnd = this._compareBoundary(parent, idx, this.endContainer, this.endOffset);
-    return afterStart > 0 && beforeEnd < 0;
-  };
-
-  AetherRange.prototype.cloneRange = function() {
-    var r = new AetherRange();
-    r.startContainer = this.startContainer;
-    r.startOffset = this.startOffset;
-    r.endContainer = this.endContainer;
-    r.endOffset = this.endOffset;
-    r._update();
-    return r;
-  };
-
-  AetherRange.prototype.detach = function() {}; // no-op per spec
-
-  AetherRange.prototype.toString = function() {
-    // Returnera text inom range
-    if (this.startContainer === this.endContainer && this.startContainer.nodeType === 3) {
-      return (this.startContainer.data || '').substring(this.startOffset, this.endOffset);
-    }
-    return '';
-  };
-
-  AetherRange.prototype.deleteContents = function() {};
-  AetherRange.prototype.extractContents = function() { return document.createDocumentFragment(); };
-  AetherRange.prototype.cloneContents = function() { return document.createDocumentFragment(); };
-  AetherRange.prototype.insertNode = function(node) {};
-  AetherRange.prototype.surroundContents = function(node) {};
-
-  AetherRange.prototype.getBoundingClientRect = function() {
-    return { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
-  };
-  AetherRange.prototype.getClientRects = function() { return []; };
-
-  AetherRange.START_TO_START = 0;
-  AetherRange.START_TO_END = 1;
-  AetherRange.END_TO_END = 2;
-  AetherRange.END_TO_START = 3;
-
-  AetherRange.prototype.compareBoundaryPoints = function(how, sourceRange) {
-    // WebIDL: ToUint16(how)
-    how = ((how | 0) & 0xFFFF) >>> 0;
-    if (how > 3) throw new DOMException("The comparison method provided is not supported.", "NotSupportedError");
-    var thisC, thisO, srcC, srcO;
-    switch (how) {
-      case 0: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
-      case 1: thisC = this.startContainer; thisO = this.startOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
-      case 2: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.endContainer; srcO = sourceRange.endOffset; break;
-      case 3: thisC = this.endContainer; thisO = this.endOffset; srcC = sourceRange.startContainer; srcO = sourceRange.startOffset; break;
-    }
-    return this._compareBoundary(thisC, thisO, srcC, srcO) < 0 ? -1 : (this._compareBoundary(thisC, thisO, srcC, srcO) > 0 ? 1 : 0);
-  };
-
-  // Override document.createRange
-  document.createRange = function() { return new AetherRange(); };
-
-  // document.createAttribute
   if (!document.createAttribute) {
     document.createAttribute = function(name) {
       var attr = { nodeType: 2, nodeName: name.toLowerCase(), name: name.toLowerCase(), value: '', nodeValue: '', specified: true,
@@ -1026,7 +873,6 @@
       return attr;
     };
   }
-  globalThis.Range = AetherRange;
 })();
 
 // ─── Document konstruktor → skapar riktig arena-backed doc ──────────────────

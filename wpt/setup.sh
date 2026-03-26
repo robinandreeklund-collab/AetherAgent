@@ -28,10 +28,15 @@ git sparse-checkout set \
     shadow-dom \
     html/dom \
     html/syntax \
+    html/semantics \
     html/webappapis/timers \
     console \
     hr-time \
     url \
+    css/selectors \
+    css/cssom \
+    xhr \
+    fetch \
     resources
 
 cd ..
@@ -42,7 +47,7 @@ echo ""
 echo "WPT-suite nedladdad: $TOTAL HTML-testfiler"
 echo ""
 echo "Kör tester med:"
-echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/dom/"
-echo "  cargo run --bin aether-wpt --features js-eval -- $WPT_DIR/html/syntax/"
+echo "  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- $WPT_DIR/dom/"
+echo "  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- $WPT_DIR/html/syntax/"
 echo ""
 echo "Dashboard: docs/wpt-dashboard.md"
