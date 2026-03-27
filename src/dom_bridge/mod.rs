@@ -6714,11 +6714,27 @@ impl JsHandler for InputStepUpDown {
         }
         let value = computed::get_effective_value(&s_ref, self.key);
         let current = input_value_to_number(input_type, &value);
-        let step_str = node.get_attr("step").unwrap_or("1");
-        let step = if step_str == "any" {
-            1.0
-        } else {
-            step_str.parse::<f64>().unwrap_or(1.0)
+        // Default step per input type (i samma enhet som valueAsNumber)
+        let default_step = match input_type {
+            "date" => 86_400_000.0,       // 1 dag i ms
+            "time" => 60_000.0,           // 60 sekunder i ms
+            "datetime-local" => 60_000.0, // 60 sekunder i ms
+            "month" => 1.0,               // 1 månad
+            "week" => 604_800_000.0,      // 1 vecka i ms
+            "number" | "range" => 1.0,    // 1
+            _ => 1.0,
+        };
+        let step_str = node.get_attr("step");
+        let step = match step_str {
+            Some("any") | None => default_step,
+            Some(s) => {
+                let parsed = s.parse::<f64>().unwrap_or(default_step);
+                // Step-värdet konverteras till ms för tid/datum-typer
+                match input_type {
+                    "time" | "datetime-local" => parsed * 1000.0, // sekunder → ms
+                    _ => parsed,
+                }
+            }
         };
         let new_val = if current.is_nan() {
             0.0 + step * n * self.direction as f64

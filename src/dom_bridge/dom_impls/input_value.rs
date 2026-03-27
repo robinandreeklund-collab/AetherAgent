@@ -40,7 +40,7 @@ pub(in crate::dom_bridge) fn get_input_value(state: &BridgeState, key: NodeKey) 
             // "value" mode: dirty flag → använd intern state, annars attribut
             if let Some(es) = state.element_state.get(&key_bits) {
                 if es.value_dirty {
-                    return sanitize_value(input_type, &es.value.clone().unwrap_or_default());
+                    return sanitize_value(input_type, &es.value.clone().unwrap_or_default(), node);
                 }
             }
             // Icke-dirty: läs default value (value-attribut)
@@ -65,12 +65,12 @@ pub(in crate::dom_bridge) fn get_input_value(state: &BridgeState, key: NodeKey) 
         }
         _ => return String::new(),
     };
-    sanitize_value(input_type, &raw)
+    sanitize_value(input_type, &raw, node)
 }
 
 /// Value Sanitization Algorithm per HTML spec
 /// https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
-fn sanitize_value(input_type: &str, value: &str) -> String {
+fn sanitize_value(input_type: &str, value: &str, node: &crate::arena_dom::DomNode) -> String {
     match input_type {
         // Text/Search/Tel/Password: strip newlines
         "text" | "search" | "tel" | "password" => value.replace(['\n', '\r'], ""),
@@ -91,14 +91,58 @@ fn sanitize_value(input_type: &str, value: &str) -> String {
                 _ => String::new(),
             }
         }
-        // Range: must be valid, else use default
+        // Range: must be valid float, clamped to [min, max], default = midpoint
         "range" => {
-            if value.is_empty() {
-                return String::new();
-            }
-            match value.parse::<f64>() {
-                Ok(n) if n.is_finite() => value.to_string(),
-                _ => String::new(),
+            let min = node
+                .get_attr("min")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let max = node
+                .get_attr("max")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(100.0);
+            let max = if max < min { min } else { max };
+            let step = node
+                .get_attr("step")
+                .and_then(|v| {
+                    if v == "any" {
+                        None
+                    } else {
+                        v.parse::<f64>().ok()
+                    }
+                })
+                .unwrap_or(1.0);
+
+            let num = value.parse::<f64>().ok().filter(|n| n.is_finite());
+            let val = match num {
+                Some(n) => {
+                    // Clamp till [min, max]
+                    let clamped = n.max(min).min(max);
+                    // Step-align (närmaste steg från min)
+                    if step > 0.0 {
+                        let steps = ((clamped - min) / step).round();
+                        let aligned = min + steps * step;
+                        aligned.min(max)
+                    } else {
+                        clamped
+                    }
+                }
+                None => {
+                    // Default value: midpoint
+                    let mid = min + (max - min) / 2.0;
+                    // Step-align midpoint
+                    if step > 0.0 {
+                        let steps = ((mid - min) / step).round();
+                        (min + steps * step).min(max)
+                    } else {
+                        mid
+                    }
+                }
+            };
+            if val == val.floor() {
+                format!("{}", val as i64)
+            } else {
+                format!("{}", val)
             }
         }
         // Date: YYYY-MM-DD format validation
