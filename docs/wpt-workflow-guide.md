@@ -31,10 +31,10 @@ codegen/src/             Rust-baserat code generator
   ├── type_map.rs        WebIDL → Rust typ-mappning
   └── rust_gen.rs        Genererar JsHandler structs
        ↓
-src/dom_bridge/generated/  Auto-genererade property accessors (85 filer, 15K+ rader)
+src/dom_bridge/generated/  Auto-genererade property accessors (växer med varje codegen-körning)
   ├── register.rs          Master-registrering per tag-namn
-  ├── htmlinput_element.rs 63 element-interfaces
-  └── ...
+  ├── htmlinput_element.rs En fil per WebIDL interface
+  └── ...                  (antal filer = antal interfaces i webidl/*.webidl)
        ↓
 src/dom_bridge/dom_impls/  Manuellt portad beteendelogik (från jsdom)
   ├── constraint_validation.rs  ValidityState + checkValidity
@@ -51,7 +51,7 @@ src/dom_bridge/mod.rs      Orkestrering: make_element_object() binder allt
 **Lager 1: Codegen (auto-genererat)**
 - Parsar `.webidl`-filer med `webidl-rs`
 - Genererar getter/setter för varje HTML-attribut
-- 63 HTML element interfaces, 15K+ rader kod
+- Antal filer/rader växer automatiskt när nya `.webidl`-interfaces läggs till
 - Kör med: `cd codegen && cargo run`
 
 **Lager 2: dom_impls (manuellt portat)**
