@@ -755,6 +755,12 @@ pub(super) fn register_window_with_viewport<'js>(
                 this.view = view !== undefined ? view : null;
                 this.detail = detail !== undefined ? detail : 0;
             };
+            // pseudoTarget: new spec property (getter returning null)
+            Object.defineProperty(UIEvent.prototype, 'pseudoTarget', {
+                get: function() { return null; },
+                configurable: true,
+                enumerable: true
+            });
 
             // ── MouseEvent ──
             if (!globalThis.MouseEvent) {
