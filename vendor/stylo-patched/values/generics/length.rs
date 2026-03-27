@@ -4,13 +4,18 @@
 
 //! Generic types for CSS values related to length.
 
+use crate::derives::*;
+use crate::logical_geometry::PhysicalSide;
 use crate::parser::{Parse, ParserContext};
+use crate::values::computed::position::TryTacticAdjustment;
 use crate::values::generics::box_::PositionProperty;
+use crate::values::generics::position::TreeScoped;
 use crate::values::generics::Optional;
 use crate::values::DashedIdent;
 use crate::Zero;
 use cssparser::Parser;
 use std::fmt::Write;
+use style_derive::Animate;
 use style_traits::ParseError;
 use style_traits::StyleParseErrorKind;
 use style_traits::ToCss;
@@ -37,6 +42,7 @@ use style_traits::{CssWriter, SpecifiedValueInfo};
 )]
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
 #[repr(C, u8)]
+#[typed_value(derive_fields)]
 pub enum GenericLengthPercentageOrAuto<LengthPercent> {
     LengthPercentage(LengthPercent),
     Auto,
@@ -154,6 +160,7 @@ impl<LengthPercentage: Parse> Parse for LengthPercentageOrAuto<LengthPercentage>
     ToTyped,
 )]
 #[repr(C, u8)]
+#[typed_value(derive_fields)]
 pub enum GenericSize<LengthPercent> {
     LengthPercentage(LengthPercent),
     Auto,
@@ -183,9 +190,12 @@ where
 {
     fn collect_completion_keywords(f: style_traits::KeywordsCollectFn) {
         LengthPercent::collect_completion_keywords(f);
-        f(&["auto", "stretch", "fit-content", "max-content", "min-content"]);
+        f(&["auto", "fit-content", "max-content", "min-content"]);
         if cfg!(feature = "gecko") {
             f(&["-moz-available"]);
+        }
+        if static_prefs::pref!("layout.css.stretch-size-keyword.enabled") {
+            f(&["stretch"]);
         }
         if static_prefs::pref!("layout.css.webkit-fill-available.enabled") {
             f(&["-webkit-fill-available"]);
@@ -230,6 +240,7 @@ impl<LengthPercentage> Size<LengthPercentage> {
     ToTyped,
 )]
 #[repr(C, u8)]
+#[typed_value(derive_fields)]
 pub enum GenericMaxSize<LengthPercent> {
     LengthPercentage(LengthPercent),
     None,
@@ -259,9 +270,12 @@ where
 {
     fn collect_completion_keywords(f: style_traits::KeywordsCollectFn) {
         LP::collect_completion_keywords(f);
-        f(&["none", "stretch", "fit-content", "max-content", "min-content"]);
+        f(&["none", "fit-content", "max-content", "min-content"]);
         if cfg!(feature = "gecko") {
             f(&["-moz-available"]);
+        }
+        if static_prefs::pref!("layout.css.stretch-size-keyword.enabled") {
+            f(&["stretch"]);
         }
         if static_prefs::pref!("layout.css.webkit-fill-available.enabled") {
             f(&["-webkit-fill-available"]);
@@ -348,6 +362,7 @@ impl<L, N: Zero> Zero for LengthOrNumber<L, N> {
 )]
 #[repr(C, u8)]
 #[allow(missing_docs)]
+#[typed_value(derive_fields)]
 pub enum GenericLengthPercentageOrNormal<LengthPercent> {
     LengthPercentage(LengthPercent),
     Normal,
@@ -382,18 +397,28 @@ impl<LengthPercent> LengthPercentageOrNormal<LengthPercent> {
     ToResolvedValue,
     Serialize,
     Deserialize,
+    ToTyped,
 )]
 #[repr(C)]
 pub struct GenericAnchorSizeFunction<Fallback> {
     /// Anchor name of the element to anchor to.
     /// If omitted (i.e. empty), selects the implicit anchor element.
     #[animation(constant)]
-    pub target_element: DashedIdent,
+    pub target_element: TreeScoped<DashedIdent>,
     /// Size of the positioned element, expressed in that of the anchor element.
     /// If omitted, defaults to the axis of the property the function is used in.
     pub size: AnchorSizeKeyword,
     /// Value to use in case the anchor function is invalid.
     pub fallback: Optional<Fallback>,
+}
+
+impl<Fallback: TryTacticAdjustment> TryTacticAdjustment for GenericAnchorSizeFunction<Fallback> {
+    fn try_tactic_adjustment(&mut self, old_side: PhysicalSide, new_side: PhysicalSide) {
+        self.size.try_tactic_adjustment(old_side, new_side);
+        if let Some(fallback) = self.fallback.as_mut() {
+            fallback.try_tactic_adjustment(old_side, new_side);
+        }
+    }
 }
 
 impl<Fallback> ToCss for GenericAnchorSizeFunction<Fallback>
@@ -406,7 +431,7 @@ where
     {
         dest.write_str("anchor-size(")?;
         let mut previous_entry_printed = false;
-        if !self.target_element.is_empty() {
+        if !self.target_element.value.0.is_empty() {
             previous_entry_printed = true;
             self.target_element.to_css(dest)?;
         }
@@ -501,7 +526,7 @@ impl<LengthPercentage> GenericAnchorSizeFunction<LengthPercentage> {
                 })
                 .ok();
             Ok(GenericAnchorSizeFunction {
-                target_element,
+                target_element: TreeScoped::with_default_level(target_element),
                 size: size.into(),
                 fallback: fallback.into(),
             })
@@ -548,6 +573,23 @@ pub enum AnchorSizeKeyword {
     SelfInline,
 }
 
+impl TryTacticAdjustment for AnchorSizeKeyword {
+    fn try_tactic_adjustment(&mut self, old_side: PhysicalSide, new_side: PhysicalSide) {
+        if old_side.parallel_to(new_side) {
+            return;
+        }
+        *self = match *self {
+            Self::None => Self::None,
+            Self::Width => Self::Height,
+            Self::Height => Self::Width,
+            Self::Block => Self::Inline,
+            Self::Inline => Self::Block,
+            Self::SelfBlock => Self::SelfInline,
+            Self::SelfInline => Self::SelfBlock,
+        }
+    }
+}
+
 /// Specified type for `margin` properties, which allows
 /// the use of the `anchor-size()` function.
 #[derive(
@@ -566,6 +608,7 @@ pub enum AnchorSizeKeyword {
     ToTyped,
 )]
 #[repr(C)]
+#[typed_value(derive_fields)]
 pub enum GenericMargin<LP> {
     /// A `<length-percentage>` value.
     LengthPercentage(LP),
@@ -586,18 +629,6 @@ impl<LP> GenericMargin<LP> {
     #[inline]
     pub fn is_auto(&self) -> bool {
         matches!(self, Self::Auto)
-    }
-}
-
-#[cfg(feature = "servo")]
-impl GenericMargin<crate::values::computed::LengthPercentage> {
-    /// Returns true if the computed value is absolute 0 or 0%.
-    #[inline]
-    pub fn is_definitely_zero(&self) -> bool {
-        match self {
-            Self::LengthPercentage(lp) => lp.is_definitely_zero(),
-            _ => false,
-        }
     }
 }
 

@@ -11,22 +11,23 @@ use crate::applicable_declarations::ApplicableDeclarationBlock;
 use crate::context::SharedStyleContext;
 #[cfg(feature = "gecko")]
 use crate::context::UpdateAnimationsTasks;
-use crate::data::ElementData;
-use crate::media_queries::Device;
+use crate::data::{ElementData, ElementDataMut, ElementDataRef};
+use crate::device::Device;
 use crate::properties::{AnimationDeclarations, ComputedValues, PropertyDeclarationBlock};
+use crate::selector_map::PrecomputedHashMap;
 use crate::selector_parser::{AttrValue, Lang, PseudoElement, RestyleDamage, SelectorImpl};
 use crate::shared_lock::{Locked, SharedRwLock};
 use crate::stylesheets::scope_rule::ImplicitScopeRoot;
 use crate::stylist::CascadeData;
 use crate::values::computed::Display;
 use crate::values::AtomIdent;
-use crate::{LocalName, WeakAtom};
-use atomic_refcell::{AtomicRef, AtomicRefMut};
+use crate::{LocalName, Namespace, WeakAtom};
 use dom::ElementState;
 use selectors::matching::{ElementSelectorFlags, QuirksMode, VisitedHandlingMode};
 use selectors::sink::Push;
 use selectors::{Element as SelectorsElement, OpaqueElement};
 use servo_arc::{Arc, ArcBorrow};
+use smallvec::SmallVec;
 use std::fmt;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -85,6 +86,19 @@ where
 pub struct DomDescendants<N> {
     previous: Option<N>,
     scope: N,
+}
+
+impl<N> DomDescendants<N>
+where
+    N: TNode,
+{
+    /// Returns the next element ignoring all of our subtree.
+    #[inline]
+    pub fn next_skipping_children(&mut self) -> Option<N> {
+        let prev = self.previous.take()?;
+        self.previous = prev.next_in_preorder_skipping_children(self.scope);
+        self.previous
+    }
 }
 
 impl<N> Iterator for DomDescendants<N>
@@ -189,7 +203,15 @@ pub trait TNode: Sized + Copy + Clone + Debug + NodeInfo + PartialEq {
         if let Some(c) = self.first_child() {
             return Some(c);
         }
+        self.next_in_preorder_skipping_children(scoped_to)
+    }
 
+    /// Returns the next node in tree order, skipping the children of the current node.
+    ///
+    /// This is useful when we know that a subtree cannot contain matches, allowing us
+    /// to skip entire subtrees during traversal.
+    #[inline]
+    fn next_in_preorder_skipping_children(&self, scoped_to: Self) -> Option<Self> {
         let mut current = *self;
         loop {
             if current == scoped_to {
@@ -385,7 +407,15 @@ pub trait TShadowRoot: Sized + Copy + Clone + Debug + PartialEq {
 
 /// The element trait, the main abstraction the style crate acts over.
 pub trait TElement:
-    Eq + PartialEq + Debug + Hash + Sized + Copy + Clone + SelectorsElement<Impl = SelectorImpl>
+    Eq
+    + PartialEq
+    + Debug
+    + Hash
+    + Sized
+    + Copy
+    + Clone
+    + SelectorsElement<Impl = SelectorImpl>
+    + AttributeProvider
 {
     /// The concrete node type.
     type ConcreteNode: TNode<ConcreteElement = Self>;
@@ -454,6 +484,41 @@ pub trait TElement:
     /// Return whether this element is an element in the XUL namespace.
     fn is_xul_element(&self) -> bool {
         false
+    }
+
+    /// Returns the bloom filter for this element's subtree, used for fast
+    /// querySelector optimization by allowing subtrees to be skipped.
+    /// Each element's filter includes hashes for all of it's class names and
+    /// attribute names (not values), along with the names for all descendent
+    /// elements.
+    ///
+    /// The default implementation returns all bits set, meaning the bloom filter
+    /// never filters anything.
+    fn subtree_bloom_filter(&self) -> u64 {
+        u64::MAX
+    }
+
+    /// Check if this element's subtree may contain elements with the given bloom hash.
+    fn bloom_may_have_hash(&self, bloom_hash: u64) -> bool {
+        let bloom = self.subtree_bloom_filter();
+        (bloom & bloom_hash) == bloom_hash
+    }
+
+    /// Convert a 32-bit atom hash to a bloom filter value using k=2 hash functions.
+    /// This must match the C++ implementation of HashForBloomFilter in Element.cpp
+    fn hash_for_bloom_filter(hash: u32) -> u64 {
+        // On 32-bit platforms, we have 31 bits available + 1 tag bit.
+        // On 64-bit platforms, we have 63 bits available + 1 tag bit.
+        #[cfg(target_pointer_width = "32")]
+        const BLOOM_BITS: u32 = 31;
+
+        #[cfg(target_pointer_width = "64")]
+        const BLOOM_BITS: u32 = 63;
+
+        let mut filter = 1u64;
+        filter |= 1u64 << (1 + (hash % BLOOM_BITS));
+        filter |= 1u64 << (1 + ((hash >> 6) % BLOOM_BITS));
+        filter
     }
 
     /// Return the list of slotted nodes of this node.
@@ -670,7 +735,7 @@ pub trait TElement:
     ///
     /// Unsafe because it can race to allocate and leak if not used with
     /// exclusive access to the element.
-    unsafe fn ensure_data(&self) -> AtomicRefMut<'_, ElementData>;
+    unsafe fn ensure_data(&self) -> ElementDataMut<'_>;
 
     /// Clears the element data reference, if any.
     ///
@@ -681,10 +746,10 @@ pub trait TElement:
     fn has_data(&self) -> bool;
 
     /// Immutably borrows the ElementData.
-    fn borrow_data(&self) -> Option<AtomicRef<'_, ElementData>>;
+    fn borrow_data(&self) -> Option<ElementDataRef<'_>>;
 
     /// Mutably borrows the ElementData.
-    fn mutate_data(&self) -> Option<AtomicRefMut<'_, ElementData>>;
+    fn mutate_data(&self) -> Option<ElementDataMut<'_>>;
 
     /// Whether we should skip any root- or item-based display property
     /// blockification on this element.  (This function exists so that Gecko
@@ -735,6 +800,11 @@ pub trait TElement:
         };
         return data.hint.has_animation_hint();
     }
+
+    /// Called when a highlight pseudo-element (::selection, ::highlight,
+    /// ::target-text) style is invalidated. These pseudos need explicit repaint
+    /// triggering since their styles are resolved lazily during painting.
+    fn note_highlight_pseudo_style_invalidated(&self) {}
 
     /// The shadow root this element is a host of.
     fn shadow_root(&self) -> Option<<Self::ConcreteNode as TNode>::ConcreteShadowRoot>;
@@ -914,6 +984,71 @@ pub trait TElement:
     /// Compute the damage incurred by the change from the `_old` to `_new`.
     fn compute_layout_damage(_old: &ComputedValues, _new: &ComputedValues) -> RestyleDamage {
         Default::default()
+    }
+}
+
+/// The attribute provider trait
+pub trait AttributeProvider {
+    /// Return the value of the given custom attibute if it exists.
+    fn get_attr(&self, attr: &LocalName, namespace: &Namespace) -> Option<String>;
+}
+
+/// A set of the attributes used to compute a style that uses `attr()`
+pub type AttributeReferences = Option<Box<PrecomputedHashMap<LocalName, SmallVec<[Namespace; 1]>>>>;
+
+/// A data structure to keep track of the names queried from a provider.
+pub struct AttributeTracker<'a> {
+    /// The element that queries for attributes.
+    pub provider: &'a dyn AttributeProvider,
+    /// The set of attributes we have queried.
+    pub references: AttributeReferences,
+}
+
+impl<'a> AttributeTracker<'a> {
+    /// Construct a new attribute tracker trivially.
+    pub fn new(provider: &'a dyn AttributeProvider) -> Self {
+        Self {
+            provider,
+            references: None,
+        }
+    }
+
+    /// Consstruct a new dummy attribute tracker
+    pub fn new_dummy() -> Self {
+        Self {
+            provider: &DummyAttributeProvider {},
+            references: None,
+        }
+    }
+
+    /// Extract the queried references and consume self
+    pub fn finalize(self) -> AttributeReferences {
+        self.references
+    }
+
+    /// Query the value and save the name of the attribtue.
+    pub fn query(&mut self, name: &LocalName, namespace: &Namespace) -> Option<String> {
+        // We need to save namespaces in case we are thinking of sharing this element's
+        // style with another.
+        // i.e if elment a has ns1::attr="blue"
+        // and element b has ns2::attr="blue"
+        // a and b can only share style if ns1 and ns2 resolve to the same namespace.
+        self.references
+            .get_or_insert_default()
+            .entry(name.clone())
+            .or_default()
+            .push(namespace.clone());
+        self.provider.get_attr(name, namespace)
+    }
+}
+
+/// A dummy AttributeProvider that returns none to any attribute query.
+#[derive(Clone, Debug, PartialEq)]
+struct DummyAttributeProvider;
+
+impl AttributeProvider for DummyAttributeProvider {
+    fn get_attr(&self, _attr: &LocalName, _namespace: &Namespace) -> Option<String> {
+        None
     }
 }
 

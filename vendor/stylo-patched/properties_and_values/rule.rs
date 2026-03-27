@@ -15,14 +15,15 @@ use super::{
     },
 };
 use crate::custom_properties::{Name as CustomPropertyName, SpecifiedValue};
+use crate::derives::*;
 use crate::error_reporting::ContextualParseError;
 use crate::parser::{Parse, ParserContext};
 use crate::shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
 use crate::values::{computed, serialize_atom_name};
 use cssparser::{
-    AtRuleParser, BasicParseErrorKind, CowRcStr, DeclarationParser, ParseErrorKind, Parser,
-    ParserInput, ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser,
-    SourceLocation,
+    match_ignore_ascii_case, AtRuleParser, BasicParseErrorKind, CowRcStr, DeclarationParser,
+    ParseErrorKind, Parser, ParserInput, ParserState, QualifiedRuleParser, RuleBodyItemParser,
+    RuleBodyParser, SourceLocation,
 };
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
@@ -271,6 +272,7 @@ impl PropertyRegistration {
         match SpecifiedRegisteredValue::compute(
             &mut input,
             &self.data,
+            None,
             &self.url_data,
             computed_context,
             AllowComputationallyDependent::No,
@@ -321,6 +323,7 @@ impl PropertyRegistration {
             &mut input,
             syntax,
             &initial.url_data,
+            None,
             AllowComputationallyDependent::No,
         ) {
             Ok(_) => {},
@@ -408,6 +411,10 @@ impl Parse for InitialValue {
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
         input.skip_whitespace();
-        Ok(Arc::new(SpecifiedValue::parse(input, &context.url_data)?))
+        Ok(Arc::new(SpecifiedValue::parse(
+            input,
+            Some(&context.namespaces.prefixes),
+            &context.url_data,
+        )?))
     }
 }

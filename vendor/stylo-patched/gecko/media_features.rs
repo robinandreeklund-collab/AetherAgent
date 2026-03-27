@@ -4,9 +4,11 @@
 
 //! Gecko's media feature list and evaluator.
 
+use crate::derives::*;
 use crate::gecko_bindings::bindings;
 use crate::gecko_bindings::structs;
 use crate::media_queries::{Device, MediaType};
+use crate::parser::ParserContext;
 use crate::queries::feature::{AllowsRanges, Evaluator, FeatureFlags, QueryFeatureDescription};
 use crate::queries::values::{Orientation, PrefersColorScheme};
 use crate::values::computed::{CSSPixelLength, Context, Ratio, Resolution};
@@ -76,6 +78,10 @@ fn eval_device_orientation(context: &Context, value: Option<Orientation>) -> boo
     Orientation::eval(device_size(context.device()), value)
 }
 
+fn document_picture_in_picture_enabled(context: &ParserContext) -> bool {
+    static_prefs::pref!("dom.documentpip.enabled") || context.chrome_rules_enabled()
+}
+
 /// Values for the display-mode media feature.
 #[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
 #[repr(u8)]
@@ -85,6 +91,8 @@ pub enum DisplayMode {
     MinimalUi,
     Standalone,
     Fullscreen,
+    #[parse(condition = "document_picture_in_picture_enabled")]
+    PictureInPicture,
 }
 
 /// https://w3c.github.io/manifest/#the-display-mode-media-feature
@@ -614,6 +622,13 @@ fn eval_moz_mac_rtl(context: &Context) -> bool {
     unsafe { bindings::Gecko_MediaFeatures_MacRTL(context.device().document()) }
 }
 
+fn eval_moz_native_theme(context: &Context) -> bool {
+    if context.device().document().mForceNonNativeTheme() {
+        return false;
+    }
+    static_prefs::pref!("browser.theme.native-theme")
+}
+
 fn get_lnf_int(int_id: i32) -> i32 {
     unsafe { bindings::Gecko_GetLookAndFeelInt(int_id) }
 }
@@ -645,7 +660,7 @@ macro_rules! lnf_int_feature {
 /// to support new types in these entries and (2) ensuring that either
 /// nsPresContext::MediaFeatureValuesChanged is called when the value that
 /// would be returned by the evaluator function could change.
-pub static MEDIA_FEATURES: [QueryFeatureDescription; 58] = [
+pub static MEDIA_FEATURES: [QueryFeatureDescription; 60] = [
     feature!(
         atom!("width"),
         AllowsRanges::Yes,
@@ -918,10 +933,17 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 58] = [
     ),
     lnf_int_feature!(atom!("-moz-menubar-drag"), MenuBarDrag),
     lnf_int_feature!(atom!("-moz-mac-big-sur-theme"), MacBigSurTheme),
+    lnf_int_feature!(atom!("-moz-mac-tahoe-theme"), MacTahoeTheme),
     feature!(
         atom!("-moz-mac-rtl"),
         AllowsRanges::No,
         Evaluator::BoolInteger(eval_moz_mac_rtl),
+        FeatureFlags::CHROME_AND_UA_ONLY,
+    ),
+    feature!(
+        atom!("-moz-native-theme"),
+        AllowsRanges::No,
+        Evaluator::BoolInteger(eval_moz_native_theme),
         FeatureFlags::CHROME_AND_UA_ONLY,
     ),
     lnf_int_feature!(

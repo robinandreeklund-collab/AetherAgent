@@ -12,7 +12,7 @@
 /// we might want to add a function to handle this.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+#[cfg_attr(feature = "servo", derive(crate::derives::MallocSizeOf))]
 pub struct ComputedValueFlags(u32);
 
 bitflags! {
@@ -132,6 +132,15 @@ bitflags! {
 
         /// Whether this style considered a scope style rule.
         const CONSIDERED_NONTRIVIAL_SCOPED_STYLE = 1 << 26;
+
+        /// Whether this style is that of a `display: contents` element that is either a direct
+        /// child of an item container or another `display: contents` element, the style of which
+        /// has this flag set, marked in order to cascade beyond them to the descendants of the
+        /// the item container that do generate a box.
+        const DISPLAY_CONTENTS_IN_ITEM_CONTAINER = 1 << 27;
+
+        /// Whether there are author-specific rules for `text-shadow`.
+        const HAS_AUTHOR_SPECIFIED_TEXT_SHADOW = 1 << 28;
     }
 }
 
@@ -158,7 +167,9 @@ impl ComputedValueFlags {
     /// Flags that may be propagated to descendants.
     #[inline]
     fn maybe_inherited_flags() -> Self {
-        Self::inherited_flags() | Self::SHOULD_SUPPRESS_LINEBREAK
+        Self::inherited_flags()
+            | Self::SHOULD_SUPPRESS_LINEBREAK
+            | Self::DISPLAY_CONTENTS_IN_ITEM_CONTAINER
     }
 
     /// Flags that are an input to the cascade.

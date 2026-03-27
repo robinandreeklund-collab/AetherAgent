@@ -8,6 +8,7 @@
 
 use crate::attr::{AttrIdentifier, AttrValue};
 use crate::computed_value_flags::ComputedValueFlags;
+use crate::derives::*;
 use crate::dom::{OpaqueNode, TElement, TNode};
 use crate::invalidation::element::document_state::InvalidationMatchingData;
 use crate::invalidation::element::element_wrapper::ElementSnapshot;
@@ -17,7 +18,10 @@ use crate::selector_parser::AttrValue as SelectorAttrValue;
 use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
 use crate::values::{AtomIdent, AtomString};
 use crate::{Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
-use cssparser::{serialize_identifier, CowRcStr, Parser as CssParser, SourceLocation, ToCss};
+use cssparser::{
+    match_ignore_ascii_case, serialize_identifier, CowRcStr, Parser as CssParser, SourceLocation,
+    ToCss,
+};
 use dom::{DocumentState, ElementState};
 use rustc_hash::FxHashMap;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
@@ -45,10 +49,11 @@ pub enum PseudoElement {
 
     // If/when :first-line is added, update is_first_line accordingly.
 
-    // If/when ::first-letter, ::first-line, or ::placeholder are added, adjust
-    // our property_restriction implementation to do property filtering for
-    // them.  Also, make sure the UA sheet has the !important rules some of the
+    // If/when ::first-letter or ::first-line are added, adjust our
+    // property_restriction implementation to do property filtering for them.
+    // Also, make sure the UA sheet has the !important rules some of the
     // APPLIES_TO_PLACEHOLDER properties expect!
+    FirstLetter,
 
     // Non-eager pseudos.
     Backdrop,
@@ -88,9 +93,10 @@ impl ToCss for PseudoElement {
             After => "::after",
             Before => "::before",
             Selection => "::selection",
+            FirstLetter => "::first-letter",
             Backdrop => "::backdrop",
             DetailsSummary => "::-servo-details-summary",
-            DetailsContent => "::-servo-details-content",
+            DetailsContent => "::details-content",
             Marker => "::marker",
             ColorSwatch => "::color-swatch",
             Placeholder => "::placeholder",
@@ -111,7 +117,7 @@ impl ::selectors::parser::PseudoElement for PseudoElement {
 }
 
 /// The number of eager pseudo-elements. Keep this in sync with cascade_type.
-pub const EAGER_PSEUDO_COUNT: usize = 3;
+pub const EAGER_PSEUDO_COUNT: usize = 4;
 
 impl PseudoElement {
     /// Gets the canonical index of this eagerly-cascaded pseudo-element.
@@ -180,7 +186,7 @@ impl PseudoElement {
     /// Whether the current pseudo element is :first-letter
     #[inline]
     pub fn is_first_letter(&self) -> bool {
-        false
+        *self == PseudoElement::FirstLetter
     }
 
     /// Whether the current pseudo element is :first-line
@@ -236,18 +242,19 @@ impl PseudoElement {
     #[inline]
     pub fn cascade_type(&self) -> PseudoElementCascadeType {
         match *self {
-            PseudoElement::After | PseudoElement::Before | PseudoElement::Selection => {
-                PseudoElementCascadeType::Eager
-            },
+            PseudoElement::After
+            | PseudoElement::Before
+            | PseudoElement::FirstLetter
+            | PseudoElement::Selection => PseudoElementCascadeType::Eager,
             PseudoElement::Backdrop
             | PseudoElement::ColorSwatch
             | PseudoElement::DetailsSummary
             | PseudoElement::Marker
             | PseudoElement::Placeholder
+            | PseudoElement::DetailsContent
             | PseudoElement::ServoTextControlInnerContainer
             | PseudoElement::ServoTextControlInnerEditor => PseudoElementCascadeType::Lazy,
-            PseudoElement::DetailsContent
-            | PseudoElement::ServoAnonymousBox
+            PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
             | PseudoElement::ServoAnonymousTableCell
             | PseudoElement::ServoAnonymousTableRow
@@ -270,7 +277,14 @@ impl PseudoElement {
     /// Property flag that properties must have to apply to this pseudo-element.
     #[inline]
     pub fn property_restriction(&self) -> Option<PropertyFlags> {
-        None
+        Some(match self {
+            PseudoElement::FirstLetter => PropertyFlags::APPLIES_TO_FIRST_LETTER,
+            PseudoElement::Marker if static_prefs::pref!("layout.css.marker.restricted") => {
+                PropertyFlags::APPLIES_TO_MARKER
+            },
+            PseudoElement::Placeholder => PropertyFlags::APPLIES_TO_PLACEHOLDER,
+            _ => return None,
+        })
     }
 
     /// Whether this pseudo-element should actually exist if it has
@@ -285,6 +299,25 @@ impl PseudoElement {
         }
 
         true
+    }
+
+    /// Whether this pseudo-element is the ::highlight pseudo.
+    pub fn is_highlight(&self) -> bool {
+        false
+    }
+
+    /// Whether this pseudo-element is the ::target-text pseudo.
+    #[inline]
+    pub fn is_target_text(&self) -> bool {
+        false
+    }
+
+    /// Whether this is a highlight pseudo-element that is styled lazily during
+    /// painting rather than during the restyle traversal. These pseudos need
+    /// explicit repaint triggering when their styles change.
+    #[inline]
+    pub fn is_lazy_painted_highlight_pseudo(&self) -> bool {
+        self.is_selection() || self.is_highlight() || self.is_target_text()
     }
 }
 
@@ -324,6 +357,7 @@ pub enum NonTSPseudoClass {
     MozMeterOptimum,
     MozMeterSubOptimum,
     MozMeterSubSubOptimum,
+    Open,
     Optional,
     OutOfRange,
     PlaceholderShown,
@@ -380,6 +414,11 @@ impl ToCss for NonTSPseudoClass {
             Self::AnyLink => ":any-link",
             Self::Autofill => ":autofill",
             Self::Checked => ":checked",
+            Self::CustomState(ref state) => {
+                dest.write_str(":state(")?;
+                state.0.to_css(dest)?;
+                return dest.write_char(')');
+            },
             Self::Default => ":default",
             Self::Defined => ":defined",
             Self::Disabled => ":disabled",
@@ -397,6 +436,7 @@ impl ToCss for NonTSPseudoClass {
             Self::MozMeterOptimum => ":-moz-meter-optimum",
             Self::MozMeterSubOptimum => ":-moz-meter-sub-optimum",
             Self::MozMeterSubSubOptimum => ":-moz-meter-sub-sub-optimum",
+            Self::Open => ":open",
             Self::Optional => ":optional",
             Self::OutOfRange => ":out-of-range",
             Self::PlaceholderShown => ":placeholder-shown",
@@ -410,11 +450,6 @@ impl ToCss for NonTSPseudoClass {
             Self::UserValid => ":user-valid",
             Self::Valid => ":valid",
             Self::Visited => ":visited",
-            NonTSPseudoClass::CustomState(ref state) => {
-                dest.write_str(":state(")?;
-                state.0.to_css(dest)?;
-                return dest.write_char(')');
-            },
             Self::Lang(_) => unreachable!(),
         })
     }
@@ -446,6 +481,7 @@ impl NonTSPseudoClass {
             Self::MozMeterOptimum => ElementState::OPTIMUM,
             Self::MozMeterSubOptimum => ElementState::SUB_OPTIMUM,
             Self::MozMeterSubSubOptimum => ElementState::SUB_SUB_OPTIMUM,
+            Self::Open => ElementState::OPEN,
             Self::Optional => ElementState::OPTIONAL_,
             Self::OutOfRange => ElementState::OUTOFRANGE,
             Self::PlaceholderShown => ElementState::PLACEHOLDER_SHOWN,
@@ -527,7 +563,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
 
     #[inline]
     fn parse_has(&self) -> bool {
-        false
+        true
     }
 
     #[inline]
@@ -567,6 +603,8 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             "indeterminate" => NonTSPseudoClass::Indeterminate,
             "invalid" => NonTSPseudoClass::Invalid,
             "link" => NonTSPseudoClass::Link,
+            "modal" => NonTSPseudoClass::Modal,
+            "open" => NonTSPseudoClass::Open,
             "optional" => NonTSPseudoClass::Optional,
             "out-of-range" => NonTSPseudoClass::OutOfRange,
             "placeholder-shown" => NonTSPseudoClass::PlaceholderShown,
@@ -627,6 +665,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             "after" => After,
             "backdrop" => Backdrop,
             "selection" => Selection,
+            "first-letter" => FirstLetter,
             "marker" => Marker,
             "-servo-details-summary" => {
                 if !self.in_user_agent_stylesheet() {
@@ -634,19 +673,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
                 }
                 DetailsSummary
             },
-            "-servo-details-content" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                DetailsContent
-            },
+            "details-content" => DetailsContent,
             "color-swatch" => ColorSwatch,
-            "placeholder" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                Placeholder
-            },
+            "placeholder" => Placeholder,
             "-servo-text-control-inner-container" => {
                 if !self.in_user_agent_stylesheet() {
                     return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))

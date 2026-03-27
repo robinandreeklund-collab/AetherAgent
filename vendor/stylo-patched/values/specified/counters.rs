@@ -4,9 +4,6 @@
 
 //! Specified types for counter properties.
 
-#[cfg(feature = "servo")]
-use crate::computed_values::list_style_type::T as ListStyleType;
-#[cfg(feature = "gecko")]
 use crate::counter_style::CounterStyle;
 use crate::parser::{Parse, ParserContext};
 use crate::values::generics::counters as generics;
@@ -15,7 +12,7 @@ use crate::values::specified::image::Image;
 use crate::values::specified::Attr;
 use crate::values::specified::Integer;
 use crate::values::CustomIdent;
-use cssparser::{Parser, Token};
+use cssparser::{match_ignore_ascii_case, Parser, Token};
 use selectors::parser::SelectorParseErrorKind;
 use style_traits::{ParseError, StyleParseErrorKind};
 
@@ -149,17 +146,6 @@ pub type Content = generics::GenericContent<Image>;
 pub type ContentItem = generics::GenericContentItem<Image>;
 
 impl Content {
-    #[cfg(feature = "servo")]
-    fn parse_counter_style(_: &ParserContext, input: &mut Parser) -> ListStyleType {
-        input
-            .try_parse(|input| {
-                input.expect_comma()?;
-                ListStyleType::parse(input)
-            })
-            .unwrap_or(ListStyleType::Decimal)
-    }
-
-    #[cfg(feature = "gecko")]
     fn parse_counter_style(context: &ParserContext, input: &mut Parser) -> CounterStyle {
         use crate::counter_style::CounterStyleParsingFlags;
         input
@@ -226,7 +212,7 @@ impl Parse for Content {
                             let style = Content::parse_counter_style(context, input);
                             Ok(generics::ContentItem::Counters(name, separator, style))
                         }),
-                        "attr" => input.parse_nested_block(|input| {
+                        "attr" if !static_prefs::pref!("layout.css.attr.enabled") => input.parse_nested_block(|input| {
                             Ok(generics::ContentItem::Attr(Attr::parse_function(context, input)?))
                         }),
                         _ => {

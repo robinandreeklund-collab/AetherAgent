@@ -6,14 +6,19 @@
 //!
 //! [calc]: https://drafts.csswg.org/css-values/#calc-notation
 
+use crate::derives::*;
 use crate::values::generics::length::GenericAnchorSizeFunction;
 use crate::values::generics::position::{GenericAnchorFunction, GenericAnchorSide};
 use num_traits::Zero;
 use smallvec::SmallVec;
+use std::convert::AsRef;
 use std::fmt::{self, Write};
 use std::ops::{Add, Mul, Neg, Rem, Sub};
 use std::{cmp, mem};
-use style_traits::{CssWriter, ToCss};
+use strum_macros::AsRefStr;
+use style_traits::{CssWriter, MathSum, NumericValue, ToCss, ToTyped, TypedValue};
+
+use thin_vec::ThinVec;
 
 /// Whether we're a `min` or `max` function.
 #[derive(
@@ -113,10 +118,16 @@ pub enum RoundingStrategy {
 /// This determines the order in which we serialize members of a calc() sum.
 ///
 /// See https://drafts.csswg.org/css-values-4/#sort-a-calculations-children
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    AsRefStr, Clone, Copy, Debug, Eq, Ord, Parse, PartialEq, PartialOrd, MallocSizeOf, ToShmem,
+)]
+#[strum(serialize_all = "lowercase")]
 #[allow(missing_docs)]
 pub enum SortKey {
+    #[strum(serialize = "")]
     Number,
+    #[css(skip)]
+    #[strum(serialize = "%")]
     Percentage,
     Cap,
     Ch,
@@ -144,10 +155,15 @@ pub enum SortKey {
     Lvmax,
     Lvmin,
     Lvw,
+    Ms,
     Px,
+    Rcap,
+    Rch,
     Rem,
+    Rex,
+    Ric,
     Rlh,
-    Sec,
+    S, // Sec
     Svb,
     Svh,
     Svi,
@@ -160,7 +176,9 @@ pub enum SortKey {
     Vmax,
     Vmin,
     Vw,
+    #[css(skip)]
     ColorComponent,
+    #[css(skip)]
     Other,
 }
 
@@ -335,7 +353,7 @@ macro_rules! compare_helpers {
 }
 
 /// A trait that represents all the stuff a valid leaf of a calc expression.
-pub trait CalcNodeLeaf: Clone + Sized + PartialEq + ToCss {
+pub trait CalcNodeLeaf: Clone + Sized + PartialEq + ToCss + ToTyped {
     /// Returns the unit of the leaf.
     fn unit(&self) -> CalcUnits;
 
@@ -1931,6 +1949,37 @@ impl<L: CalcNodeLeaf> CalcNode<L> {
         Ok(())
     }
 
+    fn to_typed_impl(&self, level: ArgumentLevel) -> Option<TypedValue> {
+        // XXX Only supporting Sum and Leaf for now
+        match *self {
+            Self::Sum(ref children) => {
+                let mut values = ThinVec::new();
+                for child in &**children {
+                    if let Some(TypedValue::Numeric(inner)) =
+                        child.to_typed_impl(ArgumentLevel::Nested)
+                    {
+                        values.push(inner);
+                    }
+                }
+                Some(TypedValue::Numeric(NumericValue::Sum(MathSum { values })))
+            },
+            Self::Leaf(ref l) => match l.to_typed() {
+                Some(TypedValue::Numeric(inner)) => match level {
+                    ArgumentLevel::CalculationRoot => {
+                        Some(TypedValue::Numeric(NumericValue::Sum(MathSum {
+                            values: ThinVec::from([inner]),
+                        })))
+                    },
+                    ArgumentLevel::ArgumentRoot | ArgumentLevel::Nested => {
+                        Some(TypedValue::Numeric(inner))
+                    },
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn compare(
         &self,
         other: &Self,
@@ -1954,6 +2003,12 @@ impl<L: CalcNodeLeaf> ToCss for CalcNode<L> {
         W: Write,
     {
         self.to_css_impl(dest, ArgumentLevel::CalculationRoot)
+    }
+}
+
+impl<L: CalcNodeLeaf> ToTyped for CalcNode<L> {
+    fn to_typed(&self) -> Option<TypedValue> {
+        self.to_typed_impl(ArgumentLevel::CalculationRoot)
     }
 }
 

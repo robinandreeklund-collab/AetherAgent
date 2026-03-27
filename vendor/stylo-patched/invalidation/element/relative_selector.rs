@@ -12,11 +12,12 @@ use crate::invalidation::element::element_wrapper::ElementWrapper;
 use crate::invalidation::element::invalidation_map::{
     AdditionalRelativeSelectorInvalidationMap, Dependency, DependencyInvalidationKind,
     InvalidationMap, NormalDependencyInvalidationKind, RelativeDependencyInvalidationKind,
-    TSStateForInvalidation,
+    ScopeDependencyInvalidationKind, TSStateForInvalidation,
 };
 use crate::invalidation::element::invalidator::{
-    DescendantInvalidationLists, Invalidation, InvalidationProcessor, InvalidationResult,
-    InvalidationVector, SiblingTraversalMap, TreeStyleInvalidator,
+    note_scope_dependency_force_at_subject, DescendantInvalidationLists, Invalidation,
+    InvalidationProcessor, InvalidationResult, InvalidationVector, SiblingTraversalMap,
+    TreeStyleInvalidator,
 };
 use crate::invalidation::element::restyle_hints::RestyleHint;
 use crate::invalidation::element::state_and_attributes::{
@@ -29,13 +30,13 @@ use crate::stylist::{CascadeData, Stylist};
 use dom::ElementState;
 use rustc_hash::FxHashMap;
 use selectors::matching::{
-    matches_selector, ElementSelectorFlags, IncludeStartingStyle, MatchingContext,
-    MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, QuirksMode, SelectorCaches,
-    VisitedHandlingMode,
+    early_reject_by_local_name, matches_selector, ElementSelectorFlags,
+    IncludeStartingStyle, MatchingContext, MatchingForInvalidation, MatchingMode,
+    NeedsSelectorFlags, QuirksMode, SelectorCaches, VisitedHandlingMode,
 };
 use selectors::parser::SelectorKey;
 use selectors::OpaqueElement;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::ops::DerefMut;
 
 /// Kind of DOM mutation this relative selector invalidation is being carried out in.
@@ -383,8 +384,15 @@ fn invalidation_can_collapse(
         // Cases like `:is(.item .foo) :is(.item .foo)` where `.item` invalidates would
         // point to different dependencies, pointing to the same outer selector, but
         // differing in selector offset.
-        let a_n = &a_deps.as_ref().slice()[0];
-        let b_n = &b_deps.as_ref().slice()[0];
+        let a_nexts = a_deps.as_ref().slice();
+        let b_nexts = b_deps.as_ref().slice();
+        if a_nexts.is_empty()|| b_nexts.is_empty() {
+            // Can happen when we get out to empty @scope() rules.
+            // If they're both empty, we can just do nothing for both.
+            return a_nexts.is_empty() == b_nexts.is_empty();
+        }
+        let a_n = &a_nexts[0];
+        let b_n = &b_nexts[0];
         if SelectorKey::new(&a_n.selector) != SelectorKey::new(&b_n.selector) {
             return false;
         }
@@ -494,6 +502,13 @@ where
                             | RelativeDependencyInvalidationKind::EarlierSibling
                     )
                 {
+                    return;
+                }
+                if early_reject_by_local_name(
+                    &dependency.selector,
+                    dependency.selector_offset,
+                    &element,
+                ) {
                     return;
                 }
                 self.insert_invalidation(element, dependency, host);
@@ -1010,9 +1025,17 @@ where
         );
 
         if let Some(x) = outer_dependency.next.as_ref() {
-            if !Self::is_subject(&x.as_ref().slice()[0]) {
-                // Not subject in outer selector.
-                return false;
+            // We only care to ensure that we're the subject in the outermost selector of the current
+            // selector - Crossing over a scope invalidation would mean moving into a selector inside
+            // the current scope block
+            if matches!(
+                outer_dependency.invalidation_kind(),
+                DependencyInvalidationKind::Normal(..)
+            ) {
+                if !Self::is_subject(&x.as_ref().slice()[0]) {
+                    // Not subject in outer selector.
+                    return false;
+                }
             }
         }
         outer_dependency
@@ -1086,8 +1109,10 @@ where
         // e.g. Element under consideration can only be the anchor to `:has` in
         // `.foo .bar ~ .baz:has()`, iff it matches `.foo .bar ~ .baz`.
         let invalidated_self = {
-            let mut d = self.dependency;
-            loop {
+            let mut invalidated = false;
+            let mut dependencies_to_invalidate: SmallVec<[&Dependency; 1]> =
+                smallvec![self.dependency];
+            while let Some(d) = dependencies_to_invalidate.pop() {
                 debug_assert!(
                     matches!(
                         d.invalidation_kind(),
@@ -1097,7 +1122,7 @@ where
                     "Unexpected dependency kind"
                 );
                 if !dependency_may_be_relevant(d, &element, false) {
-                    break false;
+                    continue;
                 }
                 if !matches_selector(
                     &d.selector,
@@ -1106,30 +1131,55 @@ where
                     &element,
                     self.matching_context(),
                 ) {
-                    break false;
+                    continue;
                 }
+
                 let invalidation_kind = d.invalidation_kind();
+
+                if let DependencyInvalidationKind::Scope(scope_kind) = invalidation_kind {
+                    if d.selector.is_rightmost(d.selector_offset) {
+                        if scope_kind == ScopeDependencyInvalidationKind::ScopeEnd {
+                            let invalidations = note_scope_dependency_force_at_subject(
+                                d,
+                                self.matching_context.current_host.clone(),
+                                self.matching_context.scope_element,
+                                false,
+                            );
+                            descendant_invalidations
+                                .dom_descendants
+                                .extend(invalidations);
+
+                            invalidated |= true;
+                        } else if let Some(ref next) = d.next {
+                            dependencies_to_invalidate.extend(next.as_ref().slice());
+                        }
+                        continue;
+                    }
+                }
+
                 if matches!(
                     invalidation_kind,
                     DependencyInvalidationKind::Normal(NormalDependencyInvalidationKind::Element)
-                        | DependencyInvalidationKind::Scope(_)
                 ) {
                     if let Some(ref deps) = d.next {
-                        d = &deps.as_ref().slice()[0];
+                        // Normal dependencies should only have one next
+                        dependencies_to_invalidate.push(&deps.as_ref().slice()[0]);
                         continue;
                     }
-                    break true;
+                    invalidated |= true;
+                    continue;
                 }
                 debug_assert_ne!(d.selector_offset, 0);
                 debug_assert_ne!(d.selector_offset, d.selector.len());
                 let invalidation = Invalidation::new(&d, self.host, None);
-                break push_invalidation(
+                invalidated |= push_invalidation(
                     invalidation,
                     d.invalidation_kind(),
                     descendant_invalidations,
                     sibling_invalidations,
                 );
             }
+            invalidated
         };
 
         if invalidated_self {
