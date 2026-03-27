@@ -5,19 +5,10 @@
  * Laddas före testharness.js.
  */
 
-// ─── CharacterData: MIGRERAD till native Rust (dom_bridge/mod.rs) ────────────
-// .data, .nodeValue, .length registreras nu som Rust getter/setter i make_element_object()
-// för nodeType 3 (Text), 7 (PI), 8 (Comment).
-// CharacterData-metoder (substringData, appendData, etc.) är redan Rust-native i chardata.rs.
-(function() {
-  if (typeof document === 'undefined') return;
-  // Minimal patchCharacterData — nu bara för prototyp-patching
-  function patchCharacterData(node) {
-    if (!node || typeof node !== 'object') return node;
-    return node;
-  }
-  globalThis.__patchCharacterData = patchCharacterData;
-})();
+// ─── CharacterData: native Rust (dom_bridge/mod.rs) ──────────────────────────
+// .data, .nodeValue, .length = Rust getter/setter i make_element_object()
+// substringData, appendData, etc. = Rust-native i chardata.rs
+globalThis.__patchCharacterData = function(n) { return n; };
 
 // ─── document.implementation ─────────────────────────────────────────────────
 // DOMImplementation med createDocument, createHTMLDocument, createDocumentType
@@ -173,33 +164,8 @@
 
 // ─── document.title — MIGRERAD till native Rust (DocTitleGetter/Setter) ──────
 
-// ─── document.URL ───────────────────────────────────────────────────────────
-(function() {
-  if (typeof document !== 'undefined' && !('URL' in document)) {
-    Object.defineProperty(document, 'URL', {
-      get: function() {
-        return (typeof window !== 'undefined' && window.location)
-          ? window.location.href
-          : 'about:blank';
-      },
-      configurable: true
-    });
-  }
-})();
-
-// ─── document.location alias ────────────────────────────────────────────────
-(function() {
-  if (typeof document !== 'undefined' && typeof window !== 'undefined') {
-    if (!document.location && window.location) {
-      try {
-        Object.defineProperty(document, 'location', {
-          get: function() { return window.location; },
-          configurable: true
-        });
-      } catch(e) {}
-    }
-  }
-})();
+// ─── document.URL / document.location — native Rust (register_document) ──────
+// URL sätts till "about:blank" i Rust. location alias sätts i register_window.
 
 // ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
 // MIGRERAD: UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent,
@@ -310,18 +276,10 @@
   }
 })();
 
-// ─── node.compareDocumentPosition() ─────────────────────────────────────────
-// Returnerar bitmask: DISCONNECTED=1, PRECEDING=2, FOLLOWING=4,
-// Node-konstanter — nu native i dom_bridge.rs (register_window)
-// Fallback om dom_bridge inte körts ännu (edge case)
-(function() {
-  if (typeof Node === 'undefined') {
-    // Minimal fallback — dom_bridge.rs sätter riktiga Node-konstanter
-    globalThis.Node = function Node() {};
-  }
-})();
+// ─── node.compareDocumentPosition — native Rust (register_window) ────────────
+// Node-konstanter sätts av dom_bridge.rs
 
-// ─── Element.remove() ───────────────────────────────────────────────────────
+// ─── Element/Node metoder — native Rust (dom_bridge.rs) ─────────────────────
 // Syntaktisk socker: el.remove() === el.parentNode.removeChild(el)
 // Patcha via document.createElement wrapper
 (function() {
@@ -615,71 +573,13 @@
   }
 })();
 
-// ─── document.createElementNS ────────────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.createElementNS) {
-    document.createElementNS = function(ns, qname) {
-      var local = qname.indexOf(':') >= 0 ? qname.split(':')[1] : qname;
-      var el = document.createElement(local);
-      if (el) {
-        try {
-          Object.defineProperty(el, 'namespaceURI', { value: ns, configurable: true });
-          if (qname.indexOf(':') >= 0) {
-            Object.defineProperty(el, 'prefix', { value: qname.split(':')[0], configurable: true });
-          }
-          Object.defineProperty(el, 'localName', { value: local, configurable: true });
-        } catch(e) {}
-      }
-      return el;
-    };
-  }
-})();
+// ─── document.createElementNS — native Rust (CreateElementNS) ────────────────
+// ─── document.getElementsByTagNameNS — native Rust (GetElementsByTagNameNSDoc) ─
 
-// ─── document.getElementsByTagNameNS ─────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.getElementsByTagNameNS) {
-    document.getElementsByTagNameNS = function(ns, tag) {
-      if (tag === '*') return document.querySelectorAll('*');
-      return document.querySelectorAll(tag.toLowerCase());
-    };
-  }
-})();
+// ─── NodeFilter konstanter — MIGRERAD till window.rs (native) ────────────────
 
-// ─── NodeFilter konstanter ──────────────────────────────────────────────────
-(function() {
-  if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
-  NodeFilter.FILTER_ACCEPT = 1;
-  NodeFilter.FILTER_REJECT = 2;
-  NodeFilter.FILTER_SKIP = 3;
-  NodeFilter.SHOW_ALL = 0xFFFFFFFF;
-  NodeFilter.SHOW_ELEMENT = 0x1;
-  NodeFilter.SHOW_ATTRIBUTE = 0x2;
-  NodeFilter.SHOW_TEXT = 0x4;
-  NodeFilter.SHOW_CDATA_SECTION = 0x8;
-  NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
-  NodeFilter.SHOW_COMMENT = 0x80;
-  NodeFilter.SHOW_DOCUMENT = 0x100;
-  NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
-  NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
-})();
-
-// Range API — nu native i dom_bridge.rs (migrerad 2026-03-25)
-// document.createAttribute (behövs fortfarande som polyfill)
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.createAttribute) {
-    document.createAttribute = function(name) {
-      var attr = { nodeType: 2, nodeName: name.toLowerCase(), name: name.toLowerCase(), value: '', nodeValue: '', specified: true,
-        ownerElement: null, ownerDocument: document,
-        toString: function() { return '[object Attr]'; }
-      };
-      Object.defineProperty(attr, Symbol.toStringTag, { value: 'Attr' });
-      return attr;
-    };
-  }
-})();
+// Range API — native Rust (dom_bridge.rs)
+// document.createAttribute — native Rust (CreateAttribute handler)
 
 // ─── Document konstruktor → skapar riktig arena-backed doc ──────────────────
 (function() {

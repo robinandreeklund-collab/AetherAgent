@@ -977,6 +977,22 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         })();
 
+        // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────
+        if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
+        NodeFilter.FILTER_ACCEPT = 1;
+        NodeFilter.FILTER_REJECT = 2;
+        NodeFilter.FILTER_SKIP = 3;
+        NodeFilter.SHOW_ALL = 0xFFFFFFFF;
+        NodeFilter.SHOW_ELEMENT = 0x1;
+        NodeFilter.SHOW_ATTRIBUTE = 0x2;
+        NodeFilter.SHOW_TEXT = 0x4;
+        NodeFilter.SHOW_CDATA_SECTION = 0x8;
+        NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
+        NodeFilter.SHOW_COMMENT = 0x80;
+        NodeFilter.SHOW_DOCUMENT = 0x100;
+        NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
+        NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
+
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];
         // Range mutation notification via __nodeKey__ (anropas från Rust)
