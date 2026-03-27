@@ -187,12 +187,15 @@ fn sanitize_value(input_type: &str, value: &str, node: &crate::arena_dom::DomNod
             }
             String::new()
         }
-        // Datetime-local: YYYY-MM-DDTHH:MM[:SS[.mmm]]
+        // Datetime-local: YYYY-MM-DDTHH:MM[:SS[.mmm]] (T eller mellanslag som separator)
         "datetime-local" => {
-            let parts: Vec<&str> = value.splitn(2, 'T').collect();
+            // Normalisera: mellanslag → T
+            let normalized = value.replace(' ', "T");
+            let parts: Vec<&str> = normalized.splitn(2, 'T').collect();
             if parts.len() == 2 && is_valid_date_string(parts[0]) && is_valid_time_string(parts[1])
             {
-                value.to_string()
+                // Returnera med T som separator (kanonisk form)
+                format!("{}T{}", parts[0], parts[1])
             } else {
                 String::new()
             }

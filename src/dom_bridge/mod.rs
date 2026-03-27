@@ -6579,11 +6579,11 @@ struct InputValueAsNumberSetter {
 impl JsHandler for InputValueAsNumberSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let num = args.first().and_then(|v| v.as_number()).unwrap_or(f64::NAN);
-        if num.is_nan() {
+        if num.is_nan() || num.is_infinite() {
             return Err(throw_dom_exception(
                 ctx,
-                "InvalidStateError",
-                "The input element's value is not a number",
+                "TypeError",
+                "The value provided is not a finite number",
             ));
         }
         let mut s = self.state.borrow_mut();
@@ -6778,12 +6778,12 @@ fn input_value_to_number(input_type: &str, value: &str) -> f64 {
             // YYYY-MM → months since 1970-01
             let parts: Vec<&str> = value.split('-').collect();
             if parts.len() == 2 {
-                let y = parts[0].parse::<f64>().unwrap_or(f64::NAN);
-                let m = parts[1].parse::<f64>().unwrap_or(f64::NAN);
-                if y.is_nan() || m.is_nan() {
+                let y = parts[0].parse::<i64>().unwrap_or(0);
+                let m = parts[1].parse::<u32>().unwrap_or(0);
+                if y <= 0 || !(1..=12).contains(&m) {
                     return f64::NAN;
                 }
-                (y - 1970.0) * 12.0 + (m - 1.0)
+                (y as f64 - 1970.0) * 12.0 + (m as f64 - 1.0)
             } else {
                 f64::NAN
             }
@@ -6810,10 +6810,38 @@ fn number_to_input_value(input_type: &str, num: f64) -> String {
         "date" => ms_to_input_value("date", num),
         "time" => ms_to_input_value("time", num),
         "month" => {
-            let total_months = num as i64;
-            let y = 1970 + total_months / 12;
-            let m = (total_months % 12) + 1;
+            let total_months = num.floor() as i64;
+            let mut y = 1970 + total_months / 12;
+            let mut m = (total_months % 12) + 1;
+            if m <= 0 {
+                m += 12;
+                y -= 1;
+            }
             format!("{:04}-{:02}", y, m)
+        }
+        "week" => {
+            // ms → YYYY-Www
+            let days = (num / 86_400_000.0).floor() as i64;
+            let (y, _, _) = civil_from_days(days);
+            // Hitta veckonummer
+            let jan4 = days_from_civil(y, 1, 4);
+            let dow_jan4 = (jan4 + 4) % 7;
+            let week1_monday = jan4 - dow_jan4;
+            let week_num = ((days - week1_monday) / 7) + 1;
+            if (1..=53).contains(&week_num) {
+                format!("{:04}-W{:02}", y, week_num)
+            } else {
+                String::new()
+            }
+        }
+        "datetime-local" => {
+            let date_part = ms_to_input_value("date", num);
+            let time_part = ms_to_input_value("time", num % 86_400_000.0);
+            if !date_part.is_empty() && !time_part.is_empty() {
+                format!("{}T{}", date_part, time_part)
+            } else {
+                String::new()
+            }
         }
         _ => format!("{}", num),
     }
@@ -6934,8 +6962,10 @@ fn ms_to_input_value(input_type: &str, ms: f64) -> String {
             format!("{:04}-{:02}-{:02}", y, m, d)
         }
         "time" => {
-            let total_ms = ms as i64;
-            let h = (total_ms / 3_600_000) % 24;
+            // Wrap negativa värden till 0..86400000 (24h)
+            let day_ms = 86_400_000i64;
+            let total_ms = ((ms as i64 % day_ms) + day_ms) % day_ms;
+            let h = total_ms / 3_600_000;
             let min = (total_ms % 3_600_000) / 60_000;
             let s = (total_ms % 60_000) / 1000;
             let ms_part = total_ms % 1000;
