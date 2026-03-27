@@ -23,13 +23,14 @@ fn js_truthy(v: &Value) -> bool {
     true
 }
 
-/// (registrerings-index, callback, passive, once, capture)
+/// (registrerings-index, callback, passive, once, capture, callback_id)
 type ListenerEntry = (
     usize,
     Persistent<Function<'static>>,
     Option<bool>,
     bool,
     bool,
+    u64,
 );
 
 use crate::arena_dom::NodeKey;
@@ -347,7 +348,16 @@ impl JsHandler for DispatchEventHandler {
                             .iter()
                             .enumerate()
                             .filter(|(_, l)| l.event_type == event_type)
-                            .map(|(i, l)| (i, l.callback.clone(), l.passive, l.once, l.capture))
+                            .map(|(i, l)| {
+                                (
+                                    i,
+                                    l.callback.clone(),
+                                    l.passive,
+                                    l.once,
+                                    l.capture,
+                                    l.callback_id,
+                                )
+                            })
                             .collect()
                     })
                     .unwrap_or_default()
@@ -371,7 +381,7 @@ impl JsHandler for DispatchEventHandler {
             // Flagga: har vi växlat från capture→bubble vid AT_TARGET?
             let mut prev_was_capture = true;
 
-            for (reg_idx, cb, passive, once, capture) in sorted_callbacks {
+            for (reg_idx, cb, passive, once, capture, cb_id) in sorted_callbacks {
                 // Capture listeners körs bara i capture-fas (phase 1)
                 // Bubble listeners körs bara i bubble-fas (phase 3)
                 // AT_TARGET (phase 2): kör alla (redan sorterade ovan)
@@ -391,6 +401,23 @@ impl JsHandler for DispatchEventHandler {
                     break;
                 }
                 prev_was_capture = capture;
+
+                // Per spec: kontrollera att listenern fortfarande finns i live-listan
+                // (en tidigare listener kan ha anropat removeEventListener)
+                {
+                    let s = state.borrow();
+                    let still_exists = s
+                        .event_listeners
+                        .get(&listener_key)
+                        .map(|ls| {
+                            ls.iter()
+                                .any(|l| l.callback_id == cb_id && l.event_type == event_type)
+                        })
+                        .unwrap_or(false);
+                    if !still_exists {
+                        continue;
+                    }
+                }
 
                 if let Ok(func) = cb.restore(ctx) {
                     let is_passive = passive.unwrap_or(is_passive_default);
