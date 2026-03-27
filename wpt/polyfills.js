@@ -171,28 +171,7 @@
   }
 })();
 
-// ─── document.title ─────────────────────────────────────────────────────────
-// Många WPT-tester läser document.title för att identifiera sig.
-(function() {
-  if (typeof document !== 'undefined' && !('title' in document)) {
-    Object.defineProperty(document, 'title', {
-      get: function() {
-        var el = document.querySelector('title');
-        return el ? el.textContent : '';
-      },
-      set: function(val) {
-        var el = document.querySelector('title');
-        if (!el) {
-          el = document.createElement('title');
-          var head = document.head || document.querySelector('head');
-          if (head) head.appendChild(el);
-        }
-        el.textContent = val;
-      },
-      configurable: true
-    });
-  }
-})();
+// ─── document.title — MIGRERAD till native Rust (DocTitleGetter/Setter) ──────
 
 // ─── document.URL ───────────────────────────────────────────────────────────
 (function() {

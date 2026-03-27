@@ -943,6 +943,91 @@ impl JsHandler for QuerySelectorAll {
 
 /// Skapar en Document-nod i ArenaDom (för foreignDoc / createHTMLDocument)
 // ─── document.createEvent — native Rust (migrerad från polyfill) ─────────────
+// ─── document.title getter/setter — native Rust ─────────────────────────────
+struct DocTitleGetter {
+    state: SharedState,
+}
+impl JsHandler for DocTitleGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        // Hitta <title>-elementet i <head>
+        let title = find_title_text(&s.arena, s.arena.document);
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &title,
+        )?))
+    }
+}
+
+struct DocTitleSetter {
+    state: SharedState,
+}
+impl JsHandler for DocTitleSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let doc = s.arena.document;
+        // Hitta eller skapa <title>-element
+        if let Some(title_key) = find_title_element(&s.arena, doc) {
+            // Rensa barn och sätt ny text
+            let old_children: Vec<NodeKey> = s
+                .arena
+                .nodes
+                .get(title_key)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
+            for &ck in &old_children {
+                if let Some(c) = s.arena.nodes.get_mut(ck) {
+                    c.parent = None;
+                }
+            }
+            if let Some(title_node) = s.arena.nodes.get_mut(title_key) {
+                title_node.children.clear();
+            }
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(val.into()),
+                parent: Some(title_key),
+                children: vec![],
+                owner_doc: None,
+            });
+            if let Some(title_node) = s.arena.nodes.get_mut(title_key) {
+                title_node.children.push(text_key);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+/// Hitta text i <title>-element
+fn find_title_text(arena: &crate::arena_dom::ArenaDom, root: NodeKey) -> String {
+    if let Some(title_key) = find_title_element(arena, root) {
+        collect_text_descendants(arena, title_key)
+    } else {
+        String::new()
+    }
+}
+
+/// Hitta <title>-element i dokumentträdet
+fn find_title_element(arena: &crate::arena_dom::ArenaDom, key: NodeKey) -> Option<NodeKey> {
+    let node = arena.nodes.get(key)?;
+    if node.tag.as_deref() == Some("title") {
+        return Some(key);
+    }
+    for &child in &node.children {
+        if let Some(found) = find_title_element(arena, child) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 struct NativeCreateEvent;
 impl JsHandler for NativeCreateEvent {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -2273,6 +2358,21 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set("baseURI", "about:blank")?;
     doc.set("URL", "about:blank")?;
     doc.set("documentURI", "about:blank")?;
+
+    // document.title — native Rust getter/setter (migrerad från polyfill)
+    {
+        let gt_state = Rc::clone(&state);
+        let st_state = Rc::clone(&state);
+        doc.prop(
+            "title",
+            Accessor::new(
+                JsFn(DocTitleGetter { state: gt_state }),
+                JsFn(DocTitleSetter { state: st_state }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    }
 
     // __nativeQueryElements — returnerar element-objekt för live HTMLCollection
     doc.set(
