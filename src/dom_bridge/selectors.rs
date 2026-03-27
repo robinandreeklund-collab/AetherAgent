@@ -900,7 +900,25 @@ fn get_node_namespace(node: &crate::arena_dom::DomNode) -> &str {
 
 /// Samla alla element som matchar namespace + localName (case-sensitive).
 /// ns="*" matchar alla namespaces, local_name="*" matchar alla localNames.
+/// Söker bland alla ättlingar till root-noden (exkluderar root-noden själv).
 pub(super) fn find_all_by_tag_ns(
+    arena: &ArenaDom,
+    key: NodeKey,
+    ns: &str,
+    local_name: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_by_tag_ns_recursive(arena, child, ns, local_name, results);
+    }
+}
+
+fn find_all_by_tag_ns_recursive(
     arena: &ArenaDom,
     key: NodeKey,
     ns: &str,
@@ -921,7 +939,7 @@ pub(super) fn find_all_by_tag_ns(
     }
     let children: Vec<NodeKey> = node.children.clone();
     for child in children {
-        find_all_by_tag_ns(arena, child, ns, local_name, results);
+        find_all_by_tag_ns_recursive(arena, child, ns, local_name, results);
     }
 }
 

@@ -1113,13 +1113,9 @@ impl JsHandler for CreateElementNS {
             );
         }
 
-        // Skapa elementet — använd localName som tag
+        // Skapa elementet — lagra localName som-den-är i arena (case-sensitive).
+        // tagName/nodeName visas som uppercase för HTML namespace.
         let is_html_ns = namespace.as_deref() == Some(XHTML_NAMESPACE);
-        let tag_name = if is_html_ns {
-            local_name.to_ascii_lowercase()
-        } else {
-            local_name.clone()
-        };
 
         let key = {
             let mut s = self.state.borrow_mut();
@@ -1132,7 +1128,7 @@ impl JsHandler for CreateElementNS {
             );
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
-                tag: Some(tag_name),
+                tag: Some(local_name.clone()),
                 attributes: attrs,
                 text: None,
                 parent: None,
@@ -3975,6 +3971,18 @@ pub(super) fn make_element_object<'js>(
         );
         if let Ok(cached) = ctx.eval::<Value, _>(code.as_str()) {
             if !cached.is_undefined() && !cached.is_null() {
+                // Säkerställ att polyfill-patches applicerats (element skapade under
+                // initial DOM-parsing kan ha cachats innan polyfills laddades)
+                let patch_code = format!(
+                    concat!(
+                        "(function(el){{",
+                        "if(el&&el.nodeType===1&&!el.attributes&&globalThis.__patchChildNode)",
+                        "globalThis.__patchChildNode(el)",
+                        "}})(globalThis.__nodeCache.get({}))"
+                    ),
+                    key_bits
+                );
+                let _ = ctx.eval::<Value, _>(patch_code.as_str());
                 return Ok(cached);
             }
         }

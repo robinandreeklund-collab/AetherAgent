@@ -62,7 +62,7 @@
 
   if (!impl.createHTMLDocument) {
     impl.createHTMLDocument = function(title) {
-      // Bygg en riktig DOM-struktur via vår arena
+      // Bygg DOM-struktur
       var html = document.createElement('html');
       var head = document.createElement('head');
       var body = document.createElement('body');
@@ -70,31 +70,73 @@
       html.appendChild(body);
       if (title !== undefined) {
         var titleEl = document.createElement('title');
-        titleEl.textContent = title || '';
+        var titleText = (title === null) ? 'null' : String(title);
+        titleEl.appendChild(document.createTextNode(titleText));
         head.appendChild(titleEl);
       }
-      // Skapa ett dokument-liknande objekt med delegering till riktiga element
-      var doc = document.createDocumentFragment();
-      doc.appendChild(html);
-      // Lägg till document-liknande egenskaper
+      // Skapa doctype-nod
+      var doctype = null;
+      if (document.__createDocumentType) {
+        doctype = document.__createDocumentType('html', '', '');
+      } else {
+        doctype = { nodeType: 10, nodeName: 'html', name: 'html', publicId: '', systemId: '' };
+        try { Object.setPrototypeOf(doctype, typeof DocumentType !== 'undefined' ? DocumentType.prototype : {}); } catch(e) {}
+      }
+      // Skapa doc-objekt med Document.prototype for instanceof
+      var docProto = (typeof Document !== 'undefined' && Document.prototype) ? Document.prototype : {};
+      var doc = Object.create(docProto);
       doc.nodeType = 9;
       doc.nodeName = '#document';
+      doc.nodeValue = null;
+      // childNodes: [doctype, html]
+      doc._doctype = doctype;
+      doc._html = html;
+      Object.defineProperty(doc, 'childNodes', {
+        get: function() {
+          var cn = doctype ? [doctype, html] : [html];
+          cn.item = function(i) { return i >= 0 && i < this.length ? this[i] : null; };
+          return cn;
+        },
+        configurable: true
+      });
+      Object.defineProperty(doc, 'firstChild', {
+        get: function() { return doctype || html; },
+        configurable: true
+      });
+      Object.defineProperty(doc, 'lastChild', {
+        get: function() { return html; },
+        configurable: true
+      });
+      doc.hasChildNodes = function() { return true; };
+      doc.doctype = doctype;
       doc.documentElement = html;
       doc.head = head;
       doc.body = body;
-      doc.title = title || '';
-      // Per-doc implementation med ownerDoc-referens
+      // Metadata per spec
+      doc.URL = 'about:blank';
+      doc.documentURI = 'about:blank';
+      doc.compatMode = 'CSS1Compat';
+      doc.characterSet = 'UTF-8';
+      doc.charset = 'UTF-8';
+      doc.inputEncoding = 'UTF-8';
+      doc.contentType = 'text/html';
+      doc.location = null;
+      doc.title = (title === null) ? 'null' : (title || '');
+      // Per-doc DOMImplementation
       var docImpl = Object.create(document.implementation);
       docImpl._ownerDoc = doc;
       doc.implementation = docImpl;
-      doc.createElement = document.createElement.bind(document);
+      // Delegera createElement etc. till parent document
+      doc.createElement = function(tag) {
+        var el = document.createElement(tag);
+        return el;
+      };
       doc.createTextNode = document.createTextNode.bind(document);
       doc.createComment = document.createComment.bind(document);
       doc.createDocumentFragment = document.createDocumentFragment.bind(document);
       doc.createElementNS = document.createElementNS ? document.createElementNS.bind(document) : undefined;
-      // Query-metoder söker i detta dokumentets träd
+      // Query-metoder
       doc.getElementById = function(id) {
-        // Rekursiv sökning i hela dokumentträdet
         function findById(node, target) {
           if (node.id === target) return node;
           var kids = node.childNodes || [];
@@ -125,12 +167,11 @@
       };
       doc.createCDATASection = function(data) {
         var node = document.createComment(data);
-        node.nodeType = 4; // CDATA_SECTION_NODE
+        node.nodeType = 4;
         node.nodeName = '#cdata-section';
         return node;
       };
       doc.createProcessingInstruction = function(target, data) {
-        // Delegera till native om möjlig
         if (document.createProcessingInstruction) {
           return document.createProcessingInstruction(target, data);
         }
