@@ -25,7 +25,7 @@ pub(in crate::dom_bridge) fn get_value_mode(input_type: &str) -> &'static str {
     }
 }
 
-/// Hämta input.value respekterande value mode + dirty flag
+/// Hämta input.value respekterande value mode + dirty flag + sanitization
 pub(in crate::dom_bridge) fn get_input_value(state: &BridgeState, key: NodeKey) -> String {
     let node = match state.arena.nodes.get(key) {
         Some(n) => n,
@@ -35,12 +35,12 @@ pub(in crate::dom_bridge) fn get_input_value(state: &BridgeState, key: NodeKey) 
     let mode = get_value_mode(input_type);
     let key_bits = super::super::node_key_to_f64(key) as u64;
 
-    match mode {
+    let raw = match mode {
         "value" => {
             // "value" mode: dirty flag → använd intern state, annars attribut
             if let Some(es) = state.element_state.get(&key_bits) {
                 if es.value_dirty {
-                    return es.value.clone().unwrap_or_default();
+                    return sanitize_value(input_type, &es.value.clone().unwrap_or_default());
                 }
             }
             // Icke-dirty: läs default value (value-attribut)
@@ -55,16 +55,139 @@ pub(in crate::dom_bridge) fn get_input_value(state: &BridgeState, key: NodeKey) 
             node.get_attr("value").unwrap_or("on").to_string()
         }
         "filename" => {
-            // "filename" mode: kan inte sättas programmatiskt, returnerar "C:\fakepath\filename"
+            // "filename" mode: kan inte sättas programmatiskt
             if let Some(es) = state.element_state.get(&key_bits) {
                 if let Some(ref v) = es.value {
                     return v.clone();
                 }
             }
+            return String::new();
+        }
+        _ => return String::new(),
+    };
+    sanitize_value(input_type, &raw)
+}
+
+/// Value Sanitization Algorithm per HTML spec
+/// https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
+fn sanitize_value(input_type: &str, value: &str) -> String {
+    match input_type {
+        // Text/Search/Tel/Password: strip newlines
+        "text" | "search" | "tel" | "password" => value.replace(['\n', '\r'], ""),
+        // URL: strip newlines + leading/trailing whitespace
+        "url" => value.replace(['\n', '\r'], "").trim().to_string(),
+        // Email: strip newlines + leading/trailing whitespace
+        // Multiple: also per-address
+        "email" => value.replace(['\n', '\r'], "").trim().to_string(),
+        // Color: lowercase #rrggbb, default #000000
+        "color" => sanitize_color(value),
+        // Number: must be valid floating-point, else empty
+        "number" => {
+            if value.is_empty() {
+                return String::new();
+            }
+            match value.parse::<f64>() {
+                Ok(n) if n.is_finite() => value.to_string(),
+                _ => String::new(),
+            }
+        }
+        // Range: must be valid, else use default
+        "range" => {
+            if value.is_empty() {
+                return String::new();
+            }
+            match value.parse::<f64>() {
+                Ok(n) if n.is_finite() => value.to_string(),
+                _ => String::new(),
+            }
+        }
+        // Date: YYYY-MM-DD format validation
+        "date" => {
+            if is_valid_date_string(value) {
+                value.to_string()
+            } else {
+                String::new()
+            }
+        }
+        // Time: HH:MM[:SS[.mmm]] validation
+        "time" => {
+            if is_valid_time_string(value) {
+                value.to_string()
+            } else {
+                String::new()
+            }
+        }
+        // Month: YYYY-MM validation
+        "month" => {
+            let parts: Vec<&str> = value.split('-').collect();
+            if parts.len() == 2 {
+                if let (Ok(y), Ok(m)) = (parts[0].parse::<i32>(), parts[1].parse::<u32>()) {
+                    if y > 0 && (1..=12).contains(&m) {
+                        return value.to_string();
+                    }
+                }
+            }
             String::new()
         }
-        _ => String::new(),
+        // Week: YYYY-Www validation
+        "week" => {
+            if value.len() >= 8 && value.contains("-W") {
+                let parts: Vec<&str> = value.split("-W").collect();
+                if parts.len() == 2 {
+                    if let (Ok(y), Ok(w)) = (parts[0].parse::<i32>(), parts[1].parse::<u32>()) {
+                        if y > 0 && (1..=53).contains(&w) {
+                            return value.to_string();
+                        }
+                    }
+                }
+            }
+            String::new()
+        }
+        // Datetime-local: YYYY-MM-DDTHH:MM[:SS[.mmm]]
+        "datetime-local" => {
+            let parts: Vec<&str> = value.splitn(2, 'T').collect();
+            if parts.len() == 2 && is_valid_date_string(parts[0]) && is_valid_time_string(parts[1])
+            {
+                value.to_string()
+            } else {
+                String::new()
+            }
+        }
+        _ => value.to_string(),
     }
+}
+
+/// Sanitize color value: lowercase valid #rrggbb, else #000000
+fn sanitize_color(value: &str) -> String {
+    let v = value.trim();
+    if v.len() == 7 && v.starts_with('#') {
+        let hex = &v[1..];
+        if hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return format!("#{}", hex.to_ascii_lowercase());
+        }
+    }
+    "#000000".to_string()
+}
+
+fn is_valid_date_string(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let y = parts[0].parse::<i32>().unwrap_or(0);
+    let m = parts[1].parse::<u32>().unwrap_or(0);
+    let d = parts[2].parse::<u32>().unwrap_or(0);
+    y > 0 && (1..=12).contains(&m) && (1..=31).contains(&d)
+}
+
+fn is_valid_time_string(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    let h = parts[0].parse::<u32>().unwrap_or(99);
+    let m = parts[1].parse::<u32>().unwrap_or(99);
+    h <= 23 && m <= 59
 }
 
 /// Sätt input.value respekterande value mode
