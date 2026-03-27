@@ -329,13 +329,12 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
 
-        // Registrera DOM-objekt
+        // Node identity cache — MÅSTE initieras FÖRE register_document
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        // Node identity cache — samma NodeKey ger alltid samma JS-objekt
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(result) => {
@@ -457,11 +456,11 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(res) => {
@@ -608,12 +607,12 @@ fn eval_js_with_lifecycle_internal(
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        // Node identity cache — MÅSTE initieras FÖRE register_document
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        // Node identity cache
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -741,12 +740,12 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ =
             register_window_with_viewport(&ctx, Rc::clone(&state), viewport_width, viewport_height);
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -5468,7 +5467,19 @@ pub(super) fn make_element_object<'js>(
         let _ = ctx.eval::<Value, _>(patch_code.as_str());
     }
 
-    Ok(obj.into_value())
+    // Cacha i __nodeCache för identitetsgaranti (a === b vid samma NodeKey)
+    let val = obj.into_value();
+    {
+        let set_fn_code = format!(
+            "(function(v) {{ globalThis.__nodeCache && globalThis.__nodeCache.set({}, v); }})",
+            key_bits
+        );
+        if let Ok(set_fn) = ctx.eval::<Function, _>(set_fn_code.as_str()) {
+            let _ = set_fn.call::<_, Value>((val.clone(),));
+        }
+    }
+
+    Ok(val)
 }
 
 /// Konvertera data-attributnamn till camelCase (t.ex. "my-value" → "myValue")
