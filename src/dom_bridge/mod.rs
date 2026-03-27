@@ -6404,7 +6404,57 @@ struct ValidityStateGetter {
 impl JsHandler for ValidityStateGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let vs = dom_impls::constraint_validation::compute_validity(&s, self.key);
+        let mut vs = dom_impls::constraint_validation::compute_validity(&s, self.key);
+
+        // Korrigera patternMismatch med riktig JS RegExp-evaluering
+        let pattern_and_value: Option<(String, String)> = {
+            let node = s.arena.nodes.get(self.key);
+            node.and_then(|n| {
+                n.get_attr("pattern").map(|p| {
+                    let v = computed::get_effective_value(&s, self.key);
+                    (p.to_string(), v)
+                })
+            })
+        };
+        drop(s);
+
+        if let Some((pattern, value)) = pattern_and_value {
+            if !value.is_empty() {
+                // Per spec: pattern matchas som ^(?:pattern)$ med v-flag
+                // Per spec: mönster kompileras med v-flag.
+                // Om v-flag inte stöds, fallback till u-flag.
+                // Om BÅDA kastar → mönstret ignoreras (return true = match)
+                // Obs: QuickJS stöder kanske inte v-flag — fallback till u-flag
+                let escaped_value = value
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let escaped_pattern = pattern
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let js_code = format!(
+                    "(function(){{var v='{}';var p='{}';try{{var r=new RegExp('^(?:'+p+')$','v');return r.test(v);}}catch(e){{try{{var r2=new RegExp('^(?:'+p+')$','u');return r2.test(v);}}catch(e2){{return true;}}}}}})()",
+                    escaped_value, escaped_pattern
+                );
+                if let Ok(v) = ctx.eval::<Value, _>(js_code.as_str()) {
+                    let matches = v.as_bool().unwrap_or(true);
+                    vs.pattern_mismatch = !matches;
+                    vs.valid = !(vs.value_missing
+                        || vs.type_mismatch
+                        || vs.pattern_mismatch
+                        || vs.too_long
+                        || vs.too_short
+                        || vs.range_underflow
+                        || vs.range_overflow
+                        || vs.step_mismatch
+                        || vs.bad_input
+                        || vs.custom_error);
+                }
+            }
+        }
 
         // Skapa ValidityState JS-objekt med rätt prototype
         let obj_code =
