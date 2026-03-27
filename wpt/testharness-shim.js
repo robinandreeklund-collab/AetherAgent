@@ -35,6 +35,7 @@
   var _single_test_obj = null;
   var _timeout_multiplier = 1;
   var _promise_chain = Promise.resolve();
+  var _current_test = null;
 
   // ─── Callback registration (globala funktioner som testharness.js exponerar) ───
   function add_start_callback(fn) { _start_callbacks.push(fn); }
@@ -367,6 +368,7 @@
     _tests.push(t);
     _fire_start_callbacks_once();
 
+    _current_test = t;
     try {
       fn.call(t);
       if (t.status === NOTRUN) {
@@ -383,6 +385,12 @@
         t.status = FAIL;
         t.message = String(e);
       }
+    }
+    _current_test = null;
+
+    // Kör cleanup
+    for (var i = 0; i < t._cleanup_fns.length; i++) {
+      try { t._cleanup_fns[i](); } catch(e) { /* ignorera */ }
     }
 
     _fire_result_callbacks(t);
@@ -411,6 +419,7 @@
     _fire_start_callbacks_once();
 
     if (fn) {
+      _current_test = t;
       try {
         fn.call(t, t);
       } catch(e) {
@@ -420,6 +429,7 @@
         _pending_async--;
         _maybe_complete();
       }
+      _current_test = null;
     }
 
     return t;
@@ -436,6 +446,7 @@
 
     _promise_chain = _promise_chain.then(function() {
       return new Promise(function(resolve) {
+        _current_test = t;
         try {
           var result = fn.call(t, t);
           if (result && typeof result.then === "function") {
@@ -595,10 +606,6 @@
     // Assertions
     globalThis.assert_true = assert_true;
     globalThis.assert_false = assert_false;
-    // setup() — kör fn direkt (WPT setup-hook)
-    globalThis.setup = function(fn) {
-      if (typeof fn === 'function') fn();
-    };
     globalThis.assert_equals = assert_equals;
     globalThis.assert_not_equals = assert_not_equals;
     globalThis.assert_in_array = assert_in_array;
@@ -622,10 +629,81 @@
     globalThis.assert_between_inclusive = function(a, lo, hi, d) { if (!(a >= lo && a <= hi)) throw new AssertionError(d || ('expected ' + lo + ' <= ' + a + ' <= ' + hi)); };
     globalThis.assert_object_equals = function(a, b, d) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new AssertionError(d || ('expected ' + JSON.stringify(a) + ' equals ' + JSON.stringify(b))); };
     globalThis.assert_approx_equals = function(a, b, eps, d) { if (Math.abs(a - b) > (eps || 0)) throw new AssertionError(d || ('expected ' + a + ' ~= ' + b)); };
+    globalThis.assert_any = function(assert_func, actual, expected_array, description) {
+      for (var i = 0; i < expected_array.length; i++) {
+        try { assert_func(actual, expected_array[i]); return; } catch(e) { /* försök nästa */ }
+      }
+      throw new AssertionError((description ? description + ": " : "") + _format_value(actual) + " did not match any expected value");
+    };
+    globalThis.assert_not_own_property = function(object, name, description) {
+      if (object.hasOwnProperty(name)) throw new AssertionError((description ? description + ": " : "") + "unexpected own property " + name);
+    };
+    globalThis.assert_idl_attribute = function(object, name, description) {
+      if (!(name in object)) throw new AssertionError((description ? description + ": " : "") + "expected property " + name);
+    };
 
     // Test-objekt och statusar
     globalThis.Test = Test;
     globalThis.AssertionError = AssertionError;
+
+    // ─── Global add_cleanup (fallback när this ej är Test-objekt) ───
+    globalThis.add_cleanup = function(fn) {
+      if (_current_test) _current_test.add_cleanup(fn);
+    };
+
+    // ─── on_event — WPT testharness hjälpfunktion ───
+    globalThis.on_event = function(object, event, callback) {
+      object.addEventListener(event, callback, false);
+    };
+
+    // ─── step_timeout — global convenience wrapper ───
+    globalThis.step_timeout = function(fn, timeout) {
+      setTimeout(fn, timeout);
+    };
+
+    // ─── newHTMLDocument — skapar nytt tomt HTML-dokument ───
+    globalThis.newHTMLDocument = function() {
+      return document.implementation.createHTMLDocument('');
+    };
+
+    // ─── HTML5_ELEMENTS — lista på alla HTML5-element (för template-tester) ───
+    globalThis.HTML5_ELEMENTS = [
+      'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
+      'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
+      'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+      'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
+      'em', 'embed',
+      'fieldset', 'figcaption', 'figure', 'footer', 'form',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
+      'i', 'iframe', 'img', 'input', 'ins',
+      'kbd',
+      'label', 'legend', 'li', 'link',
+      'main', 'map', 'mark', 'menu', 'meta', 'meter',
+      'nav', 'noscript',
+      'object', 'ol', 'optgroup', 'option', 'output',
+      'p', 'param', 'picture', 'pre', 'progress',
+      'q',
+      'rp', 'rt', 'ruby',
+      's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source', 'span',
+      'strong', 'style', 'sub', 'summary', 'sup',
+      'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track',
+      'u', 'ul',
+      'var', 'video',
+      'wbr'
+    ];
+
+    // ─── assert_node — WPT helper som kontrollerar nod-properties ───
+    globalThis.assert_node = function(actual, expected) {
+      assert_true(actual !== null && actual !== undefined, "node should not be null/undefined");
+      if (expected.type !== undefined) assert_equals(actual.nodeType, expected.type, "nodeType");
+      if (expected.id !== undefined) assert_equals(actual.id, expected.id, "id");
+      if (expected.nodeName !== undefined) assert_equals(actual.nodeName, expected.nodeName, "nodeName");
+    };
+
+    // ─── test_equals (alias för generate_tests-liknande mönster) ───
+    globalThis.test_equals = function(a, b, desc) {
+      test(function() { assert_equals(a, b); }, desc);
+    };
   }
 
 })();

@@ -27,6 +27,7 @@ git sparse-checkout set \
     domparsing \
     domxpath \
     \
+    html/resources \
     html/dom \
     html/syntax \
     html/semantics \
