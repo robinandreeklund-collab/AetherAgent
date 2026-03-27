@@ -1966,6 +1966,7 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 JsFn(AddEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: None,
                 }),
             )?,
         )?;
@@ -1976,6 +1977,7 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 JsFn(RemoveEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: None,
                 }),
             )?,
         )?;
@@ -4532,6 +4534,7 @@ pub(super) fn make_element_object<'js>(
             JsFn(AddEventListenerHandler {
                 state: Rc::clone(state),
                 key,
+                override_key: None,
             }),
         )?,
     )?;
@@ -4542,6 +4545,7 @@ pub(super) fn make_element_object<'js>(
             JsFn(RemoveEventListenerHandler {
                 state: Rc::clone(state),
                 key,
+                override_key: None,
             }),
         )?,
     )?;

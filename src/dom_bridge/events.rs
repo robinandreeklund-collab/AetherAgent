@@ -2,6 +2,9 @@
 
 use rquickjs::{Ctx, Function, Persistent, Value};
 
+/// Unik nyckel för window event listeners — separerad från document
+pub(super) const WINDOW_EVENT_KEY: u64 = u64::MAX - 1;
+
 use crate::arena_dom::NodeKey;
 use crate::event_loop::JsHandler;
 
@@ -11,6 +14,8 @@ use super::{extract_node_key, make_element_object, node_contains, node_key_to_f6
 pub(super) struct AddEventListenerHandler {
     pub(super) state: SharedState,
     pub(super) key: NodeKey,
+    /// Om satt, använd denna istället för node_key_to_f64(key) som event listener key
+    pub(super) override_key: Option<u64>,
 }
 impl JsHandler for AddEventListenerHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -49,7 +54,9 @@ impl JsHandler for AddEventListenerHandler {
             (false, None, false)
         };
         let persistent = Persistent::save(ctx, func);
-        let key_bits = node_key_to_f64(self.key) as u64;
+        let key_bits = self
+            .override_key
+            .unwrap_or(node_key_to_f64(self.key) as u64);
         let mut s = self.state.borrow_mut();
         s.event_listeners
             .entry(key_bits)
@@ -68,6 +75,7 @@ impl JsHandler for AddEventListenerHandler {
 pub(super) struct RemoveEventListenerHandler {
     pub(super) state: SharedState,
     pub(super) key: NodeKey,
+    pub(super) override_key: Option<u64>,
 }
 impl JsHandler for RemoveEventListenerHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -76,7 +84,9 @@ impl JsHandler for RemoveEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let key_bits = node_key_to_f64(self.key) as u64;
+        let key_bits = self
+            .override_key
+            .unwrap_or(node_key_to_f64(self.key) as u64);
         let mut s = self.state.borrow_mut();
         if let Some(listeners) = s.event_listeners.get_mut(&key_bits) {
             listeners.retain(|l| l.event_type != event_type);
@@ -100,11 +110,47 @@ impl JsHandler for DispatchEventHandler {
             .unwrap_or(false);
 
         // Passive-by-default: touchstart, touchmove, wheel, mousewheel
+        // Per spec gäller BARA på window, document, och document.body targets
         let passive_default_types = ["touchstart", "touchmove", "wheel", "mousewheel"];
-        let is_passive_default = passive_default_types.contains(&event_type.as_str());
+        let is_passive_event_type = passive_default_types.contains(&event_type.as_str());
+        let body_key_bits = {
+            let s = self.state.borrow();
+            // Hitta <body> — första "body" child av document
+            let doc_key = s.arena.document;
+            s.arena
+                .nodes
+                .get(doc_key)
+                .map(|doc| {
+                    doc.children
+                        .iter()
+                        .find_map(|&child| {
+                            s.arena
+                                .nodes
+                                .get(child)
+                                .filter(|n| n.tag.as_deref() == Some("html"))
+                                .and_then(|html| {
+                                    html.children.iter().find_map(|&hc| {
+                                        s.arena
+                                            .nodes
+                                            .get(hc)
+                                            .filter(|n| n.tag.as_deref() == Some("body"))
+                                            .map(|_| node_key_to_f64(hc) as u64)
+                                    })
+                                })
+                        })
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+        let doc_key_bits = {
+            let s = self.state.borrow();
+            node_key_to_f64(s.arena.document) as u64
+        };
 
         // ── Bygg propagation path: target → parent → ... → document → window ──
         let mut path: Vec<u64> = Vec::new();
+        // Sentinel-värde för window — skiljer från document-noden
+        const WINDOW_SENTINEL: u64 = u64::MAX;
         let window_key_bits: u64;
         {
             let s = self.state.borrow();
@@ -113,16 +159,14 @@ impl JsHandler for DispatchEventHandler {
                 path.push(node_key_to_f64(key) as u64);
                 current = s.arena.nodes.get(key).and_then(|n| n.parent);
             }
-            // Window-events lagras med doc_key — lägg till document som sista steg
-            // om den inte redan finns (window = document i vår modell)
-            window_key_bits = node_key_to_f64(s.arena.document) as u64;
+            // Window-event-listeners lagras med WINDOW_EVENT_KEY
+            window_key_bits = WINDOW_EVENT_KEY;
         }
-        // Lägg till "window" (= document key) i slutet av pathen om den inte redan finns
-        // Window ska vara den yttersta noden i propagation
-        if path.last().copied() != Some(window_key_bits) && !path.is_empty() {
-            path.push(window_key_bits);
+        // Lägg till window-sentinel i slutet av pathen
+        if !path.is_empty() {
+            path.push(WINDOW_SENTINEL);
         }
-        // path[0] = target, path[last] = root/window
+        // path[0] = target, path[last] = window sentinel
         // Capture order: root → ... → target (reversed path)
         // Bubble order: target → ... → root (path as-is)
 
@@ -152,12 +196,28 @@ impl JsHandler for DispatchEventHandler {
                              is_passive_default: bool,
                              window_bits: u64|
          -> (bool, bool) {
+            // Hämta listeners med rätt key — window sentinel → doc key
+            let listener_key = if node_bits == WINDOW_SENTINEL {
+                window_bits
+            } else {
+                node_bits
+            };
             // Sätt currentTarget och eventPhase
             if let Some(ev) = event_val.as_object() {
-                let key = crate::dom_bridge::f64_to_node_key(node_bits as f64);
-                // Sätt currentTarget — om det är window-noden, använd globalThis
-                let ct_val = if node_bits == window_bits {
-                    ctx.globals().into_value()
+                let key = crate::dom_bridge::f64_to_node_key(listener_key as f64);
+                // Sätt currentTarget — återanvänd cachade objekt för window/document
+                let is_doc_node = {
+                    let s = state.borrow();
+                    node_key_to_f64(s.arena.document) as u64 == node_bits
+                };
+                let ct_val = if node_bits == WINDOW_SENTINEL {
+                    ctx.globals()
+                        .get::<_, Value>("window")
+                        .unwrap_or_else(|_| ctx.globals().into_value())
+                } else if is_doc_node {
+                    ctx.globals()
+                        .get::<_, Value>("document")
+                        .unwrap_or_else(|_| Value::new_null(ctx.clone()))
                 } else if let Ok(ct) = make_element_object(ctx, key, state) {
                     ct
                 } else {
@@ -170,7 +230,7 @@ impl JsHandler for DispatchEventHandler {
             let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>, bool, bool)> = {
                 let s = state.borrow();
                 s.event_listeners
-                    .get(&node_bits)
+                    .get(&listener_key)
                     .map(|listeners| {
                         listeners
                             .iter()
@@ -230,7 +290,7 @@ impl JsHandler for DispatchEventHandler {
             // Ta bort once-listeners
             if !once_to_remove.is_empty() {
                 let mut s = state.borrow_mut();
-                if let Some(listeners) = s.event_listeners.get_mut(&node_bits) {
+                if let Some(listeners) = s.event_listeners.get_mut(&listener_key) {
                     let mut type_idx = 0usize;
                     let mut remove_set: Vec<usize> = vec![];
                     for (i, l) in listeners.iter().enumerate() {
@@ -257,6 +317,10 @@ impl JsHandler for DispatchEventHandler {
                 break;
             }
             let phase = if node_bits == path[0] { 2 } else { 1 };
+            let passive_for_node = is_passive_event_type
+                && (node_bits == WINDOW_SENTINEL
+                    || node_bits == doc_key_bits
+                    || node_bits == body_key_bits);
             let (stop_prop, _stop_imm) = run_listeners(
                 ctx,
                 node_bits,
@@ -264,7 +328,7 @@ impl JsHandler for DispatchEventHandler {
                 &self.state,
                 &event_val,
                 &event_type,
-                is_passive_default,
+                passive_for_node,
                 window_key_bits,
             );
             if stop_prop {
@@ -278,6 +342,10 @@ impl JsHandler for DispatchEventHandler {
                 if stopped {
                     break;
                 }
+                let passive_for_node = is_passive_event_type
+                    && (node_bits == WINDOW_SENTINEL
+                        || node_bits == doc_key_bits
+                        || node_bits == body_key_bits);
                 let (stop_prop, _stop_imm) = run_listeners(
                     ctx,
                     node_bits,
@@ -285,7 +353,7 @@ impl JsHandler for DispatchEventHandler {
                     &self.state,
                     &event_val,
                     &event_type,
-                    is_passive_default,
+                    passive_for_node,
                     window_key_bits,
                 );
                 if stop_prop {

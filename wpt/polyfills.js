@@ -297,7 +297,7 @@
     'clipboardevent': ClipboardEvent,
     'submitevent': SubmitEvent,
     'svgevents': Event, 'svgevent': Event,
-    'textevent': typeof CompositionEvent !== 'undefined' ? CompositionEvent : Event,
+    'textevent': 'TextEvent',
     'mutationevent': Event, 'mutationevents': Event,
     'devicemotionevent': DeviceMotionEvent,
     'deviceorientationevent': DeviceOrientationEvent,
@@ -313,6 +313,20 @@
     var Ctor = aliases[key];
     if (!Ctor) {
       throw new DOMException("The operation is not supported.", "NotSupportedError");
+    }
+    // TextEvent har illegal constructor — skapa via Object.create
+    if (Ctor === 'TextEvent') {
+      var e = Object.create(TextEvent.prototype);
+      e.type = ''; e.bubbles = false; e.cancelable = false;
+      e.defaultPrevented = false; e.target = null; e.currentTarget = null;
+      e.eventPhase = 0; e.isTrusted = false;
+      e.timeStamp = Date.now();
+      e.view = null; e.detail = 0; e.data = '';
+      e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
+      e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
+      e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
+      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
+      return e;
     }
     var e = new Ctor('');
     e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };

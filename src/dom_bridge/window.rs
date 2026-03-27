@@ -6,7 +6,9 @@ use rquickjs::{object::Accessor, Ctx, Function, Object, Value};
 
 use crate::event_loop::{JsFn, JsHandler};
 
-use super::events::{AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler};
+use super::events::{
+    self, AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler,
+};
 use super::state::SharedState;
 use super::style::kebab_to_camel;
 use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_query_matches};
@@ -301,10 +303,8 @@ pub(super) fn register_window_with_viewport<'js>(
 
     // addEventListener / removeEventListener / dispatchEvent på window
     {
-        // Använd document-nyckel som proxy — window-events lagras där
+        // Window-listeners lagras med WINDOW_EVENT_KEY, separat från document
         let doc_key = state.borrow().arena.document;
-        // Separata handlers med nyckel 0 (speciell window-markör)
-        // Vi använder doc_key+1 offset som unik nyckel
         win.set(
             "addEventListener",
             Function::new(
@@ -312,6 +312,7 @@ pub(super) fn register_window_with_viewport<'js>(
                 JsFn(AddEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: Some(events::WINDOW_EVENT_KEY),
                 }),
             )?,
         )?;
@@ -322,6 +323,7 @@ pub(super) fn register_window_with_viewport<'js>(
                 JsFn(RemoveEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: Some(events::WINDOW_EVENT_KEY),
                 }),
             )?,
         )?;
@@ -942,6 +944,22 @@ pub(super) fn register_window_with_viewport<'js>(
                 this.initUIEvent(type, bubbles, cancelable, view, 0);
                 this.data = data !== undefined ? String(data) : '';
             };
+
+            // ── TextEvent (legacy, created only via createEvent) ──
+            if (!globalThis.TextEvent) {
+                globalThis.TextEvent = function TextEvent() {
+                    throw new TypeError("Illegal constructor");
+                };
+                TextEvent.prototype = Object.create(UIEvent.prototype);
+                TextEvent.prototype.constructor = TextEvent;
+                TextEvent.prototype.data = '';
+                TextEvent.prototype.initTextEvent = function(type, bubbles, cancelable, view, data) {
+                    if (arguments.length < 1) throw new TypeError("Failed to execute 'initTextEvent': 1 argument required, but only 0 present.");
+                    if (this._dispatching) return;
+                    this.initUIEvent(type, bubbles, cancelable, view, 0);
+                    this.data = data !== undefined ? String(data) : 'undefined';
+                };
+            }
         })();
 
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
