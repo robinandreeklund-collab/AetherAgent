@@ -9,7 +9,7 @@
 
 use crate::arena_dom::{NodeKey, NodeType};
 
-use super::super::computed::{compute_will_validate, get_effective_value};
+use super::super::computed::get_effective_value;
 use super::super::state::BridgeState;
 
 /// ValidityState — de 11 constraint-flaggorna per HTML spec
@@ -35,11 +35,6 @@ pub(in crate::dom_bridge) fn compute_validity(state: &BridgeState, key: NodeKey)
         valid: true,
         ..Default::default()
     };
-
-    // Element som inte valideras har alltid valid=true
-    if !compute_will_validate(state, key) {
-        return vs;
-    }
 
     let node = match state.arena.nodes.get(key) {
         Some(n) => n,
@@ -337,24 +332,101 @@ fn is_valid_url(url: &str) -> bool {
 }
 
 /// Matcha pattern mot värde (per spec: ^(?:pattern)$)
+/// Utan regex-crate stöds: literal match, .* (any), enkla character classes.
+/// För komplexa mönster returnerar None (okänt) — behandlas som "no mismatch".
 fn matches_pattern(value: &str, pattern: &str) -> bool {
-    // Enkelt: stöd literal match och vanliga regex-mönster
-    // Full regex-support kräver regex-crate — vi undviker den dependencyn
-    // och gör en enkel exakt-match + grundläggande fallback
+    // Exakt literal match
     if value == pattern {
         return true;
     }
-    // Om pattern börjar med ^ och slutar med $, extrahera inre
-    let inner = pattern
-        .strip_prefix('^')
-        .unwrap_or(pattern)
-        .strip_suffix('$')
-        .unwrap_or(pattern);
-    if value == inner {
+
+    // Enkel .* (matchar allt)
+    if pattern == ".*" || pattern == ".+" && !value.is_empty() {
         return true;
     }
-    // För enkla character class patterns [a-z]+ etc, fallback till true
-    // (full regex-implementation är utanför scope här)
-    // Bättre att inte falskt rapportera patternMismatch
+
+    // Pattern "." matchar exakt ett tecken
+    if pattern == "." {
+        return value.chars().count() == 1;
+    }
+
+    // Enkel alternativ: "a|b|c"
+    if !pattern.contains('[') && !pattern.contains('(') && pattern.contains('|') {
+        return pattern.split('|').any(|alt| value == alt.trim());
+    }
+
+    // Enkla vanliga mönster: [a-zA-Z]+ etc.
+    // Implementera grundläggande karaktärsklasser
+    if let Some(result) = try_simple_pattern_match(value, pattern) {
+        return result;
+    }
+
+    // Okänt mönster — konservativt: anta att det matchar
+    // (undviker falska patternMismatch-rapporter)
     true
+}
+
+/// Försök matcha enkla mönster utan full regex.
+/// Returnerar Some(true/false) om mönstret förstås, None annars.
+fn try_simple_pattern_match(value: &str, pattern: &str) -> Option<bool> {
+    // [a-z]+ / [a-zA-Z0-9]+ etc.
+    let trimmed = pattern.trim();
+
+    // Enkel character class + quantifier: [chars]+ eller [chars]*
+    if trimmed.starts_with('[') {
+        if let Some(bracket_end) = trimmed.find(']') {
+            let class_spec = &trimmed[1..bracket_end];
+            let after = &trimmed[bracket_end + 1..];
+            let (min_count, max_count) = match after {
+                "+" => (1usize, usize::MAX),
+                "*" => (0, usize::MAX),
+                "?" => (0, 1),
+                "" => (1, 1),
+                _ => return None, // Komplex quantifier
+            };
+
+            let char_matches = |ch: char| -> bool { char_in_class(ch, class_spec) };
+
+            let matching: usize = value.chars().filter(|&c| char_matches(c)).count();
+            let total: usize = value.chars().count();
+
+            // Alla tecken måste matcha klassen, och count i rätt range
+            if total == matching && total >= min_count && total <= max_count {
+                return Some(true);
+            }
+            return Some(false);
+        }
+    }
+
+    None
+}
+
+/// Kolla om ett tecken matchar en character class spec (t.ex. "a-zA-Z0-9_")
+fn char_in_class(ch: char, spec: &str) -> bool {
+    let mut chars = spec.chars().peekable();
+    let mut negated = false;
+    if chars.peek() == Some(&'^') {
+        negated = true;
+        chars.next();
+    }
+    let mut matched = false;
+    while let Some(c) = chars.next() {
+        if chars.peek() == Some(&'-') {
+            chars.next(); // konsumera '-'
+            if let Some(end) = chars.next() {
+                if ch >= c && ch <= end {
+                    matched = true;
+                }
+                continue;
+            }
+        }
+        if ch == c {
+            matched = true;
+        }
+    }
+    if negated {
+        !matched
+    } else {
+        matched
+    }
 }

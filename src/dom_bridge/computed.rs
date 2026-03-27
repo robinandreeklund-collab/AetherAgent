@@ -108,73 +108,13 @@ pub(super) fn compute_will_validate(state: &BridgeState, key: NodeKey) -> bool {
 }
 
 /// checkValidity — returnerar true om inga constraint violations
+/// Per spec: true om element ej är candidate for validation ELLER om valid
 pub(super) fn check_validity(state: &BridgeState, key: NodeKey) -> bool {
     if !compute_will_validate(state, key) {
         return true;
     }
-    let node = match state.arena.nodes.get(key) {
-        Some(n) => n,
-        None => return true,
-    };
-    let key_bits = super::node_key_to_f64(key) as u64;
-
-    // Custom validity tar företräde
-    if let Some(es) = state.element_state.get(&key_bits) {
-        if !es.custom_validity.is_empty() {
-            return false;
-        }
-    }
-
-    let value = get_effective_value(state, key);
-    let tag = node.tag.as_deref().unwrap_or("");
-
-    // required
-    if node.has_attr("required") && value.is_empty() {
-        if tag == "select" {
-            // select: required means selectedIndex must not be -1 or first option empty
-            return false;
-        }
-        return false;
-    }
-
-    if tag == "input" {
-        // minLength
-        if let Some(ml) = node
-            .get_attr("minlength")
-            .and_then(|v| v.parse::<usize>().ok())
-        {
-            if !value.is_empty() && value.len() < ml {
-                return false;
-            }
-        }
-        // maxLength
-        if let Some(ml) = node
-            .get_attr("maxlength")
-            .and_then(|v| v.parse::<usize>().ok())
-        {
-            if value.len() > ml {
-                return false;
-            }
-        }
-        // min/max för numeriska typer
-        let input_type = node.get_attr("type").unwrap_or("text");
-        if matches!(input_type, "number" | "range") {
-            if let Ok(num_val) = value.parse::<f64>() {
-                if let Some(min) = node.get_attr("min").and_then(|v| v.parse::<f64>().ok()) {
-                    if num_val < min {
-                        return false;
-                    }
-                }
-                if let Some(max) = node.get_attr("max").and_then(|v| v.parse::<f64>().ok()) {
-                    if num_val > max {
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-
-    true
+    let vs = super::dom_impls::constraint_validation::compute_validity(state, key);
+    vs.valid
 }
 
 /// validationMessage — returnerar aktuellt valideringsmeddelande
