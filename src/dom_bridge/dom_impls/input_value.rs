@@ -81,9 +81,14 @@ fn sanitize_value(input_type: &str, value: &str, node: &crate::arena_dom::DomNod
         "email" => value.replace(['\n', '\r'], "").trim().to_string(),
         // Color: lowercase #rrggbb, default #000000
         "color" => sanitize_color(value),
-        // Number: must be valid floating-point, else empty
+        // Number: must be valid floating-point number per spec, else empty
+        // Per spec: no leading +, no trailing dot, must be parseable
         "number" => {
             if value.is_empty() {
+                return String::new();
+            }
+            // Ogiltig: börjar med +, slutar med ., eller inte parserbart
+            if value.starts_with('+') || value.ends_with('.') {
                 return String::new();
             }
             match value.parse::<f64>() {

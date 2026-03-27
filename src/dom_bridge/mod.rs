@@ -6305,6 +6305,9 @@ fn register_dom_impl_properties<'js>(
                 }),
             )?,
         )?;
+        // files och list — null per spec (vi stöder inte FileList/datalist-koppling)
+        obj.set("files", Value::new_null(ctx.clone()))?;
+        obj.set("list", Value::new_null(ctx.clone()))?;
     }
 
     // ─── Select element: value, selectedIndex med riktig option-logik ─────
@@ -6626,8 +6629,25 @@ impl JsHandler for InputValueAsDateGetter {
         if value.is_empty() {
             return Ok(Value::new_null(ctx.clone()));
         }
-        // Konvertera till ms-since-epoch via Date.parse
-        let ms = input_value_to_ms(input_type, &value);
+        // Konvertera till ms-since-epoch
+        let ms = match input_type {
+            "month" => {
+                // Month: YYYY-MM → Date(YYYY, MM-1, 1) UTC
+                let parts: Vec<&str> = value.split('-').collect();
+                if parts.len() == 2 {
+                    let y = parts[0].parse::<i64>().unwrap_or(0);
+                    let m = parts[1].parse::<u32>().unwrap_or(0);
+                    if y > 0 && (1..=12).contains(&m) {
+                        days_from_civil(y, m, 1) as f64 * 86_400_000.0
+                    } else {
+                        f64::NAN
+                    }
+                } else {
+                    f64::NAN
+                }
+            }
+            _ => input_value_to_ms(input_type, &value),
+        };
         if ms.is_nan() {
             return Ok(Value::new_null(ctx.clone()));
         }
@@ -6671,15 +6691,20 @@ impl JsHandler for InputValueAsDateSetter {
             let es = s.element_state.entry(key_bits).or_default();
             es.value = Some(String::new());
             es.value_dirty = true;
-        } else if let Some(obj) = val.and_then(|v| v.as_object()) {
-            // Hämta getTime() från Date-objektet
-            if let Ok(get_time) = obj.get::<_, Function>("getTime") {
-                if let Ok(ms_val) = get_time.call::<_, Value>(()) {
+        } else if let Some(date_val) = val {
+            // Anropa getTime() via JS eval (korrekt this-binding)
+            drop(s);
+            let js_code = "(function(d){return typeof d==='object'&&d&&typeof d.getTime==='function'?d.getTime():NaN;})";
+            if let Ok(get_time_fn) = ctx.eval::<Function, _>(js_code) {
+                if let Ok(ms_val) = get_time_fn.call::<_, Value>((date_val.clone(),)) {
                     if let Some(ms) = ms_val.as_number() {
-                        let val_str = ms_to_input_value(&input_type, ms);
-                        let es = s.element_state.entry(key_bits).or_default();
-                        es.value = Some(val_str);
-                        es.value_dirty = true;
+                        if !ms.is_nan() && ms.is_finite() {
+                            let val_str = ms_to_input_value(&input_type, ms);
+                            let mut s2 = self.state.borrow_mut();
+                            let es = s2.element_state.entry(key_bits).or_default();
+                            es.value = Some(val_str);
+                            es.value_dirty = true;
+                        }
                     }
                 }
             }

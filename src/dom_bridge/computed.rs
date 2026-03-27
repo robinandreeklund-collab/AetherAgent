@@ -95,8 +95,11 @@ pub(super) fn compute_will_validate(state: &BridgeState, key: NodeKey) -> bool {
     if tag == "input" && node.has_attr("readonly") {
         return false;
     }
-    if tag == "input" && node.get_attr("type") == Some("hidden") {
-        return false;
+    if tag == "input" {
+        let t = node.get_attr("type").unwrap_or("text");
+        if matches!(t, "hidden" | "reset" | "button") {
+            return false;
+        }
     }
     if tag == "button" {
         let btn_type = node.get_attr("type").unwrap_or("submit");
