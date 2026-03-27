@@ -117,6 +117,42 @@ pub(super) fn check_validity(state: &BridgeState, key: NodeKey) -> bool {
     vs.valid
 }
 
+/// form.checkValidity — kontrollerar alla submittable descendants
+/// Returnerar true om alla element är valid
+pub(super) fn form_check_validity(state: &BridgeState, form_key: NodeKey) -> bool {
+    let node = match state.arena.nodes.get(form_key) {
+        Some(n) => n,
+        None => return true,
+    };
+    // Om det inte är ett <form>, delegera till vanlig check
+    if node.tag.as_deref() != Some("form") {
+        return check_validity(state, form_key);
+    }
+    // Samla alla submittable descendants
+    let mut all_valid = true;
+    check_descendants_validity(state, form_key, &mut all_valid);
+    all_valid
+}
+
+fn check_descendants_validity(state: &BridgeState, key: NodeKey, all_valid: &mut bool) {
+    let children = match state.arena.nodes.get(key) {
+        Some(n) => n.children.clone(),
+        None => return,
+    };
+    for child in children {
+        if let Some(node) = state.arena.nodes.get(child) {
+            if matches!(
+                node.tag.as_deref(),
+                Some("input") | Some("select") | Some("textarea") | Some("button")
+            ) && !check_validity(state, child)
+            {
+                *all_valid = false;
+            }
+        }
+        check_descendants_validity(state, child, all_valid);
+    }
+}
+
 /// validationMessage — returnerar aktuellt valideringsmeddelande
 pub(super) fn get_validation_message(state: &BridgeState, key: NodeKey) -> String {
     let key_bits = super::node_key_to_f64(key) as u64;

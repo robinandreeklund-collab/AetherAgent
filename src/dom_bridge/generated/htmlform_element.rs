@@ -378,9 +378,9 @@ pub(crate) struct HTMLFormElementCheckValidity {
     pub(crate) key: NodeKey,
 }
 impl JsHandler for HTMLFormElementCheckValidity {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = super::super::computed::check_validity(&s, self.key);
+        let val = super::super::computed::form_check_validity(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -390,9 +390,9 @@ pub(crate) struct HTMLFormElementReportValidity {
     pub(crate) key: NodeKey,
 }
 impl JsHandler for HTMLFormElementReportValidity {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = super::super::computed::check_validity(&s, self.key);
+        let val = super::super::computed::form_check_validity(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
