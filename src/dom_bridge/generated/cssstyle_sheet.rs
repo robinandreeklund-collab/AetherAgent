@@ -97,14 +97,16 @@ pub(crate) fn register_cssstyle_sheet<'js>(
         Accessor::new_get(JsFn(CSSStyleSheetGetOwnerRule {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "cssRules",
         Accessor::new_get(JsFn(CSSStyleSheetGetCssRules {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "insertRule",

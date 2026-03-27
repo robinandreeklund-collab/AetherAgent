@@ -147,7 +147,8 @@ pub(crate) fn register_domtoken_list<'js>(
         Accessor::new_get(JsFn(DOMTokenListGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -160,7 +161,8 @@ pub(crate) fn register_domtoken_list<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.set(
         "item",

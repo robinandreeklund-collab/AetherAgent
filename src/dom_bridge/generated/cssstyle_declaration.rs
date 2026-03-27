@@ -186,21 +186,24 @@ pub(crate) fn register_cssstyle_declaration<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "length",
         Accessor::new_get(JsFn(CSSStyleDeclarationGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "parentRule",
         Accessor::new_get(JsFn(CSSStyleDeclarationGetParentRule {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "cssFloat",
@@ -213,7 +216,8 @@ pub(crate) fn register_cssstyle_declaration<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.set(
         "item",

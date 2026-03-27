@@ -389,7 +389,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "srcdoc",
@@ -402,7 +403,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -415,7 +417,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "sandbox",
@@ -428,7 +431,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "allowFullscreen",
@@ -441,7 +445,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "allow",
@@ -454,7 +459,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "width",
@@ -467,7 +473,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "height",
@@ -480,7 +487,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -493,7 +501,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "loading",
@@ -506,7 +515,8 @@ pub(crate) fn register_htmliframe_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

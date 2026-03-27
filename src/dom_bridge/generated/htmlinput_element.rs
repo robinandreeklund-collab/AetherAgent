@@ -1250,7 +1250,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "alt",
@@ -1263,7 +1264,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "autocomplete",
@@ -1276,7 +1278,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defaultChecked",
@@ -1289,7 +1292,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "checked",
@@ -1302,7 +1306,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "dirName",
@@ -1315,7 +1320,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "disabled",
@@ -1328,7 +1334,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formAction",
@@ -1341,7 +1348,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formEnctype",
@@ -1354,7 +1362,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formMethod",
@@ -1367,7 +1376,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formNoValidate",
@@ -1380,7 +1390,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formTarget",
@@ -1393,7 +1404,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "height",
@@ -1406,7 +1418,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "indeterminate",
@@ -1419,7 +1432,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "max",
@@ -1432,7 +1446,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "maxLength",
@@ -1445,7 +1460,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "min",
@@ -1458,7 +1474,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "minLength",
@@ -1471,7 +1488,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "multiple",
@@ -1484,7 +1502,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -1497,7 +1516,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "pattern",
@@ -1510,7 +1530,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "placeholder",
@@ -1523,7 +1544,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "readOnly",
@@ -1536,7 +1558,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "required",
@@ -1549,7 +1572,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "size",
@@ -1562,7 +1586,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "src",
@@ -1575,7 +1600,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "step",
@@ -1588,7 +1614,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -1601,7 +1628,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defaultValue",
@@ -1614,7 +1642,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -1627,7 +1656,8 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "width",
@@ -1640,21 +1670,24 @@ pub(crate) fn register_htmlinput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "validationMessage",
         Accessor::new_get(JsFn(HTMLInputElementGetValidationMessage {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "willValidate",
         Accessor::new_get(JsFn(HTMLInputElementGetWillValidate {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "labels",

@@ -161,42 +161,48 @@ pub(crate) fn register_style_sheet<'js>(
         Accessor::new_get(JsFn(StyleSheetGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "href",
         Accessor::new_get(JsFn(StyleSheetGetHref {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "ownerNode",
         Accessor::new_get(JsFn(StyleSheetGetOwnerNode {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "parentStyleSheet",
         Accessor::new_get(JsFn(StyleSheetGetParentStyleSheet {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "title",
         Accessor::new_get(JsFn(StyleSheetGetTitle {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "media",
         Accessor::new_get(JsFn(StyleSheetGetMedia {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "disabled",
@@ -209,7 +215,8 @@ pub(crate) fn register_style_sheet<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

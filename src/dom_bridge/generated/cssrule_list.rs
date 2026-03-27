@@ -51,7 +51,8 @@ pub(crate) fn register_cssrule_list<'js>(
         Accessor::new_get(JsFn(CSSRuleListGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "item",

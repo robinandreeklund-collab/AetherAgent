@@ -113,14 +113,16 @@ pub(crate) fn register_media_list<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "length",
         Accessor::new_get(JsFn(MediaListGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "item",

@@ -419,7 +419,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "action",
@@ -432,7 +433,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "autocomplete",
@@ -445,7 +447,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "encoding",
@@ -458,7 +461,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "enctype",
@@ -471,7 +475,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "method",
@@ -484,7 +489,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -497,7 +503,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "noValidate",
@@ -510,7 +517,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "target",
@@ -523,14 +531,16 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "length",
         Accessor::new_get(JsFn(HTMLFormElementGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "submit",

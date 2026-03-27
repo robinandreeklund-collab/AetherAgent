@@ -439,7 +439,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "disabled",
@@ -452,7 +453,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "length",
@@ -465,7 +467,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "multiple",
@@ -478,7 +481,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -491,7 +495,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "required",
@@ -504,7 +509,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "selectedIndex",
@@ -517,7 +523,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "size",
@@ -530,7 +537,8 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -543,28 +551,32 @@ pub(crate) fn register_htmlselect_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
         Accessor::new_get(JsFn(HTMLSelectElementGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "willValidate",
         Accessor::new_get(JsFn(HTMLSelectElementGetWillValidate {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "validationMessage",
         Accessor::new_get(JsFn(HTMLSelectElementGetValidationMessage {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "labels",

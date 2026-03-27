@@ -209,7 +209,8 @@ pub(crate) fn register_htmltable_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "frame",
@@ -222,7 +223,8 @@ pub(crate) fn register_htmltable_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rules",
@@ -235,7 +237,8 @@ pub(crate) fn register_htmltable_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "summary",
@@ -248,7 +251,8 @@ pub(crate) fn register_htmltable_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "width",
@@ -261,7 +265,8 @@ pub(crate) fn register_htmltable_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

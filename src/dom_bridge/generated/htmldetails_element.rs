@@ -101,7 +101,8 @@ pub(crate) fn register_htmldetails_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -114,7 +115,8 @@ pub(crate) fn register_htmldetails_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

@@ -82,14 +82,16 @@ pub(crate) fn register_cssstyle_rule<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "style",
         Accessor::new_get(JsFn(CSSStyleRuleGetStyle {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }
