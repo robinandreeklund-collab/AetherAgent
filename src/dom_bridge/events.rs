@@ -5,6 +5,15 @@ use rquickjs::{Ctx, Function, Persistent, Value};
 /// Unik nyckel för window event listeners — separerad från document
 pub(super) const WINDOW_EVENT_KEY: u64 = u64::MAX - 1;
 
+/// (registrerings-index, callback, passive, once, capture)
+type ListenerEntry = (
+    usize,
+    Persistent<Function<'static>>,
+    Option<bool>,
+    bool,
+    bool,
+);
+
 use crate::arena_dom::NodeKey;
 use crate::event_loop::JsHandler;
 
@@ -227,28 +236,40 @@ impl JsHandler for DispatchEventHandler {
                 let _ = ev.set("eventPhase", phase);
             }
 
-            let callbacks: Vec<(Persistent<Function<'static>>, Option<bool>, bool, bool)> = {
+            let callbacks: Vec<ListenerEntry> = {
                 let s = state.borrow();
                 s.event_listeners
                     .get(&listener_key)
                     .map(|listeners| {
                         listeners
                             .iter()
-                            .filter(|l| l.event_type == event_type)
-                            .map(|l| (l.callback.clone(), l.passive, l.once, l.capture))
+                            .enumerate()
+                            .filter(|(_, l)| l.event_type == event_type)
+                            .map(|(i, l)| (i, l.callback.clone(), l.passive, l.once, l.capture))
                             .collect()
                     })
                     .unwrap_or_default()
+            };
+
+            // AT_TARGET (phase 2): sortera så capture-listeners körs först, sedan bubble
+            // Per DOM spec: vid AT_TARGET, capture before bubble
+            let sorted_callbacks: Vec<ListenerEntry> = if phase == 2 {
+                let mut capture_list: Vec<_> = callbacks.iter().filter(|c| c.4).cloned().collect();
+                let mut bubble_list: Vec<_> = callbacks.iter().filter(|c| !c.4).cloned().collect();
+                capture_list.append(&mut bubble_list);
+                capture_list
+            } else {
+                callbacks
             };
 
             let mut once_to_remove = vec![];
             let mut stop_prop = false;
             let mut stop_immediate = false;
 
-            for (idx, (cb, passive, once, capture)) in callbacks.into_iter().enumerate() {
+            for (reg_idx, cb, passive, once, capture) in sorted_callbacks {
                 // Capture listeners körs bara i capture-fas (phase 1)
                 // Bubble listeners körs bara i bubble-fas (phase 3)
-                // AT_TARGET (phase 2): kör alla oavsett capture-flagga
+                // AT_TARGET (phase 2): kör alla (redan sorterade ovan)
                 if phase == 1 && !capture {
                     continue;
                 }
@@ -274,7 +295,7 @@ impl JsHandler for DispatchEventHandler {
                         }
                     }
                     if once {
-                        once_to_remove.push(idx);
+                        once_to_remove.push(reg_idx);
                     }
                 }
 
@@ -287,22 +308,16 @@ impl JsHandler for DispatchEventHandler {
                 }
             }
 
-            // Ta bort once-listeners
+            // Ta bort once-listeners (once_to_remove innehåller globala index i listeners-vektorn)
             if !once_to_remove.is_empty() {
                 let mut s = state.borrow_mut();
                 if let Some(listeners) = s.event_listeners.get_mut(&listener_key) {
-                    let mut type_idx = 0usize;
-                    let mut remove_set: Vec<usize> = vec![];
-                    for (i, l) in listeners.iter().enumerate() {
-                        if l.event_type == event_type {
-                            if once_to_remove.contains(&type_idx) {
-                                remove_set.push(i);
-                            }
-                            type_idx += 1;
+                    once_to_remove.sort_unstable();
+                    once_to_remove.dedup();
+                    for &i in once_to_remove.iter().rev() {
+                        if i < listeners.len() {
+                            listeners.remove(i);
                         }
-                    }
-                    for &i in remove_set.iter().rev() {
-                        listeners.remove(i);
                     }
                 }
             }
@@ -369,6 +384,8 @@ impl JsHandler for DispatchEventHandler {
             let _ = ev.set("_dispatching", false);
             let _ = ev.set("_stopPropagationFlag", false);
             let _ = ev.set("_stopImmediatePropagationFlag", false);
+            // cancelBubble måste vara false efter dispatch (spec: stop propagation flag resätts)
+            let _ = ev.set("_canceledFlag", false);
         }
         let default_prevented = args
             .first()

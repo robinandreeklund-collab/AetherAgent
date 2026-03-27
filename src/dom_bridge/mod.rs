@@ -50,8 +50,8 @@ use chardata::*;
 use events::*;
 use node_ops::*;
 use selectors::{
-    find_all_by_class, find_all_by_tag, find_all_matching, find_first_matching, matches_selector,
-    query_select_all, query_select_one,
+    find_all_by_class, find_all_by_tag, find_all_by_tag_ns, find_all_matching, find_first_matching,
+    matches_selector, query_select_all, query_select_one,
 };
 use state::*;
 use style::*;
@@ -1123,10 +1123,17 @@ impl JsHandler for CreateElementNS {
 
         let key = {
             let mut s = self.state.borrow_mut();
+            let mut attrs = crate::arena_dom::Attrs::new();
+            // Spara namespace URI i arena-noden som internt attribut __ns__
+            // Krävs av getElementsByTagNameNS för att filtrera på namespace.
+            attrs.insert(
+                "__ns__".to_string(),
+                namespace.as_deref().unwrap_or("").to_string(),
+            );
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
                 tag: Some(tag_name),
-                attributes: crate::arena_dom::Attrs::new(),
+                attributes: attrs,
                 text: None,
                 parent: None,
                 children: vec![],
@@ -1344,6 +1351,37 @@ impl JsHandler for GetElementsByTagName {
     }
 }
 
+// ─── getElementsByTagNameNS (document-nivå) ──────────────────────────────────
+
+struct GetElementsByTagNameNSDoc {
+    state: SharedState,
+}
+impl JsHandler for GetElementsByTagNameNSDoc {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() {
+                    Some("".to_string())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .unwrap_or_default();
+        let local_name = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let root_key = {
+            let s = self.state.borrow();
+            s.arena.document
+        };
+        let query_val = format!("{}\x01{}", ns, local_name);
+        make_live_html_collection(ctx, &self.state, root_key, "tag_ns", &query_val)
+    }
+}
+
 // ─── Native query-helpers för live HTMLCollection ─────────────────────────────
 
 /// Returnerar en array av element-objekt som matchar sökningen.
@@ -1380,6 +1418,13 @@ impl JsHandler for NativeQueryElements {
             match query_type.as_str() {
                 "tag" => find_all_by_tag(&s.arena, root, &query_val, &mut results),
                 "class" => find_all_by_class(&s.arena, root, &query_val, &mut results),
+                "tag_ns" => {
+                    if let Some(sep) = query_val.find('\x01') {
+                        let ns_part = &query_val[..sep];
+                        let local_part = &query_val[sep + 1..];
+                        find_all_by_tag_ns(&s.arena, root, ns_part, local_part, &mut results);
+                    }
+                }
                 _ => {}
             }
             results
@@ -1409,6 +1454,13 @@ pub(super) fn make_live_html_collection<'js>(
         match query_type {
             "tag" => find_all_by_tag(&s.arena, root_key, query_val, &mut results),
             "class" => find_all_by_class(&s.arena, root_key, query_val, &mut results),
+            "tag_ns" => {
+                if let Some(sep) = query_val.find('\x01') {
+                    let ns_part = &query_val[..sep];
+                    let local_part = &query_val[sep + 1..];
+                    find_all_by_tag_ns(&s.arena, root_key, ns_part, local_part, &mut results);
+                }
+            }
             _ => {}
         }
         results
@@ -1847,6 +1899,15 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         Function::new(
             ctx.clone(),
             JsFn(GetElementsByTagName {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    doc.set(
+        "getElementsByTagNameNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameNSDoc {
                 state: Rc::clone(&state),
             }),
         )?,
@@ -2773,6 +2834,32 @@ impl JsHandler for GetElementsByTagNameElement {
             .unwrap_or_default()
             .to_ascii_lowercase();
         make_live_html_collection(ctx, &self.state, self.key, "tag", &tag)
+    }
+}
+
+struct GetElementsByTagNameNSElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByTagNameNSElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() {
+                    Some("".to_string())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .unwrap_or_default();
+        let local_name = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let query_val = format!("{}\x01{}", ns, local_name);
+        make_live_html_collection(ctx, &self.state, self.key, "tag_ns", &query_val)
     }
 }
 
@@ -4331,7 +4418,7 @@ pub(super) fn make_element_object<'js>(
         "getElementsByTagNameNS",
         Function::new(
             ctx.clone(),
-            JsFn(GetElementsByTagNameElement {
+            JsFn(GetElementsByTagNameNSElement {
                 state: Rc::clone(state),
                 key,
             }),

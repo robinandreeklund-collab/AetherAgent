@@ -193,8 +193,15 @@
     );
   }
 
+  function _is_array_like(obj) {
+    if (Array.isArray(obj)) return true;
+    // HTMLCollection, NodeList och andra array-like objekt har length + numeriskt index
+    if (obj && typeof obj === 'object' && typeof obj.length === 'number') return true;
+    return false;
+  }
+
   function assert_array_equals(actual, expected, description) {
-    if (!Array.isArray(actual) || !Array.isArray(expected)) {
+    if (!_is_array_like(actual) || !_is_array_like(expected)) {
       throw new AssertionError(
         (description ? description + ": " : "") +
         "expected arrays"
@@ -370,7 +377,7 @@
 
     _current_test = t;
     try {
-      fn.call(t);
+      fn.call(t, t);
       if (t.status === NOTRUN) {
         t.status = PASS;
       }

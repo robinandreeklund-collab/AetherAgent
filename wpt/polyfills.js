@@ -325,11 +325,16 @@
       e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
       e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
       e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
+      e._stopPropagationFlag = false; e._stopImmediatePropagationFlag = false; e._canceledFlag = false; e.returnValue = true;
+      e.initEvent = function(t, b, c) { if (this._dispatching) return; this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
+      Object.defineProperty(e, 'cancelBubble', {
+        get: function() { return this._stopPropagationFlag; },
+        set: function(v) { if (v) this._stopPropagationFlag = true; },
+        configurable: true, enumerable: true
+      });
       return e;
     }
     var e = new Ctor('');
-    e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
     return e;
   };
 })();

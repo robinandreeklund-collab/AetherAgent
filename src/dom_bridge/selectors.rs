@@ -882,6 +882,49 @@ pub(super) fn find_all_by_tag(
     }
 }
 
+/// Hämta effektiv namespace-URI för en nod.
+/// Element utan __ns__-attribut antas tillhöra XHTML-namnrymden (HTML-parsade element).
+fn get_node_namespace(node: &crate::arena_dom::DomNode) -> &str {
+    const XHTML_NS: &str = "http://www.w3.org/1999/xhtml";
+    match node.attributes.get("__ns__") {
+        Some(ns) => {
+            if ns.is_empty() {
+                "" // null namespace
+            } else {
+                ns.as_str()
+            }
+        }
+        None => XHTML_NS, // HTML-parsade element
+    }
+}
+
+/// Samla alla element som matchar namespace + localName (case-sensitive).
+/// ns="*" matchar alla namespaces, local_name="*" matchar alla localNames.
+pub(super) fn find_all_by_tag_ns(
+    arena: &ArenaDom,
+    key: NodeKey,
+    ns: &str,
+    local_name: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    if node.node_type == NodeType::Element {
+        let node_ns = get_node_namespace(node);
+        let ns_match = ns == "*" || node_ns == ns;
+        let local_match = local_name == "*" || node.tag.as_deref().is_some_and(|t| t == local_name);
+        if ns_match && local_match {
+            results.push(key);
+        }
+    }
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_by_tag_ns(arena, child, ns, local_name, results);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
