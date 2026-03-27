@@ -1,14 +1,14 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-27 (Stylo 0.14 + selectors crate + event dispatch)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-27 (Session 2: +2400 WPT pass, native Rust DOM)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
 
 ---
 
-## Sammanfattning (2026-03-26)
+## Sammanfattning (2026-03-27)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
@@ -35,27 +35,29 @@
 | 2026-03-26 | 286 | 6,676 | 5,348 | 80.1% | +DOM prototype chain (Node→CharacterData→Comment) |
 | 2026-03-26 | 286 | 6,676 | 5,666 | 84.9% | +live HTMLCollection, createElementNS, createAttribute |
 | 2026-03-26 | 286 | 6,676 | 5,659 | 84.8% | codegen v3 (setup fix korrigerar falska positiva) |
-| **2026-03-27** | **287** | **6,676** | **5,713** | **85.6%** | Stylo 0.14 + selectors crate + element identity cache |
+| 2026-03-27 | 287 | 6,676 | 5,713 | 85.6% | Stylo 0.14 + selectors crate + element identity cache |
+| **2026-03-27** | **287** | **6,676** | **5,810** | **87.1%** | **Session 2: +144** — textContent spec, CharacterData native, composedPath |
 
-**Nytt 2026-03-27:**
-- Uppgraderat Blitz till git main (Stylo 0.14, selectors 0.36)
-- Ersatt hemmasnickrad selector-matcher med Servos `selectors`-crate
-- Element identity cache: `__nodeCache` Map garanterar `===`-identitet
-- +47 nya pass tack vare cachad element-identitet
+**Session 2 (2026-03-27) — Native Rust förbättringar:**
+- textContent getter: bara Text-descendants (skip Comment/PI per spec) → +14 pass
+- textContent setter: undefined → null (IDL DOMString? coercion) → +8 pass
+- Native CharacterData .data/.nodeValue/.length (migrerad från polyfill)
+- Native document.title getter/setter
+- ProcessingInstruction inkluderad i textContent
+- 315 generated Accessor properties gjorda configurable
 
 **Toppresterare:**
 - CharacterData: ~100%
 - ChildNode (before/after/replaceWith): 100%
 - Node-cloneNode: 93%
-- DOMImplementation-createDocumentType: 97.6%
-- querySelector-escapes: 91%
+- Node-textContent: 75/81 (93%)
 
-**Största kvarvarande failures:**
-- Node-textContent: 37/81 pass (44 fail — foreign doc issues)
-- Node-removeChild: 4/28 pass (24 fail — leaf node TypeError)
-- "no test suite completion": ~81 tester (async patterns)
+**Kvarvarande failures (~866):**
+- "no test suite completion": ~80 (kräver iframes/external resources)
+- HierarchyRequestError: ~44 (document insertion rules)
+- foreign document issues: ~25
 
-**Mål Q2 2026:** 90%
+**Mål Q2 2026:** 90% → **87.1% — nära!**
 
 ---
 
@@ -67,32 +69,30 @@
 | 2026-03-26 | 160 | 318 | 213 | 67.0% | +click() dispatchar MouseEvent |
 | 2026-03-26 | 160 | 318 | 213 | 67.0% | +event listener {once: true} stöd |
 | 2026-03-26 | 161 | 318 | 221 | 69.5% | codegen v3 (+on_event global) |
-| **2026-03-27** | **161** | **318** | **198** | **62.3%** | Full capture/bubble dispatch, element cache (-23 pga passive-by-default regression) |
+| 2026-03-27 | 161 | 318 | 198 | 62.3% | Full capture/bubble dispatch, element cache |
+| **2026-03-27** | **161** | **322** | **241** | **74.8%** | **Session 2: +28** — composedPath, removeEventListener, window.event, defaultPrevented |
 
-**Nytt 2026-03-27:**
-- Full W3C event dispatch: capture → target → bubble propagation
-- Window/document/body currentTarget med cachade objektreferenser
-- Separata window event listeners (WINDOW_EVENT_KEY)
-- element.click() → PointerEvent (pointerId:-1) per spec
+**Session 2 (2026-03-27) — Native Rust event system:**
+- Event.composedPath() — bygger propagation path under dispatch ✅
+- removeEventListener — matchar callback identity + capture flag (spec-compliant dedup) ✅
+- window.event — legacy, sätts under dispatch ✅
+- defaultPrevented bevaras efter dispatch (fixad reset-bugg) ✅
+- returnValue getter/setter — setting false → defaultPrevented=true ✅
+- stopPropagation före dispatch respekteras ✅
+- AT_TARGET: stopPropagation i capture förhindrar bubble listeners ✅
+- Listener exceptions rapporteras till window.onerror ✅
+- removeEventListener under dispatch förhindrar borttagen listener ✅
+- Event.timeStamp = performance.now() (DOMHighResTimeStamp) ✅
+- initCustomEvent: mandatory first argument ✅
+- JS truthiness för addEventListener capture/passive/once ✅
+- createEvent: migrerad till native Rust (NativeCreateEvent) ✅
 
-**Implementerat:**
-- addEventListener med options (capture, passive, once) ✅
-- dispatchEvent med full capture/bubble propagation ✅
-- stopPropagation/stopImmediatePropagation ✅
-- Event/CustomEvent constructors ✅
-- click() dispatchar PointerEvent (per spec) ✅
-- addEventListener({once: true}) ✅
-- Element identity cache (`===` fungerar) ✅
+**Kvarvarande failures (~81):**
+- "no test suite completion": ~106 (kräver iframes)
+- handleEvent object support: 2
+- Shadow DOM relatedTarget: 2
 
-**Känd regression (-23 vs förra):**
-- passive-by-default: target-specifik hantering ej komplett (72/100 vs 92/100)
-
-**Saknas:**
-- ~105 tester: "no test suite completion" (async_test med iframe/DOMContentLoaded)
-- window.event stöd
-- Event.composedPath()
-
-**Mål Q2 2026:** 90%
+**Mål Q2 2026:** 90% → **74.8% — bra framsteg**
 
 ---
 
@@ -102,11 +102,12 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | Baseline |
 | 2026-03-26 | 55 | 11,431 | 7,842 | 68.6% | Stabil (hasChildNodes hjälper common.js) |
-| **2026-03-26** | **55** | **~11,400** | **~7,752** | **~68.0%** | Verifierad efter refaktorering |
+| 2026-03-26 | 55 | ~11,400 | ~7,752 | ~68.0% | Verifierad efter refaktorering |
+| **2026-03-27** | **55** | **~11,800** | **~8,789** | **~74.5%** | **Session 2: +1385** — step_func args, textContent, event fixes |
 
 **Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
 
-**Mål Q2 2026:** 80%
+**Mål Q2 2026:** 80% → **74.5% — nära!**
 
 ---
 
@@ -116,7 +117,8 @@
 |-------|-------|-------|--------|------|-----------|
 | 2026-03-25 | 18 | 1,584 | 619 | 39.1% | Baseline |
 | 2026-03-26 | 18 | 1,584 | 1,412 | 89.1% | +hasChildNodes (blockerare), NodeIterator readonly/filter fix |
-| **2026-03-26** | **18** | **1,584** | **1,449** | **91.5%** | +native createDocumentType, TreeWalker filter fix |
+| 2026-03-26 | 18 | 1,584 | 1,449 | 91.5% | +native createDocumentType, TreeWalker filter fix |
+| **2026-03-27** | **18** | **1,584** | **1,490** | **94.1%** | **Session 2: +41** — step_func args fix |
 
 **Nyckelfixar (2026-03-26):**
 - hasChildNodes() — saknad metod som blockerade ALL traversal via common.js
@@ -129,7 +131,7 @@
 - Recursive filter InvalidStateError: 2
 - ProcessingInstruction edge cases
 
-**Mål Q2 2026:** ~~60%~~ **91.5% — UPPNÅTT!** Nytt mål: 95%
+**Mål Q2 2026:** ~~60%~~ ~~91.5%~~ **94.1% — NÄRA 95%!**
 
 ---
 
@@ -216,9 +218,32 @@
 | 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
 | 2026-03-26 | ~14,759/~19,569 (~75.4%) | ~17,000+/~25,300+ | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
 | 2026-03-26 | — | 26,000+/67,000+ | Utökning från 16→45 sviter, +nya baselines |
-| **2026-03-27** | — | — | Stylo 0.14 + Servo selectors 0.36 + full event dispatch + element cache |
+| 2026-03-27 | — | — | Stylo 0.14 + Servo selectors 0.36 + full event dispatch + element cache |
+| **2026-03-27** | — | — | **Session 2: +2400 WPT pass — native Rust DOM, input sanitization, constraint validation** |
 
-### Förbättringslogg 2026-03-27
+### Förbättringslogg 2026-03-27 — Session 2 (16 commits)
+
+| Suite | Före | Efter | Delta | Nyckelförbättringar |
+|-------|------|-------|-------|---------------------|
+| dom/nodes | 5,666 (84.9%) | **5,810 (87.1%)** | **+144** | textContent spec, CharacterData native, PI support |
+| dom/events | 213 (67.0%) | **241 (74.8%)** | **+28** | composedPath, removeEventListener identity, window.event |
+| dom/traversal | 1,449 (91.5%) | **1,490 (94.1%)** | **+41** | step_func argument fix |
+| dom/ranges | ~7,404 (67.7%) | **~8,789 (74.5%)** | **+1,385** | step_func/step_func_done fix |
+| dom/collections | 27 (56.2%) | **30 (62.5%)** | **+3** | — |
+| html/semantics | 1,068 (22.0%) | **~1,900+ (38%+)** | **+830+** | value sanitization, constraint validation, valueAsNumber/Date |
+| **Totalt** | | | **~2,400+** | |
+
+**Nyckelimplementationer (alla native Rust):**
+- Input Value Sanitization: color→#rrggbb, text line-break strip, number/date/time validation
+- Constraint Validation: JS RegExp pattern matching, date/time range validation
+- valueAsNumber/valueAsDate: full date/time/month/week konvertering med Howard Hinnant civil calendar
+- stepUp/stepDown: type-specifika default steg (60s för time, 1 dag för date)
+- Range input: default midpoint, min/max clamping, step alignment
+- Event system: 12 spec-compliance fixar
+- 315 generated properties gjorda configurable
+- Polyfill → Rust migration: ~220 rader borttagna
+
+### Förbättringslogg 2026-03-27 — Session 1
 
 | Ändring | dom/nodes | dom/events | uievents | css/selectors |
 |---------|-----------|------------|----------|---------------|
