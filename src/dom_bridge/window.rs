@@ -737,16 +737,17 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── UIEvent ──
             if (!globalThis.UIEvent) {
-                globalThis.UIEvent = function UIEvent(type, opts) {
+                globalThis.UIEvent = function UIEvent(type) {
+                    var opts = arguments[1] || {};
                     Event.call(this, type, opts);
-                    var o = opts || {};
-                    this.view = o.view !== undefined ? o.view : null;
-                    this.detail = o.detail !== undefined ? o.detail : 0;
+                    this.view = opts.view !== undefined ? opts.view : null;
+                    this.detail = opts.detail !== undefined ? opts.detail : 0;
                 };
                 UIEvent.prototype = Object.create(Event.prototype);
                 UIEvent.prototype.constructor = UIEvent;
             }
             UIEvent.prototype.initUIEvent = function(type, bubbles, cancelable, view, detail) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initUIEvent': 1 argument required, but only 0 present.");
                 if (this._dispatching) return;
                 this.initEvent(type, !!bubbles, !!cancelable);
                 this.view = view !== undefined ? view : null;
@@ -755,9 +756,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── MouseEvent ──
             if (!globalThis.MouseEvent) {
-                globalThis.MouseEvent = function MouseEvent(type, opts) {
+                globalThis.MouseEvent = function MouseEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    var o = opts || {};
+                    var o = opts;
                     this.screenX = o.screenX || 0; this.screenY = o.screenY || 0;
                     this.clientX = o.clientX || 0; this.clientY = o.clientY || 0;
                     this.pageX = o.pageX !== undefined ? o.pageX : this.clientX;
@@ -791,6 +793,7 @@ pub(super) fn register_window_with_viewport<'js>(
             MouseEvent.prototype.getModifierState = _getModifierState;
             MouseEvent.prototype.initMouseEvent = function(type, bubbles, cancelable, view, detail,
                     screenX, screenY, clientX, clientY, ctrlKey, altKey, shiftKey, metaKey, button, relatedTarget) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initMouseEvent': 1 argument required, but only 0 present.");
                 if (this._dispatching) return;
                 this.initUIEvent(type, bubbles, cancelable, view, detail);
                 this.screenX = screenX || 0; this.screenY = screenY || 0;
@@ -803,9 +806,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── KeyboardEvent ──
             if (!globalThis.KeyboardEvent) {
-                globalThis.KeyboardEvent = function KeyboardEvent(type, opts) {
+                globalThis.KeyboardEvent = function KeyboardEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    var o = opts || {};
+                    var o = opts;
                     this.key = o.key !== undefined ? String(o.key) : '';
                     this.code = o.code !== undefined ? String(o.code) : '';
                     this.location = o.location || 0;
@@ -833,6 +837,7 @@ pub(super) fn register_window_with_viewport<'js>(
             KeyboardEvent.prototype.getModifierState = _getModifierState;
             KeyboardEvent.prototype.initKeyboardEvent = function(type, bubbles, cancelable, view,
                     key, location, ctrlKey, altKey, shiftKey, metaKey) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initKeyboardEvent': 1 argument required, but only 0 present.");
                 if (this._dispatching) return;
                 this.initUIEvent(type, bubbles, cancelable, view, 0);
                 this.key = key !== undefined ? String(key) : '';
@@ -851,9 +856,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── FocusEvent ──
             if (!globalThis.FocusEvent) {
-                globalThis.FocusEvent = function FocusEvent(type, opts) {
+                globalThis.FocusEvent = function FocusEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    this.relatedTarget = (opts && opts.relatedTarget) || null;
+                    this.relatedTarget = opts.relatedTarget || null;
                 };
                 FocusEvent.prototype = Object.create(UIEvent.prototype);
                 FocusEvent.prototype.constructor = FocusEvent;
@@ -861,9 +867,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── InputEvent ──
             if (!globalThis.InputEvent) {
-                globalThis.InputEvent = function InputEvent(type, opts) {
+                globalThis.InputEvent = function InputEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    var o = opts || {};
+                    var o = opts;
                     this.data = o.data !== undefined ? o.data : null;
                     this.inputType = o.inputType !== undefined ? String(o.inputType) : '';
                     this.isComposing = !!o.isComposing;
@@ -875,9 +882,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── WheelEvent ──
             if (!globalThis.WheelEvent) {
-                globalThis.WheelEvent = function WheelEvent(type, opts) {
+                globalThis.WheelEvent = function WheelEvent(type) {
+                    var opts = arguments[1] || {};
                     MouseEvent.call(this, type, opts);
-                    var o = opts || {};
+                    var o = opts;
                     this.deltaX = o.deltaX || 0;
                     this.deltaY = o.deltaY || 0;
                     this.deltaZ = o.deltaZ || 0;
@@ -896,9 +904,10 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── PointerEvent ──
             if (!globalThis.PointerEvent) {
-                globalThis.PointerEvent = function PointerEvent(type, opts) {
+                globalThis.PointerEvent = function PointerEvent(type) {
+                    var opts = arguments[1] || {};
                     MouseEvent.call(this, type, opts);
-                    var o = opts || {};
+                    var o = opts;
                     this.pointerId = o.pointerId || 0;
                     this.width = o.width !== undefined ? o.width : 1;
                     this.height = o.height !== undefined ? o.height : 1;
@@ -919,14 +928,16 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // ── CompositionEvent ──
             if (!globalThis.CompositionEvent) {
-                globalThis.CompositionEvent = function CompositionEvent(type, opts) {
+                globalThis.CompositionEvent = function CompositionEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    this.data = (opts && opts.data !== undefined) ? String(opts.data) : '';
+                    this.data = opts.data !== undefined ? String(opts.data) : '';
                 };
                 CompositionEvent.prototype = Object.create(UIEvent.prototype);
                 CompositionEvent.prototype.constructor = CompositionEvent;
             }
             CompositionEvent.prototype.initCompositionEvent = function(type, bubbles, cancelable, view, data) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initCompositionEvent': 1 argument required, but only 0 present.");
                 if (this._dispatching) return;
                 this.initUIEvent(type, bubbles, cancelable, view, 0);
                 this.data = data !== undefined ? String(data) : '';
