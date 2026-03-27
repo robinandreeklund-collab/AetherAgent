@@ -942,6 +942,62 @@ impl JsHandler for QuerySelectorAll {
 }
 
 /// Skapar en Document-nod i ArenaDom (för foreignDoc / createHTMLDocument)
+// ─── document.createEvent — native Rust (migrerad från polyfill) ─────────────
+struct NativeCreateEvent;
+impl JsHandler for NativeCreateEvent {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let type_str = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        // Mappa event-typ till konstruktor (per spec)
+        let ctor_name = match type_str.as_str() {
+            "event" | "events" | "htmlevents" | "svgevents" | "svgevent" => "Event",
+            "customevent" => "CustomEvent",
+            "uievent" | "uievents" => "UIEvent",
+            "mouseevent" | "mouseevents" => "MouseEvent",
+            "keyboardevent" => "KeyboardEvent",
+            "focusevent" => "FocusEvent",
+            "inputevent" => "InputEvent",
+            "wheelevent" => "WheelEvent",
+            "compositionevent" => "CompositionEvent",
+            "pointerevent" => "PointerEvent",
+            "beforeunloadevent" => "BeforeUnloadEvent",
+            "hashchangeevent" => "HashChangeEvent",
+            "popstateevent" => "PopStateEvent",
+            "storageevent" => "StorageEvent",
+            "progressevent" => "ProgressEvent",
+            "messageevent" => "MessageEvent",
+            "dragevent" => "DragEvent",
+            "errorevent" => "ErrorEvent",
+            "clipboardevent" => "ClipboardEvent",
+            "animationevent" => "AnimationEvent",
+            "transitionevent" => "TransitionEvent",
+            "touchevent" => "TouchEvent",
+            "mutationevent" | "mutationevents" => "Event",
+            _ => {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "NotSupportedError",
+                    "The operation is not supported.",
+                ));
+            }
+        };
+        // Skapa event via konstruktor i JS-kontexten
+        let code = format!("new {}('')", ctor_name);
+        match ctx.eval::<Value, _>(code.as_str()) {
+            Ok(v) => Ok(v),
+            Err(_) => {
+                // Fallback: skapa via Event-konstruktor
+                ctx.eval::<Value, _>("new Event('')")
+            }
+        }
+    }
+}
+
 struct CreateDocumentNode {
     state: SharedState,
 }
@@ -2227,6 +2283,12 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 state: Rc::clone(&state),
             }),
         )?,
+    )?;
+
+    // ─── document.createEvent — native Rust (migrerad från polyfill) ─────────
+    doc.set(
+        "createEvent",
+        Function::new(ctx.clone(), JsFn(NativeCreateEvent))?,
     )?;
 
     ctx.globals().set("document", doc)?;

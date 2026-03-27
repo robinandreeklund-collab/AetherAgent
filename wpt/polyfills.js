@@ -5,50 +5,17 @@
  * Laddas före testharness.js.
  */
 
-// ─── CharacterData: .data, .length, .substringData, .replaceData, etc. ──────
-// Text (nodeType=3) och Comment (nodeType=8) måste ha CharacterData-metoder
+// ─── CharacterData: MIGRERAD till native Rust (dom_bridge/mod.rs) ────────────
+// .data, .nodeValue, .length registreras nu som Rust getter/setter i make_element_object()
+// för nodeType 3 (Text), 7 (PI), 8 (Comment).
+// CharacterData-metoder (substringData, appendData, etc.) är redan Rust-native i chardata.rs.
 (function() {
   if (typeof document === 'undefined') return;
-
+  // Minimal patchCharacterData — nu bara för prototyp-patching
   function patchCharacterData(node) {
     if (!node || typeof node !== 'object') return node;
-    var nt = node.nodeType;
-    // Text (3), Comment (8), ProcessingInstruction (7) — alla har CharacterData-interface
-    if (nt !== 3 && nt !== 7 && nt !== 8) return node;
-
-    // .data getter/setter — alias för textContent (spec: null → "", undefined → "undefined")
-    if (!('data' in node)) {
-      Object.defineProperty(node, 'data', {
-        get: function() { return this.textContent || ''; },
-        set: function(val) {
-          this.textContent = (val === null) ? '' : String(val);
-        },
-        configurable: true
-      });
-    }
-
-    // .length
-    if (!('length' in node)) {
-      Object.defineProperty(node, 'length', {
-        get: function() { return (this.data || '').length; },
-        configurable: true
-      });
-    }
-
-    // .nodeValue — alias för data
-    if (!('nodeValue' in node)) {
-      Object.defineProperty(node, 'nodeValue', {
-        get: function() { return this.data; },
-        set: function(val) { this.data = val; },
-        configurable: true
-      });
-    }
-
-    // CharacterData methods — nu Rust-native med UTF-16 code unit counting
-
     return node;
   }
-
   globalThis.__patchCharacterData = patchCharacterData;
 })();
 
@@ -279,75 +246,8 @@
   });
 })();
 
-// ─── document.createEvent() ─────────────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
-
-  // Mappning: case-insensitive alias → konstruktor
-  var aliases = {
-    'event': Event, 'events': Event, 'htmlevents': Event,
-    'customevent': typeof CustomEvent !== 'undefined' ? CustomEvent : Event,
-    'uievent': UIEvent, 'uievents': UIEvent,
-    'mouseevent': MouseEvent, 'mouseevents': MouseEvent,
-    'keyboardevent': KeyboardEvent,
-    'compositionevent': CompositionEvent,
-    'focusevent': FocusEvent,
-    'inputevent': InputEvent,
-    'wheelevent': WheelEvent,
-    'beforeunloadevent': BeforeUnloadEvent,
-    'touchevent': typeof TouchEvent !== 'undefined' ? TouchEvent : null,
-    'animationevent': AnimationEvent,
-    'transitionevent': TransitionEvent,
-    'pointerevent': PointerEvent,
-    'hashchangeevent': HashChangeEvent,
-    'popstateevent': PopStateEvent,
-    'storageevent': StorageEvent,
-    'progressevent': ProgressEvent,
-    'messageevent': MessageEvent,
-    'dragevent': DragEvent,
-    'errorevent': ErrorEvent,
-    'clipboardevent': ClipboardEvent,
-    'submitevent': SubmitEvent,
-    'svgevents': Event, 'svgevent': Event,
-    'textevent': 'TextEvent',
-    'mutationevent': Event, 'mutationevents': Event,
-    'devicemotionevent': DeviceMotionEvent,
-    'deviceorientationevent': DeviceOrientationEvent,
-    'gamepadevent': GamepadEvent,
-    'mediaquerylistevent': MediaQueryListEvent,
-    'formdataevent': FormDataEvent,
-    'promiserejectionevent': PromiseRejectionEvent,
-    'securitypolicyviolationevent': SecurityPolicyViolationEvent
-  };
-
-  document.createEvent = function(type) {
-    var key = type.toLowerCase();
-    var Ctor = aliases[key];
-    if (!Ctor) {
-      throw new DOMException("The operation is not supported.", "NotSupportedError");
-    }
-    // TextEvent har illegal constructor — skapa via Object.create
-    if (Ctor === 'TextEvent') {
-      var e = Object.create(TextEvent.prototype);
-      e.type = ''; e.bubbles = false; e.cancelable = false;
-      e.defaultPrevented = false; e.target = null; e.currentTarget = null;
-      e.eventPhase = 0; e.isTrusted = false;
-      e.timeStamp = Date.now();
-      e.view = null; e.detail = 0; e.data = '';
-      e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
-      e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
-      e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-      e.initEvent = function(t, b, c) { if (this._dispatching) return; this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; this._returnValue = true; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
-      return e;
-    }
-    var e = new Ctor('');
-    // initEvent finns redan på Event-prototypen — lägg bara till som fallback
-    if (!e.initEvent) {
-      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; };
-    }
-    return e;
-  };
-})();
+// ─── document.createEvent() — MIGRERAD till native Rust (dom_bridge/mod.rs) ──
+// Registrerad som NativeCreateEvent i register_document().
 
 // ─── node.ownerDocument ─────────────────────────────────────────────────────
 // WPT-tester kontrollerar ofta att noder hör till rätt dokument
