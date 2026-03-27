@@ -5,7 +5,7 @@
 <h1 align="center">AetherAgent</h1>
 
 <p align="center">
-  <strong>The LLM-native browser engine.</strong><br>
+  <strong> AetherAgent is the Rust browser engine that makes AI agents faster, cheaper, safer, and greener.</strong><br>
   Semantic perception, goal-aware intelligence, and prompt injection protection — in a single embeddable Rust/WASM library.
 </p>
 
