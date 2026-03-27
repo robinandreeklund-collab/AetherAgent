@@ -1,0 +1,1234 @@
+{
+  "timestamp": "2026-03-27T10:12:24.161520",
+  "url": "https://quotes.toscrape.com",
+  "status": 200,
+  "duration_ms": 425.9,
+  "raw_response": {
+    "fetch": {
+      "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n\t<meta charset=\"UTF-8\">\n\t<title>Quotes to Scrape</title>\n    <link rel=\"stylesheet\" href=\"/static/bootstrap.min.css\">\n    <link rel=\"stylesheet\" href=\"/static/main.css\">\n    \n    \n</head>\n<body>\n    <div class=\"container\">\n        <div class=\"row header-box\">\n            <div class=\"col-md-8\">\n                <h1>\n                    <a href=\"/\" style=\"text-decoration: none\">Quotes to Scrape</a>\n                </h1>\n            </div>\n            <div class=\"col-md-4\">\n                <p>\n                \n                    <a href=\"/login\">Login</a>\n                \n                </p>\n            </div>\n        </div>\n    \n\n<div class=\"row\">\n    <div class=\"col-md-8\">\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Albert Einstein</small>\n        <a href=\"/author/Albert-Einstein\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"change,deep-thoughts,thinking,world\" /    > \n            \n            <a class=\"tag\" href=\"/tag/change/page/1/\">change</a>\n            \n            <a class=\"tag\" href=\"/tag/deep-thoughts/page/1/\">deep-thoughts</a>\n            \n            <a class=\"tag\" href=\"/tag/thinking/page/1/\">thinking</a>\n            \n            <a class=\"tag\" href=\"/tag/world/page/1/\">world</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“It is our choices, Harry, that show what we truly are, far more than our abilities.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">J.K. Rowling</small>\n        <a href=\"/author/J-K-Rowling\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"abilities,choices\" /    > \n            \n            <a class=\"tag\" href=\"/tag/abilities/page/1/\">abilities</a>\n            \n            <a class=\"tag\" href=\"/tag/choices/page/1/\">choices</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Albert Einstein</small>\n        <a href=\"/author/Albert-Einstein\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"inspirational,life,live,miracle,miracles\" /    > \n            \n            <a class=\"tag\" href=\"/tag/inspirational/page/1/\">inspirational</a>\n            \n            <a class=\"tag\" href=\"/tag/life/page/1/\">life</a>\n            \n            <a class=\"tag\" href=\"/tag/live/page/1/\">live</a>\n            \n            <a class=\"tag\" href=\"/tag/miracle/page/1/\">miracle</a>\n            \n            <a class=\"tag\" href=\"/tag/miracles/page/1/\">miracles</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Jane Austen</small>\n        <a href=\"/author/Jane-Austen\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"aliteracy,books,classic,humor\" /    > \n            \n            <a class=\"tag\" href=\"/tag/aliteracy/page/1/\">aliteracy</a>\n            \n            <a class=\"tag\" href=\"/tag/books/page/1/\">books</a>\n            \n            <a class=\"tag\" href=\"/tag/classic/page/1/\">classic</a>\n            \n            <a class=\"tag\" href=\"/tag/humor/page/1/\">humor</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“Imperfection is beauty, madness is genius and it&#39;s better to be absolutely ridiculous than absolutely boring.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Marilyn Monroe</small>\n        <a href=\"/author/Marilyn-Monroe\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"be-yourself,inspirational\" /    > \n            \n            <a class=\"tag\" href=\"/tag/be-yourself/page/1/\">be-yourself</a>\n            \n            <a class=\"tag\" href=\"/tag/inspirational/page/1/\">inspirational</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“Try not to become a man of success. Rather become a man of value.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Albert Einstein</small>\n        <a href=\"/author/Albert-Einstein\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"adulthood,success,value\" /    > \n            \n            <a class=\"tag\" href=\"/tag/adulthood/page/1/\">adulthood</a>\n            \n            <a class=\"tag\" href=\"/tag/success/page/1/\">success</a>\n            \n            <a class=\"tag\" href=\"/tag/value/page/1/\">value</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“It is better to be hated for what you are than to be loved for what you are not.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">André Gide</small>\n        <a href=\"/author/Andre-Gide\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"life,love\" /    > \n            \n            <a class=\"tag\" href=\"/tag/life/page/1/\">life</a>\n            \n            <a class=\"tag\" href=\"/tag/love/page/1/\">love</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“I have not failed. I&#39;ve just found 10,000 ways that won&#39;t work.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Thomas A. Edison</small>\n        <a href=\"/author/Thomas-A-Edison\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"edison,failure,inspirational,paraphrased\" /    > \n            \n            <a class=\"tag\" href=\"/tag/edison/page/1/\">edison</a>\n            \n            <a class=\"tag\" href=\"/tag/failure/page/1/\">failure</a>\n            \n            <a class=\"tag\" href=\"/tag/inspirational/page/1/\">inspirational</a>\n            \n            <a class=\"tag\" href=\"/tag/paraphrased/page/1/\">paraphrased</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“A woman is like a tea bag; you never know how strong it is until it&#39;s in hot water.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Eleanor Roosevelt</small>\n        <a href=\"/author/Eleanor-Roosevelt\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"misattributed-eleanor-roosevelt\" /    > \n            \n            <a class=\"tag\" href=\"/tag/misattributed-eleanor-roosevelt/page/1/\">misattributed-eleanor-roosevelt</a>\n            \n        </div>\n    </div>\n\n    <div class=\"quote\" itemscope itemtype=\"http://schema.org/CreativeWork\">\n        <span class=\"text\" itemprop=\"text\">“A day without sunshine is like, you know, night.”</span>\n        <span>by <small class=\"author\" itemprop=\"author\">Steve Martin</small>\n        <a href=\"/author/Steve-Martin\">(about)</a>\n        </span>\n        <div class=\"tags\">\n            Tags:\n            <meta class=\"keywords\" itemprop=\"keywords\" content=\"humor,obvious,simile\" /    > \n            \n            <a class=\"tag\" href=\"/tag/humor/page/1/\">humor</a>\n            \n            <a class=\"tag\" href=\"/tag/obvious/page/1/\">obvious</a>\n            \n            <a class=\"tag\" href=\"/tag/simile/page/1/\">simile</a>\n            \n        </div>\n    </div>\n\n    <nav>\n        <ul class=\"pager\">\n            \n            \n            <li class=\"next\">\n                <a href=\"/page/2/\">Next <span aria-hidden=\"true\">&rarr;</span></a>\n            </li>\n            \n        </ul>\n    </nav>\n    </div>\n    <div class=\"col-md-4 tags-box\">\n        \n            <h2>Top Ten tags</h2>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 28px\" href=\"/tag/love/\">love</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 26px\" href=\"/tag/inspirational/\">inspirational</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 26px\" href=\"/tag/life/\">life</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 24px\" href=\"/tag/humor/\">humor</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 22px\" href=\"/tag/books/\">books</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 14px\" href=\"/tag/reading/\">reading</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 10px\" href=\"/tag/friendship/\">friendship</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 8px\" href=\"/tag/friends/\">friends</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 8px\" href=\"/tag/truth/\">truth</a>\n            </span>\n            \n            <span class=\"tag-item\">\n            <a class=\"tag\" style=\"font-size: 6px\" href=\"/tag/simile/\">simile</a>\n            </span>\n            \n        \n    </div>\n</div>\n\n    </div>\n    <footer class=\"footer\">\n        <div class=\"container\">\n            <p class=\"text-muted\">\n                Quotes by: <a href=\"https://www.goodreads.com/quotes\">GoodReads.com</a>\n            </p>\n            <p class=\"copyright\">\n                Made with <span class='zyte'>❤</span> by <a class='zyte' href=\"https://www.zyte.com\">Zyte</a>\n            </p>\n        </div>\n    </footer>\n</body>\n</html>",
+      "body_size_bytes": 11064,
+      "content_type": "text/html; charset=utf-8",
+      "fetch_time_ms": 422,
+      "final_url": "https://quotes.toscrape.com/",
+      "redirect_chain": [
+        "https://quotes.toscrape.com",
+        "https://quotes.toscrape.com/"
+      ],
+      "status_code": 200
+    },
+    "timing": {
+      "fetch_ms": 422,
+      "parse_ms": 0,
+      "total_ms": 423
+    },
+    "total_time_ms": 423,
+    "tree": {
+      "goal": "understand the main content and key information on this page",
+      "injection_warnings": [],
+      "nodes": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 6,
+                                  "label": "Quotes to Scrape",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/"
+                                }
+                              ],
+                              "id": 5,
+                              "label": "Quotes to Scrape",
+                              "relevance": 0.0,
+                              "role": "heading",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            }
+                          ],
+                          "id": 4,
+                          "label": "Quotes to Scrape",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 9,
+                                  "label": "Login",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/login"
+                                }
+                              ],
+                              "id": 8,
+                              "label": "Login",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            }
+                          ],
+                          "id": 7,
+                          "label": "Login",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        }
+                      ],
+                      "id": 3,
+                      "label": "Quotes to Scrape Login",
+                      "relevance": 0.0,
+                      "role": "text",
+                      "state": {},
+                      "trust": "Untrusted",
+                      "value": null
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 16,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Albert-Einstein"
+                                    }
+                                  ],
+                                  "id": 14,
+                                  "label": "by Albert Einstein (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 18,
+                                      "label": "change",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/change/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 19,
+                                      "label": "deep-thoughts",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/deep-thoughts/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 20,
+                                      "label": "thinking",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/thinking/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 21,
+                                      "label": "world",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/world/page/1/"
+                                    }
+                                  ],
+                                  "id": 17,
+                                  "label": "Tags: change deep-thoughts thinking world",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 12,
+                              "label": "“The world as we have created it is a process of our thinking. It cannot be chan",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 26,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/J-K-Rowling"
+                                    }
+                                  ],
+                                  "id": 24,
+                                  "label": "by J.K. Rowling (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 28,
+                                      "label": "abilities",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/abilities/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 29,
+                                      "label": "choices",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/choices/page/1/"
+                                    }
+                                  ],
+                                  "id": 27,
+                                  "label": "Tags: abilities choices",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 22,
+                              "label": "“It is our choices, Harry, that show what we truly are, far more than our abilit",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 34,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Albert-Einstein"
+                                    }
+                                  ],
+                                  "id": 32,
+                                  "label": "by Albert Einstein (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 36,
+                                      "label": "inspirational",
+                                      "relevance": 0.02000004,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/inspirational/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 37,
+                                      "label": "life",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/life/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 38,
+                                      "label": "live",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/live/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 39,
+                                      "label": "miracle",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/miracle/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 40,
+                                      "label": "miracles",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/miracles/page/1/"
+                                    }
+                                  ],
+                                  "id": 35,
+                                  "label": "Tags: inspirational life live miracle miracles",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 30,
+                              "label": "“There are only two ways to live your life. One is as though nothing is a miracl",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 45,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Jane-Austen"
+                                    }
+                                  ],
+                                  "id": 43,
+                                  "label": "by Jane Austen (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 47,
+                                      "label": "aliteracy",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/aliteracy/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 48,
+                                      "label": "books",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/books/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 49,
+                                      "label": "classic",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/classic/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 50,
+                                      "label": "humor",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/humor/page/1/"
+                                    }
+                                  ],
+                                  "id": 46,
+                                  "label": "Tags: aliteracy books classic humor",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 41,
+                              "label": "“The person, be it gentleman or lady, who has not pleasure in a good novel, must",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 55,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Marilyn-Monroe"
+                                    }
+                                  ],
+                                  "id": 53,
+                                  "label": "by Marilyn Monroe (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 57,
+                                      "label": "be-yourself",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/be-yourself/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 58,
+                                      "label": "inspirational",
+                                      "relevance": 0.02000004,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/inspirational/page/1/"
+                                    }
+                                  ],
+                                  "id": 56,
+                                  "label": "Tags: be-yourself inspirational",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 51,
+                              "label": "“Imperfection is beauty, madness is genius and it's better to be absolutely ridi",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 63,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Albert-Einstein"
+                                    }
+                                  ],
+                                  "id": 61,
+                                  "label": "by Albert Einstein (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 65,
+                                      "label": "adulthood",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/adulthood/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 66,
+                                      "label": "success",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/success/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 67,
+                                      "label": "value",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/value/page/1/"
+                                    }
+                                  ],
+                                  "id": 64,
+                                  "label": "Tags: adulthood success value",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 59,
+                              "label": "“Try not to become a man of success. Rather become a man of value.” by Albert Ei",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 72,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Andre-Gide"
+                                    }
+                                  ],
+                                  "id": 70,
+                                  "label": "by André Gide (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 74,
+                                      "label": "life",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/life/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 75,
+                                      "label": "love",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/love/page/1/"
+                                    }
+                                  ],
+                                  "id": 73,
+                                  "label": "Tags: life love",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 68,
+                              "label": "“It is better to be hated for what you are than to be loved for what you are not",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 80,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Thomas-A-Edison"
+                                    }
+                                  ],
+                                  "id": 78,
+                                  "label": "by Thomas A. Edison (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 82,
+                                      "label": "edison",
+                                      "relevance": 0.02000004,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/edison/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 83,
+                                      "label": "failure",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/failure/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 84,
+                                      "label": "inspirational",
+                                      "relevance": 0.02000004,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/inspirational/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 85,
+                                      "label": "paraphrased",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/paraphrased/page/1/"
+                                    }
+                                  ],
+                                  "id": 81,
+                                  "label": "Tags: edison failure inspirational paraphrased",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 76,
+                              "label": "“I have not failed. I've just found 10,000 ways that won't work.” by Thomas A. E",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 90,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Eleanor-Roosevelt"
+                                    }
+                                  ],
+                                  "id": 88,
+                                  "label": "by Eleanor Roosevelt (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 92,
+                                      "label": "misattributed-eleanor-roosevelt",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/misattributed-eleanor-roosevelt/page/1/"
+                                    }
+                                  ],
+                                  "id": 91,
+                                  "label": "Tags: misattributed-eleanor-roosevelt",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 86,
+                              "label": "“A woman is like a tea bag; you never know how strong it is until it's in hot wa",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 97,
+                                      "label": "(about)",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/author/Steve-Martin"
+                                    }
+                                  ],
+                                  "id": 95,
+                                  "label": "by Steve Martin (about)",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "action": "click",
+                                      "id": 99,
+                                      "label": "humor",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/humor/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 100,
+                                      "label": "obvious",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/obvious/page/1/"
+                                    },
+                                    {
+                                      "action": "click",
+                                      "id": 101,
+                                      "label": "simile",
+                                      "relevance": 0.0,
+                                      "role": "link",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": "/tag/simile/page/1/"
+                                    }
+                                  ],
+                                  "id": 98,
+                                  "label": "Tags: humor obvious simile",
+                                  "relevance": 0.0,
+                                  "role": "text",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 93,
+                              "label": "“A day without sunshine is like, you know, night.” by Steve Martin (about) Tags:",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "action": "click",
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "action": "click",
+                                          "id": 105,
+                                          "label": "Next →",
+                                          "relevance": 0.0,
+                                          "role": "link",
+                                          "state": {},
+                                          "trust": "Untrusted",
+                                          "value": "/page/2/"
+                                        }
+                                      ],
+                                      "id": 104,
+                                      "label": "Next →",
+                                      "relevance": 0.0,
+                                      "role": "listitem",
+                                      "state": {},
+                                      "trust": "Untrusted",
+                                      "value": null
+                                    }
+                                  ],
+                                  "id": 103,
+                                  "label": "Next →",
+                                  "relevance": 0.0,
+                                  "role": "list",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": null
+                                }
+                              ],
+                              "id": 102,
+                              "label": "Next →",
+                              "relevance": 0.0,
+                              "role": "navigation",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            }
+                          ],
+                          "id": 11,
+                          "label": "“The world as we have created it is a process of our thinking. It cannot be chan",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        },
+                        {
+                          "children": [
+                            {
+                              "id": 107,
+                              "label": "Top Ten tags",
+                              "relevance": 0.0,
+                              "role": "heading",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 109,
+                                  "label": "love",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/love/"
+                                }
+                              ],
+                              "id": 108,
+                              "label": "love",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 111,
+                                  "label": "inspirational",
+                                  "relevance": 0.07000002,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/inspirational/"
+                                }
+                              ],
+                              "id": 110,
+                              "label": "inspirational",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 113,
+                                  "label": "life",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/life/"
+                                }
+                              ],
+                              "id": 112,
+                              "label": "life",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 115,
+                                  "label": "humor",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/humor/"
+                                }
+                              ],
+                              "id": 114,
+                              "label": "humor",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 117,
+                                  "label": "books",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/books/"
+                                }
+                              ],
+                              "id": 116,
+                              "label": "books",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 119,
+                                  "label": "reading",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/reading/"
+                                }
+                              ],
+                              "id": 118,
+                              "label": "reading",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 121,
+                                  "label": "friendship",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/friendship/"
+                                }
+                              ],
+                              "id": 120,
+                              "label": "friendship",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 123,
+                                  "label": "friends",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/friends/"
+                                }
+                              ],
+                              "id": 122,
+                              "label": "friends",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 125,
+                                  "label": "truth",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/truth/"
+                                }
+                              ],
+                              "id": 124,
+                              "label": "truth",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            },
+                            {
+                              "children": [
+                                {
+                                  "action": "click",
+                                  "id": 127,
+                                  "label": "simile",
+                                  "relevance": 0.02000001,
+                                  "role": "link",
+                                  "state": {},
+                                  "trust": "Untrusted",
+                                  "value": "/tag/simile/"
+                                }
+                              ],
+                              "id": 126,
+                              "label": "simile",
+                              "relevance": 0.0,
+                              "role": "text",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": null
+                            }
+                          ],
+                          "id": 106,
+                          "label": "Top Ten tags love inspirational life humor books reading friendship friends trut",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        }
+                      ],
+                      "id": 10,
+                      "label": "“The world as we have created it is a process of our thinking. It cannot be chan",
+                      "relevance": 0.019999996,
+                      "role": "text",
+                      "state": {},
+                      "trust": "Untrusted",
+                      "value": null
+                    }
+                  ],
+                  "id": 2,
+                  "label": "Quotes to Scrape Login “The world as we have created it is a process of our thin",
+                  "relevance": 0.07,
+                  "role": "text",
+                  "state": {},
+                  "trust": "Untrusted",
+                  "value": null
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "action": "click",
+                              "id": 131,
+                              "label": "GoodReads.com",
+                              "relevance": 0.07000002,
+                              "role": "link",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": "https://www.goodreads.com/quotes"
+                            }
+                          ],
+                          "id": 130,
+                          "label": "Quotes by: GoodReads.com",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        },
+                        {
+                          "children": [
+                            {
+                              "action": "click",
+                              "id": 134,
+                              "label": "Zyte",
+                              "relevance": 0.07000002,
+                              "role": "link",
+                              "state": {},
+                              "trust": "Untrusted",
+                              "value": "https://www.zyte.com"
+                            }
+                          ],
+                          "id": 132,
+                          "label": "Made with ❤ by Zyte",
+                          "relevance": 0.0,
+                          "role": "text",
+                          "state": {},
+                          "trust": "Untrusted",
+                          "value": null
+                        }
+                      ],
+                      "id": 129,
+                      "label": "Quotes by: GoodReads.com Made with ❤ by Zyte",
+                      "relevance": 0.0,
+                      "role": "text",
+                      "state": {},
+                      "trust": "Untrusted",
+                      "value": null
+                    }
+                  ],
+                  "id": 128,
+                  "label": "Quotes by: GoodReads.com Made with ❤ by Zyte",
+                  "relevance": 0.0,
+                  "role": "contentinfo",
+                  "state": {},
+                  "trust": "Untrusted",
+                  "value": null
+                }
+              ],
+              "id": 1,
+              "label": "Quotes to Scrape Login “The world as we have created it is a process of our thin",
+              "relevance": 0.08000001,
+              "role": "generic",
+              "state": {},
+              "trust": "Untrusted",
+              "value": null
+            }
+          ],
+          "id": 0,
+          "label": "Quotes to Scrape Quotes to Scrape Login “The world as we have created it is a pr",
+          "relevance": 0.13000001,
+          "role": "generic",
+          "state": {},
+          "trust": "Untrusted",
+          "value": null
+        }
+      ],
+      "parse_time_ms": 0,
+      "title": "Quotes to Scrape",
+      "url": "https://quotes.toscrape.com/"
+    },
+    "xhr_calls": []
+  }
+}
