@@ -159,7 +159,8 @@ pub(crate) fn register_htmlprogress_element<'js>(
         Accessor::new_get(JsFn(HTMLProgressElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

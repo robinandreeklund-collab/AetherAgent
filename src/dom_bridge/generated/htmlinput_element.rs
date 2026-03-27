@@ -1661,7 +1661,8 @@ pub(crate) fn register_htmlinput_element<'js>(
         Accessor::new_get(JsFn(HTMLInputElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "select",

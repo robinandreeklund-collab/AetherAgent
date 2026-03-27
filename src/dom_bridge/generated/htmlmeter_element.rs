@@ -340,7 +340,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
         Accessor::new_get(JsFn(HTMLMeterElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

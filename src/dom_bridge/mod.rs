@@ -6031,22 +6031,9 @@ fn register_dom_impl_properties<'js>(
         )?;
     }
 
-    // ─── element.labels — NodeList av associerade <label> (native Rust) ──────
-    if matches!(
-        tag_lower.as_str(),
-        "input" | "select" | "textarea" | "button" | "meter" | "output" | "progress"
-    ) {
-        let lab_state = Rc::clone(state);
-        let lab_key = key;
-        obj.prop(
-            "labels",
-            rquickjs::object::Accessor::new_get(JsFn(LabelsGetter {
-                state: lab_state,
-                key: lab_key,
-            }))
-            .configurable(),
-        )?;
-    }
+    // ─── element.labels — hanteras redan av generated code ──────────────────
+    // Generated: htmlinput_element, htmlbutton_element, htmlselect_element, etc.
+    // anropar computed::find_labels() och returnerar Array.
 
     // ─── Input value/checked med dirty state (input) ─────────────────────
     if tag_lower == "input" {
@@ -6350,36 +6337,6 @@ impl JsHandler for InputCheckedSetter {
         let mut s = self.state.borrow_mut();
         dom_impls::input_value::set_input_checked(&mut s, self.key, checked);
         Ok(Value::new_undefined(ctx.clone()))
-    }
-}
-
-// ─── Labels getter — hittar associerade <label> element ──────────────────────
-
-struct LabelsGetter {
-    state: SharedState,
-    key: NodeKey,
-}
-impl JsHandler for LabelsGetter {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let s = self.state.borrow();
-        let label_keys = computed::find_labels(&s, self.key);
-        drop(s);
-        let arr = rquickjs::Array::new(ctx.clone())?;
-        for (i, &lk) in label_keys.iter().enumerate() {
-            if let Ok(obj) = make_element_object(ctx, lk, &self.state) {
-                let _ = arr.set(i, obj);
-            }
-        }
-        // NodeList-liknande: lägg till length
-        let result = Object::new(ctx.clone())?;
-        let len = label_keys.len();
-        for i in 0..len {
-            if let Ok(v) = arr.get::<Value>(i) {
-                result.set(i as u32, v)?;
-            }
-        }
-        result.set("length", len as i32)?;
-        Ok(result.into_value())
     }
 }
 

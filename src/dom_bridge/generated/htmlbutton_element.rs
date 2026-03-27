@@ -569,7 +569,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
         Accessor::new_get(JsFn(HTMLButtonElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",

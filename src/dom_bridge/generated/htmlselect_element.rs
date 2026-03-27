@@ -571,7 +571,8 @@ pub(crate) fn register_htmlselect_element<'js>(
         Accessor::new_get(JsFn(HTMLSelectElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",
