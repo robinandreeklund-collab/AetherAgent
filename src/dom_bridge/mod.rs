@@ -1136,8 +1136,9 @@ impl JsHandler for CreateElement {
             .first()
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
-            .unwrap_or_default()
-            .to_lowercase();
+            .unwrap_or_default();
+        // HTML spec: createElement lowercasar BARA ASCII (ej Unicode)
+        let tag = tag.to_ascii_lowercase();
         let key = {
             let mut s = self.state.borrow_mut();
             s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -1273,9 +1274,20 @@ impl JsHandler for CreateElementNS {
                 "__ns__".to_string(),
                 namespace.as_deref().unwrap_or("").to_string(),
             );
+            // Lagra qualifiedName (prefix:localName) för getElementsByTagName-matchning
+            let qualified_name = if let Some(ref pfx) = prefix {
+                format!("{pfx}:{local_name}")
+            } else {
+                local_name.clone()
+            };
+            // Spara __prefix__ för localName-access
+            if let Some(ref pfx) = prefix {
+                attrs.insert("__prefix__".to_string(), pfx.clone());
+                attrs.insert("__localName__".to_string(), local_name.clone());
+            }
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
-                tag: Some(local_name.clone()),
+                tag: Some(qualified_name),
                 attributes: attrs,
                 text: None,
                 parent: None,
@@ -1854,6 +1866,347 @@ impl JsHandler for XmlSerializeNodeHandler {
         let xml = dom_impls::xml_serializer::serialize_to_xml(&s.arena, key);
         Ok(rquickjs::String::from_str(ctx.clone(), &xml)?.into_value())
     }
+}
+
+/// Kontrollera XML well-formedness. Returnerar null (ok) eller felmeddelande (sträng).
+pub(super) struct CheckXmlWellFormedHandler;
+impl JsHandler for CheckXmlWellFormedHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let xml = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        match check_xml_well_formed(&xml) {
+            None => Ok(Value::new_null(ctx.clone())),
+            Some(err) => Ok(rquickjs::String::from_str(ctx.clone(), &err)?.into_value()),
+        }
+    }
+}
+
+/// Enkel XML well-formedness-check. Returnerar None om OK, Some(error) om fel.
+fn check_xml_well_formed(xml: &str) -> Option<String> {
+    // Ta bort DOCTYPE, PI, kommentarer, CDATA
+    let mut cleaned = xml.to_string();
+    // Ta bort DOCTYPE
+    while let Some(start) = cleaned.find("<!DOCTYPE") {
+        if let Some(end) = cleaned[start..].find('>') {
+            cleaned.replace_range(start..start + end + 1, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort PI
+    while let Some(start) = cleaned.find("<?") {
+        if let Some(end) = cleaned[start..].find("?>") {
+            cleaned.replace_range(start..start + end + 2, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort kommentarer
+    while let Some(start) = cleaned.find("<!--") {
+        if let Some(end) = cleaned[start..].find("-->") {
+            cleaned.replace_range(start..start + end + 3, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort CDATA
+    while let Some(start) = cleaned.find("<![CDATA[") {
+        if let Some(end) = cleaned[start..].find("]]>") {
+            cleaned.replace_range(start..start + end + 3, "");
+        } else {
+            break;
+        }
+    }
+
+    // Ogiltig: < följt av mellanslag
+    if cleaned.contains("< ") {
+        // Kolla att det inte bara är text
+        let idx = cleaned.find("< ").unwrap_or(0);
+        let after = &cleaned[idx + 2..];
+        if after.starts_with('/')
+            || after
+                .chars()
+                .next()
+                .map(|c| c.is_alphabetic())
+                .unwrap_or(false)
+        {
+            return Some("bad start tag".to_string());
+        }
+    }
+    // Ogiltig sluttagg med mellanslag
+    if cleaned.contains("</ ") {
+        return Some("bad end tag".to_string());
+    }
+    // Ofullständig tag (< utan matchande >)
+    if let Some(last_lt) = cleaned.rfind('<') {
+        if cleaned[last_lt..].find('>').is_none() {
+            return Some("unclosed tag".to_string());
+        }
+    }
+    // Dubbelkolon (::)
+    for cap in cleaned.match_indices("::") {
+        // Kontrollera att det är inuti en tag
+        let before = &cleaned[..cap.0];
+        let last_open = before.rfind('<');
+        let last_close = before.rfind('>');
+        if let Some(lo) = last_open {
+            if last_close.is_none() || last_close.unwrap() < lo {
+                return Some("invalid qualified name".to_string());
+            }
+        }
+    }
+
+    // Tag-matchning + attributvalidering
+    let mut stack: Vec<String> = Vec::new();
+    let mut i = 0;
+    let bytes = cleaned.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' && i + 1 < bytes.len() {
+            let is_end = i + 1 < bytes.len() && bytes[i + 1] == b'/';
+            let tag_start = if is_end { i + 2 } else { i + 1 };
+            // Hitta slutet av taggen
+            let tag_end = match cleaned[i..].find('>') {
+                Some(pos) => i + pos,
+                None => return Some("unclosed tag".to_string()),
+            };
+            let tag_content = &cleaned[tag_start..tag_end];
+            // Extrahera tag-namn
+            let name_end = tag_content
+                .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+                .unwrap_or(tag_content.len());
+            let tag_name = &tag_content[..name_end];
+
+            if tag_name.is_empty() && !is_end {
+                // Kan vara `< ` som vi redan kontrollerat
+                i = tag_end + 1;
+                continue;
+            }
+            // Kontrollera att tagnamn är giltigt
+            if !tag_name.is_empty() {
+                let first = tag_name.chars().next().unwrap();
+                if first.is_ascii_digit() {
+                    return Some("tag name starts with digit".to_string());
+                }
+                // Kontrollera : i tagnamn
+                if tag_name.contains(':') {
+                    let parts: Vec<&str> = tag_name.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        if parts[0].is_empty() {
+                            return Some("empty prefix".to_string());
+                        }
+                        if parts[0]
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                        {
+                            return Some("prefix starts with digit".to_string());
+                        }
+                    }
+                }
+            }
+
+            if is_end {
+                // Sluttagg
+                let name = tag_name.trim();
+                if stack.is_empty() || stack.last().map(|s| s.as_str()) != Some(name) {
+                    return Some(format!("mismatched tag: {name}"));
+                }
+                stack.pop();
+            } else {
+                let self_close = tag_content.ends_with('/');
+                // Kontrollera attribut
+                let attr_str = tag_content[name_end..].trim_end_matches('/').trim();
+                if !attr_str.is_empty() {
+                    if let Some(err) = check_xml_attributes(attr_str) {
+                        return Some(err);
+                    }
+                }
+                if !self_close && !tag_name.is_empty() {
+                    stack.push(tag_name.to_string());
+                }
+            }
+            i = tag_end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    if !stack.is_empty() {
+        return Some(format!("unclosed tag: {}", stack.last().unwrap()));
+    }
+    // Kontrollera undeklare namespace-prefix i attribut
+    check_xml_namespace_prefixes(&cleaned)
+}
+
+/// Kontrollera XML-attributsyntax. Returnerar None om OK, Some(error) vid fel.
+fn check_xml_attributes(attr_str: &str) -> Option<String> {
+    let mut s = attr_str.trim();
+    while !s.is_empty() {
+        // Hoppa över whitespace
+        s = s.trim_start();
+        if s.is_empty() {
+            break;
+        }
+        // Kolla att attributnamn börjar med giltigt tecken
+        let first = s.chars().next()?;
+        if first == '=' {
+            return Some("attribute without name".to_string());
+        }
+        if first == ':' {
+            // Tomt prefix (:attr) — ogiltigt i XML
+            return Some("empty attribute prefix".to_string());
+        }
+        if !first.is_alphabetic() && first != '_' {
+            return Some("invalid attribute name".to_string());
+        }
+        // Läs attributnamn
+        let name_end = s
+            .find(|c: char| c.is_whitespace() || c == '=' || c == '/' || c == '>')
+            .unwrap_or(s.len());
+        let attr_name = &s[..name_end];
+        // Kontrollera xmlns: med tomt prefix-namn
+        if attr_name == "xmlns:" || attr_name.starts_with("xmlns:") {
+            let pfx = &attr_name[6..];
+            if pfx.is_empty() {
+                return Some("empty xmlns prefix".to_string());
+            }
+        }
+        s = s[name_end..].trim_start();
+        // Kräv = efter attributnamn
+        if s.is_empty() || !s.starts_with('=') {
+            return Some("attribute without value".to_string());
+        }
+        s = s[1..].trim_start();
+        // Kräv citattecken
+        if s.is_empty() {
+            return Some("attribute without value".to_string());
+        }
+        let quote = s.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return Some("unquoted attribute value".to_string());
+        }
+        // Läs till matchande citattecken
+        s = &s[1..];
+        match s.find(quote) {
+            Some(end) => s = &s[end + 1..],
+            None => return Some("unterminated attribute value".to_string()),
+        }
+    }
+    None
+}
+
+/// Kontrollera att alla namespace-prefix i attribut är deklarerade.
+fn check_xml_namespace_prefixes(xml: &str) -> Option<String> {
+    use std::collections::HashSet;
+    let mut declared: HashSet<String> = HashSet::new();
+    declared.insert("xml".to_string());
+    declared.insert("xmlns".to_string());
+
+    // Samla deklarerade xmlns-prefix
+    // Namespace-prefix valideras nedan
+    // Sök alla xmlns:prefix="..." deklarationer
+    let mut idx = 0;
+    while let Some(pos) = xml[idx..].find("xmlns:") {
+        let prefix_start = idx + pos + 6;
+        let prefix_end = xml[prefix_start..]
+            .find(|c: char| c.is_whitespace() || c == '=')
+            .map(|e| prefix_start + e)
+            .unwrap_or(prefix_start);
+        let prefix = &xml[prefix_start..prefix_end];
+        if !prefix.is_empty() {
+            // Kontrollera att det har ett = och värde
+            let after = xml[prefix_end..].trim_start();
+            if after.starts_with('=') {
+                declared.insert(prefix.to_string());
+            } else {
+                // xmlns:prefix utan = → fel
+                return Some("xmlns without value".to_string());
+            }
+        }
+        // xmlns:xmlns="" → förbjudet
+        if prefix == "xmlns" {
+            let after = xml[prefix_end..].trim_start();
+            if after.starts_with("=\"\"") || after.starts_with("=''") {
+                return Some("reserved xmlns prefix".to_string());
+            }
+        }
+        idx = prefix_end + 1;
+        if idx >= xml.len() {
+            break;
+        }
+    }
+
+    // Kontrollera attribut-prefix
+    // Sök attribut med prefix (name:attr=)
+    let mut idx2 = 0;
+    while idx2 < xml.len() {
+        if let Some(lt) = xml[idx2..].find('<') {
+            let lt_abs = idx2 + lt;
+            if let Some(gt) = xml[lt_abs..].find('>') {
+                let tag = &xml[lt_abs..lt_abs + gt + 1];
+                // Sök prefix:attr= mönster i taggen
+                let mut ti = 0;
+                let tag_bytes = tag.as_bytes();
+                // Hoppa förbi tag-namn
+                while ti < tag_bytes.len()
+                    && tag_bytes[ti] != b' '
+                    && tag_bytes[ti] != b'\t'
+                    && tag_bytes[ti] != b'\n'
+                    && tag_bytes[ti] != b'>'
+                {
+                    ti += 1;
+                }
+                // Sök attribut
+                while ti < tag_bytes.len() {
+                    // Hoppa whitespace
+                    while ti < tag_bytes.len()
+                        && (tag_bytes[ti] == b' '
+                            || tag_bytes[ti] == b'\t'
+                            || tag_bytes[ti] == b'\n')
+                    {
+                        ti += 1;
+                    }
+                    if ti >= tag_bytes.len() || tag_bytes[ti] == b'>' || tag_bytes[ti] == b'/' {
+                        break;
+                    }
+                    // Läs attributnamn
+                    let attr_start = ti;
+                    while ti < tag_bytes.len()
+                        && tag_bytes[ti] != b'='
+                        && tag_bytes[ti] != b' '
+                        && tag_bytes[ti] != b'>'
+                    {
+                        ti += 1;
+                    }
+                    let attr_name = &tag[attr_start..ti];
+                    // Kontrollera prefix
+                    if let Some(colon) = attr_name.find(':') {
+                        let pfx = &attr_name[..colon];
+                        if !pfx.is_empty()
+                            && pfx != "xmlns"
+                            && pfx != "xml"
+                            && !declared.contains(pfx)
+                        {
+                            return Some(format!("undeclared prefix: {pfx}"));
+                        }
+                    }
+                    // Hoppa förbi = och värde
+                    while ti < tag_bytes.len() && tag_bytes[ti] != b' ' && tag_bytes[ti] != b'>' {
+                        ti += 1;
+                    }
+                }
+                idx2 = lt_abs + gt + 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    None
 }
 
 struct GetSelection;
@@ -3015,12 +3368,12 @@ struct GetElementsByTagNameElement {
 }
 impl JsHandler for GetElementsByTagNameElement {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Spec: getElementsByTagName tar INTE lowercase — matchning sker per-element i selectors.rs
         let tag = args
             .first()
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
+            .unwrap_or_default();
         make_live_html_collection(ctx, &self.state, self.key, "tag", &tag)
     }
 }
@@ -4266,9 +4619,19 @@ pub(super) fn make_element_object<'js>(
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "html".to_string())
         } else {
-            node.and_then(|n| n.tag.as_ref())
-                .map(|t| t.to_uppercase())
-                .unwrap_or_default()
+            // tagName: uppercase bara för HTML namespace (eller parsade element utan __ns__)
+            let ns = node.and_then(|n| n.get_attr("__ns__"));
+            let is_html_ns = ns.is_none() || ns == Some("http://www.w3.org/1999/xhtml");
+            let raw_tag = node
+                .and_then(|n| n.tag.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            if is_html_ns {
+                raw_tag.to_ascii_uppercase()
+            } else {
+                // Icke-HTML namespace: bevara case som-den-är
+                raw_tag
+            }
         };
         let id = node
             .and_then(|n| n.get_attr("id"))
@@ -4319,6 +4682,23 @@ pub(super) fn make_element_object<'js>(
         _ => tag_name.clone(),
     };
     obj.set("nodeName", node_name.as_str())?;
+    // localName — sätts för alla element/PI-noder
+    if node_type_val == 1 || node_type_val == 7 {
+        let local_name = {
+            let s = state.borrow();
+            let node = s.arena.nodes.get(key);
+            // createElementNS sparar __localName__ som internt attribut
+            node.and_then(|n| n.get_attr("__localName__"))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // Vanliga element: tag = localName (redan lowercase)
+                    node.and_then(|n| n.tag.as_deref())
+                        .unwrap_or("")
+                        .to_string()
+                })
+        };
+        obj.set("localName", local_name.as_str())?;
+    }
     // ownerDocument — lazy getter som hämtar document från globals vid anrop
     // Löser timing: body/head/documentElement skapas innan document registreras.
     if node_type_val != 9 {

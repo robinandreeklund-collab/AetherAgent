@@ -15,7 +15,8 @@ use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_quer
 #[cfg(feature = "blitz")]
 use super::{build_blitz_computed_styles, map_blitz_styles_to_arena};
 use super::{
-    extract_node_key, node_key_to_f64, GetSelectionFromDoc, NoOpHandler, XmlSerializeNodeHandler,
+    extract_node_key, node_key_to_f64, CheckXmlWellFormedHandler, GetSelectionFromDoc, NoOpHandler,
+    XmlSerializeNodeHandler,
 };
 
 pub(super) struct GetComputedStyleHandler {
@@ -299,6 +300,17 @@ pub(super) fn register_window_with_viewport<'js>(
                 state: Rc::clone(&state),
             }),
         )?,
+    )?;
+
+    // __checkXmlWellFormed — kontrollera XML well-formedness, returnerar null eller felmeddelande
+    // Registrera på BÅDE window OCH globals (globalThis) så DOMParser kan hitta den
+    win.set(
+        "__checkXmlWellFormed",
+        Function::new(ctx.clone(), JsFn(CheckXmlWellFormedHandler))?,
+    )?;
+    ctx.globals().set(
+        "__checkXmlWellFormed",
+        Function::new(ctx.clone(), JsFn(CheckXmlWellFormedHandler))?,
     )?;
 
     // addEventListener / removeEventListener / dispatchEvent på window
@@ -628,7 +640,21 @@ pub(super) fn register_window_with_viewport<'js>(
             this._returnValue = true;
             Object.defineProperty(this, 'returnValue', {
                 get: function() { return this._returnValue; },
-                set: function(v) { if (!v && this.cancelable && !this.__passive) { this.defaultPrevented = true; } this._returnValue = v; },
+                set: function(v) {
+                    if (!v) {
+                        // returnValue=false: sätt canceled flag bara om cancelable
+                        if (this.cancelable && !this.__passive) {
+                            this.defaultPrevented = true;
+                            this._returnValue = false;
+                        }
+                        // Om ej cancelable: ignorera (returnValue förblir true)
+                    } else {
+                        // returnValue=true: har ingen effekt om redan canceled
+                        if (!this.defaultPrevented) {
+                            this._returnValue = true;
+                        }
+                    }
+                },
                 configurable: true, enumerable: true
             });
             this.timeStamp = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -1287,6 +1313,7 @@ pub(super) fn register_window_with_viewport<'js>(
                     type !== 'image/svg+xml') {
                     throw new TypeError("Invalid MIME type: " + type);
                 }
+                var isXml = type && type !== 'text/html';
                 // Skapa en ny document via createHTMLDocument eller fallback
                 var newDoc;
                 if (document.implementation && document.implementation.createHTMLDocument) {
@@ -1306,7 +1333,25 @@ pub(super) fn register_window_with_viewport<'js>(
                     newDoc.documentElement.appendChild(newDoc.head);
                     newDoc.documentElement.appendChild(newDoc.body);
                 }
-                if (str && newDoc.documentElement) {
+                // XML well-formedness check via Rust
+                if (isXml && str) {
+                    var xmlErr = null;
+                    if (typeof __checkXmlWellFormed === 'function') {
+                        xmlErr = __checkXmlWellFormed(str);
+                    }
+                    if (xmlErr) {
+                        // Parsererror: sätt som enda barn till documentElement
+                        if (newDoc.documentElement) {
+                            newDoc.documentElement.innerHTML = '';
+                            var pe = newDoc.createElement('parsererror');
+                            pe.namespaceURI = 'http://www.mozilla.org/newlayout/xml/parsererror.xml';
+                            pe.textContent = 'XML Parsing Error: ' + xmlErr;
+                            newDoc.documentElement.appendChild(pe);
+                        }
+                    } else if (str && newDoc.documentElement) {
+                        newDoc.documentElement.innerHTML = str;
+                    }
+                } else if (str && newDoc.documentElement) {
                     newDoc.documentElement.innerHTML = str;
                 }
                 // Spec-krävda properties
@@ -1336,6 +1381,10 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                 }
                 newDoc.styleSheets = sheets;
+                // DOMParser spec: returnerar Document (INTE XMLDocument)
+                if (globalThis.Document && globalThis.Document.prototype) {
+                    try { Object.setPrototypeOf(newDoc, globalThis.Document.prototype); } catch(e) {}
+                }
                 return newDoc;
             };
         };

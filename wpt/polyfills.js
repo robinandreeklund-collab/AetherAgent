@@ -595,8 +595,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
   globalThis.Document.prototype = _origDocProto;
   globalThis.Document.prototype.constructor = globalThis.Document;
 
-  // XMLDocument — alias
-  globalThis.XMLDocument = globalThis.Document;
+  // XMLDocument — separat konstruktor (INTE subclass av Document)
+  // DOMParser spec: parseFromString returnerar Document, INTE XMLDocument
+  // Så instanceof XMLDocument === false för DOMParser-resultat
+  globalThis.XMLDocument = function XMLDocument() {};
+  globalThis.XMLDocument.prototype = {};
+  globalThis.XMLDocument.prototype.constructor = globalThis.XMLDocument;
 })();
 
 // ─── Patcha document.body/head/documentElement (pre-cache-skapade) ───────────
@@ -771,8 +775,9 @@ globalThis.__patchCharacterData = function(n) { return n; };
   // make_element_object skapar plain objects — vi patchas via __patchProto
   globalThis.__tagToConstructor = tagMap;
   globalThis.__patchPrototype = function(el) {
-    if (!el || typeof el !== 'object' || !el.tagName) return el;
+    if (!el || typeof el !== 'object') return el;
     var nt = el.nodeType;
+    if (!nt) return el;
     var proto = null;
     if (nt === 1) {
       // Element — välj via tagName

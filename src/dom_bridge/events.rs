@@ -186,7 +186,18 @@ pub(super) struct DispatchEventHandler {
 }
 impl JsHandler for DispatchEventHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let event_obj = args.first().and_then(|v| v.as_object());
+        // Spec: dispatchEvent(null) kastar TypeError
+        let first = args.first();
+        if first.is_none() || first.is_some_and(|v| v.is_null() || v.is_undefined()) {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "TypeError: Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'.",
+                )?
+                .into(),
+            ));
+        }
+        let event_obj = first.and_then(|v| v.as_object());
         let event_type = event_obj
             .and_then(|obj| obj.get::<_, String>("type").ok())
             .unwrap_or_default();
