@@ -367,6 +367,8 @@ impl JsHandler for DispatchEventHandler {
             let _ = ev.set("eventPhase", 0i32);
             let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
             let _ = ev.set("_dispatching", false);
+            let _ = ev.set("_stopPropagationFlag", false);
+            let _ = ev.set("_stopImmediatePropagationFlag", false);
         }
         let default_prevented = args
             .first()

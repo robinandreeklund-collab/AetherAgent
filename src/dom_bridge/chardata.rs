@@ -30,10 +30,9 @@ impl JsHandler for SubstringData {
             .unwrap_or("");
         if offset > utf16_len(data) {
             drop(s);
-            return Err(ctx.throw(
-                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
-                    .into(),
-            ));
+            return Err(ctx.throw(ctx.eval::<Value, _>(
+                r#"new DOMException("The index is not in the allowed range.", "IndexSizeError")"#,
+            )?));
         }
         let byte_start = utf16_offset_to_byte(data, offset);
         let byte_end = utf16_offset_to_byte(data, offset + count);
@@ -53,10 +52,16 @@ impl JsHandler for AppendData {
                 rquickjs::String::from_str(ctx.clone(), "TypeError: Not enough arguments")?.into(),
             ));
         }
-        let data = args[0]
-            .as_string()
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let data = if args[0].is_null() {
+            "null".to_string()
+        } else if args[0].is_undefined() {
+            "undefined".to_string()
+        } else {
+            args[0]
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default()
+        };
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let mut current = node.text.as_deref().unwrap_or("").to_string();
@@ -74,11 +79,15 @@ pub(super) struct InsertData {
 impl JsHandler for InsertData {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let offset = webidl_unsigned_long(args.first()) as usize;
-        let data = args
-            .get(1)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let data = match args.get(1) {
+            Some(v) if v.is_null() => "null".to_string(),
+            Some(v) if v.is_undefined() => "undefined".to_string(),
+            Some(v) => v
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default(),
+            None => String::new(),
+        };
         let mut s = self.state.borrow_mut();
         let text_len = s
             .arena
@@ -89,10 +98,9 @@ impl JsHandler for InsertData {
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
-            return Err(ctx.throw(
-                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
-                    .into(),
-            ));
+            return Err(ctx.throw(ctx.eval::<Value, _>(
+                r#"new DOMException("The index is not in the allowed range.", "IndexSizeError")"#,
+            )?));
         }
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
@@ -125,10 +133,9 @@ impl JsHandler for DeleteData {
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
-            return Err(ctx.throw(
-                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
-                    .into(),
-            ));
+            return Err(ctx.throw(ctx.eval::<Value, _>(
+                r#"new DOMException("The index is not in the allowed range.", "IndexSizeError")"#,
+            )?));
         }
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
@@ -151,11 +158,15 @@ impl JsHandler for ReplaceData {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let offset = webidl_unsigned_long(args.first()) as usize;
         let count = webidl_unsigned_long(args.get(1)) as usize;
-        let data = args
-            .get(2)
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+        let data = match args.get(2) {
+            Some(v) if v.is_null() => "null".to_string(),
+            Some(v) if v.is_undefined() => "undefined".to_string(),
+            Some(v) => v
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default(),
+            None => String::new(),
+        };
         let mut s = self.state.borrow_mut();
         let text_len = s
             .arena
@@ -166,10 +177,9 @@ impl JsHandler for ReplaceData {
             .unwrap_or(0);
         if offset > text_len {
             drop(s);
-            return Err(ctx.throw(
-                rquickjs::String::from_str(ctx.clone(), "IndexSizeError: offset out of range")?
-                    .into(),
-            ));
+            return Err(ctx.throw(ctx.eval::<Value, _>(
+                r#"new DOMException("The index is not in the allowed range.", "IndexSizeError")"#,
+            )?));
         }
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let current = node.text.as_deref().unwrap_or("").to_string();
