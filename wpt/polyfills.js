@@ -62,7 +62,7 @@
 
   if (!impl.createHTMLDocument) {
     impl.createHTMLDocument = function(title) {
-      // Bygg DOM-struktur
+      // Bygg en riktig DOM-struktur via vår arena
       var html = document.createElement('html');
       var head = document.createElement('head');
       var body = document.createElement('body');
@@ -74,44 +74,17 @@
         titleEl.appendChild(document.createTextNode(titleText));
         head.appendChild(titleEl);
       }
-      // Skapa doctype-nod
-      var doctype = null;
-      if (document.__createDocumentType) {
-        doctype = document.__createDocumentType('html', '', '');
-      } else {
-        doctype = { nodeType: 10, nodeName: 'html', name: 'html', publicId: '', systemId: '' };
-        try { Object.setPrototypeOf(doctype, typeof DocumentType !== 'undefined' ? DocumentType.prototype : {}); } catch(e) {}
-      }
-      // Skapa doc-objekt med Document.prototype for instanceof
-      var docProto = (typeof Document !== 'undefined' && Document.prototype) ? Document.prototype : {};
-      var doc = Object.create(docProto);
+      // Skapa ett dokument-liknande objekt via DocumentFragment (behåller arena-koppling)
+      var doc = document.createDocumentFragment();
+      doc.appendChild(html);
+      // Lägg till document-liknande egenskaper
       doc.nodeType = 9;
       doc.nodeName = '#document';
       doc.nodeValue = null;
-      // childNodes: [doctype, html]
-      doc._doctype = doctype;
-      doc._html = html;
-      Object.defineProperty(doc, 'childNodes', {
-        get: function() {
-          var cn = doctype ? [doctype, html] : [html];
-          cn.item = function(i) { return i >= 0 && i < this.length ? this[i] : null; };
-          return cn;
-        },
-        configurable: true
-      });
-      Object.defineProperty(doc, 'firstChild', {
-        get: function() { return doctype || html; },
-        configurable: true
-      });
-      Object.defineProperty(doc, 'lastChild', {
-        get: function() { return html; },
-        configurable: true
-      });
-      doc.hasChildNodes = function() { return true; };
-      doc.doctype = doctype;
       doc.documentElement = html;
       doc.head = head;
       doc.body = body;
+      doc.title = (title === null) ? 'null' : (title || '');
       // Metadata per spec
       doc.URL = 'about:blank';
       doc.documentURI = 'about:blank';
@@ -121,22 +94,18 @@
       doc.inputEncoding = 'UTF-8';
       doc.contentType = 'text/html';
       doc.location = null;
-      doc.title = (title === null) ? 'null' : (title || '');
-      // Per-doc DOMImplementation
+      // Per-doc implementation med ownerDoc-referens
       var docImpl = Object.create(document.implementation);
       docImpl._ownerDoc = doc;
       doc.implementation = docImpl;
-      // Delegera createElement etc. till parent document
-      doc.createElement = function(tag) {
-        var el = document.createElement(tag);
-        return el;
-      };
+      doc.createElement = document.createElement.bind(document);
       doc.createTextNode = document.createTextNode.bind(document);
       doc.createComment = document.createComment.bind(document);
       doc.createDocumentFragment = document.createDocumentFragment.bind(document);
       doc.createElementNS = document.createElementNS ? document.createElementNS.bind(document) : undefined;
-      // Query-metoder
+      // Query-metoder söker i detta dokumentets träd
       doc.getElementById = function(id) {
+        // Rekursiv sökning i hela dokumentträdet
         function findById(node, target) {
           if (node.id === target) return node;
           var kids = node.childNodes || [];
@@ -167,11 +136,12 @@
       };
       doc.createCDATASection = function(data) {
         var node = document.createComment(data);
-        node.nodeType = 4;
+        node.nodeType = 4; // CDATA_SECTION_NODE
         node.nodeName = '#cdata-section';
         return node;
       };
       doc.createProcessingInstruction = function(target, data) {
+        // Delegera till native om möjlig
         if (document.createProcessingInstruction) {
           return document.createProcessingInstruction(target, data);
         }
@@ -366,16 +336,11 @@
       e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
       e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
       e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-      e._stopPropagationFlag = false; e._stopImmediatePropagationFlag = false; e._canceledFlag = false; e.returnValue = true;
-      e.initEvent = function(t, b, c) { if (this._dispatching) return; this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
-      Object.defineProperty(e, 'cancelBubble', {
-        get: function() { return this._stopPropagationFlag; },
-        set: function(v) { if (v) this._stopPropagationFlag = true; },
-        configurable: true, enumerable: true
-      });
+      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
       return e;
     }
     var e = new Ctor('');
+    e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
     return e;
   };
 })();
