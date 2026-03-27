@@ -6569,7 +6569,8 @@ impl JsHandler for InputValueAsNumberGetter {
             None => return Ok(Value::new_float(ctx.clone(), f64::NAN)),
         };
         let input_type = node.get_attr("type").unwrap_or("text");
-        let value = computed::get_effective_value(&s, self.key);
+        // Använd sanitized value (inkl. range clamping/default)
+        let value = dom_impls::input_value::get_input_value(&s, self.key);
         let num = input_value_to_number(input_type, &value);
         Ok(Value::new_float(ctx.clone(), num))
     }
@@ -6692,9 +6693,23 @@ impl JsHandler for InputValueAsDateSetter {
             es.value = Some(String::new());
             es.value_dirty = true;
         } else if let Some(date_val) = val {
-            // Anropa getTime() via JS eval (korrekt this-binding)
+            // Kontrollera att det är ett Date-objekt
             drop(s);
-            let js_code = "(function(d){return typeof d==='object'&&d&&typeof d.getTime==='function'?d.getTime():NaN;})";
+            let check_code = "(function(d){return d instanceof Date;})";
+            let is_date = ctx
+                .eval::<Function, _>(check_code)
+                .ok()
+                .and_then(|f| f.call::<_, Value>((date_val.clone(),)).ok())
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_date {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "TypeError",
+                    "Failed to set 'valueAsDate': The provided value is not a Date",
+                ));
+            }
+            let js_code = "(function(d){return d.getTime();})";
             if let Ok(get_time_fn) = ctx.eval::<Function, _>(js_code) {
                 if let Ok(ms_val) = get_time_fn.call::<_, Value>((date_val.clone(),)) {
                     if let Some(ms) = ms_val.as_number() {
@@ -6850,7 +6865,7 @@ fn number_to_input_value(input_type: &str, num: f64) -> String {
             let (y, _, _) = civil_from_days(days);
             // Hitta veckonummer
             let jan4 = days_from_civil(y, 1, 4);
-            let dow_jan4 = (jan4 + 4) % 7;
+            let dow_jan4 = ((jan4 % 7) + 3) % 7;
             let week1_monday = jan4 - dow_jan4;
             let week_num = ((days - week1_monday) / 7) + 1;
             if (1..=53).contains(&week_num) {
@@ -6948,7 +6963,7 @@ fn input_value_to_ms(input_type: &str, value: &str) -> f64 {
                     // ISO 8601: vecka 1 innehåller 4 januari
                     let jan4 = days_from_civil(y, 1, 4);
                     // Hitta måndag i vecka 1
-                    let dow_jan4 = (jan4 + 4) % 7; // 0=mån
+                    let dow_jan4 = ((jan4 % 7) + 3) % 7; // 0=mån
                     let week1_monday = jan4 - dow_jan4;
                     let target_day = week1_monday + (w - 1) * 7;
                     target_day as f64 * 86_400_000.0
@@ -6981,6 +6996,12 @@ fn input_value_to_ms(input_type: &str, value: &str) -> f64 {
 /// Konvertera ms till input value-sträng
 fn ms_to_input_value(input_type: &str, ms: f64) -> String {
     match input_type {
+        "month" => {
+            // ms → YYYY-MM (dag 1 av den månaden)
+            let days = (ms / 86_400_000.0).floor() as i64;
+            let (y, m, _) = civil_from_days(days);
+            format!("{:04}-{:02}", y, m)
+        }
         "date" => {
             let days = (ms / 86_400_000.0).floor() as i64;
             let (y, m, d) = civil_from_days(days);

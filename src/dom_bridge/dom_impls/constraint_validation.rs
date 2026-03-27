@@ -395,7 +395,7 @@ fn parse_input_as_number(input_type: &str, value: &str) -> f64 {
                         return f64::NAN;
                     }
                     let jan4 = days_from_civil(y, 1, 4);
-                    let dow_jan4 = (jan4 + 4) % 7;
+                    let dow_jan4 = ((jan4 % 7) + 3) % 7;
                     let week1_monday = jan4 - dow_jan4;
                     let target_day = week1_monday + (w - 1) * 7;
                     target_day as f64 * 86_400_000.0
