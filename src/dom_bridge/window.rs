@@ -625,8 +625,13 @@ pub(super) fn register_window_with_viewport<'js>(
             this.currentTarget = null;
             this.eventPhase = 0;
             this.defaultPrevented = false;
-            this.returnValue = true;
-            this.timeStamp = Date.now();
+            this._returnValue = true;
+            Object.defineProperty(this, 'returnValue', {
+                get: function() { return this._returnValue; },
+                set: function(v) { if (!v && this.cancelable && !this.__passive) { this.defaultPrevented = true; } this._returnValue = v; },
+                configurable: true, enumerable: true
+            });
+            this.timeStamp = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
             this.isTrusted = false;
             this._stopPropagationFlag = false;
             this._stopImmediatePropagationFlag = false;
@@ -638,10 +643,12 @@ pub(super) fn register_window_with_viewport<'js>(
                 set: function(v) { if (v) this._stopPropagationFlag = true; },
                 configurable: true, enumerable: true
             });
+            this._composedPath = [];
+            this.composedPath = function() { return this._dispatching ? this._composedPath.slice() : []; };
             this.stopPropagation = function() { this._stopPropagationFlag = true; };
             this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-            this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
-            this.initEvent = function(type, bubbles, cancelable) { if (this._dispatching) return; this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
+            this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this._returnValue = false; } };
+            this.initEvent = function(type, bubbles, cancelable) { if (this._dispatching) return; this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._returnValue = true; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
         };
         Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
         Event.prototype.NONE = 0; Event.prototype.CAPTURING_PHASE = 1; Event.prototype.AT_TARGET = 2; Event.prototype.BUBBLING_PHASE = 3;

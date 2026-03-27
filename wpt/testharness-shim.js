@@ -95,15 +95,17 @@
   Test.prototype.step_func = function(fn) {
     var t = this;
     return function() {
-      t.step(function() { fn.apply(t, arguments); });
+      var outer_args = arguments;
+      t.step(function() { fn.apply(t, outer_args); });
     };
   };
 
   Test.prototype.step_func_done = function(fn) {
     var t = this;
     return function() {
+      var outer_args = arguments;
       t.step(function() {
-        if (fn) fn.apply(t, arguments);
+        if (fn) fn.apply(t, outer_args);
       });
       if (t.status !== FAIL) {
         t.done();

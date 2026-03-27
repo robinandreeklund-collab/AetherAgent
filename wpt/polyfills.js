@@ -13,7 +13,8 @@
   function patchCharacterData(node) {
     if (!node || typeof node !== 'object') return node;
     var nt = node.nodeType;
-    if (nt !== 3 && nt !== 8) return node;
+    // Text (3), Comment (8), ProcessingInstruction (7) — alla har CharacterData-interface
+    if (nt !== 3 && nt !== 7 && nt !== 8) return node;
 
     // .data getter/setter — alias för textContent (spec: null → "", undefined → "undefined")
     if (!('data' in node)) {

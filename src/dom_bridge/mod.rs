@@ -320,6 +320,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -449,6 +450,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -530,6 +532,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 blitz_style_generation: 0,
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
+                next_callback_id: 0,
             }
         }
     };
@@ -600,6 +603,7 @@ fn eval_js_with_lifecycle_internal(
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -733,6 +737,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -835,6 +840,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 blitz_style_generation: 0,
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
+                next_callback_id: 0,
             }
         }
     };
@@ -2591,15 +2597,39 @@ fn get_text_content(arena: &ArenaDom, key: NodeKey) -> String {
         None => return String::new(),
     };
     match &node.node_type {
-        NodeType::Text | NodeType::Comment => node.text.as_deref().unwrap_or("").to_string(),
-        _ => {
-            let mut text = String::new();
-            for &child in &node.children {
-                text.push_str(&get_text_content(arena, child));
+        // Text, Comment, PI: returnera node data direkt
+        NodeType::Text | NodeType::Comment | NodeType::ProcessingInstruction => {
+            node.text.as_deref().unwrap_or("").to_string()
+        }
+        // Element, DocumentFragment: konkatenera text från ALLA Text-descendants
+        _ => collect_text_descendants(arena, key),
+    }
+}
+
+/// Samla text från alla Text-nod descendants (exkluderar Comment, PI per spec)
+fn collect_text_descendants(arena: &ArenaDom, key: NodeKey) -> String {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return String::new(),
+    };
+    let mut text = String::new();
+    for &child in &node.children {
+        if let Some(child_node) = arena.nodes.get(child) {
+            match &child_node.node_type {
+                NodeType::Text => {
+                    text.push_str(child_node.text.as_deref().unwrap_or(""));
+                }
+                NodeType::Comment | NodeType::ProcessingInstruction => {
+                    // Skip per spec — inte inkluderad i textContent
+                }
+                _ => {
+                    // Rekursera in i element-barn
+                    text.push_str(&collect_text_descendants(arena, child));
+                }
             }
-            text
         }
     }
+    text
 }
 
 /// Serialisera nod till HTML
@@ -3777,7 +3807,8 @@ struct TextContentSetter {
 impl JsHandler for TextContentSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args.first();
-        let is_null = val.map(|v| v.is_null()).unwrap_or(true);
+        // Per IDL: textContent setter tar DOMString? — undefined → null
+        let is_null = val.map(|v| v.is_null() || v.is_undefined()).unwrap_or(true);
         let mut s = self.state.borrow_mut();
         let node_type = s
             .arena

@@ -45,6 +45,8 @@ pub(crate) struct EventListener {
     pub(super) capture: bool,
     pub(super) passive: Option<bool>,
     pub(super) once: bool,
+    /// Unik ID för callback-identifiering (för removeEventListener)
+    pub(super) callback_id: u64,
 }
 
 #[allow(dead_code)]
@@ -84,6 +86,8 @@ pub(crate) struct BridgeState {
     /// Generation vid senaste Blitz-cache-build
     #[cfg(feature = "blitz")]
     pub(super) blitz_cache_generation: u64,
+    /// Nästa callback_id för event listeners
+    pub(super) next_callback_id: u64,
 }
 
 pub(crate) type SharedState = Rc<RefCell<BridgeState>>;
