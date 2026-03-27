@@ -17,16 +17,19 @@ use super::{CSSFloat, CSSInteger};
 use crate::computed_value_flags::ComputedValueFlags;
 use crate::context::QuirksMode;
 use crate::custom_properties::ComputedCustomProperties;
+use crate::derives::*;
+use crate::device::Device;
 use crate::font_metrics::{FontMetrics, FontMetricsOrientation};
-use crate::media_queries::Device;
 #[cfg(feature = "gecko")]
 use crate::properties;
 use crate::properties::{ComputedValues, StyleBuilder};
 use crate::rule_cache::RuleCacheConditions;
+use crate::rule_tree::CascadeLevel;
 use crate::stylesheets::container_rule::{
     ContainerInfo, ContainerSizeQuery, ContainerSizeQueryResult,
 };
 use crate::stylist::Stylist;
+use crate::values::generics::ClampToNonNegative;
 use crate::values::specified::font::QueryFontMetricsFlags;
 use crate::values::specified::length::FontBaseSize;
 use crate::{ArcSlice, Atom, One};
@@ -37,27 +40,27 @@ use std::cmp;
 use std::f32;
 use std::ops::{Add, Sub};
 
-pub use self::align::{AlignContent, AlignItems, JustifyContent, JustifyItems, SelfAlignment};
-pub use self::align::{AlignSelf, JustifySelf};
+pub use self::align::{ContentDistribution, ItemPlacement, JustifyItems, SelfAlignment};
 pub use self::angle::Angle;
 pub use self::animation::{
     AnimationComposition, AnimationDirection, AnimationDuration, AnimationFillMode,
-    AnimationIterationCount, AnimationName, AnimationPlayState, AnimationTimeline, ScrollAxis,
-    TimelineName, TransitionBehavior, TransitionProperty, ViewTimelineInset, ViewTransitionClass,
-    ViewTransitionName,
+    AnimationIterationCount, AnimationName, AnimationPlayState, AnimationRangeEnd,
+    AnimationRangeStart, AnimationTimeline, ScrollAxis, TimelineName, TransitionBehavior,
+    TransitionProperty, ViewTimelineInset, ViewTransitionClass, ViewTransitionName,
 };
 pub use self::background::{BackgroundRepeat, BackgroundSize};
 pub use self::basic_shape::FillRule;
 pub use self::border::{
     BorderCornerRadius, BorderImageRepeat, BorderImageSideWidth, BorderImageSlice,
-    BorderImageWidth, BorderRadius, BorderSideWidth, BorderSpacing, LineWidth,
+    BorderImageWidth, BorderRadius, BorderSideOffset, BorderSideWidth, BorderSpacing, LineWidth,
 };
 pub use self::box_::{
-    Appearance, BaselineSource, BreakBetween, BreakWithin, Clear, Contain, ContainIntrinsicSize,
-    ContainerName, ContainerType, ContentVisibility, Display, Float, LineClamp, Overflow,
-    OverflowAnchor, OverflowClipBox, OverscrollBehavior, Perspective, PositionProperty, Resize,
-    ScrollSnapAlign, ScrollSnapAxis, ScrollSnapStop, ScrollSnapStrictness, ScrollSnapType,
-    ScrollbarGutter, TouchAction, VerticalAlign, WillChange, WritingModeProperty, Zoom,
+    AlignmentBaseline, Appearance, BaselineShift, BaselineSource, BreakBetween, BreakWithin, Clear,
+    Contain, ContainIntrinsicSize, ContainerName, ContainerType, ContentVisibility, Display,
+    DominantBaseline, Float, LineClamp, Overflow, OverflowAnchor, OverflowClipMargin,
+    OverscrollBehavior, Perspective, PositionProperty, Resize, ScrollSnapAlign, ScrollSnapAxis,
+    ScrollSnapStop, ScrollSnapStrictness, ScrollSnapType, ScrollbarGutter, TouchAction, WillChange,
+    WritingModeProperty, Zoom,
 };
 pub use self::color::{
     Color, ColorOrAuto, ColorPropertyValue, ColorScheme, ForcedColorAdjust, PrintColorAdjust,
@@ -80,7 +83,6 @@ pub use self::length::{CSSPixelLength, NonNegativeLength};
 pub use self::length::{Length, LengthOrNumber, LengthPercentage, NonNegativeLengthOrNumber};
 pub use self::length::{LengthOrAuto, LengthPercentageOrAuto, Margin, MaxSize, Size};
 pub use self::length::{NonNegativeLengthPercentage, NonNegativeLengthPercentageOrAuto};
-#[cfg(feature = "gecko")]
 pub use self::list::ListStyleType;
 pub use self::list::Quotes;
 pub use self::motion::{OffsetPath, OffsetPosition, OffsetRotate};
@@ -89,7 +91,6 @@ pub use self::page::{PageName, PageOrientation, PageSize, PageSizeOrientation, P
 pub use self::percentage::{NonNegativePercentage, Percentage};
 pub use self::position::AnchorFunction;
 pub use self::position::AnchorName;
-pub use self::position::AnchorScope;
 pub use self::position::AspectRatio;
 pub use self::position::DashedIdentAndOrTryTactic;
 pub use self::position::Inset;
@@ -97,6 +98,7 @@ pub use self::position::PositionAnchor;
 pub use self::position::PositionTryFallbacks;
 pub use self::position::PositionTryOrder;
 pub use self::position::PositionVisibility;
+pub use self::position::ScopedName;
 pub use self::position::{
     GridAutoFlow, GridTemplateAreas, MasonryAutoFlow, Position, PositionOrAuto, ZIndex,
 };
@@ -112,8 +114,9 @@ pub use self::text::{InitialLetter, LetterSpacing, LineBreak, TextIndent};
 pub use self::text::{OverflowWrap, RubyPosition, TextOverflow, WordBreak, WordSpacing};
 pub use self::text::{TextAlign, TextAlignLast, TextEmphasisPosition, TextEmphasisStyle};
 pub use self::text::{TextAutospace, TextUnderlinePosition};
+pub use self::text::{TextBoxEdge, TextBoxTrim};
 pub use self::text::{
-    TextDecorationLength, TextDecorationSkipInk, TextDecorationTrim, TextJustify,
+    TextDecorationInset, TextDecorationLength, TextDecorationSkipInk, TextJustify,
 };
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform, TransformBox, TransformOperation};
@@ -175,7 +178,7 @@ pub struct Context<'a> {
     ///
     /// See properties/longhands/font.mako.rs
     #[cfg(feature = "gecko")]
-    pub cached_system_font: Option<properties::longhands::system_font::ComputedSystemFont>,
+    pub cached_system_font: Option<properties::gecko::system_font::ComputedSystemFont>,
 
     /// A dummy option for servo so initializing a computed::Context isn't
     /// painful.
@@ -212,6 +215,9 @@ pub struct Context<'a> {
     /// FIXME(emilio): Drop the refcell.
     pub rule_cache_conditions: RefCell<&'a mut RuleCacheConditions>,
 
+    /// The cascade level in the shadow tree hierarchy.
+    pub scope: CascadeLevel,
+
     /// Container size query for this context.
     container_size_query: RefCell<ContainerSizeQuery<'a>>,
 }
@@ -241,6 +247,7 @@ impl<'a> Context<'a> {
             container_info: None,
             for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(&mut conditions),
+            scope: CascadeLevel::same_tree_author_normal(),
             container_size_query: RefCell::new(ContainerSizeQuery::none()),
         };
         f(&context)
@@ -277,6 +284,7 @@ impl<'a> Context<'a> {
             container_info,
             for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(&mut conditions),
+            scope: CascadeLevel::same_tree_author_normal(),
             container_size_query: RefCell::new(container_size_query),
         };
 
@@ -300,6 +308,7 @@ impl<'a> Context<'a> {
             for_smil_animation: false,
             for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(rule_cache_conditions),
+            scope: CascadeLevel::same_tree_author_normal(),
             container_size_query: RefCell::new(container_size_query),
         }
     }
@@ -322,6 +331,7 @@ impl<'a> Context<'a> {
             for_smil_animation,
             for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(rule_cache_conditions),
+            scope: CascadeLevel::same_tree_author_normal(),
             container_size_query: RefCell::new(container_size_query),
         }
     }
@@ -344,6 +354,7 @@ impl<'a> Context<'a> {
             for_smil_animation: false,
             for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(rule_cache_conditions),
+            scope: CascadeLevel::same_tree_author_normal(),
             container_size_query: RefCell::new(ContainerSizeQuery::none()),
         }
     }
@@ -399,7 +410,7 @@ impl<'a> Context<'a> {
             flags |= QueryFontMetricsFlags::USE_USER_FONT_SET
         }
         self.device()
-            .query_font_metrics(vertical, font, size, flags)
+            .query_font_metrics(vertical, font, size, flags, /* track_changes = */ true)
     }
 
     /// The current viewport size, used to resolve viewport units.
@@ -427,6 +438,11 @@ impl<'a> Context<'a> {
     /// The current style.
     pub fn style(&self) -> &StyleBuilder<'a> {
         &self.builder
+    }
+
+    /// The current tree scope.
+    pub fn current_scope(&self) -> CascadeLevel {
+        self.scope
     }
 
     /// Apply text-zoom if enabled.
@@ -718,6 +734,7 @@ trivial_to_computed_value!(bool);
 trivial_to_computed_value!(f32);
 trivial_to_computed_value!(i32);
 trivial_to_computed_value!(u8);
+trivial_to_computed_value!(i8);
 trivial_to_computed_value!(u16);
 trivial_to_computed_value!(u32);
 trivial_to_computed_value!(usize);
@@ -799,20 +816,6 @@ impl IsParallelTo for (Number, Number, Number) {
 /// A wrapper of Number, but the value >= 0.
 pub type NonNegativeNumber = NonNegative<CSSFloat>;
 
-impl ToAnimatedValue for NonNegativeNumber {
-    type AnimatedValue = CSSFloat;
-
-    #[inline]
-    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
-        self.0
-    }
-
-    #[inline]
-    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        animated.max(0.).into()
-    }
-}
-
 impl From<CSSFloat> for NonNegativeNumber {
     #[inline]
     fn from(number: CSSFloat) -> NonNegativeNumber {
@@ -843,16 +846,16 @@ impl One for NonNegativeNumber {
 pub type ZeroToOneNumber = ZeroToOne<CSSFloat>;
 
 impl ToAnimatedValue for ZeroToOneNumber {
-    type AnimatedValue = CSSFloat;
+    type AnimatedValue = Self;
 
     #[inline]
     fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
-        self.0
+        self
     }
 
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        Self(animated.max(0.).min(1.))
+        Self(animated.0.max(0.).min(1.))
     }
 }
 
@@ -904,6 +907,7 @@ impl From<GreaterThanOrEqualToOneNumber> for CSSFloat {
     MallocSizeOf,
     PartialEq,
     ToAnimatedZero,
+    ToAnimatedValue,
     ToCss,
     ToResolvedValue,
 )]
@@ -913,13 +917,13 @@ pub enum NumberOrPercentage {
     Number(Number),
 }
 
-impl NumberOrPercentage {
+impl ClampToNonNegative for NumberOrPercentage {
     fn clamp_to_non_negative(self) -> Self {
         match self {
             NumberOrPercentage::Percentage(p) => {
                 NumberOrPercentage::Percentage(p.clamp_to_non_negative())
             },
-            NumberOrPercentage::Number(n) => NumberOrPercentage::Number(n.max(0.)),
+            NumberOrPercentage::Number(n) => NumberOrPercentage::Number(n.clamp_to_non_negative()),
         }
     }
 }
@@ -961,20 +965,6 @@ impl NonNegativeNumberOrPercentage {
     #[inline]
     pub fn hundred_percent() -> Self {
         NonNegative(NumberOrPercentage::Percentage(Percentage::hundred()))
-    }
-}
-
-impl ToAnimatedValue for NonNegativeNumberOrPercentage {
-    type AnimatedValue = NumberOrPercentage;
-
-    #[inline]
-    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
-        self.0
-    }
-
-    #[inline]
-    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        NonNegative(animated.clamp_to_non_negative())
     }
 }
 

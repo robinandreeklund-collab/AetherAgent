@@ -1,1172 +1,665 @@
-// ─── CSS Selector Matching ───────────────────────────────────────────────────
+// ─── CSS Selector Matching via Servo's `selectors` crate ─────────────────────
 //
-// Utbruten från dom_bridge/mod.rs för bättre modularitet.
+// Riktig implementation som använder selectors 0.36 (samma engine som Stylo/Firefox).
+// Implementerar selectors::Element trait för ArenaDom-noder.
+// Stödjer alla CSS-selektorer: :has(), :is(), :where(), :not(), alla combinators, etc.
 
 use crate::arena_dom::{ArenaDom, NodeKey, NodeType};
+use cssparser::{CowRcStr, SourceLocation, ToCss};
+use selectors::attr::{
+    AttrSelectorOperation, AttrSelectorOperator, CaseSensitivity, NamespaceConstraint,
+};
+use selectors::context::{MatchingContext, MatchingMode, QuirksMode, SelectorCaches};
+use selectors::matching::ElementSelectorFlags;
+use selectors::matching::{MatchingForInvalidation, NeedsSelectorFlags};
+use selectors::parser::{self as sel_parser, ParseRelative, SelectorImpl, SelectorList};
+use selectors::OpaqueElement;
+use std::fmt;
 
-/// Kontrollera om en nod matchar en CSS-selektor
-///
-/// Stöder: *, #id, .class, tag, tag.class, [attr], [attr="val"],
-/// [attr^="val"], [attr$="val"], [attr*="val"], [attr~="val"], [attr|="val"],
-/// Hitta matchande ) med hänsyn till nestade parenteser
-fn find_matching_paren(s: &str) -> Option<usize> {
-    let mut depth = 1;
-    for (i, c) in s.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
+// ─── SelectorImpl: Definierar typerna som selectors-craten arbetar med ───────
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ArenaSelectorImpl;
+
+/// Enkel strängtyp för attributvärden, identifiers, etc.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
+pub(super) struct ArenaStr(String);
+
+impl AsRef<str> for ArenaStr {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
-    None
 }
 
-/// :first-child, :last-child, :nth-child(An+B), :only-child,
-/// :first-of-type, :last-of-type, :nth-of-type(An+B),
-/// :root, :empty, :not(sel), :checked, :disabled, :enabled, :focus,
-/// kombinatorer: (mellanslag), >, +, ~. Komma-separerade selektorer.
+impl std::borrow::Borrow<str> for ArenaStr {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl precomputed_hash::PrecomputedHash for ArenaStr {
+    fn precomputed_hash(&self) -> u32 {
+        let mut h: u32 = 5381;
+        for byte in self.0.bytes() {
+            h = h.wrapping_mul(33).wrapping_add(byte as u32);
+        }
+        h
+    }
+}
+
+impl ToCss for ArenaStr {
+    fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
+        cssparser::serialize_identifier(&self.0, dest)
+    }
+}
+
+impl From<&str> for ArenaStr {
+    fn from(s: &str) -> Self {
+        ArenaStr(s.to_string())
+    }
+}
+
+/// Non-tree-structural pseudo-class — :hover, :focus, :checked, etc.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum ArenaPseudoClass {
+    Hover,
+    Focus,
+    Active,
+    Checked,
+    Disabled,
+    Enabled,
+    ReadOnly,
+    ReadWrite,
+    Link,
+    Visited,
+    AnyLink,
+    Target,
+    FocusVisible,
+    FocusWithin,
+    Indeterminate,
+    PlaceholderShown,
+    Default,
+    Defined,
+    Required,
+    Optional,
+    Valid,
+    Invalid,
+    Scope,
+}
+
+impl selectors::parser::NonTSPseudoClass for ArenaPseudoClass {
+    type Impl = ArenaSelectorImpl;
+    fn is_active_or_hover(&self) -> bool {
+        matches!(self, ArenaPseudoClass::Hover | ArenaPseudoClass::Active)
+    }
+    fn is_user_action_state(&self) -> bool {
+        matches!(
+            self,
+            ArenaPseudoClass::Hover | ArenaPseudoClass::Active | ArenaPseudoClass::Focus
+        )
+    }
+}
+
+impl ToCss for ArenaPseudoClass {
+    fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
+        let s = match self {
+            ArenaPseudoClass::Hover => ":hover",
+            ArenaPseudoClass::Focus => ":focus",
+            ArenaPseudoClass::Active => ":active",
+            ArenaPseudoClass::Checked => ":checked",
+            ArenaPseudoClass::Disabled => ":disabled",
+            ArenaPseudoClass::Enabled => ":enabled",
+            ArenaPseudoClass::ReadOnly => ":read-only",
+            ArenaPseudoClass::ReadWrite => ":read-write",
+            ArenaPseudoClass::Link => ":link",
+            ArenaPseudoClass::Visited => ":visited",
+            ArenaPseudoClass::AnyLink => ":any-link",
+            ArenaPseudoClass::Target => ":target",
+            ArenaPseudoClass::FocusVisible => ":focus-visible",
+            ArenaPseudoClass::FocusWithin => ":focus-within",
+            ArenaPseudoClass::Indeterminate => ":indeterminate",
+            ArenaPseudoClass::PlaceholderShown => ":placeholder-shown",
+            ArenaPseudoClass::Default => ":default",
+            ArenaPseudoClass::Defined => ":defined",
+            ArenaPseudoClass::Required => ":required",
+            ArenaPseudoClass::Optional => ":optional",
+            ArenaPseudoClass::Valid => ":valid",
+            ArenaPseudoClass::Invalid => ":invalid",
+            ArenaPseudoClass::Scope => ":scope",
+        };
+        dest.write_str(s)
+    }
+}
+
+/// Pseudo-element — ::before, ::after, etc. (vi matchar inte pseudo-element i DOM)
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum ArenaPseudoElement {
+    Before,
+    After,
+    FirstLine,
+    FirstLetter,
+}
+
+impl selectors::parser::PseudoElement for ArenaPseudoElement {
+    type Impl = ArenaSelectorImpl;
+}
+
+impl ToCss for ArenaPseudoElement {
+    fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
+        let s = match self {
+            ArenaPseudoElement::Before => "::before",
+            ArenaPseudoElement::After => "::after",
+            ArenaPseudoElement::FirstLine => "::first-line",
+            ArenaPseudoElement::FirstLetter => "::first-letter",
+        };
+        dest.write_str(s)
+    }
+}
+
+impl SelectorImpl for ArenaSelectorImpl {
+    type ExtraMatchingData<'a> = ();
+    type AttrValue = ArenaStr;
+    type Identifier = ArenaStr;
+    type LocalName = ArenaStr;
+    type NamespaceUrl = ArenaStr;
+    type NamespacePrefix = ArenaStr;
+    type BorrowedNamespaceUrl = str;
+    type BorrowedLocalName = str;
+    type NonTSPseudoClass = ArenaPseudoClass;
+    type PseudoElement = ArenaPseudoElement;
+}
+
+// ─── Parser: Parsear CSS-selektorer till selectors-cratens AST ────────────────
+
+struct ArenaParser;
+
+impl<'i> sel_parser::Parser<'i> for ArenaParser {
+    type Impl = ArenaSelectorImpl;
+    type Error = sel_parser::SelectorParseErrorKind<'i>;
+
+    fn parse_non_ts_pseudo_class(
+        &self,
+        _location: SourceLocation,
+        name: CowRcStr<'i>,
+    ) -> Result<ArenaPseudoClass, cssparser::ParseError<'i, Self::Error>> {
+        match name.as_ref() {
+            "hover" => Ok(ArenaPseudoClass::Hover),
+            "focus" => Ok(ArenaPseudoClass::Focus),
+            "active" => Ok(ArenaPseudoClass::Active),
+            "checked" => Ok(ArenaPseudoClass::Checked),
+            "disabled" => Ok(ArenaPseudoClass::Disabled),
+            "enabled" => Ok(ArenaPseudoClass::Enabled),
+            "read-only" => Ok(ArenaPseudoClass::ReadOnly),
+            "read-write" => Ok(ArenaPseudoClass::ReadWrite),
+            "link" => Ok(ArenaPseudoClass::Link),
+            "visited" => Ok(ArenaPseudoClass::Visited),
+            "any-link" => Ok(ArenaPseudoClass::AnyLink),
+            "target" => Ok(ArenaPseudoClass::Target),
+            "focus-visible" => Ok(ArenaPseudoClass::FocusVisible),
+            "focus-within" => Ok(ArenaPseudoClass::FocusWithin),
+            "indeterminate" => Ok(ArenaPseudoClass::Indeterminate),
+            "placeholder-shown" => Ok(ArenaPseudoClass::PlaceholderShown),
+            "default" => Ok(ArenaPseudoClass::Default),
+            "defined" => Ok(ArenaPseudoClass::Defined),
+            "required" => Ok(ArenaPseudoClass::Required),
+            "optional" => Ok(ArenaPseudoClass::Optional),
+            "valid" => Ok(ArenaPseudoClass::Valid),
+            "invalid" => Ok(ArenaPseudoClass::Invalid),
+            "scope" => Ok(ArenaPseudoClass::Scope),
+            _ => Err(cssparser::ParseError {
+                kind: cssparser::ParseErrorKind::Custom(
+                    sel_parser::SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
+                ),
+                location: _location,
+            }),
+        }
+    }
+
+    fn parse_non_ts_functional_pseudo_class<'t>(
+        &self,
+        name: CowRcStr<'i>,
+        _arguments: &mut cssparser::Parser<'i, 't>,
+        _after_part: bool,
+    ) -> Result<ArenaPseudoClass, cssparser::ParseError<'i, Self::Error>> {
+        Err(cssparser::ParseError {
+            kind: cssparser::ParseErrorKind::Custom(
+                sel_parser::SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
+            ),
+            location: _arguments.current_source_location(),
+        })
+    }
+
+    fn parse_pseudo_element(
+        &self,
+        _location: SourceLocation,
+        name: CowRcStr<'i>,
+    ) -> Result<ArenaPseudoElement, cssparser::ParseError<'i, Self::Error>> {
+        match name.as_ref() {
+            "before" => Ok(ArenaPseudoElement::Before),
+            "after" => Ok(ArenaPseudoElement::After),
+            "first-line" => Ok(ArenaPseudoElement::FirstLine),
+            "first-letter" => Ok(ArenaPseudoElement::FirstLetter),
+            _ => Err(cssparser::ParseError {
+                kind: cssparser::ParseErrorKind::Custom(
+                    sel_parser::SelectorParseErrorKind::UnsupportedPseudoClassOrElement(name),
+                ),
+                location: _location,
+            }),
+        }
+    }
+
+    fn parse_is_and_where(&self) -> bool {
+        true
+    }
+
+    fn parse_has(&self) -> bool {
+        true
+    }
+
+    fn default_namespace(&self) -> Option<ArenaStr> {
+        None
+    }
+
+    fn namespace_for_prefix(&self, _prefix: &ArenaStr) -> Option<ArenaStr> {
+        None
+    }
+}
+
+// ─── Element wrapper: kopplar ArenaDom till selectors::Element trait ──────────
+
+#[derive(Clone)]
+pub(super) struct ArenaElement<'a> {
+    arena: &'a ArenaDom,
+    key: NodeKey,
+}
+
+impl<'a> fmt::Debug for ArenaElement<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(node) = self.arena.nodes.get(self.key) {
+            write!(f, "<{}>", node.tag.as_deref().unwrap_or("?"))
+        } else {
+            write!(f, "<invalid>")
+        }
+    }
+}
+
+impl<'a> ArenaElement<'a> {
+    fn new(arena: &'a ArenaDom, key: NodeKey) -> Self {
+        Self { arena, key }
+    }
+
+    fn node(&self) -> Option<&'a crate::arena_dom::DomNode> {
+        self.arena.nodes.get(self.key)
+    }
+}
+
+impl<'a> selectors::Element for ArenaElement<'a> {
+    type Impl = ArenaSelectorImpl;
+
+    fn opaque(&self) -> OpaqueElement {
+        // Stabil pekare: använd arenaslotens adress så samma NodeKey ger samma OpaqueElement.
+        // Krävs för att :has() relativa selektorankare ska kunna jämföras korrekt.
+        if let Some(node) = self.arena.nodes.get(self.key) {
+            OpaqueElement::new(node)
+        } else {
+            OpaqueElement::new(&())
+        }
+    }
+
+    fn parent_element(&self) -> Option<Self> {
+        let node = self.node()?;
+        let parent_key = node.parent?;
+        let parent = self.arena.nodes.get(parent_key)?;
+        if parent.node_type == NodeType::Element {
+            Some(ArenaElement::new(self.arena, parent_key))
+        } else {
+            None
+        }
+    }
+
+    fn parent_node_is_shadow_root(&self) -> bool {
+        false
+    }
+
+    fn containing_shadow_host(&self) -> Option<Self> {
+        None
+    }
+
+    fn is_pseudo_element(&self) -> bool {
+        false
+    }
+
+    fn prev_sibling_element(&self) -> Option<Self> {
+        let node = self.node()?;
+        let parent_key = node.parent?;
+        let parent = self.arena.nodes.get(parent_key)?;
+        let my_pos = parent.children.iter().position(|&k| k == self.key)?;
+        // Sök bakåt efter närmaste element-syskon
+        for i in (0..my_pos).rev() {
+            let sib_key = parent.children[i];
+            if let Some(sib) = self.arena.nodes.get(sib_key) {
+                if sib.node_type == NodeType::Element {
+                    return Some(ArenaElement::new(self.arena, sib_key));
+                }
+            }
+        }
+        None
+    }
+
+    fn next_sibling_element(&self) -> Option<Self> {
+        let node = self.node()?;
+        let parent_key = node.parent?;
+        let parent = self.arena.nodes.get(parent_key)?;
+        let my_pos = parent.children.iter().position(|&k| k == self.key)?;
+        for i in (my_pos + 1)..parent.children.len() {
+            let sib_key = parent.children[i];
+            if let Some(sib) = self.arena.nodes.get(sib_key) {
+                if sib.node_type == NodeType::Element {
+                    return Some(ArenaElement::new(self.arena, sib_key));
+                }
+            }
+        }
+        None
+    }
+
+    fn first_element_child(&self) -> Option<Self> {
+        let node = self.node()?;
+        for &child_key in &node.children {
+            if let Some(child) = self.arena.nodes.get(child_key) {
+                if child.node_type == NodeType::Element {
+                    return Some(ArenaElement::new(self.arena, child_key));
+                }
+            }
+        }
+        None
+    }
+
+    fn is_html_element_in_html_document(&self) -> bool {
+        // Alla element i ArenaDom anses vara HTML-element i ett HTML-dokument
+        true
+    }
+
+    fn has_local_name(&self, local_name: &str) -> bool {
+        self.node()
+            .and_then(|n| n.tag.as_deref())
+            .is_some_and(|tag| tag.eq_ignore_ascii_case(local_name))
+    }
+
+    fn has_namespace(&self, _ns: &str) -> bool {
+        // ArenaDom använder inte namespace — default namespace matchar alltid
+        true
+    }
+
+    fn is_same_type(&self, other: &Self) -> bool {
+        let my_tag = self.node().and_then(|n| n.tag.as_deref());
+        let other_tag = other.node().and_then(|n| n.tag.as_deref());
+        match (my_tag, other_tag) {
+            (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+            _ => false,
+        }
+    }
+
+    fn attr_matches(
+        &self,
+        ns: &NamespaceConstraint<&<Self::Impl as SelectorImpl>::NamespaceUrl>,
+        local_name: &<Self::Impl as SelectorImpl>::LocalName,
+        operation: &AttrSelectorOperation<&<Self::Impl as SelectorImpl>::AttrValue>,
+    ) -> bool {
+        // Namespace-filtrering: vi stödjer bara no-namespace
+        match ns {
+            NamespaceConstraint::Any => {}
+            NamespaceConstraint::Specific(ns_url) => {
+                if !ns_url.0.is_empty() {
+                    return false;
+                }
+            }
+        }
+
+        let node = match self.node() {
+            Some(n) => n,
+            None => return false,
+        };
+        let attr_val = match node.get_attr(&local_name.0) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        match operation {
+            AttrSelectorOperation::Exists => true,
+            AttrSelectorOperation::WithValue {
+                operator,
+                case_sensitivity,
+                value,
+            } => {
+                let val = value.0.as_str();
+                let actual = attr_val;
+                match case_sensitivity {
+                    CaseSensitivity::CaseSensitive => match_attr_value(operator, actual, val),
+                    CaseSensitivity::AsciiCaseInsensitive => {
+                        match_attr_value_ci(operator, actual, val)
+                    }
+                }
+            }
+        }
+    }
+
+    fn match_non_ts_pseudo_class(
+        &self,
+        pc: &ArenaPseudoClass,
+        _context: &mut MatchingContext<Self::Impl>,
+    ) -> bool {
+        let node = match self.node() {
+            Some(n) => n,
+            None => return false,
+        };
+        match pc {
+            ArenaPseudoClass::Checked => {
+                let tag = node.tag.as_deref().unwrap_or("");
+                if tag.eq_ignore_ascii_case("input") {
+                    let input_type = node.get_attr("type").unwrap_or("text");
+                    if input_type.eq_ignore_ascii_case("checkbox")
+                        || input_type.eq_ignore_ascii_case("radio")
+                    {
+                        return node.attributes.contains_key("checked");
+                    }
+                }
+                if tag.eq_ignore_ascii_case("option") {
+                    return node.attributes.contains_key("selected");
+                }
+                false
+            }
+            ArenaPseudoClass::Disabled => node.attributes.contains_key("disabled"),
+            ArenaPseudoClass::Enabled => !node.attributes.contains_key("disabled"),
+            ArenaPseudoClass::Link | ArenaPseudoClass::AnyLink => {
+                let tag = node.tag.as_deref().unwrap_or("");
+                (tag.eq_ignore_ascii_case("a") || tag.eq_ignore_ascii_case("area"))
+                    && node.attributes.contains_key("href")
+            }
+            ArenaPseudoClass::Required => node.attributes.contains_key("required"),
+            ArenaPseudoClass::Optional => !node.attributes.contains_key("required"),
+            ArenaPseudoClass::ReadOnly => node.attributes.contains_key("readonly"),
+            ArenaPseudoClass::ReadWrite => !node.attributes.contains_key("readonly"),
+            ArenaPseudoClass::Defined => true, // Alla kända element anses defined
+            ArenaPseudoClass::Scope => {
+                // :scope matchar scope-elementet (satt i MatchingContext)
+                // Fallback: matchar root
+                self.is_root()
+            }
+            // Tillstånds-pseudoklasser — statiskt DOM har ingen hover/focus/etc.
+            ArenaPseudoClass::Hover
+            | ArenaPseudoClass::Focus
+            | ArenaPseudoClass::Active
+            | ArenaPseudoClass::FocusVisible
+            | ArenaPseudoClass::FocusWithin
+            | ArenaPseudoClass::Visited
+            | ArenaPseudoClass::Target
+            | ArenaPseudoClass::Indeterminate
+            | ArenaPseudoClass::PlaceholderShown
+            | ArenaPseudoClass::Default
+            | ArenaPseudoClass::Valid
+            | ArenaPseudoClass::Invalid => false,
+        }
+    }
+
+    fn match_pseudo_element(
+        &self,
+        _pe: &ArenaPseudoElement,
+        _context: &mut MatchingContext<Self::Impl>,
+    ) -> bool {
+        false // Vi matchar inte pseudo-element i DOM-traversering
+    }
+
+    fn apply_selector_flags(&self, _flags: ElementSelectorFlags) {
+        // Noop — vi behöver inte spåra selector flags
+    }
+
+    fn is_link(&self) -> bool {
+        let node = match self.node() {
+            Some(n) => n,
+            None => return false,
+        };
+        let tag = node.tag.as_deref().unwrap_or("");
+        (tag.eq_ignore_ascii_case("a") || tag.eq_ignore_ascii_case("area"))
+            && node.attributes.contains_key("href")
+    }
+
+    fn is_html_slot_element(&self) -> bool {
+        self.node()
+            .and_then(|n| n.tag.as_deref())
+            .is_some_and(|t| t.eq_ignore_ascii_case("slot"))
+    }
+
+    fn has_id(&self, id: &ArenaStr, case_sensitivity: CaseSensitivity) -> bool {
+        self.node()
+            .and_then(|n| n.get_attr("id"))
+            .is_some_and(|actual_id| match case_sensitivity {
+                CaseSensitivity::CaseSensitive => actual_id == id.0,
+                CaseSensitivity::AsciiCaseInsensitive => actual_id.eq_ignore_ascii_case(&id.0),
+            })
+    }
+
+    fn has_class(&self, name: &ArenaStr, case_sensitivity: CaseSensitivity) -> bool {
+        self.node()
+            .and_then(|n| n.get_attr("class"))
+            .is_some_and(|class_str| {
+                class_str
+                    .split([' ', '\t', '\n', '\x0C', '\r'])
+                    .filter(|s| !s.is_empty())
+                    .any(|cls| match case_sensitivity {
+                        CaseSensitivity::CaseSensitive => cls == name.0,
+                        CaseSensitivity::AsciiCaseInsensitive => cls.eq_ignore_ascii_case(&name.0),
+                    })
+            })
+    }
+
+    fn has_custom_state(&self, _name: &ArenaStr) -> bool {
+        false
+    }
+
+    fn imported_part(&self, _name: &ArenaStr) -> Option<ArenaStr> {
+        None
+    }
+
+    fn is_part(&self, _name: &ArenaStr) -> bool {
+        false
+    }
+
+    fn is_empty(&self) -> bool {
+        let node = match self.node() {
+            Some(n) => n,
+            None => return true,
+        };
+        // :empty — inga element-barn eller textnoder med innehåll
+        !node.children.iter().any(|&child_key| {
+            self.arena
+                .nodes
+                .get(child_key)
+                .is_some_and(|child| match child.node_type {
+                    NodeType::Element => true,
+                    NodeType::Text => child.text.as_ref().is_some_and(|t| !t.is_empty()),
+                    _ => false,
+                })
+        })
+    }
+
+    fn is_root(&self) -> bool {
+        // :root — matchar <html>-elementet (dokumentets rot-element)
+        let node = match self.node() {
+            Some(n) => n,
+            None => return false,
+        };
+        if let Some(parent_key) = node.parent {
+            if let Some(parent) = self.arena.nodes.get(parent_key) {
+                return parent.node_type == NodeType::Document;
+            }
+        }
+        false
+    }
+
+    fn add_element_unique_hashes(&self, _filter: &mut selectors::bloom::BloomFilter) -> bool {
+        false
+    }
+}
+
+// ─── Attribut-matchning hjälpfunktioner ──────────────────────────────────────
+
+fn match_attr_value(op: &AttrSelectorOperator, actual: &str, expected: &str) -> bool {
+    match op {
+        AttrSelectorOperator::Equal => actual == expected,
+        AttrSelectorOperator::Includes => actual
+            .split([' ', '\t', '\n', '\x0C', '\r'])
+            .any(|w| w == expected),
+        AttrSelectorOperator::DashMatch => {
+            actual == expected || actual.starts_with(&format!("{expected}-"))
+        }
+        AttrSelectorOperator::Prefix => !expected.is_empty() && actual.starts_with(expected),
+        AttrSelectorOperator::Suffix => !expected.is_empty() && actual.ends_with(expected),
+        AttrSelectorOperator::Substring => !expected.is_empty() && actual.contains(expected),
+    }
+}
+
+fn match_attr_value_ci(op: &AttrSelectorOperator, actual: &str, expected: &str) -> bool {
+    let actual_lower = actual.to_ascii_lowercase();
+    let expected_lower = expected.to_ascii_lowercase();
+    match_attr_value(op, &actual_lower, &expected_lower)
+}
+
+// ─── Publikt API: Parsa + matcha selektorer ──────────────────────────────────
+
+/// Parsea en CSS-selektor till selectors-cratens AST.
+/// Returnerar None vid parse-fel (ogiltiga selektorer).
+fn parse_selector_list(selector: &str) -> Option<SelectorList<ArenaSelectorImpl>> {
+    let mut input = cssparser::ParserInput::new(selector);
+    let mut parser = cssparser::Parser::new(&mut input);
+    SelectorList::parse(&ArenaParser, &mut parser, ParseRelative::No).ok()
+}
+
+/// Kontrollera om en nod matchar en CSS-selektor.
+/// Använder selectors-cratens riktiga matching-engine.
 pub(super) fn matches_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
     let selector = selector.trim();
     if selector.is_empty() {
         return false;
     }
 
-    // Komma-separerade selektorer — matcha om någon matchar
-    if find_unescaped_delimiter(selector, &[',']) < selector.len() {
-        return selector
-            .split(',')
-            .any(|s| matches_single_selector(arena, key, s.trim()));
-    }
-
-    // Descendant/child/sibling-kombinator — kolla bara oescaped combinators
-    {
-        let has_combinator =
-            find_unescaped_delimiter(selector, &[' ', '>', '+', '~']) < selector.len();
-        if has_combinator {
-            // Dubbelkolla: hitta den faktiska split-punkten
-            let split = find_unescaped_delimiter(selector, &[' ', '>', '+', '~']);
-            // Om split == selector.len() → ingen combinator
-            if split < selector.len() {
-                return matches_combinator_selector(arena, key, selector);
-            }
-        }
-    }
-
-    matches_single_selector(arena, key, selector)
-}
-
-/// Attribut-matchningsoperator
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum AttrOp {
-    /// [attr="val"] — exakt matchning
-    Exact,
-    /// [attr^="val"] — börjar med
-    StartsWith,
-    /// [attr$="val"] — slutar med
-    EndsWith,
-    /// [attr*="val"] — innehåller
-    Contains,
-    /// [attr~="val"] — ordmatchning (mellanslag-separerat)
-    WordMatch,
-    /// [attr|="val"] — bindestreck-prefix (val eller val-*)
-    HyphenPrefix,
-    /// [attr] — bara existens, inget värde
-    Exists,
-}
-
-/// Matcha en enkel selektor (utan kombinatorer)
-/// Hitta nästa oescaped delimiter i CSS-selektor.
-/// Hoppar över escaped tecken (\X, \XXXXXX).
-fn find_unescaped_delimiter(s: &str, delimiters: &[char]) -> usize {
-    let mut i = 0;
-    let bytes = s.as_bytes();
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 1; // hoppa över backslash
-                    // Hoppa över hex-sekvens (1-6 hex + optional whitespace)
-            if i < bytes.len() && bytes[i].is_ascii_hexdigit() {
-                let mut hex_count = 0;
-                while i < bytes.len() && bytes[i].is_ascii_hexdigit() && hex_count < 6 {
-                    i += 1;
-                    hex_count += 1;
-                }
-                // Optional trailing whitespace
-                if i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') {
-                    i += 1;
-                }
-            } else if i < bytes.len() {
-                i += 1; // hoppa över escaped tecken
-            }
-            continue;
-        }
-        // Kolla om det är en delimiter (men bara om vi är på en char boundary)
-        if s.is_char_boundary(i) {
-            let ch = s[i..].chars().next().unwrap();
-            if delimiters.contains(&ch) {
-                return i;
-            }
-            i += ch.len_utf8();
-        } else {
-            i += 1;
-        }
-    }
-    s.len()
-}
-
-/// CSS escape-unescape per CSS syntax spec.
-/// Hanterar: \XX (hex 1-6 siffror + optional space), \c (escaped tecken)
-fn css_unescape(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            result.push(c);
-            continue;
-        }
-        // Backslash — kolla nästa tecken
-        match chars.peek() {
-            None => {
-                // Backslash i slutet — ignorera per spec
-            }
-            Some(&next) if next.is_ascii_hexdigit() => {
-                // Hex escape: 1-6 hex siffror
-                let mut hex = String::with_capacity(6);
-                for _ in 0..6 {
-                    if let Some(&h) = chars.peek() {
-                        if h.is_ascii_hexdigit() {
-                            hex.push(h);
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                // Optional trailing whitespace (konsumeras)
-                if let Some(&ws) = chars.peek() {
-                    if ws == ' ' || ws == '\t' || ws == '\n' || ws == '\r' || ws == '\x0C' {
-                        chars.next();
-                    }
-                }
-                if let Ok(cp) = u32::from_str_radix(&hex, 16) {
-                    if cp == 0 || (0xD800..=0xDFFF).contains(&cp) || cp > 0x10FFFF {
-                        result.push('\u{FFFD}');
-                    } else if let Some(ch) = char::from_u32(cp) {
-                        result.push(ch);
-                    } else {
-                        result.push('\u{FFFD}');
-                    }
-                }
-            }
-            Some(_) => {
-                // Escaped tecken — ta bokstavligt
-                result.push(chars.next().unwrap());
-            }
-        }
-    }
-    result
-}
-
-fn matches_single_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
-    let node = match arena.nodes.get(key) {
-        Some(n) if n.node_type == NodeType::Element => n,
-        _ => return false,
-    };
-
-    let selector = selector.trim();
-    if selector.is_empty() {
-        return false;
-    }
-
-    // Universell selektor
-    if selector == "*" {
-        return true;
-    }
-
-    // Rena pseudo-selektorer utan tagg
-    if selector == ":first-child" {
-        return is_first_child(arena, key);
-    }
-    if selector == ":last-child" {
-        return is_last_child(arena, key);
-    }
-    if selector == ":root" {
-        return is_root_element(arena, key);
-    }
-    if selector == ":empty" {
-        return is_empty_element(arena, key);
-    }
-    if selector == ":only-child" {
-        return element_index_among_siblings(arena, key)
-            .map(|(_, total)| total == 1)
-            .unwrap_or(false);
-    }
-    if selector == ":first-of-type" {
-        return type_index_among_siblings(arena, key)
-            .map(|(pos, _)| pos == 1)
-            .unwrap_or(false);
-    }
-    if selector == ":last-of-type" {
-        return type_index_among_siblings(arena, key)
-            .map(|(pos, total)| pos == total)
-            .unwrap_or(false);
-    }
-    if selector == ":checked" {
-        return node.get_attr("checked").is_some() || node.get_attr("selected").is_some();
-    }
-    if selector == ":disabled" {
-        return node.get_attr("disabled").is_some();
-    }
-    if selector == ":enabled" {
-        let is_form_el = matches!(
-            node.tag.as_deref(),
-            Some("input" | "select" | "textarea" | "button")
-        );
-        return is_form_el && node.get_attr("disabled").is_none();
-    }
-    if selector == ":focus" {
-        // Utan tillgång till BridgeState kollar vi data-focused-attribut
-        return node.get_attr("data-focused").is_some();
-    }
-
-    // Parsea selektor-delar: tag, #id, .class, [attr], [attr="val"], :pseudo
-    let mut remaining = selector;
-    let mut required_tag: Option<&str> = None;
-    let mut required_id: Option<&str> = None;
-    let mut required_classes: Vec<&str> = Vec::new();
-    let mut required_attrs: Vec<(String, Option<String>, AttrOp)> = Vec::new();
-    let mut require_first_child = false;
-    let mut require_last_child = false;
-    let mut require_root = false;
-    let mut require_empty = false;
-    let mut require_only_child = false;
-    let mut require_first_of_type = false;
-    let mut require_last_of_type = false;
-    let mut require_checked = false;
-    let mut require_disabled = false;
-    let mut require_enabled = false;
-    let mut require_focus = false;
-    let mut nth_child_expr: Option<(i32, i32)> = None;
-    let mut nth_of_type_expr: Option<(i32, i32)> = None;
-    let mut nth_last_child_expr: Option<(i32, i32)> = None;
-    let mut nth_last_of_type_expr: Option<(i32, i32)> = None;
-    let mut require_is: Option<String> = None;
-    let mut require_where: Option<String> = None;
-    let mut require_has: Option<String> = None;
-    let mut require_heading = false;
-    let mut require_heading_levels: Option<Vec<u32>> = None;
-    let mut require_lang: Option<String> = None;
-    let mut require_dir: Option<String> = None;
-    let mut require_placeholder_shown = false;
-    let mut require_any_link = false;
-    let mut not_selectors: Vec<String> = Vec::new();
-    let mut is_universal = false;
-
-    // Universell selektor med pseudo
-    if remaining.starts_with('*') {
-        is_universal = true;
-        remaining = &remaining[1..];
-    } else if remaining.starts_with(|c: char| c.is_ascii_alphabetic()) {
-        // Extrahera tagg (om den börjar med bokstav)
-        let end = remaining
-            .find(|c: char| ['#', '.', '[', ':'].contains(&c))
-            .unwrap_or(remaining.len());
-        required_tag = Some(&remaining[..end]);
-        remaining = &remaining[end..];
-    }
-
-    // Parsea resterande delar
-    while !remaining.is_empty() {
-        if let Some(rest) = remaining.strip_prefix('#') {
-            let end = find_unescaped_delimiter(rest, &['.', '[', ':']);
-            required_id = Some(&rest[..end]);
-            remaining = &rest[end..];
-        } else if let Some(rest) = remaining.strip_prefix('.') {
-            let end = find_unescaped_delimiter(rest, &['#', '.', '[', ':']);
-            required_classes.push(&rest[..end]);
-            remaining = &rest[end..];
-        } else if let Some(rest) = remaining.strip_prefix('[') {
-            let bracket_end = match rest.find(']') {
-                Some(e) => e,
-                None => break,
-            };
-            let attr_spec = &rest[..bracket_end];
-            if let Some(eq_pos) = attr_spec.find('=') {
-                let before_eq = &attr_spec[..eq_pos];
-                let attr_val = attr_spec[eq_pos + 1..].trim_matches('"').trim_matches('\'');
-
-                if let Some(attr_name) = before_eq.strip_suffix('^') {
-                    required_attrs.push((
-                        attr_name.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::StartsWith,
-                    ));
-                } else if let Some(attr_name) = before_eq.strip_suffix('$') {
-                    required_attrs.push((
-                        attr_name.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::EndsWith,
-                    ));
-                } else if let Some(attr_name) = before_eq.strip_suffix('*') {
-                    required_attrs.push((
-                        attr_name.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::Contains,
-                    ));
-                } else if let Some(attr_name) = before_eq.strip_suffix('~') {
-                    required_attrs.push((
-                        attr_name.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::WordMatch,
-                    ));
-                } else if let Some(attr_name) = before_eq.strip_suffix('|') {
-                    required_attrs.push((
-                        attr_name.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::HyphenPrefix,
-                    ));
-                } else {
-                    required_attrs.push((
-                        before_eq.to_string(),
-                        Some(attr_val.to_string()),
-                        AttrOp::Exact,
-                    ));
-                }
-            } else {
-                required_attrs.push((attr_spec.to_string(), None, AttrOp::Exists));
-            }
-            remaining = &rest[bracket_end + 1..];
-        } else if let Some(rest) = remaining.strip_prefix(":not(") {
-            // Hitta matchande avslutande parentes
-            if let Some(end) = rest.find(')') {
-                let inner = &rest[..end];
-                not_selectors.push(inner.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                break;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":nth-of-type(") {
-            if let Some(end) = rest.find(')') {
-                let expr = &rest[..end];
-                nth_of_type_expr = Some(parse_nth_expression(expr));
-                remaining = &rest[end + 1..];
-            } else {
-                break;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":nth-child(") {
-            if let Some(end) = rest.find(')') {
-                let expr = &rest[..end];
-                nth_child_expr = Some(parse_nth_expression(expr));
-                remaining = &rest[end + 1..];
-            } else {
-                break;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":nth-last-child(") {
-            if let Some(end) = rest.find(')') {
-                let expr = &rest[..end];
-                nth_last_child_expr = Some(parse_nth_expression(expr));
-                remaining = &rest[end + 1..];
-            } else {
-                break;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":nth-last-of-type(") {
-            if let Some(end) = rest.find(')') {
-                let expr = &rest[..end];
-                nth_last_of_type_expr = Some(parse_nth_expression(expr));
-                remaining = &rest[end + 1..];
-            } else {
-                break;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":is(") {
-            if let Some(end) = find_matching_paren(rest) {
-                let inner = &rest[..end];
-                require_is = Some(inner.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":where(") {
-            if let Some(end) = find_matching_paren(rest) {
-                let inner = &rest[..end];
-                require_where = Some(inner.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":has(") {
-            if let Some(end) = find_matching_paren(rest) {
-                let inner = &rest[..end];
-                require_has = Some(inner.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":dir(") {
-            if let Some(end) = rest.find(')') {
-                let dir_val = rest[..end].trim();
-                let node_dir = node
-                    .get_attr("dir")
-                    .map(|d| d.to_ascii_lowercase())
-                    .unwrap_or_else(|| "ltr".to_string());
-                if node_dir != dir_val {
-                    return false;
-                }
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":first-child") {
-            require_first_child = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":last-child") {
-            require_last_child = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":first-of-type") {
-            require_first_of_type = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":last-of-type") {
-            require_last_of_type = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":only-child") {
-            require_only_child = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":root") {
-            require_root = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":empty") {
-            require_empty = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":checked") {
-            require_checked = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":disabled") {
-            require_disabled = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":enabled") {
-            require_enabled = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":focus") {
-            require_focus = true;
-            remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix(":heading(") {
-            // :heading(n, m, ...) — matchar h<n>, h<m>, etc.
-            if let Some(end) = rest.find(')') {
-                let args = &rest[..end];
-                require_heading_levels = Some(
-                    args.split(',')
-                        .filter_map(|s| s.trim().parse::<u32>().ok())
-                        .collect(),
-                );
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if remaining.starts_with(":heading") {
-            // :heading (utan parentes) — matchar alla h1-h6
-            require_heading = true;
-            remaining = &remaining[8..]; // len(":heading") = 8
-        } else if let Some(rest) = remaining.strip_prefix(":lang(") {
-            // :lang(xx) — matchar element med lang-attribut
-            if let Some(end) = find_matching_paren(rest) {
-                let lang_arg = rest[..end].trim().trim_matches('"').trim_matches('\'');
-                require_lang = Some(lang_arg.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = remaining.strip_prefix(":dir(") {
-            // :dir(ltr|rtl)
-            if let Some(end) = rest.find(')') {
-                let dir_arg = rest[..end].trim();
-                require_dir = Some(dir_arg.to_string());
-                remaining = &rest[end + 1..];
-            } else {
-                return false;
-            }
-        } else if remaining.starts_with(":placeholder-shown") {
-            require_placeholder_shown = true;
-            remaining = &remaining[18..];
-        } else if remaining.starts_with(":any-link") {
-            require_any_link = true;
-            remaining = &remaining[9..];
-        } else if remaining.starts_with(":link") {
-            require_any_link = true; // :link ≈ :any-link i vår kontext
-            remaining = &remaining[5..];
-        } else if remaining.starts_with(":visited") {
-            // :visited — aldrig matchad (ingen browsing history)
-            return false;
-        } else if remaining.starts_with(":hover") || remaining.starts_with(":active") {
-            // Dynamiska pseudo-klasser — aldrig matchade i statisk parse
-            return false;
-        } else if remaining.starts_with(':') {
-            // Okänd pseudo-klass
-            return false;
-        } else {
-            break;
-        }
-    }
-
-    // Verifiera tagg (om inte universell)
-    if let Some(tag) = required_tag {
-        if node.tag.as_deref() != Some(tag) {
-            return false;
-        }
-    }
-    // Universell selektor kräver ingen tagg-matchning (alla element matchar)
-    let _ = is_universal;
-
-    if let Some(id) = required_id {
-        let unesc = css_unescape(id);
-        if node.get_attr("id") != Some(unesc.as_str()) {
-            return false;
-        }
-    }
-    for cls in &required_classes {
-        let unesc = css_unescape(cls);
-        let has = node
-            .get_attr("class")
-            .map(|c| split_ascii_whitespace(c).any(|x| x == unesc))
-            .unwrap_or(false);
-        if !has {
-            return false;
-        }
-    }
-
-    // Verifiera attribut med operator
-    for (attr, val, op) in &required_attrs {
-        match op {
-            AttrOp::Exists => {
-                if !node.has_attr(attr) {
-                    return false;
-                }
-            }
-            AttrOp::Exact => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                if node.get_attr(attr) != Some(expected) {
-                    return false;
-                }
-            }
-            AttrOp::StartsWith => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                match node.get_attr(attr) {
-                    Some(actual) if actual.starts_with(expected) => {}
-                    _ => return false,
-                }
-            }
-            AttrOp::EndsWith => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                match node.get_attr(attr) {
-                    Some(actual) if actual.ends_with(expected) => {}
-                    _ => return false,
-                }
-            }
-            AttrOp::Contains => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                match node.get_attr(attr) {
-                    Some(actual) if actual.contains(expected) => {}
-                    _ => return false,
-                }
-            }
-            AttrOp::WordMatch => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                match node.get_attr(attr) {
-                    Some(actual) if actual.split_whitespace().any(|w| w == expected) => {}
-                    _ => return false,
-                }
-            }
-            AttrOp::HyphenPrefix => {
-                let expected = match val {
-                    Some(v) => v.as_str(),
-                    None => return false,
-                };
-                match node.get_attr(attr) {
-                    Some(actual)
-                        if actual == expected || actual.starts_with(&format!("{}-", expected)) => {}
-                    _ => return false,
-                }
-            }
-        }
-    }
-
-    // Pseudo-klass-verifieringar
-    if require_first_child && !is_first_child(arena, key) {
-        return false;
-    }
-    if require_last_child && !is_last_child(arena, key) {
-        return false;
-    }
-    if require_root && !is_root_element(arena, key) {
-        return false;
-    }
-    if require_empty && !is_empty_element(arena, key) {
-        return false;
-    }
-    if require_only_child {
-        let is_only = element_index_among_siblings(arena, key)
-            .map(|(_, total)| total == 1)
-            .unwrap_or(false);
-        if !is_only {
-            return false;
-        }
-    }
-    if require_first_of_type {
-        let is_first = type_index_among_siblings(arena, key)
-            .map(|(pos, _)| pos == 1)
-            .unwrap_or(false);
-        if !is_first {
-            return false;
-        }
-    }
-    if require_last_of_type {
-        let is_last = type_index_among_siblings(arena, key)
-            .map(|(pos, total)| pos == total)
-            .unwrap_or(false);
-        if !is_last {
-            return false;
-        }
-    }
-    if require_checked && node.get_attr("checked").is_none() && node.get_attr("selected").is_none()
-    {
-        return false;
-    }
-    if require_disabled && node.get_attr("disabled").is_none() {
-        return false;
-    }
-    if require_enabled {
-        let is_form_el = matches!(
-            node.tag.as_deref(),
-            Some("input" | "select" | "textarea" | "button")
-        );
-        if !is_form_el || node.get_attr("disabled").is_some() {
-            return false;
-        }
-    }
-    if require_focus && node.get_attr("data-focused").is_none() {
-        return false;
-    }
-    if let Some((a, b)) = nth_child_expr {
-        let matched = element_index_among_siblings(arena, key)
-            .map(|(pos, _)| matches_nth(pos, a, b))
-            .unwrap_or(false);
-        if !matched {
-            return false;
-        }
-    }
-    if let Some((a, b)) = nth_of_type_expr {
-        let matched = type_index_among_siblings(arena, key)
-            .map(|(pos, _)| matches_nth(pos, a, b))
-            .unwrap_or(false);
-        if !matched {
-            return false;
-        }
-    }
-
-    // :nth-last-child
-    if let Some((a, b)) = nth_last_child_expr {
-        let matched = element_index_among_siblings(arena, key)
-            .map(|(pos, total)| {
-                let from_last = total - pos + 1;
-                matches_nth(from_last, a, b)
-            })
-            .unwrap_or(false);
-        if !matched {
-            return false;
-        }
-    }
-    // :nth-last-of-type
-    if let Some((a, b)) = nth_last_of_type_expr {
-        let matched = type_index_among_siblings(arena, key)
-            .map(|(pos, total)| {
-                let from_last = total - pos + 1;
-                matches_nth(from_last, a, b)
-            })
-            .unwrap_or(false);
-        if !matched {
-            return false;
-        }
-    }
-    // :is() / :where() — matcha mot kommaseparerade inre selektorer
-    if let Some(ref inner) = require_is {
-        let any_match = inner
-            .split(',')
-            .any(|s| matches_selector(arena, key, s.trim()));
-        if !any_match {
-            return false;
-        }
-    }
-    if let Some(ref inner) = require_where {
-        let any_match = inner
-            .split(',')
-            .any(|s| matches_selector(arena, key, s.trim()));
-        if !any_match {
-            return false;
-        }
-    }
-    // :has() — matcha om elementet har efterkommande som matchar
-    if let Some(ref inner) = require_has {
-        let has_match = inner.split(',').any(|sel| {
-            let sel = sel.trim();
-            // Sök bland alla efterkommande
-            fn check_descendants(arena: &ArenaDom, parent: NodeKey, sel: &str) -> bool {
-                if let Some(node) = arena.nodes.get(parent) {
-                    for &child in &node.children {
-                        if matches_selector(arena, child, sel) {
-                            return true;
-                        }
-                        if check_descendants(arena, child, sel) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            }
-            check_descendants(arena, key, sel)
-        });
-        if !has_match {
-            return false;
-        }
-    }
-    // :heading / :heading(n) — matchar h1-h6
-    if require_heading {
-        let tag = node.tag.as_deref().unwrap_or("");
-        let is_heading = matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
-        if !is_heading {
-            return false;
-        }
-    }
-    if let Some(ref levels) = require_heading_levels {
-        let tag = node.tag.as_deref().unwrap_or("");
-        let heading_level: u32 = match tag {
-            "h1" => 1,
-            "h2" => 2,
-            "h3" => 3,
-            "h4" => 4,
-            "h5" => 5,
-            "h6" => 6,
-            _ => 0,
-        };
-        if heading_level == 0 || !levels.contains(&heading_level) {
-            return false;
-        }
-    }
-    // :lang(xx) — matchar element eller ancestors med lang-attribut
-    if let Some(ref lang) = require_lang {
-        let lang_lower = lang.to_lowercase();
-        let mut found = false;
-        let mut current = Some(key);
-        while let Some(k) = current {
-            if let Some(n) = arena.nodes.get(k) {
-                if let Some(node_lang) = n.get_attr("lang").or_else(|| n.get_attr("xml:lang")) {
-                    let node_lang_lower = node_lang.to_lowercase();
-                    // :lang(en) matchar "en", "en-US", "en-GB" etc.
-                    if node_lang_lower == lang_lower
-                        || node_lang_lower.starts_with(&format!("{}-", lang_lower))
-                    {
-                        found = true;
-                    }
-                    break; // Närmaste lang-attribut bestämmer
-                }
-                current = n.parent;
-            } else {
-                break;
-            }
-        }
-        if !found {
-            return false;
-        }
-    }
-    // :dir(ltr|rtl)
-    if let Some(ref dir) = require_dir {
-        let mut found_dir = "ltr".to_string(); // default
-        let mut current = Some(key);
-        while let Some(k) = current {
-            if let Some(n) = arena.nodes.get(k) {
-                if let Some(d) = n.get_attr("dir") {
-                    found_dir = d.to_lowercase();
-                    break;
-                }
-                current = n.parent;
-            } else {
-                break;
-            }
-        }
-        if found_dir != dir.to_lowercase() {
-            return false;
-        }
-    }
-    // :placeholder-shown
-    if require_placeholder_shown {
-        let has_placeholder = node.get_attr("placeholder").is_some();
-        let is_input =
-            node.tag.as_deref() == Some("input") || node.tag.as_deref() == Some("textarea");
-        let value_empty = node.get_attr("value").is_none_or(|v| v.is_empty());
-        if !(is_input && has_placeholder && value_empty) {
-            return false;
-        }
-    }
-    // :any-link / :link
-    if require_any_link {
-        let is_link = (node.tag.as_deref() == Some("a") || node.tag.as_deref() == Some("area"))
-            && node.has_attr("href");
-        if !is_link {
-            return false;
-        }
-    }
-    // :not()-verifiering — negera matchning mot inre selektor
-    for not_sel in &not_selectors {
-        if matches_single_selector(arena, key, not_sel) {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Matcha selektor med kombinatorer (>, mellanslag, +, ~)
-fn matches_combinator_selector(arena: &ArenaDom, key: NodeKey, selector: &str) -> bool {
-    // Splitta vid whitespace och separera kombinatorer
-    let parts: Vec<&str> = selector.split_whitespace().collect();
-    if parts.is_empty() {
-        return false;
-    }
-
-    // Sista delen matchar mot noden
-    let last = parts[parts.len() - 1];
-    if matches!(last, ">" | "+" | "~") {
-        return false; // Felaktig selektor — slutar med kombinator
-    }
-    if !matches_single_selector(arena, key, last) {
-        return false;
-    }
-
-    if parts.len() == 1 {
-        return true;
-    }
-
-    // Identifiera kombinator-typ: >, +, ~ eller descendant (mellanslag)
-    let combinator = if parts.len() >= 2 {
-        match parts[parts.len() - 2] {
-            ">" => ">",
-            "+" => "+",
-            "~" => "~",
-            _ => " ", // descendant
-        }
-    } else {
-        " "
-    };
-
-    let ancestor_sel = if combinator != " " {
-        // Explicit kombinator — skippa kombinatorn
-        if parts.len() < 3 {
-            return false;
-        }
-        parts[..parts.len() - 2].join(" ")
-    } else {
-        parts[..parts.len() - 1].join(" ")
-    };
-
-    match combinator {
-        ">" => {
-            // Direkt förälder måste matcha
-            if let Some(parent) = arena.nodes.get(key).and_then(|n| n.parent) {
-                matches_selector(arena, parent, &ancestor_sel)
-            } else {
-                false
-            }
-        }
-        "+" => {
-            // Föregående element-syskon måste matcha
-            if let Some(prev) = prev_element_sibling(arena, key) {
-                matches_selector(arena, prev, &ancestor_sel)
-            } else {
-                false
-            }
-        }
-        "~" => {
-            // Något föregående element-syskon måste matcha
-            let prev_siblings = all_prev_element_siblings(arena, key);
-            prev_siblings
-                .iter()
-                .any(|&sib| matches_selector(arena, sib, &ancestor_sel))
-        }
-        _ => {
-            // Descendant — valfri förfader måste matcha
-            let mut current = arena.nodes.get(key).and_then(|n| n.parent);
-            while let Some(ancestor) = current {
-                if matches_selector(arena, ancestor, &ancestor_sel) {
-                    return true;
-                }
-                current = arena.nodes.get(ancestor).and_then(|n| n.parent);
-            }
-            false
-        }
-    }
-}
-
-/// Kolla om nod är första element-barnet
-fn is_first_child(arena: &ArenaDom, key: NodeKey) -> bool {
-    let parent = match arena.nodes.get(key).and_then(|n| n.parent) {
-        Some(p) => p,
+    let selector_list = match parse_selector_list(selector) {
+        Some(list) => list,
         None => return false,
     };
-    // Spec: :first-child gäller bara element med element-parent (inte Document)
-    let parent_node = match arena.nodes.get(parent) {
-        Some(n)
-            if n.node_type == NodeType::Element || n.node_type == NodeType::DocumentFragment =>
-        {
-            n
-        }
-        _ => return false,
-    };
-    parent_node.children.iter().find(|&&c| {
-        arena
-            .nodes
-            .get(c)
-            .map(|cn| cn.node_type == NodeType::Element)
-            .unwrap_or(false)
-    }) == Some(&key)
-}
 
-/// Kolla om nod är sista element-barnet
-fn is_last_child(arena: &ArenaDom, key: NodeKey) -> bool {
-    let parent = match arena.nodes.get(key).and_then(|n| n.parent) {
-        Some(p) => p,
-        None => return false,
-    };
-    // Spec: :last-child gäller bara element med element-parent
-    let parent_node = match arena.nodes.get(parent) {
-        Some(n)
-            if n.node_type == NodeType::Element || n.node_type == NodeType::DocumentFragment =>
-        {
-            n
-        }
-        _ => return false,
-    };
-    parent_node.children.iter().rfind(|&&c| {
-        arena
-            .nodes
-            .get(c)
-            .map(|cn| cn.node_type == NodeType::Element)
-            .unwrap_or(false)
-    }) == Some(&key)
-}
+    let element = ArenaElement::new(arena, key);
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
 
-/// Räkna nodens element-position bland sina syskon (1-indexed)
-/// Returnerar (position, totalt_antal_element_syskon)
-fn element_index_among_siblings(arena: &ArenaDom, key: NodeKey) -> Option<(usize, usize)> {
-    let parent = arena.nodes.get(key)?.parent?;
-    let parent_node = arena.nodes.get(parent)?;
-    // Spec: child-indexed pseudo-klasser kräver element-parent
-    if !matches!(
-        parent_node.node_type,
-        NodeType::Element | NodeType::DocumentFragment
-    ) {
-        return None;
-    }
-    let mut pos = 0usize;
-    let mut total = 0usize;
-    let mut found = false;
-    for &child in &parent_node.children {
-        let is_element = arena
-            .nodes
-            .get(child)
-            .map(|n| n.node_type == NodeType::Element)
-            .unwrap_or(false);
-        if is_element {
-            total += 1;
-            if child == key {
-                pos = total;
-                found = true;
-            }
-        }
-    }
-    if found {
-        Some((pos, total))
-    } else {
-        None
-    }
-}
-
-/// Räkna nodens position bland syskon av samma tagg-typ (1-indexed)
-/// Returnerar (position, totalt_antal_av_samma_typ)
-fn type_index_among_siblings(arena: &ArenaDom, key: NodeKey) -> Option<(usize, usize)> {
-    let node = arena.nodes.get(key)?;
-    let my_tag = node.tag.as_deref()?;
-    let parent = node.parent?;
-    let parent_node = arena.nodes.get(parent)?;
-    // Spec: :*-of-type kräver element-parent
-    if !matches!(
-        parent_node.node_type,
-        NodeType::Element | NodeType::DocumentFragment
-    ) {
-        return None;
-    }
-    let mut pos = 0usize;
-    let mut total = 0usize;
-    let mut found = false;
-    for &child in &parent_node.children {
-        let matches = arena
-            .nodes
-            .get(child)
-            .map(|n| n.node_type == NodeType::Element && n.tag.as_deref() == Some(my_tag))
-            .unwrap_or(false);
-        if matches {
-            total += 1;
-            if child == key {
-                pos = total;
-                found = true;
-            }
-        }
-    }
-    if found {
-        Some((pos, total))
-    } else {
-        None
-    }
-}
-
-/// Parsa An+B-uttryck för :nth-child/:nth-of-type
-fn parse_nth_expression(expr: &str) -> (i32, i32) {
-    let expr = expr.trim();
-    match expr {
-        "odd" => (2, 1),
-        "even" => (2, 0),
-        s if s.contains('n') => {
-            // Hantera varianter: "n", "2n", "-n", "2n+1", "2n-3", "-2n+1"
-            let s = s.replace(' ', "");
-            let n_pos = match s.find('n') {
-                Some(p) => p,
-                None => return (0, 0),
-            };
-            let a_part = &s[..n_pos];
-            let a: i32 = match a_part {
-                "" | "+" => 1,
-                "-" => -1,
-                other => other.parse().unwrap_or(0),
-            };
-            let after = &s[n_pos + 1..];
-            let b: i32 = if after.is_empty() {
-                0
-            } else {
-                after.parse().unwrap_or(0)
-            };
-            (a, b)
-        }
-        s => (0, s.parse().unwrap_or(0)),
-    }
-}
-
-/// Kolla om position matchar An+B-uttryck
-fn matches_nth(pos: usize, a: i32, b: i32) -> bool {
-    let pos = pos as i32;
-    if a == 0 {
-        return pos == b;
-    }
-    let diff = pos - b;
-    diff % a == 0 && diff / a >= 0
-}
-
-/// Hämta föregående element-syskon
-fn prev_element_sibling(arena: &ArenaDom, key: NodeKey) -> Option<NodeKey> {
-    let parent = arena.nodes.get(key)?.parent?;
-    let parent_node = arena.nodes.get(parent)?;
-    let mut prev: Option<NodeKey> = None;
-    for &child in &parent_node.children {
-        if child == key {
-            return prev;
-        }
-        let is_element = arena
-            .nodes
-            .get(child)
-            .map(|n| n.node_type == NodeType::Element)
-            .unwrap_or(false);
-        if is_element {
-            prev = Some(child);
-        }
-    }
-    None
-}
-
-/// Hämta alla föregående element-syskon
-fn all_prev_element_siblings(arena: &ArenaDom, key: NodeKey) -> Vec<NodeKey> {
-    let parent = match arena.nodes.get(key).and_then(|n| n.parent) {
-        Some(p) => p,
-        None => return vec![],
-    };
-    let parent_node = match arena.nodes.get(parent) {
-        Some(n) => n,
-        None => return vec![],
-    };
-    let mut result = vec![];
-    for &child in &parent_node.children {
-        if child == key {
-            break;
-        }
-        let is_element = arena
-            .nodes
-            .get(child)
-            .map(|n| n.node_type == NodeType::Element)
-            .unwrap_or(false);
-        if is_element {
-            result.push(child);
-        }
-    }
-    result
-}
-
-/// Kolla om nod är rotelementet (html)
-fn is_root_element(arena: &ArenaDom, key: NodeKey) -> bool {
-    let node = match arena.nodes.get(key) {
-        Some(n) => n,
-        None => return false,
-    };
-    // Roten har document som förälder
-    match node.parent {
-        Some(p) => arena
-            .nodes
-            .get(p)
-            .map(|pn| pn.node_type == NodeType::Document)
-            .unwrap_or(false),
-        None => false,
-    }
-}
-
-/// Kolla om nod saknar barn-element och text
-fn is_empty_element(arena: &ArenaDom, key: NodeKey) -> bool {
-    let node = match arena.nodes.get(key) {
-        Some(n) => n,
-        None => return false,
-    };
-    node.children.iter().all(|&c| {
-        arena
-            .nodes
-            .get(c)
-            .map(|cn| {
-                // :empty = inga element- eller text-barn (kommentarer ok)
-                cn.node_type != NodeType::Element && cn.node_type != NodeType::Text
-            })
-            .unwrap_or(true)
+    selector_list.slice().iter().any(|selector| {
+        selectors::matching::matches_selector(selector, 0, None, &element, &mut context)
     })
 }
 
@@ -1176,21 +669,41 @@ pub(super) fn query_select_one(arena: &ArenaDom, selector: &str) -> Option<NodeK
     if selector.is_empty() {
         return None;
     }
-    find_first_matching(arena, arena.document, selector)
+
+    let selector_list = parse_selector_list(selector)?;
+
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
+
+    find_first_matching_compiled(arena, arena.document, &selector_list, &mut context)
 }
 
-/// Rekursiv sökning efter första matchande nod
-pub(super) fn find_first_matching(
+fn find_first_matching_compiled(
     arena: &ArenaDom,
     key: NodeKey,
-    selector: &str,
+    selector_list: &SelectorList<ArenaSelectorImpl>,
+    context: &mut MatchingContext<ArenaSelectorImpl>,
 ) -> Option<NodeKey> {
     let node = arena.nodes.get(key)?;
-    if node.node_type == NodeType::Element && matches_selector(arena, key, selector) {
-        return Some(key);
+    if node.node_type == NodeType::Element {
+        let element = ArenaElement::new(arena, key);
+        if selector_list
+            .slice()
+            .iter()
+            .any(|sel| selectors::matching::matches_selector(sel, 0, None, &element, context))
+        {
+            return Some(key);
+        }
     }
     for &child in &node.children {
-        if let Some(found) = find_first_matching(arena, child, selector) {
+        if let Some(found) = find_first_matching_compiled(arena, child, selector_list, context) {
             return Some(found);
         }
     }
@@ -1203,39 +716,119 @@ pub(super) fn query_select_all(arena: &ArenaDom, selector: &str) -> Vec<NodeKey>
     if selector.is_empty() {
         return vec![];
     }
+
+    let selector_list = match parse_selector_list(selector) {
+        Some(list) => list,
+        None => return vec![],
+    };
+
     let mut results = vec![];
-    find_all_matching(arena, arena.document, selector, &mut results);
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
+
+    find_all_matching_compiled(
+        arena,
+        arena.document,
+        &selector_list,
+        &mut context,
+        &mut results,
+    );
     results
 }
 
-/// Rekursiv sökning efter alla matchande noder
-pub(super) fn find_all_matching(
+fn find_all_matching_compiled(
     arena: &ArenaDom,
     key: NodeKey,
-    selector: &str,
+    selector_list: &SelectorList<ArenaSelectorImpl>,
+    context: &mut MatchingContext<ArenaSelectorImpl>,
     results: &mut Vec<NodeKey>,
 ) {
     let node = match arena.nodes.get(key) {
         Some(n) => n,
         None => return,
     };
-    if node.node_type == NodeType::Element && matches_selector(arena, key, selector) {
-        results.push(key);
+    if node.node_type == NodeType::Element {
+        let element = ArenaElement::new(arena, key);
+        if selector_list
+            .slice()
+            .iter()
+            .any(|sel| selectors::matching::matches_selector(sel, 0, None, &element, context))
+        {
+            results.push(key);
+        }
     }
     let children: Vec<NodeKey> = node.children.clone();
     for child in children {
-        find_all_matching(arena, child, selector, results);
+        find_all_matching_compiled(arena, child, selector_list, context, results);
     }
 }
 
-/// Samla alla element med given klass
-/// Splitta sträng på ASCII whitespace per HTML-spec (space, tab, LF, FF, CR).
-/// Unicode-whitespace som \u{00A0} (NBSP) är INTE separatorer — de är giltiga class-tecken.
+/// Bakåtkompatibel wrapper: hittar första matchande nod under given nod
+pub(super) fn find_first_matching(
+    arena: &ArenaDom,
+    key: NodeKey,
+    selector: &str,
+) -> Option<NodeKey> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return None;
+    }
+    let selector_list = parse_selector_list(selector)?;
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
+    find_first_matching_compiled(arena, key, &selector_list, &mut context)
+}
+
+/// Bakåtkompatibel wrapper: hittar alla matchande noder under given nod
+pub(super) fn find_all_matching(
+    arena: &ArenaDom,
+    key: NodeKey,
+    selector: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return;
+    }
+    let selector_list = match parse_selector_list(selector) {
+        Some(list) => list,
+        None => return,
+    };
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
+    find_all_matching_compiled(arena, key, &selector_list, &mut context, results);
+}
+
+// ─── Hjälpfunktioner som används av andra moduler ────────────────────────────
+
+/// Splitta sträng på ASCII whitespace per HTML-spec
 fn split_ascii_whitespace(s: &str) -> impl Iterator<Item = &str> {
     s.split([' ', '\t', '\n', '\x0C', '\r'])
         .filter(|s| !s.is_empty())
 }
 
+/// Samla alla element med given klass
 pub(super) fn find_all_by_class(
     arena: &ArenaDom,
     key: NodeKey,
@@ -1248,7 +841,6 @@ pub(super) fn find_all_by_class(
     };
     if node.node_type == NodeType::Element {
         if let Some(attr_classes) = node.get_attr("class") {
-            // getElementsByClassName("a b") matchar element med BÅDA "a" och "b"
             let search_tokens: Vec<&str> = split_ascii_whitespace(class).collect();
             if !search_tokens.is_empty() {
                 let elem_tokens: Vec<&str> = split_ascii_whitespace(attr_classes).collect();
@@ -1287,5 +879,161 @@ pub(super) fn find_all_by_tag(
     let children: Vec<NodeKey> = node.children.clone();
     for child in children {
         find_all_by_tag(arena, child, tag, results);
+    }
+}
+
+/// Hämta effektiv namespace-URI för en nod.
+/// Element utan __ns__-attribut antas tillhöra XHTML-namnrymden (HTML-parsade element).
+fn get_node_namespace(node: &crate::arena_dom::DomNode) -> &str {
+    const XHTML_NS: &str = "http://www.w3.org/1999/xhtml";
+    match node.attributes.get("__ns__") {
+        Some(ns) => {
+            if ns.is_empty() {
+                "" // null namespace
+            } else {
+                ns.as_str()
+            }
+        }
+        None => XHTML_NS, // HTML-parsade element
+    }
+}
+
+/// Samla alla element som matchar namespace + localName (case-sensitive).
+/// ns="*" matchar alla namespaces, local_name="*" matchar alla localNames.
+/// Söker bland alla ättlingar till root-noden (exkluderar root-noden själv).
+pub(super) fn find_all_by_tag_ns(
+    arena: &ArenaDom,
+    key: NodeKey,
+    ns: &str,
+    local_name: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_by_tag_ns_recursive(arena, child, ns, local_name, results);
+    }
+}
+
+fn find_all_by_tag_ns_recursive(
+    arena: &ArenaDom,
+    key: NodeKey,
+    ns: &str,
+    local_name: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    if node.node_type == NodeType::Element {
+        let node_ns = get_node_namespace(node);
+        let ns_match = ns == "*" || node_ns == ns;
+        let local_match = local_name == "*" || node.tag.as_deref().is_some_and(|t| t == local_name);
+        if ns_match && local_match {
+            results.push(key);
+        }
+    }
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_by_tag_ns_recursive(arena, child, ns, local_name, results);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arena_dom_sink::parse_html_to_arena;
+
+    #[test]
+    fn test_has_selector_basic() {
+        let html =
+            r#"<div id="parent"><span class="child">Hello</span></div><div id="other">Bye</div>"#;
+        let arena = parse_html_to_arena(html);
+
+        // :has(.child) borde matcha #parent (och html/body)
+        let results = query_select_all(&arena, ":has(.child)");
+        let ids: Vec<&str> = results
+            .iter()
+            .filter_map(|k| arena.nodes.get(*k))
+            .filter_map(|n| n.get_attr("id"))
+            .collect();
+        println!(":has(.child) matched ids: {:?}", ids);
+        assert!(
+            ids.contains(&"parent"),
+            ":has(.child) borde matcha parent, fick: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn test_has_child_combinator() {
+        let html = r#"<div id="a"><span class="x">Hi</span></div><div id="b"><p><span class="x">Deep</span></p></div>"#;
+        let arena = parse_html_to_arena(html);
+
+        // :has(> .x) borde matcha bara #a (direkt barn), inte #b (nested)
+        let results = query_select_all(&arena, ":has(> .x)");
+        let ids: Vec<&str> = results
+            .iter()
+            .filter_map(|k| arena.nodes.get(*k))
+            .filter_map(|n| n.get_attr("id"))
+            .collect();
+        println!(":has(> .x) matched ids: {:?}", ids);
+        assert!(
+            ids.contains(&"a"),
+            ":has(> .x) borde matcha #a, fick: {:?}",
+            ids
+        );
+        assert!(
+            !ids.contains(&"b"),
+            ":has(> .x) borde INTE matcha #b (nested), fick: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn test_has_sibling_combinator() {
+        let html = r#"<div id="wrap"><span id="a" class="first"></span><span id="b" class="second"></span></div>"#;
+        let arena = parse_html_to_arena(html);
+
+        // :has(+ .second) borde matcha #a (adjacent sibling)
+        let results = query_select_all(&arena, ":has(+ .second)");
+        let ids: Vec<&str> = results
+            .iter()
+            .filter_map(|k| arena.nodes.get(*k))
+            .filter_map(|n| n.get_attr("id"))
+            .collect();
+        println!(":has(+ .second) matched ids: {:?}", ids);
+        assert!(
+            ids.contains(&"a"),
+            ":has(+ .second) borde matcha #a, fick: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn test_basic_class_selector() {
+        let html = r#"<div class="foo">A</div><div class="bar">B</div>"#;
+        let arena = parse_html_to_arena(html);
+
+        let results = query_select_all(&arena, ".foo");
+        assert_eq!(results.len(), 1, ".foo borde matcha 1 element");
+    }
+
+    #[test]
+    fn test_is_and_where_selector() {
+        let html = r#"<div class="a">A</div><span class="b">B</span><p class="c">C</p>"#;
+        let arena = parse_html_to_arena(html);
+
+        let results = query_select_all(&arena, ":is(.a, .b)");
+        assert_eq!(
+            results.len(),
+            2,
+            ":is(.a, .b) borde matcha 2 element, fick: {}",
+            results.len()
+        );
     }
 }

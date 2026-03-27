@@ -17,6 +17,8 @@
 //!
 //! [recalc_style_at]: traversal/fn.recalc_style_at.html
 //!
+//! A list of supported style properties can be found as [docs::supported_properties]
+//!
 //! Major dependencies are the [cssparser][cssparser] and [selectors][selectors]
 //! crates.
 //!
@@ -25,14 +27,10 @@
 
 #![deny(missing_docs)]
 
+pub(crate) use cssparser;
+
 #[macro_use]
 extern crate bitflags;
-#[macro_use]
-extern crate cssparser;
-#[macro_use]
-extern crate debug_unreachable;
-#[macro_use]
-extern crate derive_more;
 #[macro_use]
 #[cfg(feature = "gecko")]
 extern crate gecko_profiler;
@@ -40,24 +38,7 @@ extern crate gecko_profiler;
 #[macro_use]
 pub mod gecko_string_cache;
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate log;
-#[macro_use]
-extern crate malloc_size_of;
-#[macro_use]
-extern crate malloc_size_of_derive;
-#[cfg(feature = "servo")]
-extern crate web_atoms;
-#[allow(unused_extern_crates)]
-#[macro_use]
-extern crate matches;
-#[cfg(feature = "gecko")]
-pub use nsstring;
-#[cfg(feature = "gecko")]
-extern crate num_cpus;
-#[macro_use]
-extern crate num_derive;
 #[macro_use]
 extern crate serde;
 pub use servo_arc;
@@ -66,16 +47,20 @@ pub use servo_arc;
 extern crate stylo_atoms;
 #[macro_use]
 extern crate static_assertions;
-#[macro_use]
-extern crate style_derive;
-#[cfg(feature = "gecko")]
-#[macro_use]
-extern crate thin_vec;
-#[macro_use]
-extern crate to_shmem_derive;
 
 #[macro_use]
 mod macros;
+
+mod derives {
+    pub(crate) use derive_more::{Add, AddAssign, Deref, DerefMut, From};
+    pub(crate) use malloc_size_of_derive::MallocSizeOf;
+    pub(crate) use num_derive::FromPrimitive;
+    pub(crate) use style_derive::{
+        Animate, ComputeSquaredDistance, Parse, SpecifiedValueInfo, ToAnimatedValue,
+        ToAnimatedZero, ToComputedValue, ToCss, ToResolvedValue, ToTyped,
+    };
+    pub(crate) use to_shmem_derive::ToShmem;
+}
 
 pub mod applicable_declarations;
 pub mod author_styles;
@@ -89,6 +74,7 @@ pub mod counter_style;
 pub mod custom_properties;
 pub mod custom_properties_map;
 pub mod data;
+pub mod device;
 pub mod dom;
 pub mod dom_apis;
 pub mod driver;
@@ -128,11 +114,22 @@ pub mod stylist;
 pub mod thread_state;
 pub mod traversal;
 pub mod traversal_flags;
+pub mod typed_om;
 pub mod use_counters;
 
 #[macro_use]
 #[allow(non_camel_case_types)]
 pub mod values;
+
+#[cfg(all(doc, feature = "servo"))]
+/// Documentation
+pub mod docs {
+    /// The CSS properties supported by the style system.
+    /// Generated from the `properties.mako.rs` template by `build.rs`
+    pub mod supported_properties {
+        #![doc = include_str!(concat!(env!("OUT_DIR"), "/css-properties.html"))]
+    }
+}
 
 #[cfg(feature = "gecko")]
 pub use crate::gecko_string_cache as string_cache;

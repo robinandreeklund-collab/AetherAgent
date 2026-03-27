@@ -153,8 +153,12 @@ impl JsHandler for GetAttributeNames {
         let s = self.state.borrow();
         let arr = rquickjs::Array::new(ctx.clone())?;
         if let Some(node) = s.arena.nodes.get(self.key) {
-            let mut names: Vec<&String> = node.attributes.keys().collect();
-            names.sort();
+            // Behåll dokumentordning (insertion order), filtrera interna __-attribut
+            let names: Vec<&String> = node
+                .attributes
+                .keys()
+                .filter(|k| !k.starts_with("__"))
+                .collect();
             for (i, name) in names.iter().enumerate() {
                 arr.set(
                     i,

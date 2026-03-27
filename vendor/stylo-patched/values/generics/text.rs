@@ -4,6 +4,7 @@
 
 //! Generic types for text properties.
 
+use crate::derives::*;
 use crate::Zero;
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ToCss};
@@ -158,15 +159,16 @@ impl<N: ToCss + Zero, I: ToCss + Zero> ToCss for InitialLetter<N, I> {
     ToTyped,
 )]
 #[allow(missing_docs)]
+#[typed_value(derive_fields)]
 pub enum GenericTextDecorationLength<L> {
     LengthPercentage(L),
     Auto,
     FromFont,
 }
 
-/// Text decoration trim values.
+/// Text decoration inset values.
 ///
-/// https://drafts.csswg.org/css-text-decor-4/#propdef-text-decoration-trim
+/// https://drafts.csswg.org/css-text-decor-4/#text-decoration-skip-inset-property
 #[repr(C, u8)]
 #[derive(
     Animate,
@@ -184,7 +186,7 @@ pub enum GenericTextDecorationLength<L> {
     ToShmem,
     ToTyped,
 )]
-pub enum GenericTextDecorationTrim<L> {
+pub enum GenericTextDecorationInset<L> {
     /// `auto` value
     Auto,
     /// Start and end length values.
@@ -192,25 +194,25 @@ pub enum GenericTextDecorationTrim<L> {
     Length { start: L, end: L },
 }
 
-impl<L: Zero> GenericTextDecorationTrim<L> {
+impl<L: Zero> GenericTextDecorationInset<L> {
     /// Gets the initial value (zero)
     #[inline]
     pub fn get_initial_value() -> Self {
-        GenericTextDecorationTrim::Length {
+        GenericTextDecorationInset::Length {
             start: L::zero(),
             end: L::zero(),
         }
     }
 }
 
-impl<L: ToCss + PartialEq> ToCss for GenericTextDecorationTrim<L> {
+impl<L: ToCss + PartialEq> ToCss for GenericTextDecorationInset<L> {
     fn to_css<W>(&self, dst: &mut CssWriter<W>) -> fmt::Result
     where
         W: Write,
     {
         match self {
-            GenericTextDecorationTrim::Auto => dst.write_str("auto"),
-            GenericTextDecorationTrim::Length { start, end } => {
+            GenericTextDecorationInset::Auto => dst.write_str("auto"),
+            GenericTextDecorationInset::Length { start, end } => {
                 start.to_css(dst)?;
                 if start != end {
                     dst.write_char(' ')?;

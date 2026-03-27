@@ -6,7 +6,9 @@ use rquickjs::{object::Accessor, Ctx, Function, Object, Value};
 
 use crate::event_loop::{JsFn, JsHandler};
 
-use super::events::{AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler};
+use super::events::{
+    self, AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler,
+};
 use super::state::SharedState;
 use super::style::kebab_to_camel;
 use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_query_matches};
@@ -301,10 +303,8 @@ pub(super) fn register_window_with_viewport<'js>(
 
     // addEventListener / removeEventListener / dispatchEvent på window
     {
-        // Använd document-nyckel som proxy — window-events lagras där
+        // Window-listeners lagras med WINDOW_EVENT_KEY, separat från document
         let doc_key = state.borrow().arena.document;
-        // Separata handlers med nyckel 0 (speciell window-markör)
-        // Vi använder doc_key+1 offset som unik nyckel
         win.set(
             "addEventListener",
             Function::new(
@@ -312,6 +312,7 @@ pub(super) fn register_window_with_viewport<'js>(
                 JsFn(AddEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: Some(events::WINDOW_EVENT_KEY),
                 }),
             )?,
         )?;
@@ -322,6 +323,7 @@ pub(super) fn register_window_with_viewport<'js>(
                 JsFn(RemoveEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: Some(events::WINDOW_EVENT_KEY),
                 }),
             )?,
         )?;
@@ -628,6 +630,8 @@ pub(super) fn register_window_with_viewport<'js>(
             this.isTrusted = false;
             this._stopPropagationFlag = false;
             this._stopImmediatePropagationFlag = false;
+            this._dispatching = false;
+            this._canceledFlag = false;
             // cancelBubble: getter/setter per spec — set(false) = no-op, set(true) = stopPropagation
             Object.defineProperty(this, 'cancelBubble', {
                 get: function() { return this._stopPropagationFlag; },
@@ -637,7 +641,7 @@ pub(super) fn register_window_with_viewport<'js>(
             this.stopPropagation = function() { this._stopPropagationFlag = true; };
             this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
             this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
-            this.initEvent = function(type, bubbles, cancelable) { this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; };
+            this.initEvent = function(type, bubbles, cancelable) { if (this._dispatching) return; this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
         };
         Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
         Event.prototype.NONE = 0; Event.prototype.CAPTURING_PHASE = 1; Event.prototype.AT_TARGET = 2; Event.prototype.BUBBLING_PHASE = 3;
@@ -710,104 +714,259 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         })();
 
-        // ─── Event Subclass Constructors (native, migrerad från polyfills.js) ─
-        // UIEvent → MouseEvent/KeyboardEvent/FocusEvent/InputEvent/WheelEvent/PointerEvent
+        // ─── Event Subclass Constructors (native, spec-compliant per W3C UIEvents) ─
+        // Hierarki: Event → UIEvent → MouseEvent/KeyboardEvent/FocusEvent/InputEvent
+        //                   UIEvent → MouseEvent → WheelEvent → PointerEvent
         (function() {
+            // ── getModifierState helper (shared by Mouse/Keyboard) ──
+            function _getModifierState(key) {
+                switch(key) {
+                    case 'Control': return !!this.ctrlKey;
+                    case 'Shift': return !!this.shiftKey;
+                    case 'Alt': return !!this.altKey;
+                    case 'Meta': return !!this.metaKey;
+                    case 'AltGraph': return !!this.modifierAltGraph;
+                    case 'CapsLock': return !!this.modifierCapsLock;
+                    case 'Fn': return !!this.modifierFn;
+                    case 'FnLock': return !!this.modifierFnLock;
+                    case 'Hyper': return !!this.modifierHyper;
+                    case 'NumLock': return !!this.modifierNumLock;
+                    case 'ScrollLock': return !!this.modifierScrollLock;
+                    case 'Super': return !!this.modifierSuper;
+                    case 'Symbol': return !!this.modifierSymbol;
+                    case 'SymbolLock': return !!this.modifierSymbolLock;
+                    default: return false;
+                }
+            }
+
+            // ── UIEvent ──
             if (!globalThis.UIEvent) {
-                globalThis.UIEvent = function UIEvent(type, opts) {
+                globalThis.UIEvent = function UIEvent(type) {
+                    var opts = arguments[1] || {};
                     Event.call(this, type, opts);
-                    this.view = (opts && opts.view) || null;
-                    this.detail = (opts && opts.detail !== undefined) ? opts.detail : 0;
+                    this.view = opts.view !== undefined ? opts.view : null;
+                    this.detail = opts.detail !== undefined ? opts.detail : 0;
                 };
                 UIEvent.prototype = Object.create(Event.prototype);
                 UIEvent.prototype.constructor = UIEvent;
-                UIEvent.prototype.initUIEvent = function(t,b,c,v,d) { this.initEvent(t,b,c); this.view=v||null; this.detail=d||0; };
             }
+            UIEvent.prototype.initUIEvent = function(type, bubbles, cancelable, view, detail) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initUIEvent': 1 argument required, but only 0 present.");
+                if (this._dispatching) return;
+                this.initEvent(type, !!bubbles, !!cancelable);
+                this.view = view !== undefined ? view : null;
+                this.detail = detail !== undefined ? detail : 0;
+            };
+            // pseudoTarget: new spec property (getter returning null)
+            Object.defineProperty(UIEvent.prototype, 'pseudoTarget', {
+                get: function() { return null; },
+                configurable: true,
+                enumerable: true
+            });
+
+            // ── MouseEvent ──
             if (!globalThis.MouseEvent) {
-                globalThis.MouseEvent = function MouseEvent(type, opts) {
+                globalThis.MouseEvent = function MouseEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    var o = opts || {};
-                    this.screenX=o.screenX||0; this.screenY=o.screenY||0;
-                    this.clientX=o.clientX||0; this.clientY=o.clientY||0;
-                    this.pageX=o.pageX||0; this.pageY=o.pageY||0;
-                    this.offsetX=o.offsetX||0; this.offsetY=o.offsetY||0;
-                    this.movementX=o.movementX||0; this.movementY=o.movementY||0;
-                    this.button=o.button||0; this.buttons=o.buttons||0;
-                    this.relatedTarget=o.relatedTarget||null;
-                    this.ctrlKey=!!o.ctrlKey; this.shiftKey=!!o.shiftKey;
-                    this.altKey=!!o.altKey; this.metaKey=!!o.metaKey;
+                    var o = opts;
+                    this.screenX = o.screenX || 0; this.screenY = o.screenY || 0;
+                    this.clientX = o.clientX || 0; this.clientY = o.clientY || 0;
+                    this.pageX = o.pageX !== undefined ? o.pageX : this.clientX;
+                    this.pageY = o.pageY !== undefined ? o.pageY : this.clientY;
+                    this.offsetX = o.offsetX || 0; this.offsetY = o.offsetY || 0;
+                    this.movementX = o.movementX || 0; this.movementY = o.movementY || 0;
+                    this.button = o.button !== undefined ? o.button : 0;
+                    this.buttons = o.buttons || 0;
+                    this.relatedTarget = o.relatedTarget || null;
+                    this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+                    this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+                    this.modifierAltGraph = !!o.modifierAltGraph;
+                    this.modifierCapsLock = !!o.modifierCapsLock;
+                    this.modifierFn = !!o.modifierFn;
+                    this.modifierFnLock = !!o.modifierFnLock;
+                    this.modifierHyper = !!o.modifierHyper;
+                    this.modifierNumLock = !!o.modifierNumLock;
+                    this.modifierScrollLock = !!o.modifierScrollLock;
+                    this.modifierSuper = !!o.modifierSuper;
+                    this.modifierSymbol = !!o.modifierSymbol;
+                    this.modifierSymbolLock = !!o.modifierSymbolLock;
                 };
                 MouseEvent.prototype = Object.create(UIEvent.prototype);
                 MouseEvent.prototype.constructor = MouseEvent;
-                MouseEvent.prototype.initMouseEvent = function(t,b,c,v,d,sx,sy,cx,cy,ctrl,alt,shift,meta,btn,rt) {
-                    this.initUIEvent(t,b,c,v,d); this.screenX=sx||0; this.screenY=sy||0; this.clientX=cx||0; this.clientY=cy||0;
-                    this.ctrlKey=!!ctrl; this.altKey=!!alt; this.shiftKey=!!shift; this.metaKey=!!meta; this.button=btn||0; this.relatedTarget=rt||null;
-                };
-                MouseEvent.prototype.getModifierState = function(key) {
-                    if(key==='Control')return this.ctrlKey; if(key==='Shift')return this.shiftKey;
-                    if(key==='Alt')return this.altKey; if(key==='Meta')return this.metaKey; return false;
-                };
             }
+            // x/y are aliases for clientX/clientY per spec
+            Object.defineProperty(MouseEvent.prototype, 'x', { get: function() { return this.clientX; }, configurable: true });
+            Object.defineProperty(MouseEvent.prototype, 'y', { get: function() { return this.clientY; }, configurable: true });
+            Object.defineProperty(MouseEvent.prototype, 'layerX', { get: function() { return this.clientX; }, configurable: true });
+            Object.defineProperty(MouseEvent.prototype, 'layerY', { get: function() { return this.clientY; }, configurable: true });
+            MouseEvent.prototype.getModifierState = _getModifierState;
+            MouseEvent.prototype.initMouseEvent = function(type, bubbles, cancelable, view, detail,
+                    screenX, screenY, clientX, clientY, ctrlKey, altKey, shiftKey, metaKey, button, relatedTarget) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initMouseEvent': 1 argument required, but only 0 present.");
+                if (this._dispatching) return;
+                this.initUIEvent(type, bubbles, cancelable, view, detail);
+                this.screenX = screenX || 0; this.screenY = screenY || 0;
+                this.clientX = clientX || 0; this.clientY = clientY || 0;
+                this.ctrlKey = !!ctrlKey; this.altKey = !!altKey;
+                this.shiftKey = !!shiftKey; this.metaKey = !!metaKey;
+                this.button = button !== undefined ? button : 0;
+                this.relatedTarget = relatedTarget || null;
+            };
+
+            // ── KeyboardEvent ──
             if (!globalThis.KeyboardEvent) {
-                globalThis.KeyboardEvent = function KeyboardEvent(type, opts) {
-                    UIEvent.call(this, type, opts); var o = opts || {};
-                    this.key=o.key||''; this.code=o.code||''; this.location=o.location||0;
-                    this.repeat=!!o.repeat; this.isComposing=!!o.isComposing;
-                    this.ctrlKey=!!o.ctrlKey; this.shiftKey=!!o.shiftKey;
-                    this.altKey=!!o.altKey; this.metaKey=!!o.metaKey;
-                    this.charCode=o.charCode||0; this.keyCode=o.keyCode||0; this.which=o.which||0;
+                globalThis.KeyboardEvent = function KeyboardEvent(type) {
+                    var opts = arguments[1] || {};
+                    UIEvent.call(this, type, opts);
+                    var o = opts;
+                    this.key = o.key !== undefined ? String(o.key) : '';
+                    this.code = o.code !== undefined ? String(o.code) : '';
+                    this.location = o.location || 0;
+                    this.repeat = !!o.repeat;
+                    this.isComposing = !!o.isComposing;
+                    this.ctrlKey = !!o.ctrlKey; this.shiftKey = !!o.shiftKey;
+                    this.altKey = !!o.altKey; this.metaKey = !!o.metaKey;
+                    this.modifierAltGraph = !!o.modifierAltGraph;
+                    this.modifierCapsLock = !!o.modifierCapsLock;
+                    this.modifierFn = !!o.modifierFn;
+                    this.modifierFnLock = !!o.modifierFnLock;
+                    this.modifierHyper = !!o.modifierHyper;
+                    this.modifierNumLock = !!o.modifierNumLock;
+                    this.modifierScrollLock = !!o.modifierScrollLock;
+                    this.modifierSuper = !!o.modifierSuper;
+                    this.modifierSymbol = !!o.modifierSymbol;
+                    this.modifierSymbolLock = !!o.modifierSymbolLock;
+                    this.charCode = o.charCode || 0;
+                    this.keyCode = o.keyCode || 0;
+                    this.which = o.which || 0;
                 };
                 KeyboardEvent.prototype = Object.create(UIEvent.prototype);
                 KeyboardEvent.prototype.constructor = KeyboardEvent;
-                KeyboardEvent.prototype.getModifierState = MouseEvent.prototype.getModifierState;
-                KeyboardEvent.DOM_KEY_LOCATION_STANDARD=0; KeyboardEvent.DOM_KEY_LOCATION_LEFT=1;
-                KeyboardEvent.DOM_KEY_LOCATION_RIGHT=2; KeyboardEvent.DOM_KEY_LOCATION_NUMPAD=3;
             }
+            KeyboardEvent.prototype.getModifierState = _getModifierState;
+            KeyboardEvent.prototype.initKeyboardEvent = function(type, bubbles, cancelable, view,
+                    key, location, ctrlKey, altKey, shiftKey, metaKey) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initKeyboardEvent': 1 argument required, but only 0 present.");
+                if (this._dispatching) return;
+                this.initUIEvent(type, bubbles, cancelable, view, 0);
+                this.key = key !== undefined ? String(key) : '';
+                this.location = location || 0;
+                this.ctrlKey = !!ctrlKey; this.altKey = !!altKey;
+                this.shiftKey = !!shiftKey; this.metaKey = !!metaKey;
+            };
+            KeyboardEvent.DOM_KEY_LOCATION_STANDARD = 0;
+            KeyboardEvent.DOM_KEY_LOCATION_LEFT = 1;
+            KeyboardEvent.DOM_KEY_LOCATION_RIGHT = 2;
+            KeyboardEvent.DOM_KEY_LOCATION_NUMPAD = 3;
+            KeyboardEvent.prototype.DOM_KEY_LOCATION_STANDARD = 0;
+            KeyboardEvent.prototype.DOM_KEY_LOCATION_LEFT = 1;
+            KeyboardEvent.prototype.DOM_KEY_LOCATION_RIGHT = 2;
+            KeyboardEvent.prototype.DOM_KEY_LOCATION_NUMPAD = 3;
+
+            // ── FocusEvent ──
             if (!globalThis.FocusEvent) {
-                globalThis.FocusEvent = function FocusEvent(type, opts) {
+                globalThis.FocusEvent = function FocusEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    this.relatedTarget = (opts && opts.relatedTarget) || null;
+                    this.relatedTarget = opts.relatedTarget || null;
                 };
                 FocusEvent.prototype = Object.create(UIEvent.prototype);
                 FocusEvent.prototype.constructor = FocusEvent;
             }
+
+            // ── InputEvent ──
             if (!globalThis.InputEvent) {
-                globalThis.InputEvent = function InputEvent(type, opts) {
-                    UIEvent.call(this, type, opts); var o = opts || {};
-                    this.data=o.data!==undefined?o.data:null; this.inputType=o.inputType||'';
-                    this.isComposing=!!o.isComposing; this.dataTransfer=o.dataTransfer||null;
+                globalThis.InputEvent = function InputEvent(type) {
+                    var opts = arguments[1] || {};
+                    UIEvent.call(this, type, opts);
+                    var o = opts;
+                    this.data = o.data !== undefined ? o.data : null;
+                    this.inputType = o.inputType !== undefined ? String(o.inputType) : '';
+                    this.isComposing = !!o.isComposing;
+                    this.dataTransfer = o.dataTransfer || null;
                 };
                 InputEvent.prototype = Object.create(UIEvent.prototype);
                 InputEvent.prototype.constructor = InputEvent;
             }
+
+            // ── WheelEvent ──
             if (!globalThis.WheelEvent) {
-                globalThis.WheelEvent = function WheelEvent(type, opts) {
-                    MouseEvent.call(this, type, opts); var o = opts || {};
-                    this.deltaX=o.deltaX||0; this.deltaY=o.deltaY||0; this.deltaZ=o.deltaZ||0;
-                    this.deltaMode=o.deltaMode||0;
+                globalThis.WheelEvent = function WheelEvent(type) {
+                    var opts = arguments[1] || {};
+                    MouseEvent.call(this, type, opts);
+                    var o = opts;
+                    this.deltaX = o.deltaX || 0;
+                    this.deltaY = o.deltaY || 0;
+                    this.deltaZ = o.deltaZ || 0;
+                    this.deltaMode = o.deltaMode || 0;
                 };
                 WheelEvent.prototype = Object.create(MouseEvent.prototype);
                 WheelEvent.prototype.constructor = WheelEvent;
-                WheelEvent.DOM_DELTA_PIXEL=0; WheelEvent.DOM_DELTA_LINE=1; WheelEvent.DOM_DELTA_PAGE=2;
             }
+            WheelEvent.DOM_DELTA_PIXEL = 0;
+            WheelEvent.DOM_DELTA_LINE = 1;
+            WheelEvent.DOM_DELTA_PAGE = 2;
+            WheelEvent.prototype.DOM_DELTA_PIXEL = 0;
+            WheelEvent.prototype.DOM_DELTA_LINE = 1;
+            WheelEvent.prototype.DOM_DELTA_PAGE = 2;
+            // NOTE: initWheelEvent/initWebKitWheelEvent intentionally NOT on prototype (spec removed them)
+
+            // ── PointerEvent ──
             if (!globalThis.PointerEvent) {
-                globalThis.PointerEvent = function PointerEvent(type, opts) {
-                    MouseEvent.call(this, type, opts); var o = opts || {};
-                    this.pointerId=o.pointerId||0; this.width=o.width||1; this.height=o.height||1;
-                    this.pressure=o.pressure||0; this.tangentialPressure=o.tangentialPressure||0;
-                    this.tiltX=o.tiltX||0; this.tiltY=o.tiltY||0; this.twist=o.twist||0;
-                    this.pointerType=o.pointerType||''; this.isPrimary=!!o.isPrimary;
+                globalThis.PointerEvent = function PointerEvent(type) {
+                    var opts = arguments[1] || {};
+                    MouseEvent.call(this, type, opts);
+                    var o = opts;
+                    this.pointerId = o.pointerId || 0;
+                    this.width = o.width !== undefined ? o.width : 1;
+                    this.height = o.height !== undefined ? o.height : 1;
+                    this.pressure = o.pressure || 0;
+                    this.tangentialPressure = o.tangentialPressure || 0;
+                    this.tiltX = o.tiltX || 0; this.tiltY = o.tiltY || 0;
+                    this.twist = o.twist || 0;
+                    this.altitudeAngle = o.altitudeAngle || 0;
+                    this.azimuthAngle = o.azimuthAngle || 0;
+                    this.pointerType = o.pointerType !== undefined ? String(o.pointerType) : '';
+                    this.isPrimary = !!o.isPrimary;
                 };
                 PointerEvent.prototype = Object.create(MouseEvent.prototype);
                 PointerEvent.prototype.constructor = PointerEvent;
             }
+            PointerEvent.prototype.getCoalescedEvents = function() { return []; };
+            PointerEvent.prototype.getPredictedEvents = function() { return []; };
+
+            // ── CompositionEvent ──
             if (!globalThis.CompositionEvent) {
-                globalThis.CompositionEvent = function CompositionEvent(type, opts) {
+                globalThis.CompositionEvent = function CompositionEvent(type) {
+                    var opts = arguments[1] || {};
                     UIEvent.call(this, type, opts);
-                    this.data = (opts && opts.data !== undefined) ? opts.data : '';
+                    this.data = opts.data !== undefined ? String(opts.data) : '';
                 };
                 CompositionEvent.prototype = Object.create(UIEvent.prototype);
                 CompositionEvent.prototype.constructor = CompositionEvent;
+            }
+            CompositionEvent.prototype.initCompositionEvent = function(type, bubbles, cancelable, view, data) {
+                if (arguments.length < 1) throw new TypeError("Failed to execute 'initCompositionEvent': 1 argument required, but only 0 present.");
+                if (this._dispatching) return;
+                this.initUIEvent(type, bubbles, cancelable, view, 0);
+                this.data = data !== undefined ? String(data) : '';
+            };
+
+            // ── TextEvent (legacy, created only via createEvent) ──
+            if (!globalThis.TextEvent) {
+                globalThis.TextEvent = function TextEvent() {
+                    throw new TypeError("Illegal constructor");
+                };
+                TextEvent.prototype = Object.create(UIEvent.prototype);
+                TextEvent.prototype.constructor = TextEvent;
+                TextEvent.prototype.data = '';
+                TextEvent.prototype.initTextEvent = function(type, bubbles, cancelable, view, data) {
+                    if (arguments.length < 1) throw new TypeError("Failed to execute 'initTextEvent': 1 argument required, but only 0 present.");
+                    if (this._dispatching) return;
+                    this.initUIEvent(type, bubbles, cancelable, view, 0);
+                    this.data = data !== undefined ? String(data) : 'undefined';
+                };
             }
         })();
 

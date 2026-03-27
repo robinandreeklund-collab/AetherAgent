@@ -7,6 +7,7 @@
 //! [calc]: https://drafts.csswg.org/css-values/#calc-notation
 
 use crate::color::parsing::ChannelKeyword;
+use crate::derives::*;
 use crate::parser::{Parse, ParserContext};
 use crate::values::generics::calc::{
     self as generic, CalcNodeLeaf, CalcUnits, MinMaxOp, ModRemOp, PositivePercentageBasis,
@@ -14,18 +15,23 @@ use crate::values::generics::calc::{
 };
 use crate::values::generics::length::GenericAnchorSizeFunction;
 use crate::values::generics::position::{
-    AnchorSideKeyword, GenericAnchorFunction, GenericAnchorSide,
+    AnchorSideKeyword, GenericAnchorFunction, GenericAnchorSide, TreeScoped,
 };
 use crate::values::specified::length::{AbsoluteLength, FontRelativeLength, NoCalcLength};
 use crate::values::specified::length::{ContainerRelativeLength, ViewportPercentageLength};
 use crate::values::specified::{self, Angle, Resolution, Time};
-use crate::values::{serialize_number, serialize_percentage, CSSFloat, DashedIdent};
-use cssparser::{CowRcStr, Parser, Token};
+use crate::values::{
+    reify_percentage, serialize_number, serialize_percentage, CSSFloat, DashedIdent,
+};
+use cssparser::{match_ignore_ascii_case, CowRcStr, Parser, Token};
+use debug_unreachable::debug_unreachable;
 use smallvec::SmallVec;
 use std::cmp;
 use std::fmt::{self, Write};
 use style_traits::values::specified::AllowedNumericType;
-use style_traits::{CssWriter, ParseError, SpecifiedValueInfo, StyleParseErrorKind, ToCss};
+use style_traits::{
+    CssWriter, ParseError, SpecifiedValueInfo, StyleParseErrorKind, ToCss, ToTyped, TypedValue,
+};
 
 /// The name of the mathematical function that we're parsing.
 #[derive(Clone, Copy, Debug, Parse)]
@@ -120,14 +126,26 @@ impl ToCss for Leaf {
     }
 }
 
+impl ToTyped for Leaf {
+    fn to_typed(&self) -> Option<TypedValue> {
+        // XXX Only supporting Length and Percentage for now
+        match *self {
+            Self::Length(ref l) => l.to_typed(),
+            Self::Percentage(p) => Some(TypedValue::Numeric(reify_percentage(p))),
+            _ => None,
+        }
+    }
+}
+
 /// A struct to hold a simplified `<length>` or `<percentage>` expression.
 ///
 /// In some cases, e.g. DOMMatrix, we support calc(), but reject all the
 /// relative lengths, and to_computed_pixel_length_without_context() handles
 /// this case. Therefore, if you want to add a new field, please make sure this
 /// function work properly.
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss, ToShmem)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToCss, ToShmem, ToTyped)]
 #[allow(missing_docs)]
+#[typed_value(derive_fields)]
 pub struct CalcLengthPercentage {
     #[css(skip)]
     pub clamping_mode: AllowedNumericType,
@@ -291,17 +309,21 @@ impl generic::CalcNodeLeaf for Leaf {
         match *self {
             Self::Number(..) => SortKey::Number,
             Self::Percentage(..) => SortKey::Percentage,
-            Self::Time(..) => SortKey::Sec,
+            Self::Time(..) => SortKey::S,
             Self::Resolution(..) => SortKey::Dppx,
             Self::Angle(..) => SortKey::Deg,
             Self::Length(ref l) => match *l {
                 NoCalcLength::Absolute(..) => SortKey::Px,
                 NoCalcLength::FontRelative(ref relative) => match *relative {
-                    FontRelativeLength::Ch(..) => SortKey::Ch,
                     FontRelativeLength::Em(..) => SortKey::Em,
                     FontRelativeLength::Ex(..) => SortKey::Ex,
+                    FontRelativeLength::Rex(..) => SortKey::Rex,
+                    FontRelativeLength::Ch(..) => SortKey::Ch,
+                    FontRelativeLength::Rch(..) => SortKey::Rch,
                     FontRelativeLength::Cap(..) => SortKey::Cap,
+                    FontRelativeLength::Rcap(..) => SortKey::Rcap,
                     FontRelativeLength::Ic(..) => SortKey::Ic,
+                    FontRelativeLength::Ric(..) => SortKey::Ric,
                     FontRelativeLength::Rem(..) => SortKey::Rem,
                     FontRelativeLength::Lh(..) => SortKey::Lh,
                     FontRelativeLength::Rlh(..) => SortKey::Rlh,
@@ -523,19 +545,25 @@ impl GenericAnchorFunction<Box<CalcNode>, Box<CalcNode>> {
             let fallback = i
                 .try_parse(|i| {
                     i.expect_comma()?;
-                    let node = CalcNode::parse_argument(
-                        context,
-                        i,
-                        AllowParse {
-                            units: CalcUnits::LENGTH_PERCENTAGE,
-                            additional_functions,
-                        },
-                    )?;
-                    Ok::<Box<CalcNode>, ParseError<'i>>(Box::new(node))
+                    Ok::<Box<CalcNode>, ParseError<'i>>(Box::new(
+                        CalcNode::parse_argument(
+                            context,
+                            i,
+                            AllowParse {
+                                units: CalcUnits::LENGTH_PERCENTAGE,
+                                additional_functions,
+                            },
+                        )?
+                        .into_length_or_percentage(AllowedNumericType::All)
+                        .map_err(|_| i.new_custom_error(StyleParseErrorKind::UnspecifiedError))?
+                        .node,
+                    ))
                 })
                 .ok();
             Ok(Self {
-                target_element: target_element.unwrap_or_else(DashedIdent::empty),
+                target_element: TreeScoped::with_default_level(
+                    target_element.unwrap_or_else(DashedIdent::empty),
+                ),
                 side,
                 fallback: fallback.into(),
             })
@@ -552,8 +580,16 @@ impl GenericAnchorSizeFunction<Box<CalcNode>> {
             return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
         }
         GenericAnchorSizeFunction::parse_inner(context, input, |i| {
-            CalcNode::parse_argument(context, i, AllowParse::new(CalcUnits::LENGTH_PERCENTAGE))
-                .map(|r| Box::new(r))
+            Ok(Box::new(
+                CalcNode::parse_argument(
+                    context,
+                    i,
+                    AllowParse::new(CalcUnits::LENGTH_PERCENTAGE),
+                )?
+                .into_length_or_percentage(AllowedNumericType::All)
+                .map_err(|_| i.new_custom_error(StyleParseErrorKind::UnspecifiedError))?
+                .node,
+            ))
         })
     }
 }
@@ -583,7 +619,8 @@ impl CalcNode {
                 value, ref unit, ..
             } => {
                 if allowed.includes(CalcUnits::LENGTH) {
-                    if let Ok(l) = NoCalcLength::parse_dimension(context, value, unit) {
+                    if let Ok(l) = NoCalcLength::parse_dimension_with_context(context, value, unit)
+                    {
                         return Ok(CalcNode::Leaf(Leaf::Length(l)));
                     }
                 }
@@ -680,15 +717,45 @@ impl CalcNode {
             match function {
                 MathFunction::Calc => Self::parse_argument(context, input, allowed),
                 MathFunction::Clamp => {
-                    let min = Self::parse_argument(context, input, allowed)?;
+                    let min_val = if input
+                        .try_parse(|min| min.expect_ident_matching("none"))
+                        .ok()
+                        .is_none()
+                    {
+                        Some(Self::parse_argument(context, input, allowed)?)
+                    } else {
+                        None
+                    };
+
                     input.expect_comma()?;
                     let center = Self::parse_argument(context, input, allowed)?;
                     input.expect_comma()?;
-                    let max = Self::parse_argument(context, input, allowed)?;
-                    Ok(Self::Clamp {
-                        min: Box::new(min),
-                        center: Box::new(center),
-                        max: Box::new(max),
+
+                    let max_val = if input
+                        .try_parse(|max| max.expect_ident_matching("none"))
+                        .ok()
+                        .is_none()
+                    {
+                        Some(Self::parse_argument(context, input, allowed)?)
+                    } else {
+                        None
+                    };
+
+                    // Specification does not state how serialization should occur for clamp
+                    // https://github.com/w3c/csswg-drafts/issues/13535
+                    // tentatively partially serialize to min/max
+                    // clamp(MIN, VAL, none) is equivalent to max(MIN, VAL)
+                    // clamp(none, VAL, MAX) is equivalent to min(VAL, MAX)
+                    // clamp(none, VAL, none) is equivalent to just calc(VAL)
+                    Ok(match (min_val, max_val) {
+                        (None, None) => center,
+                        (None, Some(max)) => Self::MinMax(vec![center, max].into(), MinMaxOp::Min),
+                        (Some(min), None) => Self::MinMax(vec![min, center].into(), MinMaxOp::Max),
+                        (Some(min), Some(max)) => Self::Clamp {
+                            min: Box::new(min),
+                            center: Box::new(center),
+                            max: Box::new(max),
+                        },
                     })
                 },
                 MathFunction::Round => {

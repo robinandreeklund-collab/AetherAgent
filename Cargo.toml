@@ -23,6 +23,9 @@ aho-corasick = "1.1"
 markup5ever_rcdom = "0.38"
 slotmap = { version = "1.0", features = ["serde"] }
 smallvec = { version = "1.13", features = ["serde"] }
+selectors = "0.36"
+cssparser = "0.36"
+precomputed-hash = "0.1"
 
 # Server dependencies (only for native binary, not WASM)
 axum = { version = "0.7", features = ["ws"], optional = true }
@@ -61,24 +64,23 @@ headless_chrome = { version = "1.0", optional = true }
 lightningcss = { version = "1.0.0-alpha.71", optional = true, default-features = false }
 css-inline = { version = "0.20", optional = true, default-features = false }
 
-# Blitz rendering — fullständig HTML→PNG rendering (Stylo CSS, layout, fonter, bilder)
-blitz-html = { version = "0.2", optional = true }
-blitz-dom = { version = "0.2", optional = true }
-blitz-paint = { version = "0.2", optional = true }
-blitz-net = { version = "0.2", optional = true }
-blitz-traits = { version = "0.2", optional = true }
-style_traits = { version = "0.8", package = "stylo_traits", optional = true }
-anyrender = { version = "0.6", optional = true }
-anyrender_vello_cpu = { version = "0.7", optional = true }
-# Peniko version must match anyrender 0.6's dep (peniko 0.5)
-peniko = { version = "0.5", optional = true }
+# Blitz rendering — git deps from DioxusLabs/blitz main (stylo 0.14, selectors 0.36)
+blitz-html = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true, default-features = false, features = ["svg"] }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
+blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
+style_traits = { version = "0.14", package = "stylo_traits", optional = true }
+anyrender = { version = "0.8", optional = true }
+anyrender_vello_cpu = { version = "0.8", package = "anyrender_vello", optional = true }
+peniko = { version = "0.6", optional = true }
 png = { version = "0.17", optional = true }
 
-# Taffy+Vello fallback rendering (används som backup)
-taffy = { version = "0.9", optional = true }
-parley = { version = "0.6", optional = true }
+# Taffy+Vello fallback rendering (matchar blitz main deps)
+taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "4b6687da0ca1e9d71da4e48b4c659f5c45060707", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size", "calc", "detailed_layout_info"], optional = true }
+parley = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", default-features = false, features = ["std"], optional = true }
 fontique = { version = "0.6", optional = true }
-skrifa = { version = "0.37", optional = true }
+skrifa = { version = "0.40", optional = true }
 vello_cpu = { version = "0.0.3", features = ["text"], optional = true }
 
 [dev-dependencies]

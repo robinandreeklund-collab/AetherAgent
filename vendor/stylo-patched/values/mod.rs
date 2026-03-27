@@ -8,6 +8,7 @@
 
 #![deny(missing_docs)]
 
+use crate::derives::*;
 use crate::parser::{Parse, ParserContext};
 use crate::values::distance::{ComputeSquaredDistance, SquaredDistance};
 use crate::Atom;
@@ -16,7 +17,9 @@ pub use cssparser::{SourceLocation, Token};
 use precomputed_hash::PrecomputedHash;
 use selectors::parser::SelectorParseErrorKind;
 use std::fmt::{self, Debug, Write};
-use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
+use style_traits::{
+    CssString, CssWriter, NumericValue, ParseError, StyleParseErrorKind, ToCss, UnitValue,
+};
 use to_shmem::impl_trivial_to_shmem;
 
 #[cfg(feature = "gecko")]
@@ -448,6 +451,14 @@ where
     dest.write_char('%')
 }
 
+/// Reify a value into percentage numeric value.
+pub fn reify_percentage(value: CSSFloat) -> NumericValue {
+    NumericValue::Unit(UnitValue {
+        value: value * 100.,
+        unit: CssString::from("percent"),
+    })
+}
+
 /// Convenience void type to disable some properties and values through types.
 #[cfg_attr(feature = "servo", derive(Deserialize, MallocSizeOf, Serialize))]
 #[derive(
@@ -635,6 +646,20 @@ impl DashedIdent {
     pub fn is_empty(&self) -> bool {
         self.0 == atom!("")
     }
+
+    /// Returns an atom with the same value, but without the starting "--".
+    ///
+    /// # Panics
+    ///
+    /// Panics when used on the special `DashedIdent::empty()`.
+    pub(crate) fn undashed(&self) -> Atom {
+        assert!(!self.is_empty(), "Can't undash the empty DashedIdent");
+        #[cfg(feature = "gecko")]
+        let name = &self.0.as_slice()[2..];
+        #[cfg(feature = "servo")]
+        let name = &self.0[2..];
+        Atom::from(name)
+    }
 }
 
 impl Parse for DashedIdent {
@@ -713,7 +738,10 @@ impl Parse for KeyframesName {
         let location = input.current_source_location();
         Ok(match *input.next()? {
             Token::Ident(ref s) => Self(CustomIdent::from_ident(location, s, &["none"])?.0),
-            Token::QuotedString(ref s) => Self(Atom::from(s.as_ref())),
+            // Note that empty <string> should be rejected.
+            Token::QuotedString(ref s) if !s.as_ref().is_empty() => {
+                Self(Atom::from(s.as_ref()))
+            },
             ref t => return Err(location.new_unexpected_token_error(t.clone())),
         })
     }

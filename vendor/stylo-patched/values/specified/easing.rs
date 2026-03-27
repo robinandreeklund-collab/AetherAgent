@@ -10,7 +10,7 @@ use crate::values::computed::{Context, ToComputedValue};
 use crate::values::generics::easing::TimingFunction as GenericTimingFunction;
 use crate::values::generics::easing::{StepPosition, TimingKeyword};
 use crate::values::specified::{AnimationName, Integer, Number, Percentage};
-use cssparser::{Delimiter, Parser, Token};
+use cssparser::{match_ignore_ascii_case, Delimiter, Parser, Token};
 use selectors::parser::SelectorParseErrorKind;
 use style_traits::{ParseError, StyleParseErrorKind};
 
@@ -78,7 +78,7 @@ impl TimingFunction {
         let position = input
             .try_parse(|i| {
                 i.expect_comma()?;
-                StepPosition::parse(context, i)
+                StepPosition::parse(i)
             })
             .unwrap_or(StepPosition::End);
 

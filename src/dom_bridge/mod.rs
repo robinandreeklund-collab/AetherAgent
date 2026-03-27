@@ -50,8 +50,8 @@ use chardata::*;
 use events::*;
 use node_ops::*;
 use selectors::{
-    find_all_by_class, find_all_by_tag, find_all_matching, find_first_matching, matches_selector,
-    query_select_all, query_select_one,
+    find_all_by_class, find_all_by_tag, find_all_by_tag_ns, find_all_matching, find_first_matching,
+    matches_selector, query_select_all, query_select_one,
 };
 use state::*;
 use style::*;
@@ -329,13 +329,12 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
 
-        // Registrera DOM-objekt
+        // Node identity cache — MÅSTE initieras FÖRE register_document
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        // Node identity cache — samma NodeKey ger alltid samma JS-objekt
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(result) => {
@@ -457,11 +456,11 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let eval_result = match ctx.eval::<Value, _>(code) {
             Ok(res) => {
@@ -608,12 +607,12 @@ fn eval_js_with_lifecycle_internal(
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        // Node identity cache — MÅSTE initieras FÖRE register_document
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ = register_window(&ctx, Rc::clone(&state));
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        // Node identity cache
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -741,12 +740,12 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
     let result = context.with(|ctx| {
         let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
         let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
         let _ = register_document(&ctx, Rc::clone(&state));
         let _ =
             register_window_with_viewport(&ctx, Rc::clone(&state), viewport_width, viewport_height);
         let _ = register_dom_exception(&ctx);
         let _ = register_console(&ctx, Rc::clone(&state));
-        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
 
         let mut last_value: Option<String> = None;
         let mut first_error: Option<String> = None;
@@ -1114,20 +1113,23 @@ impl JsHandler for CreateElementNS {
             );
         }
 
-        // Skapa elementet — använd localName som tag
+        // Skapa elementet — lagra localName som-den-är i arena (case-sensitive).
+        // tagName/nodeName visas som uppercase för HTML namespace.
         let is_html_ns = namespace.as_deref() == Some(XHTML_NAMESPACE);
-        let tag_name = if is_html_ns {
-            local_name.to_ascii_lowercase()
-        } else {
-            local_name.clone()
-        };
 
         let key = {
             let mut s = self.state.borrow_mut();
+            let mut attrs = crate::arena_dom::Attrs::new();
+            // Spara namespace URI i arena-noden som internt attribut __ns__
+            // Krävs av getElementsByTagNameNS för att filtrera på namespace.
+            attrs.insert(
+                "__ns__".to_string(),
+                namespace.as_deref().unwrap_or("").to_string(),
+            );
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
-                tag: Some(tag_name),
-                attributes: crate::arena_dom::Attrs::new(),
+                tag: Some(local_name.clone()),
+                attributes: attrs,
                 text: None,
                 parent: None,
                 children: vec![],
@@ -1345,6 +1347,37 @@ impl JsHandler for GetElementsByTagName {
     }
 }
 
+// ─── getElementsByTagNameNS (document-nivå) ──────────────────────────────────
+
+struct GetElementsByTagNameNSDoc {
+    state: SharedState,
+}
+impl JsHandler for GetElementsByTagNameNSDoc {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() {
+                    Some("".to_string())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .unwrap_or_default();
+        let local_name = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let root_key = {
+            let s = self.state.borrow();
+            s.arena.document
+        };
+        let query_val = format!("{}\x01{}", ns, local_name);
+        make_live_html_collection(ctx, &self.state, root_key, "tag_ns", &query_val)
+    }
+}
+
 // ─── Native query-helpers för live HTMLCollection ─────────────────────────────
 
 /// Returnerar en array av element-objekt som matchar sökningen.
@@ -1381,6 +1414,13 @@ impl JsHandler for NativeQueryElements {
             match query_type.as_str() {
                 "tag" => find_all_by_tag(&s.arena, root, &query_val, &mut results),
                 "class" => find_all_by_class(&s.arena, root, &query_val, &mut results),
+                "tag_ns" => {
+                    if let Some(sep) = query_val.find('\x01') {
+                        let ns_part = &query_val[..sep];
+                        let local_part = &query_val[sep + 1..];
+                        find_all_by_tag_ns(&s.arena, root, ns_part, local_part, &mut results);
+                    }
+                }
                 _ => {}
             }
             results
@@ -1410,6 +1450,13 @@ pub(super) fn make_live_html_collection<'js>(
         match query_type {
             "tag" => find_all_by_tag(&s.arena, root_key, query_val, &mut results),
             "class" => find_all_by_class(&s.arena, root_key, query_val, &mut results),
+            "tag_ns" => {
+                if let Some(sep) = query_val.find('\x01') {
+                    let ns_part = &query_val[..sep];
+                    let local_part = &query_val[sep + 1..];
+                    find_all_by_tag_ns(&s.arena, root_key, ns_part, local_part, &mut results);
+                }
+            }
             _ => {}
         }
         results
@@ -1852,6 +1899,15 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
             }),
         )?,
     )?;
+    doc.set(
+        "getElementsByTagNameNS",
+        Function::new(
+            ctx.clone(),
+            JsFn(GetElementsByTagNameNSDoc {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
 
     // createAttribute — native Attr-objekt
     doc.set(
@@ -1966,6 +2022,7 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 JsFn(AddEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: None,
                 }),
             )?,
         )?;
@@ -1976,6 +2033,7 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 JsFn(RemoveEventListenerHandler {
                     state: Rc::clone(&state),
                     key: doc_key,
+                    override_key: None,
                 }),
             )?,
         )?;
@@ -2772,6 +2830,32 @@ impl JsHandler for GetElementsByTagNameElement {
             .unwrap_or_default()
             .to_ascii_lowercase();
         make_live_html_collection(ctx, &self.state, self.key, "tag", &tag)
+    }
+}
+
+struct GetElementsByTagNameNSElement {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for GetElementsByTagNameNSElement {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let ns = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() {
+                    Some("".to_string())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .unwrap_or_default();
+        let local_name = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let query_val = format!("{}\x01{}", ns, local_name);
+        make_live_html_collection(ctx, &self.state, self.key, "tag_ns", &query_val)
     }
 }
 
@@ -3887,6 +3971,18 @@ pub(super) fn make_element_object<'js>(
         );
         if let Ok(cached) = ctx.eval::<Value, _>(code.as_str()) {
             if !cached.is_undefined() && !cached.is_null() {
+                // Säkerställ att polyfill-patches applicerats (element skapade under
+                // initial DOM-parsing kan ha cachats innan polyfills laddades)
+                let patch_code = format!(
+                    concat!(
+                        "(function(el){{",
+                        "if(el&&el.nodeType===1&&!el.attributes&&globalThis.__patchChildNode)",
+                        "globalThis.__patchChildNode(el)",
+                        "}})(globalThis.__nodeCache.get({}))"
+                    ),
+                    key_bits
+                );
+                let _ = ctx.eval::<Value, _>(patch_code.as_str());
                 return Ok(cached);
             }
         }
@@ -4330,7 +4426,7 @@ pub(super) fn make_element_object<'js>(
         "getElementsByTagNameNS",
         Function::new(
             ctx.clone(),
-            JsFn(GetElementsByTagNameElement {
+            JsFn(GetElementsByTagNameNSElement {
                 state: Rc::clone(state),
                 key,
             }),
@@ -4532,6 +4628,7 @@ pub(super) fn make_element_object<'js>(
             JsFn(AddEventListenerHandler {
                 state: Rc::clone(state),
                 key,
+                override_key: None,
             }),
         )?,
     )?;
@@ -4542,6 +4639,7 @@ pub(super) fn make_element_object<'js>(
             JsFn(RemoveEventListenerHandler {
                 state: Rc::clone(state),
                 key,
+                override_key: None,
             }),
         )?,
     )?;
@@ -5464,7 +5562,19 @@ pub(super) fn make_element_object<'js>(
         let _ = ctx.eval::<Value, _>(patch_code.as_str());
     }
 
-    Ok(obj.into_value())
+    // Cacha i __nodeCache för identitetsgaranti (a === b vid samma NodeKey)
+    let val = obj.into_value();
+    {
+        let set_fn_code = format!(
+            "(function(v) {{ globalThis.__nodeCache && globalThis.__nodeCache.set({}, v); }})",
+            key_bits
+        );
+        if let Ok(set_fn) = ctx.eval::<Function, _>(set_fn_code.as_str()) {
+            let _ = set_fn.call::<_, Value>((val.clone(),));
+        }
+    }
+
+    Ok(val)
 }
 
 /// Konvertera data-attributnamn till camelCase (t.ex. "my-value" → "myValue")

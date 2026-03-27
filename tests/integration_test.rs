@@ -3656,3 +3656,59 @@ fn test_classlist_dedup_and_index_in_production() {
         "Borde hitta elementet med classList-operationer"
     );
 }
+
+/// Test att :has() CSS-selektorn inte kraschar Stylo resolve
+#[test]
+#[cfg(feature = "blitz")]
+fn test_has_selector_resolve_no_crash() {
+    use blitz_dom::DocumentConfig;
+    use blitz_html::HtmlDocument;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    let html = r##"<!DOCTYPE html>
+<html><head><style>
+  .parent:has(.child) { color: red; }
+  div:has(> span) { background: blue; }
+  .container:has(> .item:first-child) { border: 1px solid green; }
+  a:has(img) { text-decoration: none; }
+</style></head><body>
+  <div class="parent"><span class="child">Hej</span></div>
+  <div class="container">
+    <div class="item">Första</div>
+    <div class="item">Andra</div>
+  </div>
+  <a href="#"><img src="test.png" alt="test"/></a>
+  <div>Ingen has-match</div>
+</body></html>"##;
+
+    let result = std::panic::catch_unwind(|| {
+        let mut doc = HtmlDocument::from_html(
+            html,
+            DocumentConfig {
+                viewport: Some(Viewport::new(1280, 900, 1.0, ColorScheme::Light)),
+                base_url: Some("https://test.local".to_string()),
+                ..Default::default()
+            },
+        );
+        doc.as_mut().resolve(0.0);
+        // Om vi kommer hit utan panic = SUCCESS
+        true
+    });
+
+    match &result {
+        Ok(true) => println!("SUCCESS: :has() resolve utan krasch!"),
+        Ok(false) => println!("FAIL: resolve returnerade false"),
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                format!("{:?}", e)
+            };
+            println!("KRASCH: resolve panikade: {}", msg);
+        }
+    }
+
+    assert!(result.is_ok(), ":has() resolve kraschade! Se output ovan.");
+}
