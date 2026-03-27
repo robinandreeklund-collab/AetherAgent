@@ -389,7 +389,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "crossOrigin",
@@ -402,7 +403,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rel",
@@ -415,7 +417,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "as",
@@ -428,7 +431,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "media",
@@ -441,7 +445,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "integrity",
@@ -454,7 +459,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "hreflang",
@@ -467,7 +473,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -480,7 +487,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -493,7 +501,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "disabled",
@@ -506,7 +515,8 @@ pub(crate) fn register_htmllink_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

@@ -563,7 +563,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "download",
@@ -576,7 +577,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "ping",
@@ -589,7 +591,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rel",
@@ -602,7 +605,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "hreflang",
@@ -615,7 +619,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -628,7 +633,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "text",
@@ -641,7 +647,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -654,7 +661,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "href",
@@ -667,14 +675,16 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "origin",
         Accessor::new_get(JsFn(HTMLAnchorElementGetOrigin {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "protocol",
@@ -687,7 +697,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "username",
@@ -700,7 +711,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "password",
@@ -713,7 +725,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "host",
@@ -726,7 +739,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "hostname",
@@ -739,7 +753,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "port",
@@ -752,7 +767,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "pathname",
@@ -765,7 +781,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "search",
@@ -778,7 +795,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "hash",
@@ -791,7 +809,8 @@ pub(crate) fn register_htmlanchor_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

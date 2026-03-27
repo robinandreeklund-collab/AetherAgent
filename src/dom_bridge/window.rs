@@ -625,8 +625,13 @@ pub(super) fn register_window_with_viewport<'js>(
             this.currentTarget = null;
             this.eventPhase = 0;
             this.defaultPrevented = false;
-            this.returnValue = true;
-            this.timeStamp = Date.now();
+            this._returnValue = true;
+            Object.defineProperty(this, 'returnValue', {
+                get: function() { return this._returnValue; },
+                set: function(v) { if (!v && this.cancelable && !this.__passive) { this.defaultPrevented = true; } this._returnValue = v; },
+                configurable: true, enumerable: true
+            });
+            this.timeStamp = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
             this.isTrusted = false;
             this._stopPropagationFlag = false;
             this._stopImmediatePropagationFlag = false;
@@ -638,10 +643,12 @@ pub(super) fn register_window_with_viewport<'js>(
                 set: function(v) { if (v) this._stopPropagationFlag = true; },
                 configurable: true, enumerable: true
             });
+            this._composedPath = [];
+            this.composedPath = function() { return this._dispatching ? this._composedPath.slice() : []; };
             this.stopPropagation = function() { this._stopPropagationFlag = true; };
             this.stopImmediatePropagation = function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-            this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this.returnValue = false; } };
-            this.initEvent = function(type, bubbles, cancelable) { if (this._dispatching) return; this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
+            this.preventDefault = function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; this._returnValue = false; } };
+            this.initEvent = function(type, bubbles, cancelable) { if (this._dispatching) return; this.type = type; this.bubbles = !!bubbles; this.cancelable = !!cancelable; this.defaultPrevented = false; this._returnValue = true; this._canceledFlag = false; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
         };
         Event.NONE = 0; Event.CAPTURING_PHASE = 1; Event.AT_TARGET = 2; Event.BUBBLING_PHASE = 3;
         Event.prototype.NONE = 0; Event.prototype.CAPTURING_PHASE = 1; Event.prototype.AT_TARGET = 2; Event.prototype.BUBBLING_PHASE = 3;
@@ -651,7 +658,7 @@ pub(super) fn register_window_with_viewport<'js>(
         };
         CustomEvent.prototype = Object.create(Event.prototype);
         CustomEvent.prototype.constructor = CustomEvent;
-        CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
+        CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { if (arguments.length < 1) throw new TypeError("Failed to execute 'initCustomEvent': 1 argument required, but only 0 present."); if (this._dispatching) { return; } this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
 
         // ─── DOM Type Hierarchy (native, migrerad från polyfills.js) ─────────
         // EventTarget → Node → Element/CharacterData → HTMLElement/Text/Comment
@@ -969,6 +976,22 @@ pub(super) fn register_window_with_viewport<'js>(
                 };
             }
         })();
+
+        // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────
+        if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
+        NodeFilter.FILTER_ACCEPT = 1;
+        NodeFilter.FILTER_REJECT = 2;
+        NodeFilter.FILTER_SKIP = 3;
+        NodeFilter.SHOW_ALL = 0xFFFFFFFF;
+        NodeFilter.SHOW_ELEMENT = 0x1;
+        NodeFilter.SHOW_ATTRIBUTE = 0x2;
+        NodeFilter.SHOW_TEXT = 0x4;
+        NodeFilter.SHOW_CDATA_SECTION = 0x8;
+        NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
+        NodeFilter.SHOW_COMMENT = 0x80;
+        NodeFilter.SHOW_DOCUMENT = 0x100;
+        NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
+        NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
 
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];

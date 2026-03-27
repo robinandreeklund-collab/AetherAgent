@@ -111,7 +111,8 @@ pub(crate) fn register_named_node_map<'js>(
         Accessor::new_get(JsFn(NamedNodeMapGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "item",

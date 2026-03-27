@@ -227,7 +227,8 @@ pub(crate) fn register_htmloutput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -240,14 +241,16 @@ pub(crate) fn register_htmloutput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
         Accessor::new_get(JsFn(HTMLOutputElementGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -260,21 +263,24 @@ pub(crate) fn register_htmloutput_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "willValidate",
         Accessor::new_get(JsFn(HTMLOutputElementGetWillValidate {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "validationMessage",
         Accessor::new_get(JsFn(HTMLOutputElementGetValidationMessage {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",

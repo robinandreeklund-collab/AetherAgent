@@ -77,14 +77,16 @@ pub(crate) fn register_cssmedia_rule<'js>(
         Accessor::new_get(JsFn(CSSMediaRuleGetMedia {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "cssRules",
         Accessor::new_get(JsFn(CSSMediaRuleGetCssRules {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "insertRule",

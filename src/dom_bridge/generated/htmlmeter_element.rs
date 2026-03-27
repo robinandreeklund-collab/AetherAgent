@@ -268,7 +268,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "min",
@@ -281,7 +282,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "max",
@@ -294,7 +296,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "low",
@@ -307,7 +310,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "high",
@@ -320,7 +324,8 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "optimum",
@@ -333,14 +338,16 @@ pub(crate) fn register_htmlmeter_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "labels",
         Accessor::new_get(JsFn(HTMLMeterElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

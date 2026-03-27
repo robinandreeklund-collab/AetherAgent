@@ -47,14 +47,16 @@ pub(crate) fn register_htmltable_row_element<'js>(
         Accessor::new_get(JsFn(HTMLTableRowElementGetRowIndex {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "sectionRowIndex",
         Accessor::new_get(JsFn(HTMLTableRowElementGetSectionRowIndex {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

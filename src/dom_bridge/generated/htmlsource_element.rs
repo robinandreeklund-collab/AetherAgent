@@ -283,7 +283,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -296,7 +297,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "srcset",
@@ -309,7 +311,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "sizes",
@@ -322,7 +325,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "media",
@@ -335,7 +339,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "width",
@@ -348,7 +353,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "height",
@@ -361,7 +367,8 @@ pub(crate) fn register_htmlsource_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

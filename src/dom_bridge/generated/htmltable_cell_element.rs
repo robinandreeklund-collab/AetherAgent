@@ -223,7 +223,8 @@ pub(crate) fn register_htmltable_cell_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rowSpan",
@@ -236,7 +237,8 @@ pub(crate) fn register_htmltable_cell_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "headers",
@@ -249,14 +251,16 @@ pub(crate) fn register_htmltable_cell_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "cellIndex",
         Accessor::new_get(JsFn(HTMLTableCellElementGetCellIndex {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "scope",
@@ -269,7 +273,8 @@ pub(crate) fn register_htmltable_cell_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "abbr",
@@ -282,7 +287,8 @@ pub(crate) fn register_htmltable_cell_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

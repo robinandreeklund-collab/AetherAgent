@@ -101,7 +101,8 @@ pub(crate) fn register_htmlbase_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "target",
@@ -114,7 +115,8 @@ pub(crate) fn register_htmlbase_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

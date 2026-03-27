@@ -137,7 +137,8 @@ pub(crate) fn register_htmlstyle_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "media",
@@ -150,7 +151,8 @@ pub(crate) fn register_htmlstyle_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -163,7 +165,8 @@ pub(crate) fn register_htmlstyle_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

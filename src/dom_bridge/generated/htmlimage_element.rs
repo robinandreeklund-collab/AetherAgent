@@ -511,7 +511,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "src",
@@ -524,7 +525,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "srcset",
@@ -537,7 +539,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "sizes",
@@ -550,7 +553,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "crossOrigin",
@@ -563,7 +567,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "useMap",
@@ -576,7 +581,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "isMap",
@@ -589,7 +595,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "width",
@@ -602,7 +609,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "height",
@@ -615,7 +623,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "decoding",
@@ -628,7 +637,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "loading",
@@ -641,7 +651,8 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -654,35 +665,40 @@ pub(crate) fn register_htmlimage_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "naturalWidth",
         Accessor::new_get(JsFn(HTMLImageElementGetNaturalWidth {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "naturalHeight",
         Accessor::new_get(JsFn(HTMLImageElementGetNaturalHeight {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "complete",
         Accessor::new_get(JsFn(HTMLImageElementGetComplete {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "currentSrc",
         Accessor::new_get(JsFn(HTMLImageElementGetCurrentSrc {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

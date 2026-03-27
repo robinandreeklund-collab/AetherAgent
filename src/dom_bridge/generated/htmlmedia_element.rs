@@ -654,7 +654,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "currentSrc",
@@ -667,7 +668,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "crossOrigin",
@@ -680,14 +682,16 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "networkState",
         Accessor::new_get(JsFn(HTMLMediaElementGetNetworkState {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "preload",
@@ -700,21 +704,24 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "readyState",
         Accessor::new_get(JsFn(HTMLMediaElementGetReadyState {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "seeking",
         Accessor::new_get(JsFn(HTMLMediaElementGetSeeking {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "currentTime",
@@ -727,21 +734,24 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "duration",
         Accessor::new_get(JsFn(HTMLMediaElementGetDuration {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "paused",
         Accessor::new_get(JsFn(HTMLMediaElementGetPaused {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "defaultPlaybackRate",
@@ -754,7 +764,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "playbackRate",
@@ -767,14 +778,16 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "ended",
         Accessor::new_get(JsFn(HTMLMediaElementGetEnded {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "autoplay",
@@ -787,7 +800,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "loop",
@@ -800,7 +814,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "controls",
@@ -813,7 +828,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "volume",
@@ -826,7 +842,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "muted",
@@ -839,7 +856,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defaultMuted",
@@ -852,7 +870,8 @@ pub(crate) fn register_htmlmedia_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.set(
         "play",

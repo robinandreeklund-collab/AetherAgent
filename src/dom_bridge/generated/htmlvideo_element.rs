@@ -211,7 +211,8 @@ pub(crate) fn register_htmlvideo_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "height",
@@ -224,21 +225,24 @@ pub(crate) fn register_htmlvideo_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "videoWidth",
         Accessor::new_get(JsFn(HTMLVideoElementGetVideoWidth {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "videoHeight",
         Accessor::new_get(JsFn(HTMLVideoElementGetVideoHeight {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "poster",
@@ -251,7 +255,8 @@ pub(crate) fn register_htmlvideo_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "playsInline",
@@ -264,7 +269,8 @@ pub(crate) fn register_htmlvideo_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

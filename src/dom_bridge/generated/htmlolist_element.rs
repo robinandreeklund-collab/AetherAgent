@@ -138,7 +138,8 @@ pub(crate) fn register_htmlolist_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "start",
@@ -151,7 +152,8 @@ pub(crate) fn register_htmlolist_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -164,7 +166,8 @@ pub(crate) fn register_htmlolist_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

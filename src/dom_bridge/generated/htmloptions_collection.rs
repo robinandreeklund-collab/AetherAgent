@@ -123,7 +123,8 @@ pub(crate) fn register_htmloptions_collection<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "selectedIndex",
@@ -136,7 +137,8 @@ pub(crate) fn register_htmloptions_collection<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.set(
         "add",

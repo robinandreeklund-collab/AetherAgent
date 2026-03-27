@@ -5,13 +5,32 @@ use rquickjs::{Ctx, Function, Persistent, Value};
 /// Unik nyckel för window event listeners — separerad från document
 pub(super) const WINDOW_EVENT_KEY: u64 = u64::MAX - 1;
 
-/// (registrerings-index, callback, passive, once, capture)
+/// Konvertera JS-värde till boolean per JS truthiness-regler
+fn js_truthy(v: &Value) -> bool {
+    if let Some(b) = v.as_bool() {
+        return b;
+    }
+    if v.is_null() || v.is_undefined() {
+        return false;
+    }
+    if let Some(n) = v.as_number() {
+        return n != 0.0 && !n.is_nan();
+    }
+    if let Some(s) = v.as_string() {
+        return !s.to_string().unwrap_or_default().is_empty();
+    }
+    // Objects, functions, arrays → truthy
+    true
+}
+
+/// (registrerings-index, callback, passive, once, capture, callback_id)
 type ListenerEntry = (
     usize,
     Persistent<Function<'static>>,
     Option<bool>,
     bool,
     bool,
+    u64,
 );
 
 use crate::arena_dom::NodeKey;
@@ -38,45 +57,76 @@ impl JsHandler for AddEventListenerHandler {
             None => return Ok(Value::new_undefined(ctx.clone())),
         };
         let (capture, passive, once) = if let Some(opts) = args.get(2) {
-            if let Some(b) = opts.as_bool() {
-                (b, None, false)
-            } else if let Some(obj) = opts.as_object() {
+            if let Some(obj) = opts.as_object() {
                 let cap = obj
                     .get::<_, Value>("capture")
                     .ok()
-                    .and_then(|v| v.as_bool())
+                    .map(|v| js_truthy(&v))
                     .unwrap_or(false);
                 let pas = obj
                     .get::<_, Value>("passive")
                     .ok()
-                    .and_then(|v| v.as_bool());
+                    .map(|v| {
+                        if v.is_undefined() {
+                            None
+                        } else {
+                            Some(js_truthy(&v))
+                        }
+                    })
+                    .unwrap_or(None);
                 let onc = obj
                     .get::<_, Value>("once")
                     .ok()
-                    .and_then(|v| v.as_bool())
+                    .map(|v| js_truthy(&v))
                     .unwrap_or(false);
                 (cap, pas, onc)
             } else {
-                (false, None, false)
+                // Boolean/number/string → JS truthiness
+                (js_truthy(opts), None, false)
             }
         } else {
             (false, None, false)
+        };
+        // Tilldela unik callback_id till funktionen (för removeEventListener-matchning)
+        // Function.0 är ett Object — vi kan accessa det via into_value + as_object
+        let func_val: Value = func.clone().into_value();
+        let callback_id: u64 = if let Some(func_obj) = func_val.as_object() {
+            if let Ok(existing_id) = func_obj.get::<_, f64>("__ael_id") {
+                existing_id as u64
+            } else {
+                let mut s = self.state.borrow_mut();
+                let id = s.next_callback_id;
+                s.next_callback_id += 1;
+                drop(s);
+                let _ = func_obj.set("__ael_id", id as f64);
+                id
+            }
+        } else {
+            let mut s = self.state.borrow_mut();
+            let id = s.next_callback_id;
+            s.next_callback_id += 1;
+            id
         };
         let persistent = Persistent::save(ctx, func);
         let key_bits = self
             .override_key
             .unwrap_or(node_key_to_f64(self.key) as u64);
         let mut s = self.state.borrow_mut();
-        s.event_listeners
-            .entry(key_bits)
-            .or_default()
-            .push(EventListener {
+        // Per spec: om samma callback+capture redan finns, ignorera (deduplicering)
+        let listeners = s.event_listeners.entry(key_bits).or_default();
+        let already_exists = listeners.iter().any(|l| {
+            l.event_type == event_type && l.callback_id == callback_id && l.capture == capture
+        });
+        if !already_exists {
+            listeners.push(EventListener {
                 event_type,
                 callback: persistent,
                 capture,
                 passive,
                 once,
+                callback_id,
             });
+        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
@@ -93,12 +143,38 @@ impl JsHandler for RemoveEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        // Hämta callback_id från funktionens __ael_id property
+        let callback_id: Option<u64> = args
+            .get(1)
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, f64>("__ael_id").ok())
+            .map(|id| id as u64);
+        let capture = if let Some(opts) = args.get(2) {
+            if let Some(obj) = opts.as_object() {
+                obj.get::<_, Value>("capture")
+                    .ok()
+                    .map(|v| js_truthy(&v))
+                    .unwrap_or(false)
+            } else {
+                js_truthy(opts)
+            }
+        } else {
+            false
+        };
         let key_bits = self
             .override_key
             .unwrap_or(node_key_to_f64(self.key) as u64);
         let mut s = self.state.borrow_mut();
         if let Some(listeners) = s.event_listeners.get_mut(&key_bits) {
-            listeners.retain(|l| l.event_type != event_type);
+            if let Some(cb_id) = callback_id {
+                // Matcha per spec: event_type + callback_id + capture
+                listeners.retain(|l| {
+                    !(l.event_type == event_type && l.callback_id == cb_id && l.capture == capture)
+                });
+            } else {
+                // Inget callback — ta bort alla av den typen (fallback)
+                listeners.retain(|l| l.event_type != event_type);
+            }
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -186,8 +262,35 @@ impl JsHandler for DispatchEventHandler {
             let _ = ev.set("target", target_val.clone());
             let _ = ev.set("srcElement", target_val);
             let _ = ev.set("_dispatching", true);
-            let _ = ev.set("_stopPropagationFlag", false);
-            let _ = ev.set("_stopImmediatePropagationFlag", false);
+            // OBS: Resätt INTE _stopPropagationFlag/_stopImmediatePropagationFlag
+            // Per spec: om stopPropagation() anropades före dispatch, ska flaggan respekteras
+
+            // Bygg composedPath: target → ... → document → window
+            if let Ok(cp_arr) = rquickjs::Array::new(ctx.clone()) {
+                let mut cp_idx: usize = 0;
+                for &node_bits in &path {
+                    if node_bits == WINDOW_SENTINEL {
+                        // Lägg till window-objektet
+                        if let Ok(win) = ctx.globals().get::<_, Value>("window") {
+                            let _ = cp_arr.set(cp_idx, win);
+                            cp_idx += 1;
+                        }
+                    } else {
+                        let nk = crate::dom_bridge::f64_to_node_key(node_bits as f64);
+                        if let Ok(obj) = make_element_object(ctx, nk, &self.state) {
+                            let _ = cp_arr.set(cp_idx, obj);
+                            cp_idx += 1;
+                        }
+                    }
+                }
+                let _ = ev.set("_composedPath", cp_arr);
+            }
+        }
+
+        // Sätt window.event (legacy) under dispatch
+        let prev_window_event = ctx.globals().get::<_, Value>("event").ok();
+        if let Some(ev_val) = args.first() {
+            let _ = ctx.globals().set("event", ev_val.clone());
         }
 
         let event_val = args
@@ -245,14 +348,23 @@ impl JsHandler for DispatchEventHandler {
                             .iter()
                             .enumerate()
                             .filter(|(_, l)| l.event_type == event_type)
-                            .map(|(i, l)| (i, l.callback.clone(), l.passive, l.once, l.capture))
+                            .map(|(i, l)| {
+                                (
+                                    i,
+                                    l.callback.clone(),
+                                    l.passive,
+                                    l.once,
+                                    l.capture,
+                                    l.callback_id,
+                                )
+                            })
                             .collect()
                     })
                     .unwrap_or_default()
             };
 
-            // AT_TARGET (phase 2): sortera så capture-listeners körs först, sedan bubble
-            // Per DOM spec: vid AT_TARGET, capture before bubble
+            // AT_TARGET (phase 2): capture-listeners körs först, sedan bubble
+            // (target nås under capture-fasen FÖRE bubble-fasen)
             let sorted_callbacks: Vec<ListenerEntry> = if phase == 2 {
                 let mut capture_list: Vec<_> = callbacks.iter().filter(|c| c.4).cloned().collect();
                 let mut bubble_list: Vec<_> = callbacks.iter().filter(|c| !c.4).cloned().collect();
@@ -266,7 +378,10 @@ impl JsHandler for DispatchEventHandler {
             let mut stop_prop = false;
             let mut stop_immediate = false;
 
-            for (reg_idx, cb, passive, once, capture) in sorted_callbacks {
+            // Flagga: har vi växlat från capture→bubble vid AT_TARGET?
+            let mut prev_was_capture = true;
+
+            for (reg_idx, cb, passive, once, capture, cb_id) in sorted_callbacks {
                 // Capture listeners körs bara i capture-fas (phase 1)
                 // Bubble listeners körs bara i bubble-fas (phase 3)
                 // AT_TARGET (phase 2): kör alla (redan sorterade ovan)
@@ -281,6 +396,29 @@ impl JsHandler for DispatchEventHandler {
                     break;
                 }
 
+                // AT_TARGET: om vi växlar från capture→bubble, kolla stopPropagation
+                if phase == 2 && prev_was_capture && !capture && stop_prop {
+                    break;
+                }
+                prev_was_capture = capture;
+
+                // Per spec: kontrollera att listenern fortfarande finns i live-listan
+                // (en tidigare listener kan ha anropat removeEventListener)
+                {
+                    let s = state.borrow();
+                    let still_exists = s
+                        .event_listeners
+                        .get(&listener_key)
+                        .map(|ls| {
+                            ls.iter()
+                                .any(|l| l.callback_id == cb_id && l.event_type == event_type)
+                        })
+                        .unwrap_or(false);
+                    if !still_exists {
+                        continue;
+                    }
+                }
+
                 if let Ok(func) = cb.restore(ctx) {
                     let is_passive = passive.unwrap_or(is_passive_default);
                     if is_passive {
@@ -288,7 +426,21 @@ impl JsHandler for DispatchEventHandler {
                             let _ = obj.set("__passive", true);
                         }
                     }
-                    let _ = func.call::<_, Value>((event_val.clone(),));
+                    let call_result = func.call::<_, Value>((event_val.clone(),));
+                    if let Err(e) = call_result {
+                        // Per spec: rapportera exception till window.onerror och fortsätt
+                        let err_msg = format!("{}", e);
+                        if let Ok(onerror) = ctx.globals().get::<_, Value>("onerror") {
+                            if let Some(onerror_fn) = onerror.as_function() {
+                                let _ = onerror_fn.call::<_, Value>((rquickjs::String::from_str(
+                                    ctx.clone(),
+                                    &err_msg,
+                                )
+                                .map(|s| s.into_value())
+                                .unwrap_or(Value::new_undefined(ctx.clone())),));
+                            }
+                        }
+                    }
                     if is_passive {
                         if let Some(obj) = event_val.as_object() {
                             let _ = obj.set("__passive", false);
@@ -324,7 +476,10 @@ impl JsHandler for DispatchEventHandler {
             (stop_prop, stop_immediate)
         };
 
-        let mut stopped = false;
+        // Kolla om stopPropagation anropades före dispatch
+        let mut stopped = event_obj
+            .and_then(|ev| ev.get::<_, bool>("_stopPropagationFlag").ok())
+            .unwrap_or(false);
 
         // ── CAPTURE PHASE: root → ... → parent (exkludera target) ──
         for &node_bits in path.iter().rev() {
@@ -377,15 +532,30 @@ impl JsHandler for DispatchEventHandler {
             }
         }
 
-        // ── Cleanup: resätt event state ──
+        // Återställ window.event
+        match prev_window_event {
+            Some(prev) => {
+                let _ = ctx.globals().set("event", prev);
+            }
+            None => {
+                let _ = ctx
+                    .globals()
+                    .set("event", Value::new_undefined(ctx.clone()));
+            }
+        }
+
+        // ── Cleanup: resätt event state per spec ──
+        // OBS: defaultPrevented, target, srcElement ska BEVARAS efter dispatch
         if let Some(ev) = args.first().and_then(|v| v.as_object()) {
             let _ = ev.set("eventPhase", 0i32);
             let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
             let _ = ev.set("_dispatching", false);
             let _ = ev.set("_stopPropagationFlag", false);
             let _ = ev.set("_stopImmediatePropagationFlag", false);
-            // cancelBubble måste vara false efter dispatch (spec: stop propagation flag resätts)
-            let _ = ev.set("_canceledFlag", false);
+            // Rensa composedPath (per spec: tom array efter dispatch)
+            if let Ok(empty_arr) = rquickjs::Array::new(ctx.clone()) {
+                let _ = ev.set("_composedPath", empty_arr);
+            }
         }
         let default_prevented = args
             .first()

@@ -389,7 +389,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "coords",
@@ -402,7 +403,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "download",
@@ -415,7 +417,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "href",
@@ -428,7 +431,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "hreflang",
@@ -441,7 +445,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "ping",
@@ -454,7 +459,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -467,7 +473,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rel",
@@ -480,7 +487,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "shape",
@@ -493,7 +501,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "target",
@@ -506,7 +515,8 @@ pub(crate) fn register_htmlarea_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

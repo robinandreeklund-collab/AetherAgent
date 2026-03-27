@@ -320,6 +320,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -449,6 +450,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -530,6 +532,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 blitz_style_generation: 0,
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
+                next_callback_id: 0,
             }
         }
     };
@@ -600,6 +603,7 @@ fn eval_js_with_lifecycle_internal(
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -733,6 +737,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         blitz_style_generation: 0,
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
+        next_callback_id: 0,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -835,6 +840,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 blitz_style_generation: 0,
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
+                next_callback_id: 0,
             }
         }
     };
@@ -936,6 +942,147 @@ impl JsHandler for QuerySelectorAll {
 }
 
 /// Skapar en Document-nod i ArenaDom (för foreignDoc / createHTMLDocument)
+// ─── document.createEvent — native Rust (migrerad från polyfill) ─────────────
+// ─── document.title getter/setter — native Rust ─────────────────────────────
+struct DocTitleGetter {
+    state: SharedState,
+}
+impl JsHandler for DocTitleGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        // Hitta <title>-elementet i <head>
+        let title = find_title_text(&s.arena, s.arena.document);
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &title,
+        )?))
+    }
+}
+
+struct DocTitleSetter {
+    state: SharedState,
+}
+impl JsHandler for DocTitleSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        let doc = s.arena.document;
+        // Hitta eller skapa <title>-element
+        if let Some(title_key) = find_title_element(&s.arena, doc) {
+            // Rensa barn och sätt ny text
+            let old_children: Vec<NodeKey> = s
+                .arena
+                .nodes
+                .get(title_key)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
+            for &ck in &old_children {
+                if let Some(c) = s.arena.nodes.get_mut(ck) {
+                    c.parent = None;
+                }
+            }
+            if let Some(title_node) = s.arena.nodes.get_mut(title_key) {
+                title_node.children.clear();
+            }
+            let text_key = s.arena.nodes.insert(crate::arena_dom::DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(val.into()),
+                parent: Some(title_key),
+                children: vec![],
+                owner_doc: None,
+            });
+            if let Some(title_node) = s.arena.nodes.get_mut(title_key) {
+                title_node.children.push(text_key);
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+/// Hitta text i <title>-element
+fn find_title_text(arena: &crate::arena_dom::ArenaDom, root: NodeKey) -> String {
+    if let Some(title_key) = find_title_element(arena, root) {
+        collect_text_descendants(arena, title_key)
+    } else {
+        String::new()
+    }
+}
+
+/// Hitta <title>-element i dokumentträdet
+fn find_title_element(arena: &crate::arena_dom::ArenaDom, key: NodeKey) -> Option<NodeKey> {
+    let node = arena.nodes.get(key)?;
+    if node.tag.as_deref() == Some("title") {
+        return Some(key);
+    }
+    for &child in &node.children {
+        if let Some(found) = find_title_element(arena, child) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+struct NativeCreateEvent;
+impl JsHandler for NativeCreateEvent {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let type_str = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        // Mappa event-typ till konstruktor (per spec)
+        let ctor_name = match type_str.as_str() {
+            "event" | "events" | "htmlevents" | "svgevents" | "svgevent" => "Event",
+            "customevent" => "CustomEvent",
+            "uievent" | "uievents" => "UIEvent",
+            "mouseevent" | "mouseevents" => "MouseEvent",
+            "keyboardevent" => "KeyboardEvent",
+            "focusevent" => "FocusEvent",
+            "inputevent" => "InputEvent",
+            "wheelevent" => "WheelEvent",
+            "compositionevent" => "CompositionEvent",
+            "pointerevent" => "PointerEvent",
+            "beforeunloadevent" => "BeforeUnloadEvent",
+            "hashchangeevent" => "HashChangeEvent",
+            "popstateevent" => "PopStateEvent",
+            "storageevent" => "StorageEvent",
+            "progressevent" => "ProgressEvent",
+            "messageevent" => "MessageEvent",
+            "dragevent" => "DragEvent",
+            "errorevent" => "ErrorEvent",
+            "clipboardevent" => "ClipboardEvent",
+            "animationevent" => "AnimationEvent",
+            "transitionevent" => "TransitionEvent",
+            "touchevent" => "TouchEvent",
+            "mutationevent" | "mutationevents" => "Event",
+            _ => {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "NotSupportedError",
+                    "The operation is not supported.",
+                ));
+            }
+        };
+        // Skapa event via konstruktor i JS-kontexten
+        let code = format!("new {}('')", ctor_name);
+        match ctx.eval::<Value, _>(code.as_str()) {
+            Ok(v) => Ok(v),
+            Err(_) => {
+                // Fallback: skapa via Event-konstruktor
+                ctx.eval::<Value, _>("new Event('')")
+            }
+        }
+    }
+}
+
 struct CreateDocumentNode {
     state: SharedState,
 }
@@ -2212,6 +2359,21 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
     doc.set("URL", "about:blank")?;
     doc.set("documentURI", "about:blank")?;
 
+    // document.title — native Rust getter/setter (migrerad från polyfill)
+    {
+        let gt_state = Rc::clone(&state);
+        let st_state = Rc::clone(&state);
+        doc.prop(
+            "title",
+            Accessor::new(
+                JsFn(DocTitleGetter { state: gt_state }),
+                JsFn(DocTitleSetter { state: st_state }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    }
+
     // __nativeQueryElements — returnerar element-objekt för live HTMLCollection
     doc.set(
         "__nativeQueryElements",
@@ -2221,6 +2383,12 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
                 state: Rc::clone(&state),
             }),
         )?,
+    )?;
+
+    // ─── document.createEvent — native Rust (migrerad från polyfill) ─────────
+    doc.set(
+        "createEvent",
+        Function::new(ctx.clone(), JsFn(NativeCreateEvent))?,
     )?;
 
     ctx.globals().set("document", doc)?;
@@ -2591,15 +2759,39 @@ fn get_text_content(arena: &ArenaDom, key: NodeKey) -> String {
         None => return String::new(),
     };
     match &node.node_type {
-        NodeType::Text | NodeType::Comment => node.text.as_deref().unwrap_or("").to_string(),
-        _ => {
-            let mut text = String::new();
-            for &child in &node.children {
-                text.push_str(&get_text_content(arena, child));
+        // Text, Comment, PI: returnera node data direkt
+        NodeType::Text | NodeType::Comment | NodeType::ProcessingInstruction => {
+            node.text.as_deref().unwrap_or("").to_string()
+        }
+        // Element, DocumentFragment: konkatenera text från ALLA Text-descendants
+        _ => collect_text_descendants(arena, key),
+    }
+}
+
+/// Samla text från alla Text-nod descendants (exkluderar Comment, PI per spec)
+fn collect_text_descendants(arena: &ArenaDom, key: NodeKey) -> String {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return String::new(),
+    };
+    let mut text = String::new();
+    for &child in &node.children {
+        if let Some(child_node) = arena.nodes.get(child) {
+            match &child_node.node_type {
+                NodeType::Text => {
+                    text.push_str(child_node.text.as_deref().unwrap_or(""));
+                }
+                NodeType::Comment | NodeType::ProcessingInstruction => {
+                    // Skip per spec — inte inkluderad i textContent
+                }
+                _ => {
+                    // Rekursera in i element-barn
+                    text.push_str(&collect_text_descendants(arena, child));
+                }
             }
-            text
         }
     }
+    text
 }
 
 /// Serialisera nod till HTML
@@ -3748,6 +3940,71 @@ impl JsHandler for GetClientRects {
     }
 }
 
+// ─── CharacterData .data/.nodeValue/.length — native Rust (migrerad från polyfill) ──
+
+struct CharDataGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for CharDataGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let text = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| t.to_string())
+            .unwrap_or_default();
+        Ok(Value::from_string(rquickjs::String::from_str(
+            ctx.clone(),
+            &text,
+        )?))
+    }
+}
+
+struct CharDataSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for CharDataSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let new_val = args
+            .first()
+            .and_then(|v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.text = Some(new_val.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct CharDataLengthGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for CharDataLengthGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.text.as_ref())
+            .map(|t| t.encode_utf16().count())
+            .unwrap_or(0);
+        Ok(Value::new_int(ctx.clone(), len as i32))
+    }
+}
+
 // Getter/setter handlers
 struct TextContentGetter {
     state: SharedState,
@@ -3777,7 +4034,8 @@ struct TextContentSetter {
 impl JsHandler for TextContentSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let val = args.first();
-        let is_null = val.map(|v| v.is_null()).unwrap_or(true);
+        // Per IDL: textContent setter tar DOMString? — undefined → null
+        let is_null = val.map(|v| v.is_null() || v.is_undefined()).unwrap_or(true);
         let mut s = self.state.borrow_mut();
         let node_type = s
             .arena
@@ -4095,23 +4353,58 @@ pub(super) fn make_element_object<'js>(
         obj.set("publicId", "")?;
         obj.set("systemId", "")?;
     }
-    // nodeValue: null för Element/Document/Doctype/Fragment, data för Text/Comment
+    // nodeValue + data: live getter/setter för Text/Comment/PI, null för övriga
     match node_type_val {
         1 | 9 | 10 | 11 => {
             obj.set("nodeValue", Value::new_null(ctx.clone()))?;
         }
-        3 | 8 => {
-            // Text/Comment — sätt nodeValue till textinnehållet
-            let text_val = {
-                let s = state.borrow();
-                s.arena
-                    .nodes
-                    .get(key)
-                    .and_then(|n| n.text.as_ref())
-                    .map(|t| t.to_string())
-                    .unwrap_or_default()
-            };
-            obj.set("nodeValue", text_val.as_str())?;
+        3 | 7 | 8 => {
+            // Text(3)/PI(7)/Comment(8) — live getter/setter för nodeValue och data
+            let nv_get_state = Rc::clone(state);
+            let nv_set_state = Rc::clone(state);
+            obj.prop(
+                "nodeValue",
+                rquickjs::object::Accessor::new(
+                    JsFn(CharDataGetter {
+                        state: nv_get_state,
+                        key,
+                    }),
+                    JsFn(CharDataSetter {
+                        state: nv_set_state,
+                        key,
+                    }),
+                )
+                .configurable()
+                .enumerable(),
+            )?;
+            let d_get_state = Rc::clone(state);
+            let d_set_state = Rc::clone(state);
+            obj.prop(
+                "data",
+                rquickjs::object::Accessor::new(
+                    JsFn(CharDataGetter {
+                        state: d_get_state,
+                        key,
+                    }),
+                    JsFn(CharDataSetter {
+                        state: d_set_state,
+                        key,
+                    }),
+                )
+                .configurable()
+                .enumerable(),
+            )?;
+            // .length — UTF-16 code unit count (live)
+            let len_state = Rc::clone(state);
+            obj.prop(
+                "length",
+                rquickjs::object::Accessor::new_get(JsFn(CharDataLengthGetter {
+                    state: len_state,
+                    key,
+                }))
+                .configurable()
+                .enumerable(),
+            )?;
         }
         _ => {}
     }
@@ -5900,6 +6193,10 @@ fn register_dom_impl_properties<'js>(
         )?;
     }
 
+    // ─── element.labels — hanteras redan av generated code ──────────────────
+    // Generated: htmlinput_element, htmlbutton_element, htmlselect_element, etc.
+    // anropar computed::find_labels() och returnerar Array.
+
     // ─── Input value/checked med dirty state (input) ─────────────────────
     if tag_lower == "input" {
         // Överskrivna value getter/setter med dirty state-logik
@@ -5948,6 +6245,69 @@ fn register_dom_impl_properties<'js>(
             )
             .configurable(),
         )?;
+
+        // valueAsNumber getter/setter — konverterar value till/från nummer per input type
+        let van_get_state = Rc::clone(state);
+        let van_set_state = Rc::clone(state);
+        obj.prop(
+            "valueAsNumber",
+            rquickjs::object::Accessor::new(
+                JsFn(InputValueAsNumberGetter {
+                    state: van_get_state,
+                    key,
+                }),
+                JsFn(InputValueAsNumberSetter {
+                    state: van_set_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+
+        // valueAsDate getter/setter — konverterar value till/från Date per input type
+        let vad_get_state = Rc::clone(state);
+        let vad_set_state = Rc::clone(state);
+        obj.prop(
+            "valueAsDate",
+            rquickjs::object::Accessor::new(
+                JsFn(InputValueAsDateGetter {
+                    state: vad_get_state,
+                    key,
+                }),
+                JsFn(InputValueAsDateSetter {
+                    state: vad_set_state,
+                    key,
+                }),
+            )
+            .configurable(),
+        )?;
+
+        // stepUp/stepDown — justerar numeriskt value med step
+        obj.set(
+            "stepUp",
+            Function::new(
+                ctx.clone(),
+                JsFn(InputStepUpDown {
+                    state: Rc::clone(state),
+                    key,
+                    direction: 1,
+                }),
+            )?,
+        )?;
+        obj.set(
+            "stepDown",
+            Function::new(
+                ctx.clone(),
+                JsFn(InputStepUpDown {
+                    state: Rc::clone(state),
+                    key,
+                    direction: -1,
+                }),
+            )?,
+        )?;
+        // files och list — null per spec (vi stöder inte FileList/datalist-koppling)
+        obj.set("files", Value::new_null(ctx.clone()))?;
+        obj.set("list", Value::new_null(ctx.clone()))?;
     }
 
     // ─── Select element: value, selectedIndex med riktig option-logik ─────
@@ -6047,7 +6407,57 @@ struct ValidityStateGetter {
 impl JsHandler for ValidityStateGetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let vs = dom_impls::constraint_validation::compute_validity(&s, self.key);
+        let mut vs = dom_impls::constraint_validation::compute_validity(&s, self.key);
+
+        // Korrigera patternMismatch med riktig JS RegExp-evaluering
+        let pattern_and_value: Option<(String, String)> = {
+            let node = s.arena.nodes.get(self.key);
+            node.and_then(|n| {
+                n.get_attr("pattern").map(|p| {
+                    let v = computed::get_effective_value(&s, self.key);
+                    (p.to_string(), v)
+                })
+            })
+        };
+        drop(s);
+
+        if let Some((pattern, value)) = pattern_and_value {
+            if !value.is_empty() {
+                // Per spec: pattern matchas som ^(?:pattern)$ med v-flag
+                // Per spec: mönster kompileras med v-flag.
+                // Om v-flag inte stöds, fallback till u-flag.
+                // Om BÅDA kastar → mönstret ignoreras (return true = match)
+                // Obs: QuickJS stöder kanske inte v-flag — fallback till u-flag
+                let escaped_value = value
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let escaped_pattern = pattern
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let js_code = format!(
+                    "(function(){{var v='{}';var p='{}';try{{var r=new RegExp('^(?:'+p+')$','v');return r.test(v);}}catch(e){{try{{var r2=new RegExp('^(?:'+p+')$','u');return r2.test(v);}}catch(e2){{return true;}}}}}})()",
+                    escaped_value, escaped_pattern
+                );
+                if let Ok(v) = ctx.eval::<Value, _>(js_code.as_str()) {
+                    let matches = v.as_bool().unwrap_or(true);
+                    vs.pattern_mismatch = !matches;
+                    vs.valid = !(vs.value_missing
+                        || vs.type_mismatch
+                        || vs.pattern_mismatch
+                        || vs.too_long
+                        || vs.too_short
+                        || vs.range_underflow
+                        || vs.range_overflow
+                        || vs.step_mismatch
+                        || vs.bad_input
+                        || vs.custom_error);
+                }
+            }
+        }
 
         // Skapa ValidityState JS-objekt med rätt prototype
         let obj_code =
@@ -6143,6 +6553,503 @@ impl JsHandler for InputCheckedSetter {
         dom_impls::input_value::set_input_checked(&mut s, self.key, checked);
         Ok(Value::new_undefined(ctx.clone()))
     }
+}
+
+// ─── Input valueAsNumber/valueAsDate/stepUp/stepDown ────────────────────────
+
+struct InputValueAsNumberGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueAsNumberGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let node = match s.arena.nodes.get(self.key) {
+            Some(n) => n,
+            None => return Ok(Value::new_float(ctx.clone(), f64::NAN)),
+        };
+        let input_type = node.get_attr("type").unwrap_or("text");
+        // Använd sanitized value (inkl. range clamping/default)
+        let value = dom_impls::input_value::get_input_value(&s, self.key);
+        let num = input_value_to_number(input_type, &value);
+        Ok(Value::new_float(ctx.clone(), num))
+    }
+}
+
+struct InputValueAsNumberSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueAsNumberSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let num = args.first().and_then(|v| v.as_number()).unwrap_or(f64::NAN);
+        if num.is_nan() || num.is_infinite() {
+            return Err(throw_dom_exception(
+                ctx,
+                "TypeError",
+                "The value provided is not a finite number",
+            ));
+        }
+        let mut s = self.state.borrow_mut();
+        let input_type = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("type"))
+            .unwrap_or("text")
+            .to_string();
+        let val = number_to_input_value(&input_type, num);
+        let key_bits = node_key_to_f64(self.key) as u64;
+        let es = s.element_state.entry(key_bits).or_default();
+        es.value = Some(val);
+        es.value_dirty = true;
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct InputValueAsDateGetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueAsDateGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let node = match s.arena.nodes.get(self.key) {
+            Some(n) => n,
+            None => return Ok(Value::new_null(ctx.clone())),
+        };
+        let input_type = node.get_attr("type").unwrap_or("text");
+        let value = computed::get_effective_value(&s, self.key);
+        // Per spec: valueAsDate returns null for types that don't support it
+        if !matches!(
+            input_type,
+            "date" | "time" | "month" | "week" | "datetime-local"
+        ) {
+            return Ok(Value::new_null(ctx.clone()));
+        }
+        if value.is_empty() {
+            return Ok(Value::new_null(ctx.clone()));
+        }
+        // Konvertera till ms-since-epoch
+        let ms = match input_type {
+            "month" => {
+                // Month: YYYY-MM → Date(YYYY, MM-1, 1) UTC
+                let parts: Vec<&str> = value.split('-').collect();
+                if parts.len() == 2 {
+                    let y = parts[0].parse::<i64>().unwrap_or(0);
+                    let m = parts[1].parse::<u32>().unwrap_or(0);
+                    if y > 0 && (1..=12).contains(&m) {
+                        days_from_civil(y, m, 1) as f64 * 86_400_000.0
+                    } else {
+                        f64::NAN
+                    }
+                } else {
+                    f64::NAN
+                }
+            }
+            _ => input_value_to_ms(input_type, &value),
+        };
+        if ms.is_nan() {
+            return Ok(Value::new_null(ctx.clone()));
+        }
+        // Skapa Date-objekt i JS
+        let date_code = format!("new Date({})", ms);
+        match ctx.eval::<Value, _>(date_code.as_str()) {
+            Ok(v) => Ok(v),
+            Err(_) => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+struct InputValueAsDateSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for InputValueAsDateSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args.first();
+        let is_null = val.map(|v| v.is_null() || v.is_undefined()).unwrap_or(true);
+        let mut s = self.state.borrow_mut();
+        let input_type = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("type"))
+            .unwrap_or("text")
+            .to_string();
+        if !matches!(
+            input_type.as_str(),
+            "date" | "time" | "month" | "week" | "datetime-local"
+        ) {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidStateError",
+                "This input type does not support valueAsDate",
+            ));
+        }
+        let key_bits = node_key_to_f64(self.key) as u64;
+        if is_null {
+            let es = s.element_state.entry(key_bits).or_default();
+            es.value = Some(String::new());
+            es.value_dirty = true;
+        } else if let Some(date_val) = val {
+            // Kontrollera att det är ett Date-objekt
+            drop(s);
+            let check_code = "(function(d){return d instanceof Date;})";
+            let is_date = ctx
+                .eval::<Function, _>(check_code)
+                .ok()
+                .and_then(|f| f.call::<_, Value>((date_val.clone(),)).ok())
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_date {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "TypeError",
+                    "Failed to set 'valueAsDate': The provided value is not a Date",
+                ));
+            }
+            let js_code = "(function(d){return d.getTime();})";
+            if let Ok(get_time_fn) = ctx.eval::<Function, _>(js_code) {
+                if let Ok(ms_val) = get_time_fn.call::<_, Value>((date_val.clone(),)) {
+                    if let Some(ms) = ms_val.as_number() {
+                        if !ms.is_nan() && ms.is_finite() {
+                            let val_str = ms_to_input_value(&input_type, ms);
+                            let mut s2 = self.state.borrow_mut();
+                            let es = s2.element_state.entry(key_bits).or_default();
+                            es.value = Some(val_str);
+                            es.value_dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct InputStepUpDown {
+    state: SharedState,
+    key: NodeKey,
+    direction: i32,
+}
+impl JsHandler for InputStepUpDown {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let n = args.first().and_then(|v| v.as_number()).unwrap_or(1.0);
+        let s_ref = self.state.borrow();
+        let node = match s_ref.arena.nodes.get(self.key) {
+            Some(n) => n,
+            None => return Ok(Value::new_undefined(ctx.clone())),
+        };
+        let input_type = node.get_attr("type").unwrap_or("text");
+        if !matches!(
+            input_type,
+            "number" | "range" | "date" | "time" | "datetime-local" | "month" | "week"
+        ) {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidStateError",
+                "This input type does not support stepUp/stepDown",
+            ));
+        }
+        let value = computed::get_effective_value(&s_ref, self.key);
+        let current = input_value_to_number(input_type, &value);
+        // Default step per input type (i samma enhet som valueAsNumber)
+        let default_step = match input_type {
+            "date" => 86_400_000.0,       // 1 dag i ms
+            "time" => 60_000.0,           // 60 sekunder i ms
+            "datetime-local" => 60_000.0, // 60 sekunder i ms
+            "month" => 1.0,               // 1 månad
+            "week" => 604_800_000.0,      // 1 vecka i ms
+            "number" | "range" => 1.0,    // 1
+            _ => 1.0,
+        };
+        let step_str = node.get_attr("step");
+        let step = match step_str {
+            Some("any") | None => default_step,
+            Some(s) => {
+                let parsed = s.parse::<f64>().unwrap_or(default_step);
+                // Step-värdet konverteras till ms för tid/datum-typer
+                match input_type {
+                    "time" | "datetime-local" => parsed * 1000.0, // sekunder → ms
+                    _ => parsed,
+                }
+            }
+        };
+        let new_val = if current.is_nan() {
+            0.0 + step * n * self.direction as f64
+        } else {
+            current + step * n * self.direction as f64
+        };
+        drop(s_ref);
+        let mut s = self.state.borrow_mut();
+        let key_bits = node_key_to_f64(self.key) as u64;
+        let input_type_owned = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("type"))
+            .unwrap_or("text")
+            .to_string();
+        let new_val_str = number_to_input_value(&input_type_owned, new_val);
+        let es = s.element_state.entry(key_bits).or_default();
+        es.value = Some(new_val_str);
+        es.value_dirty = true;
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+/// Konvertera input value till nummer baserat på typ
+fn input_value_to_number(input_type: &str, value: &str) -> f64 {
+    if value.is_empty() {
+        return f64::NAN;
+    }
+    match input_type {
+        "number" | "range" => value.parse::<f64>().unwrap_or(f64::NAN),
+        "date" => {
+            // YYYY-MM-DD → ms since epoch
+            input_value_to_ms("date", value)
+        }
+        "time" => {
+            // HH:MM[:SS[.mmm]] → ms since midnight
+            input_value_to_ms("time", value)
+        }
+        "month" => {
+            // YYYY-MM → months since 1970-01
+            let parts: Vec<&str> = value.split('-').collect();
+            if parts.len() == 2 {
+                let y = parts[0].parse::<i64>().unwrap_or(0);
+                let m = parts[1].parse::<u32>().unwrap_or(0);
+                if y <= 0 || !(1..=12).contains(&m) {
+                    return f64::NAN;
+                }
+                (y as f64 - 1970.0) * 12.0 + (m as f64 - 1.0)
+            } else {
+                f64::NAN
+            }
+        }
+        "week" => {
+            // YYYY-Www → ms since epoch
+            input_value_to_ms("week", value)
+        }
+        "datetime-local" => input_value_to_ms("datetime-local", value),
+        _ => f64::NAN,
+    }
+}
+
+/// Konvertera nummer tillbaka till input value-sträng
+fn number_to_input_value(input_type: &str, num: f64) -> String {
+    match input_type {
+        "number" | "range" => {
+            if num == num.floor() {
+                format!("{}", num as i64)
+            } else {
+                format!("{}", num)
+            }
+        }
+        "date" => ms_to_input_value("date", num),
+        "time" => ms_to_input_value("time", num),
+        "month" => {
+            let total_months = num.floor() as i64;
+            let mut y = 1970 + total_months / 12;
+            let mut m = (total_months % 12) + 1;
+            if m <= 0 {
+                m += 12;
+                y -= 1;
+            }
+            format!("{:04}-{:02}", y, m)
+        }
+        "week" => {
+            // ms → YYYY-Www
+            let days = (num / 86_400_000.0).floor() as i64;
+            let (y, _, _) = civil_from_days(days);
+            // Hitta veckonummer
+            let jan4 = days_from_civil(y, 1, 4);
+            let dow_jan4 = ((jan4 % 7) + 3) % 7;
+            let week1_monday = jan4 - dow_jan4;
+            let week_num = ((days - week1_monday) / 7) + 1;
+            if (1..=53).contains(&week_num) {
+                format!("{:04}-W{:02}", y, week_num)
+            } else {
+                String::new()
+            }
+        }
+        "datetime-local" => {
+            let date_part = ms_to_input_value("date", num);
+            let time_part = ms_to_input_value("time", num % 86_400_000.0);
+            if !date_part.is_empty() && !time_part.is_empty() {
+                format!("{}T{}", date_part, time_part)
+            } else {
+                String::new()
+            }
+        }
+        _ => format!("{}", num),
+    }
+}
+
+/// Validera datum-komponenter
+fn is_valid_date(y: i64, m: u32, d: u32) -> bool {
+    if y == 0 || !(1..=12).contains(&m) || d < 1 {
+        return false;
+    }
+    let days_in_month = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return false,
+    };
+    d <= days_in_month
+}
+
+/// Konvertera input value till millisekunder (Date.getTime()-kompatibelt)
+fn input_value_to_ms(input_type: &str, value: &str) -> f64 {
+    match input_type {
+        "date" => {
+            // YYYY-MM-DD → ms since epoch (UTC)
+            let parts: Vec<&str> = value.split('-').collect();
+            if parts.len() == 3 {
+                let y = parts[0].parse::<i64>().unwrap_or(0);
+                let m = parts[1].parse::<u32>().unwrap_or(0);
+                let d = parts[2].parse::<u32>().unwrap_or(0);
+                if !is_valid_date(y, m, d) {
+                    return f64::NAN;
+                }
+                let days = days_from_civil(y, m, d);
+                days as f64 * 86_400_000.0
+            } else {
+                f64::NAN
+            }
+        }
+        "time" => {
+            // HH:MM[:SS[.mmm]] → ms since midnight
+            let parts: Vec<&str> = value.split(':').collect();
+            if parts.len() >= 2 {
+                let h = parts[0].parse::<f64>().unwrap_or(-1.0);
+                let m = parts[1].parse::<f64>().unwrap_or(-1.0);
+                // Validera: 0 <= h <= 23, 0 <= m <= 59
+                if !(0.0..=23.0).contains(&h) || !(0.0..=59.0).contains(&m) {
+                    return f64::NAN;
+                }
+                let s = if parts.len() > 2 {
+                    parts[2].parse::<f64>().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                if !(0.0..60.0).contains(&s) {
+                    return f64::NAN;
+                }
+                h * 3_600_000.0 + m * 60_000.0 + s * 1000.0
+            } else {
+                f64::NAN
+            }
+        }
+        "week" => {
+            // YYYY-Www → ms since epoch
+            if value.len() >= 8 && value.contains("-W") {
+                let parts: Vec<&str> = value.split("-W").collect();
+                if parts.len() == 2 {
+                    let y = parts[0].parse::<i64>().unwrap_or(0);
+                    let w = parts[1].parse::<i64>().unwrap_or(0);
+                    // Validera: y > 0, 1 <= w <= 53
+                    if y == 0 || !(1..=53).contains(&w) {
+                        return f64::NAN;
+                    }
+                    // ISO 8601: vecka 1 innehåller 4 januari
+                    let jan4 = days_from_civil(y, 1, 4);
+                    // Hitta måndag i vecka 1
+                    let dow_jan4 = ((jan4 % 7) + 3) % 7; // 0=mån
+                    let week1_monday = jan4 - dow_jan4;
+                    let target_day = week1_monday + (w - 1) * 7;
+                    target_day as f64 * 86_400_000.0
+                } else {
+                    f64::NAN
+                }
+            } else {
+                f64::NAN
+            }
+        }
+        "datetime-local" => {
+            // YYYY-MM-DDTHH:MM[:SS[.mmm]]
+            let parts: Vec<&str> = value.splitn(2, 'T').collect();
+            if parts.len() == 2 {
+                let date_ms = input_value_to_ms("date", parts[0]);
+                let time_ms = input_value_to_ms("time", parts[1]);
+                if date_ms.is_nan() || time_ms.is_nan() {
+                    f64::NAN
+                } else {
+                    date_ms + time_ms
+                }
+            } else {
+                f64::NAN
+            }
+        }
+        _ => f64::NAN,
+    }
+}
+
+/// Konvertera ms till input value-sträng
+fn ms_to_input_value(input_type: &str, ms: f64) -> String {
+    match input_type {
+        "month" => {
+            // ms → YYYY-MM (dag 1 av den månaden)
+            let days = (ms / 86_400_000.0).floor() as i64;
+            let (y, m, _) = civil_from_days(days);
+            format!("{:04}-{:02}", y, m)
+        }
+        "date" => {
+            let days = (ms / 86_400_000.0).floor() as i64;
+            let (y, m, d) = civil_from_days(days);
+            format!("{:04}-{:02}-{:02}", y, m, d)
+        }
+        "time" => {
+            // Wrap negativa värden till 0..86400000 (24h)
+            let day_ms = 86_400_000i64;
+            let total_ms = ((ms as i64 % day_ms) + day_ms) % day_ms;
+            let h = total_ms / 3_600_000;
+            let min = (total_ms % 3_600_000) / 60_000;
+            let s = (total_ms % 60_000) / 1000;
+            let ms_part = total_ms % 1000;
+            if ms_part > 0 {
+                format!("{:02}:{:02}:{:02}.{:03}", h, min, s, ms_part)
+            } else if s > 0 {
+                format!("{:02}:{:02}:{:02}", h, min, s)
+            } else {
+                format!("{:02}:{:02}", h, min)
+            }
+        }
+        _ => format!("{}", ms),
+    }
+}
+
+/// Dagar sedan epoch (1970-01-01) — Howard Hinnants algoritm
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe as i64 - 719468
+}
+
+/// Civildatum från dagar sedan epoch
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }
 
 // ─── Select Element JS Handlers ─────────────────────────────────────────────

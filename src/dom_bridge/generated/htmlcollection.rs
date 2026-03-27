@@ -61,7 +61,8 @@ pub(crate) fn register_htmlcollection<'js>(
         Accessor::new_get(JsFn(HTMLCollectionGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "item",

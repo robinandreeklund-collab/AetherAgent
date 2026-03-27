@@ -131,7 +131,8 @@ pub(crate) fn register_htmldialog_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "returnValue",
@@ -144,7 +145,8 @@ pub(crate) fn register_htmldialog_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.set(
         "show",

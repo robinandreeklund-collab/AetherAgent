@@ -226,7 +226,8 @@ pub(crate) fn register_htmltrack_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "src",
@@ -239,7 +240,8 @@ pub(crate) fn register_htmltrack_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "srclang",
@@ -252,7 +254,8 @@ pub(crate) fn register_htmltrack_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "label",
@@ -265,7 +268,8 @@ pub(crate) fn register_htmltrack_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "default",
@@ -278,14 +282,16 @@ pub(crate) fn register_htmltrack_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "readyState",
         Accessor::new_get(JsFn(HTMLTrackElementGetReadyState {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

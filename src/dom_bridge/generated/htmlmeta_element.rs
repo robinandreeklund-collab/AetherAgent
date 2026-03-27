@@ -173,7 +173,8 @@ pub(crate) fn register_htmlmeta_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "httpEquiv",
@@ -186,7 +187,8 @@ pub(crate) fn register_htmlmeta_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "content",
@@ -199,7 +201,8 @@ pub(crate) fn register_htmlmeta_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "media",
@@ -212,7 +215,8 @@ pub(crate) fn register_htmlmeta_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

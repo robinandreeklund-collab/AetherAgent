@@ -353,7 +353,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -366,7 +367,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "noModule",
@@ -379,7 +381,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "async",
@@ -392,7 +395,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defer",
@@ -405,7 +409,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "crossOrigin",
@@ -418,7 +423,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "text",
@@ -431,7 +437,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "integrity",
@@ -444,7 +451,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "referrerPolicy",
@@ -457,7 +465,8 @@ pub(crate) fn register_htmlscript_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }
