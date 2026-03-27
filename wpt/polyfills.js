@@ -337,11 +337,14 @@
       e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
       e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
       e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
+      e.initEvent = function(t, b, c) { if (this._dispatching) return; this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; this._returnValue = true; this._stopPropagationFlag = false; this._stopImmediatePropagationFlag = false; this.target = null; this.srcElement = null; this.currentTarget = null; this.eventPhase = 0; };
       return e;
     }
     var e = new Ctor('');
-    e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
+    // initEvent finns redan på Event-prototypen — lägg bara till som fallback
+    if (!e.initEvent) {
+      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; this.defaultPrevented = false; };
+    }
     return e;
   };
 })();

@@ -658,7 +658,7 @@ pub(super) fn register_window_with_viewport<'js>(
         };
         CustomEvent.prototype = Object.create(Event.prototype);
         CustomEvent.prototype.constructor = CustomEvent;
-        CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
+        CustomEvent.prototype.initCustomEvent = function(type, bubbles, cancelable, detail) { if (arguments.length < 1) throw new TypeError("Failed to execute 'initCustomEvent': 1 argument required, but only 0 present."); if (this._dispatching) { return; } this.initEvent(type, bubbles, cancelable); this.detail = detail !== undefined ? detail : null; };
 
         // ─── DOM Type Hierarchy (native, migrerad från polyfills.js) ─────────
         // EventTarget → Node → Element/CharacterData → HTMLElement/Text/Comment
