@@ -1,7 +1,7 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-26 (codegen v3)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-27 (codegen v3)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
