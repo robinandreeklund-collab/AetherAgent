@@ -583,18 +583,55 @@ pub(super) struct ClickHandler {
 }
 impl JsHandler for ClickHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // Skapa element och dispatcha via global helper
-        let elem = make_element_object(ctx, self.key, &self.state)?;
-        let code = r#"
-        (function(el) {
-            if (el && el.dispatchEvent) {
-                var evt = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
-                el.dispatchEvent(evt);
-            }
-        })
-        "#;
-        let f: Function = ctx.eval(code)?;
-        let _ = f.call::<_, Value>((elem,));
+        // Kolla om det är en checkbox/radio — toggle checked + dispatcha input/change
+        let (is_checkbox, is_radio) = {
+            let s = self.state.borrow();
+            let node = s.arena.nodes.get(self.key);
+            let input_type = node
+                .and_then(|n| n.tag.as_deref())
+                .filter(|t| t.eq_ignore_ascii_case("input"))
+                .and_then(|_| node.and_then(|n| n.get_attr("type")))
+                .unwrap_or("");
+            (input_type == "checkbox", input_type == "radio")
+        };
+
+        if is_checkbox || is_radio {
+            // Dispatcha click, toggle checked om ej cancelled, sen input/change
+            let key_f64 = node_key_to_f64(self.key);
+            let elem = make_element_object(ctx, self.key, &self.state)?;
+            let code = r#"
+            (function(el, keyF64, isRadio) {
+                if (!el || !el.dispatchEvent) return;
+                var click = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
+                var cancelled = !el.dispatchEvent(click);
+                if (!cancelled) {
+                    // Toggle checked efter lyckad dispatch
+                    if (isRadio) {
+                        el.checked = true;
+                    } else {
+                        el.checked = !el.checked;
+                    }
+                    el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                    el.dispatchEvent(new Event('change', {bubbles:true}));
+                }
+            })
+            "#;
+            let f: Function = ctx.eval(code)?;
+            let _ = f.call::<_, Value>((elem, key_f64, is_radio));
+        } else {
+            // Vanligt click utan activation behavior
+            let elem = make_element_object(ctx, self.key, &self.state)?;
+            let code = r#"
+            (function(el) {
+                if (el && el.dispatchEvent) {
+                    var evt = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
+                    el.dispatchEvent(evt);
+                }
+            })
+            "#;
+            let f: Function = ctx.eval(code)?;
+            let _ = f.call::<_, Value>((elem,));
+        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

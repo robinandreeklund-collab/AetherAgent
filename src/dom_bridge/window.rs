@@ -1013,11 +1013,14 @@ pub(super) fn register_window_with_viewport<'js>(
         NodeFilter.SHOW_ATTRIBUTE = 0x2;
         NodeFilter.SHOW_TEXT = 0x4;
         NodeFilter.SHOW_CDATA_SECTION = 0x8;
+        NodeFilter.SHOW_ENTITY_REFERENCE = 0x10;
+        NodeFilter.SHOW_ENTITY = 0x20;
         NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
         NodeFilter.SHOW_COMMENT = 0x80;
         NodeFilter.SHOW_DOCUMENT = 0x100;
         NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
         NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
+        NodeFilter.SHOW_NOTATION = 0x800;
 
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];
