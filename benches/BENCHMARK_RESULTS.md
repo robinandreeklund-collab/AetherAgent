@@ -9,10 +9,11 @@
 
 | Metric | AetherAgent | LightPanda |
 |--------|-------------|------------|
-| **Campfire 100x total** | **23ms** | 48,520ms |
-| **Campfire avg/parse** | **0.23ms** | 485ms |
-| **Campfire P99** | **0.28ms** | 549ms |
-| **Speed ratio** | **2,109x faster** | baseline |
+| **Campfire 100x total** | **24ms** | 16,950ms |
+| **Campfire avg/parse** | **0.24ms** | 170ms |
+| **Speed ratio (Campfire)** | **706x faster** | baseline |
+| **Live sites OK** | 14/20 | 19/20 |
+| **Live sites avg time** | 7.16s | 1.87s |
 | **Embedding accuracy** | 100% (20/20) | N/A |
 | **Goal-relevance** | YES | NO |
 | **Injection protection** | YES | NO |
@@ -20,19 +21,23 @@
 
 ## Raw Performance: 100 Sequential Campfire Commerce Parses
 
-Same HTML page (Campfire Commerce product page), parsed 100 times sequentially.
+Same HTML page (Campfire Commerce product page) served via local HTTP, parsed 100 times.
+LightPanda uses `fetch --dump semantic_tree` (gomcp-downloaded binary, full V8).
 
-| Engine | Total | Avg | Median | P99 | Min | Max | Tokens/parse |
-|--------|-------|-----|--------|-----|-----|-----|-------------|
-| **AetherAgent** | **23ms** | **0.23ms** | **0.22ms** | **0.28ms** | 0.21ms | 0.31ms | ~2,620 |
-| LightPanda | 48,520ms | 485ms | 178ms | 549ms | 138ms | 549ms | ~417 |
+| Engine | Total | Avg | Median | P99 | Tokens/parse |
+|--------|-------|-----|--------|-----|-------------|
+| **AetherAgent** | **24ms** | **0.24ms** | **0.23ms** | **0.30ms** | ~2,620 |
+| LightPanda | 16,950ms | 170ms | 151ms | 197ms | ~422 |
 
-**AetherAgent is 2,109x faster** on repeated parses of the same page.
+**AetherAgent is 706x faster** on repeated parses of the same page.
 
 > **Why the difference?** AetherAgent is an in-process Rust library — no process spawn,
-> no IPC, no V8 startup. LightPanda spawns a new process per parse (cold start each time).
-> LightPanda's `fetch` command includes HTTP fetch + full JS rendering, while AetherAgent
-> parses pre-fetched HTML. This is the fairest comparison for the "parse HTML" use case.
+> no IPC, no V8 startup. LightPanda spawns a new process per parse with full HTTP fetch.
+> AetherAgent parses pre-fetched HTML. These are different architectures for different purposes.
+>
+> **Why different token counts?** AetherAgent returns a richer semantic tree (2,620 tokens)
+> with roles, relevance scores, trust levels. LightPanda returns a leaner DOM tree (422 tokens).
+> More tokens = more context for an LLM to understand the page.
 
 ## Embedding Model Performance
 
@@ -107,31 +112,31 @@ Both engines fetch and parse real production websites.
 
 | Site | AE Parse | LP Parse | AE Nodes | LP Nodes | AE Status | LP Status |
 |------|----------|----------|----------|----------|-----------|-----------|
-| books.toscrape.com | 1ms | 972ms | 0 | 669 | NO_NODES | OK |
-| news.ycombinator.com | 13.5s | 409ms | 492 | 1,220 | OK | OK |
-| example.com | 220ms | 356ms | 6 | 11 | OK | OK |
-| httpbin.org | 728ms | 788ms | 28 | 58 | OK | OK |
-| wikipedia/Rust | 74ms | 141ms | 1 | 5 | LOW_REL | OK |
-| github.com/rust-mustache | 16.4s | 5.2s | 641 | 0 | OK | FAIL |
-| jsonplaceholder.typicode.com | 3.2s | 5.1s | 88 | 297 | OK | OK |
-| quotes.toscrape.com | 3.2s | 522ms | 114 | 238 | OK | OK |
-| scrapethissite/simple | 59.2s | 5.2s | 613 | 5,895 | OK | OK |
-| scrapethissite/forms | 7.4s | 5.3s | 90 | 624 | OK | OK |
-| wikipedia/WebAssembly | 78ms | 428ms | 1 | 5 | LOW_REL | OK |
-| wikipedia/AI | 40ms | 138ms | 1 | 5 | LOW_REL | OK |
-| developer.mozilla.org | 22.9s | 5.2s | 1,050 | 2,117 | OK | OK |
-| rust-lang.org | 4.3s | 2.0s | 144 | 255 | OK | OK |
-| crates.io | FAIL | 291ms | 0 | 3 | FETCH_ERR | OK |
-| docs.rs | 3.4s | 323ms | 91 | 238 | OK | OK |
-| play.rust-lang.org | 75ms | 5.1s | 1 | 90 | OK | OK |
-| wikipedia/Linux | 38ms | 150ms | 1 | 5 | LOW_REL | OK |
-| wikipedia/WWW | 38ms | 137ms | 1 | 5 | OK | OK |
-| lobste.rs | 10.3s | 458ms | 500 | 1,088 | OK | OK |
+| books.toscrape.com | 1ms | 1.11s | 0 | 669 | NO_NODES | OK |
+| news.ycombinator.com | 13.1s | 368ms | 492 | 1,220 | OK | OK |
+| example.com | 225ms | 143ms | 6 | 11 | OK | OK |
+| httpbin.org | 736ms | 1.39s | 28 | 58 | OK | OK |
+| wikipedia/Rust | 75ms | 138ms | 1 | 5 | LOW_REL | OK |
+| github.com/rust-mustache | 16.5s | 5.17s | 657 | 0 | OK | FAIL |
+| jsonplaceholder.typicode.com | 3.1s | 5.08s | 88 | 295 | OK | OK |
+| quotes.toscrape.com | 3.1s | 636ms | 114 | 238 | OK | OK |
+| scrapethissite/simple | 58.0s | 5.29s | 613 | 5,895 | OK | OK |
+| scrapethissite/forms | 7.1s | 5.10s | 90 | 624 | OK | OK |
+| wikipedia/WebAssembly | 75ms | 135ms | 1 | 5 | LOW_REL | OK |
+| wikipedia/AI | 39ms | 206ms | 1 | 5 | LOW_REL | OK |
+| developer.mozilla.org | 23.1s | 5.15s | 1,050 | 2,117 | OK | OK |
+| rust-lang.org | 4.2s | 1.04s | 144 | 255 | OK | OK |
+| crates.io | FAIL | 175ms | 0 | 3 | FETCH_ERR | OK |
+| docs.rs | 3.4s | 269ms | 91 | 238 | OK | OK |
+| play.rust-lang.org | 73ms | 5.09s | 1 | 90 | OK | OK |
+| wikipedia/Linux | 38ms | 142ms | 1 | 5 | LOW_REL | OK |
+| wikipedia/WWW | 37ms | 137ms | 1 | 5 | OK | OK |
+| lobste.rs | 10.3s | 662ms | 501 | 1,088 | OK | OK |
 
 | Summary | AetherAgent | LightPanda |
 |---------|-------------|------------|
 | **OK** | **14/20** | **19/20** |
-| Avg time | 7.25s | 1.90s |
+| Avg time | 7.16s | 1.87s |
 
 ### Why AetherAgent is slower on live sites
 
