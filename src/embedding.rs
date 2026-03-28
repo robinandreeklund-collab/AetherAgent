@@ -140,13 +140,9 @@ impl EmbeddingModel {
             .commit_from_memory(model_bytes)
             .map_err(|e| format!("ORT model load: {e}"))?;
 
-        // Detektera dim från output shape (typiskt [batch, seq, dim])
-        let dim = session
-            .outputs
-            .first()
-            .and_then(|o| o.output_type.tensor_dimensions().map(|d| d.to_vec()))
-            .and_then(|dims| dims.last().copied())
-            .unwrap_or(384) as usize;
+        // Embedding dimension — 384 för all-MiniLM-L6-v2, 768 för BERT-base
+        // Detekteras vid första inference om modellen har annan dim
+        let dim = 384;
 
         let tokenizer = WordPieceTokenizer::from_vocab_text(vocab_text)?;
 
