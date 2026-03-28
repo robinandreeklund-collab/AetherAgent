@@ -6,9 +6,7 @@ use rquickjs::{object::Accessor, Ctx, Function, Object, Value};
 
 use crate::event_loop::{JsFn, JsHandler};
 
-use super::events::{
-    self, AddEventListenerHandler, RemoveEventListenerHandler,
-};
+use super::events::{self, AddEventListenerHandler, RemoveEventListenerHandler};
 use super::state::SharedState;
 use super::style::kebab_to_camel;
 use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_query_matches};
@@ -23,7 +21,6 @@ use super::{
 /// så att window-registrerade listeners hittas vid AT_TARGET.
 struct WindowDispatchEvent {
     state: SharedState,
-    doc_key: crate::arena_dom::NodeKey,
 }
 impl JsHandler for WindowDispatchEvent {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -409,7 +406,6 @@ pub(super) fn register_window_with_viewport<'js>(
                 ctx.clone(),
                 JsFn(WindowDispatchEvent {
                     state: Rc::clone(&state),
-                    doc_key,
                 }),
             )?,
         )?;

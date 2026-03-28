@@ -1,894 +1,184 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-27 (Session 2: +2400 WPT pass, native Rust DOM)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-28 (Session 3: +350 WPT pass, native Rust DOM)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
 
 ---
 
-## Sammanfattning (2026-03-27)
+## Sammanfattning (2026-03-28)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
-| **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
-| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
-| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~1,650+ | ~28% |
-| **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
-| **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
-| **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
+| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists | ~30,100 | ~17,700+ | ~59% |
+| **Tier 2** (Parsing & Serialization) | domparsing, html/syntax | ~794 | ~377 | ~47% |
+| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,296 | ~2,045 | ~32% |
+| **Tier 4** (HTML) | html/semantics/forms, html/webappapis/timers | ~2,529 | ~1,266 | ~50% |
+| **Tier 5** (Events & Interaction) | uievents, pointerevents, focus, selection | ~29,729 | ~7,450 | ~25% |
+| **Tier 6** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~97 | ~51% |
+| **Tier 7** (Övriga) | FileAPI, trusted-types, svg, xhr, encoding, inert, domxpath, webstorage, url, wai-aria, accname, html-aam, core-aam | ~3,683 | ~239 | ~6% |
 
 ---
 
-## Tier 1 — Kärna (kör varje PR)
+## Alla sviter — Fullständig status (2026-03-28)
 
-### dom/nodes/ — Core DOM
+### Tier 1 — Core DOM (kör varje PR)
 
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 286 | 6,624 | 5,004 | 75.5% | blitz-bekräftad baseline |
-| 2026-03-26 | 286 | 6,659 | 5,089 | 76.4% | +hasChildNodes, HierarchyRequestError, unskip insertBefore |
-| 2026-03-26 | 286 | 6,676 | 5,243 | 78.5% | +native createDocumentType/PI, nodeName per spec |
-| 2026-03-26 | 286 | 6,674 | 5,332 | 79.9% | +ownerDocument configurable, DOMString, TypeError |
-| 2026-03-26 | 286 | 6,676 | 5,348 | 80.1% | +DOM prototype chain (Node→CharacterData→Comment) |
-| 2026-03-26 | 286 | 6,676 | 5,666 | 84.9% | +live HTMLCollection, createElementNS, createAttribute |
-| 2026-03-26 | 286 | 6,676 | 5,659 | 84.8% | codegen v3 (setup fix korrigerar falska positiva) |
-| 2026-03-27 | 287 | 6,676 | 5,713 | 85.6% | Stylo 0.14 + selectors crate + element identity cache |
-| **2026-03-27** | **287** | **6,676** | **5,810** | **87.1%** | **Session 2: +144** — textContent spec, CharacterData native, composedPath |
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **dom/nodes** | 6,029 | 6,676 | **90.3%** | ↑ från 84.9% |
+| **dom/events** | 271 | 322 | **84.2%** | ↑ från 67.0% |
+| **dom/ranges** | 8,153 | 10,995 | **74.2%** | ↑ från ~67.7% |
+| **dom/traversal** | 1,534 | 1,591 | **96.4%** | ↑ från 91.5% |
+| **dom/collections** | 30 | 48 | **62.5%** | ↑ från 56.2% |
+| **dom/lists** | 181 | 189 | **95.8%** | ─ stabil |
 
-**Session 2 (2026-03-27) — Native Rust förbättringar:**
-- textContent getter: bara Text-descendants (skip Comment/PI per spec) → +14 pass
-- textContent setter: undefined → null (IDL DOMString? coercion) → +8 pass
-- Native CharacterData .data/.nodeValue/.length (migrerad från polyfill)
-- Native document.title getter/setter
-- ProcessingInstruction inkluderad i textContent
-- 315 generated Accessor properties gjorda configurable
+### Tier 2 — Parsing & Serialization
 
-**Toppresterare:**
-- CharacterData: ~100%
-- ChildNode (before/after/replaceWith): 100%
-- Node-cloneNode: 93%
-- Node-textContent: 75/81 (93%)
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **domparsing** | 137 | 233 | **58.8%** | ↑ från 18.8% |
+| **html/syntax** | 240 | 561 | **42.8%** | ↑ från 20.0% |
 
-**Kvarvarande failures (~866):**
-- "no test suite completion": ~80 (kräver iframes/external resources)
-- HierarchyRequestError: ~44 (document insertion rules)
-- foreign document issues: ~25
+### Tier 3 — CSS
 
-**Mål Q2 2026:** 90% → **87.1% — nära!**
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **css/selectors** | 1,703 | 3,457 | **49.3%** | ↑ från 12.0% baseline |
+| **css/css-values** | 164 | 1,526 | **10.7%** | ny |
+| **css/cssom** | 112 | 656 | **17.1%** | ↑ från 14.3% |
+| **css/css-display** | 16 | 44 | **36.4%** | ny |
+| **css/css-color** | 12 | 87 | **13.8%** | ny |
+| **css/css-cascade** | 27 | 402 | **6.7%** | ny |
+| **css/css-flexbox** | 11 | 124 | **8.9%** | ny |
 
----
+### Tier 4 — HTML
 
-### dom/events/ — Event System
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **html/semantics/forms** | 1,265 | 2,528 | **50.0%** | ny |
+| **html/webappapis/timers** | 1 | 1 | **100%** | ny |
 
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad baseline |
-| 2026-03-26 | 160 | 318 | 213 | 67.0% | +click() dispatchar MouseEvent |
-| 2026-03-26 | 160 | 318 | 213 | 67.0% | +event listener {once: true} stöd |
-| 2026-03-26 | 161 | 318 | 221 | 69.5% | codegen v3 (+on_event global) |
-| 2026-03-27 | 161 | 318 | 198 | 62.3% | Full capture/bubble dispatch, element cache |
-| **2026-03-27** | **161** | **322** | **241** | **74.8%** | **Session 2: +28** — composedPath, removeEventListener, window.event, defaultPrevented |
+### Tier 5 — Events & Interaction
 
-**Session 2 (2026-03-27) — Native Rust event system:**
-- Event.composedPath() — bygger propagation path under dispatch ✅
-- removeEventListener — matchar callback identity + capture flag (spec-compliant dedup) ✅
-- window.event — legacy, sätts under dispatch ✅
-- defaultPrevented bevaras efter dispatch (fixad reset-bugg) ✅
-- returnValue getter/setter — setting false → defaultPrevented=true ✅
-- stopPropagation före dispatch respekteras ✅
-- AT_TARGET: stopPropagation i capture förhindrar bubble listeners ✅
-- Listener exceptions rapporteras till window.onerror ✅
-- removeEventListener under dispatch förhindrar borttagen listener ✅
-- Event.timeStamp = performance.now() (DOMHighResTimeStamp) ✅
-- initCustomEvent: mandatory first argument ✅
-- JS truthiness för addEventListener capture/passive/once ✅
-- createEvent: migrerad till native Rust (NativeCreateEvent) ✅
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **selection** | 7,239 | 29,383 | **24.6%** | ny |
+| **pointerevents** | 192 | 320 | **60.0%** | ny |
+| **uievents** | 19 | 25 | **76.0%** | ny |
+| **focus** | 0 | 1 | **0.0%** | ny |
 
-**Kvarvarande failures (~81):**
-- "no test suite completion": ~106 (kräver iframes)
-- handleEvent object support: 2
-- Shadow DOM relatedTarget: 2
+### Tier 6 — JS & Standards
 
-**Mål Q2 2026:** 90% → **74.8% — bra framsteg**
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **ecmascript** | 18 | 21 | **85.7%** | ny |
+| **quirks** | 58 | 75 | **77.3%** | ny |
+| **webidl** | 21 | 94 | **22.3%** | ny |
 
----
+### Tier 7 — Övriga
 
-### dom/ranges/ — Range API
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | Baseline |
-| 2026-03-26 | 55 | 11,431 | 7,842 | 68.6% | Stabil (hasChildNodes hjälper common.js) |
-| 2026-03-26 | 55 | ~11,400 | ~7,752 | ~68.0% | Verifierad efter refaktorering |
-| **2026-03-27** | **55** | **~11,800** | **~8,789** | **~74.5%** | **Session 2: +1385** — step_func args, textContent, event fixes |
-
-**Native:** Range i `dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
-
-**Mål Q2 2026:** 80% → **74.5% — nära!**
+| Suite | Passed | Total | Rate | Trend |
+|-------|--------|-------|------|-------|
+| **svg** | 58 | 887 | **6.5%** | ny |
+| **FileAPI** | 10 | 23 | **43.5%** | ny |
+| **xhr** | 31 | 461 | **6.7%** | ny |
+| **encoding** | 6 | 331 | **1.8%** | ny |
+| **trusted-types** | 26 | 259 | **10.0%** | ny |
+| **domxpath** | 2 | 105 | **1.9%** | ny |
+| **inert** | 5 | 61 | **8.2%** | ny |
+| **webstorage** | 0 | 7 | **0.0%** | ny |
+| **url** | 0 | 1 | **0.0%** | ny |
+| **wai-aria** | 0 | 0 | **N/A** | test setup issues |
+| **accname** | 0 | 0 | **N/A** | test setup issues |
+| **html-aam** | 0 | 0 | **N/A** | test setup issues |
+| **core-aam** | 0 | 0 | **N/A** | test setup issues |
 
 ---
 
-### dom/traversal/ — TreeWalker & NodeIterator
+## Toppresterande (>75%)
 
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 18 | 1,584 | 619 | 39.1% | Baseline |
-| 2026-03-26 | 18 | 1,584 | 1,412 | 89.1% | +hasChildNodes (blockerare), NodeIterator readonly/filter fix |
-| 2026-03-26 | 18 | 1,584 | 1,449 | 91.5% | +native createDocumentType, TreeWalker filter fix |
-| **2026-03-27** | **18** | **1,584** | **1,490** | **94.1%** | **Session 2: +41** — step_func args fix |
-
-**Nyckelfixar (2026-03-26):**
-- hasChildNodes() — saknad metod som blockerade ALL traversal via common.js
-- NodeIterator: filter boolean→number konvertering, readonly properties
-- Native createDocumentType — doctype-noder har nu __nodeKey__
-- ProcessingInstruction nodeType=7 i arena
-
-**Kvarvarande failures (135):**
-- xmlDoctype foreignDoctype: ~48 (polyfill doctype utan __nodeKey__ för foreign docs)
-- Recursive filter InvalidStateError: 2
-- ProcessingInstruction edge cases
-
-**Mål Q2 2026:** ~~60%~~ ~~91.5%~~ **94.1% — NÄRA 95%!**
+| Suite | Rate |
+|-------|------|
+| html/webappapis/timers | **100%** |
+| dom/traversal | **96.4%** |
+| dom/lists | **95.8%** |
+| dom/nodes | **90.3%** |
+| ecmascript | **85.7%** |
+| dom/events | **84.2%** |
+| quirks | **77.3%** |
+| uievents | **76.0%** |
 
 ---
 
-### dom/collections/ — HTMLCollection & NodeList
+## Historik — Sessionsloggar
 
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
-| 2026-03-26 | 9 | 48 | 27 | 56.2% | +live Proxy HTMLCollection, NamedNodeMap Proxy |
-| **2026-03-26** | **9** | **48** | **28** | **58.3%** | codegen v3 (+1) |
-
-**Implementerat:**
-- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
-- NamedNodeMap Proxy (element.attributes) ✅
-- item(), namedItem(), Symbol.iterator ✅
-
-**Saknas:**
-- Named property access edge cases
-- NodeList iteration edge cases
-
-**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
-
----
-
-## Tier 2 — Stödjande (kör vid relevanta ändringar)
-
-### dom/lists/ — DOMTokenList
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-26 | 5 | 189 | 180 | 95.2% | Stabil |
-| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
-
----
-
-### domparsing/ — DOMParser & Serialization
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
-| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
-| 2026-03-26 | 53 | 453 | 85 | 18.8% | +outerHTML setter, createAttribute fix |
-| **2026-03-26** | **53** | **457** | **85** | **18.6%** | codegen v3 WebIDL wrappers |
-
-**Mål Q2 2026:** 30%
-
----
-
-### css/selectors/ — CSS Selector Matching
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 636 | 761 | 91 | 12.0% | Baseline |
-| **2026-03-26** | **636** | **3,457** | **1,840** | **53.2%** | +hasChildNodes fixade common.js → massiv förbättring |
-
-**Mål Q2 2026:** ~~40%~~ **53.2% — UPPNÅTT!** Nytt mål: 65%
-
----
-
-### css/cssom/ — CSS Object Model
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **210** | **531** | **76** | **14.3%** | Baseline (oförändrad) |
-
----
-
-### html/syntax/ — HTML Parsing
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 536 | 340 | 68 | 20.0% | Baseline |
-| 2026-03-26 | 536 | 298 | 85 | 28.5% | +17 pass |
-| **2026-03-26** | **536** | **450** | **214** | **47.6%** | codegen v3: void elements, text escaping, doctype serialization |
-
----
-
-## Historik — Övergripande
-
-| Datum | dom/ total | Alla sviter | Kommentar |
-|-------|-----------|-------------|-----------|
-| 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
-| 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
-| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
-| 2026-03-26 | ~14,759/~19,569 (~75.4%) | ~17,000+/~25,300+ | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
-| 2026-03-26 | — | 26,000+/67,000+ | Utökning från 16→45 sviter, +nya baselines |
-| 2026-03-27 | — | — | Stylo 0.14 + Servo selectors 0.36 + full event dispatch + element cache |
-| **2026-03-27** | — | — | **Session 2: +2400 WPT pass — native Rust DOM, input sanitization, constraint validation** |
-
-### Förbättringslogg 2026-03-27 — Session 2 (16 commits)
+### Session 3 (2026-03-28) — Tier A+B DOM Integrations (+350 WPT, 21 commits)
 
 | Suite | Före | Efter | Delta | Nyckelförbättringar |
 |-------|------|-------|-------|---------------------|
-| dom/nodes | 5,666 (84.9%) | **5,810 (87.1%)** | **+144** | textContent spec, CharacterData native, PI support |
-| dom/events | 213 (67.0%) | **241 (74.8%)** | **+28** | composedPath, removeEventListener identity, window.event |
-| dom/traversal | 1,449 (91.5%) | **1,490 (94.1%)** | **+41** | step_func argument fix |
-| dom/ranges | ~7,404 (67.7%) | **~8,789 (74.5%)** | **+1,385** | step_func/step_func_done fix |
-| dom/collections | 27 (56.2%) | **30 (62.5%)** | **+3** | — |
-| html/semantics | 1,068 (22.0%) | **~1,900+ (38%+)** | **+830+** | value sanitization, constraint validation, valueAsNumber/Date |
-| **Totalt** | | | **~2,400+** | |
+| dom/nodes | 5,810 (87.0%) | **6,029 (90.3%)** | **+219** | getElementsByTagName namespace, splitText, nodeValue, createEvent, classList, compareDocumentPosition 100% |
+| dom/events | 241 (74.8%) | **271 (84.2%)** | **+30** | WindowDispatchEvent, handleEvent objects, returnValue, capture options, click activation |
+| dom/traversal | 1,490 (94.1%) | **1,534 (96.4%)** | **+44** | createHTMLDocument doctype, TreeWalker readonly, NodeFilter constants |
+| domparsing | 89 (38.2%) | **137 (58.8%)** | **+48** | innerHTML fragment parsing (parse_html_fragment), DOMParser XML well-formedness, parsererror |
+| html/semantics/forms | 1,258 (49.7%) | **1,265 (50.1%)** | **+7** | color named colors, click activation |
+| css/selectors | 1,702 (49.2%) | **1,703 (49.3%)** | **+1** | getElementsByTagName case fix |
+| uievents | 18 | **19** | **+1** | NodeFilter constants |
+| **Totalt** | | | **~+350** | |
 
-**Nyckelimplementationer (alla native Rust):**
-- Input Value Sanitization: color→#rrggbb, text line-break strip, number/date/time validation
-- Constraint Validation: JS RegExp pattern matching, date/time range validation
-- valueAsNumber/valueAsDate: full date/time/month/week konvertering med Howard Hinnant civil calendar
-- stepUp/stepDown: type-specifika default steg (60s för time, 1 dag för date)
-- Range input: default midpoint, min/max clamping, step alignment
-- Event system: 12 spec-compliance fixar
-- 315 generated properties gjorda configurable
-- Polyfill → Rust migration: ~220 rader borttagna
+**Alla implementationer native Rust i produktionspipelinen:**
+- `parse_html_fragment()` i parser.rs — innerHTML utan html/head/body wrapper
+- `check_xml_well_formed()` — Rust XML validator för DOMParser
+- `getElementsByTagName` — spec-korrekt namespace, case-sensitivity, context exclusion
+- `Text.splitText()` — UTF-16-medveten split
+- `WindowDispatchEvent` — korrekt window event dispatch med WINDOW_EVENT_KEY
+- `AttrGetter/AttrSetter` — native id/className/namespaceURI accessors
+- `NodeValueSetter` — null→"" för Text/Comment/PI
+- `is_valid_xml_name()` — XML Name-produktion validator
+- `sanitize_color()` — 148 namngivna CSS-färger + #rgb expansion
 
-### Förbättringslogg 2026-03-27 — Session 1
+**Polyfill → Rust migrationer:**
+- id/className → native AttrGetter/AttrSetter
+- namespaceURI/prefix → native i make_element_object
+- nodeValue → native NullGetter + NodeValueSetter
+- Document.textContent → native accessor i register_document
+- splitText → native i chardata.rs
+- innerHTML → parse_html_fragment (Rust html5ever)
 
-| Ändring | dom/nodes | dom/events | uievents | css/selectors |
-|---------|-----------|------------|----------|---------------|
-| Stylo 0.14 + parse_has=true | +1 | — | — | — |
-| Servo selectors crate 0.36 | — | — | — | +287 (från broken) |
-| OpaqueElement fix (arena-pekare) | — | — | — | has-basic +9 |
-| Spec-compliant UIEvent hierarchy | — | +8 | +4 | — |
-| Full capture/bubble dispatch | — | +2 | +4 | — |
-| TextEvent + createEvent | — | — | +4 | — |
-| Element identity cache | +47 | +5 | +3 | — |
-| **Total** | **+47** | **-15** | **+11** | **-158** |
+### Session 2 (2026-03-27) — Native Rust DOM (+2400 WPT, 16 commits)
 
-**Notering:** css/selectors -158 beror på att den gamla hemmasnickrade matchern "fuskade" på tester. dom/events -15 pga passive-by-default regression.
+| Suite | Före | Efter | Delta |
+|-------|------|-------|-------|
+| dom/nodes | 5,666 (84.9%) | 5,810 (87.1%) | +144 |
+| dom/events | 213 (67.0%) | 241 (74.8%) | +28 |
+| dom/traversal | 1,449 (91.5%) | 1,490 (94.1%) | +41 |
+| dom/ranges | ~7,404 (67.7%) | ~8,789 (74.5%) | +1,385 |
+| html/semantics | ~1,068 (22%) | ~1,900+ (38%+) | +830+ |
+| **Totalt** | | | **~2,400+** |
 
-### Förbättringslogg 2026-03-26 (Runda 1-5)
+### Session 1 (2026-03-27) — Stylo + Event System
 
-| Runda | Nyckelfixar | dom/nodes | dom/traversal | css/selectors |
-|-------|-------------|-----------|---------------|---------------|
-| 1 | hasChildNodes, NodeIterator filter/readonly, HierarchyRequestError | +80 | +793 | +1749 |
-| 2 | Native createDocumentType/PI, document props, nodeName | +154 | +37 | — |
-| 3 | ownerDocument configurable, DOMString, TypeError | +89 | — | — |
-| 4 | DOM prototype chain (Node→CharacterData→Comment) | +16 | — | — |
-| 5 | live HTMLCollection, createElementNS, NamedNodeMap, outerHTML setter, event once | +318 | — | — |
-| **Total** | | **+657** | **+830** | **+1749** |
+Stylo 0.14, Servo selectors 0.36, full capture/bubble dispatch, element identity cache.
 
-#### Runda 5 detaljer
-- dom/nodes: 5,348 → 5,666 (+318)
-- dom/collections: 6 → 27 (+21)
-- domparsing: 83 → 85 (+2)
-- dom/lists: 180 → 181 (+1)
+### Runda 1-5 (2026-03-26) — Foundation
 
----
-
-## Köra tester
-
-```bash
-# Setup
-./wpt/setup.sh
-
-# Tier 1 (obligatoriskt per PR)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/collections/
-
-# Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/lists/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/domparsing/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/syntax/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/cssom/
-```
+| Runda | dom/nodes | dom/traversal | css/selectors |
+|-------|-----------|---------------|---------------|
+| 1-5 total | +657 | +830 | +1749 |
 
 ---
 
-## Implementation Status
-
-Se detaljerad API-täckning:
-- [dom-implementation-status.md](dom-implementation-status.md) — Native vs Polyfill per API
-- [dom-api-coverage.md](dom-api-coverage.md) — Full referens, 70+ metoder
-- [wpt-testing-strategy.md](wpt-testing-strategy.md) — Strategi och prioritering
-- [wpt-workflow-guide.md](wpt-workflow-guide.md) — Arbetsflöde steg-för-steg
-
----
-
-## Sammanfattning (2026-03-26)
-
-| Tier | Sviter | Cases | Passed | Rate |
-|------|--------|-------|--------|------|
-| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists, selection | ~50,000+ | ~22,500+ | ~45% |
-| **Tier 2** (Events & Interaction) | pointerevents, uievents, touch-events, input-events, focus, editing | ~700+ | ~160+ | ~23% |
-| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,100+ | ~2,140+ | ~35% |
-| **Tier 4** (HTML) | html/semantics, html/syntax, html/infrastructure, html/webappapis, domparsing | ~5,800+ | ~1,650+ | ~28% |
-| **Tier 5** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~96 | ~51% |
-| **Tier 6** (Övriga) | FileAPI, trusted-types, svg, xhr, fetch, encoding, webmessaging, inert, domxpath, shadow-dom, custom-elements, editing, user-timing, mathml, webstorage, hr-time, url, console, streams, compression | ~4,100+ | ~200+ | ~5% |
-| **Totalt** | **~45 sviter** | **~67,000+** | **~26,000+** | — |
-
----
-
-## Tier 1 — Kärna (kör varje PR)
-
-### dom/nodes/ — Core DOM
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 286 | 6,624 | 4,946 | 74.7% | Baseline |
-| 2026-03-25 | 286 | 6,624 | 5,017 | 75.7% | +71 pass: Event fix, classList, Text/Comment constructors |
-| 2026-03-25 | 286 | 6,624 | 5,004 | 75.5% | blitz-bekräftad (css_compiler + LightningCSS) |
-| 2026-03-26 | 286 | 6,676 | 5,666 | 84.9% | Runda 1-5: +662 pass |
-| **2026-03-27** | **287** | **6,676** | **5,713** | **85.6%** | Stylo 0.14, selectors crate, element cache (+47) |
-
-**Mål Q2 2026:** 90%
-
----
-
-### dom/events/ — Event System
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 160 | 312 | 100 | 32.1% | Baseline |
-| 2026-03-25 | 160 | 311 | 109 | 35.0% | +9 pass: Event constants, cancelBubble, initEvent |
-| 2026-03-25 | 160 | 311 | 140 | 45.0% | +31 pass: Event subclasses, cancelBubble spec fix |
-| 2026-03-25 | 160 | 310 | 208 | 67.1% | blitz-bekräftad (eventPhase, global addEventListener) |
-| 2026-03-26 | 160 | 318 | 213 | 67.0% | +click(), addEventListener({once: true}) |
-| **2026-03-27** | **161** | **318** | **198** | **62.3%** | Full capture/bubble dispatch (-15 pga passive regression) |
-
-**Mål Q2 2026:** 90% (kräver fix av passive-by-default regression)
-
----
-
-### dom/ranges/ — Range API
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | ~55 | ~11,000+ | ~7,700+ | ~70% | Baseline (polyfill, inkl. slow tester) |
-| 2026-03-25 | 55 | 645 | 315 | 48.8% | Native Range, 6 slow skippade |
-| 2026-03-25 | 55 | 11,373 | 6,958 | 61.2% | Rust compare_boundary_points, 4 filer re-enabled |
-| 2026-03-25 | 55 | 10,762 | 7,182 | 66.7% | WrongDocumentError, nativeChildIndex, toString |
-| 2026-03-25 | 55 | ~10,800 | ~7,400+ | ~69% | ownerDocument lazy getter, getSelection, Range mutations scaffolding |
-| **2026-03-26** | **55** | **~11,400** | **~7,752** | **~68.0%** | Verifierad efter dom_bridge refaktorering |
-
-**Native:** Range i `src/dom_bridge/mod.rs`, `__nativeCompareBoundary` + `__nativeChildIndex` i Rust.
-
-**Skippade (1 kvar):** Range-intersectsNode.html (>60s)
-
-**Kvarvarande failures (roadmap till 80%):**
-- compareBoundaryPoints: ~570 fail (detached/foreignDoc ranges — multi-doc stöd)
-- Range-set: ~900 fail (ownerDocument.createRange undefined på documentElement)
-- Range-mutations: ~170 fail (Range boundary update vid DOM-mutationer)
-- OpaqueRange tentative: ~100 fail (experimentell spec, ej prioriterad)
-
-**Kända begränsningar:**
-- ~~`document.documentElement.ownerDocument` = undefined~~ ✅ Fixad med lazy Accessor getter
-- Range-set/collapse varierar ±100 pass pga 30s timeout-gräns
-
-**Mål Q2 2026:** 80%
-
----
-
-### dom/traversal/ — TreeWalker & NodeIterator
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 18 | 1,584 | 516 | 32.6% | Baseline |
-| 2026-03-25 | 18 | 1,584 | 619 | 39.1% | blitz-bekräftad (whatToShow unsigned, root identity) |
-| **2026-03-26** | **18** | **1,584** | **1,449** | **91.5%** | +hasChildNodes, NodeIterator fix, createDocumentType, TreeWalker filter |
-
-**Implementerat:**
-- TreeWalker: nextNode, previousNode, parentNode, firstChild ✅
-- NodeIterator: nextNode, previousNode, filter boolean→number ✅
-- whatToShow filter ✅
-- hasChildNodes() — fixade common.js blockering ✅
-- Native createDocumentType — doctype-noder med __nodeKey__ ✅
-- ProcessingInstruction nodeType=7 i arena ✅
-
-**Saknas:**
-- xmlDoctype foreignDoctype: ~48 (polyfill doctype utan __nodeKey__ för foreign docs)
-- Recursive filter InvalidStateError: 2
-- ProcessingInstruction edge cases
-
-**Mål Q2 2026:** ~~60%~~ **91.5% — UPPNATT!** Nytt mål: 95%
-
----
-
-### dom/collections/ — HTMLCollection & NodeList
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 9 | 48 | 6 | 12.5% | Baseline |
-| 2026-03-26 | 9 | 48 | 27 | 56.2% | +live Proxy HTMLCollection, NamedNodeMap Proxy |
-| **2026-03-26** | **9** | **48** | **28** | **58.3%** | codegen v3 (+1) |
-
-**Implementerat:**
-- Live HTMLCollection (Proxy-baserad, getElementsByTagName/ClassName) ✅
-- NamedNodeMap Proxy (element.attributes) ✅
-- item(), namedItem(), Symbol.iterator ✅
-
-**Saknas:**
-- Named property access edge cases
-- NodeList iteration edge cases
-
-**Mål Q2 2026:** ~~50%~~ **56.2% — UPPNATT!** Nytt mål: 70%
-
----
-
-### dom/lists/ — DOMTokenList
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 5 | 189 | 175 | 92.6% | Baseline |
-| 2026-03-25 | 5 | 189 | 179 | 94.7% | +4 pass: classList raw value, unique tokens |
-| **2026-03-26** | **5** | **189** | **181** | **95.8%** | +1 pass efter refaktorering |
-
-Nästan komplett tack vare native classList-implementation.
-
----
-
-### dom/abort/ — AbortController
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **5** | **2** | **0** | **0.0%** | Baseline |
-
-AbortController/AbortSignal saknas helt. Låg prioritet.
-
----
-
-### selection/ — Selection API
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 29,775 | 7,293 | 24.5% | Baseline |
-
----
-
-### domparsing/ — DOMParser & Serialization
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 53 | 453 | 25 | 5.5% | Baseline |
-| 2026-03-26 | 53 | 453 | 83 | 18.3% | +native createDocumentType, nodeName fix |
-| 2026-03-26 | 53 | 453 | 85 | 18.8% | +outerHTML setter, createAttribute fix |
-| **2026-03-26** | **53** | **457** | **85** | **18.6%** | codegen v3 WebIDL wrappers |
-
-**Implementerat:**
-- DOMParser.parseFromString (basic) ✅
-- innerHTML getter/setter ✅
-- outerHTML setter ✅
-- createAttribute native ✅
-
-**Saknas:**
-- XMLSerializer
-- Range.createContextualFragment
-- Robust DOMParser med error handling
-
-**Mål Q2 2026:** 30%
-
----
-
-### html/syntax/ — HTML Parsing
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 536 | 204 | 26 | 12.7% | Baseline |
-| 2026-03-25 | 536 | 340 | 68 | 20.0% | +42 pass: ownerDocument fix |
-| **2026-03-26** | **536** | **298** | **85** | **28.5%** | +17 pass |
-
-html5ever ger bra grundstöd men WPT kräver specifika parsing edge cases.
-
-**Saknas:**
-- template element parsing
-- Foreign content (SVG/MathML)
-- Encoding detection
-
-**Mål Q2 2026:** 25%
-
----
-
-### css/selectors/ — CSS Selector Matching ⭐ NY
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 636 | 761 | 91 | 12.0% | Baseline |
-| 2026-03-26 | 636 | 3,457 | 1,840 | 53.2% | +hasChildNodes fixade common.js → massiv förbättring |
-| **2026-03-27** | **636** | **3,469** | **1,682** | **48.5%** | Servo selectors 0.36 crate (riktig matching, -158 pga borttagna hacks) |
-
-**Nytt 2026-03-27:**
-- Ersatt hemmasnickrad selector-matcher med **Servos `selectors` 0.36 crate**
-- Implementerat `selectors::Element` trait för ArenaDom
-- Riktig `:has()` via relativ selector matching (has-basic: 1/18 → 10/18)
-- Stabil `OpaqueElement` via arena-slot-pekare
-- Score-minskning vs baseline beror på att gamla matchern "fuskade" på vissa tester
-
-**Implementerat (native Rust via selectors crate):**
-- Alla CSS selectors via Servo/Firefox-motorn ✅
-- :has() med child/sibling/descendant combinators ✅
-- :is(), :where(), :not() spec-korrekt ✅
-- Alla nth-* pseudo-klasser ✅
-- Alla attribute selectors ✅
-- Alla combinators (>, +, ~, space) ✅
-
-**Mål Q2 2026:** 65% (kräver förbättrad is_html_element_in_html_document)
-
----
-
-### css/cssom/ — CSS Object Model ⭐ NY
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 210 | 531 | 43 | 8.1% | Baseline |
-| **2026-03-25** | **210** | **531** | **76** | **14.3%** | +33 pass: CSS cascade engine connected |
-
-**Implementerat:**
-- style.setProperty/getPropertyValue/removeProperty ✅
-- getComputedStyle (basic) ✅
-
-**Saknas:**
-- CSSStyleSheet API
-- CSSStyleDeclaration fullständig
-- window.getComputedStyle med cascading
-
-**Mål Q2 2026:** 20%
-
----
-
-### css/css-values/ — CSS Values
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 1,523 | 164 | 10.8% | Baseline |
-
----
-
-### css/css-cascade/ — CSS Cascade
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 402 | 23 | 5.7% | Baseline |
-
----
-
-### css/css-display/ — CSS Display
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 44 | 16 | 36.4% | Baseline |
-
----
-
-### css/css-color/ — CSS Color
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 84 | 12 | 14.3% | Baseline |
-
----
-
-### css/css-flexbox/ — CSS Flexbox
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 124 | 11 | 8.9% | Baseline |
-
----
-
-### html/dom/ — HTML-specifika DOM-APIer
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **463** | **~2,000** | **—** | **—** | Stack overflow vid batch-körning |
-
-Kräver fix i runner för stora sviter. Kör subkataloger separat.
-
----
-
-## Tier 3 — Utökad (kör vid milstolpar)
-
-### encoding/ — TextEncoder/TextDecoder
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **160** | **331** | **1** | **0.3%** | Baseline |
-
-TextEncoder/TextDecoder saknas. Enkel implementation ger stor vinst.
-
-**Mål Q2 2026:** 40%
-
----
-
-### webstorage/ — localStorage/sessionStorage
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **44** | **7** | **0** | **0.0%** | Baseline |
-
-In-memory storage finns men WPT kräver specifika beteenden (events, quota).
-
-**Mål Q2 2026:** 60%
-
----
-
-### xhr/ — XMLHttpRequest ⭐ NY
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **244** | **430** | **28** | **6.5%** | Baseline |
-
-AetherAgent har XHR interception i `intercept.rs` men WPT kräver full XMLHttpRequest API.
-
-**Mål Q2 2026:** 20%
-
----
-
-### hr-time/ — High Resolution Timing
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **15** | **5** | **0** | **0.0%** | Baseline |
-
-performance.now() finns men WPT kräver specifika precision-krav.
-
----
-
-### console/ — Console API
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **6** | **0** | **0** | **—** | Inga testcases detekterade |
-
-Console-testerna kräver troligen specifik testharness-integration.
-
----
-
-### url/ — URL API
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-25** | **4** | **1** | **0** | **0.0%** | Baseline |
-
----
-
-## Tier 2 — Events & Interaction (NY)
-
-### pointerevents/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 322 | 133 | 41.3% | Baseline |
-
-### uievents/ ⭐
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-26 | 113 | 24 | 9 | 37.5% | Baseline |
-| **2026-03-27** | **113** | **24** | **20** | **83.3%** | +11: spec-compliant UIEvent hierarchy, TextEvent, element cache |
-
-**Nytt 2026-03-27:**
-- Alla event-konstruktörer: `constructor.length === 1` per spec
-- TextEvent med initTextEvent() och createEvent('TextEvent')
-- Full capture/bubble event dispatch med window propagation
-- element.click() → PointerEvent (pointerId:-1)
-- initUIEvent/initMouseEvent/initKeyboardEvent/initCompositionEvent: TypeError utan args
-- getModifierState med alla 14 EventModifierInit keys
-
-**Kvarvarande 4 failures:**
-- stopImmediatePropagation/stopPropagation: element-identitet i propagation path (partiellt fixat)
-- click-event.htm: async_test infra-bugg (PointerEvent constructor check i step_func)
-- 1 manuellt test (kräver testdriver.js)
-
-### touch-events/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 16 | 6 | 37.5% | Baseline |
-
-### input-events/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 29 | 9 | 31.0% | Baseline |
-
-### focus/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 1 | 0 | 0.0% | Baseline |
-
-### editing/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 229 | 3 | 1.3% | Baseline |
-
----
-
-## Tier 4 — HTML
-
-### html/semantics/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 2,803 | TBD | TBD | TBD | Stack overflow vid batch-körning |
-| 2026-03-26 | — | ~4,900 | 697 | 14.3% | Baseline |
-| 2026-03-26 | 3,007 | 4,856 | 1,068 | 22.0% | +codegen v1/v1.5 (+311 properties) |
-| **2026-03-26** | **3,007** | **4,897** | **1,484** | **30.3%** | +codegen v3: ValidityState, input dirty state, form association, select (+416) |
-
----
-
-## Tier 5 — JS & Standards
-
-### ecmascript/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 21 | 18 | 85.7% | Baseline |
-
-### webidl/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 94 | 20 | 21.3% | Baseline |
-
-### quirks/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 75 | 58 | 77.3% | Baseline |
-
----
-
-## Tier 6 — Övriga
-
-### FileAPI/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 23 | 10 | 43.5% | Baseline |
-
-### trusted-types/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 238 | 25 | 10.5% | Baseline |
-
-### svg/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 869 | 53 | 6.1% | Baseline |
-
-### xhr/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 244 | 430 | 28 | 6.5% | Baseline |
-| **2026-03-26** | — | 463 | 31 | 6.7% | Uppdaterad baseline |
-
-### fetch/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 400 | 10 | 2.5% | Baseline |
-
-### encoding/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 160 | 331 | 1 | 0.3% | Baseline |
-| **2026-03-26** | — | 331 | 2 | 0.6% | +1 pass |
-
-### webmessaging/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 70 | 10 | 14.3% | Baseline |
-
-### inert/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 49 | 6 | 12.2% | Baseline |
-
-### domxpath/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 105 | 2 | 1.9% | Baseline |
-
-### shadow-dom/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 295 | 1,393 | 24 | 1.7% | Baseline |
-| **2026-03-26** | — | ~100+ | ~15 | ~5% | Uppdaterad baseline |
-
-### custom-elements/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| 2026-03-25 | 172 | 930 | 18 | 1.9% | Baseline |
-| **2026-03-26** | — | 950 | 19 | 2.0% | +1 pass |
-
-### user-timing/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 7 | 3 | 42.9% | Baseline |
-
-### mathml/
-
-| Datum | Filer | Cases | Passed | Rate | Kommentar |
-|-------|-------|-------|--------|------|-----------|
-| **2026-03-26** | — | 143 | 2 | 1.4% | Baseline |
-
----
-
-## Historik — Övergripande
-
-| Datum | dom/ total | Alla sviter | Kommentar |
-|-------|-----------|-------------|-----------|
-| 2026-03-24 | 1,382/2,004 (69.0%) | — | Första baseline (5s timeout) |
-| 2026-03-25 | 13,383/19,938 (67.1%) | ~13,600/23,649 (57.4%) | 30s timeout, 10x fler tester |
-| 2026-03-25 | — | Se ovan per svit | Ny detaljerad baseline med alla sviter |
-| 2026-03-26 | 15,100+/20,800+ (~73%) | ~17,300+/26,700+ | Runda 1-4: +2979 nya pass |
-| 2026-03-26 | ~14,759/~19,569 (~75.4%) | ~17,000+/~25,300+ | Runda 5: +live HTMLCollection, createElementNS, NamedNodeMap |
-| **2026-03-26** | — | **26,000+/67,000+** | Utökning från 16→45 sviter, +nya baselines |
-
----
-
-## Köra tester
-
-```bash
-# Setup
-./wpt/setup.sh
-
-# Tier 1 (obligatoriskt per PR)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/collections/
-
-# Tier 2 (vid relevanta ändringar)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/lists/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/domparsing/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/syntax/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/selectors/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/css/cssom/
-
-# Tier 3 (milstolpar)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/encoding/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/webstorage/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/xhr/
-
-# Verbose (debug)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
-```
-
----
-
-## Implementation Status
-
-Se detaljerad API-täckning:
-- [dom-implementation-status.md](dom-implementation-status.md) — Native vs Polyfill per API
-- [dom-api-coverage.md](dom-api-coverage.md) — Full referens, 70+ metoder
-- [wpt-testing-strategy.md](wpt-testing-strategy.md) — Strategi och prioritering
-- [wpt-workflow-guide.md](wpt-workflow-guide.md) — Arbetsflöde steg-för-steg
+## Mål Q2 2026
+
+| Suite | Nuvarande | Mål | Status |
+|-------|-----------|-----|--------|
+| dom/nodes | 90.3% | 95% | 🔄 |
+| dom/events | 84.2% | 90% | 🔄 |
+| dom/traversal | 96.4% | 98% | 🔄 |
+| dom/ranges | 74.2% | 80% | 🔄 |
+| domparsing | 58.8% | 70% | 🔄 |
+| css/selectors | 49.3% | 60% | 🔄 |
+| dom/lists | 95.8% | 98% | 🔄 |
+| dom/collections | 62.5% | 75% | 🔄 |
