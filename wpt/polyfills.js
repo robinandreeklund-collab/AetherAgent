@@ -789,6 +789,11 @@ globalThis.__patchCharacterData = function(n) { return n; };
     }
   });
 
+  // Patcha document.implementation prototype för instanceof DOMImplementation
+  if (typeof document !== 'undefined' && document.implementation && globalThis.DOMImplementation) {
+    try { Object.setPrototypeOf(document.implementation, DOMImplementation.prototype); } catch(e) {}
+  }
+
   // ─── setPrototypeOf på element-objekt ─────────────────────────────
   // make_element_object skapar plain objects — vi patchas via __patchProto
   globalThis.__tagToConstructor = tagMap;
