@@ -1,0 +1,467 @@
+{
+  "local": [
+    {
+      "fixture": "01_ecommerce_product.html",
+      "lp_time_ms": 144.81565299956856,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "02_login_form.html",
+      "lp_time_ms": 150.36177599995426,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "03_search_results.html",
+      "lp_time_ms": 145.34851999997045,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "04_registration.html",
+      "lp_time_ms": 145.58348300033686,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "05_checkout.html",
+      "lp_time_ms": 144.38214799974958,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "06_news_article.html",
+      "lp_time_ms": 148.08955500029697,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "07_booking_flight.html",
+      "lp_time_ms": 148.9039079997383,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "08_restaurant_menu.html",
+      "lp_time_ms": 149.40310299971316,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "09_dashboard.html",
+      "lp_time_ms": 151.76195100048062,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "10_injection_hidden.html",
+      "lp_time_ms": 147.41536600013205,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "11_injection_social.html",
+      "lp_time_ms": 144.20031800000288,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "12_banking.html",
+      "lp_time_ms": 145.5468190006286,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "13_real_estate.html",
+      "lp_time_ms": 146.05767200009723,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "14_job_listing.html",
+      "lp_time_ms": 145.85484999952314,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "15_grocery_store.html",
+      "lp_time_ms": 148.47932500015304,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "16_settings_page.html",
+      "lp_time_ms": 183.52591399980156,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "17_wiki_article.html",
+      "lp_time_ms": 548.6173729996153,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "18_social_media.html",
+      "lp_time_ms": 178.7386999994851,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "19_contact_form.html",
+      "lp_time_ms": 145.36776400018425,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "20_large_catalog.html",
+      "lp_time_ms": 146.9349630006036,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "21_sv_price_synonym.html",
+      "lp_time_ms": 144.11454899982346,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "22_sv_contact_synonym.html",
+      "lp_time_ms": 145.15829799984203,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "23_sv_buy_synonym.html",
+      "lp_time_ms": 179.97008899965294,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "24_en_purchase_synonym.html",
+      "lp_time_ms": 147.4514680003267,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "25_en_pricing_synonym.html",
+      "lp_time_ms": 144.13510500071425,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "26_en_employment_synonym.html",
+      "lp_time_ms": 144.52802100004192,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "27_semantic_nutrition.html",
+      "lp_time_ms": 144.55870100027823,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "28_semantic_author.html",
+      "lp_time_ms": 151.03633499984426,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "29_semantic_hours.html",
+      "lp_time_ms": 149.745329000325,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "30_semantic_unsubscribe.html",
+      "lp_time_ms": 145.2772950005965,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "31_negative_login_logout.html",
+      "lp_time_ms": 149.0428979996068,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "32_negative_price_news.html",
+      "lp_time_ms": 144.9915389994203,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "33_negative_delete_save.html",
+      "lp_time_ms": 147.1781820000615,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "34_ecommerce_cart_review.html",
+      "lp_time_ms": 142.7401569999347,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "35_ecommerce_product_compare.html",
+      "lp_time_ms": 144.97572199979913,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "36_form_multi_step.html",
+      "lp_time_ms": 137.91657000001578,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "37_content_table_specs.html",
+      "lp_time_ms": 144.7048760001053,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "38_content_faq_accordion.html",
+      "lp_time_ms": 147.41133300049114,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "39_sv_medical_booking.html",
+      "lp_time_ms": 144.59532999990188,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "40_sv_government_form.html",
+      "lp_time_ms": 149.4197020001593,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "41_edge_empty_page.html",
+      "lp_time_ms": 145.8413800000926,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "42_edge_huge_page.html",
+      "lp_time_ms": 143.45219200004067,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "43_edge_deep_nesting.html",
+      "lp_time_ms": 139.5226789991284,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "44_edge_no_semantics.html",
+      "lp_time_ms": 148.86254999964876,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "45_complex_dashboard.html",
+      "lp_time_ms": 404.7563550002451,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "46_complex_email_inbox.html",
+      "lp_time_ms": 141.64667899967753,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "47_complex_social_feed.html",
+      "lp_time_ms": 144.00917700004356,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "48_complex_code_editor.html",
+      "lp_time_ms": 152.58243400057836,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "49_sv_recipe_page.html",
+      "lp_time_ms": 392.51689999946393,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    },
+    {
+      "fixture": "50_accessibility_aria.html",
+      "lp_time_ms": 143.68028399985633,
+      "lp_nodes": 11,
+      "lp_tokens": 422
+    }
+  ],
+  "live": [
+    {
+      "url": "https://books.toscrape.com",
+      "lp_time_ms": 971.6430749995197,
+      "lp_nodes": 669,
+      "lp_tokens": 45656,
+      "lp_ok": true
+    },
+    {
+      "url": "https://news.ycombinator.com",
+      "lp_time_ms": 409.28680500019254,
+      "lp_nodes": 1220,
+      "lp_tokens": 79358,
+      "lp_ok": true
+    },
+    {
+      "url": "https://example.com",
+      "lp_time_ms": 355.54368700013583,
+      "lp_nodes": 11,
+      "lp_tokens": 460,
+      "lp_ok": true
+    },
+    {
+      "url": "https://httpbin.org",
+      "lp_time_ms": 787.6365860001897,
+      "lp_nodes": 58,
+      "lp_tokens": 3146,
+      "lp_ok": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+      "lp_time_ms": 141.00103799955832,
+      "lp_nodes": 5,
+      "lp_tokens": 170,
+      "lp_ok": true
+    },
+    {
+      "url": "https://github.com/nickel-org/rust-mustache",
+      "lp_time_ms": 5159.947982000631,
+      "lp_nodes": 0,
+      "lp_tokens": 179801,
+      "lp_ok": false
+    },
+    {
+      "url": "https://jsonplaceholder.typicode.com",
+      "lp_time_ms": 5094.286863999514,
+      "lp_nodes": 297,
+      "lp_tokens": 15400,
+      "lp_ok": true
+    },
+    {
+      "url": "https://quotes.toscrape.com",
+      "lp_time_ms": 521.8958700006624,
+      "lp_nodes": 238,
+      "lp_tokens": 12814,
+      "lp_ok": true
+    },
+    {
+      "url": "https://www.scrapethissite.com/pages/simple/",
+      "lp_time_ms": 5242.833434000204,
+      "lp_nodes": 5895,
+      "lp_tokens": 326581,
+      "lp_ok": true
+    },
+    {
+      "url": "https://www.scrapethissite.com/pages/forms/",
+      "lp_time_ms": 5246.911980999357,
+      "lp_nodes": 624,
+      "lp_tokens": 37964,
+      "lp_ok": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/WebAssembly",
+      "lp_time_ms": 428.03038800047943,
+      "lp_nodes": 5,
+      "lp_tokens": 170,
+      "lp_ok": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+      "lp_time_ms": 137.56926899986865,
+      "lp_nodes": 5,
+      "lp_tokens": 170,
+      "lp_ok": true
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML",
+      "lp_time_ms": 5152.480287999424,
+      "lp_nodes": 2117,
+      "lp_tokens": 139753,
+      "lp_ok": true
+    },
+    {
+      "url": "https://www.rust-lang.org",
+      "lp_time_ms": 1994.452836000164,
+      "lp_nodes": 255,
+      "lp_tokens": 15362,
+      "lp_ok": true
+    },
+    {
+      "url": "https://crates.io",
+      "lp_time_ms": 291.0826810002618,
+      "lp_nodes": 3,
+      "lp_tokens": 92,
+      "lp_ok": true
+    },
+    {
+      "url": "https://docs.rs",
+      "lp_time_ms": 323.19950300006894,
+      "lp_nodes": 238,
+      "lp_tokens": 14642,
+      "lp_ok": true
+    },
+    {
+      "url": "https://play.rust-lang.org",
+      "lp_time_ms": 5096.661030000178,
+      "lp_nodes": 90,
+      "lp_tokens": 6405,
+      "lp_ok": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Linux",
+      "lp_time_ms": 149.82775899989065,
+      "lp_nodes": 5,
+      "lp_tokens": 170,
+      "lp_ok": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/World_Wide_Web",
+      "lp_time_ms": 137.1702530004768,
+      "lp_nodes": 5,
+      "lp_tokens": 170,
+      "lp_ok": true
+    },
+    {
+      "url": "https://lobste.rs",
+      "lp_time_ms": 458.2571820001249,
+      "lp_nodes": 1088,
+      "lp_tokens": 66336,
+      "lp_ok": true
+    }
+  ],
+  "campfire": {
+    "ae": {
+      "total": 23.0,
+      "avg": 0.23,
+      "median": 0.22,
+      "p99": 0.28,
+      "min": 0.21,
+      "max": 0.31,
+      "tokens": 2620
+    },
+    "lp": {
+      "total": 48515.23611899938,
+      "avg": 485.1523611899938,
+      "median": 178.34818999972413,
+      "p99": 549.2163170001731,
+      "min": 141.61669799977972,
+      "max": 30000.0,
+      "tokens": 417.78
+    },
+    "speedup": 2109.358092130408
+  }
+}
