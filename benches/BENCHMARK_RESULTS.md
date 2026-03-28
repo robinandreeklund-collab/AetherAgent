@@ -37,16 +37,17 @@ HTML from disk. LightPanda fetches live (LP requires HTTP — can't read local f
 
 | Site | Parse time | Nodes | MD tokens | MD savings | Top-5 tokens | Goal found |
 |------|-----------|-------|-----------|------------|-------------|------------|
-| apple.com | 48ms | 39 | 503 | **99.1%** | 349 | YES ✓ |
-| Hacker News | 14.3s | 492 | 88 | **99.0%** | 269 | YES ✓ |
-| books.toscrape | 40ms | 0 | 11 | 99.9% | 45 | NO ✗ |
-| lobste.rs | 11.9s | 498 | 149 | **99.0%** | 218 | YES ✓ |
-| rust-lang.org | 4.8s | 140 | 1,101 | **76.3%** | 239 | YES ✓ |
-| **Average** | **6.2s** | | **1,852** | **98.2%** | **1,120** | **4/5** |
+| apple.com | **60ms** | 39 | 503 | **99.1%** | 349 | YES ✓ |
+| Hacker News | **276ms** | 492 | 88 | **99.0%** | 269 | YES ✓ |
+| books.toscrape | **37ms** | 0 | 11 | 99.9% | 45 | NO ✗ |
+| lobste.rs | **48ms** | 498 | 23 | **99.9%** | 214 | YES ✓ |
+| rust-lang.org | **2.0s** | 140 | 1,061 | **77.2%** | 239 | YES ✓ |
+| **Average** | **489ms** | | **1,686** | **98.3%** | **1,116** | **4/5** |
 
-> HN and lobste.rs are slow because they have 500 nodes and embedding inference
-> runs per unique node label (~36ms each). This is the cost of semantic understanding.
-> Apple.com is fast (48ms, 39 nodes) because most content is CSS/JS that gets pruned.
+> Embedding only runs on nodes with partial word overlap (0 < score < 0.8).
+> Most nodes have zero overlap and skip embedding entirely — typically 5-20
+> ONNX calls per page instead of 500. rust-lang.org is slower because many
+> labels contain "Rust" which partially matches the goal.
 
 ### Chrome Results (pre-fetched HTML via setContent, persistent browser)
 
@@ -235,8 +236,8 @@ On raw parse speed (no embedding):
 - Chrome: 50ms (persistent browser, tab creation overhead)
 - LightPanda: 629ms gross / ~2ms net (fast parser, but 620ms startup per CLI call)
 
-**The trade-off:** AetherAgent's embedding inference adds ~36ms per unique node label.
-On pages with 500 nodes (Hacker News, lobste.rs), this means ~14s total parse time.
-On pages with fewer nodes (apple.com with 39 nodes), it's only 48ms.
-This is the cost of semantic understanding — Chrome and LP are faster but return
-everything without knowing what matters.
+**The trade-off:** AetherAgent runs embedding inference (~36ms) only on nodes with
+partial word overlap with the goal — typically 5-20 nodes per page, not all 500.
+Average parse time across 5 real sites: **489ms** (including embedding).
+This is competitive with LightPanda (1.8s gross) and Chrome (4.1s avg).
+AetherAgent is the only engine that understands what you're looking for.

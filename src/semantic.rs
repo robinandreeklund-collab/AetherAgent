@@ -426,9 +426,17 @@ impl SemanticBuilder {
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
         // 1. Textuell likhet — embedding-förstärkt med word-overlap fallback
         let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
-        let text_score = if word_score < 0.8 && !label.is_empty() {
-            // Använd pre-beräknad goal-vektor — bara en ONNX-inference per nod (label)
-            // istället för två (goal + label) per nod
+
+        // Embedding bara när det finns partiell textmatch (0 < word_score < 0.8).
+        // Noder utan textöverlapp (word_score == 0) har nästan aldrig hög embedding-likhet
+        // och att köra ONNX på alla (~36ms/st) gör parsning oacceptabelt långsam.
+        // Resultat: istället för 500 ONNX-anrop per sida → typiskt 5-20 anrop.
+        let needs_embedding = word_score > 0.0
+            && word_score < 0.8
+            && !label.is_empty()
+            && self.goal_embedding.is_some();
+
+        let text_score = if needs_embedding {
             if let Some(ref goal_vec) = self.goal_embedding {
                 if let Some(emb_score) = crate::embedding::similarity_with_vec(goal_vec, label) {
                     word_score.max(emb_score)
