@@ -1,0 +1,87 @@
+[
+  {
+    "site": "apple.com",
+    "goal": "find iPhone price",
+    "html_tokens": 58985,
+    "chrome": {
+      "ms": 110.37340200000006,
+      "nodes": 1098,
+      "tokens": 57619
+    },
+    "lp": {
+      "ms": 5143.988727,
+      "nodes": 1870,
+      "html_tokens": 78311,
+      "st_tokens": 146160,
+      "ok": true
+    }
+  },
+  {
+    "site": "Hacker News",
+    "goal": "find latest news articles",
+    "html_tokens": 8669,
+    "chrome": {
+      "ms": 39.210941999999704,
+      "nodes": 810,
+      "tokens": 8676
+    },
+    "lp": {
+      "ms": 576.8684489999996,
+      "nodes": 1220,
+      "html_tokens": 8680,
+      "st_tokens": 79387,
+      "ok": true
+    }
+  },
+  {
+    "site": "books.toscrape",
+    "goal": "find book titles and prices",
+    "html_tokens": 12818,
+    "chrome": {
+      "ms": 20047.165089000002,
+      "nodes": 542,
+      "tokens": 12751
+    },
+    "lp": {
+      "ms": 906.1401110000006,
+      "nodes": 669,
+      "html_tokens": 12819,
+      "st_tokens": 45656,
+      "ok": true
+    }
+  },
+  {
+    "site": "lobste.rs",
+    "goal": "find technology articles",
+    "html_tokens": 15412,
+    "chrome": {
+      "ms": 52.95983200000046,
+      "nodes": 777,
+      "tokens": 15361
+    },
+    "lp": {
+      "ms": 1355.3129779999945,
+      "nodes": 1086,
+      "html_tokens": 15390,
+      "st_tokens": 66446,
+      "ok": true
+    }
+  },
+  {
+    "site": "rust-lang.org",
+    "goal": "download and install Rust",
+    "html_tokens": 4614,
+    "chrome": {
+      "ms": 127.44578299999557,
+      "nodes": 242,
+      "tokens": 4573
+    },
+    "lp": {
+      "ms": 985.128515000004,
+      "nodes": 255,
+      "html_tokens": 4572,
+      "st_tokens": 15362,
+      "ok": true
+    }
+  }
+]
