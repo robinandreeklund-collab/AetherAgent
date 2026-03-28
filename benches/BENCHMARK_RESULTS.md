@@ -7,37 +7,45 @@
 
 ## TL;DR
 
-| Metric | AetherAgent | LightPanda |
-|--------|-------------|------------|
-| **Campfire 100x total** | **24ms** | 16,950ms |
-| **Campfire avg/parse** | **0.24ms** | 170ms |
-| **Speed ratio (Campfire)** | **706x faster** | baseline |
-| **Live sites OK** | 14/20 | 19/20 |
-| **Live sites avg time** | 7.16s | 1.87s |
-| **Embedding accuracy** | 100% (20/20) | N/A |
-| **Goal-relevance** | YES | NO |
-| **Injection protection** | YES | NO |
-| **JS execution** | Sandboxed QuickJS | Full V8 |
+| Metric | AetherAgent | LightPanda | Headless Chrome |
+|--------|-------------|------------|-----------------|
+| **Campfire 100x total** | **24ms** | 16,950ms | 3,040ms |
+| **Campfire avg/parse** | **0.24ms** | 170ms | 30ms |
+| **Speed ratio (Campfire)** | **706x vs LP** | baseline | 5.6x vs LP |
+| **Local fixtures avg** | 1,116ms* | 198ms** | **22ms** |
+| **Local fixture nodes** | 42 (goal-filtered) | N/A** | 38 (full DOM) |
+| **Live sites OK** | 14/20 | 19/20 | N/A*** |
+| **Embedding accuracy** | 100% (20/20) | N/A | N/A |
+| **Goal-relevance** | YES | NO | NO |
+| **Injection protection** | YES | NO | NO |
+| **JS execution** | Sandboxed QuickJS | Full V8 | Full V8 |
+
+\* Includes embedding inference (~36ms per node×goal comparison)
+\*\* LP returned error pages for local fixtures (connection issue)
+\*\*\* Chrome could not reach external sites in this sandbox environment
 
 ## Raw Performance: 100 Sequential Campfire Commerce Parses
 
 Same HTML page (Campfire Commerce product page) served via local HTTP, parsed 100 times.
-LightPanda uses `fetch --dump semantic_tree` (gomcp-downloaded binary, full V8).
+All engines run sequentially on the same machine — no parallel resource contention.
 
-| Engine | Total | Avg | Median | P99 | Tokens/parse |
-|--------|-------|-----|--------|-----|-------------|
-| **AetherAgent** | **24ms** | **0.24ms** | **0.23ms** | **0.30ms** | ~2,620 |
-| LightPanda | 16,950ms | 170ms | 151ms | 197ms | ~422 |
+| Engine | Total | Avg | Median | P99 | Tokens/parse | Nodes |
+|--------|-------|-----|--------|-----|-------------|-------|
+| **AetherAgent** | **24ms** | **0.24ms** | **0.23ms** | **0.30ms** | ~2,620 | 1 tree |
+| Headless Chrome | 3,040ms | 30ms | 32ms | 41ms | ~1,281 | 97 |
+| LightPanda | 16,950ms | 170ms | 151ms | 197ms | ~422 | 11 |
 
-**AetherAgent is 706x faster** on repeated parses of the same page.
+**AetherAgent is 125x faster than Chrome and 706x faster than LightPanda.**
 
-> **Why the difference?** AetherAgent is an in-process Rust library — no process spawn,
-> no IPC, no V8 startup. LightPanda spawns a new process per parse with full HTTP fetch.
-> AetherAgent parses pre-fetched HTML. These are different architectures for different purposes.
+> **Why the speed difference?**
+> - AetherAgent: in-process Rust library, parses pre-fetched HTML, no process spawn
+> - Headless Chrome: Playwright launches a page in an existing browser process, navigates + renders
+> - LightPanda: spawns a new process per parse, full HTTP fetch + V8 rendering
 >
-> **Why different token counts?** AetherAgent returns a richer semantic tree (2,620 tokens)
-> with roles, relevance scores, trust levels. LightPanda returns a leaner DOM tree (422 tokens).
-> More tokens = more context for an LLM to understand the page.
+> **Why different token/node counts?**
+> - AetherAgent: rich semantic JSON tree with roles, relevance, trust (2,620 tokens)
+> - Chrome: returns full rendered HTML including all tags (1,281 tokens)
+> - LightPanda: lean semantic_tree JSON (422 tokens)
 
 ## Embedding Model Performance
 
@@ -75,19 +83,27 @@ LightPanda uses `fetch --dump semantic_tree` (gomcp-downloaded binary, full V8).
 
 ## 50 Local Fixture Tests
 
-AetherAgent parses HTML **and** runs embedding inference for goal-relevance scoring.
-LightPanda parses HTML only (no goal understanding).
+All three engines parse the same 50 HTML fixture files served via local HTTP.
 
-| Metric | AetherAgent | LightPanda |
-|--------|-------------|------------|
-| Fixtures tested | 50 | 50 |
-| Targets found | **42/50 (84%)** | N/A (no goal-relevance) |
-| High relevance (>0.3) | 10/42 | N/A |
-| Avg parse time | 1,133ms* | 166ms** |
-| Injection warnings | 2 fixtures caught | N/A |
+| Metric | AetherAgent | LightPanda | Headless Chrome |
+|--------|-------------|------------|-----------------|
+| Fixtures tested | 50 | 50 | 50 |
+| **Avg parse time** | 1,116ms* | 198ms** | **22ms** |
+| **Total parse time** | 55.8s | 9.9s | **1.08s** |
+| Avg nodes | 42 (goal-filtered) | 11** | 38 (full DOM) |
+| Avg tokens | varies | 422** | 351 |
+| Targets found | **42/50 (84%)** | N/A | N/A |
+| Injection detection | **2 caught** | N/A | N/A |
 
 > \* AetherAgent time includes embedding inference (~36ms per unique goal×label pair).
 > Each fixture triggers multiple embedding comparisons across all nodes.
+>
+> \*\* LightPanda returned identical 11-node/422-token error pages for all local fixtures
+> (could not connect to the ephemeral HTTP server). Only Campfire + live site data is reliable.
+>
+> Chrome is fastest on local fixtures because it's an already-running browser process
+> with optimized page loading. AetherAgent is slower because it runs semantic analysis
+> (embedding inference) on every node — which is the cost of understanding page content.
 >
 > \*\* LightPanda returned identical 11-node/422-token output for all local fixtures,
 > indicating it rendered its error page rather than the actual fixture HTML.
@@ -196,18 +212,20 @@ It enables AetherAgent to find "Add To Cart" when the goal is "buy product"
 
 ## What Each Engine Does
 
-| Capability | AetherAgent | LightPanda |
-|-----------|-------------|------------|
-| HTML parsing | ✅ html5ever (Rust) | ✅ Zig-based parser |
-| CSS rendering | ✅ Blitz (optional) | ✅ Full CSS |
-| JavaScript | ✅ Sandboxed QuickJS | ✅ Full V8 engine |
-| Goal-relevance scoring | ✅ Embedding + word-overlap | ❌ |
-| Prompt injection detection | ✅ Trust shield | ❌ |
-| Semantic diff (token savings) | ✅ 67-99% savings | ❌ |
-| Action planning | ✅ Intent compiler | ❌ |
-| Semantic firewall | ✅ L1/L2/L3 filtering | ❌ |
-| Causal reasoning | ✅ Action graph | ❌ |
-| WASM compilation | ✅ wasm32 target | ❌ |
+| Capability | AetherAgent | LightPanda | Headless Chrome |
+|-----------|-------------|------------|-----------------|
+| HTML parsing | ✅ html5ever (Rust) | ✅ Zig-based parser | ✅ Blink (C++) |
+| CSS rendering | ✅ Blitz (optional) | ✅ Full CSS | ✅ Full CSS |
+| JavaScript | ✅ Sandboxed QuickJS | ✅ Full V8 engine | ✅ Full V8 engine |
+| Goal-relevance scoring | ✅ Embedding + word-overlap | ❌ | ❌ |
+| Prompt injection detection | ✅ Trust shield | ❌ | ❌ |
+| Semantic diff (token savings) | ✅ 67-99% savings | ❌ | ❌ |
+| Action planning | ✅ Intent compiler | ❌ | ❌ |
+| Semantic firewall | ✅ L1/L2/L3 filtering | ❌ | ❌ |
+| Causal reasoning | ✅ Action graph | ❌ | ❌ |
+| WASM compilation | ✅ wasm32 target | ❌ | ❌ |
+| Process model | In-process library | CLI subprocess | Long-running browser |
+| Memory footprint | ~50 MB | ~20 MB/process | ~200+ MB |
 
 ## How to Reproduce
 
@@ -230,22 +248,41 @@ curl -sL "https://github.com/lightpanda-io/browser/releases/download/nightly/lig
 
 # 4. Run comparison benchmark
 python3 benches/bench_embedding_vs_lightpanda.py
+
+# 5. Run Headless Chrome benchmark
+npm install playwright@1.56.1
+node benches/bench_headless_chrome.js
 ```
 
 ## Conclusion
 
-**AetherAgent wins on raw parse speed** (2,109x faster on Campfire Commerce).
-This is because AetherAgent is an in-process Rust library with zero process spawn overhead.
+### Speed ranking (Campfire Commerce, 100 sequential parses)
 
-**LightPanda wins on live site completeness** (19/20 vs 14/20 OK) because it runs
-a full V8 JavaScript engine and renders JS-heavy pages that AetherAgent's static parser misses.
+| Rank | Engine | Avg/parse | vs Chrome |
+|------|--------|-----------|-----------|
+| 1 | **AetherAgent** | **0.24ms** | **125x faster** |
+| 2 | Headless Chrome | 30ms | baseline |
+| 3 | LightPanda | 170ms | 5.6x slower |
 
-**AetherAgent's unique value** is semantic understanding: it doesn't just parse HTML — it
-understands which elements are relevant to your goal, detects prompt injection attacks,
-and provides 100% accurate embedding-based similarity matching.
+### What each engine is best at
 
-The right choice depends on your use case:
-- **AI agent navigation with security** → AetherAgent
-- **Full browser rendering with JS** → LightPanda
-- **Both** → AetherAgent for semantic analysis, LightPanda/CDP for JS-heavy pages
-  (AetherAgent already supports this via TieredBackend with CDP escalation)
+| Use case | Best engine | Why |
+|----------|-------------|-----|
+| **Raw HTML parse speed** | AetherAgent | In-process Rust, no overhead |
+| **JS-heavy live sites** | Chrome / LightPanda | Full V8 rendering |
+| **AI agent navigation** | AetherAgent | Goal-relevance, injection protection |
+| **Token savings for LLM** | AetherAgent | Markdown output (21-56% savings) |
+| **Lightweight deployment** | LightPanda | ~20MB, no browser install |
+| **Full browser features** | Chrome | Complete web platform |
+
+### The honest picture
+
+- **AetherAgent** is fastest at parsing pre-fetched HTML (125x faster than Chrome)
+  but slower on live sites because embedding inference (~36ms/query) runs per node
+- **Headless Chrome** is the gold standard for JS rendering but heavy (200+ MB)
+  and requires a running browser process
+- **LightPanda** is lightweight and handles JS but slower than Chrome and limited
+  in local fixture parsing
+- **AetherAgent's unique value** is semantic understanding: goal-relevance scoring
+  (100% embedding accuracy), prompt injection detection, and 21-56% token savings
+  via Markdown output — capabilities no browser engine provides
