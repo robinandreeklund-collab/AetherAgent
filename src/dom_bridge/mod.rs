@@ -2318,6 +2318,14 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         doc.set("nodeName", "#document")?;
     }
 
+    // nodeValue — null per spec för Document-noder
+    doc.prop(
+        "nodeValue",
+        rquickjs::object::Accessor::new(JsFn(NullGetter), JsFn(NoOpHandler))
+            .configurable()
+            .enumerable(),
+    )?;
+
     // textContent — returnerar null per spec för Document-noder
     {
         let doc_key = state.borrow().arena.document;
@@ -4352,6 +4360,27 @@ impl JsHandler for CharDataGetter {
     }
 }
 
+/// Setter för .nodeValue — null → "" (empty), andra värden → DOMString
+struct NodeValueSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for NodeValueSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args.first();
+        // nodeValue: null → empty string, undefined → "undefined", annat → DOMString
+        let new_val = match val {
+            Some(v) if v.is_null() => String::new(),
+            _ => js_value_to_dom_string(val),
+        };
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.text = Some(new_val.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 struct CharDataSetter {
     state: SharedState,
     key: NodeKey,
@@ -4587,6 +4616,13 @@ pub(super) fn copy_subtree(src: &ArenaDom, src_key: NodeKey, parent: NodeKey, ds
 }
 
 pub(super) struct NoOpHandler;
+
+struct NullGetter;
+impl JsHandler for NullGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        Ok(Value::new_null(ctx.clone()))
+    }
+}
 impl JsHandler for NoOpHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         Ok(Value::new_undefined(ctx.clone()))
@@ -4764,21 +4800,26 @@ pub(super) fn make_element_object<'js>(
     // nodeValue + data: live getter/setter för Text/Comment/PI, null för övriga
     match node_type_val {
         1 | 9 | 10 | 11 => {
-            obj.set("nodeValue", Value::new_null(ctx.clone()))?;
+            // nodeValue: getter → null, setter → no-op (per spec)
+            obj.prop(
+                "nodeValue",
+                rquickjs::object::Accessor::new(JsFn(NullGetter), JsFn(NoOpHandler))
+                    .configurable()
+                    .enumerable(),
+            )?;
         }
         3 | 7 | 8 => {
             // Text(3)/PI(7)/Comment(8) — live getter/setter för nodeValue och data
-            let nv_get_state = Rc::clone(state);
-            let nv_set_state = Rc::clone(state);
+            // nodeValue: null → "" (per spec: DOMString? setter)
             obj.prop(
                 "nodeValue",
                 rquickjs::object::Accessor::new(
                     JsFn(CharDataGetter {
-                        state: nv_get_state,
+                        state: Rc::clone(state),
                         key,
                     }),
-                    JsFn(CharDataSetter {
-                        state: nv_set_state,
+                    JsFn(NodeValueSetter {
+                        state: Rc::clone(state),
                         key,
                     }),
                 )
