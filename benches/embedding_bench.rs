@@ -13,7 +13,7 @@
 /// - Jämförelse: med vs utan embedding
 use std::time::Instant;
 
-use aether_agent::{embedding, parse_to_semantic_tree};
+use aether_agent::{embedding, parse_to_semantic_tree, parse_top_nodes};
 
 // ─── Resultattyper ───────────────────────────────────────────────────────────
 
@@ -831,49 +831,76 @@ fn main() {
     println!("    Output:  ~{avg_tokens} tokens/parse");
     println!();
 
-    // ── 7. Token analysis across all fixtures ─────────────────────────────
-    println!("═══ Token Analysis (all 50 fixtures) ═══");
-    let mut total_html_chars = 0usize;
-    let mut total_output_tokens = 0usize;
+    // ── 7. Token analysis: full tree vs top-N (what LLM actually receives) ─
+    println!("═══ Token Analysis: HTML vs Full Tree vs Top-5 (what LLM gets) ═══");
+    let mut total_html_tokens = 0usize;
+    let mut total_full_tokens = 0usize;
+    let mut total_top5_tokens = 0usize;
+    let mut total_top10_tokens = 0usize;
     println!(
-        "{:<35} {:>10} {:>10} {:>8}",
-        "Fixture", "HTML chars", "Out tokens", "Ratio"
+        "{:<30} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "Fixture", "HTML", "Full", "Top-5", "Top-10", "Savings"
     );
-    println!("{}", "-".repeat(68));
+    println!("{}", "-".repeat(78));
     for r in &local_results {
         let html = load_fixture(&r.fixture);
-        let html_chars = html.len();
-        let result =
-            parse_to_semantic_tree(&html, &r.goal, &format!("https://test.se/{}", r.fixture));
-        let out_tokens = result.len() / 4;
-        let ratio = if html_chars > 0 {
-            out_tokens as f64 / (html_chars as f64 / 4.0) * 100.0
+        let url = format!("https://test.se/{}", r.fixture);
+        let html_tokens = html.len() / 4;
+        let full = parse_to_semantic_tree(&html, &r.goal, &url);
+        let full_tokens = full.len() / 4;
+        let top5 = parse_top_nodes(&html, &r.goal, &url, 5);
+        let top5_tokens = top5.len() / 4;
+        let top10 = parse_top_nodes(&html, &r.goal, &url, 10);
+        let top10_tokens = top10.len() / 4;
+
+        let savings = if html_tokens > 0 {
+            (1.0 - top5_tokens as f64 / html_tokens as f64) * 100.0
         } else {
             0.0
         };
-        total_html_chars += html_chars;
-        total_output_tokens += out_tokens;
+
+        total_html_tokens += html_tokens;
+        total_full_tokens += full_tokens;
+        total_top5_tokens += top5_tokens;
+        total_top10_tokens += top10_tokens;
+
         println!(
-            "{:<35} {:>10} {:>10} {:>7.1}%",
-            truncate_str(&r.fixture, 33),
-            html_chars,
-            out_tokens,
-            ratio
+            "{:<30} {:>8} {:>8} {:>8} {:>8} {:>7.1}%",
+            truncate_str(&r.fixture, 28),
+            html_tokens,
+            full_tokens,
+            top5_tokens,
+            top10_tokens,
+            savings,
         );
     }
-    let overall_ratio = if total_html_chars > 0 {
-        total_output_tokens as f64 / (total_html_chars as f64 / 4.0) * 100.0
+    let overall_savings = if total_html_tokens > 0 {
+        (1.0 - total_top5_tokens as f64 / total_html_tokens as f64) * 100.0
     } else {
         0.0
     };
-    println!("{}", "-".repeat(68));
+    println!("{}", "-".repeat(78));
     println!(
-        "{:<35} {:>10} {:>10} {:>7.1}%",
-        "TOTAL", total_html_chars, total_output_tokens, overall_ratio
+        "{:<30} {:>8} {:>8} {:>8} {:>8} {:>7.1}%",
+        "TOTAL",
+        total_html_tokens,
+        total_full_tokens,
+        total_top5_tokens,
+        total_top10_tokens,
+        overall_savings
+    );
+    println!("\n  What matters for LLM cost:");
+    println!("    Raw HTML tokens:   {}", total_html_tokens);
+    println!(
+        "    Top-5 tokens:      {} ({:.1}% of HTML → {:.1}% savings)",
+        total_top5_tokens,
+        total_top5_tokens as f64 / total_html_tokens as f64 * 100.0,
+        overall_savings
     );
     println!(
-        "\n  Token savings vs raw HTML: {:.1}%",
-        100.0 - overall_ratio
+        "    Top-10 tokens:     {} ({:.1}% of HTML)",
+        total_top10_tokens,
+        total_top10_tokens as f64 / total_html_tokens as f64 * 100.0
     );
     println!();
 
@@ -960,14 +987,19 @@ fn main() {
         avg_tokens
     );
     println!("║                                                                        ║");
-    println!("║  TOKEN EFFICIENCY                                                      ║");
+    println!("║  TOKEN EFFICIENCY (Top-5 vs raw HTML)                                 ║");
+    let top5_ratio = if total_html_tokens > 0 {
+        total_top5_tokens as f64 / total_html_tokens as f64 * 100.0
+    } else {
+        0.0
+    };
     println!(
-        "║    Avg token ratio:  {:>6.1}% of raw HTML                                  ║",
-        overall_ratio
+        "║    Top-5 / HTML:     {:>6.1}%                                               ║",
+        top5_ratio
     );
     println!(
         "║    Token savings:    {:>6.1}%                                               ║",
-        100.0 - overall_ratio
+        overall_savings
     );
     println!("║                                                                        ║");
 

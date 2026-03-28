@@ -143,19 +143,40 @@ it understands which nodes are relevant to your goal.
 LightPanda is a full headless browser — it fetches, renders JS, and dumps the DOM tree.
 It's faster on large pages because it does no semantic analysis.
 
-## Token Efficiency
+## Token Efficiency — The Honest Truth
 
-AetherAgent's semantic tree output vs raw HTML input:
+**AetherAgent's semantic output is LARGER than raw HTML, not smaller.**
 
-| Metric | Value |
-|--------|-------|
-| Avg output/input ratio | 285% |
-| Campfire tokens/parse | ~2,620 |
+| Output type | Tokens (50 fixtures) | vs Raw HTML |
+|-------------|---------------------|-------------|
+| Raw HTML | 17,607 | baseline |
+| Full semantic tree | 50,265 | 285% (2.85x larger) |
+| Top-5 nodes | 46,392 | 263% (2.63x larger) |
+| Top-10 nodes | 96,958 | 551% (5.5x larger) |
+| Campfire per parse | ~2,620 | vs ~1,287 HTML tokens |
 
-> The semantic tree is **larger** than raw HTML because it adds metadata:
-> roles, labels, relevance scores, trust levels, injection warnings.
-> Token savings come from **`diff_semantic_trees`** (not tested here),
-> which achieves 67-99% savings on subsequent parses of the same page.
+### Why is the output larger?
+
+The semantic tree JSON includes metadata per node: `id`, `role`, `label`, `relevance`,
+`state`, `trust`, `value`, `children`, `html_id`, `name`, `bbox`. This is structured
+data that an LLM can understand and act on — but it costs more tokens than raw HTML.
+
+`parse_top_nodes(5)` returns the 5 most relevant top-level nodes **with all their children**,
+which can be entire subtrees. This explains why top-5 is sometimes larger than the full tree
+(the full tree has relevance-based pruning that top-N does not apply to children).
+
+### Where token savings actually come from
+
+Token savings in AetherAgent come from **`diff_semantic_trees`** (Fas 4a), not from
+initial parsing. On repeated parses of the same page (e.g., monitoring for changes),
+the diff is 67-99% smaller than a full tree. This was not tested in this benchmark.
+
+### What the embedding actually provides
+
+The embedding model's value is **not** token reduction — it's **accuracy**.
+It enables AetherAgent to find "Add To Cart" when the goal is "buy product"
+(cosine similarity 0.32) while correctly ignoring "weather forecast" (similarity 0.05).
+This is what LightPanda cannot do at all.
 
 ## What Each Engine Does
 
