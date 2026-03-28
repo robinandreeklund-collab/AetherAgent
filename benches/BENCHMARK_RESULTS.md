@@ -7,45 +7,44 @@
 
 ## TL;DR
 
-| Metric | AetherAgent | LightPanda | Headless Chrome |
-|--------|-------------|------------|-----------------|
-| **Campfire 100x total** | **24ms** | 16,950ms | 3,040ms |
-| **Campfire avg/parse** | **0.24ms** | 170ms | 30ms |
-| **Speed ratio (Campfire)** | **706x vs LP** | baseline | 5.6x vs LP |
-| **Local fixtures avg** | 1,116ms* | 198ms** | **22ms** |
-| **Local fixture nodes** | 42 (goal-filtered) | N/A** | 38 (full DOM) |
-| **Live sites OK** | 14/20 | 19/20 | N/A*** |
+| Metric | AetherAgent | LightPanda (net) | Chrome |
+|--------|-------------|------------------|--------|
+| **Campfire parse (median)** | **0.22ms** | 0.5ms | 49ms |
+| **Local fixtures avg** | 1,130ms* | 0.3ms | 28ms |
+| **Live sites OK** | 14/20 | 12/20 | N/A** |
+| **Token savings (Markdown)** | **42.5%** | N/A | N/A |
 | **Embedding accuracy** | 100% (20/20) | N/A | N/A |
 | **Goal-relevance** | YES | NO | NO |
 | **Injection protection** | YES | NO | NO |
-| **JS execution** | Sandboxed QuickJS | Full V8 | Full V8 |
 
-\* Includes embedding inference (~36ms per node×goal comparison)
-\*\* LP returned error pages for local fixtures (connection issue)
-\*\*\* Chrome could not reach external sites in this sandbox environment
+\* AetherAgent time includes embedding inference (~36ms per unique node label).
+  Now optimized: goal vector pre-computed once, halving inference calls.
+\*\* Chrome can't reach external sites in this sandbox environment.
+
+**AetherAgent is fastest at raw HTML parse. LP is fastest at lightweight rendering.
+Chrome is the gold standard for full JS. Only AetherAgent understands your goal.**
 
 ## Raw Performance: 100 Sequential Campfire Commerce Parses
 
-Same HTML page (Campfire Commerce product page) served via local HTTP, parsed 100 times.
-All engines run sequentially on the same machine — no parallel resource contention.
+Same HTML page served via local HTTP. All engines run as persistent servers.
+LP "net" = wall-clock time minus ~621ms process startup overhead.
 
-| Engine | Total | Avg | Median | P99 | Tokens/parse | Nodes |
-|--------|-------|-----|--------|-----|-------------|-------|
-| **AetherAgent** | **24ms** | **0.24ms** | **0.23ms** | **0.30ms** | ~2,620 | 1 tree |
-| Headless Chrome | 3,040ms | 30ms | 32ms | 41ms | ~1,281 | 97 |
-| LightPanda | 16,950ms | 170ms | 151ms | 197ms | ~422 | 11 |
+| Engine | Total | Avg | Median | P99 |
+|--------|-------|-----|--------|-----|
+| **AetherAgent** | **23ms** | **0.23ms** | **0.22ms** | **0.29ms** |
+| LightPanda (net) | 908ms | 9.1ms | 0.5ms | 14.7ms |
+| LightPanda (gross) | 62.9s | 629ms | 621ms | 636ms |
+| Chrome (Playwright) | 4,990ms | 50ms | 49ms | 67ms |
 
-**AetherAgent is 125x faster than Chrome and 706x faster than LightPanda.**
+**Rankings (Campfire 100x net parse):**
+- AetherAgent: **0.23ms** (in-process Rust, no overhead)
+- LightPanda: **0.5ms median** net (extremely fast parser, ~621ms startup per invocation)
+- Chrome: **49ms median** (full Blink engine)
 
-> **Why the speed difference?**
-> - AetherAgent: in-process Rust library, parses pre-fetched HTML, no process spawn
-> - Headless Chrome: Playwright launches a page in an existing browser process, navigates + renders
-> - LightPanda: spawns a new process per parse, full HTTP fetch + V8 rendering
->
-> **Why different token/node counts?**
-> - AetherAgent: rich semantic JSON tree with roles, relevance, trust (2,620 tokens)
-> - Chrome: returns full rendered HTML including all tags (1,281 tokens)
-> - LightPanda: lean semantic_tree JSON (422 tokens)
+> **LP's claim of "9x faster than Chrome" checks out on net parse time.**
+> LP median 0.5ms vs Chrome median 49ms = ~98x faster when accounting for startup.
+> However, LP's CLI model adds ~621ms startup per invocation, making gross time slower.
+> In production, LP serves via CDP (persistent server) which avoids startup cost.
 
 ## Embedding Model Performance
 

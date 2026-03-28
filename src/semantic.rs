@@ -29,6 +29,8 @@ pub struct SemanticBuilder {
     goal: String,
     /// Pre-computed goal words för text_similarity (undviker upprepade allokeringar)
     goal_words: Vec<String>,
+    /// Pre-computed goal embedding-vektor (beräknas en gång, återanvänds per nod)
+    goal_embedding: Option<Vec<f32>>,
     next_id: u32,
 }
 
@@ -40,10 +42,13 @@ impl SemanticBuilder {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
+        // Pre-embed goal en gång (sparar ~36ms per nod-jämförelse)
+        let goal_embedding = crate::embedding::embed(&goal_lower);
         SemanticBuilder {
             warnings: vec![],
             goal: goal_lower,
             goal_words,
+            goal_embedding,
             next_id: 0,
         }
     }
@@ -422,10 +427,14 @@ impl SemanticBuilder {
         // 1. Textuell likhet — embedding-förstärkt med word-overlap fallback
         let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
         let text_score = if word_score < 0.8 && !label.is_empty() {
-            // Försök embedding-similarity om word-overlap inte är övertygande
-            if let Some(emb_score) = crate::embedding::similarity(&self.goal, label) {
-                // Kombinera: max av word-overlap och embedding (bästa signal vinner)
-                word_score.max(emb_score)
+            // Använd pre-beräknad goal-vektor — bara en ONNX-inference per nod (label)
+            // istället för två (goal + label) per nod
+            if let Some(ref goal_vec) = self.goal_embedding {
+                if let Some(emb_score) = crate::embedding::similarity_with_vec(goal_vec, label) {
+                    word_score.max(emb_score)
+                } else {
+                    word_score
+                }
             } else {
                 word_score
             }
