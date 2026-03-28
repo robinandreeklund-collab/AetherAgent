@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>AppSettings – Notifications</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/profile">Profile</a>
+      <a href="/settings">Settings</a>
+      <a href="/billing">Billing</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Account Settings</h1>
+    <nav aria-label="Settings menu">
+      <a href="/settings/profile">Profile</a>
+      <a href="/settings/security">Security</a>
+      <a href="/settings/notifications" aria-current="page">Notifications</a>
+      <a href="/settings/integrations">Integrations</a>
+    </nav>
+    <section>
+      <h2>Notification Preferences</h2>
+      <form>
+        <label><input type="checkbox" checked /> Product updates</label>
+        <label><input type="checkbox" checked /> Weekly digest</label>
+        <label><input type="checkbox" /> Marketing emails</label>
+        <label><input type="checkbox" checked /> Security alerts</label>
+        <a href="/settings/email-preferences">Manage Email Preferences</a>
+        <p>To stop all emails, visit <a href="/settings/email-preferences#unsubscribe">Email Preferences</a> and select "Unsubscribe from all".</p>
+        <button type="submit">Save changes</button>
+      </form>
+    </section>
+  </main>
+  <footer>
+    <a href="/help">Help Center</a>
+    <a href="/privacy">Privacy Policy</a>
+  </footer>
+</body>
+</html>

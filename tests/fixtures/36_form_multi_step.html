@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>InsureCo – Application Step 2 of 4</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">InsureCo</a>
+      <a href="/products">Insurance Products</a>
+      <a href="/claims">Claims</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Insurance Application</h1>
+    <div class="progress" aria-label="Step 2 of 4">
+      <span class="done">1. Personal Info</span>
+      <span class="current">2. Coverage Options</span>
+      <span>3. Medical History</span>
+      <span>4. Review &amp; Submit</span>
+    </div>
+    <form>
+      <h2>Select Coverage</h2>
+      <label><input type="radio" name="plan" value="basic" /> Basic — $50/month</label>
+      <label><input type="radio" name="plan" value="standard" checked /> Standard — $120/month</label>
+      <label><input type="radio" name="plan" value="premium" /> Premium — $250/month</label>
+      <h2>Add-ons</h2>
+      <label><input type="checkbox" /> Dental coverage (+$30/month)</label>
+      <label><input type="checkbox" /> Vision coverage (+$15/month)</label>
+      <div class="nav-buttons">
+        <button type="button" class="back">Back to Step 1</button>
+        <button type="button" class="next primary">Continue to Step 3</button>
+      </div>
+    </form>
+  </main>
+  <footer>
+    <a href="/faq">FAQ</a>
+    <a href="/contact">Contact Agent</a>
+  </footer>
+</body>
+</html>
