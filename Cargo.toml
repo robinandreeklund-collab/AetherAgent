@@ -124,6 +124,11 @@ path = "benches/token_check.rs"
 required-features = ["embeddings"]
 
 [[bin]]
+name = "aether-token-md-check"
+path = "benches/token_md_check.rs"
+required-features = ["embeddings"]
+
+[[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
 required-features = ["js-eval", "blitz", "fetch"]

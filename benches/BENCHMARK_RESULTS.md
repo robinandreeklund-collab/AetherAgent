@@ -148,40 +148,51 @@ it understands which nodes are relevant to your goal.
 LightPanda is a full headless browser — it fetches, renders JS, and dumps the DOM tree.
 It's faster on large pages because it does no semantic analysis.
 
-## Token Efficiency — The Honest Truth
+## Token Efficiency
 
-**AetherAgent's semantic output is LARGER than raw HTML, not smaller.**
+AetherAgent has two output modes — choose based on use case:
 
-| Output type | Tokens (50 fixtures) | vs Raw HTML |
-|-------------|---------------------|-------------|
-| Raw HTML | 17,607 | baseline |
-| Full semantic tree | 50,265 | 285% (2.85x larger) |
-| Top-5 nodes | 46,392 | 263% (2.63x larger) |
-| Top-10 nodes | 96,958 | 551% (5.5x larger) |
-| Campfire per parse | ~2,620 | vs ~1,287 HTML tokens |
+| Output format | Tokens (10 fixtures) | vs Raw HTML | Use case |
+|---------------|---------------------|-------------|----------|
+| Raw HTML | 5,782 | baseline | — |
+| **Markdown** (`html_to_markdown`) | **4,560** | **21.1% savings** | LLM context (reading, Q&A) |
+| JSON tree (`parse_to_semantic_tree`) | 17,773 | 307% (3x larger) | Agent ops (click, fill, extract) |
+| Top-5 JSON (`parse_top_nodes`) | 21,496 | 372% (larger) | Focused agent actions |
 
-### Why is the output larger?
+### Markdown output: 21-56% token savings
 
-The semantic tree JSON includes metadata per node: `id`, `role`, `label`, `relevance`,
-`state`, `trust`, `value`, `children`, `html_id`, `name`, `bbox`. This is structured
-data that an LLM can understand and act on — but it costs more tokens than raw HTML.
+When the goal is to **send page content to an LLM** (for reading, answering questions,
+summarization), use `html_to_markdown` or `fetch_markdown`. This strips all HTML tags,
+CSS, scripts, and structural noise — keeping only semantic content:
 
-`parse_top_nodes(5)` returns the 5 most relevant top-level nodes **with all their children**,
-which can be entire subtrees. This explains why top-5 is sometimes larger than the full tree
-(the full tree has relevance-based pruning that top-N does not apply to children).
+| Fixture | HTML tokens | Markdown tokens | Savings |
+|---------|-------------|-----------------|---------|
+| campfire_fixture.html | 1,287 | 728 | **43.4%** |
+| 01_ecommerce_product.html | 574 | 355 | **38.2%** |
+| 17_wiki_article.html | 253 | 112 | **55.7%** |
+| 06_news_article.html | 400 | 257 | **35.8%** |
 
-### Where token savings actually come from
+These numbers align with the [analysis report](../docs/aetheragent-analysis-report.md)
+which measured 37-60% savings on real production sites.
 
-Token savings in AetherAgent come from **`diff_semantic_trees`** (Fas 4a), not from
-initial parsing. On repeated parses of the same page (e.g., monitoring for changes),
-the diff is 67-99% smaller than a full tree. This was not tested in this benchmark.
+### JSON tree output: structured agent operations
 
-### What the embedding actually provides
+When the goal is to **perform actions** (click buttons, fill forms, extract data),
+use `parse_to_semantic_tree`. The JSON is larger because it includes metadata per node:
+`id`, `role`, `label`, `relevance`, `state`, `trust`, `action`, `children`.
+This is structured data for programmatic use, not LLM context.
 
-The embedding model's value is **not** token reduction — it's **accuracy**.
+### Additional savings: semantic diff (67-99%)
+
+On repeated parses of the same page, `diff_semantic_trees` returns only changes —
+achieving 67-99% token savings vs a full tree.
+
+### What embedding provides
+
+The embedding model's value is **relevance accuracy**, not compression.
 It enables AetherAgent to find "Add To Cart" when the goal is "buy product"
 (cosine similarity 0.32) while correctly ignoring "weather forecast" (similarity 0.05).
-This is what LightPanda cannot do at all.
+100% accuracy on English semantic pairs. This is what LightPanda cannot do.
 
 ## What Each Engine Does
 
