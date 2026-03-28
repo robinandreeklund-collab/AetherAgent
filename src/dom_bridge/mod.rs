@@ -1662,6 +1662,15 @@ impl JsHandler for CreateDocumentType {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        // Spec: validera qualifiedName — rejekta '>' och whitespace inuti/efter namnet
+        let has_invalid = name.contains('>') || name.contains(' ') || name.contains('\t');
+        if has_invalid {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
+            ));
+        }
         let public_id = args
             .get(1)
             .and_then(|v| v.as_string())
@@ -4343,16 +4352,8 @@ struct CharDataSetter {
 }
 impl JsHandler for CharDataSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let new_val = args
-            .first()
-            .and_then(|v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_string().and_then(|s| s.to_string().ok())
-                }
-            })
-            .unwrap_or_default();
+        // WebIDL DOMString: undefined→"undefined", null→"null", 0→"0" etc.
+        let new_val = js_value_to_dom_string(args.first());
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             node.text = Some(new_val.into());
