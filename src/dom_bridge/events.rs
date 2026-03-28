@@ -52,10 +52,7 @@ impl JsHandler for AddEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let func = match args.get(1).and_then(|v| v.as_function()) {
-            Some(f) => f.clone(),
-            None => return Ok(Value::new_undefined(ctx.clone())),
-        };
+        // Spec: options måste processas INNAN callback-validering (triggers getters)
         let (capture, passive, once) = if let Some(opts) = args.get(2) {
             if let Some(obj) = opts.as_object() {
                 let cap = obj
@@ -86,6 +83,11 @@ impl JsHandler for AddEventListenerHandler {
             }
         } else {
             (false, None, false)
+        };
+        // Hämta callback efter options-processing
+        let func = match args.get(1).and_then(|v| v.as_function()) {
+            Some(f) => f.clone(),
+            None => return Ok(Value::new_undefined(ctx.clone())),
         };
         // Tilldela unik callback_id till funktionen (för removeEventListener-matchning)
         // Function.0 är ett Object — vi kan accessa det via into_value + as_object
@@ -143,12 +145,7 @@ impl JsHandler for RemoveEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        // Hämta callback_id från funktionens __ael_id property
-        let callback_id: Option<u64> = args
-            .get(1)
-            .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get::<_, f64>("__ael_id").ok())
-            .map(|id| id as u64);
+        // Spec: process options FIRST (triggers getters), sen callback
         let capture = if let Some(opts) = args.get(2) {
             if let Some(obj) = opts.as_object() {
                 obj.get::<_, Value>("capture")
@@ -161,6 +158,12 @@ impl JsHandler for RemoveEventListenerHandler {
         } else {
             false
         };
+        // Hämta callback_id från funktionens __ael_id property
+        let callback_id: Option<u64> = args
+            .get(1)
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, f64>("__ael_id").ok())
+            .map(|id| id as u64);
         let key_bits = self
             .override_key
             .unwrap_or(node_key_to_f64(self.key) as u64);

@@ -131,7 +131,16 @@ globalThis.__patchCharacterData = function(n) { return n; };
   if (!impl.createDocument) {
     impl.createDocument = function(namespace, qualifiedName, doctype) {
       var doc = impl.createHTMLDocument('');
-      doc.contentType = namespace ? 'application/xml' : 'text/html';
+      // Sätt contentType baserat på namespace per spec
+      if (namespace === 'http://www.w3.org/1999/xhtml') {
+        doc.contentType = 'application/xhtml+xml';
+      } else if (namespace === 'http://www.w3.org/2000/svg') {
+        doc.contentType = 'image/svg+xml';
+      } else if (namespace) {
+        doc.contentType = 'application/xml';
+      } else {
+        doc.contentType = 'application/xml';
+      }
       return doc;
     };
   }
