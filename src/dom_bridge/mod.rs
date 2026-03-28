@@ -1057,11 +1057,11 @@ impl JsHandler for NativeCreateEvent {
             "progressevent" => "ProgressEvent",
             "messageevent" => "MessageEvent",
             "dragevent" => "DragEvent",
-            "errorevent" => "ErrorEvent",
-            "clipboardevent" => "ClipboardEvent",
-            "animationevent" => "AnimationEvent",
-            "transitionevent" => "TransitionEvent",
             "touchevent" => "TouchEvent",
+            // Legacy aliases per spec — returnerar Event-objekt
+            "devicemotionevent" => "Event",
+            "deviceorientationevent" => "Event",
+            "textevent" => "Event",
             "mutationevent" | "mutationevents" => "Event",
             _ => {
                 return Err(throw_dom_exception(
@@ -1136,8 +1136,9 @@ impl JsHandler for CreateElement {
             .first()
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
-            .unwrap_or_default()
-            .to_lowercase();
+            .unwrap_or_default();
+        // HTML spec: createElement lowercasar BARA ASCII (ej Unicode)
+        let tag = tag.to_ascii_lowercase();
         let key = {
             let mut s = self.state.borrow_mut();
             s.arena.nodes.insert(crate::arena_dom::DomNode {
@@ -1273,9 +1274,20 @@ impl JsHandler for CreateElementNS {
                 "__ns__".to_string(),
                 namespace.as_deref().unwrap_or("").to_string(),
             );
+            // Lagra qualifiedName (prefix:localName) för getElementsByTagName-matchning
+            let qualified_name = if let Some(ref pfx) = prefix {
+                format!("{pfx}:{local_name}")
+            } else {
+                local_name.clone()
+            };
+            // Spara __prefix__ för localName-access
+            if let Some(ref pfx) = prefix {
+                attrs.insert("__prefix__".to_string(), pfx.clone());
+                attrs.insert("__localName__".to_string(), local_name.clone());
+            }
             s.arena.nodes.insert(crate::arena_dom::DomNode {
                 node_type: NodeType::Element,
-                tag: Some(local_name.clone()),
+                tag: Some(qualified_name),
                 attributes: attrs,
                 text: None,
                 parent: None,
@@ -1401,19 +1413,11 @@ impl JsHandler for CreateAttribute {
         // DOMString-konvertering: null→"null", undefined→"undefined"
         let name = js_value_to_dom_string(args.first());
 
-        // Validera namn
+        // Validera namn — per DOM spec: tom sträng → InvalidCharacterError
         if name.is_empty() {
             return Err(
                 ctx.throw(rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into())
             );
-        }
-        // Kontrollera ogiltiga tecken i attributnamn
-        for ch in name.chars() {
-            if matches!(ch, ' ' | '\t' | '\n' | '\r' | '<' | '>' | '&' | '"' | '\'') {
-                return Err(ctx.throw(
-                    rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into(),
-                ));
-            }
         }
 
         // HTML-dokument: lowercase
@@ -1658,6 +1662,15 @@ impl JsHandler for CreateDocumentType {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        // Spec: validera qualifiedName — rejekta '>' och whitespace inuti/efter namnet
+        let has_invalid = name.contains('>') || name.contains(' ') || name.contains('\t');
+        if has_invalid {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
+            ));
+        }
         let public_id = args
             .get(1)
             .and_then(|v| v.as_string())
@@ -1707,11 +1720,20 @@ impl JsHandler for CreateProcessingInstruction {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        if target.is_empty() {
+        // Spec: target måste matcha XML Name-produktionen
+        if !crate::dom_bridge::attributes::is_valid_xml_name(&target) {
             return Err(throw_dom_exception(
                 ctx,
                 "InvalidCharacterError",
-                "InvalidCharacterError: target must not be empty",
+                "InvalidCharacterError: target is not a valid XML Name",
+            ));
+        }
+        // Spec: data får inte innehålla "?>"
+        if data.contains("?>") {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "InvalidCharacterError: data must not contain '?>'",
             ));
         }
         let key = {
@@ -1856,6 +1878,347 @@ impl JsHandler for XmlSerializeNodeHandler {
     }
 }
 
+/// Kontrollera XML well-formedness. Returnerar null (ok) eller felmeddelande (sträng).
+pub(super) struct CheckXmlWellFormedHandler;
+impl JsHandler for CheckXmlWellFormedHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let xml = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        match check_xml_well_formed(&xml) {
+            None => Ok(Value::new_null(ctx.clone())),
+            Some(err) => Ok(rquickjs::String::from_str(ctx.clone(), &err)?.into_value()),
+        }
+    }
+}
+
+/// Enkel XML well-formedness-check. Returnerar None om OK, Some(error) om fel.
+fn check_xml_well_formed(xml: &str) -> Option<String> {
+    // Ta bort DOCTYPE, PI, kommentarer, CDATA
+    let mut cleaned = xml.to_string();
+    // Ta bort DOCTYPE
+    while let Some(start) = cleaned.find("<!DOCTYPE") {
+        if let Some(end) = cleaned[start..].find('>') {
+            cleaned.replace_range(start..start + end + 1, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort PI
+    while let Some(start) = cleaned.find("<?") {
+        if let Some(end) = cleaned[start..].find("?>") {
+            cleaned.replace_range(start..start + end + 2, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort kommentarer
+    while let Some(start) = cleaned.find("<!--") {
+        if let Some(end) = cleaned[start..].find("-->") {
+            cleaned.replace_range(start..start + end + 3, "");
+        } else {
+            break;
+        }
+    }
+    // Ta bort CDATA
+    while let Some(start) = cleaned.find("<![CDATA[") {
+        if let Some(end) = cleaned[start..].find("]]>") {
+            cleaned.replace_range(start..start + end + 3, "");
+        } else {
+            break;
+        }
+    }
+
+    // Ogiltig: < följt av mellanslag
+    if cleaned.contains("< ") {
+        // Kolla att det inte bara är text
+        let idx = cleaned.find("< ").unwrap_or(0);
+        let after = &cleaned[idx + 2..];
+        if after.starts_with('/')
+            || after
+                .chars()
+                .next()
+                .map(|c| c.is_alphabetic())
+                .unwrap_or(false)
+        {
+            return Some("bad start tag".to_string());
+        }
+    }
+    // Ogiltig sluttagg med mellanslag
+    if cleaned.contains("</ ") {
+        return Some("bad end tag".to_string());
+    }
+    // Ofullständig tag (< utan matchande >)
+    if let Some(last_lt) = cleaned.rfind('<') {
+        if cleaned[last_lt..].find('>').is_none() {
+            return Some("unclosed tag".to_string());
+        }
+    }
+    // Dubbelkolon (::)
+    for cap in cleaned.match_indices("::") {
+        // Kontrollera att det är inuti en tag
+        let before = &cleaned[..cap.0];
+        let last_open = before.rfind('<');
+        let last_close = before.rfind('>');
+        if let Some(lo) = last_open {
+            if last_close.is_none() || last_close.unwrap() < lo {
+                return Some("invalid qualified name".to_string());
+            }
+        }
+    }
+
+    // Tag-matchning + attributvalidering
+    let mut stack: Vec<String> = Vec::new();
+    let mut i = 0;
+    let bytes = cleaned.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' && i + 1 < bytes.len() {
+            let is_end = i + 1 < bytes.len() && bytes[i + 1] == b'/';
+            let tag_start = if is_end { i + 2 } else { i + 1 };
+            // Hitta slutet av taggen
+            let tag_end = match cleaned[i..].find('>') {
+                Some(pos) => i + pos,
+                None => return Some("unclosed tag".to_string()),
+            };
+            let tag_content = &cleaned[tag_start..tag_end];
+            // Extrahera tag-namn
+            let name_end = tag_content
+                .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+                .unwrap_or(tag_content.len());
+            let tag_name = &tag_content[..name_end];
+
+            if tag_name.is_empty() && !is_end {
+                // Kan vara `< ` som vi redan kontrollerat
+                i = tag_end + 1;
+                continue;
+            }
+            // Kontrollera att tagnamn är giltigt
+            if !tag_name.is_empty() {
+                let first = tag_name.chars().next().unwrap();
+                if first.is_ascii_digit() {
+                    return Some("tag name starts with digit".to_string());
+                }
+                // Kontrollera : i tagnamn
+                if tag_name.contains(':') {
+                    let parts: Vec<&str> = tag_name.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        if parts[0].is_empty() {
+                            return Some("empty prefix".to_string());
+                        }
+                        if parts[0]
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                        {
+                            return Some("prefix starts with digit".to_string());
+                        }
+                    }
+                }
+            }
+
+            if is_end {
+                // Sluttagg
+                let name = tag_name.trim();
+                if stack.is_empty() || stack.last().map(|s| s.as_str()) != Some(name) {
+                    return Some(format!("mismatched tag: {name}"));
+                }
+                stack.pop();
+            } else {
+                let self_close = tag_content.ends_with('/');
+                // Kontrollera attribut
+                let attr_str = tag_content[name_end..].trim_end_matches('/').trim();
+                if !attr_str.is_empty() {
+                    if let Some(err) = check_xml_attributes(attr_str) {
+                        return Some(err);
+                    }
+                }
+                if !self_close && !tag_name.is_empty() {
+                    stack.push(tag_name.to_string());
+                }
+            }
+            i = tag_end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    if !stack.is_empty() {
+        return Some(format!("unclosed tag: {}", stack.last().unwrap()));
+    }
+    // Kontrollera undeklare namespace-prefix i attribut
+    check_xml_namespace_prefixes(&cleaned)
+}
+
+/// Kontrollera XML-attributsyntax. Returnerar None om OK, Some(error) vid fel.
+fn check_xml_attributes(attr_str: &str) -> Option<String> {
+    let mut s = attr_str.trim();
+    while !s.is_empty() {
+        // Hoppa över whitespace
+        s = s.trim_start();
+        if s.is_empty() {
+            break;
+        }
+        // Kolla att attributnamn börjar med giltigt tecken
+        let first = s.chars().next()?;
+        if first == '=' {
+            return Some("attribute without name".to_string());
+        }
+        if first == ':' {
+            // Tomt prefix (:attr) — ogiltigt i XML
+            return Some("empty attribute prefix".to_string());
+        }
+        if !first.is_alphabetic() && first != '_' {
+            return Some("invalid attribute name".to_string());
+        }
+        // Läs attributnamn
+        let name_end = s
+            .find(|c: char| c.is_whitespace() || c == '=' || c == '/' || c == '>')
+            .unwrap_or(s.len());
+        let attr_name = &s[..name_end];
+        // Kontrollera xmlns: med tomt prefix-namn
+        if attr_name == "xmlns:" || attr_name.starts_with("xmlns:") {
+            let pfx = &attr_name[6..];
+            if pfx.is_empty() {
+                return Some("empty xmlns prefix".to_string());
+            }
+        }
+        s = s[name_end..].trim_start();
+        // Kräv = efter attributnamn
+        if s.is_empty() || !s.starts_with('=') {
+            return Some("attribute without value".to_string());
+        }
+        s = s[1..].trim_start();
+        // Kräv citattecken
+        if s.is_empty() {
+            return Some("attribute without value".to_string());
+        }
+        let quote = s.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return Some("unquoted attribute value".to_string());
+        }
+        // Läs till matchande citattecken
+        s = &s[1..];
+        match s.find(quote) {
+            Some(end) => s = &s[end + 1..],
+            None => return Some("unterminated attribute value".to_string()),
+        }
+    }
+    None
+}
+
+/// Kontrollera att alla namespace-prefix i attribut är deklarerade.
+fn check_xml_namespace_prefixes(xml: &str) -> Option<String> {
+    use std::collections::HashSet;
+    let mut declared: HashSet<String> = HashSet::new();
+    declared.insert("xml".to_string());
+    declared.insert("xmlns".to_string());
+
+    // Samla deklarerade xmlns-prefix
+    // Namespace-prefix valideras nedan
+    // Sök alla xmlns:prefix="..." deklarationer
+    let mut idx = 0;
+    while let Some(pos) = xml[idx..].find("xmlns:") {
+        let prefix_start = idx + pos + 6;
+        let prefix_end = xml[prefix_start..]
+            .find(|c: char| c.is_whitespace() || c == '=')
+            .map(|e| prefix_start + e)
+            .unwrap_or(prefix_start);
+        let prefix = &xml[prefix_start..prefix_end];
+        if !prefix.is_empty() {
+            // Kontrollera att det har ett = och värde
+            let after = xml[prefix_end..].trim_start();
+            if after.starts_with('=') {
+                declared.insert(prefix.to_string());
+            } else {
+                // xmlns:prefix utan = → fel
+                return Some("xmlns without value".to_string());
+            }
+        }
+        // xmlns:xmlns="" → förbjudet
+        if prefix == "xmlns" {
+            let after = xml[prefix_end..].trim_start();
+            if after.starts_with("=\"\"") || after.starts_with("=''") {
+                return Some("reserved xmlns prefix".to_string());
+            }
+        }
+        idx = prefix_end + 1;
+        if idx >= xml.len() {
+            break;
+        }
+    }
+
+    // Kontrollera attribut-prefix
+    // Sök attribut med prefix (name:attr=)
+    let mut idx2 = 0;
+    while idx2 < xml.len() {
+        if let Some(lt) = xml[idx2..].find('<') {
+            let lt_abs = idx2 + lt;
+            if let Some(gt) = xml[lt_abs..].find('>') {
+                let tag = &xml[lt_abs..lt_abs + gt + 1];
+                // Sök prefix:attr= mönster i taggen
+                let mut ti = 0;
+                let tag_bytes = tag.as_bytes();
+                // Hoppa förbi tag-namn
+                while ti < tag_bytes.len()
+                    && tag_bytes[ti] != b' '
+                    && tag_bytes[ti] != b'\t'
+                    && tag_bytes[ti] != b'\n'
+                    && tag_bytes[ti] != b'>'
+                {
+                    ti += 1;
+                }
+                // Sök attribut
+                while ti < tag_bytes.len() {
+                    // Hoppa whitespace
+                    while ti < tag_bytes.len()
+                        && (tag_bytes[ti] == b' '
+                            || tag_bytes[ti] == b'\t'
+                            || tag_bytes[ti] == b'\n')
+                    {
+                        ti += 1;
+                    }
+                    if ti >= tag_bytes.len() || tag_bytes[ti] == b'>' || tag_bytes[ti] == b'/' {
+                        break;
+                    }
+                    // Läs attributnamn
+                    let attr_start = ti;
+                    while ti < tag_bytes.len()
+                        && tag_bytes[ti] != b'='
+                        && tag_bytes[ti] != b' '
+                        && tag_bytes[ti] != b'>'
+                    {
+                        ti += 1;
+                    }
+                    let attr_name = &tag[attr_start..ti];
+                    // Kontrollera prefix
+                    if let Some(colon) = attr_name.find(':') {
+                        let pfx = &attr_name[..colon];
+                        if !pfx.is_empty()
+                            && pfx != "xmlns"
+                            && pfx != "xml"
+                            && !declared.contains(pfx)
+                        {
+                            return Some(format!("undeclared prefix: {pfx}"));
+                        }
+                    }
+                    // Hoppa förbi = och värde
+                    while ti < tag_bytes.len() && tag_bytes[ti] != b' ' && tag_bytes[ti] != b'>' {
+                        ti += 1;
+                    }
+                }
+                idx2 = lt_abs + gt + 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 struct GetSelection;
 impl JsHandler for GetSelection {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
@@ -1953,6 +2316,34 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         doc.set("__nodeKey__", node_key_to_f64(s.arena.document))?;
         doc.set("nodeType", 9)?;
         doc.set("nodeName", "#document")?;
+    }
+
+    // nodeValue — null per spec för Document-noder
+    doc.prop(
+        "nodeValue",
+        rquickjs::object::Accessor::new(JsFn(NullGetter), JsFn(NoOpHandler))
+            .configurable()
+            .enumerable(),
+    )?;
+
+    // textContent — returnerar null per spec för Document-noder
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.prop(
+            "textContent",
+            rquickjs::object::Accessor::new(
+                JsFn(TextContentGetter {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+                JsFn(TextContentSetter {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
     }
 
     // Registrera alla document-metoder
@@ -3015,12 +3406,12 @@ struct GetElementsByTagNameElement {
 }
 impl JsHandler for GetElementsByTagNameElement {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Spec: getElementsByTagName tar INTE lowercase — matchning sker per-element i selectors.rs
         let tag = args
             .first()
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
+            .unwrap_or_default();
         make_live_html_collection(ctx, &self.state, self.key, "tag", &tag)
     }
 }
@@ -3347,21 +3738,27 @@ impl JsHandler for CreateTreeWalker {
         let filter = args.get(2).cloned();
 
         let tw = Object::new(ctx.clone())?;
-        let root_val = args
-            .first()
-            .cloned()
-            .unwrap_or(Value::new_undefined(ctx.clone()));
         let root_obj = make_element_object(ctx, root_key, &self.state)?;
-        tw.set("root", root_val)?;
-        tw.set("whatToShow", what_to_show as f64)?;
-        tw.set("currentNode", root_obj)?;
-        tw.set("__rootKey", node_key_to_f64(root_key))?;
-        tw.set("__whatToShow", what_to_show as f64)?;
         let filter_val = match &filter {
             Some(f) if !f.is_null() && !f.is_undefined() => f.clone(),
             _ => Value::new_null(ctx.clone()),
         };
-        tw.set("filter", filter_val)?;
+        // Readonly-egenskaper: root, whatToShow, filter
+        let setup_code = r#"(function(tw, root, whatToShow, filter) {
+            Object.defineProperty(tw, 'root', { value: root, writable: false, configurable: false });
+            Object.defineProperty(tw, 'whatToShow', { value: whatToShow, writable: false, configurable: false });
+            Object.defineProperty(tw, 'filter', { value: filter, writable: false, configurable: false });
+        })"#;
+        let setup_fn: Function = ctx.eval(setup_code)?;
+        setup_fn.call::<_, Value>((
+            tw.clone(),
+            root_obj.clone(),
+            what_to_show as f64,
+            filter_val,
+        ))?;
+        tw.set("currentNode", root_obj)?;
+        tw.set("__rootKey", node_key_to_f64(root_key))?;
+        tw.set("__whatToShow", what_to_show as f64)?;
 
         // TreeWalker-metoder via JS
         let walker_code = r#"
@@ -3963,22 +4360,35 @@ impl JsHandler for CharDataGetter {
     }
 }
 
+/// Setter för .nodeValue — null → "" (empty), andra värden → DOMString
+struct NodeValueSetter {
+    state: SharedState,
+    key: NodeKey,
+}
+impl JsHandler for NodeValueSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args.first();
+        // nodeValue: null → empty string, undefined → "undefined", annat → DOMString
+        let new_val = match val {
+            Some(v) if v.is_null() => String::new(),
+            _ => js_value_to_dom_string(val),
+        };
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.text = Some(new_val.into());
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 struct CharDataSetter {
     state: SharedState,
     key: NodeKey,
 }
 impl JsHandler for CharDataSetter {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let new_val = args
-            .first()
-            .and_then(|v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_string().and_then(|s| s.to_string().ok())
-                }
-            })
-            .unwrap_or_default();
+        // WebIDL DOMString: undefined→"undefined", null→"null", 0→"0" etc.
+        let new_val = js_value_to_dom_string(args.first());
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             node.text = Some(new_val.into());
@@ -4163,15 +4573,37 @@ impl JsHandler for InnerHTMLSetter {
                 });
                 s.arena.append_child(self.key, text_key);
             } else {
-                // Parsa HTML-fragment och lägg till som barn
-                let rcdom = crate::parser::parse_html(&html_str);
+                // Parsa HTML-fragment (ej fullständigt dokument) — undviker <html>/<head>/<body>-wrapper
+                let context_tag = s
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.tag.as_deref())
+                    .unwrap_or("div")
+                    .to_string();
+                let rcdom = crate::parser::parse_html_fragment(&html_str, &context_tag);
                 let fragment = ArenaDom::from_rcdom(&rcdom);
                 let doc_key = fragment.document;
-                // Kopiera alla barn från fragment till vår nod
-                if let Some(doc_node) = fragment.nodes.get(doc_key) {
-                    for &child in &doc_node.children {
-                        copy_subtree(&fragment, child, self.key, &mut s.arena);
-                    }
+                // html5ever parse_fragment skapar: Document → <html>(wrapper) → content
+                // Vi behöver komma åt content-barnen inuti wrapper-elementet
+                let content_children: Vec<NodeKey> =
+                    if let Some(doc_node) = fragment.nodes.get(doc_key) {
+                        if doc_node.children.len() == 1 {
+                            // Enda barnet = wrapper <html>, ta dess barn
+                            let wrapper_key = doc_node.children[0];
+                            fragment
+                                .nodes
+                                .get(wrapper_key)
+                                .map(|n| n.children.clone())
+                                .unwrap_or_default()
+                        } else {
+                            doc_node.children.clone()
+                        }
+                    } else {
+                        vec![]
+                    };
+                for &child in &content_children {
+                    copy_subtree(&fragment, child, self.key, &mut s.arena);
                 }
             }
             s.mutations.push(std::borrow::Cow::Owned(format!(
@@ -4205,7 +4637,51 @@ pub(super) fn copy_subtree(src: &ArenaDom, src_key: NodeKey, parent: NodeKey, ds
     }
 }
 
+/// Generic attribute getter — returnerar attributvärde eller ""
+struct AttrGetter {
+    state: SharedState,
+    key: NodeKey,
+    attr_name: &'static str,
+}
+impl JsHandler for AttrGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let val = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(self.attr_name))
+            .unwrap_or("")
+            .to_string();
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
+    }
+}
+
+/// Generic attribute setter — sätter attributvärde i arena
+struct AttrSetter {
+    state: SharedState,
+    key: NodeKey,
+    attr_name: &'static str,
+}
+impl JsHandler for AttrSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = js_value_to_dom_string(args.first());
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.attributes.insert(self.attr_name.to_string(), val);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 pub(super) struct NoOpHandler;
+
+struct NullGetter;
+impl JsHandler for NullGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        Ok(Value::new_null(ctx.clone()))
+    }
+}
 impl JsHandler for NoOpHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         Ok(Value::new_undefined(ctx.clone()))
@@ -4266,9 +4742,19 @@ pub(super) fn make_element_object<'js>(
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "html".to_string())
         } else {
-            node.and_then(|n| n.tag.as_ref())
-                .map(|t| t.to_uppercase())
-                .unwrap_or_default()
+            // tagName: uppercase bara för HTML namespace (eller parsade element utan __ns__)
+            let ns = node.and_then(|n| n.get_attr("__ns__"));
+            let is_html_ns = ns.is_none() || ns == Some("http://www.w3.org/1999/xhtml");
+            let raw_tag = node
+                .and_then(|n| n.tag.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            if is_html_ns {
+                raw_tag.to_ascii_uppercase()
+            } else {
+                // Icke-HTML namespace: bevara case som-den-är
+                raw_tag
+            }
         };
         let id = node
             .and_then(|n| n.get_attr("id"))
@@ -4319,6 +4805,23 @@ pub(super) fn make_element_object<'js>(
         _ => tag_name.clone(),
     };
     obj.set("nodeName", node_name.as_str())?;
+    // localName — sätts för alla element/PI-noder
+    if node_type_val == 1 || node_type_val == 7 {
+        let local_name = {
+            let s = state.borrow();
+            let node = s.arena.nodes.get(key);
+            // createElementNS sparar __localName__ som internt attribut
+            node.and_then(|n| n.get_attr("__localName__"))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // Vanliga element: tag = localName (redan lowercase)
+                    node.and_then(|n| n.tag.as_deref())
+                        .unwrap_or("")
+                        .to_string()
+                })
+        };
+        obj.set("localName", local_name.as_str())?;
+    }
     // ownerDocument — lazy getter som hämtar document från globals vid anrop
     // Löser timing: body/head/documentElement skapas innan document registreras.
     if node_type_val != 9 {
@@ -4327,8 +4830,65 @@ pub(super) fn make_element_object<'js>(
             Accessor::new_get(JsFn(OwnerDocumentGetter)).configurable(),
         )?;
     }
-    obj.set("id", id_val.as_str())?;
-    obj.set("className", class_val.as_str())?;
+    // id och className som live accessors (läser/skriver via arena)
+    if node_type_val == 1 {
+        obj.prop(
+            "id",
+            rquickjs::object::Accessor::new(
+                JsFn(AttrGetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "id",
+                }),
+                JsFn(AttrSetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "id",
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+        obj.prop(
+            "className",
+            rquickjs::object::Accessor::new(
+                JsFn(AttrGetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "class",
+                }),
+                JsFn(AttrSetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "class",
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    } else {
+        obj.set("id", id_val.as_str())?;
+        obj.set("className", class_val.as_str())?;
+    }
+    // namespaceURI, prefix — sätts för element-noder som inte redan har dem (createElementNS sätter egna)
+    if node_type_val == 1 {
+        let has_ns = {
+            let s = state.borrow();
+            s.arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("__ns__"))
+                .is_some()
+        };
+        if !has_ns {
+            // HTML-parsade element: XHTML namespace, prefix = null
+            obj.set(
+                "namespaceURI",
+                rquickjs::String::from_str(ctx.clone(), "http://www.w3.org/1999/xhtml")?,
+            )?;
+            obj.set("prefix", Value::new_null(ctx.clone()))?;
+        }
+    }
     // baseURI per DOM spec (alla noder ärver document.baseURI)
     obj.set("baseURI", "about:blank")?;
 
@@ -4356,21 +4916,26 @@ pub(super) fn make_element_object<'js>(
     // nodeValue + data: live getter/setter för Text/Comment/PI, null för övriga
     match node_type_val {
         1 | 9 | 10 | 11 => {
-            obj.set("nodeValue", Value::new_null(ctx.clone()))?;
+            // nodeValue: getter → null, setter → no-op (per spec)
+            obj.prop(
+                "nodeValue",
+                rquickjs::object::Accessor::new(JsFn(NullGetter), JsFn(NoOpHandler))
+                    .configurable()
+                    .enumerable(),
+            )?;
         }
         3 | 7 | 8 => {
             // Text(3)/PI(7)/Comment(8) — live getter/setter för nodeValue och data
-            let nv_get_state = Rc::clone(state);
-            let nv_set_state = Rc::clone(state);
+            // nodeValue: null → "" (per spec: DOMString? setter)
             obj.prop(
                 "nodeValue",
                 rquickjs::object::Accessor::new(
                     JsFn(CharDataGetter {
-                        state: nv_get_state,
+                        state: Rc::clone(state),
                         key,
                     }),
-                    JsFn(CharDataSetter {
-                        state: nv_set_state,
+                    JsFn(NodeValueSetter {
+                        state: Rc::clone(state),
                         key,
                     }),
                 )
@@ -4688,6 +5253,19 @@ pub(super) fn make_element_object<'js>(
             Function::new(
                 ctx.clone(),
                 JsFn(ReplaceData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+    }
+    // Text-specifika metoder: splitText, wholeText
+    if node_type_val == 3 {
+        obj.set(
+            "splitText",
+            Function::new(
+                ctx.clone(),
+                JsFn(SplitText {
                     state: Rc::clone(state),
                     key,
                 }),

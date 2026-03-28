@@ -41,6 +41,15 @@ globalThis.__patchCharacterData = function(n) { return n; };
       doc.nodeName = '#document';
       doc.nodeValue = null;
       doc.documentElement = html;
+      // Skapa doctype-nod (lazy — sätts efter doc är klar)
+      try {
+        if (document.__createDocumentType) {
+          var dt = document.__createDocumentType('html', '', '');
+          doc.doctype = dt;
+        }
+      } catch(e) {
+        doc.doctype = null;
+      }
       doc.head = head;
       doc.body = body;
       doc.title = (title === null) ? 'null' : (title || '');
@@ -122,7 +131,16 @@ globalThis.__patchCharacterData = function(n) { return n; };
   if (!impl.createDocument) {
     impl.createDocument = function(namespace, qualifiedName, doctype) {
       var doc = impl.createHTMLDocument('');
-      doc.contentType = namespace ? 'application/xml' : 'text/html';
+      // Sätt contentType baserat på namespace per spec
+      if (namespace === 'http://www.w3.org/1999/xhtml') {
+        doc.contentType = 'application/xhtml+xml';
+      } else if (namespace === 'http://www.w3.org/2000/svg') {
+        doc.contentType = 'image/svg+xml';
+      } else if (namespace) {
+        doc.contentType = 'application/xml';
+      } else {
+        doc.contentType = 'application/xml';
+      }
       return doc;
     };
   }
@@ -195,11 +213,11 @@ globalThis.__patchCharacterData = function(n) { return n; };
 // Registrerad som NativeCreateEvent i register_document().
 
 // ─── node.ownerDocument ─────────────────────────────────────────────────────
-// WPT-tester kontrollerar ofta att noder hör till rätt dokument
+// OwnerDocumentGetter finns i Rust, men JS-wrappers behövs fortfarande
+// för att patcha element som skapas via polyfill-skapade dokument.
 (function() {
   if (typeof document === 'undefined') return;
 
-  // Patcha createElement så att returnerade element har ownerDocument
   var _origCreateElement = document.createElement;
   if (_origCreateElement) {
     document.createElement = function(tag) {
@@ -210,15 +228,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          el.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return el;
     };
   }
 
-  // Patcha createTextNode
   var _origCreateTextNode = document.createTextNode;
   if (_origCreateTextNode) {
     document.createTextNode = function(text) {
@@ -229,15 +244,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return node;
     };
   }
 
-  // Patcha createComment
   var _origCreateComment = document.createComment;
   if (_origCreateComment) {
     document.createComment = function(text) {
@@ -248,15 +260,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return node;
     };
   }
 
-  // Patcha createDocumentFragment
   var _origCreateFragment = document.createDocumentFragment;
   if (_origCreateFragment) {
     document.createDocumentFragment = function() {
@@ -267,9 +276,7 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          frag.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return frag;
     };
@@ -493,15 +500,13 @@ globalThis.__patchCharacterData = function(n) { return n; };
       }
     }
 
-    // id, className — måste skriva tillbaka till arena via setAttribute
+    // id, className — Rust sätter native accessors, men polyfill behövs för __patchChildNode-skapade element
     if (el.nodeType === 1 && el.setAttribute) {
-      var _origId = el.id || '';
       Object.defineProperty(el, 'id', {
         get: function() { return this.getAttribute('id') || ''; },
         set: function(v) { this.setAttribute('id', v); },
         configurable: true
       });
-      var _origClass = el.className || '';
       Object.defineProperty(el, 'className', {
         get: function() { return this.getAttribute('class') || ''; },
         set: function(v) { this.setAttribute('class', v); },
@@ -509,13 +514,11 @@ globalThis.__patchCharacterData = function(n) { return n; };
       });
     }
 
-    // prefix, namespaceURI, localName — HTML-element har aldrig prefix/namespace
+    // prefix, namespaceURI, localName — Rust sätter native, polyfill för __patchChildNode
     if (el.nodeType === 1) {
       if (!('prefix' in el)) el.prefix = null;
       if (!('namespaceURI' in el)) el.namespaceURI = 'http://www.w3.org/1999/xhtml';
-      if (!('localName' in el)) {
-        el.localName = (el.tagName || '').toLowerCase();
-      }
+      if (!('localName' in el)) el.localName = (el.tagName || '').toLowerCase();
     }
 
     // toggleAttribute — nu Rust-native i dom_bridge.rs
@@ -595,8 +598,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
   globalThis.Document.prototype = _origDocProto;
   globalThis.Document.prototype.constructor = globalThis.Document;
 
-  // XMLDocument — alias
-  globalThis.XMLDocument = globalThis.Document;
+  // XMLDocument — separat konstruktor (INTE subclass av Document)
+  // DOMParser spec: parseFromString returnerar Document, INTE XMLDocument
+  // Så instanceof XMLDocument === false för DOMParser-resultat
+  globalThis.XMLDocument = function XMLDocument() {};
+  globalThis.XMLDocument.prototype = {};
+  globalThis.XMLDocument.prototype.constructor = globalThis.XMLDocument;
 })();
 
 // ─── Patcha document.body/head/documentElement (pre-cache-skapade) ───────────
@@ -767,12 +774,18 @@ globalThis.__patchCharacterData = function(n) { return n; };
     }
   });
 
+  // Patcha document.implementation prototype för instanceof DOMImplementation
+  if (typeof document !== 'undefined' && document.implementation && globalThis.DOMImplementation) {
+    try { Object.setPrototypeOf(document.implementation, DOMImplementation.prototype); } catch(e) {}
+  }
+
   // ─── setPrototypeOf på element-objekt ─────────────────────────────
   // make_element_object skapar plain objects — vi patchas via __patchProto
   globalThis.__tagToConstructor = tagMap;
   globalThis.__patchPrototype = function(el) {
-    if (!el || typeof el !== 'object' || !el.tagName) return el;
+    if (!el || typeof el !== 'object') return el;
     var nt = el.nodeType;
+    if (!nt) return el;
     var proto = null;
     if (nt === 1) {
       // Element — välj via tagName

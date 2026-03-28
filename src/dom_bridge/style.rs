@@ -116,34 +116,45 @@ impl JsHandler for ClassListToggle {
         if has_force {
             let mut s = self.state.borrow_mut();
             if force {
-                if let Some(node) = s.arena.nodes.get_mut(self.key) {
-                    let current = node.get_attr("class").unwrap_or("").to_string();
-                    // Ordered set: dedup + append om saknas
-                    let mut seen = std::collections::HashSet::new();
-                    let mut classes: Vec<&str> = current
-                        .split_whitespace()
-                        .filter(|c| seen.insert(*c))
-                        .collect();
-                    if !classes.contains(&cls.as_str()) {
-                        classes.push(&cls);
+                // toggle(token, true): om token finns i ordered set → no-op
+                // om ej → kör "ordered set" add (deduplicate + normalize + append)
+                let current = s
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .map(|n| n.get_attr("class").unwrap_or("").to_string())
+                    .unwrap_or_default();
+                let mut seen = std::collections::HashSet::new();
+                let unique: Vec<&str> = current
+                    .split_whitespace()
+                    .filter(|c| seen.insert(*c))
+                    .collect();
+                if !unique.contains(&cls.as_str()) {
+                    // Token saknas — lägg till och normalisera (ordered set serializer)
+                    let mut result = unique;
+                    result.push(&cls);
+                    if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                        node.attributes
+                            .insert("class".to_string(), result.join(" "));
                     }
-                    node.attributes
-                        .insert("class".to_string(), classes.join(" "));
                 }
+                // Om token redan finns → ändra INTE attributet
                 return Ok(Value::new_bool(ctx.clone(), true));
             }
-            // force=false → ta bort token om den finns, annars no-op
+            // force=false → ta bort ALLA förekomster, normalisera resten
             if let Some(node) = s.arena.nodes.get_mut(self.key) {
                 let current = node.get_attr("class").unwrap_or("").to_string();
                 let has_token = current.split_whitespace().any(|c| c == cls);
                 if has_token {
-                    // Per spec: kör "ordered set remove" — normaliserar
-                    let new_cls: Vec<&str> =
-                        current.split_whitespace().filter(|&c| c != cls).collect();
+                    // Ordered set remove: ta bort token, deduplicate resten
+                    let mut seen = std::collections::HashSet::new();
+                    let new_cls: Vec<&str> = current
+                        .split_whitespace()
+                        .filter(|&c| c != cls && seen.insert(c))
+                        .collect();
                     node.attributes
                         .insert("class".to_string(), new_cls.join(" "));
                 }
-                // Om token inte fanns, skriv INTE (bevarar whitespace)
             }
             return Ok(Value::new_bool(ctx.clone(), false));
         }

@@ -856,7 +856,8 @@ pub(super) fn find_all_by_class(
     }
 }
 
-/// Samla alla element med given tagg
+/// Samla alla element med given tagg bland ättlingar (exkluderar root).
+/// I HTML-dokument matchar getElementsByTagName bara element i HTML namespace.
 pub(super) fn find_all_by_tag(
     arena: &ArenaDom,
     key: NodeKey,
@@ -867,18 +868,47 @@ pub(super) fn find_all_by_tag(
         Some(n) => n,
         None => return,
     };
-    if node.node_type == NodeType::Element
-        && (tag == "*"
-            || node
-                .tag
-                .as_deref()
-                .is_some_and(|t| t.eq_ignore_ascii_case(tag)))
-    {
-        results.push(key);
+    // Starta från barnens barn (root exkluderas per spec)
+    let children: Vec<NodeKey> = node.children.clone();
+    for child in children {
+        find_all_by_tag_recursive(arena, child, tag, results);
+    }
+}
+
+fn find_all_by_tag_recursive(
+    arena: &ArenaDom,
+    key: NodeKey,
+    tag: &str,
+    results: &mut Vec<NodeKey>,
+) {
+    let node = match arena.nodes.get(key) {
+        Some(n) => n,
+        None => return,
+    };
+    if node.node_type == NodeType::Element {
+        if tag == "*" {
+            // Wildcard matchar alla element oavsett namespace
+            results.push(key);
+        } else {
+            let node_ns = get_node_namespace(node);
+            let is_html_ns = node_ns == "http://www.w3.org/1999/xhtml";
+            if is_html_ns {
+                // HTML namespace: input ASCII-lowercasas, jämför exakt mot elementets qualifiedName
+                let tag_lower = tag.to_ascii_lowercase();
+                if node.tag.as_deref().is_some_and(|t| t == tag_lower) {
+                    results.push(key);
+                }
+            } else {
+                // Icke-HTML namespace: case-sensitive exakt match mot original input
+                if node.tag.as_deref().is_some_and(|t| t == tag) {
+                    results.push(key);
+                }
+            }
+        }
     }
     let children: Vec<NodeKey> = node.children.clone();
     for child in children {
-        find_all_by_tag(arena, child, tag, results);
+        find_all_by_tag_recursive(arena, child, tag, results);
     }
 }
 
@@ -932,7 +962,16 @@ fn find_all_by_tag_ns_recursive(
     if node.node_type == NodeType::Element {
         let node_ns = get_node_namespace(node);
         let ns_match = ns == "*" || node_ns == ns;
-        let local_match = local_name == "*" || node.tag.as_deref().is_some_and(|t| t == local_name);
+        let local_match = local_name == "*"
+            || node.tag.as_deref().is_some_and(|t| {
+                // Jämför mot localName (efter : om prefix finns)
+                let node_local = if let Some(colon) = t.find(':') {
+                    &t[colon + 1..]
+                } else {
+                    t
+                };
+                node_local == local_name
+            });
         if ns_match && local_match {
             results.push(key);
         }

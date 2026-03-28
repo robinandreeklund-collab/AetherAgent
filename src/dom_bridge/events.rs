@@ -52,10 +52,7 @@ impl JsHandler for AddEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let func = match args.get(1).and_then(|v| v.as_function()) {
-            Some(f) => f.clone(),
-            None => return Ok(Value::new_undefined(ctx.clone())),
-        };
+        // Spec: options måste processas INNAN callback-validering (triggers getters)
         let (capture, passive, once) = if let Some(opts) = args.get(2) {
             if let Some(obj) = opts.as_object() {
                 let cap = obj
@@ -86,6 +83,31 @@ impl JsHandler for AddEventListenerHandler {
             }
         } else {
             (false, None, false)
+        };
+        // Hämta callback: kan vara Function ELLER object med handleEvent-metod
+        let listener_val = args.get(1);
+        let func = if let Some(f) = listener_val.and_then(|v| v.as_function()) {
+            f.clone()
+        } else if let Some(obj) = listener_val.and_then(|v| v.as_object()) {
+            // Wrap handleEvent-object i en funktion som anropar obj.handleEvent(evt)
+            // Per spec: this ska vara objektet, och handleEvent hämtas vid dispatch (inte vid registration)
+            let wrapper_code = r#"(function(listenerObj) { return function(evt) { var h = listenerObj.handleEvent; if (typeof h === 'function') h.call(listenerObj, evt); }; })"#;
+            let wrapper_fn: Function = ctx.eval(wrapper_code)?;
+            let result: Value = wrapper_fn.call((obj.clone(),))?;
+            match result.as_function() {
+                Some(f) => {
+                    // Kopiera __ael_id från originalobjektet till wrappern
+                    if let Ok(id) = obj.get::<_, f64>("__ael_id") {
+                        if let Some(fo) = result.as_object() {
+                            let _ = fo.set("__ael_id", id);
+                        }
+                    }
+                    f.clone()
+                }
+                None => return Ok(Value::new_undefined(ctx.clone())),
+            }
+        } else {
+            return Ok(Value::new_undefined(ctx.clone()));
         };
         // Tilldela unik callback_id till funktionen (för removeEventListener-matchning)
         // Function.0 är ett Object — vi kan accessa det via into_value + as_object
@@ -143,12 +165,7 @@ impl JsHandler for RemoveEventListenerHandler {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        // Hämta callback_id från funktionens __ael_id property
-        let callback_id: Option<u64> = args
-            .get(1)
-            .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get::<_, f64>("__ael_id").ok())
-            .map(|id| id as u64);
+        // Spec: process options FIRST (triggers getters), sen callback
         let capture = if let Some(opts) = args.get(2) {
             if let Some(obj) = opts.as_object() {
                 obj.get::<_, Value>("capture")
@@ -161,6 +178,12 @@ impl JsHandler for RemoveEventListenerHandler {
         } else {
             false
         };
+        // Hämta callback_id från funktionens __ael_id property
+        let callback_id: Option<u64> = args
+            .get(1)
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, f64>("__ael_id").ok())
+            .map(|id| id as u64);
         let key_bits = self
             .override_key
             .unwrap_or(node_key_to_f64(self.key) as u64);
@@ -186,7 +209,18 @@ pub(super) struct DispatchEventHandler {
 }
 impl JsHandler for DispatchEventHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let event_obj = args.first().and_then(|v| v.as_object());
+        // Spec: dispatchEvent(null) kastar TypeError
+        let first = args.first();
+        if first.is_none() || first.is_some_and(|v| v.is_null() || v.is_undefined()) {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "TypeError: Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'.",
+                )?
+                .into(),
+            ));
+        }
+        let event_obj = first.and_then(|v| v.as_object());
         let event_type = event_obj
             .and_then(|obj| obj.get::<_, String>("type").ok())
             .unwrap_or_default();
@@ -572,18 +606,60 @@ pub(super) struct ClickHandler {
 }
 impl JsHandler for ClickHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        // Skapa element och dispatcha via global helper
-        let elem = make_element_object(ctx, self.key, &self.state)?;
-        let code = r#"
-        (function(el) {
-            if (el && el.dispatchEvent) {
-                var evt = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
-                el.dispatchEvent(evt);
-            }
-        })
-        "#;
-        let f: Function = ctx.eval(code)?;
-        let _ = f.call::<_, Value>((elem,));
+        // Kolla om det är en checkbox/radio — toggle checked + dispatcha input/change
+        let (is_checkbox, is_radio) = {
+            let s = self.state.borrow();
+            let node = s.arena.nodes.get(self.key);
+            let input_type = node
+                .and_then(|n| n.tag.as_deref())
+                .filter(|t| t.eq_ignore_ascii_case("input"))
+                .and_then(|_| node.and_then(|n| n.get_attr("type")))
+                .unwrap_or("");
+            (input_type == "checkbox", input_type == "radio")
+        };
+
+        if is_checkbox || is_radio {
+            // Dispatcha click, toggle checked om ej cancelled, sen input/change
+            let key_f64 = node_key_to_f64(self.key);
+            let elem = make_element_object(ctx, self.key, &self.state)?;
+            let code = r#"
+            (function(el, keyF64, isRadio) {
+                if (!el || !el.dispatchEvent) return;
+                var click = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
+                var cancelled = !el.dispatchEvent(click);
+                if (!cancelled) {
+                    // Toggle checked efter lyckad dispatch
+                    if (isRadio) {
+                        el.checked = true;
+                    } else {
+                        el.checked = !el.checked;
+                    }
+                    // Spec: input/change bara om elementet är kopplat till document
+                    var connected = false;
+                    try { var n = el; while(n) { if (n.nodeType === 9) { connected = true; break; } n = n.parentNode; } } catch(e) {}
+                    if (connected) {
+                        el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                        el.dispatchEvent(new Event('change', {bubbles:true}));
+                    }
+                }
+            })
+            "#;
+            let f: Function = ctx.eval(code)?;
+            let _ = f.call::<_, Value>((elem, key_f64, is_radio));
+        } else {
+            // Vanligt click utan activation behavior
+            let elem = make_element_object(ctx, self.key, &self.state)?;
+            let code = r#"
+            (function(el) {
+                if (el && el.dispatchEvent) {
+                    var evt = new PointerEvent('click', {bubbles:true, cancelable:true, composed:true, pointerId:-1, pointerType:''});
+                    el.dispatchEvent(evt);
+                }
+            })
+            "#;
+            let f: Function = ctx.eval(code)?;
+            let _ = f.call::<_, Value>((elem,));
+        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }

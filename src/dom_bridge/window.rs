@@ -6,17 +6,79 @@ use rquickjs::{object::Accessor, Ctx, Function, Object, Value};
 
 use crate::event_loop::{JsFn, JsHandler};
 
-use super::events::{
-    self, AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler,
-};
+use super::events::{self, AddEventListenerHandler, RemoveEventListenerHandler};
 use super::state::SharedState;
 use super::style::kebab_to_camel;
 use super::utils::{get_tag_style_defaults, parse_inline_styles, parse_media_query_matches};
 #[cfg(feature = "blitz")]
 use super::{build_blitz_computed_styles, map_blitz_styles_to_arena};
 use super::{
-    extract_node_key, node_key_to_f64, GetSelectionFromDoc, NoOpHandler, XmlSerializeNodeHandler,
+    extract_node_key, node_key_to_f64, CheckXmlWellFormedHandler, GetSelectionFromDoc, NoOpHandler,
+    XmlSerializeNodeHandler,
 };
+
+/// Window.dispatchEvent — dispatchar event med WINDOW_EVENT_KEY som target
+/// så att window-registrerade listeners hittas vid AT_TARGET.
+struct WindowDispatchEvent {
+    state: SharedState,
+}
+impl JsHandler for WindowDispatchEvent {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Validera null/undefined argument
+        let first = args.first();
+        if first.is_none() || first.is_some_and(|v| v.is_null() || v.is_undefined()) {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "TypeError: Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'.",
+                )?
+                .into(),
+            ));
+        }
+        // Kör listeners registrerade under WINDOW_EVENT_KEY direkt (AT_TARGET)
+        let event_type = first
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, String>("type").ok())
+            .unwrap_or_default();
+        let event_val = first.cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+        // Sätt target = window
+        if let Some(ev) = event_val.as_object() {
+            let win_val: Value = ctx
+                .eval("window")
+                .unwrap_or(Value::new_undefined(ctx.clone()));
+            let _ = ev.set("target", win_val.clone());
+            let _ = ev.set("currentTarget", win_val);
+            let _ = ev.set("eventPhase", 2i32); // AT_TARGET
+        }
+        let mut default_prevented = false;
+        // Kör matchande window-listeners (clone Persistent för att undvika borrow-issue)
+        let callbacks: Vec<_> = {
+            let s = self.state.borrow();
+            s.event_listeners
+                .get(&events::WINDOW_EVENT_KEY)
+                .map(|listeners| {
+                    listeners
+                        .iter()
+                        .filter(|l| l.event_type == event_type)
+                        .map(|l| l.callback.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for cb in callbacks {
+            if let Ok(func) = cb.restore(ctx) {
+                let _ = func.call::<_, Value>((event_val.clone(),));
+            }
+        }
+        // Kolla defaultPrevented
+        if let Some(ev) = event_val.as_object() {
+            default_prevented = ev.get::<_, bool>("defaultPrevented").unwrap_or(false);
+            let _ = ev.set("eventPhase", 0i32);
+            let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
+        }
+        Ok(Value::new_bool(ctx.clone(), !default_prevented))
+    }
+}
 
 pub(super) struct GetComputedStyleHandler {
     state: SharedState,
@@ -301,6 +363,17 @@ pub(super) fn register_window_with_viewport<'js>(
         )?,
     )?;
 
+    // __checkXmlWellFormed — kontrollera XML well-formedness, returnerar null eller felmeddelande
+    // Registrera på BÅDE window OCH globals (globalThis) så DOMParser kan hitta den
+    win.set(
+        "__checkXmlWellFormed",
+        Function::new(ctx.clone(), JsFn(CheckXmlWellFormedHandler))?,
+    )?;
+    ctx.globals().set(
+        "__checkXmlWellFormed",
+        Function::new(ctx.clone(), JsFn(CheckXmlWellFormedHandler))?,
+    )?;
+
     // addEventListener / removeEventListener / dispatchEvent på window
     {
         // Window-listeners lagras med WINDOW_EVENT_KEY, separat från document
@@ -331,9 +404,8 @@ pub(super) fn register_window_with_viewport<'js>(
             "dispatchEvent",
             Function::new(
                 ctx.clone(),
-                JsFn(DispatchEventHandler {
+                JsFn(WindowDispatchEvent {
                     state: Rc::clone(&state),
-                    key: doc_key,
                 }),
             )?,
         )?;
@@ -628,7 +700,21 @@ pub(super) fn register_window_with_viewport<'js>(
             this._returnValue = true;
             Object.defineProperty(this, 'returnValue', {
                 get: function() { return this._returnValue; },
-                set: function(v) { if (!v && this.cancelable && !this.__passive) { this.defaultPrevented = true; } this._returnValue = v; },
+                set: function(v) {
+                    if (!v) {
+                        // returnValue=false: sätt canceled flag bara om cancelable
+                        if (this.cancelable && !this.__passive) {
+                            this.defaultPrevented = true;
+                            this._returnValue = false;
+                        }
+                        // Om ej cancelable: ignorera (returnValue förblir true)
+                    } else {
+                        // returnValue=true: har ingen effekt om redan canceled
+                        if (!this.defaultPrevented) {
+                            this._returnValue = true;
+                        }
+                    }
+                },
                 configurable: true, enumerable: true
             });
             this.timeStamp = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -679,8 +765,9 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // Node-konstanter
             var nc = {ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,
+                ENTITY_REFERENCE_NODE:5,ENTITY_NODE:6,
                 PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,
-                DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,
+                DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,NOTATION_NODE:12,
                 DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,
                 DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,
                 DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
@@ -987,11 +1074,14 @@ pub(super) fn register_window_with_viewport<'js>(
         NodeFilter.SHOW_ATTRIBUTE = 0x2;
         NodeFilter.SHOW_TEXT = 0x4;
         NodeFilter.SHOW_CDATA_SECTION = 0x8;
+        NodeFilter.SHOW_ENTITY_REFERENCE = 0x10;
+        NodeFilter.SHOW_ENTITY = 0x20;
         NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
         NodeFilter.SHOW_COMMENT = 0x80;
         NodeFilter.SHOW_DOCUMENT = 0x100;
         NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
         NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
+        NodeFilter.SHOW_NOTATION = 0x800;
 
         // ─── Range API (native, flyttad från polyfills.js) ────────────────────
         globalThis.__liveRanges = [];
@@ -1287,6 +1377,7 @@ pub(super) fn register_window_with_viewport<'js>(
                     type !== 'image/svg+xml') {
                     throw new TypeError("Invalid MIME type: " + type);
                 }
+                var isXml = type && type !== 'text/html';
                 // Skapa en ny document via createHTMLDocument eller fallback
                 var newDoc;
                 if (document.implementation && document.implementation.createHTMLDocument) {
@@ -1306,7 +1397,25 @@ pub(super) fn register_window_with_viewport<'js>(
                     newDoc.documentElement.appendChild(newDoc.head);
                     newDoc.documentElement.appendChild(newDoc.body);
                 }
-                if (str && newDoc.documentElement) {
+                // XML well-formedness check via Rust
+                if (isXml && str) {
+                    var xmlErr = null;
+                    if (typeof __checkXmlWellFormed === 'function') {
+                        xmlErr = __checkXmlWellFormed(str);
+                    }
+                    if (xmlErr) {
+                        // Parsererror: sätt som enda barn till documentElement
+                        if (newDoc.documentElement) {
+                            newDoc.documentElement.innerHTML = '';
+                            var pe = newDoc.createElement('parsererror');
+                            pe.namespaceURI = 'http://www.mozilla.org/newlayout/xml/parsererror.xml';
+                            pe.textContent = 'XML Parsing Error: ' + xmlErr;
+                            newDoc.documentElement.appendChild(pe);
+                        }
+                    } else if (str && newDoc.documentElement) {
+                        newDoc.documentElement.innerHTML = str;
+                    }
+                } else if (str && newDoc.documentElement) {
                     newDoc.documentElement.innerHTML = str;
                 }
                 // Spec-krävda properties
@@ -1336,6 +1445,10 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                 }
                 newDoc.styleSheets = sheets;
+                // DOMParser spec: returnerar Document (INTE XMLDocument)
+                if (globalThis.Document && globalThis.Document.prototype) {
+                    try { Object.setPrototypeOf(newDoc, globalThis.Document.prototype); } catch(e) {}
+                }
                 return newDoc;
             };
         };
