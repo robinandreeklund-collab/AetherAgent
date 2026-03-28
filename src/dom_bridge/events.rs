@@ -84,10 +84,30 @@ impl JsHandler for AddEventListenerHandler {
         } else {
             (false, None, false)
         };
-        // Hämta callback efter options-processing
-        let func = match args.get(1).and_then(|v| v.as_function()) {
-            Some(f) => f.clone(),
-            None => return Ok(Value::new_undefined(ctx.clone())),
+        // Hämta callback: kan vara Function ELLER object med handleEvent-metod
+        let listener_val = args.get(1);
+        let func = if let Some(f) = listener_val.and_then(|v| v.as_function()) {
+            f.clone()
+        } else if let Some(obj) = listener_val.and_then(|v| v.as_object()) {
+            // Wrap handleEvent-object i en funktion som anropar obj.handleEvent(evt)
+            // Per spec: this ska vara objektet, och handleEvent hämtas vid dispatch (inte vid registration)
+            let wrapper_code = r#"(function(listenerObj) { return function(evt) { var h = listenerObj.handleEvent; if (typeof h === 'function') h.call(listenerObj, evt); }; })"#;
+            let wrapper_fn: Function = ctx.eval(wrapper_code)?;
+            let result: Value = wrapper_fn.call((obj.clone(),))?;
+            match result.as_function() {
+                Some(f) => {
+                    // Kopiera __ael_id från originalobjektet till wrappern
+                    if let Ok(id) = obj.get::<_, f64>("__ael_id") {
+                        if let Some(fo) = result.as_object() {
+                            let _ = fo.set("__ael_id", id);
+                        }
+                    }
+                    f.clone()
+                }
+                None => return Ok(Value::new_undefined(ctx.clone())),
+            }
+        } else {
+            return Ok(Value::new_undefined(ctx.clone()));
         };
         // Tilldela unik callback_id till funktionen (för removeEventListener-matchning)
         // Function.0 är ett Object — vi kan accessa det via into_value + as_object
@@ -614,8 +634,13 @@ impl JsHandler for ClickHandler {
                     } else {
                         el.checked = !el.checked;
                     }
-                    el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
-                    el.dispatchEvent(new Event('change', {bubbles:true}));
+                    // Spec: input/change bara om elementet är kopplat till document
+                    var connected = false;
+                    try { var n = el; while(n) { if (n.nodeType === 9) { connected = true; break; } n = n.parentNode; } } catch(e) {}
+                    if (connected) {
+                        el.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+                        el.dispatchEvent(new Event('change', {bubbles:true}));
+                    }
                 }
             })
             "#;
