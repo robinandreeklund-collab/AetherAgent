@@ -482,14 +482,23 @@ fn count_nodes(nodes: &[SemanticNode]) -> usize {
     nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
 }
 
-/// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
+/// Minimum relevance threshold: always prune nodes below this,
+/// even if the tree is small. This ensures goal-based filtering works.
+const MIN_RELEVANCE_THRESHOLD: f32 = 0.02;
+
+/// Beskär låg-relevans löv-noder.
+/// Steg 1: Alltid ta bort noder under MIN_RELEVANCE_THRESHOLD (goal-filtrering).
+/// Steg 2: Om trädet > max noder, höj tröskeln iterativt.
 fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
+    // Steg 1: Goal-baserad filtrering — ta alltid bort irrelevanta noder
+    prune_and_count(nodes, MIN_RELEVANCE_THRESHOLD);
+
     let mut current_count = count_nodes(nodes);
     if current_count <= max {
         return;
     }
 
-    // Iterativt höj tröskeln och beskär löv — räkna och beskär i samma pass
+    // Steg 2: Iterativt höj tröskeln och beskär löv tills under max
     let mut threshold = 0.2_f32;
     while current_count > max && threshold < 0.8 {
         current_count = prune_and_count(nodes, threshold);

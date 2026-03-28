@@ -399,15 +399,19 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     let mut tree = build_tree(html, goal, url);
     tree.parse_time_ms = now_ms() - start;
 
-    // Samla alla noder platt och sortera
+    // Samla alla noder platt och sortera efter relevans
     let mut all_nodes = collect_all_nodes(&tree.nodes);
     all_nodes.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    // Ta topp-N
+    // Ta topp-N — strippa children för att bara returnera själva noden (inte hela subtree)
     let top: Vec<_> = all_nodes
         .into_iter()
         .take(top_n as usize)
-        .cloned()
+        .map(|n| {
+            let mut flat = n.clone();
+            flat.children.clear();
+            flat
+        })
         .collect();
 
     let result = serde_json::json!({
@@ -3142,7 +3146,12 @@ pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
     semantic_tree_to_markdown(&tree_json)
 }
 
-/// Intern: konvertera en nod till markdown rekursivt
+/// Min relevance for a node to be included in markdown output.
+/// Nodes below this threshold are filtered out (goal-based filtering).
+const MARKDOWN_MIN_RELEVANCE: f32 = 0.05;
+
+/// Intern: konvertera en nod till markdown rekursivt.
+/// Skippar noder under relevance-tröskeln — bara goal-relevanta noder renderas.
 fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
     let role = node.role.as_str();
     let label = node.label.trim();
@@ -3151,9 +3160,29 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
         return;
     }
 
+    // Goal-baserad filtrering: skippa noder med låg relevans.
+    // Undantag: headings (strukturellt viktiga) och noder med relevanta barn.
+    let dominated_by_threshold = node.relevance < MARKDOWN_MIN_RELEVANCE
+        && role != "heading"
+        && role != "navigation"
+        && role != "nav";
+
+    if dominated_by_threshold {
+        // Kolla om någon child har hög relevans — om så, rendera bara children
+        let has_relevant_child = node
+            .children
+            .iter()
+            .any(|c| c.relevance >= MARKDOWN_MIN_RELEVANCE);
+        if has_relevant_child {
+            for child in &node.children {
+                node_to_markdown(child, md, depth);
+            }
+        }
+        return;
+    }
+
     match role {
         "heading" => {
-            // Bestäm heading-nivå baserat på djup (h1-h6)
             let level = (depth + 1).min(6);
             let prefix = "#".repeat(level);
             if !label.is_empty() {

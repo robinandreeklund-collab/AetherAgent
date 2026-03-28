@@ -166,49 +166,52 @@ It's faster on large pages because it does no semantic analysis.
 
 ## Token Efficiency
 
-AetherAgent has two output modes — choose based on use case:
+AetherAgent uses the goal + embedding model to **filter out irrelevant nodes** before
+sending content to an LLM. Three output modes, each optimized for different use cases:
 
-| Output format | Tokens (10 fixtures) | vs Raw HTML | Use case |
+| Output format | Tokens (50 fixtures) | vs Raw HTML | Use case |
 |---------------|---------------------|-------------|----------|
-| Raw HTML | 5,782 | baseline | — |
-| **Markdown** (`html_to_markdown`) | **4,560** | **21.1% savings** | LLM context (reading, Q&A) |
-| JSON tree (`parse_to_semantic_tree`) | 17,773 | 307% (3x larger) | Agent ops (click, fill, extract) |
-| Top-5 JSON (`parse_top_nodes`) | 21,496 | 372% (larger) | Focused agent actions |
+| Raw HTML | 17,607 | baseline | — |
+| **Markdown** (`html_to_markdown`) | **10,126** | **42.5% savings** | LLM context (reading, Q&A) |
+| **Top-5 JSON** (`parse_top_nodes`) | **2,263** | **87.1% savings** | Focused agent actions |
+| JSON tree (`parse_to_semantic_tree`) | 50,233 | 285% (larger) | Full agent ops (click, fill, extract) |
 
-### Markdown output: 21-56% token savings
+### Markdown: 42.5% average savings (up to 92% on individual pages)
 
-When the goal is to **send page content to an LLM** (for reading, answering questions,
-summarization), use `html_to_markdown` or `fetch_markdown`. This strips all HTML tags,
-CSS, scripts, and structural noise — keeping only semantic content:
+`html_to_markdown` now uses goal-based relevance filtering: nodes with low embedding
+similarity to the goal are excluded from the markdown output. Only goal-relevant content
+is sent to the LLM.
 
 | Fixture | HTML tokens | Markdown tokens | Savings |
 |---------|-------------|-----------------|---------|
-| campfire_fixture.html | 1,287 | 728 | **43.4%** |
-| 01_ecommerce_product.html | 574 | 355 | **38.2%** |
-| 17_wiki_article.html | 253 | 112 | **55.7%** |
-| 06_news_article.html | 400 | 257 | **35.8%** |
+| 44_edge_no_semantics.html | 280 | 23 | **91.8%** |
+| 39_sv_medical_booking.html | 310 | 29 | **90.6%** |
+| 32_negative_price_news.html | 282 | 31 | **89.0%** |
+| 43_edge_deep_nesting.html | 358 | 99 | **72.3%** |
+| 49_sv_recipe_page.html | 405 | 118 | **70.9%** |
+| 38_content_faq_accordion.html | 433 | 132 | **69.5%** |
+| 17_wiki_article.html | 253 | 87 | **65.6%** |
+| 46_complex_email_inbox.html | 608 | 222 | **63.5%** |
+| 01_ecommerce_product.html | 574 | 308 | **46.3%** |
+| campfire_fixture.html | 1,287 | 566 | **56.0%** |
 
-These numbers align with the [analysis report](../docs/aetheragent-analysis-report.md)
-which measured 37-60% savings on real production sites.
+### Top-5 JSON: 87% savings — just the relevant nodes
 
-### JSON tree output: structured agent operations
+`parse_top_nodes(5)` returns the 5 most relevant individual nodes (no subtrees),
+sorted by embedding-enhanced relevance score. This is the most token-efficient format
+for agent operations that need structured data.
 
-When the goal is to **perform actions** (click buttons, fill forms, extract data),
-use `parse_to_semantic_tree`. The JSON is larger because it includes metadata per node:
-`id`, `role`, `label`, `relevance`, `state`, `trust`, `action`, `children`.
-This is structured data for programmatic use, not LLM context.
+### How the filtering works
+
+1. **Embedding scores every node** against the goal (cosine similarity via all-MiniLM-L6-v2)
+2. **`prune_to_limit`** removes nodes below minimum relevance threshold (even on small pages)
+3. **`html_to_markdown`** skips nodes with relevance < 0.05 — only goal-relevant content rendered
+4. **`parse_top_nodes`** returns flat nodes (no children) sorted by relevance
 
 ### Additional savings: semantic diff (67-99%)
 
 On repeated parses of the same page, `diff_semantic_trees` returns only changes —
 achieving 67-99% token savings vs a full tree.
-
-### What embedding provides
-
-The embedding model's value is **relevance accuracy**, not compression.
-It enables AetherAgent to find "Add To Cart" when the goal is "buy product"
-(cosine similarity 0.32) while correctly ignoring "weather forecast" (similarity 0.05).
-100% accuracy on English semantic pairs. This is what LightPanda cannot do.
 
 ## What Each Engine Does
 
