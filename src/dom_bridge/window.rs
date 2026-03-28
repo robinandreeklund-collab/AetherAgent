@@ -7,7 +7,7 @@ use rquickjs::{object::Accessor, Ctx, Function, Object, Value};
 use crate::event_loop::{JsFn, JsHandler};
 
 use super::events::{
-    self, AddEventListenerHandler, DispatchEventHandler, RemoveEventListenerHandler,
+    self, AddEventListenerHandler, RemoveEventListenerHandler,
 };
 use super::state::SharedState;
 use super::style::kebab_to_camel;
@@ -18,6 +18,70 @@ use super::{
     extract_node_key, node_key_to_f64, CheckXmlWellFormedHandler, GetSelectionFromDoc, NoOpHandler,
     XmlSerializeNodeHandler,
 };
+
+/// Window.dispatchEvent — dispatchar event med WINDOW_EVENT_KEY som target
+/// så att window-registrerade listeners hittas vid AT_TARGET.
+struct WindowDispatchEvent {
+    state: SharedState,
+    doc_key: crate::arena_dom::NodeKey,
+}
+impl JsHandler for WindowDispatchEvent {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Validera null/undefined argument
+        let first = args.first();
+        if first.is_none() || first.is_some_and(|v| v.is_null() || v.is_undefined()) {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "TypeError: Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'.",
+                )?
+                .into(),
+            ));
+        }
+        // Kör listeners registrerade under WINDOW_EVENT_KEY direkt (AT_TARGET)
+        let event_type = first
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get::<_, String>("type").ok())
+            .unwrap_or_default();
+        let event_val = first.cloned().unwrap_or(Value::new_undefined(ctx.clone()));
+        // Sätt target = window
+        if let Some(ev) = event_val.as_object() {
+            let win_val: Value = ctx
+                .eval("window")
+                .unwrap_or(Value::new_undefined(ctx.clone()));
+            let _ = ev.set("target", win_val.clone());
+            let _ = ev.set("currentTarget", win_val);
+            let _ = ev.set("eventPhase", 2i32); // AT_TARGET
+        }
+        let mut default_prevented = false;
+        // Kör matchande window-listeners (clone Persistent för att undvika borrow-issue)
+        let callbacks: Vec<_> = {
+            let s = self.state.borrow();
+            s.event_listeners
+                .get(&events::WINDOW_EVENT_KEY)
+                .map(|listeners| {
+                    listeners
+                        .iter()
+                        .filter(|l| l.event_type == event_type)
+                        .map(|l| l.callback.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for cb in callbacks {
+            if let Ok(func) = cb.restore(ctx) {
+                let _ = func.call::<_, Value>((event_val.clone(),));
+            }
+        }
+        // Kolla defaultPrevented
+        if let Some(ev) = event_val.as_object() {
+            default_prevented = ev.get::<_, bool>("defaultPrevented").unwrap_or(false);
+            let _ = ev.set("eventPhase", 0i32);
+            let _ = ev.set("currentTarget", Value::new_null(ctx.clone()));
+        }
+        Ok(Value::new_bool(ctx.clone(), !default_prevented))
+    }
+}
 
 pub(super) struct GetComputedStyleHandler {
     state: SharedState,
@@ -343,9 +407,9 @@ pub(super) fn register_window_with_viewport<'js>(
             "dispatchEvent",
             Function::new(
                 ctx.clone(),
-                JsFn(DispatchEventHandler {
+                JsFn(WindowDispatchEvent {
                     state: Rc::clone(&state),
-                    key: doc_key,
+                    doc_key,
                 }),
             )?,
         )?;
@@ -705,8 +769,9 @@ pub(super) fn register_window_with_viewport<'js>(
 
             // Node-konstanter
             var nc = {ELEMENT_NODE:1,ATTRIBUTE_NODE:2,TEXT_NODE:3,CDATA_SECTION_NODE:4,
+                ENTITY_REFERENCE_NODE:5,ENTITY_NODE:6,
                 PROCESSING_INSTRUCTION_NODE:7,COMMENT_NODE:8,DOCUMENT_NODE:9,
-                DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,
+                DOCUMENT_TYPE_NODE:10,DOCUMENT_FRAGMENT_NODE:11,NOTATION_NODE:12,
                 DOCUMENT_POSITION_DISCONNECTED:1,DOCUMENT_POSITION_PRECEDING:2,
                 DOCUMENT_POSITION_FOLLOWING:4,DOCUMENT_POSITION_CONTAINS:8,
                 DOCUMENT_POSITION_CONTAINED_BY:16,DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC:32};
