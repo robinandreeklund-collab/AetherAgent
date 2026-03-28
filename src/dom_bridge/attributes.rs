@@ -15,6 +15,37 @@ use super::{
     throw_dom_exception,
 };
 
+/// Validera att en sträng matchar XML Name-produktionen.
+/// NameStartChar: ":" | [A-Z] | "_" | [a-z] | diverse Unicode-range
+/// NameChar: NameStartChar | "-" | "." | [0-9] | diverse Unicode
+fn is_valid_xml_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !is_name_start_char(first) {
+        return false;
+    }
+    chars.all(is_name_char)
+}
+
+fn is_name_start_char(c: char) -> bool {
+    matches!(c, ':' | 'A'..='Z' | '_' | 'a'..='z'
+        | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+        | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}'
+        | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+        | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+        | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'
+        | '\u{10000}'..='\u{EFFFF}')
+}
+
+fn is_name_char(c: char) -> bool {
+    is_name_start_char(c)
+        || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}'
+            | '\u{0300}'..='\u{036F}' | '\u{203F}'..='\u{2040}')
+}
+
 // ─── JsHandler-structs för element-metoder ──────────────────────────────────
 
 pub(super) struct GetAttribute {
@@ -53,6 +84,14 @@ impl JsHandler for SetAttribute {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        // Spec: validera Name-produktion
+        if !is_valid_xml_name(&name) {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
+            ));
+        }
         let val = args
             .get(1)
             .and_then(|v| v.as_string())
@@ -525,15 +564,81 @@ pub(super) struct SetAttributeNS {
 }
 impl JsHandler for SetAttributeNS {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let _ns = args
-            .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok());
+        let ns = args.first().and_then(|v| {
+            if v.is_null() || v.is_undefined() {
+                None
+            } else {
+                v.as_string().and_then(|s| s.to_string().ok())
+            }
+        });
         let qname = args
             .get(1)
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
+        // Validera Name-produktion
+        if !is_valid_xml_name(&qname) {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "The string contains invalid characters.",
+            ));
+        }
+        // Validera QName (om kolon finns, prefix och local måste vara giltiga)
+        if let Some(colon) = qname.find(':') {
+            let prefix = &qname[..colon];
+            let local = &qname[colon + 1..];
+            if prefix.is_empty() || local.is_empty() || local.contains(':') {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "InvalidCharacterError",
+                    "The string contains invalid characters.",
+                ));
+            }
+            // Namespace-validering
+            if ns.is_none() {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "NamespaceError",
+                    "A namespace is required to use a prefix.",
+                ));
+            }
+            if prefix == "xml" && ns.as_deref() != Some("http://www.w3.org/XML/1998/namespace") {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "NamespaceError",
+                    "The xml prefix requires the XML namespace.",
+                ));
+            }
+            if (prefix == "xmlns" || qname == "xmlns")
+                && ns.as_deref() != Some("http://www.w3.org/2000/xmlns/")
+            {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "NamespaceError",
+                    "The xmlns prefix requires the XMLNS namespace.",
+                ));
+            }
+        }
+        // xmlns qname utan xmlns namespace
+        if qname == "xmlns" && ns.as_deref() != Some("http://www.w3.org/2000/xmlns/") {
+            return Err(throw_dom_exception(
+                ctx,
+                "NamespaceError",
+                "The xmlns qualified name requires the XMLNS namespace.",
+            ));
+        }
+        // XMLNS namespace kräver xmlns prefix
+        if ns.as_deref() == Some("http://www.w3.org/2000/xmlns/")
+            && !qname.starts_with("xmlns:")
+            && qname != "xmlns"
+        {
+            return Err(throw_dom_exception(
+                ctx,
+                "NamespaceError",
+                "The XMLNS namespace requires the xmlns prefix.",
+            ));
+        }
         let val = args
             .get(2)
             .and_then(|v| v.as_string())
