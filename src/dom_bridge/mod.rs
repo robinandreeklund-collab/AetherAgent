@@ -4637,6 +4637,43 @@ pub(super) fn copy_subtree(src: &ArenaDom, src_key: NodeKey, parent: NodeKey, ds
     }
 }
 
+/// Generic attribute getter — returnerar attributvärde eller ""
+struct AttrGetter {
+    state: SharedState,
+    key: NodeKey,
+    attr_name: &'static str,
+}
+impl JsHandler for AttrGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let val = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr(self.attr_name))
+            .unwrap_or("")
+            .to_string();
+        Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
+    }
+}
+
+/// Generic attribute setter — sätter attributvärde i arena
+struct AttrSetter {
+    state: SharedState,
+    key: NodeKey,
+    attr_name: &'static str,
+}
+impl JsHandler for AttrSetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = js_value_to_dom_string(args.first());
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            node.attributes.insert(self.attr_name.to_string(), val);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
 pub(super) struct NoOpHandler;
 
 struct NullGetter;
@@ -4793,8 +4830,65 @@ pub(super) fn make_element_object<'js>(
             Accessor::new_get(JsFn(OwnerDocumentGetter)).configurable(),
         )?;
     }
-    obj.set("id", id_val.as_str())?;
-    obj.set("className", class_val.as_str())?;
+    // id och className som live accessors (läser/skriver via arena)
+    if node_type_val == 1 {
+        obj.prop(
+            "id",
+            rquickjs::object::Accessor::new(
+                JsFn(AttrGetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "id",
+                }),
+                JsFn(AttrSetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "id",
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+        obj.prop(
+            "className",
+            rquickjs::object::Accessor::new(
+                JsFn(AttrGetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "class",
+                }),
+                JsFn(AttrSetter {
+                    state: Rc::clone(state),
+                    key,
+                    attr_name: "class",
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    } else {
+        obj.set("id", id_val.as_str())?;
+        obj.set("className", class_val.as_str())?;
+    }
+    // namespaceURI, prefix — sätts för element-noder som inte redan har dem (createElementNS sätter egna)
+    if node_type_val == 1 {
+        let has_ns = {
+            let s = state.borrow();
+            s.arena
+                .nodes
+                .get(key)
+                .and_then(|n| n.get_attr("__ns__"))
+                .is_some()
+        };
+        if !has_ns {
+            // HTML-parsade element: XHTML namespace, prefix = null
+            obj.set(
+                "namespaceURI",
+                rquickjs::String::from_str(ctx.clone(), "http://www.w3.org/1999/xhtml")?,
+            )?;
+            obj.set("prefix", Value::new_null(ctx.clone()))?;
+        }
+    }
     // baseURI per DOM spec (alla noder ärver document.baseURI)
     obj.set("baseURI", "about:blank")?;
 

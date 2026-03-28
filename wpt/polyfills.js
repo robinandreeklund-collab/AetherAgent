@@ -213,11 +213,11 @@ globalThis.__patchCharacterData = function(n) { return n; };
 // Registrerad som NativeCreateEvent i register_document().
 
 // ─── node.ownerDocument ─────────────────────────────────────────────────────
-// WPT-tester kontrollerar ofta att noder hör till rätt dokument
+// OwnerDocumentGetter finns i Rust, men JS-wrappers behövs fortfarande
+// för att patcha element som skapas via polyfill-skapade dokument.
 (function() {
   if (typeof document === 'undefined') return;
 
-  // Patcha createElement så att returnerade element har ownerDocument
   var _origCreateElement = document.createElement;
   if (_origCreateElement) {
     document.createElement = function(tag) {
@@ -228,15 +228,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          el.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return el;
     };
   }
 
-  // Patcha createTextNode
   var _origCreateTextNode = document.createTextNode;
   if (_origCreateTextNode) {
     document.createTextNode = function(text) {
@@ -247,15 +244,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return node;
     };
   }
 
-  // Patcha createComment
   var _origCreateComment = document.createComment;
   if (_origCreateComment) {
     document.createComment = function(text) {
@@ -266,15 +260,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return node;
     };
   }
 
-  // Patcha createDocumentFragment
   var _origCreateFragment = document.createDocumentFragment;
   if (_origCreateFragment) {
     document.createDocumentFragment = function() {
@@ -285,9 +276,7 @@ globalThis.__patchCharacterData = function(n) { return n; };
             get: function() { return document; },
             configurable: true
           });
-        } catch(e) {
-          frag.ownerDocument = document;
-        }
+        } catch(e) {}
       }
       return frag;
     };
@@ -511,15 +500,13 @@ globalThis.__patchCharacterData = function(n) { return n; };
       }
     }
 
-    // id, className — måste skriva tillbaka till arena via setAttribute
+    // id, className — Rust sätter native accessors, men polyfill behövs för __patchChildNode-skapade element
     if (el.nodeType === 1 && el.setAttribute) {
-      var _origId = el.id || '';
       Object.defineProperty(el, 'id', {
         get: function() { return this.getAttribute('id') || ''; },
         set: function(v) { this.setAttribute('id', v); },
         configurable: true
       });
-      var _origClass = el.className || '';
       Object.defineProperty(el, 'className', {
         get: function() { return this.getAttribute('class') || ''; },
         set: function(v) { this.setAttribute('class', v); },
@@ -527,13 +514,11 @@ globalThis.__patchCharacterData = function(n) { return n; };
       });
     }
 
-    // prefix, namespaceURI, localName — HTML-element har aldrig prefix/namespace
+    // prefix, namespaceURI, localName — Rust sätter native, polyfill för __patchChildNode
     if (el.nodeType === 1) {
       if (!('prefix' in el)) el.prefix = null;
       if (!('namespaceURI' in el)) el.namespaceURI = 'http://www.w3.org/1999/xhtml';
-      if (!('localName' in el)) {
-        el.localName = (el.tagName || '').toLowerCase();
-      }
+      if (!('localName' in el)) el.localName = (el.tagName || '').toLowerCase();
     }
 
     // toggleAttribute — nu Rust-native i dom_bridge.rs
