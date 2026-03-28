@@ -4573,15 +4573,37 @@ impl JsHandler for InnerHTMLSetter {
                 });
                 s.arena.append_child(self.key, text_key);
             } else {
-                // Parsa HTML-fragment och lägg till som barn
-                let rcdom = crate::parser::parse_html(&html_str);
+                // Parsa HTML-fragment (ej fullständigt dokument) — undviker <html>/<head>/<body>-wrapper
+                let context_tag = s
+                    .arena
+                    .nodes
+                    .get(self.key)
+                    .and_then(|n| n.tag.as_deref())
+                    .unwrap_or("div")
+                    .to_string();
+                let rcdom = crate::parser::parse_html_fragment(&html_str, &context_tag);
                 let fragment = ArenaDom::from_rcdom(&rcdom);
                 let doc_key = fragment.document;
-                // Kopiera alla barn från fragment till vår nod
-                if let Some(doc_node) = fragment.nodes.get(doc_key) {
-                    for &child in &doc_node.children {
-                        copy_subtree(&fragment, child, self.key, &mut s.arena);
-                    }
+                // html5ever parse_fragment skapar: Document → <html>(wrapper) → content
+                // Vi behöver komma åt content-barnen inuti wrapper-elementet
+                let content_children: Vec<NodeKey> =
+                    if let Some(doc_node) = fragment.nodes.get(doc_key) {
+                        if doc_node.children.len() == 1 {
+                            // Enda barnet = wrapper <html>, ta dess barn
+                            let wrapper_key = doc_node.children[0];
+                            fragment
+                                .nodes
+                                .get(wrapper_key)
+                                .map(|n| n.children.clone())
+                                .unwrap_or_default()
+                        } else {
+                            doc_node.children.clone()
+                        }
+                    } else {
+                        vec![]
+                    };
+                for &child in &content_children {
+                    copy_subtree(&fragment, child, self.key, &mut s.arena);
                 }
             }
             s.mutations.push(std::borrow::Cow::Owned(format!(
