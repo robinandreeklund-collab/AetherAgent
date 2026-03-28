@@ -448,9 +448,41 @@ impl JsHandler for InsertAdjacentElement {
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default()
             .to_lowercase();
+        // Validera position
+        if !matches!(
+            position.as_str(),
+            "beforebegin" | "afterbegin" | "beforeend" | "afterend"
+        ) {
+            return Err(throw_dom_exception(
+                ctx,
+                "SyntaxError",
+                "The value provided is not a valid position.",
+            ));
+        }
+        // Validera arg2 — måste vara en Node
+        let second = args.get(1);
+        if second.is_none()
+            || second.is_some_and(|v| v.is_null() || v.is_undefined() || !v.is_object())
+        {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "TypeError: Failed to execute 'insertAdjacentElement': parameter 2 is not of type 'Element'.",
+                )?
+                .into(),
+            ));
+        }
         let new_key = match args.get(1).and_then(extract_node_key) {
             Some(k) => k,
-            None => return Ok(Value::new_null(ctx.clone())),
+            None => {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(
+                        ctx.clone(),
+                        "TypeError: Failed to execute 'insertAdjacentElement': parameter 2 is not of type 'Element'.",
+                    )?
+                    .into(),
+                ));
+            }
         };
         let mut s = self.state.borrow_mut();
         // Detach
@@ -461,7 +493,11 @@ impl JsHandler for InsertAdjacentElement {
         }
         match position.as_str() {
             "beforebegin" => {
-                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                let parent_key = s.arena.nodes.get(self.key).and_then(|n| n.parent);
+                if parent_key.is_none() {
+                    return Ok(Value::new_null(ctx.clone()));
+                }
+                if let Some(parent_key) = parent_key {
                     let pos = s
                         .arena
                         .nodes
@@ -493,7 +529,11 @@ impl JsHandler for InsertAdjacentElement {
                 }
             }
             "afterend" => {
-                if let Some(parent_key) = s.arena.nodes.get(self.key).and_then(|n| n.parent) {
+                let parent_key = s.arena.nodes.get(self.key).and_then(|n| n.parent);
+                if parent_key.is_none() {
+                    return Ok(Value::new_null(ctx.clone()));
+                }
+                if let Some(parent_key) = parent_key {
                     let pos = s
                         .arena
                         .nodes
@@ -527,7 +567,19 @@ impl JsHandler for InsertAdjacentText {
             .first()
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_lowercase();
+        // Validera position
+        if !matches!(
+            position.as_str(),
+            "beforebegin" | "afterbegin" | "beforeend" | "afterend"
+        ) {
+            return Err(throw_dom_exception(
+                ctx,
+                "SyntaxError",
+                "The value provided is not a valid position.",
+            ));
+        }
         let text = args
             .get(1)
             .and_then(|v| v.as_string())
@@ -553,7 +605,9 @@ impl JsHandler for InsertAdjacentText {
             state: Rc::clone(&self.state),
             key: self.key,
         };
-        handler.handle(ctx, &[pos_val, elem_val])
+        // insertAdjacentText returnerar undefined per spec (inte elementet)
+        handler.handle(ctx, &[pos_val, elem_val])?;
+        Ok(Value::new_undefined(ctx.clone()))
     }
 }
 
