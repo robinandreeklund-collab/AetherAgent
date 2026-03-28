@@ -41,6 +41,15 @@ globalThis.__patchCharacterData = function(n) { return n; };
       doc.nodeName = '#document';
       doc.nodeValue = null;
       doc.documentElement = html;
+      // Skapa doctype-nod (lazy — sätts efter doc är klar)
+      try {
+        if (document.__createDocumentType) {
+          var dt = document.__createDocumentType('html', '', '');
+          doc.doctype = dt;
+        }
+      } catch(e) {
+        doc.doctype = null;
+      }
       doc.head = head;
       doc.body = body;
       doc.title = (title === null) ? 'null' : (title || '');
