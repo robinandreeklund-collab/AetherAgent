@@ -3730,21 +3730,27 @@ impl JsHandler for CreateTreeWalker {
         let filter = args.get(2).cloned();
 
         let tw = Object::new(ctx.clone())?;
-        let root_val = args
-            .first()
-            .cloned()
-            .unwrap_or(Value::new_undefined(ctx.clone()));
         let root_obj = make_element_object(ctx, root_key, &self.state)?;
-        tw.set("root", root_val)?;
-        tw.set("whatToShow", what_to_show as f64)?;
-        tw.set("currentNode", root_obj)?;
-        tw.set("__rootKey", node_key_to_f64(root_key))?;
-        tw.set("__whatToShow", what_to_show as f64)?;
         let filter_val = match &filter {
             Some(f) if !f.is_null() && !f.is_undefined() => f.clone(),
             _ => Value::new_null(ctx.clone()),
         };
-        tw.set("filter", filter_val)?;
+        // Readonly-egenskaper: root, whatToShow, filter
+        let setup_code = r#"(function(tw, root, whatToShow, filter) {
+            Object.defineProperty(tw, 'root', { value: root, writable: false, configurable: false });
+            Object.defineProperty(tw, 'whatToShow', { value: whatToShow, writable: false, configurable: false });
+            Object.defineProperty(tw, 'filter', { value: filter, writable: false, configurable: false });
+        })"#;
+        let setup_fn: Function = ctx.eval(setup_code)?;
+        setup_fn.call::<_, Value>((
+            tw.clone(),
+            root_obj.clone(),
+            what_to_show as f64,
+            filter_val,
+        ))?;
+        tw.set("currentNode", root_obj)?;
+        tw.set("__rootKey", node_key_to_f64(root_key))?;
+        tw.set("__whatToShow", what_to_show as f64)?;
 
         // TreeWalker-metoder via JS
         let walker_code = r#"
