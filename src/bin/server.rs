@@ -5200,6 +5200,43 @@ async fn main() {
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
 
+    // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+    #[cfg(feature = "embeddings")]
+    {
+        if let (Ok(model_path), Ok(vocab_path)) = (
+            std::env::var("AETHER_EMBEDDING_MODEL"),
+            std::env::var("AETHER_EMBEDDING_VOCAB"),
+        ) {
+            match (
+                std::fs::read(&model_path),
+                std::fs::read_to_string(&vocab_path),
+            ) {
+                (Ok(model_bytes), Ok(vocab_text)) => {
+                    eprintln!(
+                        "[Embedding] Laddar modell: {} ({:.1} MB) + vocab: {}",
+                        model_path,
+                        model_bytes.len() as f64 / 1_048_576.0,
+                        vocab_path
+                    );
+                    match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
+                        Ok(()) => eprintln!("[Embedding] Modell redo"),
+                        Err(e) => eprintln!("[Embedding] WARN: Kunde inte ladda: {e}"),
+                    }
+                }
+                (Err(e), _) => eprintln!(
+                    "[Embedding] WARN: Kan inte läsa modell '{}': {e}",
+                    model_path
+                ),
+                (_, Err(e)) => eprintln!(
+                    "[Embedding] WARN: Kan inte läsa vocab '{}': {e}",
+                    vocab_path
+                ),
+            }
+        } else {
+            eprintln!("[Embedding] Ingen embedding-modell konfigurerad (AETHER_EMBEDDING_MODEL/AETHER_EMBEDDING_VOCAB ej satta)");
+        }
+    }
+
     log_rss("7. before router build");
     // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
     spawn_memory_monitor();

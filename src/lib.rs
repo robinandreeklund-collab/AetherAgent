@@ -13,6 +13,7 @@ pub mod css_compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
+pub mod embedding;
 mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;

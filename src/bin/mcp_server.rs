@@ -442,6 +442,40 @@ impl AetherMcpServer {
                     None
                 }
             });
+        // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+        #[cfg(feature = "embeddings")]
+        {
+            if let (Ok(model_path), Ok(vocab_path)) = (
+                std::env::var("AETHER_EMBEDDING_MODEL"),
+                std::env::var("AETHER_EMBEDDING_VOCAB"),
+            ) {
+                match (
+                    std::fs::read(&model_path),
+                    std::fs::read_to_string(&vocab_path),
+                ) {
+                    (Ok(model_bytes), Ok(vocab_text)) => {
+                        eprintln!(
+                            "[MCP] Embedding model loading: {} ({:.1} MB)",
+                            model_path,
+                            model_bytes.len() as f64 / 1_048_576.0
+                        );
+                        match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
+                            Ok(()) => eprintln!("[MCP] Embedding model ready"),
+                            Err(e) => eprintln!("[MCP] WARN: Embedding load failed: {e}"),
+                        }
+                    }
+                    (Err(e), _) => eprintln!(
+                        "[MCP] WARN: Cannot read embedding model '{}': {e}",
+                        model_path
+                    ),
+                    (_, Err(e)) => eprintln!(
+                        "[MCP] WARN: Cannot read embedding vocab '{}': {e}",
+                        vocab_path
+                    ),
+                }
+            }
+        }
+
         Self {
             tool_router: Self::tool_router(),
             vision_model_bytes,

@@ -415,12 +415,23 @@ impl SemanticBuilder {
     }
 
     /// Tre-nivå goal-relevance scoring
-    /// 1. Textuell likhet med goal
+    /// 1. Textuell likhet med goal (embedding-förstärkt om modell är laddad)
     /// 2. ARIA-rollprioritet
     /// 3. Djupberoende (grundare = viktigare)
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
-        // 1. Textuell likhet (använder cachade goal_words)
-        let text_score = text_similarity_cached(&self.goal, &self.goal_words, label);
+        // 1. Textuell likhet — embedding-förstärkt med word-overlap fallback
+        let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
+        let text_score = if word_score < 0.8 && !label.is_empty() {
+            // Försök embedding-similarity om word-overlap inte är övertygande
+            if let Some(emb_score) = crate::embedding::similarity(&self.goal, label) {
+                // Kombinera: max av word-overlap och embedding (bästa signal vinner)
+                word_score.max(emb_score)
+            } else {
+                word_score
+            }
+        } else {
+            word_score
+        };
 
         // 2. Roll-prioritet
         let role_score = SemanticNode::role_priority(role);
