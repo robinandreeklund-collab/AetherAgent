@@ -1057,11 +1057,11 @@ impl JsHandler for NativeCreateEvent {
             "progressevent" => "ProgressEvent",
             "messageevent" => "MessageEvent",
             "dragevent" => "DragEvent",
-            "errorevent" => "ErrorEvent",
-            "clipboardevent" => "ClipboardEvent",
-            "animationevent" => "AnimationEvent",
-            "transitionevent" => "TransitionEvent",
             "touchevent" => "TouchEvent",
+            // Legacy aliases per spec — returnerar Event-objekt
+            "devicemotionevent" => "Event",
+            "deviceorientationevent" => "Event",
+            "textevent" => "Event",
             "mutationevent" | "mutationevents" => "Event",
             _ => {
                 return Err(throw_dom_exception(
