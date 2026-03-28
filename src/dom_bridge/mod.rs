@@ -2308,6 +2308,26 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         doc.set("nodeName", "#document")?;
     }
 
+    // textContent — returnerar null per spec för Document-noder
+    {
+        let doc_key = state.borrow().arena.document;
+        doc.prop(
+            "textContent",
+            rquickjs::object::Accessor::new(
+                JsFn(TextContentGetter {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+                JsFn(TextContentSetter {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    }
+
     // Registrera alla document-metoder
     doc.set(
         "getElementById",
@@ -5068,6 +5088,19 @@ pub(super) fn make_element_object<'js>(
             Function::new(
                 ctx.clone(),
                 JsFn(ReplaceData {
+                    state: Rc::clone(state),
+                    key,
+                }),
+            )?,
+        )?;
+    }
+    // Text-specifika metoder: splitText, wholeText
+    if node_type_val == 3 {
+        obj.set(
+            "splitText",
+            Function::new(
+                ctx.clone(),
+                JsFn(SplitText {
                     state: Rc::clone(state),
                     key,
                 }),

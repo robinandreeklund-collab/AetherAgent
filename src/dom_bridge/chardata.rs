@@ -1,12 +1,14 @@
-// CharacterData-metoder: substringData, appendData, insertData, deleteData, replaceData
+// CharacterData-metoder: substringData, appendData, insertData, deleteData, replaceData, splitText
 
 use rquickjs::{Ctx, Value};
 
-use crate::arena_dom::NodeKey;
+use crate::arena_dom::{DomNode, NodeKey, NodeType};
 use crate::event_loop::JsHandler;
 
 use super::state::SharedState;
-use super::{utf16_len, utf16_offset_to_byte, webidl_unsigned_long};
+use super::{
+    make_element_object, throw_dom_exception, utf16_len, utf16_offset_to_byte, webidl_unsigned_long,
+};
 
 pub(super) struct SubstringData {
     pub(super) state: SharedState,
@@ -192,5 +194,69 @@ impl JsHandler for ReplaceData {
             node.text = Some(new_text.into());
         }
         Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+/// Text.splitText(offset) — delar textnoden vid offset, returnerar ny nod med resten.
+pub(super) struct SplitText {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for SplitText {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let offset = webidl_unsigned_long(args.first()) as usize;
+        let new_key;
+        {
+            let mut s = self.state.borrow_mut();
+            let current = s
+                .arena
+                .nodes
+                .get(self.key)
+                .and_then(|n| n.text.as_deref())
+                .unwrap_or("")
+                .to_string();
+            let current_len = utf16_len(&current);
+            if offset > current_len {
+                return Err(throw_dom_exception(
+                    ctx,
+                    "IndexSizeError",
+                    "The index is not in the allowed range.",
+                ));
+            }
+            let byte_offset = utf16_offset_to_byte(&current, offset);
+            let before = current[..byte_offset].to_string();
+            let after = current[byte_offset..].to_string();
+
+            if let Some(node) = s.arena.nodes.get_mut(self.key) {
+                node.text = Some(before.into());
+            }
+
+            new_key = s.arena.nodes.insert(DomNode {
+                node_type: NodeType::Text,
+                tag: None,
+                attributes: crate::arena_dom::Attrs::new(),
+                text: Some(after.into()),
+                parent: None,
+                children: vec![],
+                owner_doc: None,
+            });
+
+            let parent_key = s.arena.nodes.get(self.key).and_then(|n| n.parent);
+            if let Some(pk) = parent_key {
+                if let Some(parent) = s.arena.nodes.get_mut(pk) {
+                    let pos = parent
+                        .children
+                        .iter()
+                        .position(|&c| c == self.key)
+                        .map(|p| p + 1)
+                        .unwrap_or(parent.children.len());
+                    parent.children.insert(pos, new_key);
+                }
+                if let Some(n) = s.arena.nodes.get_mut(new_key) {
+                    n.parent = Some(pk);
+                }
+            }
+        }
+        make_element_object(ctx, new_key, &self.state)
     }
 }
