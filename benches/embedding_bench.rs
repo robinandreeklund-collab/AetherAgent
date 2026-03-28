@@ -776,45 +776,230 @@ fn main() {
     );
     println!();
 
-    // ── 6. Slutrapport ───────────────────────────────────────────────────
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║                      SLUTRAPPORT                               ║");
-    println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!(
-        "║  Embedding-modell:     {:>40} ║",
-        if embedding_loaded {
-            "all-MiniLM-L6-v2 (384-dim)"
-        } else {
-            "EJ LADDAD (word-overlap fallback)"
-        }
-    );
-    println!("║  Init-tid:             {:>37.0}ms ║", init_time);
-    if embedding_loaded {
-        let (avg, _, _) = run_embedding_inference_bench();
-        println!("║  Inference-tid (avg):  {:>37.2}ms ║", avg);
+    // ── 6. Raw Performance: 100 sequential parses (Campfire-style) ──────
+    println!("═══ Raw Performance: 100 Sequential Parses ═══");
+    let campfire_html = include_str!("campfire_fixture.html");
+    let mut raw_times = Vec::with_capacity(100);
+    let mut raw_token_counts = Vec::with_capacity(100);
+
+    // Warmup (3 runs)
+    for _ in 0..3 {
+        parse_to_semantic_tree(
+            campfire_html,
+            "buy the backpack",
+            "https://shop.com/backpack",
+        );
     }
-    println!("║  Similarity accuracy:  {:>36.0}% ║", sim_accuracy);
-    println!("║  ──────────────────────────────────────────────────────────── ║");
+
+    for i in 0..100 {
+        let start = Instant::now();
+        let result = parse_to_semantic_tree(
+            campfire_html,
+            "buy the backpack",
+            "https://shop.com/backpack",
+        );
+        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+        raw_times.push(elapsed);
+        // Token estimate: ~4 chars per token (GPT-style approximation)
+        raw_token_counts.push(result.len() / 4);
+        if i % 25 == 0 {
+            println!(
+                "  Run {}/100: {:.2}ms ({} output tokens)",
+                i + 1,
+                elapsed,
+                result.len() / 4
+            );
+        }
+    }
+
+    raw_times.sort_by(|a, b| a.total_cmp(b));
+    let raw_total = raw_times.iter().sum::<f64>();
+    let raw_avg = raw_total / 100.0;
+    let raw_median = raw_times[49];
+    let raw_p99 = raw_times[98];
+    let raw_min = raw_times[0];
+    let raw_max = raw_times[99];
+    let avg_tokens = raw_token_counts.iter().sum::<usize>() / raw_token_counts.len();
+
+    println!("\n  100 sequential parses (Campfire Commerce page):");
+    println!("    Total:   {raw_total:.0}ms");
+    println!("    Avg:     {raw_avg:.2}ms");
+    println!("    Median:  {raw_median:.2}ms");
+    println!("    P99:     {raw_p99:.2}ms");
+    println!("    Min:     {raw_min:.2}ms");
+    println!("    Max:     {raw_max:.2}ms");
+    println!("    Output:  ~{avg_tokens} tokens/parse");
+    println!();
+
+    // ── 7. Token analysis across all fixtures ─────────────────────────────
+    println!("═══ Token Analysis (all 50 fixtures) ═══");
+    let mut total_html_chars = 0usize;
+    let mut total_output_tokens = 0usize;
     println!(
-        "║  Lokala tester:        {:>33}/{:>3} OK ║",
+        "{:<35} {:>10} {:>10} {:>8}",
+        "Fixture", "HTML chars", "Out tokens", "Ratio"
+    );
+    println!("{}", "-".repeat(68));
+    for r in &local_results {
+        let html = load_fixture(&r.fixture);
+        let html_chars = html.len();
+        let result =
+            parse_to_semantic_tree(&html, &r.goal, &format!("https://test.se/{}", r.fixture));
+        let out_tokens = result.len() / 4;
+        let ratio = if html_chars > 0 {
+            out_tokens as f64 / (html_chars as f64 / 4.0) * 100.0
+        } else {
+            0.0
+        };
+        total_html_chars += html_chars;
+        total_output_tokens += out_tokens;
+        println!(
+            "{:<35} {:>10} {:>10} {:>7.1}%",
+            truncate_str(&r.fixture, 33),
+            html_chars,
+            out_tokens,
+            ratio
+        );
+    }
+    let overall_ratio = if total_html_chars > 0 {
+        total_output_tokens as f64 / (total_html_chars as f64 / 4.0) * 100.0
+    } else {
+        0.0
+    };
+    println!("{}", "-".repeat(68));
+    println!(
+        "{:<35} {:>10} {:>10} {:>7.1}%",
+        "TOTAL", total_html_chars, total_output_tokens, overall_ratio
+    );
+    println!(
+        "\n  Token savings vs raw HTML: {:.1}%",
+        100.0 - overall_ratio
+    );
+    println!();
+
+    // ── 8. Final report ───────────────────────────────────────────────────
+    println!("╔══════════════════════════════════════════════════════════════════════════╗");
+    println!("║              FINAL REPORT — AetherAgent Embedding Benchmark             ║");
+    println!("╠══════════════════════════════════════════════════════════════════════════╣");
+    println!("║                                                                        ║");
+    println!("║  EMBEDDING MODEL                                                       ║");
+    if embedding_loaded {
+        println!("║    Model:              all-MiniLM-L6-v2 (384-dim ONNX)                 ║");
+        println!(
+            "║    Init time:          {:>6.0}ms                                          ║",
+            init_time
+        );
+        let (inf_avg, _, _) = run_embedding_inference_bench();
+        println!(
+            "║    Inference (avg):    {:>6.2}ms per query                                ║",
+            inf_avg
+        );
+        println!(
+            "║    Similarity acc:     {:>5.0}% (20/20 EN pairs)                          ║",
+            sim_accuracy
+        );
+    } else {
+        println!("║    Model:              NOT LOADED (word-overlap fallback)               ║");
+    }
+    println!("║                                                                        ║");
+    println!("║  LOCAL FIXTURES (50 tests)                                             ║");
+    println!(
+        "║    Targets found:    {:>3}/{:<3} ({:.0}%)                                      ║",
         targets_found,
-        local_results.len()
+        local_results.len(),
+        targets_found as f64 / local_results.len() as f64 * 100.0
     );
-    println!("║  Avg parse (lokalt):   {:>37.2}ms ║", avg_parse_local);
     println!(
-        "║  Live sajter:          {:>33}/{:>3} OK ║",
-        live_ok,
-        live_results.len()
+        "║    High relevance:   {:>3}/{:<3} (>0.3 score)                                 ║",
+        high_relevance_count, targets_found
     );
-    println!("║  Avg parse (live):     {:>37.2}ms ║", avg_parse_live);
-    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!(
+        "║    Avg parse time:   {:>8.2}ms                                          ║",
+        avg_parse_local
+    );
+    println!(
+        "║    Injections caught:{:>3} fixtures                                        ║",
+        injection_detected
+    );
+    println!("║                                                                        ║");
+    println!("║  LIVE SITES (20 tests)                                                 ║");
+    println!(
+        "║    OK:               {:>3}/{:<3} ({:.0}%)                                      ║",
+        live_ok,
+        live_results.len(),
+        live_ok as f64 / live_results.len() as f64 * 100.0
+    );
+    println!(
+        "║    Avg parse time:   {:>8.2}ms                                          ║",
+        avg_parse_live
+    );
+    println!(
+        "║    Avg fetch time:   {:>8.0}ms                                          ║",
+        live_total_fetch / live_results.len() as f64
+    );
+    println!("║                                                                        ║");
+    println!("║  RAW PERFORMANCE (Campfire Commerce, 100 sequential parses)            ║");
+    println!(
+        "║    Total:            {:>8.0}ms                                          ║",
+        raw_total
+    );
+    println!(
+        "║    Avg:              {:>8.2}ms                                          ║",
+        raw_avg
+    );
+    println!(
+        "║    Median:           {:>8.2}ms                                          ║",
+        raw_median
+    );
+    println!(
+        "║    P99:              {:>8.2}ms                                          ║",
+        raw_p99
+    );
+    println!(
+        "║    Output tokens:    ~{:<6} per parse                                    ║",
+        avg_tokens
+    );
+    println!("║                                                                        ║");
+    println!("║  TOKEN EFFICIENCY                                                      ║");
+    println!(
+        "║    Avg token ratio:  {:>6.1}% of raw HTML                                  ║",
+        overall_ratio
+    );
+    println!(
+        "║    Token savings:    {:>6.1}%                                               ║",
+        100.0 - overall_ratio
+    );
+    println!("║                                                                        ║");
+
+    // Document failures honestly
+    let failed_local: Vec<_> = local_results.iter().filter(|r| !r.target_found).collect();
+    let failed_live: Vec<_> = live_results.iter().filter(|r| r.status != "OK").collect();
+
+    if !failed_local.is_empty() || !failed_live.is_empty() {
+        println!("║  FAILURES (documented for honesty)                                    ║");
+        for r in &failed_local {
+            println!(
+                "║    LOCAL MISS: {:<55}  ║",
+                truncate_str(&format!("{} [{}]", r.fixture, r.goal), 55)
+            );
+        }
+        for r in &failed_live {
+            println!(
+                "║    LIVE  FAIL: {:<55}  ║",
+                truncate_str(&format!("{} ({})", r.url, r.status), 55)
+            );
+        }
+        println!("║                                                                        ║");
+    }
+
+    println!("╚══════════════════════════════════════════════════════════════════════════╝");
 
     // Exit code
     let pass = targets_found >= 35 && live_ok >= 14 && sim_accuracy >= 50.0;
     if pass {
-        println!("\nBenchmark GODKÄND");
+        println!("\nBenchmark PASSED");
     } else {
-        println!("\nBenchmark UNDERKÄND — se detaljer ovan");
+        println!("\nBenchmark FAILED — see details above");
         std::process::exit(1);
     }
 }
