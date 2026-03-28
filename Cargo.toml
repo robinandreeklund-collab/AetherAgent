@@ -129,6 +129,11 @@ path = "benches/token_md_check.rs"
 required-features = ["embeddings"]
 
 [[bin]]
+name = "aether-definitive-bench"
+path = "benches/bench_definitive.rs"
+required-features = ["embeddings"]
+
+[[bin]]
 name = "aether-quality-bench"
 path = "benches/bench_quality.rs"
 required-features = ["embeddings"]
