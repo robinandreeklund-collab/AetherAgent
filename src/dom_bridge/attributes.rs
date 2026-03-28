@@ -18,7 +18,7 @@ use super::{
 /// Validera att en sträng matchar XML Name-produktionen.
 /// NameStartChar: ":" | [A-Z] | "_" | [a-z] | diverse Unicode-range
 /// NameChar: NameStartChar | "-" | "." | [0-9] | diverse Unicode
-fn is_valid_xml_name(name: &str) -> bool {
+pub(super) fn is_valid_xml_name(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }

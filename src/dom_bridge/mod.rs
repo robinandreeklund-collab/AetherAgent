@@ -1413,19 +1413,11 @@ impl JsHandler for CreateAttribute {
         // DOMString-konvertering: null→"null", undefined→"undefined"
         let name = js_value_to_dom_string(args.first());
 
-        // Validera namn
+        // Validera namn — per DOM spec: tom sträng → InvalidCharacterError
         if name.is_empty() {
             return Err(
                 ctx.throw(rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into())
             );
-        }
-        // Kontrollera ogiltiga tecken i attributnamn
-        for ch in name.chars() {
-            if matches!(ch, ' ' | '\t' | '\n' | '\r' | '<' | '>' | '&' | '"' | '\'') {
-                return Err(ctx.throw(
-                    rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError")?.into(),
-                ));
-            }
         }
 
         // HTML-dokument: lowercase
@@ -1719,11 +1711,20 @@ impl JsHandler for CreateProcessingInstruction {
             .and_then(|v| v.as_string())
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        if target.is_empty() {
+        // Spec: target måste matcha XML Name-produktionen
+        if !crate::dom_bridge::attributes::is_valid_xml_name(&target) {
             return Err(throw_dom_exception(
                 ctx,
                 "InvalidCharacterError",
-                "InvalidCharacterError: target must not be empty",
+                "InvalidCharacterError: target is not a valid XML Name",
+            ));
+        }
+        // Spec: data får inte innehålla "?>"
+        if data.contains("?>") {
+            return Err(throw_dom_exception(
+                ctx,
+                "InvalidCharacterError",
+                "InvalidCharacterError: data must not contain '?>'",
             ));
         }
         let key = {
