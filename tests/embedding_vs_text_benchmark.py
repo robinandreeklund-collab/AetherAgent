@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """
-Embedding vs Text Similarity Benchmark — AetherAgent
-=====================================================
+Definitive Embedding Benchmark — AetherAgent Embedding vs LightPanda
+=====================================================================
 
-Jämför all-MiniLM-L6-v2 (ONNX qint8) mot befintlig text_similarity (word-overlap)
-via AetherAgent MCP-server (stdio JSON-RPC).
-
-Testmatris:
-  - 20 lokala HTML-tester (svenska + engelska, varierade domäner)
-  - 5 riktiga sajter (HTML hämtad via curl, parsad via MCP)
-  - Mäter: relevance score, top-N-ranking, semantisk precision
+50 lokala HTML-tester + 20 live sajter + prestanda-benchmark.
+Kör varje motor separat (ingen resurskapplöpning).
 
 Kör:
   python3 tests/embedding_vs_text_benchmark.py
@@ -17,34 +12,43 @@ Kör:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import select
+import statistics
+import threading
+import http.server
+import socketserver
+from pathlib import Path
 
 # ─── Konfiguration ────────────────────────────────────────────────────────────
 
 ROOT = os.path.dirname(os.path.abspath(os.path.join(__file__, "..")))
+FIXTURE_DIR = os.path.join(ROOT, "tests", "fixtures")
 MCP_BINARY = os.path.join(ROOT, "target", "server-release", "aether-mcp")
+# Fallback till release-katalogen om server-release inte finns
+if not os.path.exists(MCP_BINARY):
+    MCP_BINARY = os.path.join(ROOT, "target", "release", "aether-mcp")
 VISION_MODEL = os.path.join(ROOT, "aether-ui-latest.onnx")
 EMBEDDING_MODEL = os.path.join(ROOT, "models", "all-MiniLM-L6-v2-qint8.onnx")
 EMBEDDING_VOCAB = os.path.join(ROOT, "models", "vocab.txt")
+LIGHTPANDA_BIN = os.environ.get("LIGHTPANDA_BIN", "/tmp/lightpanda")
+FIXTURE_PORT = 18767
+PERF_RUNS = 100
 
 
-# ─── MCP-klient (Popen med persistent session) ──────────────────────────────
+# ─── MCP-klient ───────────────────────────────────────────────────────────────
 
 class McpClient:
     """MCP JSON-RPC klient via stdio."""
 
-    def __init__(self, use_embeddings: bool):
+    def __init__(self):
         env = os.environ.copy()
         env["AETHER_MODEL_PATH"] = VISION_MODEL
-        if use_embeddings:
-            env["AETHER_EMBEDDING_MODEL"] = EMBEDDING_MODEL
-            env["AETHER_EMBEDDING_VOCAB"] = EMBEDDING_VOCAB
-        else:
-            env.pop("AETHER_EMBEDDING_MODEL", None)
-            env.pop("AETHER_EMBEDDING_VOCAB", None)
+        env["AETHER_EMBEDDING_MODEL"] = EMBEDDING_MODEL
+        env["AETHER_EMBEDDING_VOCAB"] = EMBEDDING_VOCAB
 
         self.proc = subprocess.Popen(
             [MCP_BINARY],
@@ -73,7 +77,7 @@ class McpClient:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "embedding-bench", "version": "1.0"}
+                "clientInfo": {"name": "embedding-bench", "version": "2.0"}
             }
         })
         resp = self._recv(10)
@@ -114,10 +118,54 @@ class McpClient:
             self.proc.kill()
 
 
+# ─── LightPanda-klient ────────────────────────────────────────────────────────
+
+class LightPandaClient:
+    """Wrapper kring LightPanda CLI subprocess."""
+
+    def __init__(self, binary_path: str):
+        self.binary = binary_path
+        self.available = os.path.exists(binary_path)
+
+    def fetch_semantic_tree(self, url: str, timeout: int = 30):
+        """Kör: lightpanda fetch --dump semantic_tree_text <url>
+        Returnerar (stdout, elapsed_ms) eller (None, elapsed_ms)."""
+        start = time.monotonic()
+        try:
+            result = subprocess.run(
+                [self.binary, "fetch", "--dump", "semantic_tree_text", url],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            elapsed = (time.monotonic() - start) * 1000
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout, elapsed
+            return None, elapsed
+        except (subprocess.TimeoutExpired, Exception):
+            return None, (time.monotonic() - start) * 1000
+
+
+# ─── Fixture-server ───────────────────────────────────────────────────────────
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass
+
+
+def start_fixture_server(directory: str, port: int):
+    """Starta lokal HTTP-server som serverar HTML-filer."""
+    original = os.getcwd()
+    os.chdir(directory)
+    server = socketserver.TCPServer(("127.0.0.1", port), _QuietHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    os.chdir(original)
+    return server
+
+
 # ─── Hjälpfunktioner ─────────────────────────────────────────────────────────
 
 def find_nodes_recursive(tree, max_depth=10):
-    """Hämta alla noder rekursivt ur ett semantic tree."""
+    """Hämta alla noder rekursivt ur ett AetherAgent semantic tree."""
     nodes = []
     if isinstance(tree, dict):
         if "role" in tree and "label" in tree:
@@ -125,7 +173,6 @@ def find_nodes_recursive(tree, max_depth=10):
         for child in tree.get("children", []):
             if max_depth > 0:
                 nodes.extend(find_nodes_recursive(child, max_depth - 1))
-        # parse-resultat har 'nodes' som toppnivå
         for child in tree.get("nodes", []):
             if max_depth > 0:
                 nodes.extend(find_nodes_recursive(child, max_depth - 1))
@@ -136,19 +183,38 @@ def find_nodes_recursive(tree, max_depth=10):
 
 
 def get_top_relevant(tree_result: dict, n: int = 5) -> list:
-    """Returnera top-N noder sorterade efter relevance score."""
+    """Top-N noder sorterade efter relevance score."""
     nodes = find_nodes_recursive(tree_result)
     scored = [(node, node.get("relevance", 0.0)) for node in nodes if node.get("label", "").strip()]
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:n]
 
 
+def parse_lp_tree(output: str) -> list:
+    """Parsa LightPandas semantic_tree_text till en lista av noder."""
+    nodes = []
+    for line in output.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Format: ID ROLE 'label' eller bara ID ROLE
+        m = re.match(r"(\d+)\s+(\S+)\s*'?(.*?)'?\s*$", line)
+        if m:
+            nodes.append({"role": m.group(2), "label": m.group(3)})
+        else:
+            # Ren text-nod: 'text content'
+            label = line.strip("' ")
+            if label:
+                nodes.append({"role": "text", "label": label})
+    return nodes
+
+
 def fetch_html(url: str, timeout: int = 15) -> str:
-    """Hämta HTML med curl (pålitligare än reqwest i sandbox)."""
+    """Hämta HTML med curl."""
     try:
         result = subprocess.run(
             ["curl", "-sL", "--compressed", "--max-time", str(timeout), "-A",
-             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
              url],
             capture_output=True, text=True, timeout=timeout + 5
         )
@@ -157,378 +223,659 @@ def fetch_html(url: str, timeout: int = 15) -> str:
         return f"<html><body>Fetch error: {e}</body></html>"
 
 
-# ─── Testfall ────────────────────────────────────────────────────────────────
+def load_fixture(filename: str) -> str:
+    """Läs en HTML-fixture från disk."""
+    path = os.path.join(FIXTURE_DIR, filename)
+    with open(path, "r") as f:
+        return f.read()
+
+
+def fmt_ms(ms):
+    if ms >= 1000:
+        return f"{ms/1000:.2f}s"
+    return f"{ms:.1f}ms"
+
+
+# ─── 50 Lokala testfall ──────────────────────────────────────────────────────
 
 LOCAL_TESTS = [
-    # ─── Synonymer (svenska) ─────────────────────────────────────────────────
-    {"name": "SV1: 'pris' → 'kostnad'", "goal": "hitta priset",
-     "html": '<div><span class="product-cost">Kostnad: 299 kr</span><span class="titel">Produkt A</span><a href="/about">Om oss</a></div>',
-     "expect": "299", "cat": "synonym-sv"},
+    # ── Befintliga fixtures (01-20) ──────────────────────────────────────────
+    {"id": 1, "name": "E-handel: Köp iPhone", "file": "01_ecommerce_product.html",
+     "goal": "köpa produkten", "expect": "varukorg", "cat": "ecommerce"},
+    {"id": 2, "name": "Login-formulär", "file": "02_login_form.html",
+     "goal": "logga in på mitt konto", "expect": "Sign In", "cat": "form"},
+    {"id": 3, "name": "Sökresultat", "file": "03_search_results.html",
+     "goal": "hitta sökresultaten", "expect": "result", "cat": "navigation"},
+    {"id": 4, "name": "Registrering", "file": "04_registration.html",
+     "goal": "skapa ett nytt konto", "expect": "Create", "cat": "form"},
+    {"id": 5, "name": "Checkout", "file": "05_checkout.html",
+     "goal": "slutföra mitt köp", "expect": "checkout", "cat": "ecommerce"},
+    {"id": 6, "name": "Nyhetsartikel", "file": "06_news_article.html",
+     "goal": "läsa artikeln", "expect": "article", "cat": "content"},
+    {"id": 7, "name": "Boka flygresa", "file": "07_booking_flight.html",
+     "goal": "boka billigaste flyget", "expect": "Boka", "cat": "ecommerce"},
+    {"id": 8, "name": "Restaurangmeny", "file": "08_restaurant_menu.html",
+     "goal": "beställa mat", "expect": "order", "cat": "ecommerce"},
+    {"id": 9, "name": "Dashboard", "file": "09_dashboard.html",
+     "goal": "se min kontostatus", "expect": "status", "cat": "navigation"},
+    {"id": 10, "name": "Injection (dold)", "file": "10_injection_hidden.html",
+     "goal": "köpa produkten", "expect": "cart", "cat": "negative"},
+    {"id": 11, "name": "Injection (social)", "file": "11_injection_social.html",
+     "goal": "hitta kontaktinfo", "expect": "contact", "cat": "negative"},
+    {"id": 12, "name": "Banking överföring", "file": "12_banking.html",
+     "goal": "överföra pengar", "expect": "verforing", "cat": "form"},
+    {"id": 13, "name": "Fastighetsannons", "file": "13_real_estate.html",
+     "goal": "se bostadens detaljer", "expect": "kvm", "cat": "content"},
+    {"id": 14, "name": "Jobbannons", "file": "14_job_listing.html",
+     "goal": "ansöka om jobbet", "expect": "ansok", "cat": "form"},
+    {"id": 15, "name": "Matbutik", "file": "15_grocery_store.html",
+     "goal": "lägga till matvaror i korgen", "expect": "cart", "cat": "ecommerce"},
+    {"id": 16, "name": "Inställningar", "file": "16_settings_page.html",
+     "goal": "ändra mitt lösenord", "expect": "password", "cat": "form"},
+    {"id": 17, "name": "Wiki-artikel", "file": "17_wiki_article.html",
+     "goal": "lära om Stockholms historia", "expect": "histori", "cat": "content"},
+    {"id": 18, "name": "Social media", "file": "18_social_media.html",
+     "goal": "posta ett meddelande", "expect": "post", "cat": "form"},
+    {"id": 19, "name": "Kontaktformulär", "file": "19_contact_form.html",
+     "goal": "skicka ett meddelande", "expect": "send", "cat": "form"},
+    {"id": 20, "name": "Stor katalog", "file": "20_large_catalog.html",
+     "goal": "köpa billigaste laptopen", "expect": "price", "cat": "complex"},
 
-    {"name": "SV2: 'kontakt' → 'telefonnummer'", "goal": "hitta kontaktinformation",
-     "html": '<div><h2>Kundtjänst</h2><p>Telefon: 08-123 456</p><p>Adress: Sveavägen 1</p><a href="/faq">Vanliga frågor</a></div>',
-     "expect": "08-123", "cat": "synonym-sv"},
-
-    {"name": "SV3: 'köpa' → 'lägg i varukorg'", "goal": "köpa produkten",
-     "html": '<div><h1>Blå Löparskor</h1><button>Lägg i varukorgen</button><button>Spara till önskelista</button><a href="/">Tillbaka</a></div>',
-     "expect": "varukorgen", "cat": "synonym-sv"},
-
-    {"name": "SV4: 'logga in' → 'sign in'", "goal": "logga in på kontot",
-     "html": '<nav><a href="/login">Sign in</a><a href="/register">Create account</a><a href="/">Home</a></nav>',
-     "expect": "Sign in", "cat": "synonym-sv"},
-
-    {"name": "SV5: 'sök' → 'search'", "goal": "sök efter produkter",
-     "html": '<div><form><input type="search" placeholder="Search products..."><button type="submit">Go</button></form><nav><a href="/all">Browse All</a></nav></div>',
-     "expect": "Search", "cat": "synonym-sv"},
-
-    # ─── Synonymer (engelska) ────────────────────────────────────────────────
-    {"name": "EN1: 'purchase' → 'add to cart'", "goal": "purchase this item",
-     "html": '<div><h1>Blue Shoes</h1><p class="price">$89.99</p><button class="cta">Add to cart</button><button>Share</button><button>Report</button></div>',
-     "expect": "cart", "cat": "synonym-en"},
-
-    {"name": "EN2: 'pricing' → '$29/month'", "goal": "find pricing information",
-     "html": '<div><div class="plan"><h3>Pro Plan</h3><p>$29/month — unlimited access</p></div><div class="faq"><h3>FAQ</h3><p>Common questions</p></div></div>',
-     "expect": "$29", "cat": "synonym-en"},
-
-    {"name": "EN3: 'employment' → 'job openings'", "goal": "find employment opportunities",
-     "html": '<nav><a href="/careers">Job Openings</a><a href="/about">About Us</a><a href="/blog">Blog</a><a href="/contact">Contact</a></nav>',
-     "expect": "Job", "cat": "synonym-en"},
-
-    {"name": "EN4: 'feedback' → 'leave a review'", "goal": "give feedback about the product",
-     "html": '<div><button>Leave a Review</button><button>Contact Support</button><button>Return Item</button><a href="/warranty">Warranty</a></div>',
-     "expect": "Review", "cat": "synonym-en"},
-
-    {"name": "EN5: 'shipping' → 'delivery options'", "goal": "check shipping details",
-     "html": '<div><a href="/delivery">Delivery Options & Tracking</a><a href="/returns">Return Policy</a><a href="/faq">FAQ</a></div>',
-     "expect": "Delivery", "cat": "synonym-en"},
-
-    # ─── Djupare semantik ────────────────────────────────────────────────────
-    {"name": "SEM1: 'nutrition' → 'calories'", "goal": "nutrition facts",
-     "html": '<div><h2>Nutrition Information</h2><table><tr><td>Calories</td><td>250 kcal</td></tr><tr><td>Fat</td><td>12g</td></tr></table><p>Ingredients: flour, sugar, eggs</p></div>',
-     "expect": "Calorie", "cat": "semantic"},
-
-    {"name": "SEM2: 'author' → 'written by'", "goal": "find the author",
-     "html": '<article><h1>Great Article Title</h1><p class="byline">Written by Dr. Jane Doe, 2026-03-15</p><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor...</p></article>',
-     "expect": "Jane", "cat": "semantic"},
-
-    {"name": "SEM3: 'open hours' → 'mon-fri'", "goal": "when are they open",
-     "html": '<div><h2>Visit Us</h2><p>Mon-Fri 9:00-17:00</p><p>Sat 10:00-14:00</p><p>Address: Main Street 42, Stockholm</p></div>',
-     "expect": "Mon", "cat": "semantic"},
-
-    {"name": "SEM4: 'customer service' → 'help center'", "goal": "reach customer service",
-     "html": '<nav><a href="/help">Help Center</a><a href="/docs">API Documentation</a><a href="/blog">Company Blog</a><a href="/status">System Status</a></nav>',
-     "expect": "Help", "cat": "semantic"},
-
-    {"name": "SEM5: 'unsubscribe' → 'email preferences'", "goal": "unsubscribe from emails",
-     "html": '<div><a href="/prefs">Manage Email Preferences</a><a href="/profile">Edit Profile</a><a href="/security">Security Settings</a><a href="/billing">Billing</a></div>',
-     "expect": "Email Preferences", "cat": "semantic"},
-
-    # ─── Negativa/precision-tester ───────────────────────────────────────────
-    {"name": "NEG1: 'pris' → inte 'nyhet'", "goal": "hitta priset",
-     "html": '<div><p>Senaste nyheten: Vi har öppnat nytt kontor i Malmö</p><p>Pris: 199 kr ink. moms</p><p>Kontakt: info@example.com</p></div>',
-     "expect": "199", "cat": "negative"},
-
-    {"name": "NEG2: 'login' → inte 'logout'", "goal": "log in to my account",
-     "html": '<header><button>Log Out</button><a href="/signin">Sign In</a><a href="/help">Help</a></header>',
-     "expect": "Sign In", "cat": "negative"},
-
-    # ─── Komplexa sidor ──────────────────────────────────────────────────────
-    {"name": "COMPLEX1: E-handel 15 element", "goal": "buy the blue shoes",
-     "html": """<html><body>
-        <nav><a href="/">Home</a><a href="/sale">Sale</a><a href="/new">New</a></nav>
-        <h1>Blue Running Shoes</h1><div class="price">$89.99</div>
-        <p>Lightweight, breathable mesh upper for maximum comfort</p>
-        <select><option>Size 8</option><option>Size 9</option><option>Size 10</option></select>
-        <button class="add-to-cart">Add to Cart</button><button class="wishlist">Save for Later</button>
-        <div class="reviews"><h3>Customer Reviews</h3><p>4.5 stars (230 reviews)</p></div>
-        <div class="related"><h3>You might also like</h3><a href="/red-shoes">Red Running Shoes</a></div>
-        <footer><a href="/contact">Contact Us</a><a href="/privacy">Privacy Policy</a></footer>
-     </body></html>""",
-     "expect": "Add to Cart", "cat": "complex"},
-
-    {"name": "COMPLEX2: Nyhetsartikel", "goal": "read the article about climate change",
-     "html": """<html><body>
-        <header><nav><a href="/">Start</a><a href="/sport">Sport</a><a href="/weather">Weather</a></nav></header>
-        <main><article>
-            <h1>Climate Change Report 2026: Key Findings</h1>
-            <p class="author">By Dr. Anna Lindqvist, March 2026</p>
-            <p>Global temperatures have risen by 1.5 degrees C since pre-industrial times. The report highlights several urgent actions needed to mitigate the worst effects of climate change.</p>
-        </article></main>
-        <aside><h3>Popular</h3><a href="/tech">Tech News</a><a href="/sport">Sports</a></aside>
-        <footer><p>Copyright 2026 News Corp</p></footer>
-     </body></html>""",
-     "expect": "Climate", "cat": "complex"},
-
-    {"name": "COMPLEX3: Registrering", "goal": "register a new account",
-     "html": """<html><body>
-        <h1>Create Your Account</h1>
-        <form><label>Full Name</label><input type="text" name="name">
-        <label>Email Address</label><input type="email" name="email">
-        <label>Password</label><input type="password" name="password">
-        <label><input type="checkbox"> I agree to Terms of Service</label>
-        <button type="submit">Create Account</button></form>
-        <p>Already have an account? <a href="/login">Sign in instead</a></p>
-     </body></html>""",
-     "expect": "Create Account", "cat": "complex"},
+    # ── Nya fixtures (21-50) ─────────────────────────────────────────────────
+    {"id": 21, "name": "SV: pris → kostnad", "file": "21_sv_price_synonym.html",
+     "goal": "hitta priset", "expect": "2 499", "cat": "synonym-sv"},
+    {"id": 22, "name": "SV: kontakt → telefon", "file": "22_sv_contact_synonym.html",
+     "goal": "hitta kontaktuppgifter", "expect": "0771", "cat": "synonym-sv"},
+    {"id": 23, "name": "SV: köpa → lägg i korgen", "file": "23_sv_buy_synonym.html",
+     "goal": "köpa produkten", "expect": "korgen", "cat": "synonym-sv"},
+    {"id": 24, "name": "EN: purchase → add to basket", "file": "24_en_purchase_synonym.html",
+     "goal": "purchase this item", "expect": "basket", "cat": "synonym-en"},
+    {"id": 25, "name": "EN: cost → $49/month", "file": "25_en_pricing_synonym.html",
+     "goal": "find how much it costs", "expect": "$49", "cat": "synonym-en"},
+    {"id": 26, "name": "EN: employment → careers", "file": "26_en_employment_synonym.html",
+     "goal": "find employment opportunities", "expect": "Careers", "cat": "synonym-en"},
+    {"id": 27, "name": "Semantic: nutrition → kalorier", "file": "27_semantic_nutrition.html",
+     "goal": "check nutrition facts", "expect": "Calorie", "cat": "semantic"},
+    {"id": 28, "name": "Semantic: author → byline", "file": "28_semantic_author.html",
+     "goal": "who wrote this article", "expect": "Maria Chen", "cat": "semantic"},
+    {"id": 29, "name": "Semantic: öppettider", "file": "29_semantic_hours.html",
+     "goal": "when are they open", "expect": "Monday", "cat": "semantic"},
+    {"id": 30, "name": "Semantic: unsubscribe → email prefs", "file": "30_semantic_unsubscribe.html",
+     "goal": "unsubscribe from emails", "expect": "Email Preferences", "cat": "semantic"},
+    {"id": 31, "name": "NEG: login ≠ logout", "file": "31_negative_login_logout.html",
+     "goal": "log in to my account", "expect": "Sign In", "cat": "negative"},
+    {"id": 32, "name": "NEG: pris ≠ nyhet", "file": "32_negative_price_news.html",
+     "goal": "hitta priset", "expect": "14 995", "cat": "negative"},
+    {"id": 33, "name": "NEG: save ≠ delete", "file": "33_negative_delete_save.html",
+     "goal": "save my changes", "expect": "Save", "cat": "negative"},
+    {"id": 34, "name": "E-handel: checkout i kundvagn", "file": "34_ecommerce_cart_review.html",
+     "goal": "proceed to checkout", "expect": "checkout", "cat": "ecommerce"},
+    {"id": 35, "name": "E-handel: jämför produkter", "file": "35_ecommerce_product_compare.html",
+     "goal": "compare the two laptops", "expect": "MacBook", "cat": "ecommerce"},
+    {"id": 36, "name": "Formulär: flersteg", "file": "36_form_multi_step.html",
+     "goal": "go to next step", "expect": "Continue", "cat": "form"},
+    {"id": 37, "name": "Content: batterikapacitet", "file": "37_content_table_specs.html",
+     "goal": "find the battery capacity", "expect": "5,000 mAh", "cat": "content"},
+    {"id": 38, "name": "Content: returpolicy FAQ", "file": "38_content_faq_accordion.html",
+     "goal": "how do I return an item", "expect": "30 days", "cat": "content"},
+    {"id": 39, "name": "SV: boka läkartid", "file": "39_sv_medical_booking.html",
+     "goal": "boka läkartid", "expect": "Boka", "cat": "swedish"},
+    {"id": 40, "name": "SV: deklarera skatt", "file": "40_sv_government_form.html",
+     "goal": "deklarera mina skatter", "expect": "deklarera", "cat": "swedish"},
+    {"id": 41, "name": "Edge: nästan tom sida", "file": "41_edge_empty_page.html",
+     "goal": "find content", "expect": "Coming Soon", "cat": "edge"},
+    {"id": 42, "name": "Edge: 30+ produkter", "file": "42_edge_huge_page.html",
+     "goal": "find the contact form", "expect": "Send message", "cat": "edge"},
+    {"id": 43, "name": "Edge: 15 nivåer djup", "file": "43_edge_deep_nesting.html",
+     "goal": "click the button", "expect": "Activate", "cat": "edge"},
+    {"id": 44, "name": "Edge: ingen semantisk HTML", "file": "44_edge_no_semantics.html",
+     "goal": "find the main content", "expect": "web hosting", "cat": "edge"},
+    {"id": 45, "name": "Complex: analytics dashboard", "file": "45_complex_dashboard.html",
+     "goal": "export the report", "expect": "Export", "cat": "complex"},
+    {"id": 46, "name": "Complex: email inbox", "file": "46_complex_email_inbox.html",
+     "goal": "compose new email", "expect": "Compose", "cat": "complex"},
+    {"id": 47, "name": "Complex: social feed", "file": "47_complex_social_feed.html",
+     "goal": "create a new post", "expect": "New Post", "cat": "complex"},
+    {"id": 48, "name": "Complex: code editor", "file": "48_complex_code_editor.html",
+     "goal": "run the code", "expect": "Run", "cat": "complex"},
+    {"id": 49, "name": "SV: hitta ingredienser", "file": "49_sv_recipe_page.html",
+     "goal": "hitta ingredienserna", "expect": "blandfars", "cat": "swedish"},
+    {"id": 50, "name": "Accessibility: ARIA-formulär", "file": "50_accessibility_aria.html",
+     "goal": "submit the form", "expect": "Save", "cat": "accessibility"},
 ]
+
+# ─── 20 Live-tester ──────────────────────────────────────────────────────────
 
 LIVE_TESTS = [
-    {"name": "LIVE1: Rust-lang.org — språkbeskrivning",
-     "url": "https://www.rust-lang.org/",
-     "goal": "learn about the programming language features"},
-    {"name": "LIVE2: Hacker News — toppnyheter",
+    {"id": 1, "name": "Wikipedia: Stockholm",
+     "url": "https://en.wikipedia.org/wiki/Stockholm",
+     "goal": "find the population of Stockholm"},
+    {"id": 2, "name": "Hacker News",
      "url": "https://news.ycombinator.com/",
-     "goal": "find the top stories"},
-    {"name": "LIVE3: GitHub repo — beskrivning",
+     "goal": "find the top story"},
+    {"id": 3, "name": "GitHub: nickel.rs",
      "url": "https://github.com/nickel-org/nickel.rs",
-     "goal": "find the project description and star count"},
-    {"name": "LIVE4: Python.org — nedladdning",
+     "goal": "find the project description"},
+    {"id": 4, "name": "Python.org downloads",
      "url": "https://www.python.org/downloads/",
      "goal": "download the latest Python version"},
-    {"name": "LIVE5: HTTPBin — API endpoints",
+    {"id": 5, "name": "Rust-lang.org",
+     "url": "https://www.rust-lang.org/",
+     "goal": "learn about the language features"},
+    {"id": 6, "name": "SVT.se",
+     "url": "https://www.svt.se/",
+     "goal": "hitta senaste nyheterna"},
+    {"id": 7, "name": "HTTPBin",
      "url": "https://httpbin.org/",
      "goal": "find available API endpoints"},
+    {"id": 8, "name": "BBC News",
+     "url": "https://www.bbc.com/",
+     "goal": "read the top news story"},
+    {"id": 9, "name": "Stack Overflow",
+     "url": "https://stackoverflow.com/questions",
+     "goal": "find questions about Python"},
+    {"id": 10, "name": "Books to Scrape",
+     "url": "https://books.toscrape.com/",
+     "goal": "find the cheapest book"},
+    {"id": 11, "name": "Quotes to Scrape",
+     "url": "https://quotes.toscrape.com/",
+     "goal": "find a quote about life"},
+    {"id": 12, "name": "W3Schools",
+     "url": "https://www.w3schools.com/",
+     "goal": "learn HTML basics"},
+    {"id": 13, "name": "Example.com",
+     "url": "https://example.com/",
+     "goal": "find the main content"},
+    {"id": 14, "name": "Python docs",
+     "url": "https://docs.python.org/3/",
+     "goal": "find the tutorial"},
+    {"id": 15, "name": "Mozilla.org",
+     "url": "https://www.mozilla.org/",
+     "goal": "download Firefox"},
+    {"id": 16, "name": "Apple.com",
+     "url": "https://www.apple.com/",
+     "goal": "find the latest product"},
+    {"id": 17, "name": "DN.se",
+     "url": "https://www.dn.se/",
+     "goal": "läsa huvudnyheten"},
+    {"id": 18, "name": "Dev.to",
+     "url": "https://dev.to/",
+     "goal": "find articles about Rust"},
+    {"id": 19, "name": "MDN Web Docs",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/HTML",
+     "goal": "find HTML elements reference"},
+    {"id": 20, "name": "arXiv.org",
+     "url": "https://arxiv.org/",
+     "goal": "find latest papers"},
 ]
 
 
-# ─── Benchmark-logik ─────────────────────────────────────────────────────────
+# ─── Campfire Commerce HTML (för prestandatest) ─────────────────────────────
 
-def run_local_test(client: McpClient, test: dict) -> dict:
-    start = time.time()
+CAMPFIRE_HTML = r"""<!DOCTYPE html>
+<html><head><title>Outdoor Odyssey Nomad Backpack</title></head>
+<body>
+<nav><ul><li><a href="#">Home</a></li><li><a href="#">Products</a></li>
+<li><a href="#">About</a></li><li><a href="#">Contact</a></li></ul></nav>
+<div class="single-product">
+  <h1 id="product-name">Outdoor Odyssey Nomad Backpack 60 liters</h1>
+  <h4 id="product-price">$244.99</h4>
+  <input type="number" value="1" />
+  <a href="#" class="btn">Add To Cart</a>
+  <p id="product-description">The Outdoor Odyssey Nomad Backpack is a spacious 60-liter
+  backpack for multi-day outdoor adventures. Padded shoulder straps, adjustable hip belt,
+  multiple compartments, water-resistant materials.</p>
+  <ul id="product-features">
+    <li>Large 60-liter capacity</li><li>Padded shoulder straps</li>
+    <li>Multiple compartments</li><li>Water-resistant materials</li>
+  </ul>
+</div>
+<div id="product-related">
+  <h4>Outdoor Odyssey Hiking Poles</h4><p>$79.99</p>
+  <h4>Outdoor Odyssey Sleeping Bag</h4><p>$129.99</p>
+  <h4>Outdoor Odyssey Water Bottle</h4><p>$19.99</p>
+</div>
+<div id="product-reviews">
+  <p>I recently used the Nomad Backpack on a week-long camping trip and was thoroughly impressed.</p>
+  <p>The 60-liter capacity provides plenty of room for all of my essentials.</p>
+  <p>I purchased the Nomad Backpack for a two-week trip through Europe and was blown away.</p>
+</div>
+<footer><p>Gear up for your next adventure</p></footer>
+</body></html>"""
+
+
+# ─── Test-runners ────────────────────────────────────────────────────────────
+
+def run_aether_test(client: McpClient, html: str, goal: str, expect: str) -> dict:
+    """Kör ett test via AetherAgent MCP. Returnerar resultat-dict."""
+    start = time.monotonic()
     result = client.call_tool("parse", {
-        "html": test["html"], "goal": test["goal"], "url": "https://example.com"
+        "html": html, "goal": goal, "url": "https://example.com"
     })
-    elapsed = time.time() - start
+    elapsed = (time.monotonic() - start) * 1000
 
+    if "error" in result:
+        return {"found": False, "target_rank": -1, "target_score": 0.0,
+                "node_count": 0, "token_count": 0, "elapsed_ms": round(elapsed, 1),
+                "top5": [], "error": result.get("error", "unknown")}
+
+    all_nodes = find_nodes_recursive(result)
     top = get_top_relevant(result, n=5)
+
     found = False
-    target_score = 0.0
     target_rank = -1
+    target_score = 0.0
+    if expect:
+        for i, (node, score) in enumerate(top):
+            if expect.lower() in node.get("label", "").lower():
+                found = True
+                target_rank = i + 1
+                target_score = score
+                break
 
-    for i, (node, score) in enumerate(top):
-        label = node.get("label", "")
-        if test.get("expect") and test["expect"].lower() in label.lower():
-            found = True
-            target_score = score
-            target_rank = i + 1
-            break
+    raw_json = json.dumps(result, ensure_ascii=False)
+    return {
+        "found": found,
+        "target_rank": target_rank,
+        "target_score": round(target_score, 4),
+        "node_count": len(all_nodes),
+        "token_count": len(raw_json) // 4,
+        "elapsed_ms": round(elapsed, 1),
+        "top5": [{"label": n.get("label", "")[:60], "rel": round(s, 4),
+                  "role": n.get("role", "")} for n, s in top],
+        "error": None,
+    }
 
-    best_score = top[0][1] if top else 0.0
-    best_label = top[0][0].get("label", "")[:60] if top else ""
+
+def run_lightpanda_test(lp: LightPandaClient, url: str, expect: str) -> dict:
+    """Kör ett test via LightPanda CLI. Returnerar resultat-dict."""
+    output, elapsed = lp.fetch_semantic_tree(url)
+    if output is None:
+        return {"found": False, "target_rank": -1, "node_count": 0,
+                "token_count": 0, "elapsed_ms": round(elapsed, 1),
+                "top5": [], "error": "fetch_failed"}
+
+    nodes = parse_lp_tree(output)
+    found = False
+    target_rank = -1
+    if expect:
+        for i, node in enumerate(nodes):
+            if expect.lower() in node.get("label", "").lower():
+                found = True
+                target_rank = i + 1
+                break
 
     return {
         "found": found,
-        "target_score": round(target_score, 4),
         "target_rank": target_rank,
-        "best_score": round(best_score, 4),
-        "best_label": best_label,
-        "elapsed_ms": round(elapsed * 1000, 1),
-        "top3": [{"label": n.get("label", "")[:50], "rel": round(s, 4), "role": n.get("role", "")}
-                 for n, s in top[:3]],
+        "node_count": len(nodes),
+        "token_count": len(output) // 4,
+        "elapsed_ms": round(elapsed, 1),
+        "top5": [{"label": n.get("label", "")[:60], "role": n.get("role", "")}
+                 for n in nodes[:5]],
+        "error": None,
     }
 
 
-def run_live_test(client: McpClient, html: str, goal: str, url: str) -> dict:
-    start = time.time()
-    result = client.call_tool("parse", {"html": html, "goal": goal, "url": url})
-    elapsed = time.time() - start
+# ─── Utskriftsfunktioner ────────────────────────────────────────────────────
 
-    if "error" in result:
-        return {"error": result["error"], "elapsed_ms": round(elapsed * 1000, 1)}
-
-    top = get_top_relevant(result, n=5)
-    return {
-        "elapsed_ms": round(elapsed * 1000, 1),
-        "node_count": len(find_nodes_recursive(result)),
-        "best_score": round(top[0][1], 4) if top else 0.0,
-        "top5": [{"label": n.get("label", "")[:60], "rel": round(s, 4), "role": n.get("role", "")}
-                 for n, s in top[:5]],
-    }
-
-
-def print_separator(title):
+def print_header(title):
     print()
-    print("─" * 80)
+    print("=" * 80)
     print(f"  {title}")
-    print("─" * 80)
+    print("=" * 80)
     print()
 
+
+def print_section(title):
+    print()
+    print("-" * 80)
+    print(f"  {title}")
+    print("-" * 80)
+    print()
+
+
+# ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 80)
-    print("  EMBEDDING vs TEXT SIMILARITY BENCHMARK — AetherAgent")
-    print("  Modell: all-MiniLM-L6-v2 (qint8, 22 MB, 384 dim)")
-    print("=" * 80)
+    print_header("DEFINITIVE BENCHMARK: AetherAgent Embedding vs LightPanda")
+    print(f"  Datum: {time.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  50 lokala tester | 20 live sajter | prestanda-benchmark")
     print()
 
-    # Verifiera filer
+    # ── Verifiera filer ──────────────────────────────────────────────────────
+    missing = False
     for path, name in [(MCP_BINARY, "MCP binary"), (EMBEDDING_MODEL, "Embedding model"),
                        (EMBEDDING_VOCAB, "Vocab")]:
         if os.path.exists(path):
-            print(f"  ✓ {name} ({os.path.getsize(path) / 1_048_576:.1f} MB)")
+            sz = os.path.getsize(path) / 1_048_576
+            print(f"  OK  {name} ({sz:.1f} MB)")
         else:
-            print(f"  ✗ SAKNAS: {name} ({path})")
-            sys.exit(1)
+            print(f"  SAKNAS  {name} ({path})")
+            missing = True
+    if missing:
+        print("\n  Kan inte köra utan MCP-binär och embedding-modell.")
+        sys.exit(1)
+
+    # ── LightPanda ───────────────────────────────────────────────────────────
+    lp = LightPandaClient(LIGHTPANDA_BIN)
+    if lp.available:
+        print(f"  OK  LightPanda ({LIGHTPANDA_BIN})")
+    else:
+        print(f"  INFO  LightPanda ej installerad — kör bara AetherAgent")
+        print(f"         Sätt LIGHTPANDA_BIN för att aktivera jämförelse")
     print()
 
-    # Starta två MCP-sessioner: med och utan embedding
-    print("  Startar MCP (med embedding)...")
-    client_emb = McpClient(use_embeddings=True)
-    print("  Startar MCP (utan embedding — bara text_similarity)...")
-    client_txt = McpClient(use_embeddings=False)
-    print("  Båda MCP-sessioner redo.")
+    # ── Starta fixture-server (för LightPanda) ───────────────────────────────
+    fixture_server = None
+    if lp.available:
+        fixture_server = start_fixture_server(FIXTURE_DIR, FIXTURE_PORT)
+        print(f"  Fixture-server startad på port {FIXTURE_PORT}")
 
-    results = {"local": [], "live": [], "summary": {}}
-    embed_wins = text_wins = ties = embed_found = text_found = 0
+    results = {"meta": {"date": time.strftime("%Y-%m-%d"), "local_tests": 50,
+                        "live_tests": 20, "lightpanda_available": lp.available},
+               "local": [], "live": [], "performance": {}, "summary": {}}
 
-    # ─── DEL 1: Lokala HTML-tester ───────────────────────────────────────────
-    print_separator(f"DEL 1: LOKALA HTML-TESTER ({len(LOCAL_TESTS)} testfall)")
+    # ── Ladda alla fixture-filer ─────────────────────────────────────────────
+    fixtures = {}
+    for test in LOCAL_TESTS:
+        try:
+            fixtures[test["file"]] = load_fixture(test["file"])
+        except FileNotFoundError:
+            print(f"  VARNING: Fixture saknas: {test['file']}")
+            fixtures[test["file"]] = "<html><body>Missing fixture</body></html>"
 
-    for i, test in enumerate(LOCAL_TESTS, 1):
-        print(f"  [{i:2d}/{len(LOCAL_TESTS)}] {test['name']}")
-        print(f"         Goal: \"{test['goal']}\"  |  Söker: \"{test.get('expect', '?')}\"")
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 1: LOKALA TESTER — AetherAgent
+    # ══════════════════════════════════════════════════════════════════════════
+    print_header(f"FAS 1: LOKALA TESTER — AetherAgent Embedding ({len(LOCAL_TESTS)} st)")
 
-        r_emb = run_local_test(client_emb, test)
-        r_txt = run_local_test(client_txt, test)
+    print("  Startar MCP-session (embedding)...", flush=True)
+    client = McpClient()
+    print("  MCP redo.\n")
 
-        if r_emb["found"]: embed_found += 1
-        if r_txt["found"]: text_found += 1
+    ae_local = {}
+    for test in LOCAL_TESTS:
+        html = fixtures[test["file"]]
+        r = run_aether_test(client, html, test["goal"], test["expect"])
+        ae_local[test["id"]] = r
+        f = "HIT" if r["found"] else "---"
+        rank_str = f"rank={r['target_rank']}" if r["found"] else "miss"
+        print(f"  [{test['id']:2d}/50] {test['name']:<35s}  {f}  {rank_str:<8s}  "
+              f"rel={r['target_score']:.3f}  {r['elapsed_ms']:5.0f}ms  "
+              f"nodes={r['node_count']}  tokens={r['token_count']}")
 
-        delta = r_emb["target_score"] - r_txt["target_score"]
-        if delta > 0.005:
-            winner = "EMB >"
-            embed_wins += 1
-        elif delta < -0.005:
-            winner = "< TXT"
-            text_wins += 1
-        else:
-            winner = "  =  "
-            ties += 1
+    client.close()
 
-        f_e = "HIT" if r_emb["found"] else "---"
-        f_t = "HIT" if r_txt["found"] else "---"
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 2: LOKALA TESTER — LightPanda
+    # ══════════════════════════════════════════════════════════════════════════
+    lp_local = {}
+    if lp.available:
+        print_header(f"FAS 2: LOKALA TESTER — LightPanda ({len(LOCAL_TESTS)} st)")
 
-        print(f"         EMB: {r_emb['target_score']:.4f} rank={r_emb['target_rank']:2d} [{f_e}] ({r_emb['elapsed_ms']:5.0f}ms)"
-              f"  |  TXT: {r_txt['target_score']:.4f} rank={r_txt['target_rank']:2d} [{f_t}] ({r_txt['elapsed_ms']:5.0f}ms)"
-              f"  |  {winner}  Δ={delta:+.4f}")
+        for test in LOCAL_TESTS:
+            url = f"http://127.0.0.1:{FIXTURE_PORT}/{test['file']}"
+            r = run_lightpanda_test(lp, url, test["expect"])
+            lp_local[test["id"]] = r
+            f = "HIT" if r["found"] else "---"
+            rank_str = f"pos={r['target_rank']}" if r["found"] else "miss"
+            print(f"  [{test['id']:2d}/50] {test['name']:<35s}  {f}  {rank_str:<8s}  "
+                  f"{r['elapsed_ms']:5.0f}ms  nodes={r['node_count']}  tokens={r['token_count']}")
+    else:
+        print_section("FAS 2: LightPanda — HOPPAS ÖVER (ej installerad)")
 
-        if r_emb["top3"] != r_txt["top3"]:
-            e_labels = [n["label"][:30] for n in r_emb["top3"]]
-            t_labels = [n["label"][:30] for n in r_txt["top3"]]
-            if e_labels != t_labels:
-                print(f"         EMB top3: {e_labels}")
-                print(f"         TXT top3: {t_labels}")
+    # ── Samla lokala resultat ────────────────────────────────────────────────
+    for test in LOCAL_TESTS:
+        entry = {"id": test["id"], "name": test["name"], "category": test["cat"],
+                 "goal": test["goal"], "expect": test["expect"],
+                 "aether": ae_local[test["id"]]}
+        if test["id"] in lp_local:
+            entry["lightpanda"] = lp_local[test["id"]]
+        results["local"].append(entry)
 
-        results["local"].append({
-            "test": test["name"], "category": test["cat"],
-            "goal": test["goal"], "expect": test.get("expect", ""),
-            "embedding": r_emb, "text_sim": r_txt, "delta": round(delta, 4),
-        })
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 3: LIVE-TESTER — AetherAgent
+    # ══════════════════════════════════════════════════════════════════════════
+    print_header(f"FAS 3: LIVE-TESTER — AetherAgent Embedding ({len(LIVE_TESTS)} sajter)")
 
-    # ─── DEL 2: Live-tester ──────────────────────────────────────────────────
-    print_separator(f"DEL 2: LIVE-TESTER MOT RIKTIGA SAJTER ({len(LIVE_TESTS)} sajter)")
-
-    for i, test in enumerate(LIVE_TESTS, 1):
-        print(f"  [{i}/{len(LIVE_TESTS)}] {test['name']}")
-        print(f"         URL: {test['url']}")
-        print(f"         Goal: \"{test['goal']}\"")
-
-        # Hämta HTML via curl (en gång per sajt)
-        print(f"         Hämtar HTML...", end=" ", flush=True)
+    # Hämta HTML för alla sajter först
+    live_html = {}
+    for test in LIVE_TESTS:
+        print(f"  Hämtar {test['url'][:50]}...", end=" ", flush=True)
         html = fetch_html(test["url"])
+        live_html[test["id"]] = html
         print(f"{len(html)} bytes")
 
+    print()
+    print("  Startar MCP-session (embedding)...", flush=True)
+    client = McpClient()
+    print("  MCP redo.\n")
+
+    ae_live = {}
+    for test in LIVE_TESTS:
+        html = live_html[test["id"]]
         if len(html) < 100:
-            print(f"         SKIP: Kunde inte hämta HTML")
-            results["live"].append({"test": test["name"], "error": "fetch failed"})
+            ae_live[test["id"]] = {"found": False, "target_rank": -1,
+                                    "node_count": 0, "token_count": 0,
+                                    "elapsed_ms": 0, "top5": [],
+                                    "error": "fetch_failed"}
+            print(f"  [{test['id']:2d}/20] {test['name']:<30s}  SKIP — fetch misslyckades")
             continue
 
-        r_emb = run_live_test(client_emb, html, test["goal"], test["url"])
-        r_txt = run_live_test(client_txt, html, test["goal"], test["url"])
+        r = run_aether_test(client, html, test["goal"], "")
+        ae_live[test["id"]] = r
+        best = r["top5"][0]["label"][:40] if r["top5"] else "—"
+        print(f"  [{test['id']:2d}/20] {test['name']:<30s}  "
+              f"nodes={r['node_count']:4d}  tokens={r['token_count']:5d}  "
+              f"{r['elapsed_ms']:5.0f}ms  best: {best}")
 
-        results["live"].append({
-            "test": test["name"], "url": test["url"], "goal": test["goal"],
-            "html_size": len(html),
-            "embedding": r_emb, "text_sim": r_txt,
-        })
+    client.close()
 
-        for label, r in [("EMB", r_emb), ("TXT", r_txt)]:
-            if "error" in r:
-                print(f"         {label}: ERROR — {r['error']}")
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 4: LIVE-TESTER — LightPanda
+    # ══════════════════════════════════════════════════════════════════════════
+    lp_live = {}
+    if lp.available:
+        print_header(f"FAS 4: LIVE-TESTER — LightPanda ({len(LIVE_TESTS)} sajter)")
+
+        for test in LIVE_TESTS:
+            r = run_lightpanda_test(lp, test["url"], "")
+            lp_live[test["id"]] = r
+            if r["error"]:
+                print(f"  [{test['id']:2d}/20] {test['name']:<30s}  ERROR: {r['error']}")
             else:
-                print(f"         {label}: best={r['best_score']:.4f}  nodes={r['node_count']}  ({r['elapsed_ms']:.0f}ms)")
-                for n in r.get("top5", [])[:3]:
-                    print(f"           [{n['rel']:.3f}] {n['role']:10s} {n['label']}")
+                print(f"  [{test['id']:2d}/20] {test['name']:<30s}  "
+                      f"nodes={r['node_count']:4d}  tokens={r['token_count']:5d}  "
+                      f"{r['elapsed_ms']:5.0f}ms")
+    else:
+        print_section("FAS 4: LightPanda — HOPPAS ÖVER (ej installerad)")
 
-        # Jämför: vilka noder hittar bara embedding?
-        if "error" not in r_emb and "error" not in r_txt:
-            emb_labels = set(n["label"][:40].lower() for n in r_emb.get("top5", []))
-            txt_labels = set(n["label"][:40].lower() for n in r_txt.get("top5", []))
-            only_emb = emb_labels - txt_labels
-            only_txt = txt_labels - emb_labels
-            if only_emb:
-                print(f"         Bara EMB: {only_emb}")
-            if only_txt:
-                print(f"         Bara TXT: {only_txt}")
-        print()
+    # ── Samla live-resultat ──────────────────────────────────────────────────
+    for test in LIVE_TESTS:
+        entry = {"id": test["id"], "name": test["name"], "url": test["url"],
+                 "goal": test["goal"], "html_size": len(live_html.get(test["id"], "")),
+                 "aether": ae_live.get(test["id"], {})}
+        if test["id"] in lp_live:
+            entry["lightpanda"] = lp_live[test["id"]]
+        results["live"].append(entry)
 
-    # ─── Sammanfattning ──────────────────────────────────────────────────────
-    print_separator("SAMMANFATTNING")
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 5: PRESTANDA — 100 sekventiella parseringar
+    # ══════════════════════════════════════════════════════════════════════════
+    print_header(f"FAS 5: PRESTANDA — Campfire Commerce ({PERF_RUNS} körningar)")
 
-    total = len(LOCAL_TESTS)
-    print(f"  Lokala tester ({total} st):")
-    print(f"    Embedding hittar mål:  {embed_found}/{total} ({100*embed_found/total:.0f}%)")
-    print(f"    Text_sim hittar mål:   {text_found}/{total} ({100*text_found/total:.0f}%)")
-    print(f"    Embedding vinner:      {embed_wins}")
-    print(f"    Text_sim vinner:       {text_wins}")
-    print(f"    Lika:                  {ties}")
-    print()
+    # AetherAgent
+    print("  AetherAgent: Startar MCP-session...", flush=True)
+    client = McpClient()
+    ae_perf_times = []
+    for i in range(PERF_RUNS):
+        start = time.monotonic()
+        client.call_tool("parse", {"html": CAMPFIRE_HTML, "goal": "buy the backpack",
+                                   "url": "https://demo.lightpanda.io/"})
+        ae_perf_times.append((time.monotonic() - start) * 1000)
+        if (i + 1) % 25 == 0:
+            print(f"    AetherAgent: {i+1}/{PERF_RUNS} done ({fmt_ms(ae_perf_times[-1])} last)")
+    client.close()
 
-    # Genomsnittlig latens
-    emb_latencies = [r["embedding"]["elapsed_ms"] for r in results["local"]]
-    txt_latencies = [r["text_sim"]["elapsed_ms"] for r in results["local"]]
-    print(f"  Genomsnittlig latens (lokal):")
-    print(f"    Embedding: {sum(emb_latencies)/len(emb_latencies):.0f} ms/anrop")
-    print(f"    Text_sim:  {sum(txt_latencies)/len(txt_latencies):.0f} ms/anrop")
-    print(f"    Overhead:  {(sum(emb_latencies)-sum(txt_latencies))/len(emb_latencies):.0f} ms")
-    print()
-
-    # Latens per kategori
-    cats = {}
-    for r in results["local"]:
-        c = r["category"]
-        if c not in cats: cats[c] = {"emb_scores": [], "txt_scores": [], "emb_found": 0, "txt_found": 0, "total": 0}
-        cats[c]["total"] += 1
-        cats[c]["emb_scores"].append(r["embedding"]["target_score"])
-        cats[c]["txt_scores"].append(r["text_sim"]["target_score"])
-        if r["embedding"]["found"]: cats[c]["emb_found"] += 1
-        if r["text_sim"]["found"]: cats[c]["txt_found"] += 1
-
-    print(f"  Resultat per kategori:")
-    print(f"    {'Kategori':<15s}  {'EMB hitt':>10s}  {'TXT hitt':>10s}  {'EMB avg':>10s}  {'TXT avg':>10s}")
-    for c, d in sorted(cats.items()):
-        emb_avg = sum(d["emb_scores"]) / d["total"] if d["total"] else 0
-        txt_avg = sum(d["txt_scores"]) / d["total"] if d["total"] else 0
-        print(f"    {c:<15s}  {d['emb_found']}/{d['total']:>7d}  {d['txt_found']}/{d['total']:>7d}  {emb_avg:>10.4f}  {txt_avg:>10.4f}")
-    print()
-
-    results["summary"] = {
-        "local_tests": total, "live_tests": len(LIVE_TESTS),
-        "embed_found": embed_found, "text_found": text_found,
-        "embed_wins": embed_wins, "text_wins": text_wins, "ties": ties,
-        "avg_latency_emb_ms": round(sum(emb_latencies)/len(emb_latencies), 1),
-        "avg_latency_txt_ms": round(sum(txt_latencies)/len(txt_latencies), 1),
+    ae_perf = {
+        "total_ms": round(sum(ae_perf_times), 1),
+        "avg_ms": round(statistics.mean(ae_perf_times), 1),
+        "median_ms": round(statistics.median(ae_perf_times), 1),
+        "p99_ms": round(sorted(ae_perf_times)[int(PERF_RUNS * 0.99)], 1),
     }
+    results["performance"]["aether"] = ae_perf
 
-    # Spara
+    print(f"\n  AetherAgent ({PERF_RUNS} runs):")
+    print(f"    Total:   {fmt_ms(ae_perf['total_ms'])}")
+    print(f"    Avg:     {fmt_ms(ae_perf['avg_ms'])}")
+    print(f"    Median:  {fmt_ms(ae_perf['median_ms'])}")
+    print(f"    P99:     {fmt_ms(ae_perf['p99_ms'])}")
+
+    # LightPanda prestanda
+    if lp.available:
+        # Skriv campfire till fixture-server
+        campfire_path = os.path.join(FIXTURE_DIR, "_campfire_bench.html")
+        with open(campfire_path, "w") as f:
+            f.write(CAMPFIRE_HTML)
+
+        lp_perf_times = []
+        campfire_url = f"http://127.0.0.1:{FIXTURE_PORT}/_campfire_bench.html"
+        for i in range(PERF_RUNS):
+            _, elapsed = lp.fetch_semantic_tree(campfire_url)
+            lp_perf_times.append(elapsed)
+            if (i + 1) % 25 == 0:
+                print(f"    LightPanda: {i+1}/{PERF_RUNS} done ({fmt_ms(lp_perf_times[-1])} last)")
+
+        lp_perf = {
+            "total_ms": round(sum(lp_perf_times), 1),
+            "avg_ms": round(statistics.mean(lp_perf_times), 1),
+            "median_ms": round(statistics.median(lp_perf_times), 1),
+            "p99_ms": round(sorted(lp_perf_times)[int(PERF_RUNS * 0.99)], 1),
+        }
+        results["performance"]["lightpanda"] = lp_perf
+
+        print(f"\n  LightPanda ({PERF_RUNS} runs):")
+        print(f"    Total:   {fmt_ms(lp_perf['total_ms'])}")
+        print(f"    Avg:     {fmt_ms(lp_perf['avg_ms'])}")
+        print(f"    Median:  {fmt_ms(lp_perf['median_ms'])}")
+        print(f"    P99:     {fmt_ms(lp_perf['p99_ms'])}")
+
+        speedup = lp_perf["total_ms"] / max(1, ae_perf["total_ms"])
+        print(f"\n  Speedup: AetherAgent är {speedup:.1f}x snabbare")
+
+        # Rensa temp-fil
+        try:
+            os.remove(campfire_path)
+        except OSError:
+            pass
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  FAS 6: SAMMANFATTNING
+    # ══════════════════════════════════════════════════════════════════════════
+    print_header("SAMMANFATTNING — TOTAL ÄRLIGHET")
+
+    # Lokala resultat
+    ae_local_found = sum(1 for r in ae_local.values() if r["found"])
+    ae_local_latencies = [r["elapsed_ms"] for r in ae_local.values()]
+    ae_local_tokens = [r["token_count"] for r in ae_local.values()]
+
+    print(f"  LOKALA TESTER ({len(LOCAL_TESTS)} st):")
+    print(f"  {'Motor':<20s}  {'Hittar mål':>12s}  {'Avg latens':>12s}  {'Avg tokens':>12s}")
+    print(f"  {'-'*60}")
+    print(f"  {'AetherAgent':<20s}  {ae_local_found:>5d}/50     "
+          f"  {statistics.mean(ae_local_latencies):>8.0f}ms"
+          f"  {statistics.mean(ae_local_tokens):>10.0f}")
+
+    if lp_local:
+        lp_local_found = sum(1 for r in lp_local.values() if r["found"])
+        lp_local_latencies = [r["elapsed_ms"] for r in lp_local.values()]
+        lp_local_tokens = [r["token_count"] for r in lp_local.values()]
+        print(f"  {'LightPanda':<20s}  {lp_local_found:>5d}/50     "
+              f"  {statistics.mean(lp_local_latencies):>8.0f}ms"
+              f"  {statistics.mean(lp_local_tokens):>10.0f}")
+    print()
+
+    # Per kategori
+    print(f"  RESULTAT PER KATEGORI:")
+    cats = {}
+    for test in LOCAL_TESTS:
+        c = test["cat"]
+        if c not in cats:
+            cats[c] = {"total": 0, "ae_found": 0, "lp_found": 0}
+        cats[c]["total"] += 1
+        if ae_local.get(test["id"], {}).get("found"):
+            cats[c]["ae_found"] += 1
+        if lp_local.get(test["id"], {}).get("found"):
+            cats[c]["lp_found"] += 1
+
+    header = f"  {'Kategori':<15s}  {'AE hittar':>10s}"
+    if lp_local:
+        header += f"  {'LP hittar':>10s}"
+    print(header)
+    print(f"  {'-'*40}")
+    for c in sorted(cats):
+        d = cats[c]
+        line = f"  {c:<15s}  {d['ae_found']:>3d}/{d['total']:<5d}"
+        if lp_local:
+            line += f"  {d['lp_found']:>3d}/{d['total']:<5d}"
+        print(line)
+    print()
+
+    # Failures — total ärlighet
+    print(f"  FAILURES (alla missade tester dokumenterade):")
+    ae_misses = [t for t in LOCAL_TESTS if not ae_local.get(t["id"], {}).get("found")]
+    if ae_misses:
+        print(f"  AetherAgent missade ({len(ae_misses)} st):")
+        for t in ae_misses:
+            r = ae_local.get(t["id"], {})
+            top_label = r.get("top5", [{}])[0].get("label", "—")[:40] if r.get("top5") else "—"
+            print(f"    [{t['id']:2d}] {t['name']} — sökte '{t['expect']}', "
+                  f"fick '{top_label}'")
+    else:
+        print(f"  AetherAgent: ALLA 50 HITTADE!")
+
+    if lp_local:
+        lp_misses = [t for t in LOCAL_TESTS if not lp_local.get(t["id"], {}).get("found")]
+        if lp_misses:
+            print(f"  LightPanda missade ({len(lp_misses)} st):")
+            for t in lp_misses:
+                print(f"    [{t['id']:2d}] {t['name']} — sökte '{t['expect']}'")
+        else:
+            print(f"  LightPanda: ALLA 50 HITTADE!")
+    print()
+
+    # Sammanfattning i results
+    summary = {
+        "aether": {
+            "local_found": ae_local_found,
+            "local_total": len(LOCAL_TESTS),
+            "avg_latency_ms": round(statistics.mean(ae_local_latencies), 1),
+            "avg_tokens": round(statistics.mean(ae_local_tokens)),
+        }
+    }
+    if lp_local:
+        summary["lightpanda"] = {
+            "local_found": lp_local_found,
+            "local_total": len(LOCAL_TESTS),
+            "avg_latency_ms": round(statistics.mean(lp_local_latencies), 1),
+            "avg_tokens": round(statistics.mean(lp_local_tokens)),
+        }
+    results["summary"] = summary
+
+    # ── Spara JSON ───────────────────────────────────────────────────────────
     output_path = os.path.join(os.path.dirname(__file__), "embedding_benchmark_results.json")
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     print(f"  Resultat sparat: {output_path}")
 
-    # Stäng klienter
-    client_emb.close()
-    client_txt.close()
+    # ── Cleanup ──────────────────────────────────────────────────────────────
+    if fixture_server:
+        fixture_server.shutdown()
+
+    print()
+    print("  Benchmark klar.")
+    print()
 
 
 if __name__ == "__main__":
