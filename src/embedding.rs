@@ -54,6 +54,20 @@ pub fn similarity(a: &str, b: &str) -> Option<f32> {
     GLOBAL_EMBEDDING.get()?.similarity(a, b).ok()
 }
 
+/// Cosine similarity med en pre-beräknad vektor (undviker dubbel inference).
+/// Används av SemanticBuilder: goal-vektorn embedas en gång, sen jämförs per nod.
+#[cfg(feature = "embeddings")]
+pub fn similarity_with_vec(pre_computed: &[f32], text: &str) -> Option<f32> {
+    let vec_b = GLOBAL_EMBEDDING.get()?.embed(text).ok()?;
+    Some(cosine_similarity(pre_computed, &vec_b))
+}
+
+/// Stub: embedding feature ej aktiverad
+#[cfg(not(feature = "embeddings"))]
+pub fn similarity_with_vec(_pre_computed: &[f32], _text: &str) -> Option<f32> {
+    None
+}
+
 /// Stub: embedding feature ej aktiverad
 #[cfg(not(feature = "embeddings"))]
 pub fn similarity(_a: &str, _b: &str) -> Option<f32> {

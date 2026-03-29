@@ -1,0 +1,410 @@
+{
+  "campfire": {
+    "ae": 23,
+    "lp_net": 907.6514840000109,
+    "lp_gross": 62919.85127500002,
+    "chrome": 4987.351560000003
+  },
+  "fixtures": [
+    {
+      "fixture": "01_ecommerce_product.html",
+      "chrome_ms": 49.225957999995444,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.5425079999986,
+      "chrome_nodes": 60,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "02_login_form.html",
+      "chrome_ms": 21.573944000003394,
+      "lp_net_ms": 1.2614530000028026,
+      "lp_gross_ms": 622.188261000003,
+      "chrome_nodes": 17,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "03_search_results.html",
+      "chrome_ms": 41.58473200000299,
+      "lp_net_ms": 2.310239000002184,
+      "lp_gross_ms": 623.2370470000023,
+      "chrome_nodes": 45,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "04_registration.html",
+      "chrome_ms": 23.040938999998616,
+      "lp_net_ms": 2.193747000001167,
+      "lp_gross_ms": 623.1205550000013,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "05_checkout.html",
+      "chrome_ms": 31.421658000006573,
+      "lp_net_ms": 0.8980330000085814,
+      "lp_gross_ms": 621.8248410000087,
+      "chrome_nodes": 42,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "06_news_article.html",
+      "chrome_ms": 25.81456199999957,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.7190100000007,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "07_booking_flight.html",
+      "chrome_ms": 46.31852100000833,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 620.3689920000033,
+      "chrome_nodes": 37,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "08_restaurant_menu.html",
+      "chrome_ms": 23.14912999999069,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.396962999992,
+      "chrome_nodes": 31,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "09_dashboard.html",
+      "chrome_ms": 30.08405700000003,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.1006789999956,
+      "chrome_nodes": 34,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "10_injection_hidden.html",
+      "chrome_ms": 25.045169999997597,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.8351709999988,
+      "chrome_nodes": 12,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "11_injection_social.html",
+      "chrome_ms": 26.219014000002062,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.3443899999984,
+      "chrome_nodes": 18,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "12_banking.html",
+      "chrome_ms": 38.83893299999181,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.880232999989,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "13_real_estate.html",
+      "chrome_ms": 31.128475000004983,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 620.11832400001,
+      "chrome_nodes": 22,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "14_job_listing.html",
+      "chrome_ms": 24.254532999999356,
+      "lp_net_ms": 0.09981099999640719,
+      "lp_gross_ms": 621.0266189999966,
+      "chrome_nodes": 24,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "15_grocery_store.html",
+      "chrome_ms": 26.227644999991753,
+      "lp_net_ms": 0.9386779999949795,
+      "lp_gross_ms": 621.8654859999951,
+      "chrome_nodes": 35,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "16_settings_page.html",
+      "chrome_ms": 23.695080999998027,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.1621679999953,
+      "chrome_nodes": 37,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "17_wiki_article.html",
+      "chrome_ms": 20.41702800001076,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.0720540000038,
+      "chrome_nodes": 18,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "18_social_media.html",
+      "chrome_ms": 29.24430599999323,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.6220859999885,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "19_contact_form.html",
+      "chrome_ms": 26.025840999995125,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.8209600000118,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "20_large_catalog.html",
+      "chrome_ms": 25.20513899999787,
+      "lp_net_ms": 0.6389349999990372,
+      "lp_gross_ms": 621.5657429999992,
+      "chrome_nodes": 88,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "21_sv_price_synonym.html",
+      "chrome_ms": 34.899388000005274,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 616.9774170000019,
+      "chrome_nodes": 26,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "22_sv_contact_synonym.html",
+      "chrome_ms": 25.22825900001044,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.3875120000012,
+      "chrome_nodes": 32,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "23_sv_buy_synonym.html",
+      "chrome_ms": 26.614280999987386,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 616.4939400000003,
+      "chrome_nodes": 35,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "24_en_purchase_synonym.html",
+      "chrome_ms": 33.61055800000031,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 617.0660749999952,
+      "chrome_nodes": 38,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "25_en_pricing_synonym.html",
+      "chrome_ms": 21.796194999988074,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 617.8638680000004,
+      "chrome_nodes": 47,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "26_en_employment_synonym.html",
+      "chrome_ms": 38.70523599999433,
+      "lp_net_ms": 0.6801570000134234,
+      "lp_gross_ms": 621.6069650000136,
+      "chrome_nodes": 36,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "27_semantic_nutrition.html",
+      "chrome_ms": 33.124207999993814,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.5209699999978,
+      "chrome_nodes": 47,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "28_semantic_author.html",
+      "chrome_ms": 25.58095499999763,
+      "lp_net_ms": 0.10406000000148197,
+      "lp_gross_ms": 621.0308680000016,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "29_semantic_hours.html",
+      "chrome_ms": 36.441814999998314,
+      "lp_net_ms": 1.5122379999993427,
+      "lp_gross_ms": 622.4390459999995,
+      "chrome_nodes": 39,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "30_semantic_unsubscribe.html",
+      "chrome_ms": 29.894444999998086,
+      "lp_net_ms": 1.4438039999986358,
+      "lp_gross_ms": 622.3706119999988,
+      "chrome_nodes": 35,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "31_negative_login_logout.html",
+      "chrome_ms": 21.020873000001302,
+      "lp_net_ms": 1.7746430000006512,
+      "lp_gross_ms": 622.7014510000008,
+      "chrome_nodes": 24,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "32_negative_price_news.html",
+      "chrome_ms": 17.62888699999894,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.1775320000015,
+      "chrome_nodes": 27,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "33_negative_delete_save.html",
+      "chrome_ms": 20.562778999999864,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 617.8211410000076,
+      "chrome_nodes": 20,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "34_ecommerce_cart_review.html",
+      "chrome_ms": 27.758822999996482,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.6968040000065,
+      "chrome_nodes": 54,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "35_ecommerce_product_compare.html",
+      "chrome_ms": 26.416643000004115,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.2290950000024,
+      "chrome_nodes": 56,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "36_form_multi_step.html",
+      "chrome_ms": 19.626135999991675,
+      "lp_net_ms": 2.072806000000128,
+      "lp_gross_ms": 622.9996140000003,
+      "chrome_nodes": 35,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "37_content_table_specs.html",
+      "chrome_ms": 20.087790999998106,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.6169829999999,
+      "chrome_nodes": 55,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "38_content_faq_accordion.html",
+      "chrome_ms": 40.36402400000952,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.2082920000103,
+      "chrome_nodes": 33,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "39_sv_medical_booking.html",
+      "chrome_ms": 26.58019000000786,
+      "lp_net_ms": 0.40847699999358156,
+      "lp_gross_ms": 621.3352849999937,
+      "chrome_nodes": 35,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "40_sv_government_form.html",
+      "chrome_ms": 20.196765000000596,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 617.0571340000024,
+      "chrome_nodes": 32,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "41_edge_empty_page.html",
+      "chrome_ms": 20.354955999995582,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 617.151754999999,
+      "chrome_nodes": 5,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "42_edge_huge_page.html",
+      "chrome_ms": 30.04659499999252,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.4134399999894,
+      "chrome_nodes": 167,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "43_edge_deep_nesting.html",
+      "chrome_ms": 22.789955999993253,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.9983199999988,
+      "chrome_nodes": 29,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "44_edge_no_semantics.html",
+      "chrome_ms": 23.400467999992543,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.6195589999988,
+      "chrome_nodes": 25,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "45_complex_dashboard.html",
+      "chrome_ms": 25.180993000001763,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.4005679999973,
+      "chrome_nodes": 60,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "46_complex_email_inbox.html",
+      "chrome_ms": 24.381062999993446,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.3894779999973,
+      "chrome_nodes": 75,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "47_complex_social_feed.html",
+      "chrome_ms": 35.34170699999959,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 620.0939839999919,
+      "chrome_nodes": 37,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "48_complex_code_editor.html",
+      "chrome_ms": 31.664110999990953,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 619.9560490000003,
+      "chrome_nodes": 33,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "49_sv_recipe_page.html",
+      "chrome_ms": 21.576488000006066,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 618.0856730000087,
+      "chrome_nodes": 44,
+      "lp_tokens": 3
+    },
+    {
+      "fixture": "50_accessibility_aria.html",
+      "chrome_ms": 26.967854999995325,
+      "lp_net_ms": 0,
+      "lp_gross_ms": 616.3994099999982,
+      "chrome_nodes": 41,
+      "lp_tokens": 3
+    }
+  ]
+}

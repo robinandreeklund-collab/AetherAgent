@@ -12,7 +12,7 @@ use crate::parser::{
     is_likely_visible_cached, AttrCache,
 };
 use crate::trust::{analyze_text, sanitize_text};
-use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
+use crate::types::{GoalCategory, InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
 /// Taggar att hoppa över helt (inga semantiska barn)
 const SKIP_TAGS: &[&str] = &[
@@ -29,6 +29,12 @@ pub struct SemanticBuilder {
     goal: String,
     /// Pre-computed goal words för text_similarity (undviker upprepade allokeringar)
     goal_words: Vec<String>,
+    /// Pre-computed goal embedding-vektor (beräknas en gång, återanvänds per nod)
+    goal_embedding: Option<Vec<f32>>,
+    /// Räknare för embedding-anrop (begränsa till max per sida)
+    embedding_calls: std::cell::Cell<u32>,
+    /// Goal-kategori för smart DOM-filtrering
+    goal_category: GoalCategory,
     next_id: u32,
 }
 
@@ -40,10 +46,16 @@ impl SemanticBuilder {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
+        // Pre-embed goal en gång (sparar ~36ms per nod-jämförelse)
+        let goal_embedding = crate::embedding::embed(&goal_lower);
+        let goal_category = GoalCategory::from_goal(&goal_lower);
         SemanticBuilder {
             warnings: vec![],
             goal: goal_lower,
             goal_words,
+            goal_embedding,
+            embedding_calls: std::cell::Cell::new(0),
+            goal_category,
             next_id: 0,
         }
     }
@@ -159,11 +171,25 @@ impl SemanticBuilder {
         let role = arena.infer_role_with_text(key, &inner_text);
         let raw_label = arena.extract_label_with_text(key, &inner_text);
 
-        // Trust shield
+        // Trust shield — körs ALLTID (innan pre-filtrering, så injection detekteras)
         let (trust, warning) = analyze_text(id, &raw_label);
         let has_warning = warning.is_some();
         if let Some(w) = warning {
             self.warnings.push(w);
+        }
+
+        // Smart pre-filtrering: skippa kända irrelevanta roller baserat på mål-kategori.
+        // Körs EFTER trust shield så injection-varningar aldrig missas.
+        // "find news" → skippa checkboxes, radios, selects.
+        // "click button" → skippa standalone text/paragraph/price.
+        // "generic" roller passerar alltid (roll kan vara dold i text/attribut).
+        if self.goal_category != GoalCategory::Generic
+            && !SemanticNode::matches_goal_category(&role, self.goal_category)
+            && role != "generic"
+            && !has_warning
+        // Behåll alltid noder med injection-varningar
+        {
+            return None;
         }
 
         let label = if has_warning {
@@ -421,11 +447,33 @@ impl SemanticBuilder {
     fn score_relevance(&self, role: &str, label: &str, depth: u32) -> f32 {
         // 1. Textuell likhet — embedding-förstärkt med word-overlap fallback
         let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
-        let text_score = if word_score < 0.8 && !label.is_empty() {
-            // Försök embedding-similarity om word-overlap inte är övertygande
-            if let Some(emb_score) = crate::embedding::similarity(&self.goal, label) {
-                // Kombinera: max av word-overlap och embedding (bästa signal vinner)
-                word_score.max(emb_score)
+
+        // Embedding-strategi:
+        // 1. Alltid om partiell textmatch (0 < word_score < 0.8)
+        // 2. Även utan textmatch för interaktiva noder (links, buttons) —
+        //    dessa är troligast agentens mål och kräver semantisk matchning
+        //    (t.ex. "find news articles" vs "South Korea Mandates Solar Panels")
+        // 3. Skippa noder med exakt match (>= 0.8) och tomma labels
+        // Max 30 embedding-anrop per sida (~1.1s budget vid 36ms/anrop)
+        // Pre-filtrering av goal-kategori reducerar kandidater kraftigt
+        const MAX_EMBEDDING_CALLS: u32 = 30;
+        let is_interactive = matches!(role, "link" | "button" | "cta" | "input");
+        let matches_category = SemanticNode::matches_goal_category(role, self.goal_category);
+        let needs_embedding = word_score < 0.8
+            && !label.is_empty()
+            && label.len() > 3
+            && self.goal_embedding.is_some()
+            && self.embedding_calls.get() < MAX_EMBEDDING_CALLS
+            && (word_score > 0.0 || (is_interactive && matches_category));
+
+        let text_score = if needs_embedding {
+            self.embedding_calls.set(self.embedding_calls.get() + 1);
+            if let Some(ref goal_vec) = self.goal_embedding {
+                if let Some(emb_score) = crate::embedding::similarity_with_vec(goal_vec, label) {
+                    word_score.max(emb_score)
+                } else {
+                    word_score
+                }
             } else {
                 word_score
             }
@@ -482,14 +530,23 @@ fn count_nodes(nodes: &[SemanticNode]) -> usize {
     nodes.iter().map(|n| 1 + count_nodes(&n.children)).sum()
 }
 
-/// Beskär låg-relevans löv-noder tills trädet är under MAX_TREE_NODES
+/// Minimum relevance threshold: always prune nodes below this,
+/// even if the tree is small. This ensures goal-based filtering works.
+const MIN_RELEVANCE_THRESHOLD: f32 = 0.02;
+
+/// Beskär låg-relevans löv-noder.
+/// Steg 1: Alltid ta bort noder under MIN_RELEVANCE_THRESHOLD (goal-filtrering).
+/// Steg 2: Om trädet > max noder, höj tröskeln iterativt.
 fn prune_to_limit(nodes: &mut Vec<SemanticNode>, max: usize) {
+    // Steg 1: Goal-baserad filtrering — ta alltid bort irrelevanta noder
+    prune_and_count(nodes, MIN_RELEVANCE_THRESHOLD);
+
     let mut current_count = count_nodes(nodes);
     if current_count <= max {
         return;
     }
 
-    // Iterativt höj tröskeln och beskär löv — räkna och beskär i samma pass
+    // Steg 2: Iterativt höj tröskeln och beskär löv tills under max
     let mut threshold = 0.2_f32;
     while current_count > max && threshold < 0.8 {
         current_count = prune_and_count(nodes, threshold);

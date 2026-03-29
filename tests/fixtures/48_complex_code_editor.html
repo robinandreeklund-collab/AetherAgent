@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>CodePad – Online Editor</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">CodePad</a>
+      <span>main.rs</span>
+      <button>Save (Ctrl+S)</button>
+      <button id="run-btn" aria-label="Run the code">Run</button>
+      <button>Share</button>
+      <select aria-label="Language">
+        <option selected>Rust</option>
+        <option>Python</option>
+        <option>JavaScript</option>
+        <option>Go</option>
+      </select>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside>
+      <h2>Files</h2>
+      <ul>
+        <li class="active">main.rs</li>
+        <li>lib.rs</li>
+        <li>Cargo.toml</li>
+        <li>README.md</li>
+      </ul>
+    </aside>
+    <main>
+      <div class="editor" role="textbox" aria-label="Code editor">
+        <pre><code>fn main() {
+    println!("Hello, world!");
+    let x = fibonacci(10);
+    println!("fib(10) = {}", x);
+}
+
+fn fibonacci(n: u32) -&gt; u32 {
+    match n {
+        0 =&gt; 0,
+        1 =&gt; 1,
+        _ =&gt; fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}</code></pre>
+      </div>
+      <div class="terminal" role="log" aria-label="Output terminal">
+        <h3>Output</h3>
+        <pre>Hello, world!
+fib(10) = 55
+[Process completed in 0.12s]</pre>
+      </div>
+    </main>
+  </div>
+  <footer><p>CodePad v2.1 — Free online code editor</p></footer>
+</body>
+</html>

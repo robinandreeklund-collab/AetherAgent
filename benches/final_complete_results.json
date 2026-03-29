@@ -1,0 +1,101 @@
+{
+  "ae_campfire": {
+    "total": 92.69171999994796,
+    "median": 0.9807330000057846,
+    "p99": 1.1871049998717353
+  },
+  "lp_campfire": {
+    "total": 15808.056446000137,
+    "median": 167.27492699988034,
+    "p99": 179.58169199982876
+  },
+  "lp_cdp_campfire": {
+    "total": 361,
+    "median": 4,
+    "p99": 9
+  },
+  "chrome_campfire": {
+    "total": 1385,
+    "median": 14,
+    "p99": 17
+  },
+  "ae_amiibo": {
+    "total": 72.44817600144415,
+    "median": 0.6886230000873184
+  },
+  "lp_amiibo": {
+    "total": 74146.08456299947,
+    "median": 139.47682399998484
+  },
+  "chrome_amiibo": {
+    "total": 932,
+    "median": 9
+  },
+  "parallel_1": {
+    "wall_ms": 2.511717999823304,
+    "avg_lat": 1.9491240000206744,
+    "throughput": 398.13386696689224
+  },
+  "parallel_10": {
+    "wall_ms": 12.987567999971361,
+    "avg_lat": 5.098072299983869,
+    "throughput": 769.9670946879394
+  },
+  "parallel_25": {
+    "wall_ms": 24.038603999997576,
+    "avg_lat": 6.894277359979242,
+    "throughput": 1039.9938365806318
+  },
+  "parallel_50": {
+    "wall_ms": 44.329441999934716,
+    "avg_lat": 8.18693487998189,
+    "throughput": 1127.9185512886365
+  },
+  "parallel_100": {
+    "wall_ms": 86.88174799999615,
+    "avg_lat": 12.148775640002896,
+    "throughput": 1150.9897337701404
+  },
+  "ae_live": [
+    {
+      "name": "apple.com",
+      "html_tok": 58985,
+      "extract_tok": 602,
+      "savings": 98.97940154276512,
+      "items": 20,
+      "total_nodes": 39,
+      "tier": "hydration",
+      "ms": 45.12350699997114
+    },
+    {
+      "name": "Hacker News",
+      "html_tok": 8654,
+      "extract_tok": 542,
+      "savings": 93.737000231107,
+      "items": 20,
+      "total_nodes": 488,
+      "tier": "static",
+      "ms": 776.0724689999279
+    },
+    {
+      "name": "lobste.rs",
+      "html_tok": 14917,
+      "extract_tok": 583,
+      "savings": 96.09170744787826,
+      "items": 20,
+      "total_nodes": 453,
+      "tier": "static",
+      "ms": 768.3909019999646
+    },
+    {
+      "name": "rust-lang.org",
+      "html_tok": 4614,
+      "extract_tok": 686,
+      "savings": 85.13220632856525,
+      "items": 20,
+      "total_nodes": 73,
+      "tier": "static_fallback",
+      "ms": 852.0791260000351
+    }
+  ]
+}

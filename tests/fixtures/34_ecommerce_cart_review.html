@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>ShopMax – Your Cart</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">ShopMax</a>
+      <a href="/products">Products</a>
+      <a href="/cart" aria-current="page">Cart (3)</a>
+      <a href="/account">Account</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Shopping Cart</h1>
+    <table>
+      <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Wireless Mouse</td><td><input type="number" value="1" min="1" /></td>
+          <td>$29.99</td><td><button>Remove</button></td>
+        </tr>
+        <tr>
+          <td>USB-C Hub</td><td><input type="number" value="2" min="1" /></td>
+          <td>$45.00</td><td><button>Remove</button></td>
+        </tr>
+        <tr>
+          <td>Webcam HD</td><td><input type="number" value="1" min="1" /></td>
+          <td>$79.99</td><td><button>Remove</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="cart-summary">
+      <p>Subtotal: $199.98</p>
+      <p>Shipping: Free</p>
+      <p class="total"><strong>Total: $199.98</strong></p>
+      <input type="text" placeholder="Enter promo code" aria-label="Promo code" />
+      <button>Apply code</button>
+    </div>
+    <div class="cart-actions">
+      <a href="/products">Continue shopping</a>
+      <button class="primary" id="checkout-btn">Proceed to checkout</button>
+    </div>
+  </main>
+  <footer>
+    <a href="/shipping-info">Shipping Info</a>
+    <a href="/returns">Returns</a>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>MailBox – Inbox</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">MailBox</a>
+      <button id="compose-btn" aria-label="Compose new email">Compose</button>
+      <input type="search" placeholder="Search emails..." aria-label="Search emails" />
+    </nav>
+  </header>
+  <aside>
+    <nav aria-label="Folders">
+      <a href="/inbox" aria-current="page">Inbox (3 unread)</a>
+      <a href="/sent">Sent</a>
+      <a href="/drafts">Drafts (1)</a>
+      <a href="/trash">Trash</a>
+      <a href="/spam">Spam</a>
+    </nav>
+  </aside>
+  <main>
+    <h1>Inbox</h1>
+    <div class="toolbar">
+      <label><input type="checkbox" aria-label="Select all" /> Select all</label>
+      <button>Archive</button>
+      <button>Mark as read</button>
+      <button>Delete</button>
+    </div>
+    <ul class="email-list">
+      <li class="unread"><label><input type="checkbox" /></label><span class="from">Alice Chen</span><span class="subject">Q1 Report — Final version attached</span><span class="date">10:42 AM</span></li>
+      <li class="unread"><label><input type="checkbox" /></label><span class="from">Bob Smith</span><span class="subject">Meeting rescheduled to Thursday</span><span class="date">9:15 AM</span></li>
+      <li class="unread"><label><input type="checkbox" /></label><span class="from">GitHub</span><span class="subject">[AetherAgent] New pull request #142</span><span class="date">8:30 AM</span></li>
+      <li><label><input type="checkbox" /></label><span class="from">Newsletter</span><span class="subject">This week in tech: AI roundup</span><span class="date">Yesterday</span></li>
+      <li><label><input type="checkbox" /></label><span class="from">Carol Davis</span><span class="subject">Re: Project timeline update</span><span class="date">Yesterday</span></li>
+      <li><label><input type="checkbox" /></label><span class="from">HR Team</span><span class="subject">New company policy updates</span><span class="date">Mar 26</span></li>
+      <li><label><input type="checkbox" /></label><span class="from">Dan Wilson</span><span class="subject">Lunch next week?</span><span class="date">Mar 25</span></li>
+      <li><label><input type="checkbox" /></label><span class="from">AWS</span><span class="subject">Your March invoice is ready</span><span class="date">Mar 25</span></li>
+    </ul>
+  </main>
+  <footer><p>MailBox &copy; 2026</p></footer>
+</body>
+</html>

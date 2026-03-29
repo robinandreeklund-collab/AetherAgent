@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Analytics Dashboard</title></head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/reports">Reports</a>
+      <a href="/settings">Settings</a>
+      <a href="/logout">Log out</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Analytics Dashboard — March 2026</h1>
+    <div class="kpi-row">
+      <div class="kpi"><h3>Total Users</h3><p class="value">42,891</p><p class="change">+12.3%</p></div>
+      <div class="kpi"><h3>Revenue</h3><p class="value">$128,450</p><p class="change">+8.7%</p></div>
+      <div class="kpi"><h3>Conversion Rate</h3><p class="value">3.2%</p><p class="change">-0.1%</p></div>
+      <div class="kpi"><h3>Avg Session</h3><p class="value">4m 32s</p><p class="change">+15s</p></div>
+    </div>
+    <section>
+      <h2>Traffic by Source</h2>
+      <table>
+        <thead><tr><th>Source</th><th>Visitors</th><th>Revenue</th></tr></thead>
+        <tbody>
+          <tr><td>Organic Search</td><td>18,420</td><td>$54,200</td></tr>
+          <tr><td>Direct</td><td>12,100</td><td>$38,900</td></tr>
+          <tr><td>Social Media</td><td>8,371</td><td>$22,100</td></tr>
+          <tr><td>Email</td><td>4,000</td><td>$13,250</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <div class="actions">
+      <button id="export-btn">Export report (CSV)</button>
+      <button>Schedule email report</button>
+      <button>Print dashboard</button>
+    </div>
+  </main>
+  <footer><p>Analytics Platform v5.1</p></footer>
+</body>
+</html>
