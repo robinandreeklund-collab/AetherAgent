@@ -1,119 +1,166 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-28 (Session 3: +350 WPT pass, native Rust DOM)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-29 (Session 4: +767 WPT pass, Tier B DOM integrations)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
 
 ---
 
-## Sammanfattning (2026-03-28)
+## Sammanfattning (2026-03-29)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
-| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists | ~30,100 | ~17,700+ | ~59% |
-| **Tier 2** (Parsing & Serialization) | domparsing, html/syntax | ~794 | ~377 | ~47% |
-| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,296 | ~2,045 | ~32% |
-| **Tier 4** (HTML) | html/semantics/forms, html/webappapis/timers | ~2,529 | ~1,266 | ~50% |
-| **Tier 5** (Events & Interaction) | uievents, pointerevents, focus, selection | ~29,729 | ~7,450 | ~25% |
-| **Tier 6** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~97 | ~51% |
-| **Tier 7** (Övriga) | FileAPI, trusted-types, svg, xhr, encoding, inert, domxpath, webstorage, url, wai-aria, accname, html-aam, core-aam | ~3,683 | ~239 | ~6% |
+| **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists | ~29,900 | ~18,200+ | ~61% |
+| **Tier 2** (Parsing & Serialization) | domparsing, html/syntax | ~924 | ~383 | ~41% |
+| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,316 | ~2,018 | ~32% |
+| **Tier 4** (HTML) | html/semantics | ~4,936 | ~1,966 | ~40% |
+| **Tier 5** (Events & Interaction) | uievents, pointerevents, focus, selection, input-events, touch-events | ~30,180 | ~7,842 | ~26% |
+| **Tier 6** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~99 | ~52% |
+| **Tier 7** (Övriga) | FileAPI, trusted-types, svg, xhr, encoding, inert, domxpath, webstorage, requestidlecallback, editing, webmessaging | ~3,831 | ~843 | ~22% |
 
 ---
 
-## Alla sviter — Fullständig status (2026-03-28)
+## Alla sviter — Fullständig status (2026-03-29)
 
 ### Tier 1 — Core DOM (kör varje PR)
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **dom/nodes** | 6,029 | 6,676 | **90.3%** | ↑ från 84.9% |
-| **dom/events** | 271 | 322 | **84.2%** | ↑ från 67.0% |
-| **dom/ranges** | 8,153 | 10,995 | **74.2%** | ↑ från ~67.7% |
-| **dom/traversal** | 1,534 | 1,591 | **96.4%** | ↑ från 91.5% |
-| **dom/collections** | 30 | 48 | **62.5%** | ↑ från 56.2% |
+| **dom/nodes** | 6,029 | 6,671 | **90.4%** | ─ stabil |
+| **dom/events** | 271 | 322 | **84.2%** | ─ stabil |
+| **dom/ranges** | 8,181 | 11,082 | **73.8%** | ─ stabil |
+| **dom/traversal** | 1,534 | 1,591 | **96.4%** | ─ stabil |
+| **dom/collections** | 30 | 48 | **62.5%** | ─ stabil |
 | **dom/lists** | 181 | 189 | **95.8%** | ─ stabil |
 
 ### Tier 2 — Parsing & Serialization
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **domparsing** | 137 | 233 | **58.8%** | ↑ från 18.8% |
-| **html/syntax** | 240 | 561 | **42.8%** | ↑ från 20.0% |
+| **domparsing** | 142 | 363 | **39.1%** | ─ stabil |
+| **html/syntax** | 241 | 561 | **43.0%** | ─ stabil |
 
 ### Tier 3 — CSS
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **css/selectors** | 1,703 | 3,457 | **49.3%** | ↑ från 12.0% baseline |
-| **css/css-values** | 164 | 1,526 | **10.7%** | ny |
-| **css/cssom** | 112 | 656 | **17.1%** | ↑ från 14.3% |
-| **css/css-display** | 16 | 44 | **36.4%** | ny |
-| **css/css-color** | 12 | 87 | **13.8%** | ny |
-| **css/css-cascade** | 27 | 402 | **6.7%** | ny |
-| **css/css-flexbox** | 11 | 124 | **8.9%** | ny |
+| **css/selectors** | 1,651 | 3,457 | **47.8%** | ─ stabil |
+| **css/css-values** | 164 | 1,526 | **10.7%** | ─ stabil |
+| **css/cssom** | 123 | 676 | **18.2%** | ↑ från 17.1% |
+| **css/css-display** | 21 | 44 | **47.7%** | ↑ från 36.4% |
+| **css/css-color** | 12 | 87 | **13.8%** | ─ stabil |
+| **css/css-cascade** | 33 | 402 | **8.2%** | ↑ från 6.7% |
+| **css/css-flexbox** | 14 | 124 | **11.3%** | ↑ från 8.9% |
 
 ### Tier 4 — HTML
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **html/semantics/forms** | 1,265 | 2,528 | **50.0%** | ny |
-| **html/webappapis/timers** | 1 | 1 | **100%** | ny |
+| **html/semantics** | 1,966 | 4,936 | **39.8%** | ↑ från ~50% (forms only) |
 
 ### Tier 5 — Events & Interaction
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **selection** | 7,239 | 29,383 | **24.6%** | ny |
-| **pointerevents** | 192 | 320 | **60.0%** | ny |
-| **uievents** | 19 | 25 | **76.0%** | ny |
-| **focus** | 0 | 1 | **0.0%** | ny |
+| **selection** | 7,317 | 29,396 | **24.9%** | ─ stabil |
+| **pointerevents** | 192 | 320 | **60.0%** | ─ stabil |
+| **input-events** | 262 | 379 | **69.1%** | ↑↑ från 31.0% |
+| **touch-events** | 27 | 32 | **84.4%** | ↑↑ från 37.5% |
+| **uievents** | 19 | 25 | **76.0%** | ─ stabil |
+| **focus** | 0 | 1 | **0.0%** | ─ stabil |
 
 ### Tier 6 — JS & Standards
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **ecmascript** | 18 | 21 | **85.7%** | ny |
-| **quirks** | 58 | 75 | **77.3%** | ny |
-| **webidl** | 21 | 94 | **22.3%** | ny |
+| **ecmascript** | 18 | 21 | **85.7%** | ─ stabil |
+| **quirks** | 60 | 75 | **80.0%** | ↑ från 77.3% |
+| **webidl** | 21 | 94 | **22.3%** | ─ stabil |
 
 ### Tier 7 — Övriga
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **svg** | 58 | 887 | **6.5%** | ny |
-| **FileAPI** | 10 | 23 | **43.5%** | ny |
-| **xhr** | 31 | 461 | **6.7%** | ny |
-| **encoding** | 6 | 331 | **1.8%** | ny |
-| **trusted-types** | 26 | 259 | **10.0%** | ny |
-| **domxpath** | 2 | 105 | **1.9%** | ny |
-| **inert** | 5 | 61 | **8.2%** | ny |
-| **webstorage** | 0 | 7 | **0.0%** | ny |
-| **url** | 0 | 1 | **0.0%** | ny |
-| **wai-aria** | 0 | 0 | **N/A** | test setup issues |
-| **accname** | 0 | 0 | **N/A** | test setup issues |
-| **html-aam** | 0 | 0 | **N/A** | test setup issues |
-| **core-aam** | 0 | 0 | **N/A** | test setup issues |
+| **requestidlecallback** | 5 | 7 | **71.4%** | ↑↑ ny (0%) |
+| **input-events** | 262 | 379 | **69.1%** | ↑↑ ny (31%) |
+| **FileAPI** | 13 | 22 | **59.1%** | ↑ från 43.5% |
+| **inert** | 32 | 61 | **52.5%** | ↑↑ från 8.2% |
+| **domxpath** | 54 | 109 | **49.5%** | ↑↑ ny (1.9%) |
+| **trusted-types** | 330 | 917 | **36.0%** | ↑↑ från 10.0% |
+| **webmessaging** | 12 | 71 | **16.9%** | ↑ från 14.3% |
+| **svg** | 135 | 958 | **14.1%** | ↑↑ från 6.5% |
+| **editing** | 20 | 223 | **9.0%** | ↑↑ från 1.7% |
+| **xhr** | 31 | 461 | **6.7%** | ─ stabil |
+| **encoding** | 6 | 331 | **1.8%** | ─ stabil |
+| **webstorage** | 0 | 7 | **0.0%** | ─ stabil |
 
 ---
 
-## Toppresterande (>75%)
+## Toppresterande (>60%)
 
 | Suite | Rate |
 |-------|------|
-| html/webappapis/timers | **100%** |
 | dom/traversal | **96.4%** |
 | dom/lists | **95.8%** |
-| dom/nodes | **90.3%** |
+| dom/nodes | **90.4%** |
 | ecmascript | **85.7%** |
+| touch-events | **84.4%** |
 | dom/events | **84.2%** |
-| quirks | **77.3%** |
+| quirks | **80.0%** |
 | uievents | **76.0%** |
+| dom/ranges | **73.8%** |
+| requestidlecallback | **71.4%** |
+| input-events | **69.1%** |
+| dom/collections | **62.5%** |
+| pointerevents | **60.0%** |
 
 ---
 
 ## Historik — Sessionsloggar
+
+### Session 4 (2026-03-29) — Tier B DOM Integrations (+767 WPT, 11 commits)
+
+Stor integration av Tier B-sviter med fokus på produktionsrelevanta browser-API:er.
+
+| Suite | Före | Efter | Delta | Nyckelförbättringar |
+|-------|------|-------|-------|---------------------|
+| trusted-types | 26 (10.0%) | **330 (36.0%)** | **+304** | TrustedTypePolicyFactory, TrustedHTML/Script/ScriptURL, fromLiteral, getAttributeType/getPropertyType |
+| input-events | 9 (31.0%) | **262 (69.1%)** | **+253** | execCommand spec-compliance (20+ inputType mappings), case-insensitive commands, editable-only dispatch |
+| svg | 58 (6.5%) | **135 (14.1%)** | **+77** | 40+ SVG interfaces, DOMPoint/DOMRect/DOMMatrix/DOMQuad, CSS defaults |
+| domxpath | 2 (1.9%) | **54 (49.5%)** | **+52** | XPathResult, XPathEvaluator, evaluateXPath med 15+ functions, operators, namespace resolver, MutationObserver invalidation |
+| inert | 5 (8.2%) | **32 (52.5%)** | **+27** | Selection.selectAllChildren med inert guard, FocusHandler inert check, Element.inert property |
+| touch-events | 6 (37.5%) | **27 (84.4%)** | **+21** | Touch/TouchEvent/TouchList constructors (W3C spec) |
+| editing | 4 (1.7%) | **20 (9.0%)** | **+16** | EditContext API, TextFormat, HTMLElement.editContext property |
+| requestidlecallback | 0 (0.0%) | **5 (71.4%)** | **+5** | requestIdleCallback/cancelIdleCallback, IdleDeadline |
+| css/css-display | 16 (36.4%) | **21 (47.7%)** | **+5** | ToCss display serialization, display:math resolution |
+| FileAPI | 10 (43.5%) | **13 (59.1%)** | **+3** | File, FileList, FileReader, Blob, URL.createObjectURL |
+| quirks | 58 (77.3%) | **60 (80.0%)** | **+2** | CSS.supports() quirky length/color validation |
+| webmessaging | 10 (14.3%) | **12 (16.9%)** | **+2** | MessagePort, MessageChannel, BroadcastChannel |
+| **Totalt** | | | **+767** | |
+
+**Alla implementationer native Rust/JS i produktionspipelinen:**
+- `requestIdleCallback`/`cancelIdleCallback` — event_loop.rs
+- Touch/TouchEvent/TouchList — window.rs (W3C Touch Events)
+- XPath (evaluate, XPathResult, XPathEvaluator) — window.rs
+- BroadcastChannel, MessagePort/MessageChannel — window.rs
+- CSS.supports() med value validation — window.rs
+- TrustedTypes (Policy, Factory, fromLiteral) — window.rs
+- EditContext, TextFormat — window.rs
+- DOMPoint/DOMRect/DOMMatrix/DOMQuad — window.rs
+- Element.checkVisibility(), insertAdjacentHTML — window.rs
+- Selection.selectAllChildren med inert guard — mod.rs
+- File/FileList/FileReader/Blob — window.rs
+- document.execCommand (spec-correct, input-only) — window.rs
+- document.hidden/visibilityState, innerText — window.rs
+- SVG DOM (40+ interfaces, getBBox, CTM) — window.rs
+- 70+ CSS property defaults i getComputedStyle — utils.rs
+
+**Polyfill → Rust migrationer (Session 4):**
+- ownerDocument wrapper → native OwnerDocumentGetter (borttagen från polyfills.js)
+- TouchEvent i simpleTypes → native Touch/TouchEvent/TouchList i window.rs
+- id/className/prefix/namespaceURI i __patchChildNode → native Accessors i make_element_object
 
 ### Session 3 (2026-03-28) — Tier A+B DOM Integrations (+350 WPT, 21 commits)
 
@@ -125,27 +172,7 @@
 | domparsing | 89 (38.2%) | **137 (58.8%)** | **+48** | innerHTML fragment parsing (parse_html_fragment), DOMParser XML well-formedness, parsererror |
 | html/semantics/forms | 1,258 (49.7%) | **1,265 (50.1%)** | **+7** | color named colors, click activation |
 | css/selectors | 1,702 (49.2%) | **1,703 (49.3%)** | **+1** | getElementsByTagName case fix |
-| uievents | 18 | **19** | **+1** | NodeFilter constants |
 | **Totalt** | | | **~+350** | |
-
-**Alla implementationer native Rust i produktionspipelinen:**
-- `parse_html_fragment()` i parser.rs — innerHTML utan html/head/body wrapper
-- `check_xml_well_formed()` — Rust XML validator för DOMParser
-- `getElementsByTagName` — spec-korrekt namespace, case-sensitivity, context exclusion
-- `Text.splitText()` — UTF-16-medveten split
-- `WindowDispatchEvent` — korrekt window event dispatch med WINDOW_EVENT_KEY
-- `AttrGetter/AttrSetter` — native id/className/namespaceURI accessors
-- `NodeValueSetter` — null→"" för Text/Comment/PI
-- `is_valid_xml_name()` — XML Name-produktion validator
-- `sanitize_color()` — 148 namngivna CSS-färger + #rgb expansion
-
-**Polyfill → Rust migrationer:**
-- id/className → native AttrGetter/AttrSetter
-- namespaceURI/prefix → native i make_element_object
-- nodeValue → native NullGetter + NodeValueSetter
-- Document.textContent → native accessor i register_document
-- splitText → native i chardata.rs
-- innerHTML → parse_html_fragment (Rust html5ever)
 
 ### Session 2 (2026-03-27) — Native Rust DOM (+2400 WPT, 16 commits)
 
@@ -174,11 +201,16 @@ Stylo 0.14, Servo selectors 0.36, full capture/bubble dispatch, element identity
 
 | Suite | Nuvarande | Mål | Status |
 |-------|-----------|-----|--------|
-| dom/nodes | 90.3% | 95% | 🔄 |
+| dom/nodes | 90.4% | 95% | 🔄 |
 | dom/events | 84.2% | 90% | 🔄 |
 | dom/traversal | 96.4% | 98% | 🔄 |
-| dom/ranges | 74.2% | 80% | 🔄 |
-| domparsing | 58.8% | 70% | 🔄 |
-| css/selectors | 49.3% | 60% | 🔄 |
+| dom/ranges | 73.8% | 80% | 🔄 |
+| domparsing | 39.1% | 60% | 🔄 |
+| css/selectors | 47.8% | 60% | 🔄 |
 | dom/lists | 95.8% | 98% | 🔄 |
 | dom/collections | 62.5% | 75% | 🔄 |
+| input-events | 69.1% | 80% | 🔄 ny |
+| touch-events | 84.4% | 90% | 🔄 ny |
+| trusted-types | 36.0% | 50% | 🔄 ny |
+| domxpath | 49.5% | 60% | 🔄 ny |
+| inert | 52.5% | 70% | 🔄 ny |

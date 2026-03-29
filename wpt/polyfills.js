@@ -198,8 +198,9 @@ globalThis.__patchCharacterData = function(n) { return n; };
 (function() {
   if (typeof Event === 'undefined') return;
   // Enkla event-typer (ärver Event direkt, inga spec-properties)
+  // OBS: TouchEvent migrerad till native Rust (window.rs) med Touch/TouchList
   var simpleTypes = [
-    'TouchEvent', 'AnimationEvent', 'TransitionEvent',
+    'AnimationEvent', 'TransitionEvent',
     'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
     'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
     'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
@@ -218,76 +219,9 @@ globalThis.__patchCharacterData = function(n) { return n; };
 // ─── document.createEvent() — MIGRERAD till native Rust (dom_bridge/mod.rs) ──
 // Registrerad som NativeCreateEvent i register_document().
 
-// ─── node.ownerDocument ─────────────────────────────────────────────────────
-// OwnerDocumentGetter finns i Rust, men JS-wrappers behövs fortfarande
-// för att patcha element som skapas via polyfill-skapade dokument.
-(function() {
-  if (typeof document === 'undefined') return;
-
-  var _origCreateElement = document.createElement;
-  if (_origCreateElement) {
-    document.createElement = function(tag) {
-      var el = _origCreateElement.call(document, tag);
-      if (el && !('ownerDocument' in el)) {
-        try {
-          Object.defineProperty(el, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {}
-      }
-      return el;
-    };
-  }
-
-  var _origCreateTextNode = document.createTextNode;
-  if (_origCreateTextNode) {
-    document.createTextNode = function(text) {
-      var node = _origCreateTextNode.call(document, text);
-      if (node && !('ownerDocument' in node)) {
-        try {
-          Object.defineProperty(node, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {}
-      }
-      return node;
-    };
-  }
-
-  var _origCreateComment = document.createComment;
-  if (_origCreateComment) {
-    document.createComment = function(text) {
-      var node = _origCreateComment.call(document, text);
-      if (node && !('ownerDocument' in node)) {
-        try {
-          Object.defineProperty(node, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {}
-      }
-      return node;
-    };
-  }
-
-  var _origCreateFragment = document.createDocumentFragment;
-  if (_origCreateFragment) {
-    document.createDocumentFragment = function() {
-      var frag = _origCreateFragment.call(document);
-      if (frag && !('ownerDocument' in frag)) {
-        try {
-          Object.defineProperty(frag, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {}
-      }
-      return frag;
-    };
-  }
-})();
+// ─── node.ownerDocument — MIGRERAD till native Rust (OwnerDocumentGetter) ───
+// Alla noder skapade via dom_bridge har ownerDocument som native Accessor.
+// Wrapper borttagen — Rust sätter ownerDocument i make_element_object().
 
 // ─── node.compareDocumentPosition — native Rust (register_window) ────────────
 // Node-konstanter sätts av dom_bridge.rs
@@ -506,26 +440,8 @@ globalThis.__patchCharacterData = function(n) { return n; };
       }
     }
 
-    // id, className — Rust sätter native accessors, men polyfill behövs för __patchChildNode-skapade element
-    if (el.nodeType === 1 && el.setAttribute) {
-      Object.defineProperty(el, 'id', {
-        get: function() { return this.getAttribute('id') || ''; },
-        set: function(v) { this.setAttribute('id', v); },
-        configurable: true
-      });
-      Object.defineProperty(el, 'className', {
-        get: function() { return this.getAttribute('class') || ''; },
-        set: function(v) { this.setAttribute('class', v); },
-        configurable: true
-      });
-    }
-
-    // prefix, namespaceURI, localName — Rust sätter native, polyfill för __patchChildNode
-    if (el.nodeType === 1) {
-      if (!('prefix' in el)) el.prefix = null;
-      if (!('namespaceURI' in el)) el.namespaceURI = 'http://www.w3.org/1999/xhtml';
-      if (!('localName' in el)) el.localName = (el.tagName || '').toLowerCase();
-    }
+    // id, className, prefix, namespaceURI, localName — ALLA native i Rust
+    // Borttagna: Rust sätter dessa som native Accessors i make_element_object()
 
     // toggleAttribute — nu Rust-native i dom_bridge.rs
 
