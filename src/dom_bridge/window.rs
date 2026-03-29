@@ -1983,7 +1983,9 @@ pub(super) fn register_window_with_viewport<'js>(
                     if (!target) return false;
                     var inputType = '';
                     var data = null;
-                    switch (cmd) {
+                    // Normalize command name (case-insensitive per spec)
+                    var lcmd = cmd.toLowerCase();
+                    switch (lcmd) {
                         case 'insertText':
                             inputType = 'insertText';
                             data = value;
@@ -2026,8 +2028,32 @@ pub(super) fn register_window_with_viewport<'js>(
                         case 'italic': inputType = 'formatItalic'; break;
                         case 'underline': inputType = 'formatUnderline'; break;
                         case 'strikethrough': inputType = 'formatStrikeThrough'; break;
+                        case 'superscript': inputType = 'formatSuperscript'; break;
+                        case 'subscript': inputType = 'formatSubscript'; break;
+                        case 'justifycenter': inputType = 'formatJustifyCenter'; break;
+                        case 'justifyfull': inputType = 'formatJustifyFull'; break;
+                        case 'justifyleft': inputType = 'formatJustifyLeft'; break;
+                        case 'justifyright': inputType = 'formatJustifyRight'; break;
+                        case 'indent': inputType = 'formatIndent'; break;
+                        case 'outdent': inputType = 'formatOutdent'; break;
+                        case 'removeformat': inputType = 'formatRemove'; break;
+                        case 'formatblock': inputType = 'formatBlock'; break;
                         case 'delete': inputType = 'deleteContentBackward'; break;
-                        case 'forwardDelete': inputType = 'deleteContentForward'; break;
+                        case 'forwarddelete': inputType = 'deleteContentForward'; break;
+                        case 'backcolor': inputType = 'formatBackColor'; data = value; break;
+                        case 'forecolor': inputType = 'formatFontColor'; data = value; break;
+                        case 'hilitecolor': inputType = 'formatBackColor'; data = value; break;
+                        case 'fontname': inputType = 'formatFontName'; data = value; break;
+                        case 'fontsize': inputType = 'formatFontSize'; data = value; break;
+                        case 'createlink': inputType = 'insertLink'; data = value; break;
+                        case 'unlink': inputType = 'insertLink'; data = ''; break;
+                        case 'insertimage': inputType = 'insertImage'; data = value; break;
+                        case 'undo': inputType = 'historyUndo'; break;
+                        case 'redo': inputType = 'historyRedo'; break;
+                        case 'selectall': inputType = ''; break;
+                        case 'copy': inputType = ''; break;
+                        case 'cut': inputType = ''; break;
+                        case 'paste': inputType = 'insertFromPaste'; data = value; break;
                         default: inputType = cmd; break;
                     }
                     // Only fire input event on editable targets (not beforeinput per spec)
