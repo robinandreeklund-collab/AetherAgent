@@ -1348,10 +1348,33 @@ pub(super) fn register_window_with_viewport<'js>(
                 return node.textContent || '';
             }
 
+            // Resolve namespace prefix via resolver
+            function resolveNS(resolver, prefix) {
+                if (!resolver) return null;
+                if (typeof resolver === 'function') return resolver(prefix);
+                if (resolver.lookupNamespaceURI) return resolver.lookupNamespaceURI(prefix);
+                return null;
+            }
+
             // Simple XPath evaluator — handles common patterns
             function evaluateXPath(expression, contextNode, resolver, resultType) {
                 var expr = expression.trim();
                 var nodes = [];
+
+                // Handle namespace prefixes: call resolver for any prefix:localname
+                if (resolver && /[a-zA-Z_][\w-]*:/.test(expr)) {
+                    var nsMatch = expr.match(/([a-zA-Z_][\w-]*):([a-zA-Z_][\w-]*)/);
+                    if (nsMatch) {
+                        var prefix = nsMatch[1];
+                        // Ignore axis names (child::, descendant::, etc.)
+                        var axisNames = ['child','descendant','descendant-or-self','parent','ancestor',
+                            'ancestor-or-self','following','following-sibling','preceding','preceding-sibling',
+                            'self','attribute','namespace'];
+                        if (axisNames.indexOf(prefix) === -1) {
+                            resolveNS(resolver, prefix); // Call resolver per spec
+                        }
+                    }
+                }
                 var numberVal = NaN;
                 var stringVal = '';
                 var boolVal = false;
@@ -1849,16 +1872,33 @@ pub(super) fn register_window_with_viewport<'js>(
                 } else if (resultType === 3) {
                     result.booleanValue = boolVal || nodes.length > 0;
                 } else if (resultType === 4 || resultType === 5) {
+                    result.invalidIteratorState = false;
                     result.iterateNext = function() {
+                        if (this.invalidIteratorState) {
+                            throw new DOMException('Document mutated since XPathResult created', 'InvalidStateError');
+                        }
                         if (this._index < this._nodes.length) return this._nodes[this._index++];
                         return null;
                     };
-                    result.invalidIteratorState = false;
+                    // Observe DOM mutations — set invalidIteratorState on change
+                    if (typeof MutationObserver !== 'undefined') {
+                        var _iterResult = result;
+                        var _iterObs = new MutationObserver(function() {
+                            _iterResult.invalidIteratorState = true;
+                            _iterObs.disconnect();
+                        });
+                        var _root = contextNode.ownerDocument || contextNode;
+                        if (_root.documentElement) {
+                            _iterObs.observe(_root.documentElement, { childList: true, subtree: true, attributes: true });
+                        }
+                    }
                 } else if (resultType === 6 || resultType === 7) {
                     result.snapshotLength = nodes.length;
                     result.snapshotItem = function(i) { return this._nodes[i] || null; };
+                    result.invalidIteratorState = false;
                 } else if (resultType === 8 || resultType === 9) {
                     result.singleNodeValue = nodes.length > 0 ? nodes[0] : null;
+                    result.invalidIteratorState = false;
                 }
 
                 return result;
