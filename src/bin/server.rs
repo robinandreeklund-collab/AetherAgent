@@ -1123,11 +1123,8 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     // Adaptiv parse: väljer automatiskt rätt pipeline-tier
     // Tier 0 (Hydration) → Tier 1 (Static) → Tier 2 (QuickJS+DOM) → fallback
     let parse_start = std::time::Instant::now();
-    let adaptive_json = aether_agent::parse_adaptive(
-        &fetch_result.body,
-        &req.goal,
-        &fetch_result.final_url,
-    );
+    let adaptive_json =
+        aether_agent::parse_adaptive(&fetch_result.body, &req.goal, &fetch_result.final_url);
     let parse_ms = parse_start.elapsed().as_millis() as u64;
 
     // Fas C.13: Inline XHR-URLs i svaret (om de finns i HTML:en)
