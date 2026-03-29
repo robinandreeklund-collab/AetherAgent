@@ -124,6 +124,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
       doc.addEventListener = function() {};
       doc.removeEventListener = function() {};
       doc.dispatchEvent = function() { return true; };
+      // XPath methods (registered by dom_bridge/window.rs)
+      if (globalThis.__xpathEvaluate && !doc.evaluate) {
+        doc.evaluate = globalThis.__xpathEvaluate;
+        doc.createExpression = globalThis.__xpathCreateExpr;
+        doc.createNSResolver = globalThis.__xpathCreateNSRes;
+      }
       return doc;
     };
   }

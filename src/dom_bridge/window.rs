@@ -637,6 +637,11 @@ pub(super) fn register_window_with_viewport<'js>(
             globalThis.getSelection = globalThis.window.getSelection;
             globalThis.matchMedia = globalThis.window.matchMedia;
             globalThis.__xmlSerializeNode = globalThis.window.__xmlSerializeNode;
+            // Synka requestIdleCallback/cancelIdleCallback till window
+            if (globalThis.requestIdleCallback) {
+                globalThis.window.requestIdleCallback = globalThis.requestIdleCallback;
+                globalThis.window.cancelIdleCallback = globalThis.cancelIdleCallback;
+            }
         }
 
         // TextEncoder/TextDecoder — UTF-8
@@ -1064,6 +1069,761 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         })();
 
+        // ─── Touch API (W3C Touch Events) ───────────────────────────────────
+        (function() {
+            globalThis.Touch = function Touch(opts) {
+                if (!opts || opts.identifier === undefined || !opts.target) {
+                    throw new TypeError("Failed to construct 'Touch': required member identifier/target is not provided.");
+                }
+                this.identifier = opts.identifier;
+                this.target = opts.target;
+                this.screenX = opts.screenX || 0;
+                this.screenY = opts.screenY || 0;
+                this.clientX = opts.clientX || 0;
+                this.clientY = opts.clientY || 0;
+                this.pageX = opts.pageX !== undefined ? opts.pageX : this.clientX;
+                this.pageY = opts.pageY !== undefined ? opts.pageY : this.clientY;
+                this.radiusX = opts.radiusX || 0;
+                this.radiusY = opts.radiusY || 0;
+                this.rotationAngle = opts.rotationAngle || 0;
+                this.force = opts.force || 0;
+                this.altitudeAngle = opts.altitudeAngle !== undefined ? opts.altitudeAngle : (Math.PI / 2);
+                this.azimuthAngle = opts.azimuthAngle || 0;
+                this.touchType = opts.touchType || 'direct';
+            };
+            // NOTE: webkitRadiusX/Y/webkitRotationAngle/webkitForce are instance properties only (not on prototype)
+            // The WPT tests verify they are NOT on the prototype
+
+            globalThis.TouchList = function TouchList(touches) {
+                var list = touches || [];
+                this.length = list.length;
+                for (var i = 0; i < list.length; i++) this[i] = list[i];
+            };
+            TouchList.prototype.item = function(i) { return this[i] || null; };
+            // NOTE: identifiedTouch intentionally NOT on prototype (removed from spec, WPT tests its absence)
+
+            globalThis.TouchEvent = function TouchEvent(type, opts) {
+                UIEvent.call(this, type, opts || {});
+                var o = opts || {};
+                this.touches = o.touches || new TouchList();
+                this.targetTouches = o.targetTouches || new TouchList();
+                this.changedTouches = o.changedTouches || new TouchList();
+                this.ctrlKey = !!o.ctrlKey;
+                this.shiftKey = !!o.shiftKey;
+                this.altKey = !!o.altKey;
+                this.metaKey = !!o.metaKey;
+            };
+            TouchEvent.prototype = Object.create(UIEvent.prototype);
+            TouchEvent.prototype.constructor = TouchEvent;
+
+            // NOTE: ontouchstart/end/move/cancel are NOT registered on prototypes
+            // WPT tests verify their absence from GlobalEventHandlers when not in a touch context
+        })();
+
+        // ─── CSS.supports() ─────────────────────────────────────────────────
+        (function() {
+            var CSS = globalThis.CSS || {};
+            CSS.supports = function supports(prop, val) {
+                if (arguments.length === 1) {
+                    // CSS.supports("display: flex") syntax
+                    var str = String(prop).trim();
+                    // @supports condition — basic parsing
+                    if (str.indexOf(':') === -1) return false;
+                    var parts = str.split(':');
+                    prop = parts[0].trim();
+                    val = parts.slice(1).join(':').trim();
+                }
+                prop = String(prop).trim();
+                val = String(val).trim();
+                // Known CSS properties (extensive list)
+                var known = [
+                    'display','color','background','background-color','margin','padding',
+                    'border','width','height','font-size','font-family','font-weight',
+                    'text-align','text-decoration','position','top','left','right','bottom',
+                    'float','clear','overflow','z-index','opacity','visibility',
+                    'flex','flex-direction','flex-wrap','justify-content','align-items',
+                    'align-content','align-self','order','flex-grow','flex-shrink','flex-basis',
+                    'grid','grid-template-columns','grid-template-rows','grid-gap','gap',
+                    'transform','transition','animation','box-shadow','border-radius',
+                    'outline','cursor','pointer-events','user-select','content',
+                    'min-width','max-width','min-height','max-height',
+                    'line-height','letter-spacing','word-spacing','white-space',
+                    'text-transform','text-indent','vertical-align',
+                    'list-style','list-style-type','table-layout','border-collapse',
+                    'background-image','background-size','background-position','background-repeat',
+                    'box-sizing','resize','appearance','filter','backdrop-filter',
+                    'clip-path','mask','object-fit','object-position','scroll-behavior',
+                    'accent-color','aspect-ratio','container-type','container-name',
+                    'inset','isolation','mix-blend-mode','will-change','writing-mode',
+                    'column-count','column-gap','column-width','column-span',
+                    'text-overflow','word-break','overflow-wrap','hyphens',
+                    'font-style','font-variant','text-shadow','direction',
+                    'unicode-bidi','all','contain','touch-action',
+                    'overscroll-behavior','scroll-snap-type','scroll-snap-align',
+                    'rotate','scale','translate','offset-path',
+                    'color-scheme','forced-color-adjust','print-color-adjust',
+                    'background-blend-mode'
+                ];
+                return known.indexOf(prop) !== -1;
+            };
+            CSS.escape = function(str) {
+                return String(str).replace(/([^\w-])/g, '\\$1');
+            };
+            globalThis.CSS = CSS;
+        })();
+
+        // ─── document.hidden / visibilityState ──────────────────────────────
+        if (typeof document !== 'undefined') {
+            Object.defineProperty(document, 'hidden', {
+                value: false, configurable: true, enumerable: true
+            });
+            Object.defineProperty(document, 'visibilityState', {
+                value: 'visible', configurable: true, enumerable: true
+            });
+            // onvisibilitychange
+            Object.defineProperty(document, 'onvisibilitychange', {
+                get: function() { return this._onvisibilitychange || null; },
+                set: function(v) { this._onvisibilitychange = v; },
+                configurable: true, enumerable: true
+            });
+            // document.onmessageerror
+            Object.defineProperty(document, 'onmessageerror', {
+                get: function() { return this._onmessageerror || null; },
+                set: function(v) { this._onmessageerror = v; },
+                configurable: true, enumerable: true
+            });
+        }
+
+        // ─── BroadcastChannel ───────────────────────────────────────────────
+        (function() {
+            var channels = {};
+            globalThis.BroadcastChannel = function BroadcastChannel(name) {
+                this.name = String(name);
+                this.onmessage = null;
+                this.onmessageerror = null;
+                this._closed = false;
+                if (!channels[this.name]) channels[this.name] = [];
+                channels[this.name].push(this);
+            };
+            BroadcastChannel.prototype.postMessage = function(message) {
+                if (this._closed) throw new DOMException('BroadcastChannel is closed', 'InvalidStateError');
+                var name = this.name;
+                var sender = this;
+                // Deliver asynchronously to other channels with same name
+                var peers = channels[name] || [];
+                for (var i = 0; i < peers.length; i++) {
+                    var peer = peers[i];
+                    if (peer !== sender && !peer._closed && typeof peer.onmessage === 'function') {
+                        (function(p, msg) {
+                            var ev = new Event('message');
+                            ev.data = msg;
+                            ev.origin = '';
+                            ev.source = null;
+                            p.onmessage(ev);
+                        })(peer, message);
+                    }
+                }
+            };
+            BroadcastChannel.prototype.close = function() {
+                this._closed = true;
+                var list = channels[this.name];
+                if (list) {
+                    var idx = list.indexOf(this);
+                    if (idx !== -1) list.splice(idx, 1);
+                }
+            };
+            BroadcastChannel.prototype.addEventListener = function(type, fn) {
+                if (type === 'message') this.onmessage = fn;
+                if (type === 'messageerror') this.onmessageerror = fn;
+            };
+            BroadcastChannel.prototype.removeEventListener = function(type) {
+                if (type === 'message') this.onmessage = null;
+                if (type === 'messageerror') this.onmessageerror = null;
+            };
+            BroadcastChannel.prototype.dispatchEvent = function(ev) {
+                if (ev.type === 'message' && this.onmessage) this.onmessage(ev);
+                if (ev.type === 'messageerror' && this.onmessageerror) this.onmessageerror(ev);
+            };
+        })();
+
+        // ─── XPath API (document.evaluate, XPathResult, XPathEvaluator) ─────
+        (function() {
+            // XPathResult constants
+            var XPR = {
+                ANY_TYPE: 0,
+                NUMBER_TYPE: 1,
+                STRING_TYPE: 2,
+                BOOLEAN_TYPE: 3,
+                UNORDERED_NODE_ITERATOR_TYPE: 4,
+                ORDERED_NODE_ITERATOR_TYPE: 5,
+                UNORDERED_NODE_SNAPSHOT_TYPE: 6,
+                ORDERED_NODE_SNAPSHOT_TYPE: 7,
+                ANY_UNORDERED_NODE_TYPE: 8,
+                FIRST_ORDERED_NODE_TYPE: 9
+            };
+
+            globalThis.XPathResult = function XPathResult() {};
+            for (var c in XPR) { XPathResult[c] = XPR[c]; XPathResult.prototype[c] = XPR[c]; }
+
+            // Simple XPath evaluator — handles common patterns
+            function evaluateXPath(expression, contextNode, resolver, resultType) {
+                var expr = expression.trim();
+                var nodes = [];
+                var numberVal = NaN;
+                var stringVal = '';
+                var boolVal = false;
+
+                // Helper: get all descendants
+                function getDescendants(node, includeRoot) {
+                    var result = [];
+                    if (includeRoot) result.push(node);
+                    if (node.childNodes) {
+                        for (var i = 0; i < node.childNodes.length; i++) {
+                            var desc = getDescendants(node.childNodes[i], true);
+                            for (var j = 0; j < desc.length; j++) result.push(desc[j]);
+                        }
+                    }
+                    return result;
+                }
+
+                // Helper: get text content of node
+                function textOf(node) {
+                    if (node.nodeType === 3 || node.nodeType === 8) return node.data || node.textContent || '';
+                    return node.textContent || '';
+                }
+
+                // Parse and evaluate expression
+                try {
+                    // id() function
+                    var idMatch = expr.match(/^id\s*\(\s*"([^"]*)"\s*\)$/);
+                    if (idMatch) {
+                        var ids = idMatch[1].trim().split(/\s+/);
+                        var doc = contextNode.ownerDocument || contextNode;
+                        // Recursive id search (handles DOMParser-created docs where
+                        // getElementById might not work for all descendants)
+                        function findById(node, targetId) {
+                            var found = [];
+                            if (node.nodeType === 1 && node.getAttribute && node.getAttribute('id') === targetId) {
+                                found.push(node);
+                            }
+                            if (node.childNodes) {
+                                for (var ci = 0; ci < node.childNodes.length; ci++) {
+                                    var sub = findById(node.childNodes[ci], targetId);
+                                    for (var si = 0; si < sub.length; si++) found.push(sub[si]);
+                                }
+                            }
+                            return found;
+                        }
+                        for (var ii = 0; ii < ids.length; ii++) {
+                            if (ids[ii]) {
+                                // Try getElementById first
+                                var el = doc.getElementById ? doc.getElementById(ids[ii]) : null;
+                                if (el) {
+                                    nodes.push(el);
+                                } else {
+                                    // Fallback: recursive search from documentElement
+                                    var root = doc.documentElement || doc;
+                                    var found = findById(root, ids[ii]);
+                                    for (var fi = 0; fi < found.length; fi++) nodes.push(found[fi]);
+                                }
+                            }
+                        }
+                    }
+                    // self::node()
+                    else if (expr === '.' || expr === 'self::node()') {
+                        nodes = [contextNode];
+                    }
+                    // .. or parent::node()
+                    else if (expr === '..' || expr === 'parent::node()') {
+                        if (contextNode.parentNode) nodes = [contextNode.parentNode];
+                    }
+                    // Simple tag name: child::tagname or just tagname
+                    else if (/^(child::)?[a-zA-Z_][\w-]*$/.test(expr)) {
+                        var tag = expr.replace(/^child::/, '');
+                        if (contextNode.childNodes) {
+                            for (var ci = 0; ci < contextNode.childNodes.length; ci++) {
+                                var cn = contextNode.childNodes[ci];
+                                if (cn.nodeType === 1 && cn.tagName &&
+                                    cn.tagName.toLowerCase() === tag.toLowerCase()) {
+                                    nodes.push(cn);
+                                }
+                            }
+                        }
+                    }
+                    // //tagname — all descendants
+                    else if (/^\/\/([a-zA-Z_][\w-]*)$/.test(expr)) {
+                        var dtag = expr.substring(2);
+                        var root = contextNode.ownerDocument || contextNode;
+                        if (root.getElementsByTagName) {
+                            var byTag = root.getElementsByTagName(dtag);
+                            for (var ti = 0; ti < byTag.length; ti++) nodes.push(byTag[ti]);
+                        }
+                    }
+                    // descendant::node() or descendant-or-self::node()
+                    else if (expr === 'descendant::node()' || expr === 'descendant-or-self::node()') {
+                        var inclSelf = expr.indexOf('-or-self') !== -1;
+                        nodes = getDescendants(contextNode, inclSelf);
+                    }
+                    // child::node() or node()
+                    else if (expr === 'child::node()' || expr === 'node()') {
+                        if (contextNode.childNodes) {
+                            for (var ni = 0; ni < contextNode.childNodes.length; ni++) {
+                                nodes.push(contextNode.childNodes[ni]);
+                            }
+                        }
+                    }
+                    // child::text() or text()
+                    else if (expr === 'text()' || expr === 'child::text()') {
+                        if (contextNode.childNodes) {
+                            for (var ti2 = 0; ti2 < contextNode.childNodes.length; ti2++) {
+                                if (contextNode.childNodes[ti2].nodeType === 3) nodes.push(contextNode.childNodes[ti2]);
+                            }
+                        }
+                    }
+                    // child::comment()
+                    else if (expr === 'comment()' || expr === 'child::comment()') {
+                        if (contextNode.childNodes) {
+                            for (var cmi = 0; cmi < contextNode.childNodes.length; cmi++) {
+                                if (contextNode.childNodes[cmi].nodeType === 8) nodes.push(contextNode.childNodes[cmi]);
+                            }
+                        }
+                    }
+                    // child::processing-instruction()
+                    else if (expr === 'processing-instruction()' || expr === 'child::processing-instruction()') {
+                        if (contextNode.childNodes) {
+                            for (var pi = 0; pi < contextNode.childNodes.length; pi++) {
+                                if (contextNode.childNodes[pi].nodeType === 7) nodes.push(contextNode.childNodes[pi]);
+                            }
+                        }
+                    }
+                    // * (all element children)
+                    else if (expr === '*' || expr === 'child::*') {
+                        if (contextNode.childNodes) {
+                            for (var si = 0; si < contextNode.childNodes.length; si++) {
+                                if (contextNode.childNodes[si].nodeType === 1) nodes.push(contextNode.childNodes[si]);
+                            }
+                        }
+                    }
+                    // attribute::* or @*
+                    else if (expr === 'attribute::*' || expr === '@*') {
+                        if (contextNode.attributes) {
+                            for (var ai = 0; ai < contextNode.attributes.length; ai++) {
+                                nodes.push(contextNode.attributes[ai]);
+                            }
+                        }
+                    }
+                    // @attrname
+                    else if (/^@([a-zA-Z_][\w-]*)$/.test(expr)) {
+                        var attrName = expr.substring(1);
+                        if (contextNode.getAttributeNode) {
+                            var attr = contextNode.getAttributeNode(attrName);
+                            if (attr) nodes.push(attr);
+                        }
+                    }
+                    // count() function
+                    else if (/^count\s*\(/.test(expr)) {
+                        var inner = expr.match(/^count\s*\(\s*(.*)\s*\)$/);
+                        if (inner) {
+                            var innerResult = evaluateXPath(inner[1], contextNode, resolver, 7);
+                            numberVal = innerResult.snapshotLength;
+                        }
+                    }
+                    // string() function
+                    else if (/^string\s*\(/.test(expr)) {
+                        var sInner = expr.match(/^string\s*\(\s*(.*)\s*\)$/);
+                        if (sInner && sInner[1]) {
+                            var sResult = evaluateXPath(sInner[1], contextNode, resolver, 9);
+                            stringVal = sResult.singleNodeValue ? textOf(sResult.singleNodeValue) : '';
+                        } else {
+                            stringVal = textOf(contextNode);
+                        }
+                    }
+                    // concat() function
+                    else if (/^concat\s*\(/.test(expr)) {
+                        // Parsa concat-argument (hanterar strängar och xpath-uttryck)
+                        var concatBody = expr.match(/^concat\s*\((.*)\)$/);
+                        if (concatBody) {
+                            var parts = [];
+                            var rest = concatBody[1];
+                            while (rest.length > 0) {
+                                rest = rest.replace(/^\s*,?\s*/, '');
+                                if (rest.charAt(0) === '"' || rest.charAt(0) === "'") {
+                                    var quote = rest.charAt(0);
+                                    var end = rest.indexOf(quote, 1);
+                                    parts.push(rest.substring(1, end));
+                                    rest = rest.substring(end + 1);
+                                } else {
+                                    var nextComma = rest.indexOf(',');
+                                    var token = nextComma >= 0 ? rest.substring(0, nextComma) : rest;
+                                    parts.push(textOf(contextNode));
+                                    rest = nextComma >= 0 ? rest.substring(nextComma) : '';
+                                }
+                            }
+                            stringVal = parts.join('');
+                        }
+                    }
+                    // contains(str, substr) function
+                    else if (/^contains\s*\(/.test(expr)) {
+                        var cArgs = expr.match(/^contains\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
+                        if (cArgs) {
+                            boolVal = cArgs[1].indexOf(cArgs[2]) !== -1;
+                        } else {
+                            // contains(., "str") or contains(context-expr, "str")
+                            var cArgs2 = expr.match(/^contains\s*\(\s*([^,]+),\s*"([^"]*)"\s*\)$/);
+                            if (cArgs2) {
+                                var cSrc = cArgs2[1].trim();
+                                var cTarget = cArgs2[2];
+                                var srcText = (cSrc === '.') ? textOf(contextNode) :
+                                    (cSrc.charAt(0) === '"' ? cSrc.slice(1,-1) : textOf(contextNode));
+                                boolVal = srcText.indexOf(cTarget) !== -1;
+                            }
+                        }
+                    }
+                    // starts-with(str, prefix)
+                    else if (/^starts-with\s*\(/.test(expr)) {
+                        var swArgs = expr.match(/^starts-with\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
+                        if (swArgs) {
+                            boolVal = swArgs[1].indexOf(swArgs[2]) === 0;
+                        } else {
+                            var swArgs2 = expr.match(/^starts-with\s*\(\s*([^,]+),\s*"([^"]*)"\s*\)$/);
+                            if (swArgs2) {
+                                var swSrc = swArgs2[1].trim() === '.' ? textOf(contextNode) : swArgs2[1].trim();
+                                boolVal = swSrc.indexOf(swArgs2[2]) === 0;
+                            }
+                        }
+                    }
+                    // normalize-space()
+                    else if (/^normalize-space\s*\(/.test(expr)) {
+                        var nsArg = expr.match(/^normalize-space\s*\(\s*\)$/);
+                        if (nsArg) {
+                            stringVal = textOf(contextNode).replace(/[\x09\x0A\x0D\x20]+/g, ' ').replace(/^ | $/g, '');
+                        } else {
+                            var nsArg2 = expr.match(/^normalize-space\s*\(\s*"([^"]*)"\s*\)$/);
+                            if (nsArg2) {
+                                stringVal = nsArg2[1].replace(/[\x09\x0A\x0D\x20]+/g, ' ').replace(/^ | $/g, '');
+                            } else {
+                                stringVal = textOf(contextNode).replace(/[\x09\x0A\x0D\x20]+/g, ' ').replace(/^ | $/g, '');
+                            }
+                        }
+                    }
+                    // substring-before(str, delim)
+                    else if (/^substring-before\s*\(/.test(expr)) {
+                        var sbArgs = expr.match(/^substring-before\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
+                        if (sbArgs) {
+                            var idx = sbArgs[1].indexOf(sbArgs[2]);
+                            stringVal = idx >= 0 ? sbArgs[1].substring(0, idx) : '';
+                        }
+                    }
+                    // substring-after(str, delim)
+                    else if (/^substring-after\s*\(/.test(expr)) {
+                        var saArgs = expr.match(/^substring-after\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
+                        if (saArgs) {
+                            var saIdx = saArgs[1].indexOf(saArgs[2]);
+                            stringVal = saIdx >= 0 ? saArgs[1].substring(saIdx + saArgs[2].length) : '';
+                        }
+                    }
+                    // substring(str, start, length?)
+                    else if (/^substring\s*\(/.test(expr)) {
+                        var subArgs = expr.match(/^substring\s*\(\s*"([^"]*)",\s*(\d+)(?:\s*,\s*(\d+))?\s*\)$/);
+                        if (subArgs) {
+                            var subStr = subArgs[1];
+                            var subStart = parseInt(subArgs[2]) - 1; // XPath is 1-based
+                            if (subArgs[3]) {
+                                stringVal = subStr.substring(subStart, subStart + parseInt(subArgs[3]));
+                            } else {
+                                stringVal = subStr.substring(subStart);
+                            }
+                        }
+                    }
+                    // string-length(str?)
+                    else if (/^string-length\s*\(/.test(expr)) {
+                        var slArg = expr.match(/^string-length\s*\(\s*"([^"]*)"\s*\)$/);
+                        if (slArg) {
+                            numberVal = slArg[1].length;
+                        } else if (/^string-length\s*\(\s*\)$/.test(expr)) {
+                            numberVal = textOf(contextNode).length;
+                        }
+                    }
+                    // translate(str, from, to)
+                    else if (/^translate\s*\(/.test(expr)) {
+                        var trArgs = expr.match(/^translate\s*\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
+                        if (trArgs) {
+                            var tResult = '';
+                            for (var ti = 0; ti < trArgs[1].length; ti++) {
+                                var ch = trArgs[1][ti];
+                                var fromIdx = trArgs[2].indexOf(ch);
+                                if (fromIdx === -1) tResult += ch;
+                                else if (fromIdx < trArgs[3].length) tResult += trArgs[3][fromIdx];
+                            }
+                            stringVal = tResult;
+                        }
+                    }
+                    // not() function
+                    else if (/^not\s*\(/.test(expr)) {
+                        var notInner = expr.match(/^not\s*\(\s*(.*)\s*\)$/);
+                        if (notInner) {
+                            var notResult = evaluateXPath(notInner[1], contextNode, resolver, 3);
+                            boolVal = !notResult.booleanValue;
+                        }
+                    }
+                    // Boolean operators: left or right, left and right
+                    else if (/\s+or\s+/.test(expr)) {
+                        var orParts = expr.split(/\s+or\s+/);
+                        boolVal = false;
+                        for (var oi = 0; oi < orParts.length; oi++) {
+                            var orSub = evaluateXPath(orParts[oi].trim(), contextNode, resolver, 3);
+                            if (orSub.booleanValue) { boolVal = true; break; }
+                        }
+                    }
+                    else if (/\s+and\s+/.test(expr)) {
+                        var andParts = expr.split(/\s+and\s+/);
+                        boolVal = true;
+                        for (var ai2 = 0; ai2 < andParts.length; ai2++) {
+                            var andSub = evaluateXPath(andParts[ai2].trim(), contextNode, resolver, 3);
+                            if (!andSub.booleanValue) { boolVal = false; break; }
+                        }
+                    }
+                    // Comparison operators: expr = expr, expr != expr, expr < expr, etc.
+                    else if (/\s*(=|!=|<=|>=|<|>)\s*/.test(expr) && !/^["']/.test(expr)) {
+                        var compMatch = expr.match(/^(.+?)\s*(!=|<=|>=|=|<|>)\s*(.+)$/);
+                        if (compMatch) {
+                            var lhs = evaluateXPath(compMatch[1].trim(), contextNode, resolver, 2);
+                            var rhs = evaluateXPath(compMatch[3].trim(), contextNode, resolver, 2);
+                            var lv = lhs.stringValue || '';
+                            var rv = rhs.stringValue || '';
+                            // Try numeric comparison
+                            var ln = parseFloat(lv), rn = parseFloat(rv);
+                            var useNum = !isNaN(ln) && !isNaN(rn);
+                            switch (compMatch[2]) {
+                                case '=': boolVal = useNum ? ln === rn : lv === rv; break;
+                                case '!=': boolVal = useNum ? ln !== rn : lv !== rv; break;
+                                case '<': boolVal = useNum ? ln < rn : lv < rv; break;
+                                case '>': boolVal = useNum ? ln > rn : lv > rv; break;
+                                case '<=': boolVal = useNum ? ln <= rn : lv <= rv; break;
+                                case '>=': boolVal = useNum ? ln >= rn : lv >= rv; break;
+                            }
+                        }
+                    }
+                    // true()/false()
+                    else if (expr === 'true()') { boolVal = true; }
+                    else if (expr === 'false()') { boolVal = false; }
+                    // Number literal
+                    else if (/^-?\d+(\.\d+)?$/.test(expr)) {
+                        numberVal = parseFloat(expr);
+                    }
+                    // String literal
+                    else if (/^["'].*["']$/.test(expr)) {
+                        stringVal = expr.substring(1, expr.length - 1);
+                    }
+                    // lang() function
+                    else if (/^lang\s*\(/.test(expr)) {
+                        var langArg = expr.match(/^lang\s*\(\s*"([^"]*)"\s*\)$/);
+                        if (langArg) {
+                            var langVal = langArg[1].toLowerCase();
+                            var node = contextNode;
+                            while (node) {
+                                var xmlLang = (node.getAttribute && (node.getAttribute('xml:lang') || node.getAttribute('lang'))) || '';
+                                if (xmlLang) {
+                                    boolVal = xmlLang.toLowerCase() === langVal ||
+                                              xmlLang.toLowerCase().indexOf(langVal + '-') === 0;
+                                    break;
+                                }
+                                node = node.parentNode;
+                            }
+                        }
+                    }
+                } catch(e) {
+                    // Fallback: empty result
+                }
+
+                // Determine result type
+                if (resultType === 0) { // ANY_TYPE
+                    if (nodes.length > 0) resultType = 4;
+                    else if (!isNaN(numberVal)) resultType = 1;
+                    else if (stringVal) resultType = 2;
+                    else resultType = 3;
+                }
+
+                var result = new XPathResult();
+                result.resultType = resultType;
+                result._nodes = nodes;
+                result._index = 0;
+
+                if (resultType === 1) {
+                    result.numberValue = isNaN(numberVal) ? nodes.length : numberVal;
+                } else if (resultType === 2) {
+                    result.stringValue = stringVal || (nodes.length > 0 ? textOf(nodes[0]) : '');
+                } else if (resultType === 3) {
+                    result.booleanValue = boolVal || nodes.length > 0;
+                } else if (resultType === 4 || resultType === 5) {
+                    result.iterateNext = function() {
+                        if (this._index < this._nodes.length) return this._nodes[this._index++];
+                        return null;
+                    };
+                    result.invalidIteratorState = false;
+                } else if (resultType === 6 || resultType === 7) {
+                    result.snapshotLength = nodes.length;
+                    result.snapshotItem = function(i) { return this._nodes[i] || null; };
+                } else if (resultType === 8 || resultType === 9) {
+                    result.singleNodeValue = nodes.length > 0 ? nodes[0] : null;
+                }
+
+                return result;
+            }
+
+            // XPathEvaluator constructor
+            globalThis.XPathEvaluator = function XPathEvaluator() {};
+            XPathEvaluator.prototype.evaluate = function(expr, ctx, resolver, type) {
+                return evaluateXPath(expr, ctx, resolver, type || 0);
+            };
+            XPathEvaluator.prototype.createExpression = function(expr, resolver) {
+                return {
+                    evaluate: function(ctx, type) {
+                        return evaluateXPath(expr, ctx, resolver, type || 0);
+                    }
+                };
+            };
+            XPathEvaluator.prototype.createNSResolver = function(node) {
+                return { lookupNamespaceURI: function() { return null; } };
+            };
+
+            // Shared XPath methods (added to any document-like object)
+            var _xpathEvaluate = function(expr, ctx, resolver, type) {
+                return evaluateXPath(expr, ctx || this, resolver, type || 0);
+            };
+            var _xpathCreateExpr = function(expr, resolver) {
+                return new XPathEvaluator().createExpression(expr, resolver);
+            };
+            var _xpathCreateNSRes = function(node) {
+                return new XPathEvaluator().createNSResolver(node);
+            };
+
+            // Set on Document.prototype for proper docs
+            if (typeof Document !== 'undefined') {
+                Document.prototype.evaluate = _xpathEvaluate;
+                Document.prototype.createExpression = _xpathCreateExpr;
+                Document.prototype.createNSResolver = _xpathCreateNSRes;
+            }
+            // Set directly on current document
+            if (typeof document !== 'undefined') {
+                document.evaluate = _xpathEvaluate;
+                document.createExpression = _xpathCreateExpr;
+                document.createNSResolver = _xpathCreateNSRes;
+            }
+            // Store XPath methods globally so they can be applied to docs created later
+            globalThis.__xpathEvaluate = _xpathEvaluate;
+            globalThis.__xpathCreateExpr = _xpathCreateExpr;
+            globalThis.__xpathCreateNSRes = _xpathCreateNSRes;
+        })();
+
+        // ─── SVGElement constructor ─────────────────────────────────────────
+        if (!globalThis.SVGElement) {
+            globalThis.SVGElement = function SVGElement() {};
+            SVGElement.prototype = Object.create(Element.prototype);
+            SVGElement.prototype.constructor = SVGElement;
+        }
+
+        // ─── onmessageerror on body/window ──────────────────────────────────
+        if (typeof window !== 'undefined') {
+            Object.defineProperty(window, 'onmessageerror', {
+                get: function() { return this._onmessageerror || null; },
+                set: function(v) { this._onmessageerror = v; },
+                configurable: true, enumerable: true
+            });
+        }
+        if (typeof document !== 'undefined' && document.body) {
+            Object.defineProperty(document.body, 'onmessageerror', {
+                get: function() { return this._onmessageerror || null; },
+                set: function(v) { this._onmessageerror = v; },
+                configurable: true, enumerable: true
+            });
+        }
+
+        // ─── document.execCommand (basic editing commands) ────────────────────
+        if (typeof document !== 'undefined' && !document.execCommand) {
+            var _supportedCmds = ['insertText','insertOrderedList','insertUnorderedList',
+                'insertLineBreak','insertParagraph','insertHorizontalRule','bold','italic',
+                'underline','strikethrough','delete','forwardDelete','undo','redo',
+                'selectAll','formatBlock','indent','outdent','createLink','unlink',
+                'insertImage','copy','cut','paste','removeFormat'];
+            document.execCommand = function(cmd, showUI, value) {
+                try {
+                    // Hitta aktiv contenteditable eller fokuselement
+                    var target = document.activeElement || document.body;
+                    if (!target) return false;
+                    var inputType = '';
+                    var data = null;
+                    switch (cmd) {
+                        case 'insertText':
+                            inputType = 'insertText';
+                            data = value;
+                            if (target.textContent !== undefined && value) {
+                                target.textContent += value;
+                            }
+                            break;
+                        case 'insertOrderedList':
+                            inputType = 'insertOrderedList';
+                            var ol = document.createElement('ol');
+                            var li = document.createElement('li');
+                            li.textContent = target.textContent || '';
+                            ol.appendChild(li);
+                            target.textContent = '';
+                            target.appendChild(ol);
+                            break;
+                        case 'insertUnorderedList':
+                            inputType = 'insertUnorderedList';
+                            var ul = document.createElement('ul');
+                            var li2 = document.createElement('li');
+                            li2.textContent = target.textContent || '';
+                            ul.appendChild(li2);
+                            target.textContent = '';
+                            target.appendChild(ul);
+                            break;
+                        case 'insertLineBreak':
+                            inputType = 'insertLineBreak';
+                            target.appendChild(document.createElement('br'));
+                            break;
+                        case 'insertParagraph':
+                            inputType = 'insertParagraph';
+                            var p = document.createElement('p');
+                            target.appendChild(p);
+                            break;
+                        case 'insertHorizontalRule':
+                            inputType = 'insertHorizontalRule';
+                            target.appendChild(document.createElement('hr'));
+                            break;
+                        case 'bold': inputType = 'formatBold'; break;
+                        case 'italic': inputType = 'formatItalic'; break;
+                        case 'underline': inputType = 'formatUnderline'; break;
+                        case 'strikethrough': inputType = 'formatStrikeThrough'; break;
+                        case 'delete': inputType = 'deleteContentBackward'; break;
+                        case 'forwardDelete': inputType = 'deleteContentForward'; break;
+                        default: inputType = cmd; break;
+                    }
+                    // Fire beforeinput (cancelable)
+                    if (typeof InputEvent !== 'undefined') {
+                        var beforeEvt = new InputEvent('beforeinput', {
+                            bubbles: true, cancelable: true,
+                            inputType: inputType, data: data
+                        });
+                        target.dispatchEvent(beforeEvt);
+                        if (beforeEvt.defaultPrevented) return false;
+                        // Fire input (not cancelable)
+                        var inputEvt = new InputEvent('input', {
+                            bubbles: true, cancelable: false,
+                            inputType: inputType, data: data
+                        });
+                        target.dispatchEvent(inputEvt);
+                    }
+                    return true;
+                } catch(e) { return false; }
+            };
+            document.queryCommandEnabled = function(cmd) { return _supportedCmds.indexOf(cmd) !== -1; };
+            document.queryCommandSupported = function(cmd) { return _supportedCmds.indexOf(cmd) !== -1; };
+            document.queryCommandState = function(cmd) { return false; };
+            document.queryCommandValue = function(cmd) { return ''; };
+        }
+
         // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────
         if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
         NodeFilter.FILTER_ACCEPT = 1;
@@ -1448,6 +2208,13 @@ pub(super) fn register_window_with_viewport<'js>(
                 // DOMParser spec: returnerar Document (INTE XMLDocument)
                 if (globalThis.Document && globalThis.Document.prototype) {
                     try { Object.setPrototypeOf(newDoc, globalThis.Document.prototype); } catch(e) {}
+                }
+                // Ensure XPath methods are available on parsed docs
+                if (typeof XPathEvaluator !== 'undefined' && !newDoc.evaluate) {
+                    var _eval = new XPathEvaluator();
+                    newDoc.evaluate = function(expr, ctx, res, type) { return _eval.evaluate(expr, ctx || newDoc, res, type); };
+                    newDoc.createExpression = function(expr, res) { return _eval.createExpression(expr, res); };
+                    newDoc.createNSResolver = function(n) { return _eval.createNSResolver(n); };
                 }
                 return newDoc;
             };

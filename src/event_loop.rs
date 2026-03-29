@@ -187,6 +187,7 @@ fn arg_as_f64(args: &[Value], index: usize) -> f64 {
 pub fn register_event_loop<'js>(ctx: &Ctx<'js>, el: SharedEventLoop) -> rquickjs::Result<()> {
     register_timers(ctx, Rc::clone(&el))?;
     register_raf(ctx, Rc::clone(&el))?;
+    register_idle_callback(ctx, Rc::clone(&el))?;
     register_queue_microtask(ctx)?;
     register_mutation_observer(ctx, el)?;
     Ok(())
@@ -317,6 +318,92 @@ fn register_raf(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
     ctx.globals().set(
         "cancelAnimationFrame",
         Function::new(ctx.clone(), JsFn(CancelRafHandler { el: Rc::clone(&el) }))?,
+    )?;
+
+    Ok(())
+}
+
+/// Registrera requestIdleCallback / cancelIdleCallback
+///
+/// Schemaläggs som en timer med delay=0 (körs efter microtasks & timers).
+/// IdleDeadline-objektet ger timeRemaining() och didTimeout.
+fn register_idle_callback(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::Result<()> {
+    struct RequestIdleCallbackHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for RequestIdleCallbackHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let func = match args.first().and_then(|v| v.as_function()) {
+                Some(f) => f.clone(),
+                None => return Ok(Value::new_int(ctx.clone(), 0)),
+            };
+            let mut state = self.el.borrow_mut();
+            if state.timers.len() >= MAX_TIMERS {
+                return Ok(Value::new_int(ctx.clone(), -1));
+            }
+            let id = state.alloc_id();
+            // Idle callbacks körs som timers med delay 0 — efter andra timers
+            state.timers.push(TimerTask {
+                id,
+                callback: Persistent::save(ctx, func),
+                delay_ms: 0,
+                recurring: false,
+                cancelled: false,
+            });
+            Ok(Value::new_int(ctx.clone(), id as i32))
+        }
+    }
+
+    struct CancelIdleCallbackHandler {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for CancelIdleCallbackHandler {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let id = arg_as_f64(args, 0) as u32;
+            let mut state = self.el.borrow_mut();
+            for timer in &mut state.timers {
+                if timer.id == id {
+                    timer.cancelled = true;
+                }
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    ctx.globals().set(
+        "requestIdleCallback",
+        Function::new(
+            ctx.clone(),
+            JsFn(RequestIdleCallbackHandler { el: Rc::clone(&el) }),
+        )?,
+    )?;
+    ctx.globals().set(
+        "cancelIdleCallback",
+        Function::new(
+            ctx.clone(),
+            JsFn(CancelIdleCallbackHandler { el: Rc::clone(&el) }),
+        )?,
+    )?;
+
+    // IdleDeadline global (för callbacks)
+    ctx.eval::<(), _>(
+        r#"
+        globalThis.IdleDeadline = function IdleDeadline() {
+            this.didTimeout = false;
+        };
+        IdleDeadline.prototype.timeRemaining = function() { return 50; };
+        // Wrappa requestIdleCallback så den skickar IdleDeadline till callback
+        (function() {
+            var _ric = globalThis.requestIdleCallback;
+            globalThis.requestIdleCallback = function(cb, opts) {
+                return _ric(function() {
+                    var deadline = new IdleDeadline();
+                    if (opts && opts.timeout) deadline.didTimeout = true;
+                    cb(deadline);
+                }, opts);
+            };
+        })();
+        "#,
     )?;
 
     Ok(())
