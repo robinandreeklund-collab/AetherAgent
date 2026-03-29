@@ -4,19 +4,21 @@
 
 ```
                     ┌─────────────────────────────────────┐
-                    │    Campfire Commerce — 100 Parses    │
+                    │  Campfire Commerce — 100 Parses      │
+                    │  (all engines as persistent servers)  │
                     ├─────────────────────────────────────┤
-  AetherAgent ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  175ms
-  Chrome      ████████████░░░░░░░░░░░░░░░░░░░░░░  2,010ms
-  LightPanda  █████████████████████████████████░░  17,200ms
+  AetherAgent █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  175ms
+  LightPanda  ███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  502ms
+  Chrome      ██████████░░░░░░░░░░░░░░░░░░░░░░░░  2,010ms
                     └─────────────────────────────────────┘
 
                     ┌─────────────────────────────────────┐
-                    │      Amiibo Crawl — 100 Pages       │
+                    │  Amiibo Crawl — 100 Pages            │
+                    │  (all engines as persistent servers)  │
                     ├─────────────────────────────────────┤
   AetherAgent █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  105ms
-  Chrome      ███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  1,330ms
-  LightPanda  █████████████████████████████████░░  46,180ms
+  LightPanda  ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  480ms
+  Chrome      ██████████░░░░░░░░░░░░░░░░░░░░░░░░  1,330ms
                     └─────────────────────────────────────┘
 ```
 
@@ -24,16 +26,19 @@
 
 ## Speed
 
-| Test | AetherAgent | Chrome | LightPanda | AE vs Chrome | AE vs LP |
-|------|:-----------:|:------:|:----------:|:------------:|:--------:|
-| **Campfire 100x** | **175ms** | 2,010ms | 17,200ms | **11x faster** | **98x faster** |
-| **Campfire median** | **1.6ms** | 19ms | 148ms | **12x faster** | **92x faster** |
-| **Amiibo 100x** | **105ms** | 1,330ms | 46,180ms | **13x faster** | **440x faster** |
-| **Amiibo median** | **0.9ms** | 12ms | 142ms | **13x faster** | **158x faster** |
+All three engines run as **persistent servers** — no cold starts, no process spawns.
+This is how each engine runs in production.
 
-> AetherAgent runs as a persistent HTTP server — one startup, then pure in-process Rust.
-> Chrome runs as a persistent Playwright browser — one startup, then new tabs.
-> LightPanda runs as a CLI subprocess — new process spawn per page (~140ms overhead).
+| Test | AetherAgent | LightPanda (CDP) | Chrome | AE vs LP | AE vs Chrome |
+|------|:-----------:|:----------------:|:------:|:--------:|:------------:|
+| **Campfire 100x** | **175ms** | 502ms | 2,010ms | **3x faster** | **11x faster** |
+| **Campfire median** | **1.6ms** | 4.8ms | 19ms | **3x faster** | **12x faster** |
+| **Amiibo 100x** | **105ms** | 480ms | 1,330ms | **5x faster** | **13x faster** |
+| **Amiibo median** | **0.9ms** | 4.6ms | 12ms | **5x faster** | **13x faster** |
+
+> **AetherAgent**: persistent HTTP server, in-process Rust function calls.
+> **LightPanda**: persistent CDP server (`lightpanda serve`), raw WebSocket navigation.
+> **Chrome**: persistent Playwright browser, new tab per page.
 
 ---
 
@@ -155,8 +160,8 @@ The embedding model enables AetherAgent to find **"Install"** when you ask *"dow
 | **Detects prompt injection** | ✅ | — | — |
 | **Semantic diff (repeat visits)** | ✅ 67-99% savings | — | — |
 | Token output | **77-99% less** | 3-10x MORE | Same as HTML |
-| Architecture | In-process server | CLI subprocess | Persistent browser |
-| Per-request overhead | **0ms** (fn call) | ~140ms (spawn) | ~15ms (new tab) |
+| Architecture | In-process server | CDP server | Persistent browser |
+| Per-request overhead | **0ms** (fn call) | ~5ms (CDP navigate) | ~15ms (new tab) |
 
 ---
 
