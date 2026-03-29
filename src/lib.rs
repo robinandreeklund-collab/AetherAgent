@@ -3139,9 +3139,19 @@ pub fn semantic_tree_to_markdown(tree_json: &str) -> String {
     md
 }
 
-/// Convert HTML directly to Markdown (parse → semantic tree → markdown)
+/// Convert HTML directly to Markdown using adaptive pipeline
+/// (auto-selects: Hydration → Static → QuickJS+DOM → fallback)
 #[wasm_bindgen]
 pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
+    let adaptive_json = parse_adaptive(html, goal, url);
+    // Extrahera tree-delen från adaptive-resultatet
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&adaptive_json) {
+        if let Some(tree) = v.get("tree") {
+            let tree_str = serde_json::to_string(tree).unwrap_or_default();
+            return semantic_tree_to_markdown(&tree_str);
+        }
+    }
+    // Fallback: direkt parse
     let tree_json = parse_to_semantic_tree(html, goal, url);
     semantic_tree_to_markdown(&tree_json)
 }

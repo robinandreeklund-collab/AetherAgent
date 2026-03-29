@@ -1120,8 +1120,10 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     };
     let fetch_ms = fetch_result.fetch_time_ms;
 
+    // Adaptiv parse: väljer automatiskt rätt pipeline-tier
+    // Tier 0 (Hydration) → Tier 1 (Static) → Tier 2 (QuickJS+DOM) → fallback
     let parse_start = std::time::Instant::now();
-    let tree_json = aether_agent::parse_to_semantic_tree(
+    let adaptive_json = aether_agent::parse_adaptive(
         &fetch_result.body,
         &req.goal,
         &fetch_result.final_url,
@@ -1139,10 +1141,14 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         fetch_result.body_size_bytes / 1024
     ));
 
-    // Fas C.12: Per-steg timing i svaret
+    // Extrahera tree och tier_used från adaptive-resultatet
+    let adaptive_value: serde_json::Value =
+        serde_json::from_str(&adaptive_json).unwrap_or_default();
+
     let mut result_value = serde_json::json!({
         "fetch": fetch_result,
-        "tree": serde_json::from_str::<serde_json::Value>(&tree_json).unwrap_or_default(),
+        "tree": adaptive_value.get("tree").cloned().unwrap_or_default(),
+        "tier_used": adaptive_value.get("tier_used").cloned().unwrap_or_default(),
         "total_time_ms": total_time_ms,
         "timing": {
             "fetch_ms": fetch_ms,
