@@ -2526,6 +2526,53 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         })();
 
+        // ─── document.caretRangeFromPoint / caretPositionFromPoint ──────────
+        if (typeof document !== 'undefined') {
+            if (!document.caretRangeFromPoint) {
+                document.caretRangeFromPoint = function(x, y) {
+                    if (arguments.length === 0) {
+                        // No coords → return Range at 0,0
+                        if (typeof Range !== 'undefined') {
+                            var r = new Range();
+                            if (document.body) { r.setStart(document.body, 0); r.setEnd(document.body, 0); }
+                            return r;
+                        }
+                        return null;
+                    }
+                    // Return null for coords outside viewport
+                    if (x < 0 || y < 0) return null;
+                    if (typeof window !== 'undefined' && (x > window.innerWidth || y > window.innerHeight)) return null;
+                    // Return a Range pointing at body (best effort without layout)
+                    if (typeof Range !== 'undefined' && document.body) {
+                        var r2 = new Range();
+                        r2.setStart(document.body, 0);
+                        r2.setEnd(document.body, 0);
+                        return r2;
+                    }
+                    return null;
+                };
+            }
+            if (!document.caretPositionFromPoint) {
+                document.caretPositionFromPoint = function(x, y) {
+                    var range = document.caretRangeFromPoint(x, y);
+                    if (!range) return null;
+                    return { offsetNode: range.startContainer, offset: range.startOffset,
+                             getClientRect: function() { return new DOMRect(x || 0, y || 0, 0, 0); } };
+                };
+            }
+            // elementFromPoint
+            if (!document.elementFromPoint) {
+                document.elementFromPoint = function(x, y) { return document.body || null; };
+            }
+            // elementsFromPoint
+            if (!document.elementsFromPoint) {
+                document.elementsFromPoint = function(x, y) {
+                    var el = document.elementFromPoint(x, y);
+                    return el ? [el] : [];
+                };
+            }
+        }
+
         // ─── innerText property ─────────────────────────────────────────────
         if (typeof document !== 'undefined' && typeof HTMLElement !== 'undefined') {
             var _innerTextDesc = {
