@@ -1331,8 +1331,13 @@ pub(super) fn register_window_with_viewport<'js>(
                 if (expr === '.' || expr === 'self::node()') {
                     return textOf(contextNode);
                 }
-                // Evaluate as full XPath and get string value
-                var r = evaluateXPath(expr, contextNode, resolver, 2);
+                // Evaluate as full XPath (ANY_TYPE to preserve numbers)
+                var r = evaluateXPath(expr, contextNode, resolver, 0);
+                if (r.resultType === 1) return String(r.numberValue);
+                if (r.resultType === 2) return r.stringValue || '';
+                if (r.resultType === 3) return String(r.booleanValue);
+                // Nodeset: return text content of first node
+                if (r._nodes && r._nodes.length > 0) return textOf(r._nodes[0]);
                 return r.stringValue || '';
             }
 
@@ -1364,8 +1369,93 @@ pub(super) fn register_window_with_viewport<'js>(
                     return result;
                 }
 
+                // Find top-level operator position (not inside parens/quotes)
+                function findTopLevelOp(s, ops) {
+                    var depth = 0;
+                    var inQ = false;
+                    var qC = '';
+                    for (var i = 0; i < s.length; i++) {
+                        var c = s[i];
+                        if (inQ) { if (c === qC) inQ = false; continue; }
+                        if (c === '"' || c === "'") { inQ = true; qC = c; continue; }
+                        if (c === '(') { depth++; continue; }
+                        if (c === ')') { depth--; continue; }
+                        if (depth > 0) continue;
+                        for (var oi = 0; oi < ops.length; oi++) {
+                            var op = ops[oi];
+                            if (s.substring(i, i + op.length) === op) {
+                                // For word operators (or/and), check word boundaries
+                                if (/^[a-z]+$/.test(op)) {
+                                    var before = i > 0 ? s[i-1] : ' ';
+                                    var after = i + op.length < s.length ? s[i + op.length] : ' ';
+                                    if (/\s/.test(before) && /\s/.test(after)) {
+                                        return { pos: i, op: op };
+                                    }
+                                } else {
+                                    // Symbol ops: require space context to avoid matching inside paths
+                                    if (i > 0 && /\s/.test(s[i-1])) {
+                                        return { pos: i, op: op };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                // Helper to coerce XPathResult to boolean
+                function xpathBool(r) {
+                    if (r.resultType === 3) return r.booleanValue;
+                    if (r.resultType === 1) return !isNaN(r.numberValue) && r.numberValue !== 0;
+                    if (r.resultType === 2) return r.stringValue !== '';
+                    return r._nodes && r._nodes.length > 0;
+                }
+
                 // Parse and evaluate expression
+                var _opHandled = false;
                 try {
+                    // Check for top-level boolean/comparison operators FIRST
+                    var topOr = findTopLevelOp(expr, ['or']);
+                    if (topOr) {
+                        _opHandled = true;
+                        var orLeft = expr.substring(0, topOr.pos).trim();
+                        var orRight = expr.substring(topOr.pos + topOr.op.length).trim();
+                        var orLR = evaluateXPath(orLeft, contextNode, resolver, 0);
+                        if (xpathBool(orLR)) { boolVal = true; }
+                        else { boolVal = xpathBool(evaluateXPath(orRight, contextNode, resolver, 0)); }
+                    }
+                    if (!_opHandled) {
+                    var topAnd = findTopLevelOp(expr, ['and']);
+                    if (topAnd) {
+                        _opHandled = true;
+                        var andLeft = expr.substring(0, topAnd.pos).trim();
+                        var andRight = expr.substring(topAnd.pos + topAnd.op.length).trim();
+                        var andLR = evaluateXPath(andLeft, contextNode, resolver, 0);
+                        if (!xpathBool(andLR)) { boolVal = false; }
+                        else { boolVal = xpathBool(evaluateXPath(andRight, contextNode, resolver, 0)); }
+                    }}
+                    if (!_opHandled) {
+                    var topCmp = findTopLevelOp(expr, ['!=', '<=', '>=', '=', '<', '>']);
+                    if (topCmp) {
+                        _opHandled = true;
+                        var cmpLeft = expr.substring(0, topCmp.pos).trim();
+                        var cmpRight = expr.substring(topCmp.pos + topCmp.op.length).trim();
+                        var cmpLV = xpathStringValue(cmpLeft, contextNode, resolver);
+                        var cmpRV = xpathStringValue(cmpRight, contextNode, resolver);
+                        var cmpLN = parseFloat(cmpLV), cmpRN = parseFloat(cmpRV);
+                        var cmpUseNum = !isNaN(cmpLN) && !isNaN(cmpRN);
+                        switch (topCmp.op) {
+                            case '=': boolVal = cmpUseNum ? cmpLN === cmpRN : cmpLV === cmpRV; break;
+                            case '!=': boolVal = cmpUseNum ? cmpLN !== cmpRN : cmpLV !== cmpRV; break;
+                            case '<': boolVal = cmpUseNum ? cmpLN < cmpRN : cmpLV < cmpRV; break;
+                            case '>': boolVal = cmpUseNum ? cmpLN > cmpRN : cmpLV > cmpRV; break;
+                            case '<=': boolVal = cmpUseNum ? cmpLN <= cmpRN : cmpLV <= cmpRV; break;
+                            case '>=': boolVal = cmpUseNum ? cmpLN >= cmpRN : cmpLV >= cmpRV; break;
+                        }
+                    }}
+
+                    if (!_opHandled) {
+
                     // id() function
                     var idMatch = expr.match(/^id\s*\(\s*"([^"]*)"\s*\)$/);
                     if (idMatch) {
@@ -1409,6 +1499,39 @@ pub(super) fn register_window_with_viewport<'js>(
                     else if (expr === '..' || expr === 'parent::node()') {
                         if (contextNode.parentNode) nodes = [contextNode.parentNode];
                     }
+                    // ./tagname or ./tagname[N] — child elements relative to context
+                    else if (/^\.\/([a-zA-Z_][\w-]*)(\[\d+\])?$/.test(expr)) {
+                        var relMatch = expr.match(/^\.\/([a-zA-Z_][\w-]*)(?:\[(\d+)\])?$/);
+                        var relTag = relMatch[1];
+                        var relIdx = relMatch[2] ? parseInt(relMatch[2]) - 1 : -1;
+                        var relFound = [];
+                        if (contextNode.childNodes) {
+                            for (var rti = 0; rti < contextNode.childNodes.length; rti++) {
+                                var rn = contextNode.childNodes[rti];
+                                if (rn.nodeType === 1 && rn.tagName &&
+                                    rn.tagName.toLowerCase() === relTag.toLowerCase()) {
+                                    relFound.push(rn);
+                                }
+                            }
+                        }
+                        if (relIdx >= 0) {
+                            if (relIdx < relFound.length) nodes.push(relFound[relIdx]);
+                        } else {
+                            nodes = relFound;
+                        }
+                    }
+                    // (expr)[N] — positional predicate filter
+                    else if (/^\(.*\)\[\d+\]$/.test(expr)) {
+                        var predMatch = expr.match(/^\((.*)\)\[(\d+)\]$/);
+                        if (predMatch) {
+                            var innerExpr = predMatch[1];
+                            var predIdx = parseInt(predMatch[2]) - 1; // XPath 1-based
+                            var innerResult = evaluateXPath(innerExpr, contextNode, resolver, 7);
+                            if (innerResult.snapshotLength > predIdx) {
+                                nodes.push(innerResult.snapshotItem(predIdx));
+                            }
+                        }
+                    }
                     // Simple tag name: child::tagname or just tagname
                     else if (/^(child::)?[a-zA-Z_][\w-]*$/.test(expr)) {
                         var tag = expr.replace(/^child::/, '');
@@ -1422,13 +1545,26 @@ pub(super) fn register_window_with_viewport<'js>(
                             }
                         }
                     }
-                    // //tagname — all descendants
+                    // //tagname — all descendants of context (or document)
                     else if (/^\/\/([a-zA-Z_][\w-]*)$/.test(expr)) {
-                        var dtag = expr.substring(2);
-                        var root = contextNode.ownerDocument || contextNode;
-                        if (root.getElementsByTagName) {
-                            var byTag = root.getElementsByTagName(dtag);
-                            for (var ti = 0; ti < byTag.length; ti++) nodes.push(byTag[ti]);
+                        var dtag = expr.substring(2).toLowerCase();
+                        var allDesc = getDescendants(contextNode, false);
+                        for (var di = 0; di < allDesc.length; di++) {
+                            if (allDesc[di].nodeType === 1 && allDesc[di].tagName &&
+                                allDesc[di].tagName.toLowerCase() === dtag) {
+                                nodes.push(allDesc[di]);
+                            }
+                        }
+                    }
+                    // .//tagname — all descendants of context
+                    else if (/^\.\/\/([a-zA-Z_][\w-]*)$/.test(expr)) {
+                        var ddtag = expr.substring(3).toLowerCase();
+                        var descNodes = getDescendants(contextNode, false);
+                        for (var ddi = 0; ddi < descNodes.length; ddi++) {
+                            if (descNodes[ddi].nodeType === 1 && descNodes[ddi].tagName &&
+                                descNodes[ddi].tagName.toLowerCase() === ddtag) {
+                                nodes.push(descNodes[ddi]);
+                            }
                         }
                     }
                     // descendant::node() or descendant-or-self::node()
@@ -1635,66 +1771,20 @@ pub(super) fn register_window_with_viewport<'js>(
                             boolVal = !notResult.booleanValue;
                         }
                     }
-                    // Boolean operators: left or right, left and right
-                    else if (/\s+or\s+/.test(expr)) {
-                        var orParts = expr.split(/\s+or\s+/);
-                        boolVal = false;
-                        for (var oi = 0; oi < orParts.length; oi++) {
-                            var orSub = evaluateXPath(orParts[oi].trim(), contextNode, resolver, 0);
-                            // XPath boolean coercion: numbers: 0/NaN=false, else true; strings: ""=false; nodesets: empty=false
-                            var orBool = false;
-                            if (orSub.resultType === 3) orBool = orSub.booleanValue;
-                            else if (orSub.resultType === 1) orBool = !isNaN(orSub.numberValue) && orSub.numberValue !== 0;
-                            else if (orSub.resultType === 2) orBool = orSub.stringValue !== '';
-                            else orBool = orSub._nodes && orSub._nodes.length > 0;
-                            if (orBool) { boolVal = true; break; }
-                        }
-                    }
-                    else if (/\s+and\s+/.test(expr)) {
-                        var andParts = expr.split(/\s+and\s+/);
-                        boolVal = true;
-                        for (var ai2 = 0; ai2 < andParts.length; ai2++) {
-                            var andSub = evaluateXPath(andParts[ai2].trim(), contextNode, resolver, 0);
-                            var andBool = false;
-                            if (andSub.resultType === 3) andBool = andSub.booleanValue;
-                            else if (andSub.resultType === 1) andBool = !isNaN(andSub.numberValue) && andSub.numberValue !== 0;
-                            else if (andSub.resultType === 2) andBool = andSub.stringValue !== '';
-                            else andBool = andSub._nodes && andSub._nodes.length > 0;
-                            if (!andBool) { boolVal = false; break; }
-                        }
-                    }
-                    // Comparison operators: expr = expr, expr != expr, expr < expr, etc.
-                    else if (/\s*(=|!=|<=|>=|<|>)\s*/.test(expr) && !/^["']/.test(expr)) {
-                        var compMatch = expr.match(/^(.+?)\s*(!=|<=|>=|=|<|>)\s*(.+)$/);
-                        if (compMatch) {
-                            var lv = xpathStringValue(compMatch[1].trim(), contextNode, resolver);
-                            var rv = xpathStringValue(compMatch[3].trim(), contextNode, resolver);
-                            // Try numeric comparison
-                            var ln = parseFloat(lv), rn = parseFloat(rv);
-                            var useNum = !isNaN(ln) && !isNaN(rn);
-                            switch (compMatch[2]) {
-                                case '=': boolVal = useNum ? ln === rn : lv === rv; break;
-                                case '!=': boolVal = useNum ? ln !== rn : lv !== rv; break;
-                                case '<': boolVal = useNum ? ln < rn : lv < rv; break;
-                                case '>': boolVal = useNum ? ln > rn : lv > rv; break;
-                                case '<=': boolVal = useNum ? ln <= rn : lv <= rv; break;
-                                case '>=': boolVal = useNum ? ln >= rn : lv >= rv; break;
-                            }
-                        }
-                    }
                     // true()/false()
-                    else if (expr === 'true()') { boolVal = true; }
-                    else if (expr === 'false()') { boolVal = false; }
+                    } // close: if (!_opHandled)
+                    if (!_opHandled && expr === 'true()') { boolVal = true; }
+                    else if (!_opHandled && expr === 'false()') { boolVal = false; }
                     // Number literal
-                    else if (/^-?\d+(\.\d+)?$/.test(expr)) {
+                    else if (!_opHandled && /^-?\d+(\.\d+)?$/.test(expr)) {
                         numberVal = parseFloat(expr);
                     }
                     // String literal
-                    else if (/^["'].*["']$/.test(expr)) {
+                    else if (!_opHandled && /^["'].*["']$/.test(expr)) {
                         stringVal = expr.substring(1, expr.length - 1);
                     }
                     // lang() function
-                    else if (/^lang\s*\(/.test(expr)) {
+                    else if (!_opHandled && /^lang\s*\(/.test(expr)) {
                         var langArg = expr.match(/^lang\s*\(\s*"([^"]*)"\s*\)$/);
                         if (langArg) {
                             var langVal = langArg[1].toLowerCase();
@@ -2075,6 +2165,24 @@ pub(super) fn register_window_with_viewport<'js>(
                 if (tagName === 'iframe' && property === 'srcdoc') return 'TrustedHTML';
                 return null;
             };
+
+            // fromLiteral — tagged template literal factory (Trusted Types spec)
+            function makeFromLiteral(Cls) {
+                return function fromLiteral(templateObj) {
+                    // Tagged template: fromLiteral`abc` → templateObj is TemplateStringsArray
+                    if (!templateObj || !templateObj.raw || !Array.isArray(templateObj.raw)) {
+                        throw new TypeError('fromLiteral requires a template literal');
+                    }
+                    // Reject interpolations: template must have exactly 1 part
+                    if (templateObj.length !== 1) {
+                        throw new TypeError('fromLiteral does not allow interpolation');
+                    }
+                    return new Cls(templateObj[0]);
+                };
+            }
+            TrustedHTML.fromLiteral = makeFromLiteral(TrustedHTML);
+            TrustedScript.fromLiteral = makeFromLiteral(TrustedScript);
+            TrustedScriptURL.fromLiteral = makeFromLiteral(TrustedScriptURL);
 
             globalThis.TrustedHTML = TrustedHTML;
             globalThis.TrustedScript = TrustedScript;
