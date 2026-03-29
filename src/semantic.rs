@@ -12,7 +12,7 @@ use crate::parser::{
     is_likely_visible_cached, AttrCache,
 };
 use crate::trust::{analyze_text, sanitize_text};
-use crate::types::{InjectionWarning, NodeState, SemanticNode, SemanticTree};
+use crate::types::{GoalCategory, InjectionWarning, NodeState, SemanticNode, SemanticTree};
 
 /// Taggar att hoppa över helt (inga semantiska barn)
 const SKIP_TAGS: &[&str] = &[
@@ -33,6 +33,8 @@ pub struct SemanticBuilder {
     goal_embedding: Option<Vec<f32>>,
     /// Räknare för embedding-anrop (begränsa till max per sida)
     embedding_calls: std::cell::Cell<u32>,
+    /// Goal-kategori för smart DOM-filtrering
+    goal_category: GoalCategory,
     next_id: u32,
 }
 
@@ -46,12 +48,14 @@ impl SemanticBuilder {
             .collect();
         // Pre-embed goal en gång (sparar ~36ms per nod-jämförelse)
         let goal_embedding = crate::embedding::embed(&goal_lower);
+        let goal_category = GoalCategory::from_goal(&goal_lower);
         SemanticBuilder {
             warnings: vec![],
             goal: goal_lower,
             goal_words,
             goal_embedding,
             embedding_calls: std::cell::Cell::new(0),
+            goal_category,
             next_id: 0,
         }
     }
@@ -167,11 +171,25 @@ impl SemanticBuilder {
         let role = arena.infer_role_with_text(key, &inner_text);
         let raw_label = arena.extract_label_with_text(key, &inner_text);
 
-        // Trust shield
+        // Trust shield — körs ALLTID (innan pre-filtrering, så injection detekteras)
         let (trust, warning) = analyze_text(id, &raw_label);
         let has_warning = warning.is_some();
         if let Some(w) = warning {
             self.warnings.push(w);
+        }
+
+        // Smart pre-filtrering: skippa kända irrelevanta roller baserat på mål-kategori.
+        // Körs EFTER trust shield så injection-varningar aldrig missas.
+        // "find news" → skippa checkboxes, radios, selects.
+        // "click button" → skippa standalone text/paragraph/price.
+        // "generic" roller passerar alltid (roll kan vara dold i text/attribut).
+        if self.goal_category != GoalCategory::Generic
+            && !SemanticNode::matches_goal_category(&role, self.goal_category)
+            && role != "generic"
+            && !has_warning
+        // Behåll alltid noder med injection-varningar
+        {
+            return None;
         }
 
         let label = if has_warning {
@@ -436,15 +454,17 @@ impl SemanticBuilder {
         //    dessa är troligast agentens mål och kräver semantisk matchning
         //    (t.ex. "find news articles" vs "South Korea Mandates Solar Panels")
         // 3. Skippa noder med exakt match (>= 0.8) och tomma labels
-        // Max 50 embedding-anrop per sida (~1.8s budget vid 36ms/anrop)
-        const MAX_EMBEDDING_CALLS: u32 = 50;
+        // Max 30 embedding-anrop per sida (~1.1s budget vid 36ms/anrop)
+        // Pre-filtrering av goal-kategori reducerar kandidater kraftigt
+        const MAX_EMBEDDING_CALLS: u32 = 30;
         let is_interactive = matches!(role, "link" | "button" | "cta" | "input");
+        let matches_category = SemanticNode::matches_goal_category(role, self.goal_category);
         let needs_embedding = word_score < 0.8
             && !label.is_empty()
             && label.len() > 3
             && self.goal_embedding.is_some()
             && self.embedding_calls.get() < MAX_EMBEDDING_CALLS
-            && (word_score > 0.0 || is_interactive);
+            && (word_score > 0.0 || (is_interactive && matches_category));
 
         let text_score = if needs_embedding {
             self.embedding_calls.set(self.embedding_calls.get() + 1);

@@ -431,6 +431,162 @@ impl SemanticNode {
             _ => 0.2,
         }
     }
+
+    /// Ska denna roll inkluderas för ett visst mål-kategori?
+    /// Containers (nav, form, list) inkluderas alltid (kan ha relevanta barn).
+    /// Headings inkluderas alltid (strukturellt viktiga).
+    pub fn matches_goal_category(role: &str, goal_cat: GoalCategory) -> bool {
+        // Containers och headings — alltid med (kan ha relevanta barn)
+        if matches!(
+            role,
+            "navigation"
+                | "complementary"
+                | "main"
+                | "form"
+                | "list"
+                | "listitem"
+                | "group"
+                | "table"
+                | "dialog"
+                | "heading"
+        ) {
+            return true;
+        }
+
+        match goal_cat {
+            GoalCategory::Click => {
+                matches!(
+                    role,
+                    "button"
+                        | "cta"
+                        | "link"
+                        | "tab"
+                        | "menu"
+                        | "price"
+                        | "product_card"
+                        | "textbox"
+                        | "searchbox"
+                        | "select"
+                        | "combobox"
+                )
+            }
+            GoalCategory::Extract => {
+                matches!(
+                    role,
+                    "text" | "paragraph" | "price" | "product_card" | "link" | "data" | "img"
+                )
+            }
+            GoalCategory::Form => matches!(
+                role,
+                "textbox"
+                    | "searchbox"
+                    | "checkbox"
+                    | "radio"
+                    | "switch"
+                    | "select"
+                    | "combobox"
+                    | "button"
+                    | "cta"
+            ),
+            GoalCategory::Navigate => matches!(role, "link" | "button" | "cta" | "tab"),
+            GoalCategory::Generic => true,
+        }
+    }
+}
+
+// ─── Goal Category ──────────────────────────────────────────────────────────
+
+/// Mål-kategori för smart DOM-filtrering.
+/// Klassificeras en gång vid start, styr vilka noder som traverseras.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum GoalCategory {
+    /// "click buy button", "add to cart", "press submit"
+    Click,
+    /// "find price", "show latest news", "list products", "read article"
+    Extract,
+    /// "fill login form", "enter email", "sign up"
+    Form,
+    /// "go to next page", "navigate home", "click back"
+    Navigate,
+    /// Oklart mål — inkludera allt
+    Generic,
+}
+
+impl GoalCategory {
+    /// Klassificera en goal-sträng till kategori (O(1) keyword-lookup).
+    /// Returnerar Generic om inget mönster matchar → ingen filtrering.
+    pub fn from_goal(goal: &str) -> Self {
+        let g = goal.to_lowercase();
+
+        // Form: fylla i, logga in, registrera
+        if g.contains("fill")
+            || g.contains("enter")
+            || g.contains("login")
+            || g.contains("log in")
+            || g.contains("sign in")
+            || g.contains("sign up")
+            || g.contains("register")
+            || g.contains("submit form")
+            || g.contains("logga in")
+            || g.contains("fyll i")
+            || g.contains("registrera")
+        {
+            return GoalCategory::Form;
+        }
+
+        // Click: köp, tryck, klicka, add to cart
+        if g.contains("click")
+            || g.contains("press")
+            || g.contains("tap")
+            || g.contains("buy")
+            || g.contains("purchase")
+            || g.contains("add to cart")
+            || g.contains("checkout")
+            || g.contains("klicka")
+            || g.contains("köp")
+            || g.contains("lägg i varukorg")
+        {
+            return GoalCategory::Click;
+        }
+
+        // Navigate: gå till, nästa sida, tillbaka
+        if g.contains("next page")
+            || g.contains("previous")
+            || g.contains("go to")
+            || g.contains("navigate")
+            || g.contains("back")
+            || g.contains("nästa")
+            || g.contains("tillbaka")
+            || g.contains("gå till")
+        {
+            return GoalCategory::Navigate;
+        }
+
+        // Extract: hitta, visa, sök, läs, hämta
+        if g.contains("find")
+            || g.contains("show")
+            || g.contains("search")
+            || g.contains("list")
+            || g.contains("read")
+            || g.contains("get")
+            || g.contains("extract")
+            || g.contains("price")
+            || g.contains("article")
+            || g.contains("news")
+            || g.contains("product")
+            || g.contains("download")
+            || g.contains("install")
+            || g.contains("hitta")
+            || g.contains("visa")
+            || g.contains("sök")
+            || g.contains("läs")
+            || g.contains("hämta")
+        {
+            return GoalCategory::Extract;
+        }
+
+        GoalCategory::Generic
+    }
 }
 
 impl ClickResult {
