@@ -676,10 +676,50 @@ impl JsHandler for FocusHandler {
         let mut current = Some(self.key);
         while let Some(key) = current {
             if let Some(node) = s.arena.nodes.get(key) {
-                // Kolla inert-attribut
+                // Kolla inert-attribut (bara för HTML-element, inte MathML/SVG)
                 if node.get_attr("inert").is_some() {
-                    focusable = false;
-                    break;
+                    let is_html = node
+                        .tag
+                        .as_deref()
+                        .map(|t| {
+                            !matches!(
+                                t,
+                                "math"
+                                    | "mi"
+                                    | "mo"
+                                    | "mn"
+                                    | "ms"
+                                    | "mtext"
+                                    | "mrow"
+                                    | "mfrac"
+                                    | "msup"
+                                    | "msub"
+                                    | "mover"
+                                    | "munder"
+                                    | "svg"
+                                    | "g"
+                                    | "path"
+                                    | "circle"
+                                    | "rect"
+                                    | "line"
+                                    | "polygon"
+                                    | "polyline"
+                                    | "text"
+                                    | "tspan"
+                                    | "foreignObject"
+                                    | "use"
+                                    | "defs"
+                                    | "clipPath"
+                                    | "mask"
+                                    | "image"
+                                    | "pattern"
+                            )
+                        })
+                        .unwrap_or(true);
+                    if is_html {
+                        focusable = false;
+                        break;
+                    }
                 }
                 // Kolla display:none (inline style)
                 if let Some(style) = node.get_attr("style") {

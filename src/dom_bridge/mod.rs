@@ -2289,12 +2289,19 @@ impl JsHandler for GetSelection {
                 var _patchSel = function(sel) {
                     sel._selectedText = '';
                     sel.selectAllChildren = function(node) {
-                        // Kolla om noden eller en förälder har inert
+                        // Kolla om noden eller en HTML-förälder har inert
+                        // Per spec: inert attribut gäller bara HTML-element
+                        var htmlNS = 'http://www.w3.org/1999/xhtml';
                         var n = node;
                         while (n) {
                             if (n.getAttribute && n.getAttribute('inert') !== null) {
-                                sel._selectedText = '';
-                                return;
+                                // Kontrollera att det är ett HTML-element
+                                var ns = n.namespaceURI;
+                                var isHTML = !ns || ns === htmlNS;
+                                if (isHTML) {
+                                    sel._selectedText = '';
+                                    return;
+                                }
                             }
                             n = n.parentNode;
                         }

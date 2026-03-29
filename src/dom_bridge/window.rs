@@ -90,6 +90,51 @@ impl JsHandler for GetComputedStyleHandler {
             Some(k) => k,
             None => return Ok(Object::new(ctx.clone())?.into_value()),
         };
+        // Hantera pseudo-element (andra argumentet)
+        let pseudo = args
+            .get(1)
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        if !pseudo.is_empty() {
+            let p = pseudo.trim().to_lowercase();
+            // Normalisera: ":before" → "::before"
+            let p = if p.starts_with(':') && !p.starts_with("::") {
+                format!(":{}", p)
+            } else {
+                p
+            };
+            // Kända pseudo-element returnerar element-styles
+            let known_pseudo = matches!(
+                p.as_str(),
+                "::before"
+                    | "::after"
+                    | "::first-line"
+                    | "::first-letter"
+                    | "::marker"
+                    | "::placeholder"
+                    | "::selection"
+                    | "::file-selector-button"
+                    | "::backdrop"
+            );
+            if !known_pseudo {
+                // Okänt pseudo-element → returnera tom CSSStyleDeclaration
+                let empty = Object::new(ctx.clone())?;
+                let empty_styles = std::collections::HashMap::<String, String>::new();
+                empty.set(
+                    "getPropertyValue",
+                    Function::new(
+                        ctx.clone(),
+                        JsFn(ComputedStyleGetProperty {
+                            styles: empty_styles,
+                        }),
+                    )?,
+                )?;
+                empty.set("length", 0i32)?;
+                return Ok(empty.into_value());
+            }
+            // Kända pseudo-element: returnera element-styles (fallthrough nedan)
+        }
         // Beräkna computed styles:
         // 1. Försök Blitz Stylo (riktig CSS-motor) om tillgänglig
         // 2. Fallback: tag defaults + inline styles
@@ -2325,31 +2370,48 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                 }
             }
-            // SVGPathElement specifics
-            if (SVGPathElement) {
-                SVGPathElement.prototype.getTotalLength = function() { return 0; };
-                SVGPathElement.prototype.getPointAtLength = function() { return { x: 0, y: 0 }; };
-            }
-            // SVGSVGElement specifics
-            if (SVGSVGElement) {
-                SVGSVGElement.prototype.createSVGPoint = function() { return { x: 0, y: 0, matrixTransform: function() { return { x: 0, y: 0 }; } }; };
-                SVGSVGElement.prototype.createSVGRect = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
-                SVGSVGElement.prototype.createSVGMatrix = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
-                SVGSVGElement.prototype.createSVGTransform = function() { return { type: 0, matrix: { a:1,b:0,c:0,d:1,e:0,f:0 } }; };
-            }
-            // SVGGeometryElement.getBBox
+            // SVGPathElement — no own getTotalLength/getPointAtLength (moved to SVGGeometryElement per spec)
+            // pathLength belongs on SVGGeometryElement.prototype
             if (typeof SVGGeometryElement !== 'undefined') {
-                SVGGeometryElement.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+                SVGGeometryElement.prototype.getBBox = function() { return new DOMRect(0, 0, 0, 0); };
                 SVGGeometryElement.prototype.isPointInFill = function() { return false; };
                 SVGGeometryElement.prototype.isPointInStroke = function() { return false; };
                 SVGGeometryElement.prototype.getTotalLength = function() { return 0; };
-                SVGGeometryElement.prototype.getPointAtLength = function() { return { x: 0, y: 0 }; };
+                SVGGeometryElement.prototype.getPointAtLength = function() { return new DOMPoint(0, 0); };
+                Object.defineProperty(SVGGeometryElement.prototype, 'pathLength', {
+                    get: function() {
+                        // SVGAnimatedNumber stub
+                        return { baseVal: 0, animVal: 0 };
+                    },
+                    configurable: true
+                });
+            }
+            // SVGSVGElement specifics
+            if (SVGSVGElement) {
+                SVGSVGElement.prototype.createSVGPoint = function() { return new DOMPoint(0, 0); };
+                SVGSVGElement.prototype.createSVGRect = function() { return new DOMRect(0, 0, 0, 0); };
+                SVGSVGElement.prototype.createSVGMatrix = function() { return new DOMMatrix(); };
+                SVGSVGElement.prototype.createSVGTransform = function() { return { type: 0, matrix: new DOMMatrix() }; };
+                SVGSVGElement.prototype.createSVGNumber = function() { return { value: 0 }; };
+                SVGSVGElement.prototype.createSVGLength = function() { return { value: 0, unitType: 0, valueInSpecifiedUnits: 0, valueAsString: '0' }; };
+                SVGSVGElement.prototype.createSVGAngle = function() { return { value: 0, unitType: 0, valueInSpecifiedUnits: 0, valueAsString: '0' }; };
             }
             if (typeof SVGGraphicsElement !== 'undefined') {
-                SVGGraphicsElement.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
-                SVGGraphicsElement.prototype.getCTM = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
-                SVGGraphicsElement.prototype.getScreenCTM = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
+                SVGGraphicsElement.prototype.getBBox = function() { return new DOMRect(0, 0, 0, 0); };
+                SVGGraphicsElement.prototype.getCTM = function() { return new DOMMatrix(); };
+                SVGGraphicsElement.prototype.getScreenCTM = function() { return new DOMMatrix(); };
             }
+            // SVGViewElement
+            if (!globalThis.SVGViewElement) {
+                globalThis.SVGViewElement = function() {};
+                SVGViewElement.prototype = Object.create(SVGElement.prototype);
+            }
+            // SVGUnitTypes interface
+            if (!globalThis.SVGUnitTypes) {
+                globalThis.SVGUnitTypes = { SVG_UNIT_TYPE_UNKNOWN: 0, SVG_UNIT_TYPE_USERSPACEONUSE: 1, SVG_UNIT_TYPE_OBJECTBOUNDINGBOX: 2 };
+            }
+            // SVGFilterElement/SVGGradientElement should NOT implement SVGUnitTypes
+            // (This is per spec — they have their own unitType attributes)
         })();
 
         // ─── window.onload / DOMContentLoaded support ───────────────────────
