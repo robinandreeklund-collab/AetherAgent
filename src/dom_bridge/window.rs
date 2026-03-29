@@ -2030,15 +2030,19 @@ pub(super) fn register_window_with_viewport<'js>(
                         case 'forwardDelete': inputType = 'deleteContentForward'; break;
                         default: inputType = cmd; break;
                     }
-                    // Fire beforeinput (cancelable)
-                    if (typeof InputEvent !== 'undefined') {
-                        var beforeEvt = new InputEvent('beforeinput', {
-                            bubbles: true, cancelable: true,
-                            inputType: inputType, data: data
-                        });
-                        target.dispatchEvent(beforeEvt);
-                        if (beforeEvt.defaultPrevented) return false;
-                        // Fire input (not cancelable)
+                    // Only fire input event on editable targets (not beforeinput per spec)
+                    var isEditable = false;
+                    var n = target;
+                    while (n) {
+                        if (n.contentEditable === 'true' || n.contentEditable === 'inherit' ||
+                            (n.getAttribute && n.getAttribute('contenteditable') !== null) ||
+                            n.tagName === 'INPUT' || n.tagName === 'TEXTAREA') {
+                            isEditable = true; break;
+                        }
+                        n = n.parentNode;
+                    }
+                    if (isEditable && typeof InputEvent !== 'undefined') {
+                        // Per spec: execCommand fires 'input' but NOT 'beforeinput'
                         var inputEvt = new InputEvent('input', {
                             bubbles: true, cancelable: false,
                             inputType: inputType, data: data
@@ -2329,6 +2333,126 @@ pub(super) fn register_window_with_viewport<'js>(
                 set: function(v) { this._onload = v; },
                 configurable: true, enumerable: true
             });
+        }
+
+        // ─── Geometry API: DOMPoint, DOMRect, DOMMatrix, DOMQuad ────────────
+        (function() {
+            if (!globalThis.DOMPoint) {
+                globalThis.DOMPoint = function DOMPoint(x, y, z, w) {
+                    this.x = x || 0; this.y = y || 0;
+                    this.z = z || 0; this.w = w !== undefined ? w : 1;
+                };
+                DOMPoint.fromPoint = function(p) {
+                    p = p || {};
+                    return new DOMPoint(p.x, p.y, p.z, p.w);
+                };
+                DOMPoint.prototype.matrixTransform = function() { return new DOMPoint(this.x, this.y, this.z, this.w); };
+                DOMPoint.prototype.toJSON = function() { return { x: this.x, y: this.y, z: this.z, w: this.w }; };
+            }
+            if (!globalThis.DOMPointReadOnly) {
+                globalThis.DOMPointReadOnly = function DOMPointReadOnly(x, y, z, w) {
+                    this.x = x || 0; this.y = y || 0;
+                    this.z = z || 0; this.w = w !== undefined ? w : 1;
+                };
+                DOMPointReadOnly.fromPoint = DOMPoint.fromPoint;
+                DOMPointReadOnly.prototype.matrixTransform = DOMPoint.prototype.matrixTransform;
+                DOMPointReadOnly.prototype.toJSON = DOMPoint.prototype.toJSON;
+            }
+            if (!globalThis.DOMRect) {
+                globalThis.DOMRect = function DOMRect(x, y, width, height) {
+                    this.x = x || 0; this.y = y || 0;
+                    this.width = width || 0; this.height = height || 0;
+                };
+                Object.defineProperty(DOMRect.prototype, 'top', { get: function() { return Math.min(this.y, this.y + this.height); } });
+                Object.defineProperty(DOMRect.prototype, 'bottom', { get: function() { return Math.max(this.y, this.y + this.height); } });
+                Object.defineProperty(DOMRect.prototype, 'left', { get: function() { return Math.min(this.x, this.x + this.width); } });
+                Object.defineProperty(DOMRect.prototype, 'right', { get: function() { return Math.max(this.x, this.x + this.width); } });
+                DOMRect.fromRect = function(r) {
+                    r = r || {};
+                    return new DOMRect(r.x, r.y, r.width, r.height);
+                };
+                DOMRect.prototype.toJSON = function() { return { x: this.x, y: this.y, width: this.width, height: this.height }; };
+            }
+            if (!globalThis.DOMRectReadOnly) {
+                globalThis.DOMRectReadOnly = function DOMRectReadOnly(x, y, w, h) {
+                    this.x = x || 0; this.y = y || 0; this.width = w || 0; this.height = h || 0;
+                };
+                DOMRectReadOnly.fromRect = DOMRect.fromRect;
+                DOMRectReadOnly.prototype.toJSON = DOMRect.prototype.toJSON;
+            }
+            if (!globalThis.DOMMatrix) {
+                globalThis.DOMMatrix = function DOMMatrix() {
+                    this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+                    this.m11 = 1; this.m12 = 0; this.m13 = 0; this.m14 = 0;
+                    this.m21 = 0; this.m22 = 1; this.m23 = 0; this.m24 = 0;
+                    this.m31 = 0; this.m32 = 0; this.m33 = 1; this.m34 = 0;
+                    this.m41 = 0; this.m42 = 0; this.m43 = 0; this.m44 = 1;
+                    this.is2D = true; this.isIdentity = true;
+                };
+                DOMMatrix.prototype.translate = function(tx, ty, tz) { var m = new DOMMatrix(); m.e = tx || 0; m.f = ty || 0; return m; };
+                DOMMatrix.prototype.scale = function(sx, sy) { var m = new DOMMatrix(); m.a = sx || 1; m.d = sy || sx || 1; return m; };
+                DOMMatrix.prototype.rotate = function() { return new DOMMatrix(); };
+                DOMMatrix.prototype.inverse = function() { return new DOMMatrix(); };
+                DOMMatrix.prototype.multiply = function() { return new DOMMatrix(); };
+                DOMMatrix.prototype.transformPoint = function(p) { return new DOMPoint(p && p.x || 0, p && p.y || 0); };
+                DOMMatrix.prototype.toJSON = function() { return {a:this.a,b:this.b,c:this.c,d:this.d,e:this.e,f:this.f}; };
+            }
+            if (!globalThis.DOMMatrixReadOnly) {
+                globalThis.DOMMatrixReadOnly = DOMMatrix;
+            }
+            if (!globalThis.DOMQuad) {
+                globalThis.DOMQuad = function DOMQuad(p1, p2, p3, p4) {
+                    this.p1 = p1 || new DOMPoint(); this.p2 = p2 || new DOMPoint();
+                    this.p3 = p3 || new DOMPoint(); this.p4 = p4 || new DOMPoint();
+                };
+                DOMQuad.fromRect = function(r) {
+                    r = r || {};
+                    return new DOMQuad(
+                        new DOMPoint(r.x || 0, r.y || 0),
+                        new DOMPoint((r.x || 0) + (r.width || 0), r.y || 0),
+                        new DOMPoint((r.x || 0) + (r.width || 0), (r.y || 0) + (r.height || 0)),
+                        new DOMPoint(r.x || 0, (r.y || 0) + (r.height || 0))
+                    );
+                };
+                DOMQuad.fromQuad = function(q) {
+                    q = q || {};
+                    return new DOMQuad(q.p1, q.p2, q.p3, q.p4);
+                };
+                DOMQuad.prototype.getBounds = function() {
+                    var xs = [this.p1.x, this.p2.x, this.p3.x, this.p4.x];
+                    var ys = [this.p1.y, this.p2.y, this.p3.y, this.p4.y];
+                    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+                    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+                    return new DOMRect(minX, minY, maxX - minX, maxY - minY);
+                };
+                DOMQuad.prototype.toJSON = function() { return {p1:this.p1,p2:this.p2,p3:this.p3,p4:this.p4}; };
+            }
+            // Element.getBoundingClientRect / getClientRects
+            if (typeof Element !== 'undefined') {
+                if (!Element.prototype.getBoundingClientRect) {
+                    Element.prototype.getBoundingClientRect = function() { return new DOMRect(0, 0, 0, 0); };
+                }
+                if (!Element.prototype.getClientRects) {
+                    Element.prototype.getClientRects = function() { return []; };
+                }
+            }
+        })();
+
+        // ─── document.innerText ─────────────────────────────────────────────
+        if (typeof document !== 'undefined' && typeof HTMLElement !== 'undefined') {
+            if (!('innerText' in HTMLElement.prototype)) {
+                Object.defineProperty(HTMLElement.prototype, 'innerText', {
+                    get: function() { return this.textContent || ''; },
+                    set: function(v) {
+                        // Remove all children and set text
+                        while (this.firstChild) this.removeChild(this.firstChild);
+                        if (v !== null && v !== undefined) {
+                            this.appendChild(document.createTextNode(String(v)));
+                        }
+                    },
+                    configurable: true, enumerable: true
+                });
+            }
         }
 
         // ─── File API: File, FileList, FileReader ────────────────────────────
