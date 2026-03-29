@@ -1174,7 +1174,11 @@ pub(super) fn register_window_with_viewport<'js>(
                         prop !== 'flex-grow' && prop !== 'flex-shrink' && prop !== 'line-height' &&
                         prop !== 'font-weight' && prop !== 'column-count') {
                         // Bare number without units is quirky length — not valid in CSS.supports
-                        if (/^\d+$/.test(val) && val !== '0') return false;
+                        // Also reject multi-value bare numbers like "1 1"
+                        var valParts = val.split(/\s+/);
+                        for (var vpi = 0; vpi < valParts.length; vpi++) {
+                            if (/^\d+$/.test(valParts[vpi]) && valParts[vpi] !== '0') return false;
+                        }
                     }
                     // Reject obviously invalid color values (quirky color test)
                     if (prop === 'color' || prop === 'background-color') {
