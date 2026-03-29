@@ -1,20 +1,20 @@
 {
   "ae_campfire": {
-    "total": 175.42025199873024,
-    "median": 1.562864999868907,
-    "p99": 3.069891999984975
+    "total": 128.94918899991126,
+    "median": 1.2022420000050715,
+    "p99": 3.5524910000219734
   },
   "ae_amiibo": {
-    "total": 105.19110199948045,
-    "median": 0.9100349998334423
+    "total": 96.81782300006603,
+    "median": 0.8781160000239652
   },
   "ae_live": [
     {
       "name": "apple.com",
       "url": "https://www.apple.com",
       "goal": "find iPhone price",
-      "total_ms": 233.52455900021596,
-      "parse_ms": 50,
+      "total_ms": 231.9951890000027,
+      "parse_ms": 47,
       "total_nodes": 39,
       "relevant_nodes": 1,
       "html_tok": 0,
@@ -42,8 +42,8 @@
       "name": "Hacker News",
       "url": "https://news.ycombinator.com",
       "goal": "find latest news articles",
-      "total_ms": 541.9577209995623,
-      "parse_ms": 288,
+      "total_ms": 1645.1537290000147,
+      "parse_ms": 1373,
       "total_nodes": 492,
       "relevant_nodes": 4,
       "html_tok": 0,
@@ -57,7 +57,7 @@
         {
           "role": "generic",
           "label": "Hacker News new | past | comments | ask | show | jobs | submit login 1",
-          "relevance": 0.17087753
+          "relevance": 0.16925232
         },
         {
           "role": "link",
@@ -71,8 +71,8 @@
       "name": "books.toscrape",
       "url": "https://books.toscrape.com",
       "goal": "find book titles and prices",
-      "total_ms": 717.1022140000787,
-      "parse_ms": 43,
+      "total_ms": 1674.5700799999952,
+      "parse_ms": 52,
       "total_nodes": 0,
       "relevant_nodes": 0,
       "html_tok": 0,
@@ -84,26 +84,26 @@
       "name": "lobste.rs",
       "url": "https://lobste.rs",
       "goal": "find technology articles",
-      "total_ms": 659.177690999968,
-      "parse_ms": 59,
-      "total_nodes": 499,
-      "relevant_nodes": 7,
+      "total_ms": 1968.3075920000022,
+      "parse_ms": 1298,
+      "total_nodes": 495,
+      "relevant_nodes": 13,
       "html_tok": 0,
       "md_tok": 13,
       "top3": [
         {
           "role": "link",
+          "label": "Search",
+          "relevance": 0.2744798
+        },
+        {
+          "role": "link",
           "label": "Lobsters (Current traffic: 0%)",
-          "relevance": 0.17000002
+          "relevance": 0.20132002
         },
         {
           "role": "link",
           "label": "Login",
-          "relevance": 0.12000002
-        },
-        {
-          "role": "link",
-          "label": "Page 2",
           "relevance": 0.12000002
         }
       ],
@@ -113,10 +113,10 @@
       "name": "rust-lang.org",
       "url": "https://www.rust-lang.org",
       "goal": "download and install Rust",
-      "total_ms": 3283.618418000515,
-      "parse_ms": 2237,
-      "total_nodes": 140,
-      "relevant_nodes": 44,
+      "total_ms": 3016.1650729999965,
+      "parse_ms": 1319,
+      "total_nodes": 139,
+      "relevant_nodes": 31,
       "html_tok": 0,
       "md_tok": 13,
       "top3": [
@@ -140,59 +140,59 @@
     }
   ],
   "lp_campfire": {
-    "total": 17198.239743001977,
-    "median": 147.92879599917796,
-    "p99": 465.39206499983266
+    "total": 78236.37369400021,
+    "median": 144.28560999999718,
+    "p99": 30014.597820000006
   },
   "lp_amiibo": {
-    "total": 46178.72379399796,
-    "median": 141.9484959997135
+    "total": 14246.206467000151,
+    "median": 136.15369699999746
   },
   "lp_live": [
     {
       "name": "apple.com",
-      "ms": 5272.856245000185,
+      "ms": 5249.936609000031,
       "nodes": 1870,
       "tokens": 146160,
       "ok": true
     },
     {
       "name": "Hacker News",
-      "ms": 415.3236480005944,
+      "ms": 386.0859260000211,
       "nodes": 1220,
-      "tokens": 79405,
+      "tokens": 79373,
       "ok": true
     },
     {
       "name": "books.toscrape",
-      "ms": 730.4186809997191,
+      "ms": 892.4985979999747,
       "nodes": 669,
       "tokens": 45656,
       "ok": true
     },
     {
       "name": "lobste.rs",
-      "ms": 569.1493069998614,
-      "nodes": 1086,
-      "tokens": 66448,
+      "ms": 613.8861150000139,
+      "nodes": 1082,
+      "tokens": 65691,
       "ok": true
     },
     {
       "name": "rust-lang.org",
-      "ms": 809.6179730000586,
+      "ms": 1408.9289830000098,
       "nodes": 255,
       "tokens": 15362,
       "ok": true
     }
   ],
   "chrome_campfire": {
-    "total": 2012,
-    "median": 19,
-    "p99": 33
+    "total": 1648,
+    "median": 16,
+    "p99": 26
   },
   "chrome_amiibo": {
-    "total": 1331,
-    "median": 12,
-    "p99": 20
+    "total": 1031,
+    "median": 10,
+    "p99": 16
   }
 }
