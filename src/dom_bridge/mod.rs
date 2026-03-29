@@ -2256,6 +2256,74 @@ impl JsHandler for GetSelection {
         selection.set("collapse", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         selection.set("collapseToStart", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         selection.set("collapseToEnd", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("extend", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("setBaseAndExtent", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("empty", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("modify", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set(
+            "deleteFromDocument",
+            Function::new(ctx.clone(), JsFn(NoOp))?,
+        )?;
+        selection.set("containsNode", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        // selectAllChildren — selects all text content of a node
+        // Lagrar vald text i selection-objektet via closure
+        ctx.eval::<(), _>(
+            r#"(function() {
+                var _sel = null;
+                if (typeof document !== 'undefined' && document.getSelection) {
+                    _sel = document.getSelection;
+                }
+                // Patcha Selection-liknande objekt med selectAllChildren + toString
+                var _patchSel = function(sel) {
+                    sel._selectedText = '';
+                    sel.selectAllChildren = function(node) {
+                        // Kolla om noden eller en förälder har inert
+                        var n = node;
+                        while (n) {
+                            if (n.getAttribute && n.getAttribute('inert') !== null) {
+                                sel._selectedText = '';
+                                return;
+                            }
+                            n = n.parentNode;
+                        }
+                        sel._selectedText = (node && node.textContent) || '';
+                        sel.anchorNode = node;
+                        sel.focusNode = node;
+                        sel.rangeCount = 1;
+                        sel.type = 'Range';
+                        sel.isCollapsed = false;
+                    };
+                    sel.getRangeAt = function(idx) {
+                        if (typeof Range !== 'undefined') return new Range();
+                        return null;
+                    };
+                    var origToString = sel.toString;
+                    sel.toString = function() { return sel._selectedText || ''; };
+                    sel.removeAllRanges = function() {
+                        sel._selectedText = '';
+                        sel.rangeCount = 0;
+                        sel.type = 'None';
+                        sel.isCollapsed = true;
+                    };
+                    return sel;
+                };
+                // Patcha document.getSelection att returnera patchad Selection
+                if (typeof document !== 'undefined') {
+                    var _cachedSel = null;
+                    document.getSelection = function() {
+                        if (!_cachedSel) {
+                            _cachedSel = {
+                                anchorNode: null, anchorOffset: 0,
+                                focusNode: null, focusOffset: 0,
+                                isCollapsed: true, rangeCount: 0, type: 'None'
+                            };
+                            _patchSel(_cachedSel);
+                        }
+                        return _cachedSel;
+                    };
+                }
+            })()"#,
+        )?;
         selection.set(
             "toString",
             Function::new(ctx.clone(), JsFn(SelectionToString))?,

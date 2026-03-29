@@ -2429,6 +2429,114 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         }
 
+        // ─── EditContext API stub (Input Editing) ─────────────────────────
+        (function() {
+            globalThis.EditContext = function EditContext(opts) {
+                opts = opts || {};
+                this.text = opts.text || '';
+                this.selectionStart = opts.selectionStart || 0;
+                this.selectionEnd = opts.selectionEnd || 0;
+                this._elements = [];
+                this.oncharacterboundsupdate = null;
+                this.oncompositionstart = null;
+                this.oncompositionend = null;
+                this.ontextupdate = null;
+                this.ontextformatupdate = null;
+            };
+            EditContext.prototype.updateText = function(start, end, newText) {
+                this.text = this.text.substring(0, start) + newText + this.text.substring(end);
+            };
+            EditContext.prototype.updateSelection = function(start, end) {
+                this.selectionStart = start;
+                this.selectionEnd = end;
+            };
+            EditContext.prototype.updateControlBounds = function() {};
+            EditContext.prototype.updateSelectionBounds = function() {};
+            EditContext.prototype.updateCharacterBounds = function(start, bounds) {
+                this._characterBounds = bounds || [];
+                this._characterBoundsRangeStart = start || 0;
+            };
+            EditContext.prototype.characterBounds = function() {
+                return this._characterBounds || [];
+            };
+            Object.defineProperty(EditContext.prototype, 'characterBoundsRangeStart', {
+                get: function() { return this._characterBoundsRangeStart || 0; },
+                configurable: true
+            });
+            EditContext.prototype.attachedElements = function() { return this._elements.slice(); };
+            EditContext.prototype.addEventListener = function(type, fn) {
+                this['on' + type] = fn;
+            };
+            EditContext.prototype.removeEventListener = function() {};
+
+            globalThis.TextFormat = function TextFormat(opts) {
+                opts = opts || {};
+                this.rangeStart = opts.rangeStart || 0;
+                this.rangeEnd = opts.rangeEnd || 0;
+                this.underlineStyle = opts.underlineStyle || 'none';
+                this.underlineThickness = opts.underlineThickness || 'none';
+            };
+
+            // HTMLElement.editContext property
+            if (typeof HTMLElement !== 'undefined') {
+                Object.defineProperty(HTMLElement.prototype, 'editContext', {
+                    get: function() { return this._editContext || null; },
+                    set: function(v) {
+                        if (v !== null && !(v instanceof EditContext)) {
+                            throw new TypeError("Failed to set 'editContext': The provided value is not of type 'EditContext'.");
+                        }
+                        if (v && v._elements.indexOf(this) === -1) v._elements.push(this);
+                        this._editContext = v;
+                    },
+                    configurable: true, enumerable: true
+                });
+            }
+        })();
+
+        // ─── Element.inert property (getter/setter) ─────────────────────────
+        if (typeof HTMLElement !== 'undefined') {
+            Object.defineProperty(HTMLElement.prototype, 'inert', {
+                get: function() { return this.hasAttribute('inert'); },
+                set: function(v) {
+                    if (v) this.setAttribute('inert', '');
+                    else this.removeAttribute('inert');
+                },
+                configurable: true, enumerable: true
+            });
+        }
+
+        // ─── Element.insertAdjacentHTML stub ────────────────────────────────
+        if (typeof Element !== 'undefined' && !Element.prototype.insertAdjacentHTML) {
+            Element.prototype.insertAdjacentHTML = function(position, text) {
+                // Konvertera TrustedHTML
+                if (text && typeof text === 'object' && text.toString) text = text.toString();
+                var frag = document.createElement('div');
+                frag.innerHTML = String(text);
+                switch (String(position).toLowerCase()) {
+                    case 'beforebegin':
+                        if (this.parentNode) {
+                            while (frag.firstChild) this.parentNode.insertBefore(frag.firstChild, this);
+                        }
+                        break;
+                    case 'afterbegin':
+                        if (frag.lastChild) {
+                            var first = this.firstChild;
+                            while (frag.firstChild) this.insertBefore(frag.firstChild, first);
+                        }
+                        break;
+                    case 'beforeend':
+                        while (frag.firstChild) this.appendChild(frag.firstChild);
+                        break;
+                    case 'afterend':
+                        if (this.parentNode) {
+                            var next = this.nextSibling;
+                            while (frag.firstChild) this.parentNode.insertBefore(frag.firstChild, next);
+                        }
+                        break;
+                }
+            };
+        }
+
         // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────
         if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
         NodeFilter.FILTER_ACCEPT = 1;
