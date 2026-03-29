@@ -1164,7 +1164,26 @@ pub(super) fn register_window_with_viewport<'js>(
                     'color-scheme','forced-color-adjust','print-color-adjust',
                     'background-blend-mode'
                 ];
-                return known.indexOf(prop) !== -1;
+                if (known.indexOf(prop) === -1) return false;
+                // Two-argument form: validate value isn't obviously invalid
+                if (arguments.length >= 2) {
+                    val = String(val).trim();
+                    if (!val) return false;
+                    // Reject bare numbers for properties that need units (quirky length test)
+                    if (prop !== 'opacity' && prop !== 'z-index' && prop !== 'order' &&
+                        prop !== 'flex-grow' && prop !== 'flex-shrink' && prop !== 'line-height' &&
+                        prop !== 'font-weight' && prop !== 'column-count') {
+                        // Bare number without units is quirky length — not valid in CSS.supports
+                        if (/^\d+$/.test(val) && val !== '0') return false;
+                    }
+                    // Reject obviously invalid color values (quirky color test)
+                    if (prop === 'color' || prop === 'background-color') {
+                        // Valid: keywords, #hex, rgb(), hsl(), transparent, inherit, etc.
+                        var colorValid = /^(#[0-9a-fA-F]{3,8}|rgba?\s*\(|hsla?\s*\(|transparent|inherit|initial|unset|currentColor|revert|[a-zA-Z]+)$/i;
+                        if (!colorValid.test(val)) return false;
+                    }
+                }
+                return true;
             };
             CSS.escape = function(str) {
                 return String(str).replace(/([^\w-])/g, '\\$1');
@@ -1265,6 +1284,65 @@ pub(super) fn register_window_with_viewport<'js>(
             globalThis.XPathResult = function XPathResult() {};
             for (var c in XPR) { XPathResult[c] = XPR[c]; XPathResult.prototype[c] = XPR[c]; }
 
+            // Split XPath function arguments respecting quotes and nested parens
+            function splitXPathArgs(argsStr) {
+                var result = [];
+                var depth = 0;
+                var current = '';
+                var inQuote = false;
+                var quoteChar = '';
+                for (var i = 0; i < argsStr.length; i++) {
+                    var ch = argsStr[i];
+                    if (inQuote) {
+                        current += ch;
+                        if (ch === quoteChar) inQuote = false;
+                    } else if (ch === '"' || ch === "'") {
+                        inQuote = true;
+                        quoteChar = ch;
+                        current += ch;
+                    } else if (ch === '(') {
+                        depth++;
+                        current += ch;
+                    } else if (ch === ')') {
+                        depth--;
+                        current += ch;
+                    } else if (ch === ',' && depth === 0) {
+                        result.push(current);
+                        current = '';
+                    } else {
+                        current += ch;
+                    }
+                }
+                if (current) result.push(current);
+                return result;
+            }
+
+            // Evaluate an XPath expression and return its string value
+            function xpathStringValue(expr, contextNode, resolver) {
+                expr = expr.trim();
+                // String literal
+                if ((expr.charAt(0) === '"' && expr.charAt(expr.length - 1) === '"') ||
+                    (expr.charAt(0) === "'" && expr.charAt(expr.length - 1) === "'")) {
+                    return expr.substring(1, expr.length - 1);
+                }
+                // Number literal
+                if (/^-?\d+(\.\d+)?$/.test(expr)) return expr;
+                // Context node
+                if (expr === '.' || expr === 'self::node()') {
+                    return textOf(contextNode);
+                }
+                // Evaluate as full XPath and get string value
+                var r = evaluateXPath(expr, contextNode, resolver, 2);
+                return r.stringValue || '';
+            }
+
+            // Helper: textOf — get string value of node (defined before evaluateXPath)
+            function textOf(node) {
+                if (!node) return '';
+                if (node.nodeType === 3 || node.nodeType === 8) return node.data || node.textContent || '';
+                return node.textContent || '';
+            }
+
             // Simple XPath evaluator — handles common patterns
             function evaluateXPath(expression, contextNode, resolver, resultType) {
                 var expr = expression.trim();
@@ -1284,12 +1362,6 @@ pub(super) fn register_window_with_viewport<'js>(
                         }
                     }
                     return result;
-                }
-
-                // Helper: get text content of node
-                function textOf(node) {
-                    if (node.nodeType === 3 || node.nodeType === 8) return node.data || node.textContent || '';
-                    return node.textContent || '';
                 }
 
                 // Parse and evaluate expression
@@ -1440,55 +1512,38 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                     // concat() function
                     else if (/^concat\s*\(/.test(expr)) {
-                        // Parsa concat-argument (hanterar strängar och xpath-uttryck)
+                        // Parsa concat-argument med korrekt XPath-semantik
                         var concatBody = expr.match(/^concat\s*\((.*)\)$/);
                         if (concatBody) {
-                            var parts = [];
-                            var rest = concatBody[1];
-                            while (rest.length > 0) {
-                                rest = rest.replace(/^\s*,?\s*/, '');
-                                if (rest.charAt(0) === '"' || rest.charAt(0) === "'") {
-                                    var quote = rest.charAt(0);
-                                    var end = rest.indexOf(quote, 1);
-                                    parts.push(rest.substring(1, end));
-                                    rest = rest.substring(end + 1);
-                                } else {
-                                    var nextComma = rest.indexOf(',');
-                                    var token = nextComma >= 0 ? rest.substring(0, nextComma) : rest;
-                                    parts.push(textOf(contextNode));
-                                    rest = nextComma >= 0 ? rest.substring(nextComma) : '';
-                                }
+                            var cParts = splitXPathArgs(concatBody[1]);
+                            var cResult = '';
+                            for (var cpi = 0; cpi < cParts.length; cpi++) {
+                                cResult += xpathStringValue(cParts[cpi].trim(), contextNode, resolver);
                             }
-                            stringVal = parts.join('');
+                            stringVal = cResult;
                         }
                     }
                     // contains(str, substr) function
                     else if (/^contains\s*\(/.test(expr)) {
-                        var cArgs = expr.match(/^contains\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
-                        if (cArgs) {
-                            boolVal = cArgs[1].indexOf(cArgs[2]) !== -1;
-                        } else {
-                            // contains(., "str") or contains(context-expr, "str")
-                            var cArgs2 = expr.match(/^contains\s*\(\s*([^,]+),\s*"([^"]*)"\s*\)$/);
-                            if (cArgs2) {
-                                var cSrc = cArgs2[1].trim();
-                                var cTarget = cArgs2[2];
-                                var srcText = (cSrc === '.') ? textOf(contextNode) :
-                                    (cSrc.charAt(0) === '"' ? cSrc.slice(1,-1) : textOf(contextNode));
-                                boolVal = srcText.indexOf(cTarget) !== -1;
+                        var contBody = expr.match(/^contains\s*\((.*)\)$/);
+                        if (contBody) {
+                            var contArgs = splitXPathArgs(contBody[1]);
+                            if (contArgs.length >= 2) {
+                                var contStr = xpathStringValue(contArgs[0].trim(), contextNode, resolver);
+                                var contSub = xpathStringValue(contArgs[1].trim(), contextNode, resolver);
+                                boolVal = contStr.indexOf(contSub) !== -1;
                             }
                         }
                     }
                     // starts-with(str, prefix)
                     else if (/^starts-with\s*\(/.test(expr)) {
-                        var swArgs = expr.match(/^starts-with\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
-                        if (swArgs) {
-                            boolVal = swArgs[1].indexOf(swArgs[2]) === 0;
-                        } else {
-                            var swArgs2 = expr.match(/^starts-with\s*\(\s*([^,]+),\s*"([^"]*)"\s*\)$/);
-                            if (swArgs2) {
-                                var swSrc = swArgs2[1].trim() === '.' ? textOf(contextNode) : swArgs2[1].trim();
-                                boolVal = swSrc.indexOf(swArgs2[2]) === 0;
+                        var swBody = expr.match(/^starts-with\s*\((.*)\)$/);
+                        if (swBody) {
+                            var swArgs = splitXPathArgs(swBody[1]);
+                            if (swArgs.length >= 2) {
+                                var swStr = xpathStringValue(swArgs[0].trim(), contextNode, resolver);
+                                var swPre = xpathStringValue(swArgs[1].trim(), contextNode, resolver);
+                                boolVal = swStr.indexOf(swPre) === 0;
                             }
                         }
                     }
@@ -1508,30 +1563,44 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                     // substring-before(str, delim)
                     else if (/^substring-before\s*\(/.test(expr)) {
-                        var sbArgs = expr.match(/^substring-before\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
-                        if (sbArgs) {
-                            var idx = sbArgs[1].indexOf(sbArgs[2]);
-                            stringVal = idx >= 0 ? sbArgs[1].substring(0, idx) : '';
+                        var sbBody = expr.match(/^substring-before\s*\((.*)\)$/);
+                        if (sbBody) {
+                            var sbParts = splitXPathArgs(sbBody[1]);
+                            if (sbParts.length >= 2) {
+                                var sbStr = xpathStringValue(sbParts[0].trim(), contextNode, resolver);
+                                var sbDelim = xpathStringValue(sbParts[1].trim(), contextNode, resolver);
+                                var sbIdx = sbStr.indexOf(sbDelim);
+                                stringVal = sbIdx >= 0 ? sbStr.substring(0, sbIdx) : '';
+                            }
                         }
                     }
                     // substring-after(str, delim)
                     else if (/^substring-after\s*\(/.test(expr)) {
-                        var saArgs = expr.match(/^substring-after\s*\(\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
-                        if (saArgs) {
-                            var saIdx = saArgs[1].indexOf(saArgs[2]);
-                            stringVal = saIdx >= 0 ? saArgs[1].substring(saIdx + saArgs[2].length) : '';
+                        var saBody = expr.match(/^substring-after\s*\((.*)\)$/);
+                        if (saBody) {
+                            var saParts = splitXPathArgs(saBody[1]);
+                            if (saParts.length >= 2) {
+                                var saStr = xpathStringValue(saParts[0].trim(), contextNode, resolver);
+                                var saDelim = xpathStringValue(saParts[1].trim(), contextNode, resolver);
+                                var saIdx = saStr.indexOf(saDelim);
+                                stringVal = saIdx >= 0 ? saStr.substring(saIdx + saDelim.length) : '';
+                            }
                         }
                     }
                     // substring(str, start, length?)
                     else if (/^substring\s*\(/.test(expr)) {
-                        var subArgs = expr.match(/^substring\s*\(\s*"([^"]*)",\s*(\d+)(?:\s*,\s*(\d+))?\s*\)$/);
-                        if (subArgs) {
-                            var subStr = subArgs[1];
-                            var subStart = parseInt(subArgs[2]) - 1; // XPath is 1-based
-                            if (subArgs[3]) {
-                                stringVal = subStr.substring(subStart, subStart + parseInt(subArgs[3]));
-                            } else {
-                                stringVal = subStr.substring(subStart);
+                        var subBody = expr.match(/^substring\s*\((.*)\)$/);
+                        if (subBody) {
+                            var subParts = splitXPathArgs(subBody[1]);
+                            if (subParts.length >= 2) {
+                                var subStr = xpathStringValue(subParts[0].trim(), contextNode, resolver);
+                                var subStart = Math.round(parseFloat(xpathStringValue(subParts[1].trim(), contextNode, resolver))) - 1;
+                                if (subParts.length >= 3) {
+                                    var subLen = Math.round(parseFloat(xpathStringValue(subParts[2].trim(), contextNode, resolver)));
+                                    stringVal = subStr.substring(Math.max(0, subStart), subStart + subLen);
+                                } else {
+                                    stringVal = subStr.substring(Math.max(0, subStart));
+                                }
                             }
                         }
                     }
@@ -1571,26 +1640,35 @@ pub(super) fn register_window_with_viewport<'js>(
                         var orParts = expr.split(/\s+or\s+/);
                         boolVal = false;
                         for (var oi = 0; oi < orParts.length; oi++) {
-                            var orSub = evaluateXPath(orParts[oi].trim(), contextNode, resolver, 3);
-                            if (orSub.booleanValue) { boolVal = true; break; }
+                            var orSub = evaluateXPath(orParts[oi].trim(), contextNode, resolver, 0);
+                            // XPath boolean coercion: numbers: 0/NaN=false, else true; strings: ""=false; nodesets: empty=false
+                            var orBool = false;
+                            if (orSub.resultType === 3) orBool = orSub.booleanValue;
+                            else if (orSub.resultType === 1) orBool = !isNaN(orSub.numberValue) && orSub.numberValue !== 0;
+                            else if (orSub.resultType === 2) orBool = orSub.stringValue !== '';
+                            else orBool = orSub._nodes && orSub._nodes.length > 0;
+                            if (orBool) { boolVal = true; break; }
                         }
                     }
                     else if (/\s+and\s+/.test(expr)) {
                         var andParts = expr.split(/\s+and\s+/);
                         boolVal = true;
                         for (var ai2 = 0; ai2 < andParts.length; ai2++) {
-                            var andSub = evaluateXPath(andParts[ai2].trim(), contextNode, resolver, 3);
-                            if (!andSub.booleanValue) { boolVal = false; break; }
+                            var andSub = evaluateXPath(andParts[ai2].trim(), contextNode, resolver, 0);
+                            var andBool = false;
+                            if (andSub.resultType === 3) andBool = andSub.booleanValue;
+                            else if (andSub.resultType === 1) andBool = !isNaN(andSub.numberValue) && andSub.numberValue !== 0;
+                            else if (andSub.resultType === 2) andBool = andSub.stringValue !== '';
+                            else andBool = andSub._nodes && andSub._nodes.length > 0;
+                            if (!andBool) { boolVal = false; break; }
                         }
                     }
                     // Comparison operators: expr = expr, expr != expr, expr < expr, etc.
                     else if (/\s*(=|!=|<=|>=|<|>)\s*/.test(expr) && !/^["']/.test(expr)) {
                         var compMatch = expr.match(/^(.+?)\s*(!=|<=|>=|=|<|>)\s*(.+)$/);
                         if (compMatch) {
-                            var lhs = evaluateXPath(compMatch[1].trim(), contextNode, resolver, 2);
-                            var rhs = evaluateXPath(compMatch[3].trim(), contextNode, resolver, 2);
-                            var lv = lhs.stringValue || '';
-                            var rv = rhs.stringValue || '';
+                            var lv = xpathStringValue(compMatch[1].trim(), contextNode, resolver);
+                            var rv = xpathStringValue(compMatch[3].trim(), contextNode, resolver);
                             // Try numeric comparison
                             var ln = parseFloat(lv), rn = parseFloat(rv);
                             var useNum = !isNaN(ln) && !isNaN(rn);
@@ -1716,13 +1794,6 @@ pub(super) fn register_window_with_viewport<'js>(
             globalThis.__xpathCreateNSRes = _xpathCreateNSRes;
         })();
 
-        // ─── SVGElement constructor ─────────────────────────────────────────
-        if (!globalThis.SVGElement) {
-            globalThis.SVGElement = function SVGElement() {};
-            SVGElement.prototype = Object.create(Element.prototype);
-            SVGElement.prototype.constructor = SVGElement;
-        }
-
         // ─── onmessageerror on body/window ──────────────────────────────────
         if (typeof window !== 'undefined') {
             Object.defineProperty(window, 'onmessageerror', {
@@ -1822,6 +1893,265 @@ pub(super) fn register_window_with_viewport<'js>(
             document.queryCommandSupported = function(cmd) { return _supportedCmds.indexOf(cmd) !== -1; };
             document.queryCommandState = function(cmd) { return false; };
             document.queryCommandValue = function(cmd) { return ''; };
+        }
+
+        // ─── MessagePort / MessageChannel ───────────────────────────────────
+        (function() {
+            globalThis.MessagePort = function MessagePort() {
+                this.onmessage = null;
+                this.onmessageerror = null;
+                this._otherPort = null;
+                this._closed = false;
+                this._started = false;
+                this._queue = [];
+            };
+            MessagePort.prototype.postMessage = function(message) {
+                if (this._closed) return;
+                var other = this._otherPort;
+                if (!other || other._closed) return;
+                var ev = new Event('message');
+                ev.data = message;
+                ev.origin = '';
+                ev.source = null;
+                ev.ports = [];
+                if (other._started && typeof other.onmessage === 'function') {
+                    other.onmessage(ev);
+                } else {
+                    other._queue.push(ev);
+                }
+            };
+            MessagePort.prototype.start = function() {
+                this._started = true;
+                // Deliver queued messages
+                while (this._queue.length > 0 && this.onmessage) {
+                    var ev = this._queue.shift();
+                    this.onmessage(ev);
+                }
+            };
+            MessagePort.prototype.close = function() { this._closed = true; };
+            MessagePort.prototype.addEventListener = function(type, fn) {
+                if (type === 'message') { this.onmessage = fn; this.start(); }
+                if (type === 'messageerror') this.onmessageerror = fn;
+            };
+            MessagePort.prototype.removeEventListener = function(type) {
+                if (type === 'message') this.onmessage = null;
+                if (type === 'messageerror') this.onmessageerror = null;
+            };
+            MessagePort.prototype.dispatchEvent = function(ev) {
+                if (ev.type === 'message' && this.onmessage) this.onmessage(ev);
+                return true;
+            };
+
+            globalThis.MessageChannel = function MessageChannel() {
+                this.port1 = new MessagePort();
+                this.port2 = new MessagePort();
+                this.port1._otherPort = this.port2;
+                this.port2._otherPort = this.port1;
+            };
+
+            // window.postMessage
+            if (typeof window !== 'undefined' && !window.postMessage) {
+                window.postMessage = function(message, targetOrigin, transfer) {
+                    var ev = new Event('message');
+                    ev.data = message;
+                    ev.origin = (typeof location !== 'undefined' && location.origin) || 'https://example.com';
+                    ev.source = window;
+                    ev.ports = transfer || [];
+                    if (typeof window.onmessage === 'function') {
+                        window.onmessage(ev);
+                    }
+                };
+            }
+            // NOTE: postMessage is intentionally NOT set on globalThis
+            // WPT tests check that global postMessage is NOT defined in non-worker contexts
+        })();
+
+        // ─── Element.checkVisibility() ──────────────────────────────────────
+        if (typeof Element !== 'undefined') {
+            Element.prototype.checkVisibility = function(opts) {
+                opts = opts || {};
+                // Check display:none
+                if (typeof getComputedStyle === 'function') {
+                    try {
+                        var style = getComputedStyle(this);
+                        if (style && style.display === 'none') return false;
+                        if (opts.checkVisibilityCSS || opts.visibilityProperty) {
+                            if (style && style.visibility === 'hidden') return false;
+                        }
+                        if (opts.checkOpacity || opts.opacityProperty) {
+                            if (style && parseFloat(style.opacity) === 0) return false;
+                        }
+                    } catch(e) {}
+                }
+                // Check inert
+                var node = this;
+                while (node) {
+                    if (node.inert || (node.getAttribute && node.getAttribute('inert') !== null)) return false;
+                    if (node.getAttribute && node.getAttribute('hidden') !== null) return false;
+                    node = node.parentNode;
+                }
+                return true;
+            };
+        }
+
+        // ─── trustedTypes / TrustedTypePolicyFactory ────────────────────────
+        (function() {
+            function TrustedHTML(value) { this._value = value; }
+            TrustedHTML.prototype.toString = function() { return this._value; };
+            TrustedHTML.prototype.toJSON = function() { return this._value; };
+
+            function TrustedScript(value) { this._value = value; }
+            TrustedScript.prototype.toString = function() { return this._value; };
+            TrustedScript.prototype.toJSON = function() { return this._value; };
+
+            function TrustedScriptURL(value) { this._value = value; }
+            TrustedScriptURL.prototype.toString = function() { return this._value; };
+            TrustedScriptURL.prototype.toJSON = function() { return this._value; };
+
+            function TrustedTypePolicy(name, rules) {
+                this.name = name;
+                this._rules = rules || {};
+            }
+            TrustedTypePolicy.prototype.createHTML = function(input) {
+                var transform = this._rules.createHTML;
+                var result = transform ? transform(input) : input;
+                return new TrustedHTML(result);
+            };
+            TrustedTypePolicy.prototype.createScript = function(input) {
+                var transform = this._rules.createScript;
+                var result = transform ? transform(input) : input;
+                return new TrustedScript(result);
+            };
+            TrustedTypePolicy.prototype.createScriptURL = function(input) {
+                var transform = this._rules.createScriptURL;
+                var result = transform ? transform(input) : input;
+                return new TrustedScriptURL(result);
+            };
+
+            function TrustedTypePolicyFactory() {
+                this._policies = [];
+                this.defaultPolicy = null;
+                this.emptyHTML = new TrustedHTML('');
+                this.emptyScript = new TrustedScript('');
+            }
+            TrustedTypePolicyFactory.prototype.createPolicy = function(name, rules) {
+                var policy = new TrustedTypePolicy(name, rules);
+                this._policies.push(policy);
+                if (name === 'default') this.defaultPolicy = policy;
+                return policy;
+            };
+            TrustedTypePolicyFactory.prototype.isHTML = function(value) {
+                return value instanceof TrustedHTML;
+            };
+            TrustedTypePolicyFactory.prototype.isScript = function(value) {
+                return value instanceof TrustedScript;
+            };
+            TrustedTypePolicyFactory.prototype.isScriptURL = function(value) {
+                return value instanceof TrustedScriptURL;
+            };
+            TrustedTypePolicyFactory.prototype.getAttributeType = function(tagName, attribute, elementNs, attrNs) {
+                tagName = (tagName || '').toLowerCase();
+                attribute = (attribute || '').toLowerCase();
+                // script src → TrustedScriptURL, script text → TrustedScript
+                if (tagName === 'script' && attribute === 'src') return 'TrustedScriptURL';
+                if (tagName === 'script' && (attribute === 'text' || attribute === 'textcontent' || attribute === 'innertext')) return 'TrustedScript';
+                // iframe srcdoc → TrustedHTML
+                if (tagName === 'iframe' && attribute === 'srcdoc') return 'TrustedHTML';
+                // Various href attributes on specific elements
+                if ((attribute === 'href' || attribute === 'xlink:href') && (tagName === 'script' || tagName === 'embed' || tagName === 'object')) return 'TrustedScriptURL';
+                if (attribute === 'src' && (tagName === 'embed' || tagName === 'object' || tagName === 'frame' || tagName === 'iframe')) return 'TrustedScriptURL';
+                if (attribute === 'data' && tagName === 'object') return 'TrustedScriptURL';
+                if (attribute === 'codebase' && (tagName === 'object' || tagName === 'applet')) return 'TrustedScriptURL';
+                // SVG specific
+                if (attrNs === 'http://www.w3.org/1999/xlink' && attribute === 'href' && tagName === 'script') return 'TrustedScriptURL';
+                return null;
+            };
+            TrustedTypePolicyFactory.prototype.getPropertyType = function(tagName, property) {
+                tagName = (tagName || '').toLowerCase();
+                property = (property || '');
+                if (property === 'innerHTML' || property === 'outerHTML') return 'TrustedHTML';
+                if (tagName === 'script' && (property === 'src' || property === 'href')) return 'TrustedScriptURL';
+                if (tagName === 'script' && (property === 'text' || property === 'textContent' || property === 'innerText')) return 'TrustedScript';
+                if (tagName === 'iframe' && property === 'srcdoc') return 'TrustedHTML';
+                return null;
+            };
+
+            globalThis.TrustedHTML = TrustedHTML;
+            globalThis.TrustedScript = TrustedScript;
+            globalThis.TrustedScriptURL = TrustedScriptURL;
+            globalThis.TrustedTypePolicy = TrustedTypePolicy;
+            globalThis.TrustedTypePolicyFactory = TrustedTypePolicyFactory;
+            globalThis.trustedTypes = new TrustedTypePolicyFactory();
+            if (typeof window !== 'undefined') window.trustedTypes = globalThis.trustedTypes;
+        })();
+
+        // ─── SVG DOM stubs ──────────────────────────────────────────────────
+        (function() {
+            if (!globalThis.SVGElement) {
+                globalThis.SVGElement = function SVGElement() {};
+                SVGElement.prototype = Object.create(Element.prototype);
+                SVGElement.prototype.constructor = SVGElement;
+            }
+            // SVG geometry/graphics interfaces
+            var svgTypes = ['SVGGraphicsElement','SVGGeometryElement','SVGPathElement',
+                'SVGRectElement','SVGCircleElement','SVGEllipseElement','SVGLineElement',
+                'SVGPolylineElement','SVGPolygonElement','SVGTextElement','SVGTextContentElement',
+                'SVGSVGElement','SVGGElement','SVGDefsElement','SVGUseElement','SVGImageElement',
+                'SVGClipPathElement','SVGMaskElement','SVGPatternElement','SVGMarkerElement',
+                'SVGLinearGradientElement','SVGRadialGradientElement','SVGStopElement',
+                'SVGForeignObjectElement','SVGSymbolElement','SVGTitleElement','SVGDescElement',
+                'SVGMetadataElement','SVGSwitchElement','SVGStyleElement','SVGScriptElement',
+                'SVGAElement','SVGTextPathElement','SVGTSpanElement',
+                'SVGAnimatedLength','SVGAnimatedString','SVGAnimatedNumber',
+                'SVGAnimatedRect','SVGAnimatedBoolean','SVGAnimatedEnumeration',
+                'SVGAnimatedInteger','SVGAnimatedAngle','SVGAnimatedTransformList',
+                'SVGAnimatedNumberList','SVGAnimatedLengthList','SVGAnimatedPreserveAspectRatio',
+                'SVGLength','SVGLengthList','SVGNumber','SVGNumberList','SVGPoint','SVGPointList',
+                'SVGMatrix','SVGRect','SVGTransform','SVGTransformList','SVGPreserveAspectRatio',
+                'SVGStringList','SVGAngle'];
+            for (var sti = 0; sti < svgTypes.length; sti++) {
+                if (!globalThis[svgTypes[sti]]) {
+                    globalThis[svgTypes[sti]] = function() {};
+                    // Geometry types inherit from SVGElement
+                    if (svgTypes[sti].indexOf('Element') !== -1) {
+                        globalThis[svgTypes[sti]].prototype = Object.create(SVGElement.prototype);
+                    }
+                }
+            }
+            // SVGPathElement specifics
+            if (SVGPathElement) {
+                SVGPathElement.prototype.getTotalLength = function() { return 0; };
+                SVGPathElement.prototype.getPointAtLength = function() { return { x: 0, y: 0 }; };
+            }
+            // SVGSVGElement specifics
+            if (SVGSVGElement) {
+                SVGSVGElement.prototype.createSVGPoint = function() { return { x: 0, y: 0, matrixTransform: function() { return { x: 0, y: 0 }; } }; };
+                SVGSVGElement.prototype.createSVGRect = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+                SVGSVGElement.prototype.createSVGMatrix = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
+                SVGSVGElement.prototype.createSVGTransform = function() { return { type: 0, matrix: { a:1,b:0,c:0,d:1,e:0,f:0 } }; };
+            }
+            // SVGGeometryElement.getBBox
+            if (typeof SVGGeometryElement !== 'undefined') {
+                SVGGeometryElement.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+                SVGGeometryElement.prototype.isPointInFill = function() { return false; };
+                SVGGeometryElement.prototype.isPointInStroke = function() { return false; };
+                SVGGeometryElement.prototype.getTotalLength = function() { return 0; };
+                SVGGeometryElement.prototype.getPointAtLength = function() { return { x: 0, y: 0 }; };
+            }
+            if (typeof SVGGraphicsElement !== 'undefined') {
+                SVGGraphicsElement.prototype.getBBox = function() { return { x: 0, y: 0, width: 0, height: 0 }; };
+                SVGGraphicsElement.prototype.getCTM = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
+                SVGGraphicsElement.prototype.getScreenCTM = function() { return { a:1,b:0,c:0,d:1,e:0,f:0 }; };
+            }
+        })();
+
+        // ─── window.onload / DOMContentLoaded support ───────────────────────
+        if (typeof window !== 'undefined') {
+            Object.defineProperty(window, 'onload', {
+                get: function() { return this._onload || null; },
+                set: function(v) { this._onload = v; },
+                configurable: true, enumerable: true
+            });
         }
 
         // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────
