@@ -2438,16 +2438,30 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         })();
 
-        // ─── document.innerText ─────────────────────────────────────────────
+        // ─── innerText property ─────────────────────────────────────────────
         if (typeof document !== 'undefined' && typeof HTMLElement !== 'undefined') {
+            var _innerTextDesc = {
+                get: function() { return this.textContent || ''; },
+                set: function(v) {
+                    // Per spec: null → "null", undefined → "undefined"
+                    var str = (v === null) ? 'null' : (v === undefined) ? '' : String(v);
+                    while (this.firstChild) this.removeChild(this.firstChild);
+                    if (str) this.appendChild(document.createTextNode(str));
+                },
+                configurable: true, enumerable: true
+            };
             if (!('innerText' in HTMLElement.prototype)) {
-                Object.defineProperty(HTMLElement.prototype, 'innerText', {
-                    get: function() { return this.textContent || ''; },
+                Object.defineProperty(HTMLElement.prototype, 'innerText', _innerTextDesc);
+            }
+            // Also set on document for tests that use document.innerText
+            if (!('innerText' in document)) {
+                Object.defineProperty(document, 'innerText', {
+                    get: function() { return document.body ? (document.body.textContent || '') : ''; },
                     set: function(v) {
-                        // Remove all children and set text
-                        while (this.firstChild) this.removeChild(this.firstChild);
-                        if (v !== null && v !== undefined) {
-                            this.appendChild(document.createTextNode(String(v)));
+                        if (document.body) {
+                            var str = (v === null) ? 'null' : (v === undefined) ? '' : String(v);
+                            while (document.body.firstChild) document.body.removeChild(document.body.firstChild);
+                            if (str) document.body.appendChild(document.createTextNode(str));
                         }
                     },
                     configurable: true, enumerable: true
@@ -2612,7 +2626,10 @@ pub(super) fn register_window_with_viewport<'js>(
                 this.ontextformatupdate = null;
             };
             EditContext.prototype.updateText = function(start, end, newText) {
-                this.text = this.text.substring(0, start) + newText + this.text.substring(end);
+                // Per spec: if start > end, swap them
+                var s = Math.min(start, end);
+                var e = Math.max(start, end);
+                this.text = this.text.substring(0, s) + newText + this.text.substring(e);
             };
             EditContext.prototype.updateSelection = function(start, end) {
                 this.selectionStart = start;
@@ -2621,11 +2638,11 @@ pub(super) fn register_window_with_viewport<'js>(
             EditContext.prototype.updateControlBounds = function() {};
             EditContext.prototype.updateSelectionBounds = function() {};
             EditContext.prototype.updateCharacterBounds = function(start, bounds) {
-                this._characterBounds = bounds || [];
+                this._characterBounds = bounds ? Array.from(bounds) : [];
                 this._characterBoundsRangeStart = start || 0;
             };
             EditContext.prototype.characterBounds = function() {
-                return this._characterBounds || [];
+                return this._characterBounds ? this._characterBounds.slice() : [];
             };
             Object.defineProperty(EditContext.prototype, 'characterBoundsRangeStart', {
                 get: function() { return this._characterBoundsRangeStart || 0; },
@@ -2652,6 +2669,18 @@ pub(super) fn register_window_with_viewport<'js>(
                     set: function(v) {
                         if (v !== null && !(v instanceof EditContext)) {
                             throw new TypeError("Failed to set 'editContext': The provided value is not of type 'EditContext'.");
+                        }
+                        // Disallow on certain elements per spec
+                        var disallowed = ['BR','COL','COLGROUP','DL','HEAD','HTML','HR','IFRAME',
+                            'IMG','INPUT','LINK','META','OL','OPTGROUP','OPTION','SCRIPT',
+                            'SELECT','STYLE','TABLE','TBODY','TD','TEXTAREA','TFOOT','TH',
+                            'THEAD','TR','UL','VIDEO','AUDIO','A'];
+                        if (v && this.tagName && disallowed.indexOf(this.tagName) !== -1) {
+                            throw new DOMException("Failed to set 'editContext': not supported on this element", 'NotSupportedError');
+                        }
+                        // EditContext can only be associated with one element
+                        if (v && v._elements.length > 0 && v._elements[0] !== this) {
+                            throw new DOMException("Failed to set 'editContext': already associated", 'NotSupportedError');
                         }
                         if (v && v._elements.indexOf(this) === -1) v._elements.push(this);
                         this._editContext = v;
