@@ -1453,6 +1453,25 @@ pub(super) fn register_window_with_viewport<'js>(
                             case '>=': boolVal = cmpUseNum ? cmpLN >= cmpRN : cmpLV >= cmpRV; break;
                         }
                     }}
+                    // Arithmetic operators: +, -, *, div, mod
+                    if (!_opHandled) {
+                    var topArith = findTopLevelOp(expr, ['+', '-', 'div', 'mod', '*']);
+                    if (topArith) {
+                        _opHandled = true;
+                        var arLeft = expr.substring(0, topArith.pos).trim();
+                        var arRight = expr.substring(topArith.pos + topArith.op.length).trim();
+                        var arLV = parseFloat(xpathStringValue(arLeft, contextNode, resolver));
+                        var arRV = parseFloat(xpathStringValue(arRight, contextNode, resolver));
+                        if (isNaN(arLV)) arLV = 0;
+                        if (isNaN(arRV)) arRV = 0;
+                        switch (topArith.op) {
+                            case '+': numberVal = arLV + arRV; break;
+                            case '-': numberVal = arLV - arRV; break;
+                            case '*': numberVal = arLV * arRV; break;
+                            case 'div': numberVal = arRV !== 0 ? arLV / arRV : NaN; break;
+                            case 'mod': numberVal = arRV !== 0 ? arLV % arRV : NaN; break;
+                        }
+                    }}
 
                     if (!_opHandled) {
 
@@ -1751,16 +1770,22 @@ pub(super) fn register_window_with_viewport<'js>(
                     }
                     // translate(str, from, to)
                     else if (/^translate\s*\(/.test(expr)) {
-                        var trArgs = expr.match(/^translate\s*\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)"\s*\)$/);
-                        if (trArgs) {
-                            var tResult = '';
-                            for (var ti = 0; ti < trArgs[1].length; ti++) {
-                                var ch = trArgs[1][ti];
-                                var fromIdx = trArgs[2].indexOf(ch);
-                                if (fromIdx === -1) tResult += ch;
-                                else if (fromIdx < trArgs[3].length) tResult += trArgs[3][fromIdx];
+                        var trBody = expr.match(/^translate\s*\((.*)\)$/);
+                        if (trBody) {
+                            var trParts = splitXPathArgs(trBody[1]);
+                            if (trParts.length >= 3) {
+                                var trStr = xpathStringValue(trParts[0].trim(), contextNode, resolver);
+                                var trFrom = xpathStringValue(trParts[1].trim(), contextNode, resolver);
+                                var trTo = xpathStringValue(trParts[2].trim(), contextNode, resolver);
+                                var tResult = '';
+                                for (var ti = 0; ti < trStr.length; ti++) {
+                                    var ch = trStr[ti];
+                                    var fromIdx = trFrom.indexOf(ch);
+                                    if (fromIdx === -1) tResult += ch;
+                                    else if (fromIdx < trTo.length) tResult += trTo[fromIdx];
+                                }
+                                stringVal = tResult;
                             }
-                            stringVal = tResult;
                         }
                     }
                     // not() function
@@ -2260,6 +2285,148 @@ pub(super) fn register_window_with_viewport<'js>(
                 set: function(v) { this._onload = v; },
                 configurable: true, enumerable: true
             });
+        }
+
+        // ─── File API: File, FileList, FileReader ────────────────────────────
+        (function() {
+            // Blob (basic)
+            if (!globalThis.Blob) {
+                globalThis.Blob = function Blob(parts, opts) {
+                    var content = '';
+                    if (parts) {
+                        for (var i = 0; i < parts.length; i++) {
+                            content += String(parts[i]);
+                        }
+                    }
+                    this.size = content.length;
+                    this.type = (opts && opts.type) || '';
+                    this._content = content;
+                };
+                Blob.prototype.text = function() { return Promise.resolve(this._content); };
+                Blob.prototype.arrayBuffer = function() { return Promise.resolve(new ArrayBuffer(0)); };
+                Blob.prototype.slice = function(start, end, type) {
+                    var s = this._content.substring(start || 0, end);
+                    return new Blob([s], { type: type || this.type });
+                };
+                Blob.prototype.stream = function() { return null; };
+            }
+
+            globalThis.File = function File(bits, name, opts) {
+                Blob.call(this, bits, opts);
+                this.name = name || '';
+                this.lastModified = (opts && opts.lastModified) || Date.now();
+                this.webkitRelativePath = '';
+            };
+            File.prototype = Object.create(Blob.prototype);
+            File.prototype.constructor = File;
+
+            globalThis.FileList = function FileList() {
+                this.length = 0;
+            };
+            FileList.prototype.item = function(i) { return this[i] || null; };
+
+            globalThis.FileReader = function FileReader() {
+                this.readyState = 0; // EMPTY
+                this.result = null;
+                this.error = null;
+                this.onload = null;
+                this.onerror = null;
+                this.onloadstart = null;
+                this.onloadend = null;
+                this.onprogress = null;
+                this.onabort = null;
+            };
+            FileReader.EMPTY = 0;
+            FileReader.LOADING = 1;
+            FileReader.DONE = 2;
+            FileReader.prototype.EMPTY = 0;
+            FileReader.prototype.LOADING = 1;
+            FileReader.prototype.DONE = 2;
+            FileReader.prototype.readAsText = function(blob) {
+                var self = this;
+                self.readyState = 1;
+                self.result = blob._content || '';
+                self.readyState = 2;
+                if (self.onload) self.onload({ target: self });
+                if (self.onloadend) self.onloadend({ target: self });
+            };
+            FileReader.prototype.readAsDataURL = function(blob) {
+                var self = this;
+                self.readyState = 1;
+                self.result = 'data:' + (blob.type || '') + ';base64,';
+                self.readyState = 2;
+                if (self.onload) self.onload({ target: self });
+                if (self.onloadend) self.onloadend({ target: self });
+            };
+            FileReader.prototype.readAsArrayBuffer = function(blob) {
+                var self = this;
+                self.readyState = 1;
+                self.result = new ArrayBuffer(0);
+                self.readyState = 2;
+                if (self.onload) self.onload({ target: self });
+                if (self.onloadend) self.onloadend({ target: self });
+            };
+            FileReader.prototype.readAsBinaryString = function(blob) {
+                this.readAsText(blob);
+            };
+            FileReader.prototype.abort = function() {
+                this.readyState = 2;
+                if (this.onabort) this.onabort({ target: this });
+            };
+            FileReader.prototype.addEventListener = function(type, fn) {
+                this['on' + type] = fn;
+            };
+            FileReader.prototype.removeEventListener = function(type) {
+                this['on' + type] = null;
+            };
+
+            // URL.createObjectURL / revokeObjectURL
+            if (typeof URL !== 'undefined') {
+                if (!URL.createObjectURL) {
+                    URL.createObjectURL = function(blob) { return 'blob:null/' + Math.random().toString(36).substring(2); };
+                }
+                if (!URL.revokeObjectURL) {
+                    URL.revokeObjectURL = function() {};
+                }
+            }
+
+            // Expose FileList on window for "window has a FileList property" test
+            if (typeof window !== 'undefined') {
+                window.FileList = FileList;
+                window.File = File;
+                window.FileReader = FileReader;
+                window.Blob = Blob;
+            }
+        })();
+
+        // ─── document.write / document.writeln stubs ────────────────────────
+        if (typeof document !== 'undefined') {
+            if (!document.write) {
+                document.write = function() {
+                    var parts = [];
+                    for (var i = 0; i < arguments.length; i++) {
+                        var arg = arguments[i];
+                        parts.push(arg && typeof arg === 'object' && arg.toString ? arg.toString() : String(arg));
+                    }
+                    var str = parts.join('');
+                    if (document.body) {
+                        document.body.innerHTML += str;
+                    }
+                };
+            }
+            if (!document.writeln) {
+                document.writeln = function() {
+                    var parts = [];
+                    for (var i = 0; i < arguments.length; i++) {
+                        var arg = arguments[i];
+                        parts.push(arg && typeof arg === 'object' && arg.toString ? arg.toString() : String(arg));
+                    }
+                    var str = parts.join('');
+                    if (document.body) {
+                        document.body.innerHTML += str + '\n';
+                    }
+                };
+            }
         }
 
         // ─── NodeFilter konstanter (migrerad från polyfills.js) ──────────────

@@ -116,11 +116,11 @@ pub fn build_blitz_computed_styles(
             if let Some(style) = node.primary_styles() {
                 let mut props = std::collections::HashMap::new();
 
-                // Display
-                props.insert(
-                    "display".to_string(),
-                    format!("{:?}", style.clone_display()).to_lowercase(),
-                );
+                // Display — konvertera via ToCss för spec-korrekt serialisering
+                {
+                    use style_traits::values::ToCss;
+                    props.insert("display".to_string(), style.clone_display().to_css_string());
+                }
 
                 // Color — resolved to rgb() format
                 let color = style.clone_color().into_srgb_legacy();
