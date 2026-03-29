@@ -97,7 +97,7 @@ pub enum TrustLevel {
 }
 
 /// Hela det semantiska trädet – vad som skickas till LLM:en
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SemanticTree {
     pub url: String,
     pub title: String,

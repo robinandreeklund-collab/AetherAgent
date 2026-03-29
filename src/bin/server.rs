@@ -878,6 +878,12 @@ async fn parse_top(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn parse_extract_handler(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
+    let max_items = if req.top_n > 0 { req.top_n } else { 20 };
+    let result = aether_agent::parse_extract(&req.html, &req.goal, &req.url, max_items);
+    (StatusCode::OK, result)
+}
+
 async fn click(Json(req): Json<ClickRequest>) -> impl IntoResponse {
     let result = aether_agent::find_and_click(&req.html, &req.goal, &req.url, &req.target_label);
     (StatusCode::OK, result)
@@ -1164,6 +1170,33 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         StatusCode::OK,
         serde_json::to_string(&result_value).unwrap_or_default(),
     )
+}
+
+// ─── Extract endpoint (compact, ranked, deduped) ───────────────────────────
+
+async fn fetch_extract_smart(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let result =
+        aether_agent::parse_extract(&fetch_result.body, &req.goal, &fetch_result.final_url, 20);
+    (StatusCode::OK, result)
 }
 
 // ─── Markdown endpoints ──────────────────────────────────────────────────────
@@ -4883,6 +4916,8 @@ fn build_router(state: AppState) -> Router {
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
+        .route("/api/extract-smart", post(parse_extract_handler))
+        .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))
         .route("/api/wrap-untrusted", post(wrap_untrusted))
         // Fas 4a: Semantic diff
