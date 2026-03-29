@@ -31,6 +31,8 @@ pub struct SemanticBuilder {
     goal_words: Vec<String>,
     /// Pre-computed goal embedding-vektor (beräknas en gång, återanvänds per nod)
     goal_embedding: Option<Vec<f32>>,
+    /// Räknare för embedding-anrop (begränsa till max per sida)
+    embedding_calls: std::cell::Cell<u32>,
     next_id: u32,
 }
 
@@ -49,6 +51,7 @@ impl SemanticBuilder {
             goal: goal_lower,
             goal_words,
             goal_embedding,
+            embedding_calls: std::cell::Cell::new(0),
             next_id: 0,
         }
     }
@@ -427,16 +430,24 @@ impl SemanticBuilder {
         // 1. Textuell likhet — embedding-förstärkt med word-overlap fallback
         let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
 
-        // Embedding bara när det finns partiell textmatch (0 < word_score < 0.8).
-        // Noder utan textöverlapp (word_score == 0) har nästan aldrig hög embedding-likhet
-        // och att köra ONNX på alla (~36ms/st) gör parsning oacceptabelt långsam.
-        // Resultat: istället för 500 ONNX-anrop per sida → typiskt 5-20 anrop.
-        let needs_embedding = word_score > 0.0
-            && word_score < 0.8
+        // Embedding-strategi:
+        // 1. Alltid om partiell textmatch (0 < word_score < 0.8)
+        // 2. Även utan textmatch för interaktiva noder (links, buttons) —
+        //    dessa är troligast agentens mål och kräver semantisk matchning
+        //    (t.ex. "find news articles" vs "South Korea Mandates Solar Panels")
+        // 3. Skippa noder med exakt match (>= 0.8) och tomma labels
+        // Max 50 embedding-anrop per sida (~1.8s budget vid 36ms/anrop)
+        const MAX_EMBEDDING_CALLS: u32 = 50;
+        let is_interactive = matches!(role, "link" | "button" | "cta" | "input");
+        let needs_embedding = word_score < 0.8
             && !label.is_empty()
-            && self.goal_embedding.is_some();
+            && label.len() > 3
+            && self.goal_embedding.is_some()
+            && self.embedding_calls.get() < MAX_EMBEDDING_CALLS
+            && (word_score > 0.0 || is_interactive);
 
         let text_score = if needs_embedding {
+            self.embedding_calls.set(self.embedding_calls.get() + 1);
             if let Some(ref goal_vec) = self.goal_embedding {
                 if let Some(emb_score) = crate::embedding::similarity_with_vec(goal_vec, label) {
                     word_score.max(emb_score)

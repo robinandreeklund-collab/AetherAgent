@@ -3255,6 +3255,16 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
     }
 
     for child in &node.children {
+        // Skippa barn vars label är identisk med eller substring av förälderns
+        // (undviker duplicerad text i markdown — nästlade noder ärver parent-label)
+        let child_label = child.label.trim();
+        if !child_label.is_empty() && !label.is_empty() && label.contains(child_label) {
+            // Rendera barnets barn direkt istället (hoppa över duplikaten)
+            for grandchild in &child.children {
+                node_to_markdown(grandchild, md, depth + 1);
+            }
+            continue;
+        }
         node_to_markdown(child, md, depth + 1);
     }
 }
