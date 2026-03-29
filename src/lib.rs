@@ -3156,9 +3156,10 @@ pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
     semantic_tree_to_markdown(&tree_json)
 }
 
-/// Min relevance for a node to be included in markdown output.
-/// Nodes below this threshold are filtered out (goal-based filtering).
-const MARKDOWN_MIN_RELEVANCE: f32 = 0.05;
+/// Min relevance for markdown output. Set to 0.0 because goal-based
+/// pre-filtering in SemanticBuilder already removes irrelevant nodes.
+/// All nodes that survive the goal-filter should be rendered.
+const MARKDOWN_MIN_RELEVANCE: f32 = 0.0;
 
 /// Intern: konvertera en nod till markdown rekursivt.
 /// Skippar noder under relevance-tröskeln — bara goal-relevanta noder renderas.
