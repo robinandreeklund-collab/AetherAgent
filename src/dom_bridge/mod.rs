@@ -116,10 +116,22 @@ pub fn build_blitz_computed_styles(
             if let Some(style) = node.primary_styles() {
                 let mut props = std::collections::HashMap::new();
 
-                // Display — konvertera via ToCss för spec-korrekt serialisering
+                // Display — konvertera via ToCss, med post-processing för ogiltiga värden
                 {
                     use style_traits::values::ToCss;
-                    props.insert("display".to_string(), style.clone_display().to_css_string());
+                    let mut display_str = style.clone_display().to_css_string();
+                    // "math" är inte ett giltigt display-värde i CSS — resolve till inner/outer
+                    if display_str.contains("math") {
+                        if display_str == "math"
+                            || display_str == "inline math"
+                            || display_str == "math inline"
+                        {
+                            display_str = "inline".to_string();
+                        } else if display_str == "block math" || display_str == "math block" {
+                            display_str = "block".to_string();
+                        }
+                    }
+                    props.insert("display".to_string(), display_str);
                 }
 
                 // Color — resolved to rgb() format
