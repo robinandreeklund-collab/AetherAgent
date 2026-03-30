@@ -8,6 +8,7 @@ pub mod act_tool;
 pub mod collab_tool;
 pub mod diff_tool;
 pub mod discover_tool;
+pub mod parse_hybrid_tool;
 pub mod parse_tool;
 pub mod plan_tool;
 pub mod search_tool;

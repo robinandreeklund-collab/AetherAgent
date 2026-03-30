@@ -3702,7 +3702,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {
             "name": "parse",
-            "description": "Unified parsing: HTML/URL/screenshot → semantic tree or markdown. Auto-detects input type. Includes JS evaluation when needed, top-N filtering, and hydration extraction. Replaces: parse, parse_top, parse_with_js, fetch_parse, html_to_markdown, parse_screenshot.",
+            "description": "Unified parsing: HTML/URL/screenshot → semantic tree or markdown. Auto-detects input type. Includes JS evaluation when needed, top-N filtering, and hydration extraction. Set hybrid=true for BM25+HDC+Embedding scoring (recommended when using top_n). Replaces: parse, parse_top, parse_with_js, fetch_parse, html_to_markdown, parse_screenshot.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -3712,7 +3712,22 @@ fn mcp_tool_definitions() -> serde_json::Value {
                     "goal": {"type": "string", "description": "Agent goal for relevance scoring"},
                     "top_n": {"type": "integer", "description": "Limit to N most relevant nodes (default: all)"},
                     "format": {"type": "string", "enum": ["tree", "markdown"], "description": "Output format (default: tree)", "default": "tree"},
-                    "js": {"type": "boolean", "description": "Force JS evaluation (true/false/omit for auto)"}
+                    "js": {"type": "boolean", "description": "Force JS evaluation (true/false/omit for auto)"},
+                    "hybrid": {"type": "boolean", "description": "Use hybrid BM25+HDC+Embedding scoring pipeline for better relevance ranking (default: false). Recommended when using top_n.", "default": false}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "parse_hybrid",
+            "description": "Parse HTML/URL using the hybrid BM25+HDC+Embedding scoring pipeline. Three-stage ranking: (1) BM25 keyword retrieval with prefix fallback, (2) HDC 2048-bit bitvector pruning for structural relevance, (3) bottom-up neural embedding scoring (leaf nodes first, parents inherit). 2.5x faster and better quality than legacy parse with top_n. Returns up to 100 nodes by default so YOU (the LLM) can pick the best 5-10. Includes pipeline timing metadata in response.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and parse"},
+                    "html": {"type": "string", "description": "Raw HTML to parse directly"},
+                    "goal": {"type": "string", "description": "Agent goal for relevance scoring"},
+                    "top_n": {"type": "integer", "description": "Max nodes to return (default: 100)", "default": 100}
                 },
                 "required": ["goal"]
             }
@@ -4618,6 +4633,43 @@ async fn mcp_dispatch_tool(
                 }
             }
             let result = aether_agent::tools::parse_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 1b: parse_hybrid ─────────────────────────────────
+        "parse_hybrid" => {
+            let req = serde_json::from_value::<
+                aether_agent::tools::parse_hybrid_tool::ParseHybridRequest,
+            >(args.clone())
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            if let Some(ref url) = req.url {
+                if !url.is_empty() && req.html.is_none() {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, &req.goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    #[cfg(feature = "fetch")]
+                    {
+                        let config = aether_agent::types::FetchConfig::default();
+                        match aether_agent::fetch::fetch_page(url, &config).await {
+                            Ok(r) => {
+                                let result = aether_agent::tools::parse_hybrid_tool::execute_with_html(
+                                    &r.body, &req, url,
+                                );
+                                return text_ok(result.to_json());
+                            }
+                            Err(e) => return Err(format!("Fetch failed: {e}")),
+                        }
+                    }
+                    #[cfg(not(feature = "fetch"))]
+                    return Err("URL input requires fetch feature".to_string());
+                }
+            }
+
+            let result = aether_agent::tools::parse_hybrid_tool::execute(&req);
             text_ok(result.to_json())
         }
 
