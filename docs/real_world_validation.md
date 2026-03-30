@@ -42,7 +42,7 @@
 
 ## Hybrid Pipeline Stage Breakdown
 
-| Site | TF-IDF build | HDC build | TF-IDF query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |
+| Site | BM25 build | HDC build | BM25 query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |
 |------|-------------|-----------|-------------|-----------|-------------|---------------|-----------|----------|
 | Hacker News | 838µs | 13567µs | 13µs | 57µs | 1055089µs | 1069701µs | 0 | 80 |
 | HN Newest | 1213µs | 17474µs | 27µs | 10µs | 76717µs | 95606µs | 14 | 5 |

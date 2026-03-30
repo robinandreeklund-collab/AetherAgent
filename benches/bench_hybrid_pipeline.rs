@@ -2,7 +2,7 @@
 ///
 /// Jämför hastighet och korrekthet mellan:
 /// - Legacy: single-pass embedding (parse_top_nodes)
-/// - Hybrid: TF-IDF → HDC → Embedding (parse_top_nodes_hybrid)
+/// - Hybrid: BM25 → HDC → Embedding (parse_top_nodes_hybrid)
 ///
 /// Run: cargo run --bin aether-hybrid-bench
 use std::time::Instant;
@@ -170,7 +170,7 @@ fn bench_correctness(html: &str, goal: &str, expected_keyword: &str) -> (bool, b
 fn main() {
     println!("═══════════════════════════════════════════════════════════════════");
     println!("  AetherAgent — Hybrid Scoring Pipeline Benchmark");
-    println!("  Legacy (single-pass) vs Hybrid (TF-IDF → HDC → Embedding)");
+    println!("  Legacy (single-pass) vs Hybrid (BM25 → HDC → Embedding)");
     println!(
         "  HDC dimension: {} bits ({} bytes/vector)",
         HDC_DIM,
@@ -261,16 +261,16 @@ fn main() {
     let hybrid: serde_json::Value = serde_json::from_str(&hybrid_json).unwrap_or_default();
 
     if let Some(pipeline) = hybrid.get("pipeline") {
-        println!("  TF-IDF build:      {:>6} µs", pipeline["build_tfidf_us"]);
+        println!("  BM25 build:      {:>6} µs", pipeline["build_bm25_us"]);
         println!("  HDC build:         {:>6} µs", pipeline["build_hdc_us"]);
-        println!("  TF-IDF query:      {:>6} µs", pipeline["query_tfidf_us"]);
+        println!("  BM25 query:      {:>6} µs", pipeline["query_bm25_us"]);
         println!("  HDC prune:         {:>6} µs", pipeline["prune_hdc_us"]);
         println!("  Embedding score:   {:>6} µs", pipeline["score_embed_us"]);
         println!(
             "  Total pipeline:    {:>6} µs",
             pipeline["total_pipeline_us"]
         );
-        println!("\n  TF-IDF candidates: {}", pipeline["tfidf_candidates"]);
+        println!("\n  BM25 candidates: {}", pipeline["bm25_candidates"]);
         println!("  HDC survivors:     {}", pipeline["hdc_survivors"]);
         println!("  Final scored:      {}", pipeline["final_scored"]);
     }
@@ -279,9 +279,9 @@ fn main() {
 
     println!("\n── Amortized Query Time (build excluded) ──\n");
     if let Some(pipeline) = hybrid.get("pipeline") {
-        let build_us = pipeline["build_tfidf_us"].as_u64().unwrap_or(0)
+        let build_us = pipeline["build_bm25_us"].as_u64().unwrap_or(0)
             + pipeline["build_hdc_us"].as_u64().unwrap_or(0);
-        let query_us = pipeline["query_tfidf_us"].as_u64().unwrap_or(0)
+        let query_us = pipeline["query_bm25_us"].as_u64().unwrap_or(0)
             + pipeline["prune_hdc_us"].as_u64().unwrap_or(0)
             + pipeline["score_embed_us"].as_u64().unwrap_or(0);
         let total_us = pipeline["total_pipeline_us"].as_u64().unwrap_or(0);

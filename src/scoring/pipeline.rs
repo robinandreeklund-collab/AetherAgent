@@ -42,15 +42,20 @@ impl Default for PipelineConfig {
     }
 }
 
-/// Tidsmätningar för pipelinen
+/// Tidsmätningar för pipelinen.
+/// Fältnamn behåller "tfidf"-prefix för JSON-bakåtkompatibilitet
+/// trots att implementationen nu använder BM25.
 #[derive(Debug, Clone, Default)]
 pub struct PipelineTimings {
+    /// BM25 index build time (µs) — JSON: "build_tfidf_us"
     pub build_tfidf_us: u64,
     pub build_hdc_us: u64,
+    /// BM25 query time (µs) — JSON: "query_tfidf_us"
     pub query_tfidf_us: u64,
     pub prune_hdc_us: u64,
     pub score_embed_us: u64,
     pub total_us: u64,
+    /// BM25 candidates found — JSON: "tfidf_candidates"
     pub tfidf_candidates: usize,
     pub hdc_survivors: usize,
     pub final_scored: usize,

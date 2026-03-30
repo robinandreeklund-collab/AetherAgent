@@ -3743,7 +3743,7 @@ fn test_hybrid_pipeline_top_n_respects_limit() {
 
     // Verifiera pipeline-metadata
     assert!(
-        parsed["pipeline"]["method"].as_str() == Some("hybrid_tfidf_hdc_embedding"),
+        parsed["pipeline"]["method"].as_str() == Some("hybrid_bm25_hdc_embedding"),
         "Borde rapportera hybrid-metod"
     );
 }
@@ -3808,7 +3808,7 @@ fn test_hybrid_pipeline_reports_timings() {
         "Borde rapportera pipeline-timings"
     );
     assert!(
-        pipeline["tfidf_candidates"].as_u64().is_some(),
+        pipeline["bm25_candidates"].as_u64().is_some(),
         "Borde rapportera TF-IDF kandidater"
     );
 }

@@ -271,13 +271,13 @@ fn extract_hybrid_timings(json_str: &str) -> HashMap<String, u64> {
     let mut m = HashMap::new();
 
     for key in &[
-        "build_tfidf_us",
+        "build_bm25_us",
         "build_hdc_us",
-        "query_tfidf_us",
+        "query_bm25_us",
         "prune_hdc_us",
         "score_embed_us",
         "total_pipeline_us",
-        "tfidf_candidates",
+        "bm25_candidates",
         "hdc_survivors",
     ] {
         m.insert(key.to_string(), pipeline[key].as_u64().unwrap_or(0));
@@ -337,13 +337,13 @@ fn run_test(tc: &TestCase) -> SiteResult {
 
     // Hybrid timings
     let timings = extract_hybrid_timings(&hybrid_json);
-    result.hybrid_tfidf_build_us = *timings.get("build_tfidf_us").unwrap_or(&0);
+    result.hybrid_tfidf_build_us = *timings.get("build_bm25_us").unwrap_or(&0);
     result.hybrid_hdc_build_us = *timings.get("build_hdc_us").unwrap_or(&0);
-    result.hybrid_tfidf_query_us = *timings.get("query_tfidf_us").unwrap_or(&0);
+    result.hybrid_tfidf_query_us = *timings.get("query_bm25_us").unwrap_or(&0);
     result.hybrid_hdc_prune_us = *timings.get("prune_hdc_us").unwrap_or(&0);
     result.hybrid_embed_score_us = *timings.get("score_embed_us").unwrap_or(&0);
     result.hybrid_total_pipeline_us = *timings.get("total_pipeline_us").unwrap_or(&0);
-    result.hybrid_tfidf_candidates = *timings.get("tfidf_candidates").unwrap_or(&0);
+    result.hybrid_tfidf_candidates = *timings.get("bm25_candidates").unwrap_or(&0);
     result.hybrid_hdc_survivors = *timings.get("hdc_survivors").unwrap_or(&0);
     result.hybrid_cache_hit = *timings.get("cache_hit").unwrap_or(&0) == 1;
 
@@ -455,7 +455,7 @@ fn generate_markdown(results: &[SiteResult], has_embeddings: bool) -> String {
 
     // Pipeline breakdown
     md.push_str("\n## Hybrid Pipeline Stage Breakdown\n\n");
-    md.push_str("| Site | TF-IDF build | HDC build | TF-IDF query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |\n");
+    md.push_str("| Site | BM25 build | HDC build | BM25 query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |\n");
     md.push_str("|------|-------------|-----------|-------------|-----------|-------------|---------------|-----------|----------|\n");
 
     for r in results.iter().filter(|r| r.fetch_error.is_none()) {
