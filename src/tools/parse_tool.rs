@@ -37,6 +37,9 @@ pub struct ParseRequest {
     /// Tvinga JS-eval (true/false/auto)
     #[serde(default)]
     pub js: Option<bool>,
+    /// Använd hybrid BM25+HDC+Embedding pipeline (default: true)
+    #[serde(default = "default_true")]
+    pub hybrid: bool,
     /// Streaming-läge (default: true)
     #[serde(default = "default_true")]
     pub stream: bool,
@@ -100,12 +103,13 @@ pub fn execute(req: &ParseRequest) -> ToolResult {
 /// Kör parse med redan hämtad HTML (anropas efter fetch i async-kontext)
 pub fn execute_with_html(html: &str, req: &ParseRequest, url: &str) -> ToolResult {
     let start = now_ms();
-    execute_html_inner(
+    execute_html_with_options(
         html,
         &req.goal,
         req.top_n,
         req.format.as_deref(),
         req.js,
+        req.hybrid,
         url,
         start,
     )
@@ -114,23 +118,26 @@ pub fn execute_with_html(html: &str, req: &ParseRequest, url: &str) -> ToolResul
 /// Intern parse av HTML
 fn execute_html(html: &str, req: &ParseRequest, start: u64) -> ToolResult {
     let url = req.url.as_deref().unwrap_or("");
-    execute_html_inner(
+    execute_html_with_options(
         html,
         &req.goal,
         req.top_n,
         req.format.as_deref(),
         req.js,
+        req.hybrid,
         url,
         start,
     )
 }
 
-fn execute_html_inner(
+#[allow(clippy::too_many_arguments)]
+fn execute_html_with_options(
     html: &str,
     goal: &str,
     top_n: Option<u32>,
     format: Option<&str>,
     js: Option<bool>,
+    hybrid: bool,
     url: &str,
     start: u64,
 ) -> ToolResult {
@@ -161,7 +168,20 @@ fn execute_html_inner(
     tree.parse_time_ms = now_ms() - start;
     let total_nodes = count_all_nodes(&tree.nodes);
 
-    // Sortera och begränsa
+    // Scoring: hybrid BM25+HDC+Embedding eller legacy sort
+    if hybrid {
+        let goal_embedding = crate::embedding::embed(goal);
+        let config = crate::scoring::PipelineConfig::default();
+        let result = crate::scoring::ScoringPipeline::run_cached(
+            html,
+            &tree.nodes,
+            goal,
+            goal_embedding.as_deref(),
+            &config,
+        );
+        let score_map = crate::scoring::pipeline::scores_to_map(&result.scored_nodes);
+        crate::scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+    }
     sort_by_relevance(&mut tree);
     if let Some(n) = top_n {
         limit_top_n(&mut tree, n);
@@ -287,6 +307,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -316,6 +337,7 @@ mod tests {
             top_n: None,
             format: Some("markdown".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -341,6 +363,7 @@ mod tests {
             top_n: Some(2),
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -368,6 +391,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -384,6 +408,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -407,6 +432,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -431,6 +457,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(true),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -452,6 +479,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute(&req);
@@ -468,6 +496,7 @@ mod tests {
             top_n: Some(5),
             format: Some("markdown".to_string()),
             js: Some(false),
+            hybrid: true,
             stream: false,
         };
         let result = execute_with_html(simple_html(), &req, "https://example.com");
