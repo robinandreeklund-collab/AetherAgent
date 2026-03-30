@@ -2746,6 +2746,143 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         }
 
+        // ─── ToggleEvent constructor ────────────────────────────────────────
+        (function() {
+            if (!globalThis.ToggleEvent) {
+                globalThis.ToggleEvent = function ToggleEvent(type, opts) {
+                    Event.call(this, type, opts || {});
+                    var o = opts || {};
+                    this.oldState = o.oldState !== undefined ? String(o.oldState) : '';
+                    this.newState = o.newState !== undefined ? String(o.newState) : '';
+                };
+                ToggleEvent.prototype = Object.create(Event.prototype);
+                ToggleEvent.prototype.constructor = ToggleEvent;
+            }
+        })();
+
+        // ─── CommandEvent constructor ────────────────────────────────────────
+        (function() {
+            if (!globalThis.CommandEvent) {
+                globalThis.CommandEvent = function CommandEvent(type, opts) {
+                    Event.call(this, type, opts || {});
+                    var o = opts || {};
+                    this.command = o.command !== undefined ? String(o.command) : '';
+                    this.source = o.source || null;
+                };
+                CommandEvent.prototype = Object.create(Event.prototype);
+                CommandEvent.prototype.constructor = CommandEvent;
+            }
+        })();
+
+        // ─── Option() constructor (HTML option element factory) ─────────────
+        if (typeof document !== 'undefined') {
+            globalThis.Option = function Option(text, value, defaultSelected, selected) {
+                var el = document.createElement('option');
+                if (text !== undefined) el.textContent = String(text);
+                if (value !== undefined) el.setAttribute('value', String(value));
+                if (defaultSelected) el.setAttribute('selected', '');
+                if (selected) el.selected = true;
+                return el;
+            };
+            // Image() constructor
+            globalThis.Image = function Image(width, height) {
+                var img = document.createElement('img');
+                if (width !== undefined) img.setAttribute('width', String(width));
+                if (height !== undefined) img.setAttribute('height', String(height));
+                return img;
+            };
+            // Audio() constructor
+            globalThis.Audio = function Audio(src) {
+                var audio = document.createElement('audio');
+                if (src) audio.setAttribute('src', String(src));
+                return audio;
+            };
+        }
+
+        // ─── HTMLDialogElement methods ──────────────────────────────────────
+        if (typeof HTMLElement !== 'undefined') {
+            // show/showModal/close stubs for <dialog>
+            if (!HTMLElement.prototype.showModal) {
+                HTMLElement.prototype.showModal = function() {
+                    this.setAttribute('open', '');
+                    this._modal = true;
+                };
+            }
+            if (!HTMLElement.prototype.show) {
+                HTMLElement.prototype.show = function() {
+                    this.setAttribute('open', '');
+                };
+            }
+            if (!HTMLElement.prototype.close) {
+                HTMLElement.prototype.close = function(returnValue) {
+                    this.removeAttribute('open');
+                    if (returnValue !== undefined) this.returnValue = String(returnValue);
+                };
+            }
+            // open property
+            if (!('open' in HTMLElement.prototype)) {
+                Object.defineProperty(HTMLElement.prototype, 'open', {
+                    get: function() { return this.hasAttribute('open'); },
+                    set: function(v) { if (v) this.setAttribute('open', ''); else this.removeAttribute('open'); },
+                    configurable: true
+                });
+            }
+            // returnValue property for dialog
+            if (!('returnValue' in HTMLElement.prototype)) {
+                Object.defineProperty(HTMLElement.prototype, 'returnValue', {
+                    get: function() { return this._returnValue || ''; },
+                    set: function(v) { this._returnValue = String(v); },
+                    configurable: true
+                });
+            }
+        }
+
+        // ─── AbortController / AbortSignal ──────────────────────────────────
+        (function() {
+            if (!globalThis.AbortController) {
+                globalThis.AbortSignal = function AbortSignal() {
+                    this.aborted = false;
+                    this.reason = undefined;
+                    this.onabort = null;
+                };
+                AbortSignal.prototype.addEventListener = function(type, fn) {
+                    if (type === 'abort') this.onabort = fn;
+                };
+                AbortSignal.prototype.removeEventListener = function() {};
+                AbortSignal.prototype.throwIfAborted = function() {
+                    if (this.aborted) throw this.reason || new DOMException('The operation was aborted', 'AbortError');
+                };
+                AbortSignal.abort = function(reason) {
+                    var s = new AbortSignal();
+                    s.aborted = true;
+                    s.reason = reason || new DOMException('The operation was aborted', 'AbortError');
+                    return s;
+                };
+                AbortSignal.timeout = function(ms) { return new AbortSignal(); };
+                AbortSignal.any = function(signals) {
+                    var s = new AbortSignal();
+                    if (signals) {
+                        for (var i = 0; i < signals.length; i++) {
+                            if (signals[i].aborted) { s.aborted = true; s.reason = signals[i].reason; break; }
+                        }
+                    }
+                    return s;
+                };
+
+                globalThis.AbortController = function AbortController() {
+                    this.signal = new AbortSignal();
+                };
+                AbortController.prototype.abort = function(reason) {
+                    this.signal.aborted = true;
+                    this.signal.reason = reason || new DOMException('The operation was aborted', 'AbortError');
+                    if (typeof this.signal.onabort === 'function') {
+                        var ev = new Event('abort');
+                        this.signal.onabort(ev);
+                    }
+                };
+            }
+        })();
+
         // ─── EditContext API stub (Input Editing) ─────────────────────────
         (function() {
             globalThis.EditContext = function EditContext(opts) {
