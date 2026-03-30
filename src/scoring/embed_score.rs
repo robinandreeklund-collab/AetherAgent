@@ -42,8 +42,6 @@ pub fn score_bottom_up(
     goal_embedding: Option<&[f32]>,
 ) -> Vec<ScoredNode> {
     let goal_lower = goal.to_lowercase();
-    let survivor_ids: std::collections::HashSet<u32> = survivors.iter().map(|s| s.0).collect();
-
     // Steg 1: Scorea alla survivors (löv-noder direkt, icke-löv väntar)
     let mut scores: HashMap<u32, f32> = HashMap::new();
     let mut embedding_calls = 0usize;

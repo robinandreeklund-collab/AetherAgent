@@ -53,8 +53,8 @@ impl Hypervector {
     /// XOR-bind: kombinera två HV:er (representerar "bundling" i HDC)
     pub fn bind(&self, other: &Hypervector) -> Hypervector {
         let mut result = [0u64; WORDS];
-        for i in 0..WORDS {
-            result[i] = self.bits[i] ^ other.bits[i];
+        for (i, r) in result.iter_mut().enumerate() {
+            *r = self.bits[i] ^ other.bits[i];
         }
         Hypervector { bits: result }
     }
@@ -69,13 +69,13 @@ impl Hypervector {
         let bit_offset = bit_shift % 64;
 
         let mut result = [0u64; WORDS];
-        for i in 0..WORDS {
+        for (i, r) in result.iter_mut().enumerate() {
             let src_word = (i + WORDS - word_shift) % WORDS;
             if bit_offset == 0 {
-                result[i] = self.bits[src_word];
+                *r = self.bits[src_word];
             } else {
                 let src_prev = (src_word + WORDS - 1) % WORDS;
-                result[i] = (self.bits[src_word] << bit_offset)
+                *r = (self.bits[src_word] << bit_offset)
                     | (self.bits[src_prev] >> (64 - bit_offset));
             }
         }
@@ -96,20 +96,17 @@ impl Hypervector {
 
         match hvs.len() {
             2 => {
-                // 2 HV: majority = AND (båda måste ha biten satt)
-                for i in 0..WORDS {
-                    result[i] = hvs[0].bits[i] & hvs[1].bits[i];
+                for (i, r) in result.iter_mut().enumerate() {
+                    *r = hvs[0].bits[i] & hvs[1].bits[i];
                 }
             }
             3 => {
-                // 3 HV: majority = (a&b)|(a&c)|(b&c) — word-level, ingen bit-loop
-                for i in 0..WORDS {
+                for (i, r) in result.iter_mut().enumerate() {
                     let (a, b, c) = (hvs[0].bits[i], hvs[1].bits[i], hvs[2].bits[i]);
-                    result[i] = (a & b) | (a & c) | (b & c);
+                    *r = (a & b) | (a & c) | (b & c);
                 }
             }
             _ => {
-                // Generell: räkna ettor per bit
                 let threshold = hvs.len() / 2;
                 for bit_idx in 0..HDC_DIM {
                     let word_idx = bit_idx / 64;
@@ -140,11 +137,11 @@ impl Hypervector {
 
     /// Hamming-avstånd (antal bits som skiljer sig) via XOR + popcount
     fn hamming_distance(&self, other: &Hypervector) -> u32 {
-        let mut dist = 0u32;
-        for i in 0..WORDS {
-            dist += (self.bits[i] ^ other.bits[i]).count_ones();
-        }
-        dist
+        self.bits
+            .iter()
+            .zip(other.bits.iter())
+            .map(|(a, b)| (a ^ b).count_ones())
+            .sum()
     }
 }
 

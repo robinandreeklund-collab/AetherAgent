@@ -186,7 +186,7 @@ fn main() {
     println!("{}", "-".repeat(78));
 
     let results = vec![
-        bench_parse("Simple (3 nodes)", &simple, "population", 5, 50),
+        bench_parse("Simple (3 nodes)", simple, "population", 5, 50),
         bench_parse("Medium (50 items)", &medium, "inhabitants region", 10, 50),
         bench_parse("Medium top_3", &medium, "inhabitants region", 3, 50),
         bench_parse("Large (500 items)", &large, "data analysis units", 10, 20),
@@ -219,7 +219,7 @@ fn main() {
             "data analysis",
             "data",
         ),
-        ("Simple population", &simple, "population", "population"),
+        ("Simple population", simple, "population", "population"),
     ];
 
     let mut legacy_correct = 0;

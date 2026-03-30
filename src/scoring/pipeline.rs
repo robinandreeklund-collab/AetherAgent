@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use crate::types::SemanticNode;
 
-use super::embed_score::{self, build_node_index, NodeInfo, ScoredNode};
+use super::embed_score::{self, build_node_index, ScoredNode};
 use super::hdc::{self, HdcTree};
 use super::tfidf::{self, TfIdfIndex};
 

@@ -354,10 +354,6 @@ pub struct FetchAndPlanResult {
 // ─── Implementations ─────────────────────────────────────────────────────────
 
 impl SemanticNode {
-    pub fn default() -> Self {
-        Self::new(0, "", "")
-    }
-
     pub fn new(id: u32, role: &str, label: &str) -> Self {
         SemanticNode {
             id,
@@ -380,7 +376,15 @@ impl SemanticNode {
             bbox: None,
         }
     }
+}
 
+impl Default for SemanticNode {
+    fn default() -> Self {
+        Self::new(0, "", "")
+    }
+}
+
+impl SemanticNode {
     /// Grund klon utan barn — undviker rekursiv deep-clone av hela subträdet.
     /// Används i stream_engine där barn alltid rensas direkt efter clone.
     pub fn clone_shallow(&self) -> Self {
