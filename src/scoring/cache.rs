@@ -112,7 +112,7 @@ pub fn get_or_build(html: &str, tree_nodes: &[SemanticNode]) -> BuildResult {
         }
     }
 
-    // Cache-miss: bygg nytt
+    // Cache-miss: sekventiell build (se pipeline.rs för rayon-motivering)
     let t0 = Instant::now();
     let flat_nodes = tfidf::flatten_tree(tree_nodes);
     let tfidf_index = Arc::new(TfIdfIndex::build(&flat_nodes));

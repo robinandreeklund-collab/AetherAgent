@@ -81,18 +81,18 @@ impl ScoringPipeline {
             .map(String::from)
             .collect();
 
-        // Build-fas: TF-IDF index
+        // Sekventiell build – rayon skippat pga WASM binary size (+2 MB) och marginell
+        // vinst vid ~6 ms total build-tid. Kan läggas till senare bakom feature-flag
+        // (cfg(feature = "parallel")) om vi behöver hantera 100k+ noder på server-sidan.
         let t0 = Instant::now();
         let flat_nodes = tfidf::flatten_tree(tree_nodes);
         let tfidf_index = TfIdfIndex::build(&flat_nodes);
         timings.build_tfidf_us = t0.elapsed().as_micros() as u64;
 
-        // Build-fas: HDC tree
         let t1 = Instant::now();
         let hdc_tree = HdcTree::build(tree_nodes);
         timings.build_hdc_us = t1.elapsed().as_micros() as u64;
 
-        // Build: node index (platt map för bottom-up scoring)
         let node_index = build_node_index(tree_nodes);
 
         // Steg 1: TF-IDF kandidatretrieval
