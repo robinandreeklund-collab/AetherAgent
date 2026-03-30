@@ -293,7 +293,10 @@ fn main() {
             if cached { "CACHED" } else { "fresh" }
         );
         println!("  Query phase:       {:>6} µs (per goal-query)", query_us);
-        println!("  Total pipeline:    {:>6} µs (wall clock this query)", total_us);
+        println!(
+            "  Total pipeline:    {:>6} µs (wall clock this query)",
+            total_us
+        );
         println!();
         println!(
             "  → Med cache: hybrid query = {} µs vs legacy full = {} µs",

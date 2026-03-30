@@ -129,6 +129,59 @@ impl Hypervector {
         Hypervector { bits: result }
     }
 
+    /// Skapa HV från text med n-gram binding och positionskodning.
+    ///
+    /// Splittrar texten i ord, genererar HV per ord, binder 2-grams och 3-grams
+    /// med positionspermutation, och bundlar allt via majority-vote.
+    /// Ger ordningskänslig representation ("katt jagar hund" ≠ "hund jagar katt").
+    pub fn from_text_ngrams(text: &str) -> Self {
+        let words: Vec<&str> = text
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 1)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect();
+
+        // Workaround: split borrow — re-tokenize since we consumed the lowercase string
+        let lower = text.to_lowercase();
+        let words: Vec<&str> = lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 1)
+            .collect();
+
+        if words.is_empty() {
+            return Self::from_seed(text);
+        }
+
+        let mut components: Vec<Hypervector> = Vec::new();
+
+        // Unigrams med position
+        for (i, word) in words.iter().enumerate() {
+            let word_hv = Self::from_seed(word);
+            components.push(word_hv.permute(i * 3));
+        }
+
+        // Bigrams: bind(word[i], permute(word[i+1], 1))
+        for i in 0..words.len().saturating_sub(1) {
+            let a = Self::from_seed(words[i]);
+            let b = Self::from_seed(words[i + 1]).permute(1);
+            components.push(a.bind(&b).permute(i * 5));
+        }
+
+        // Trigrams: bind(word[i], permute(word[i+1], 1), permute(word[i+2], 2))
+        for i in 0..words.len().saturating_sub(2) {
+            let a = Self::from_seed(words[i]);
+            let b = Self::from_seed(words[i + 1]).permute(1);
+            let c = Self::from_seed(words[i + 2]).permute(2);
+            components.push(a.bind(&b).bind(&c).permute(i * 7));
+        }
+
+        // Bundle alla komponenter
+        let refs: Vec<&Hypervector> = components.iter().collect();
+        Self::bundle(&refs)
+    }
+
     /// Cosine-likhet approximerad via Hamming-avstånd
     /// cos(a,b) ≈ 1 - 2 * hamming(a,b) / DIM
     pub fn similarity(&self, other: &Hypervector) -> f32 {
@@ -166,8 +219,8 @@ impl HdcTree {
         out: &mut HashMap<u32, Hypervector>,
         depth: usize,
     ) -> Hypervector {
-        // Text-HV: genereras från nodens label
-        let text_hv = Hypervector::from_seed(&node.label);
+        // Text-HV: n-gram-baserad för ordningskänslig representation
+        let text_hv = Hypervector::from_text_ngrams(&node.label);
 
         // Tag/Role-HV: genereras från nodens roll
         let role_hv = Hypervector::from_seed(&format!("__role_{}", node.role));
@@ -197,7 +250,7 @@ impl HdcTree {
 
     /// Projicera en goal-sträng till en hypervector
     pub fn project_goal(goal: &str) -> Hypervector {
-        Hypervector::from_seed(goal)
+        Hypervector::from_text_ngrams(goal)
     }
 
     /// Pruna kandidater: behåll bara de vars HV har tillräcklig likhet med goal_hv
@@ -377,6 +430,45 @@ mod tests {
         assert!(
             adaptive_threshold("button", 3) < 0.0,
             "Button borde alltid passera (löv-nod)"
+        );
+    }
+
+    #[test]
+    fn test_ngram_order_sensitivity() {
+        // N-gram binding borde ge olika HV:er för olika ordföljder
+        let hv1 = Hypervector::from_text_ngrams("cat chases dog");
+        let hv2 = Hypervector::from_text_ngrams("dog chases cat");
+        let sim = hv1.similarity(&hv2);
+        // Borde vara liknande (delar samma unigrams) men inte identiska (olika ordning)
+        assert!(
+            sim < 0.95,
+            "Olika ordföljd borde ge <0.95 likhet, fick {sim}"
+        );
+        assert!(sim > 0.0, "Delade ord borde ge viss likhet, fick {sim}");
+    }
+
+    #[test]
+    fn test_ngram_similar_text() {
+        let hv1 = Hypervector::from_text_ngrams("population statistics data");
+        let hv2 = Hypervector::from_text_ngrams("population statistics report");
+        let hv3 = Hypervector::from_text_ngrams("cookie settings privacy");
+        let sim_related = hv1.similarity(&hv2);
+        let sim_unrelated = hv1.similarity(&hv3);
+        assert!(
+            sim_related > sim_unrelated,
+            "Relaterade texter borde ha högre likhet: related={sim_related}, unrelated={sim_unrelated}"
+        );
+    }
+
+    #[test]
+    fn test_ngram_empty_text() {
+        // Tom text borde fallbacka till from_seed utan panik
+        let hv = Hypervector::from_text_ngrams("");
+        let zero = Hypervector::zero();
+        // Borde inte vara noll (from_seed ger pseudo-random)
+        assert_ne!(
+            hv.bits, zero.bits,
+            "Tom text borde ge non-zero HV via seed fallback"
         );
     }
 }
