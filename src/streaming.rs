@@ -100,6 +100,7 @@ impl StreamingParser {
             parse_time_ms: 0,
             xhr_intercepted: 0,
             xhr_blocked: 0,
+            pending_fetch_urls: vec![],
         }
     }
 

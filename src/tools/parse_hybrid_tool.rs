@@ -53,14 +53,86 @@ pub fn execute(req: &ParseHybridRequest) -> ToolResult {
     execute_with_html(html, req, url)
 }
 
-/// Kör parse_hybrid med redan hämtad HTML (anropas efter fetch i async-kontext)
+/// Kör parse_hybrid med redan hämtad HTML (synkron — utan pending fetch resolution)
 pub fn execute_with_html(html: &str, req: &ParseHybridRequest, url: &str) -> ToolResult {
     let start = now_ms();
-
     let json_str = crate::parse_top_nodes_hybrid(html, &req.goal, url, req.top_n);
-
     let data: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_default();
+    result_from_json(data, start)
+}
 
+/// Async variant — resolvar pending fetch-URLs innan hybrid scoring (BUGG J).
+///
+/// Flöde: build_tree_with_js → resolve_pending_fetches → hybrid score → top_n
+#[cfg(feature = "fetch")]
+pub async fn execute_with_html_async(
+    html: &str,
+    req: &ParseHybridRequest,
+    url: &str,
+) -> ToolResult {
+    let start = now_ms();
+
+    // Steg 1: Bygg träd med JS-eval (samlar pending fetch-URLs)
+    let mut tree = super::build_tree_with_js(html, &req.goal, url);
+    tree.parse_time_ms = now_ms() - start;
+
+    // Steg 2: Resolve pending fetch-URLs (async — hämtar via reqwest)
+    super::resolve_pending_fetches(&mut tree, &req.goal).await;
+
+    // Steg 3: Kör hybrid scoring på det kompletta trädet
+    let goal_embedding = crate::embedding::embed(&req.goal);
+    let config = crate::scoring::PipelineConfig::default();
+    let pipeline_result = crate::scoring::ScoringPipeline::run_cached(
+        html,
+        &tree.nodes,
+        &req.goal,
+        goal_embedding.as_deref(),
+        &config,
+    );
+
+    // Applicera scores
+    let score_map = crate::scoring::pipeline::scores_to_map(&pipeline_result.scored_nodes);
+    crate::scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+
+    // Top-N
+    let top_scored = crate::scoring::ScoringPipeline::apply_top_n(
+        pipeline_result.scored_nodes,
+        Some(req.top_n as usize),
+    );
+
+    let timings = &pipeline_result.timings;
+    let data = serde_json::json!({
+        "url": tree.url,
+        "title": tree.title,
+        "goal": tree.goal,
+        "top_nodes": top_scored.iter().map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "role": s.role,
+                "label": s.label,
+                "relevance": s.relevance,
+            })
+        }).collect::<Vec<_>>(),
+        "node_count": top_scored.len(),
+        "total_nodes": super::count_all_nodes(&tree.nodes),
+        "injection_warnings": tree.injection_warnings.len(),
+        "xhr_intercepted": tree.xhr_intercepted,
+        "xhr_blocked": tree.xhr_blocked,
+        "parse_time_ms": tree.parse_time_ms,
+        "pipeline": {
+            "method": "hybrid_bm25_hdc_embedding",
+            "bm25_candidates": timings.tfidf_candidates,
+            "hdc_survivors": timings.hdc_survivors,
+            "total_pipeline_us": timings.total_us,
+            "cache_hit": timings.cache_hit,
+            "pending_urls_resolved": tree.pending_fetch_urls.is_empty(),
+        }
+    });
+
+    result_from_json(data, start)
+}
+
+fn result_from_json(data: serde_json::Value, start: u64) -> ToolResult {
     let warnings = data["injection_warnings"]
         .as_u64()
         .map(|n| {

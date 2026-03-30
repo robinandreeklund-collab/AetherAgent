@@ -144,6 +144,9 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
 
+            // Samla fetch-URLs från JS runtime (BUGG J)
+            let runtime_urls = eval_with_arena.result.fetched_urls.clone();
+
             // Logga JS-fel (FIX-SPA-001)
             if let Some(ref err) = eval_with_arena.result.error {
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
@@ -154,7 +157,9 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                 let modified_html = eval_with_arena
                     .arena
                     .serialize_html(eval_with_arena.arena.document);
-                return build_tree(&modified_html, goal, url);
+                let mut tree = build_tree(&modified_html, goal, url);
+                attach_pending_urls(&mut tree, html, &runtime_urls);
+                return tree;
             }
 
             // Om JS körde utan fel — prova arena-HTML (kan ha ändrats utan mutation-record)
@@ -163,14 +168,49 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                     .arena
                     .serialize_html(eval_with_arena.arena.document);
                 if arena_html.len() > 10 && arena_html != html {
-                    return build_tree(&arena_html, goal, url);
+                    let mut tree = build_tree(&arena_html, goal, url);
+                    attach_pending_urls(&mut tree, html, &runtime_urls);
+                    return tree;
                 }
             }
 
-            // Fallback: pre-JS DOM
+            // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
+            let mut tree = build_tree(html, goal, url);
+            attach_pending_urls(&mut tree, html, &runtime_urls);
+            return tree;
         }
     }
-    build_tree(html, goal, url)
+    // Ingen JS — extrahera fetch-URLs statiskt
+    let mut tree = build_tree(html, goal, url);
+    attach_pending_urls(&mut tree, html, &[]);
+    tree
+}
+
+/// Samla pending fetch-URLs från (1) statisk HTML-analys + (2) runtime JS-capture.
+/// Deduplicera och filtrera bort tomma/relativa URLs.
+fn attach_pending_urls(tree: &mut SemanticTree, html: &str, runtime_urls: &[String]) {
+    let mut urls: Vec<String> = Vec::new();
+
+    // Statisk extraktion: hitta fetch()/XHR-URLs i inline scripts
+    let static_urls = js_bridge::extract_xhr_from_snippets(html);
+    for capture in &static_urls {
+        if !capture.url.is_empty() && capture.url.starts_with("http") {
+            urls.push(capture.url.clone());
+        }
+    }
+
+    // Runtime-capture: URLs som JS anropade via fetch()
+    for url in runtime_urls {
+        if !url.is_empty() && url.starts_with("http") && !urls.contains(url) {
+            urls.push(url.clone());
+        }
+    }
+
+    // Dedup
+    urls.sort();
+    urls.dedup();
+
+    tree.pending_fetch_urls = urls;
 }
 
 /// Pre-allokerad JSON-serialisering via serde_json::to_writer.

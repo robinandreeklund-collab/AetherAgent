@@ -83,6 +83,7 @@ impl SemanticBuilder {
             parse_time_ms: 0, // sätts av lib.rs
             xhr_intercepted: 0,
             xhr_blocked: 0,
+            pending_fetch_urls: vec![],
         }
     }
 
@@ -104,6 +105,7 @@ impl SemanticBuilder {
             parse_time_ms: 0,
             xhr_intercepted: 0,
             xhr_blocked: 0,
+            pending_fetch_urls: vec![],
         }
     }
 

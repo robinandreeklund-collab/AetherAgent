@@ -185,6 +185,9 @@ pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::Se
             let arena = crate::arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_result = crate::dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
 
+            // Samla runtime fetch-URLs (BUGG J)
+            let runtime_urls = eval_result.result.fetched_urls.clone();
+
             // Logga JS-fel om det uppstod
             if let Some(ref err) = eval_result.result.error {
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
@@ -193,22 +196,111 @@ pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::Se
             // Om JS muterade DOM:en — använd den modifierade arenan
             if !eval_result.result.mutations.is_empty() {
                 let modified_html = eval_result.arena.serialize_html(eval_result.arena.document);
-                return build_tree(&modified_html, goal, url);
+                let mut tree = build_tree(&modified_html, goal, url);
+                collect_pending_urls(&mut tree, html, &runtime_urls);
+                return tree;
             }
 
-            // Om JS körde utan fel men utan mutationer — arenan kan ändå
-            // ha ändrats. Serialisera och jämför: om den skiljer sig, använd den.
+            // Om JS körde utan fel men utan mutationer
             if eval_result.result.error.is_none() {
                 let arena_html = eval_result.arena.serialize_html(eval_result.arena.document);
                 if arena_html.len() > 10 && arena_html != html {
-                    return build_tree(&arena_html, goal, url);
+                    let mut tree = build_tree(&arena_html, goal, url);
+                    collect_pending_urls(&mut tree, html, &runtime_urls);
+                    return tree;
                 }
             }
 
-            // Fallback: pre-JS DOM (original HTML)
+            // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async
+            let mut tree = build_tree(html, goal, url);
+            collect_pending_urls(&mut tree, html, &runtime_urls);
+            return tree;
         }
     }
-    build_tree(html, goal, url)
+    let mut tree = build_tree(html, goal, url);
+    collect_pending_urls(&mut tree, html, &[]);
+    tree
+}
+
+/// Samla pending fetch-URLs från statisk extraktion + runtime JS-capture.
+fn collect_pending_urls(
+    tree: &mut crate::types::SemanticTree,
+    html: &str,
+    runtime_urls: &[String],
+) {
+    let mut urls: Vec<String> = Vec::new();
+
+    // Statisk: hitta fetch()/XHR i inline scripts
+    let captures = crate::js_bridge::extract_xhr_from_snippets(html);
+    for c in &captures {
+        if !c.url.is_empty() && c.url.starts_with("http") {
+            urls.push(c.url.clone());
+        }
+    }
+
+    // Runtime: URLs som JS anropade via fetch()
+    for u in runtime_urls {
+        if !u.is_empty() && u.starts_with("http") && !urls.contains(u) {
+            urls.push(u.clone());
+        }
+    }
+
+    urls.sort();
+    urls.dedup();
+    tree.pending_fetch_urls = urls;
+}
+
+/// Resolve pending fetch-URLs: hämta via intercept_xhr och merge-a noder i trädet.
+///
+/// Anropas i async-kontext (server/MCP) efter att trädet är byggt.
+/// Använder befintlig `intercept_xhr()` infrastruktur (firewall + reqwest + node-skapning).
+#[cfg(feature = "fetch")]
+pub async fn resolve_pending_fetches(tree: &mut crate::types::SemanticTree, goal: &str) {
+    if tree.pending_fetch_urls.is_empty() {
+        return;
+    }
+
+    let captures: Vec<crate::intercept::XhrCapture> = tree
+        .pending_fetch_urls
+        .iter()
+        .map(|url| crate::intercept::XhrCapture {
+            url: url.clone(),
+            method: "GET".to_string(),
+            headers: std::collections::HashMap::new(),
+        })
+        .collect();
+
+    let config = crate::intercept::InterceptConfig {
+        enabled: true,
+        max_requests: 20,
+        timeout_ms: 5000,
+    };
+    let fw_config = crate::firewall::FirewallConfig::default();
+
+    let result = crate::intercept::intercept_xhr(&captures, goal, &config, &fw_config).await;
+
+    // Merge nodes med unika IDs
+    let existing_max_id = count_max_node_id(&tree.nodes);
+    for (i, mut node) in result.nodes.into_iter().enumerate() {
+        node.id = existing_max_id + 1 + i as u32;
+        tree.nodes.push(node);
+    }
+
+    tree.xhr_intercepted += result.intercepted;
+    tree.xhr_blocked += result.blocked;
+    tree.injection_warnings.extend(result.warnings);
+    tree.pending_fetch_urls.clear();
+}
+
+/// Hitta högsta nod-ID i trädet (rekursivt)
+#[cfg(feature = "fetch")]
+fn count_max_node_id(nodes: &[crate::types::SemanticNode]) -> u32 {
+    let mut max_id = 0u32;
+    for node in nodes {
+        max_id = max_id.max(node.id);
+        max_id = max_id.max(count_max_node_id(&node.children));
+    }
+    max_id
 }
 
 /// Räkna alla noder rekursivt (inkl. barn)

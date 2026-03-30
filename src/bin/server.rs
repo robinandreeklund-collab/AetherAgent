@@ -4624,11 +4624,13 @@ async fn mcp_dispatch_tool(
                     aether_agent::fetch::validate_url(url)?;
                     let config = aether_agent::types::FetchConfig::default();
                     let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
-                    let result = aether_agent::tools::parse_tool::execute_with_html(
+                    // Async variant: resolvar pending fetch-URLs (BUGG J)
+                    let result = aether_agent::tools::parse_tool::execute_with_html_async(
                         &fetched.body,
                         &req,
                         &fetched.final_url,
-                    );
+                    )
+                    .await;
                     return text_ok(result.to_json());
                 }
             }
@@ -4656,9 +4658,12 @@ async fn mcp_dispatch_tool(
                         let config = aether_agent::types::FetchConfig::default();
                         match aether_agent::fetch::fetch_page(url, &config).await {
                             Ok(r) => {
-                                let result = aether_agent::tools::parse_hybrid_tool::execute_with_html(
-                                    &r.body, &req, url,
-                                );
+                                // Async variant: resolvar pending fetch-URLs (BUGG J)
+                                let result =
+                                    aether_agent::tools::parse_hybrid_tool::execute_with_html_async(
+                                        &r.body, &req, url,
+                                    )
+                                    .await;
                                 return text_ok(result.to_json());
                             }
                             Err(e) => return Err(format!("Fetch failed: {e}")),

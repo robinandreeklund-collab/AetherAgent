@@ -113,6 +113,10 @@ pub struct SemanticTree {
     /// Antal XHR-anrop som blockerades av Semantic Firewall (Fas 10)
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub xhr_blocked: u32,
+    /// URLs som JS anropade via fetch() men inte kunde hämtas i sandbox (BUGG J).
+    /// Async-lagret (server/MCP) kan fetcha dessa och merge-a noder i trädet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_fetch_urls: Vec<String>,
 }
 
 /// Varning när trust shield hittar misstänkt innehåll
