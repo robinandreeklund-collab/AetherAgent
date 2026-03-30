@@ -12,58 +12,58 @@
 | Successfully fetched | 20 |
 | Legacy correctness (keyword in top 3) | 16/20 (80%) |
 | Hybrid correctness (keyword in top 3) | 18/20 (90%) |
-| Avg legacy parse time | 581.0ms |
-| Avg hybrid parse time | 319.1ms |
+| Avg legacy parse time | 596.0ms |
+| Avg hybrid parse time | 365.3ms |
 
 ## Per-Site Results
 
 | # | Site | Fetch | HTML | Legacy ms | Hybrid ms | L-nodes | H-nodes | L-correct | H-correct |
 |---|------|-------|------|-----------|-----------|---------|---------|-----------|----------|
-| 1 | Hacker News | 273ms | 34KB | 1029ms | 1373ms | 10 | 10 | PASS | PASS |
-| 2 | HN Newest | 260ms | 40KB | 611ms | 117ms | 10 | 4 | MISS | PASS |
-| 3 | Lobsters | 701ms | 57KB | 903ms | 404ms | 10 | 10 | PASS | PASS |
-| 4 | CNN Lite | 294ms | 326KB | 1072ms | 88ms | 10 | 3 | MISS | PASS |
-| 5 | NPR Text | 237ms | 5KB | 998ms | 4ms | 10 | 5 | PASS | PASS |
-| 6 | Rust Lang | 782ms | 18KB | 910ms | 530ms | 10 | 10 | PASS | PASS |
-| 7 | MDN HTML | 379ms | 173KB | 846ms | 615ms | 10 | 10 | PASS | PASS |
-| 8 | Python.org | 284ms | 48KB | 39ms | 38ms | 0 | 0 | MISS | MISS |
-| 9 | W3C | 335ms | 50KB | 38ms | 1ms | 0 | 0 | MISS | MISS |
-| 10 | GitHub Explore | 1128ms | 368KB | 971ms | 617ms | 10 | 10 | PASS | PASS |
-| 11 | NPM | 146ms | 28KB | 337ms | 39ms | 10 | 8 | PASS | PASS |
-| 12 | Crates.io | 174ms | 3KB | 74ms | 36ms | 1 | 1 | PASS | PASS |
-| 13 | PyPI | 47ms | 21KB | 425ms | 38ms | 10 | 7 | PASS | PASS |
-| 14 | docs.rs | 149ms | 17KB | 813ms | 174ms | 10 | 10 | PASS | PASS |
-| 15 | pkg.go.dev | 90ms | 32KB | 761ms | 183ms | 10 | 5 | PASS | PASS |
-| 16 | Docker Hub | 283ms | 387KB | 526ms | 220ms | 10 | 10 | PASS | PASS |
-| 17 | DuckDuckGo | 133ms | 157KB | 283ms | 1761ms | 10 | 10 | PASS | PASS |
-| 18 | OpenStreetMap | 785ms | 32KB | 842ms | 72ms | 10 | 3 | PASS | PASS |
-| 19 | httpbin HTML | 143ms | 3KB | 106ms | 36ms | 3 | 2 | PASS | PASS |
-| 20 | Reuters | 217ms | 0KB | 37ms | 36ms | 1 | 1 | PASS | PASS |
+| 1 | Hacker News | 553ms | 34KB | 1043ms | 1442ms | 10 | 10 | PASS | PASS |
+| 2 | HN Newest | 274ms | 40KB | 571ms | 288ms | 10 | 8 | MISS | PASS |
+| 3 | Lobsters | 278ms | 57KB | 955ms | 455ms | 10 | 10 | PASS | PASS |
+| 4 | CNN Lite | 324ms | 326KB | 1093ms | 115ms | 10 | 3 | MISS | PASS |
+| 5 | NPR Text | 407ms | 5KB | 1036ms | 11ms | 10 | 5 | PASS | PASS |
+| 6 | Rust Lang | 1178ms | 18KB | 927ms | 568ms | 10 | 10 | PASS | PASS |
+| 7 | MDN HTML | 240ms | 173KB | 850ms | 712ms | 10 | 10 | PASS | PASS |
+| 8 | Python.org | 120ms | 48KB | 38ms | 37ms | 0 | 0 | MISS | MISS |
+| 9 | W3C | 1488ms | 50KB | 38ms | 1ms | 0 | 0 | MISS | MISS |
+| 10 | GitHub Explore | 1157ms | 366KB | 1000ms | 736ms | 10 | 10 | PASS | PASS |
+| 11 | NPM | 168ms | 28KB | 374ms | 52ms | 10 | 8 | PASS | PASS |
+| 12 | Crates.io | 160ms | 3KB | 70ms | 37ms | 1 | 1 | PASS | PASS |
+| 13 | PyPI | 54ms | 21KB | 431ms | 43ms | 10 | 7 | PASS | PASS |
+| 14 | docs.rs | 341ms | 16KB | 839ms | 155ms | 10 | 10 | PASS | PASS |
+| 15 | pkg.go.dev | 126ms | 32KB | 841ms | 213ms | 10 | 5 | PASS | PASS |
+| 16 | Docker Hub | 300ms | 387KB | 535ms | 254ms | 10 | 10 | PASS | PASS |
+| 17 | DuckDuckGo | 661ms | 157KB | 319ms | 2035ms | 10 | 10 | PASS | PASS |
+| 18 | OpenStreetMap | 794ms | 32KB | 820ms | 80ms | 10 | 3 | PASS | PASS |
+| 19 | httpbin HTML | 215ms | 3KB | 105ms | 38ms | 3 | 2 | PASS | PASS |
+| 20 | Reuters | 377ms | 0KB | 36ms | 34ms | 1 | 1 | PASS | PASS |
 
 ## Hybrid Pipeline Stage Breakdown
 
 | Site | BM25 build | HDC build | BM25 query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |
 |------|-------------|-----------|-------------|-----------|-------------|---------------|-----------|----------|
-| Hacker News | 1130µs | 14795µs | 16µs | 72µs | 1353621µs | 1369966µs | 0 | 80 |
-| HN Newest | 1178µs | 15477µs | 32µs | 9µs | 96756µs | 113601µs | 14 | 5 |
-| Lobsters | 1132µs | 14075µs | 9µs | 37µs | 384823µs | 400235µs | 24 | 21 |
-| CNN Lite | 1217µs | 15683µs | 5µs | 29µs | 68664µs | 86058µs | 4 | 3 |
-| NPR Text | 302µs | 3637µs | 5µs | 27µs | 13µs | 4012µs | 9 | 5 |
-| Rust Lang | 603µs | 6925µs | 12µs | 37µs | 487936µs | 495560µs | 42 | 32 |
-| MDN HTML | 2422µs | 26817µs | 38µs | 86µs | 543012µs | 573072µs | 140 | 60 |
-| Python.org | 1µs | 0µs | 2µs | 31µs | 0µs | 124µs | 0 | 0 |
-| W3C | 0µs | 0µs | 2µs | 24µs | 0µs | 94µs | 0 | 0 |
-| GitHub Explore | 2327µs | 28710µs | 17µs | 25µs | 566119µs | 597874µs | 55 | 38 |
-| NPM | 346µs | 3574µs | 6µs | 24µs | 43µs | 4044µs | 16 | 16 |
-| Crates.io | 11µs | 36µs | 3µs | 26µs | 5µs | 92µs | 1 | 1 |
-| PyPI | 222µs | 2207µs | 6µs | 20µs | 26µs | 2563µs | 12 | 12 |
-| docs.rs | 458µs | 4548µs | 9µs | 24µs | 133979µs | 139071µs | 22 | 22 |
-| pkg.go.dev | 679µs | 7954µs | 5µs | 34µs | 137468µs | 146264µs | 14 | 7 |
-| Docker Hub | 837µs | 10305µs | 11µs | 28µs | 202246µs | 213948µs | 38 | 37 |
-| DuckDuckGo | 5816µs | 82567µs | 36µs | 97µs | 1666799µs | 1755950µs | 135 | 60 |
-| OpenStreetMap | 276µs | 3132µs | 5µs | 28µs | 67519µs | 71110µs | 4 | 4 |
-| httpbin HTML | 83µs | 471µs | 4µs | 18µs | 10µs | 600µs | 3 | 3 |
-| Reuters | 10µs | 54µs | 1µs | 18µs | 35963µs | 36052µs | 0 | 1 |
+| Hacker News | 1343µs | 39977µs | 19µs | 123µs | 1396337µs | 1437996µs | 0 | 80 |
+| HN Newest | 1352µs | 42376µs | 45µs | 17µs | 239139µs | 283120µs | 22 | 9 |
+| Lobsters | 1437µs | 39773µs | 15µs | 82µs | 409288µs | 450852µs | 24 | 21 |
+| CNN Lite | 1578µs | 41127µs | 10µs | 79µs | 69676µs | 113071µs | 4 | 3 |
+| NPR Text | 404µs | 10557µs | 6µs | 67µs | 18µs | 11080µs | 9 | 5 |
+| Rust Lang | 760µs | 21695µs | 15µs | 78µs | 509976µs | 532605µs | 42 | 32 |
+| MDN HTML | 3016µs | 82545µs | 44µs | 332µs | 576035µs | 662694µs | 140 | 60 |
+| Python.org | 1µs | 0µs | 2µs | 72µs | 0µs | 149µs | 0 | 0 |
+| W3C | 1µs | 0µs | 3µs | 83µs | 1µs | 177µs | 0 | 0 |
+| GitHub Explore | 3053µs | 81824µs | 34µs | 93µs | 626053µs | 712033µs | 55 | 38 |
+| NPM | 354µs | 14736µs | 7µs | 48µs | 52µs | 15256µs | 16 | 16 |
+| Crates.io | 13µs | 82µs | 3µs | 65µs | 6µs | 180µs | 1 | 1 |
+| PyPI | 231µs | 7057µs | 7µs | 49µs | 32µs | 7423µs | 12 | 12 |
+| docs.rs | 665µs | 12405µs | 8µs | 50µs | 105555µs | 118745µs | 20 | 20 |
+| pkg.go.dev | 840µs | 24477µs | 11µs | 106µs | 147506µs | 173090µs | 14 | 7 |
+| Docker Hub | 938µs | 32083µs | 13µs | 63µs | 213290µs | 246983µs | 38 | 37 |
+| DuckDuckGo | 7694µs | 223886µs | 58µs | 180µs | 1795418µs | 2028258µs | 135 | 60 |
+| OpenStreetMap | 293µs | 8609µs | 4µs | 66µs | 69388µs | 78450µs | 4 | 4 |
+| httpbin HTML | 80µs | 1813µs | 4µs | 44µs | 16µs | 1970µs | 3 | 3 |
+| Reuters | 11µs | 143µs | 1µs | 45µs | 33918µs | 34125µs | 0 | 1 |
 
 ## Top-3 Node Quality Comparison
 
@@ -75,9 +75,9 @@
 3. `0.297` Do your own writing
 
 **Hybrid top 3:**
-1. `0.215` Hacker News new | past | comments | ask | show | jobs | submit login
-2. `0.205` 40 points by maurycyz 4 hours ago | hide | 16 comments
-3. `0.204` 10 points by bushido 1 hour ago | hide | 5 comments
+1. `0.214` Hacker News new | past | comments | ask | show | jobs | submit login
+2. `0.209` 43 points by maurycyz 5 hours ago | hide | 16 comments
+3. `0.205` 103 points by taubek 3 hours ago | hide | 53 comments
 
 ---
 
@@ -85,13 +85,13 @@
 
 **Legacy top 3:**
 1. `0.424` submit
-2. `0.302` 9 minutes ago
+2. `0.298` 1 minute ago
 3. `0.297` 2 minutes ago
 
 **Hybrid top 3:**
-1. `0.445` Hacker News new | past | comments | ask | show | jobs | submit
-2. `0.375` new
-3. `0.102` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
+1. `0.449` David Sacks' new role shaping Trump's AI agenda
+2. `0.423` Hacker News new | past | comments | ask | show | jobs | submit
+3. `0.387` What's New in Flutter 3.41
 
 ---
 
@@ -99,8 +99,8 @@
 
 **Legacy top 3:**
 1. `0.375` Your job isn't programming
-2. `0.345` Lobsters Active Recent Comments Search Login Login 105 copilot edited an ad into
-3. `0.325` Active Recent Comments Search Login Login 105 copilot edited an ad into my pr vi
+2. `0.345` Lobsters Active Recent Comments Search Login Login 111 copilot edited an ad into
+3. `0.325` Active Recent Comments Search Login Login 111 copilot edited an ad into my pr vi
 
 **Hybrid top 3:**
 1. `0.683` Your job isn't programming
@@ -119,7 +119,7 @@
 **Hybrid top 3:**
 1. `0.599` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
 2. `0.514` Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery
-3. `0.374` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories As Trum
+3. `0.265` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories Student
 
 ---
 
@@ -243,8 +243,8 @@ for a
 
 **Hybrid top 3:**
 1. `0.758` Rust Rust website The Book Standard Library API Reference Rust by Example The Ca
-2. `0.710` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
-3. `0.684` Rust website
+2. `0.707` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
+3. `0.686` Rust website
 
 ---
 
@@ -323,7 +323,7 @@ for a
 1. `0.070` reuters.com Please enable JS and disable any ad blocker
 
 **Hybrid top 3:**
-1. `0.171` reuters.com Please enable JS and disable any ad blocker
+1. `0.173` reuters.com Please enable JS and disable any ad blocker
 
 ---
 
