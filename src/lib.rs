@@ -119,6 +119,11 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
 
+            // Logga JS-fel (FIX-SPA-001)
+            if let Some(ref err) = eval_with_arena.result.error {
+                eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
+            }
+
             // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
             if !eval_with_arena.result.mutations.is_empty() {
                 let modified_html = eval_with_arena
@@ -126,6 +131,18 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                     .serialize_html(eval_with_arena.arena.document);
                 return build_tree(&modified_html, goal, url);
             }
+
+            // Om JS körde utan fel — prova arena-HTML (kan ha ändrats utan mutation-record)
+            if eval_with_arena.result.error.is_none() {
+                let arena_html = eval_with_arena
+                    .arena
+                    .serialize_html(eval_with_arena.arena.document);
+                if arena_html.len() > 10 && arena_html != html {
+                    return build_tree(&arena_html, goal, url);
+                }
+            }
+
+            // Fallback: pre-JS DOM
         }
     }
     build_tree(html, goal, url)

@@ -167,7 +167,13 @@ pub fn build_tree(html: &str, goal: &str, url: &str) -> crate::types::SemanticTr
     tree
 }
 
-/// Kör lifecycle-parse med JS-eval om tillgängligt
+/// Kör lifecycle-parse med JS-eval om tillgängligt.
+///
+/// Strategi (FIX-SPA-001):
+/// 1. Om JS muterade DOM:en → bygg träd från modifierad arena-HTML
+/// 2. Om JS hade fel → logga, fall tillbaka på pre-JS DOM (original HTML)
+/// 3. Om JS körde utan mutationer och utan fel → prova arena-HTML
+/// Pre-JS DOM bevaras ALLTID som fallback vid JS-fel.
 #[allow(unused_variables)]
 pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::SemanticTree {
     #[cfg(all(feature = "js-eval", feature = "blitz"))]
@@ -177,10 +183,28 @@ pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::Se
             let rcdom = crate::parser::parse_html(html);
             let arena = crate::arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_result = crate::dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+
+            // Logga JS-fel om det uppstod
+            if let Some(ref err) = eval_result.result.error {
+                eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
+            }
+
+            // Om JS muterade DOM:en — använd den modifierade arenan
             if !eval_result.result.mutations.is_empty() {
                 let modified_html = eval_result.arena.serialize_html(eval_result.arena.document);
                 return build_tree(&modified_html, goal, url);
             }
+
+            // Om JS körde utan fel men utan mutationer — arenan kan ändå
+            // ha ändrats. Serialisera och jämför: om den skiljer sig, använd den.
+            if eval_result.result.error.is_none() {
+                let arena_html = eval_result.arena.serialize_html(eval_result.arena.document);
+                if arena_html.len() > 10 && arena_html != html {
+                    return build_tree(&arena_html, goal, url);
+                }
+            }
+
+            // Fallback: pre-JS DOM (original HTML)
         }
     }
     build_tree(html, goal, url)
