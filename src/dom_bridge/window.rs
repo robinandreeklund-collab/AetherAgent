@@ -672,6 +672,19 @@ pub(super) fn register_window_with_viewport<'js>(
         globalThis.atob = function(s) { return s; };
         globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
+        globalThis.frames = globalThis.window;
+        globalThis.parent = globalThis.window;
+        globalThis.top = globalThis.window;
+        if (globalThis.window) {
+            globalThis.window.frames = globalThis.window;
+            globalThis.window.parent = globalThis.window;
+            globalThis.window.top = globalThis.window;
+            globalThis.window.length = 0; // No iframes
+            globalThis.window.opener = null;
+            globalThis.window.closed = false;
+            globalThis.window.name = '';
+            globalThis.window.frameElement = null;
+        }
         globalThis.crypto = globalThis.window.crypto;
         // Synka window-funktioner till globalThis (WPT anropar utan window.)
         if (globalThis.window) {
