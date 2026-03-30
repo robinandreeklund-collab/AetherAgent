@@ -282,6 +282,50 @@ impl HdcTree {
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
+
+    /// Inkrementell uppdatering: uppdatera en nods HV och rebundla vägen till roten.
+    ///
+    /// `node_id` — noden som muterats (ny label/roll)
+    /// `new_label` — nodens nya label-text
+    /// `new_role` — nodens nya roll
+    /// `ancestor_path` — lista av (ancestor_id, [child_ids]) från noden till roten
+    ///
+    /// Istället för att bygga om hela HDC-trädet (~4ms) uppdateras bara O(djup) noder.
+    pub fn update_node(
+        &mut self,
+        node_id: u32,
+        new_label: &str,
+        new_role: &str,
+        ancestor_path: &[(u32, Vec<u32>)],
+    ) {
+        // Steg 1: Beräkna ny HV för den muterade noden
+        let text_hv = Hypervector::from_text_ngrams(new_label);
+        let role_hv = Hypervector::from_seed(&format!("__role_{new_role}"));
+        let new_hv = text_hv.bind(&role_hv);
+        self.nodes.insert(node_id, new_hv);
+
+        // Steg 2: Rebundla varje ancestor uppåt
+        for (ancestor_id, child_ids) in ancestor_path {
+            let mut hvs: Vec<Hypervector> = Vec::new();
+            // Samla alla barns HV (inkl. den uppdaterade)
+            for &child_id in child_ids {
+                if let Some(child_hv) = self.nodes.get(&child_id) {
+                    hvs.push(child_hv.clone());
+                }
+            }
+            if !hvs.is_empty() {
+                // Ancestor-HV: sammanfoga sin egen text-HV + barnens bundle
+                let refs: Vec<&Hypervector> = hvs.iter().collect();
+                let bundled = Hypervector::bundle(&refs);
+                self.nodes.insert(*ancestor_id, bundled);
+            }
+        }
+    }
+
+    /// Ta bort en nod från HDC-trädet (vid DOM-deletion)
+    pub fn remove_node(&mut self, node_id: u32) {
+        self.nodes.remove(&node_id);
+    }
 }
 
 /// Adaptiv threshold baserad på kontext (djup + roll)
@@ -470,5 +514,61 @@ mod tests {
             hv.bits, zero.bits,
             "Tom text borde ge non-zero HV via seed fallback"
         );
+    }
+
+    #[test]
+    fn test_update_node_changes_hv() {
+        let tree = vec![SemanticNode {
+            id: 1,
+            role: "text".into(),
+            label: "original content".into(),
+            children: vec![SemanticNode {
+                id: 2,
+                role: "text".into(),
+                label: "child node".into(),
+                children: vec![],
+                ..SemanticNode::default()
+            }],
+            ..SemanticNode::default()
+        }];
+
+        let mut hdc = HdcTree::build(&tree);
+
+        // Spara original HV
+        let goal_hv = HdcTree::project_goal("population statistics");
+        let sim_before = hdc.node_similarity(2, &goal_hv).unwrap_or(0.0);
+
+        // Uppdatera nod 2 till "population statistics data"
+        hdc.update_node(
+            2,
+            "population statistics data",
+            "text",
+            &[(1, vec![2])], // Ancestor: nod 1 har barn [2]
+        );
+
+        let sim_after = hdc.node_similarity(2, &goal_hv).unwrap_or(0.0);
+
+        // HV borde ha ändrats
+        assert!(
+            (sim_before - sim_after).abs() > 0.001,
+            "HV borde ändras efter update: before={sim_before}, after={sim_after}"
+        );
+    }
+
+    #[test]
+    fn test_remove_node() {
+        let tree = vec![SemanticNode {
+            id: 1,
+            role: "text".into(),
+            label: "test".into(),
+            children: vec![],
+            ..SemanticNode::default()
+        }];
+
+        let mut hdc = HdcTree::build(&tree);
+        assert_eq!(hdc.node_count(), 1, "Borde ha 1 nod");
+
+        hdc.remove_node(1);
+        assert_eq!(hdc.node_count(), 0, "Borde vara tom efter removal");
     }
 }
