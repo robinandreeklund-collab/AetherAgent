@@ -3,47 +3,48 @@
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 pub mod arena_dom;
 pub mod arena_dom_sink;
-mod causal;
-mod collab;
-mod compiler;
+pub(crate) mod causal;
+pub(crate) mod collab;
+pub(crate) mod compiler;
 #[cfg(feature = "js-eval")]
 mod css_cascade;
 #[cfg(feature = "blitz")]
 pub mod css_compiler;
-mod diff;
+pub(crate) mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
 pub mod embedding;
-mod escalation;
+pub(crate) mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
-mod grounding;
-mod hydration;
-mod intent;
+pub(crate) mod grounding;
+pub(crate) mod hydration;
+pub(crate) mod intent;
 pub mod intercept;
-mod js_bridge;
-mod js_eval;
+pub(crate) mod js_bridge;
+pub(crate) mod js_eval;
 mod memory;
-mod orchestrator;
-mod parser;
+pub(crate) mod orchestrator;
+pub(crate) mod parser;
 pub mod search;
-mod semantic;
-mod session;
+pub(crate) mod semantic;
+pub(crate) mod session;
 pub mod stream_engine;
 pub mod stream_state;
-mod streaming;
+pub(crate) mod streaming;
 #[cfg(feature = "blitz")]
 #[allow(dead_code)]
 mod taffy_render;
 mod temporal;
-mod trust;
+pub mod tools;
+pub(crate) mod trust;
 pub mod types;
 pub mod vision;
 pub mod vision_backend;
-mod webmcp;
+pub(crate) mod webmcp;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -118,6 +119,11 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
 
+            // Logga JS-fel (FIX-SPA-001)
+            if let Some(ref err) = eval_with_arena.result.error {
+                eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
+            }
+
             // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
             if !eval_with_arena.result.mutations.is_empty() {
                 let modified_html = eval_with_arena
@@ -125,6 +131,18 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                     .serialize_html(eval_with_arena.arena.document);
                 return build_tree(&modified_html, goal, url);
             }
+
+            // Om JS körde utan fel — prova arena-HTML (kan ha ändrats utan mutation-record)
+            if eval_with_arena.result.error.is_none() {
+                let arena_html = eval_with_arena
+                    .arena
+                    .serialize_html(eval_with_arena.arena.document);
+                if arena_html.len() > 10 && arena_html != html {
+                    return build_tree(&arena_html, goal, url);
+                }
+            }
+
+            // Fallback: pre-JS DOM
         }
     }
     build_tree(html, goal, url)
@@ -1440,9 +1458,9 @@ pub fn render_html_to_png(
                 );
                 if !eval_result.result.mutations.is_empty() {
                     let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
-                    // Säkerhetskontroll: om serialisering producerar drastiskt
-                    // mindre HTML har arena-roundtrip traskat DOM:en — fallback
-                    if serialized.len() >= html.len() / 3 {
+                    // Säkerhetskontroll: om serialisering producerar tom HTML
+                    // har arena-roundtrip traskat DOM:en — fallback
+                    if serialized.len() > 20 {
                         std::borrow::Cow::Owned(serialized)
                     } else {
                         std::borrow::Cow::Borrowed(html)

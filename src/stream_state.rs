@@ -183,12 +183,26 @@ impl DecisionLayer {
     }
 
     /// Beräkna relevance-score per nod baserat på goal
+    ///
+    /// Matchar semantic.rs scoring: text 55%, roll 35%, med depth/label/nav-penalties
     pub fn score(&self, node: &SemanticNode) -> f32 {
         let text_score = text_similarity(&self.goal_lower, &node.label);
         let role_score = SemanticNode::role_priority(&node.role);
 
-        // Viktat: text 50%, roll 40%, bas 10%
-        let raw = (text_score * 0.5) + (role_score * 0.4) + 0.05;
+        // Label-längd penalty — aggregerade wrappers har långa labels
+        let label_penalty = if node.label.len() > 500 {
+            0.15
+        } else if node.label.len() > 300 {
+            0.08
+        } else {
+            0.0
+        };
+
+        // Nav/cookie/skip-link penalty
+        let nav_penalty = crate::semantic::score_nav_penalty(&node.role, &node.label);
+
+        // Viktat: text 55%, roll 35% (matchar semantic.rs)
+        let raw = (text_score * 0.55) + (role_score * 0.35) - label_penalty - nav_penalty;
         raw.clamp(0.0, 1.0)
     }
 

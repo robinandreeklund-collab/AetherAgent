@@ -777,6 +777,16 @@ async fn root() -> impl IntoResponse {
     )
 }
 
+/// MCP Tool Explorer – Interactive frontend for testing all tools
+async fn tool_explorer() -> impl IntoResponse {
+    let html = include_str!("tool_explorer.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
 /// JSON API endpoint listing (moved from root)
 async fn api_endpoints() -> impl IntoResponse {
     let body = serde_json::json!({
@@ -3198,8 +3208,9 @@ async fn load_vision_model_bytes() -> Option<Vec<u8>> {
 
 // ─── MCP Streamable HTTP (spec 2025-03-26) ───────────────────────────────────
 
-/// Tool schema som exponeras via MCP tools/list
-fn mcp_tool_definitions() -> serde_json::Value {
+/// Gamla MCP tool-definitioner (pre-konsolidering) — behålls för bakåtkompatibilitet
+#[allow(dead_code)]
+fn mcp_tool_definitions_legacy() -> serde_json::Value {
     serde_json::json!([
         {
             "name": "parse",
@@ -3653,6 +3664,201 @@ fn mcp_tool_definitions() -> serde_json::Value {
     ])
 }
 
+/// 12 konsoliderade MCP tools — ersätter 35+ gamla verktyg
+fn mcp_tool_definitions() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "name": "parse",
+            "description": "Unified parsing: HTML/URL/screenshot → semantic tree or markdown. Auto-detects input type. Includes JS evaluation when needed, top-N filtering, and hydration extraction. Replaces: parse, parse_top, parse_with_js, fetch_parse, html_to_markdown, parse_screenshot.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and parse (auto-detected)"},
+                    "html": {"type": "string", "description": "Raw HTML to parse directly"},
+                    "screenshot_b64": {"type": "string", "description": "Base64-encoded PNG for YOLO vision analysis"},
+                    "goal": {"type": "string", "description": "Agent goal for relevance scoring"},
+                    "top_n": {"type": "integer", "description": "Limit to N most relevant nodes (default: all)"},
+                    "format": {"type": "string", "enum": ["tree", "markdown"], "description": "Output format (default: tree)", "default": "tree"},
+                    "js": {"type": "boolean", "description": "Force JS evaluation (true/false/omit for auto)"}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "act",
+            "description": "Interact with page elements: click buttons, fill forms, or extract data. Provide HTML or URL + an action type. Security (injection scan + firewall) runs automatically. Replaces: find_and_click, fill_form, extract_data, fetch_click, fetch_extract.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch (auto-detected)"},
+                    "html": {"type": "string", "description": "Raw HTML"},
+                    "goal": {"type": "string", "description": "Agent goal context"},
+                    "action": {"type": "string", "enum": ["click", "fill", "extract"], "description": "Action type"},
+                    "target": {"type": "string", "description": "Label/text to click (for action=click)"},
+                    "fields": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Form fields as key→value (for action=fill)"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Data keys to extract (for action=extract)"}
+                },
+                "required": ["goal", "action"]
+            }
+        },
+        {
+            "name": "stream",
+            "description": "Adaptive DOM streaming for large pages. Emits only the most goal-relevant nodes with 90-99% token savings. Supports LLM-driven directives to expand nodes, change thresholds, or stop. Replaces: stream_parse, stream_parse_directive, fetch_stream_parse.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "html": {"type": "string", "description": "Raw HTML"},
+                    "goal": {"type": "string", "description": "Agent goal for relevance filtering"},
+                    "max_nodes": {"type": "integer", "description": "Max nodes in output (default: 50)", "default": 50},
+                    "min_relevance": {"type": "number", "description": "Minimum relevance threshold 0.0-1.0 (default: 0.3)", "default": 0.3},
+                    "directives": {"type": "array", "items": {"type": "string"}, "description": "LLM directives: 'expand(node_id)', 'next_branch', 'stop', 'lower_threshold(0.1)'"}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "plan",
+            "description": "Goal decomposition + causal reasoning. Compiles a high-level goal into step-by-step action plan with dependencies, or analyzes causal graphs for safest path. Replaces: compile_goal, build_causal_graph, predict_action_outcome, find_safest_path, execute_plan.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "Goal to decompose or analyze"},
+                    "action": {"type": "string", "enum": ["compile", "predict", "safest_path", "execute"], "description": "Action (default: compile)", "default": "compile"},
+                    "graph_json": {"type": "string", "description": "Causal graph JSON (for predict/safest_path)"},
+                    "html": {"type": "string", "description": "HTML page (for execute)"},
+                    "url": {"type": "string", "description": "Page URL (for execute)"},
+                    "max_steps": {"type": "integer", "description": "Max steps in plan (default: 10)", "default": 10}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "diff",
+            "description": "Semantic tree diffing — compare two page snapshots and return only the changes. Achieves 70-99% token savings by sending deltas instead of full trees. Replaces: diff_trees, diff_semantic_trees.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "old_tree": {"type": "string", "description": "Previous semantic tree JSON"},
+                    "new_tree": {"type": "string", "description": "Current semantic tree JSON"}
+                },
+                "required": ["old_tree", "new_tree"]
+            }
+        },
+        {
+            "name": "search",
+            "description": "Web search via DuckDuckGo. Returns structured results with title, URL, snippet, and confidence. With deep=true (default), fetches and parses each result page. Replaces: search, fetch_search.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "goal": {"type": "string", "description": "Agent goal for relevance filtering"},
+                    "top_n": {"type": "integer", "description": "Number of results (default: 5)", "default": 5},
+                    "deep": {"type": "boolean", "description": "Fetch+parse each result (default: true)", "default": true}
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "secure",
+            "description": "Explicit security check. Auto-detects: text → injection scan, url → firewall classify, urls → batch classify. NOTE: Security runs automatically in all other tools — use this only for explicit pre-checks. Replaces: check_injection, classify_request, classify_request_batch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Text to scan for prompt injection"},
+                    "url": {"type": "string", "description": "Single URL to classify via firewall"},
+                    "urls": {"type": "array", "items": {"type": "string"}, "description": "Batch of URLs to classify"},
+                    "goal": {"type": "string", "description": "Agent goal (for firewall relevance scoring)"}
+                }
+            }
+        },
+        {
+            "name": "vision",
+            "description": "Visual analysis: screenshots, YOLO UI-element detection, grounding, bbox matching. Auto-selects Blitz (pure Rust) or Chrome CDP for rendering. Replaces: tiered_screenshot, parse_screenshot, vision_parse, fetch_vision, ground_semantic_tree, match_bbox_iou.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to render and analyze"},
+                    "html": {"type": "string", "description": "HTML to render"},
+                    "screenshot_b64": {"type": "string", "description": "Pre-captured screenshot as base64 PNG"},
+                    "goal": {"type": "string", "description": "Agent goal for relevance scoring"},
+                    "mode": {"type": "string", "enum": ["detect", "screenshot", "ground", "match"], "description": "Vision mode (default: detect)", "default": "detect"},
+                    "annotations": {"type": "array", "description": "Bbox annotations for grounding (mode=ground)"},
+                    "bbox": {"type": "object", "description": "Bounding box to match (mode=match)"},
+                    "tree_json": {"type": "string", "description": "Semantic tree JSON (mode=match)"},
+                    "width": {"type": "integer", "description": "Viewport width (default: 1280)", "default": 1280},
+                    "height": {"type": "integer", "description": "Viewport height (default: 720)", "default": 720}
+                }
+            }
+        },
+        {
+            "name": "discover",
+            "description": "Discover hidden resources in web pages: WebMCP tool registrations and XHR/fetch API endpoints. Scans inline scripts for navigator.modelContext.registerTool(), <script type='application/mcp+json'>, window.mcpTools, fetch(), XMLHttpRequest. Replaces: discover_webmcp, detect_xhr_urls.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch and scan"},
+                    "html": {"type": "string", "description": "Raw HTML to scan"},
+                    "mode": {"type": "string", "enum": ["all", "webmcp", "xhr"], "description": "What to discover (default: all)", "default": "all"}
+                }
+            }
+        },
+        {
+            "name": "session",
+            "description": "Session lifecycle: cookies, OAuth tokens, login detection. Expired cookies auto-cleaned. Token refresh auto-triggered. Replaces: all 11 session endpoints + detect_login_form.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "status", "cookies", "token", "oauth", "detect_login", "evict", "mark_logged_in", "refresh"], "description": "Session action"},
+                    "session_json": {"type": "string", "description": "Session state JSON"},
+                    "domain": {"type": "string", "description": "Cookie domain"},
+                    "path": {"type": "string", "description": "Cookie path (default: /)"},
+                    "cookies": {"type": "array", "items": {"type": "string"}, "description": "Set-Cookie headers to add"},
+                    "access_token": {"type": "string", "description": "OAuth access token"},
+                    "html": {"type": "string", "description": "HTML for login detection"},
+                    "goal": {"type": "string", "description": "Goal for login detection"}
+                },
+                "required": ["action"]
+            }
+        },
+        {
+            "name": "workflow",
+            "description": "Multi-page workflow orchestration with automatic planning, rollback, and step tracking. Create a workflow from a goal, feed it pages, report action results. Replaces: all 8 orchestrator endpoints + workflow memory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "page", "report", "complete", "rollback", "status"], "description": "Workflow action"},
+                    "workflow_json": {"type": "string", "description": "Workflow state JSON"},
+                    "goal": {"type": "string", "description": "Workflow goal (for create)"},
+                    "start_url": {"type": "string", "description": "Starting URL (for create)"},
+                    "html": {"type": "string", "description": "Page HTML (for page action)"},
+                    "url": {"type": "string", "description": "Page URL (for page action)"},
+                    "result_json": {"type": "string", "description": "Action result JSON (for report)"},
+                    "report_type": {"type": "string", "enum": ["click", "fill", "extract"], "description": "Report type (for report)"},
+                    "step_index": {"type": "integer", "description": "Step index (for complete/rollback)"}
+                },
+                "required": ["action"]
+            }
+        },
+        {
+            "name": "collab",
+            "description": "Multi-agent collaboration: shared diff stores for cross-agent knowledge sharing. Register agents, publish semantic deltas, fetch updates. Auto-cleanup of inactive agents. Replaces: all collab endpoints + tier_stats.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "register", "publish", "fetch", "stats"], "description": "Collab action"},
+                    "store_json": {"type": "string", "description": "Collab store state JSON"},
+                    "agent_id": {"type": "string", "description": "Agent identifier"},
+                    "goal": {"type": "string", "description": "Agent goal (for register)"},
+                    "url": {"type": "string", "description": "URL for delta (for publish)"},
+                    "delta_json": {"type": "string", "description": "Semantic delta JSON (for publish)"}
+                },
+                "required": ["action"]
+            }
+        }
+    ])
+}
+
 /// Avkoda base64-sträng till bytes
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     B64.decode(input)
@@ -3941,16 +4147,16 @@ struct FetchVisionRequest {
 
 /// Dispatcha MCP tools/call till rätt aether_agent-funktion
 /// Returnerar content-array (kan innehålla text + image blocks)
-async fn mcp_dispatch_tool(
+/// Gammal MCP dispatch — behålls för bakåtkompatibilitet med äldre klienter
+#[allow(dead_code)]
+async fn mcp_dispatch_tool_legacy(
     name: &str,
     args: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, String> {
-    // Hjälpfunktion: text-only content block
     let text_ok = |s: String| -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"type": "text", "text": s}]))
     };
-
     match name {
         "parse" => {
             let html = args["html"].as_str().unwrap_or("");
@@ -4329,7 +4535,230 @@ async fn mcp_dispatch_tool(
                 html, js_code, base_url, width, height,
             ))
         }
-        _ => Err(format!("Unknown tool: {name}")),
+        _ => Err(format!("Unknown legacy tool: {name}")),
+    }
+}
+
+/// 12 konsoliderade MCP tools — dispatch
+async fn mcp_dispatch_tool(
+    name: &str,
+    args: &serde_json::Value,
+    _state: &AppState,
+) -> Result<serde_json::Value, String> {
+    let text_ok = |s: String| -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!([{"type": "text", "text": s}]))
+    };
+
+    match name {
+        // ─── Tool 1: parse ──────────────────────────────────────────
+        "parse" => {
+            let req = serde_json::from_value::<aether_agent::tools::parse_tool::ParseRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            // Async fetch om URL angetts
+            if let Some(ref url) = req.url {
+                if !url.is_empty() && req.html.is_none() && req.screenshot_b64.is_none() {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, &req.goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    let result = aether_agent::tools::parse_tool::execute_with_html(
+                        &fetched.body,
+                        &req,
+                        &fetched.final_url,
+                    );
+                    return text_ok(result.to_json());
+                }
+            }
+            let result = aether_agent::tools::parse_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 2: act ────────────────────────────────────────────
+        "act" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::act_tool::ActRequest>(args.clone())
+                    .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            if let Some(ref url) = req.url {
+                if !url.is_empty() && req.html.is_none() {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, &req.goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    let result = aether_agent::tools::act_tool::execute_with_html(
+                        &fetched.body,
+                        &req,
+                        &fetched.final_url,
+                    );
+                    return text_ok(result.to_json());
+                }
+            }
+            let result = aether_agent::tools::act_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 3: stream ─────────────────────────────────────────
+        "stream" => {
+            let req = serde_json::from_value::<aether_agent::tools::stream_tool::StreamRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            if let Some(ref url) = req.url {
+                if !url.is_empty() && req.html.is_none() {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, &req.goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    let result = aether_agent::tools::stream_tool::execute_with_html(
+                        &fetched.body,
+                        &req,
+                        &fetched.final_url,
+                    );
+                    return text_ok(result.to_json());
+                }
+            }
+            let result = aether_agent::tools::stream_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 4: plan ───────────────────────────────────────────
+        "plan" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::plan_tool::PlanRequest>(args.clone())
+                    .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::plan_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 5: diff ───────────────────────────────────────────
+        "diff" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::diff_tool::DiffRequest>(args.clone())
+                    .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::diff_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 6: search ────────────────────────────────────────
+        "search" => {
+            let req = serde_json::from_value::<aether_agent::tools::search_tool::SearchRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            // Auto-fetch DDG
+            let ddg_url = aether_agent::search::build_ddg_url(&req.query);
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+                Ok(fetched) => {
+                    let result =
+                        aether_agent::tools::search_tool::execute_with_html(&fetched.body, &req);
+                    text_ok(result.to_json())
+                }
+                Err(_) => {
+                    // Fallback: returnera URL att fetcha manuellt
+                    let result = aether_agent::tools::search_tool::execute(&req);
+                    text_ok(result.to_json())
+                }
+            }
+        }
+
+        // ─── Tool 7: secure ────────────────────────────────────────
+        "secure" => {
+            let req = serde_json::from_value::<aether_agent::tools::secure_tool::SecureRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::secure_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 8: vision ────────────────────────────────────────
+        "vision" => {
+            let req = serde_json::from_value::<aether_agent::tools::vision_tool::VisionRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::vision_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 9: discover ──────────────────────────────────────
+        "discover" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::discover_tool::DiscoverRequest>(
+                    args.clone(),
+                )
+                .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+
+            if let Some(ref url) = req.url {
+                if !url.is_empty() && req.html.is_none() {
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    let result =
+                        aether_agent::tools::discover_tool::execute_with_html(&fetched.body, &req);
+                    return text_ok(result.to_json());
+                }
+            }
+            let result = aether_agent::tools::discover_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 10: session ──────────────────────────────────────
+        "session" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::session_tool::SessionRequest>(
+                    args.clone(),
+                )
+                .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::session_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 11: workflow ─────────────────────────────────────
+        "workflow" => {
+            let req =
+                serde_json::from_value::<aether_agent::tools::workflow_tool::WorkflowRequest>(
+                    args.clone(),
+                )
+                .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::workflow_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        // ─── Tool 12: collab ──────────────────────────────────────
+        "collab" => {
+            let req = serde_json::from_value::<aether_agent::tools::collab_tool::CollabRequest>(
+                args.clone(),
+            )
+            .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
+            let result = aether_agent::tools::collab_tool::execute(&req);
+            text_ok(result.to_json())
+        }
+
+        _ => Err(format!(
+            "Unknown tool: '{name}'. Available: parse, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
+        )),
     }
 }
 
@@ -4910,6 +5339,7 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         // Root & Health
         .route("/", get(root))
+        .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))

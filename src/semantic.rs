@@ -449,13 +449,7 @@ impl SemanticBuilder {
         let word_score = text_similarity_cached(&self.goal, &self.goal_words, label);
 
         // Embedding-strategi:
-        // 1. Alltid om partiell textmatch (0 < word_score < 0.8)
-        // 2. Även utan textmatch för interaktiva noder (links, buttons) —
-        //    dessa är troligast agentens mål och kräver semantisk matchning
-        //    (t.ex. "find news articles" vs "South Korea Mandates Solar Panels")
-        // 3. Skippa noder med exakt match (>= 0.8) och tomma labels
-        // Max 30 embedding-anrop per sida (~1.1s budget vid 36ms/anrop)
-        // Pre-filtrering av goal-kategori reducerar kandidater kraftigt
+        // Används när partiell textmatch finns eller för interaktiva noder
         const MAX_EMBEDDING_CALLS: u32 = 30;
         let is_interactive = matches!(role, "link" | "button" | "cta" | "input");
         let matches_category = SemanticNode::matches_goal_category(role, self.goal_category);
@@ -484,15 +478,65 @@ impl SemanticBuilder {
         // 2. Roll-prioritet
         let role_score = SemanticNode::role_priority(role);
 
-        // 3. Djupberoende – grundare element är viktigare
-        let depth_penalty = (depth as f32 * 0.05).min(0.4);
+        // 3. Djupberoende — mild penalty, capped
+        // Reducerad från 0.05/nivå till 0.02/nivå så djupa content-noder inte nollställs
+        let depth_penalty = (depth as f32 * 0.02).min(0.15);
+
+        // 4. Label-längd heuristik — penalisera aggregerade wrapper-labels
+        // Wrappers har labels >300 tecken (sammansatt av alla barns text)
+        // Atomära content-noder har labels 20-300 tecken
+        let label_penalty = if label.len() > 500 {
+            0.15 // Kraftig wrapper — sannolikt aggregerad
+        } else if label.len() > 300 {
+            0.08
+        } else {
+            0.0
+        };
+
+        // 5. Roll-baserad penalty — nav, skip-links, cookie-banners
+        let nav_penalty = score_nav_penalty(role, label);
 
         // Viktat medelvärde
-        let raw = (text_score * 0.5) + (role_score * 0.4) - depth_penalty;
+        let raw =
+            (text_score * 0.55) + (role_score * 0.35) - depth_penalty - label_penalty - nav_penalty;
 
         // Klipp till [0.0, 1.0]
         raw.clamp(0.0, 1.0)
     }
+}
+
+/// Penalisera navigations-artefakter, skip-links och cookie-banners
+pub(crate) fn score_nav_penalty(role: &str, label: &str) -> f32 {
+    let label_lower = label.to_ascii_lowercase();
+
+    // Skip-links (svenska + engelska)
+    if label_lower.starts_with("gå till")
+        || label_lower.starts_with("gå direkt")
+        || label_lower.starts_with("skip to")
+        || label_lower.starts_with("jump to")
+    {
+        return 0.25;
+    }
+
+    // Cookie-consent
+    if (role == "button" || role == "cta")
+        && (label_lower.contains("cookie")
+            || label_lower.contains("jag förstår")
+            || label_lower.contains("i understand")
+            || label_lower.contains("accept all")
+            || label_lower.contains("godkänn"))
+    {
+        return 0.20;
+    }
+
+    // Meny/hamburger-knappar
+    if (role == "button" || role == "cta")
+        && (label_lower == "meny" || label_lower == "menu" || label_lower == "☰")
+    {
+        return 0.15;
+    }
+
+    0.0
 }
 
 /// Kollapsa enkelbarns strukturella wrapprar
