@@ -83,7 +83,7 @@ impl Hypervector {
     }
 
     /// Majority-vote bundle: given a list of HVs, set each bit to the majority value.
-    /// Ties (50/50) resolved by keeping bit from `self`.
+    /// Optimerad: specialfall för 2-3 HV:er (vanligast), generell fallback för fler.
     pub fn bundle(hvs: &[&Hypervector]) -> Hypervector {
         if hvs.is_empty() {
             return Hypervector::zero();
@@ -92,23 +92,42 @@ impl Hypervector {
             return hvs[0].clone();
         }
 
-        let threshold = hvs.len() / 2;
         let mut result = [0u64; WORDS];
-        for bit_idx in 0..HDC_DIM {
-            let word_idx = bit_idx / 64;
-            let bit_pos = bit_idx % 64;
-            let mask = 1u64 << bit_pos;
 
-            let ones: usize = hvs
-                .iter()
-                .filter(|hv| hv.bits[word_idx] & mask != 0)
-                .count();
-
-            if ones > threshold {
-                result[word_idx] |= mask;
+        match hvs.len() {
+            2 => {
+                // 2 HV: majority = AND (båda måste ha biten satt)
+                for i in 0..WORDS {
+                    result[i] = hvs[0].bits[i] & hvs[1].bits[i];
+                }
             }
-            // vid exakt threshold: bit = 0 (default)
+            3 => {
+                // 3 HV: majority = (a&b)|(a&c)|(b&c) — word-level, ingen bit-loop
+                for i in 0..WORDS {
+                    let (a, b, c) = (hvs[0].bits[i], hvs[1].bits[i], hvs[2].bits[i]);
+                    result[i] = (a & b) | (a & c) | (b & c);
+                }
+            }
+            _ => {
+                // Generell: räkna ettor per bit
+                let threshold = hvs.len() / 2;
+                for bit_idx in 0..HDC_DIM {
+                    let word_idx = bit_idx / 64;
+                    let bit_pos = bit_idx % 64;
+                    let mask = 1u64 << bit_pos;
+
+                    let ones: usize = hvs
+                        .iter()
+                        .filter(|hv| hv.bits[word_idx] & mask != 0)
+                        .count();
+
+                    if ones > threshold {
+                        result[word_idx] |= mask;
+                    }
+                }
+            }
         }
+
         Hypervector { bits: result }
     }
 

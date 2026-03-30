@@ -139,6 +139,10 @@ path = "benches/bench_quality.rs"
 required-features = ["embeddings"]
 
 [[bin]]
+name = "aether-hybrid-bench"
+path = "benches/bench_hybrid_pipeline.rs"
+
+[[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
 required-features = ["js-eval", "blitz", "fetch"]
