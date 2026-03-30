@@ -66,7 +66,8 @@ pub(crate) fn register_htmllielement<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

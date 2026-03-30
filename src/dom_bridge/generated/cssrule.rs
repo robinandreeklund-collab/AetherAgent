@@ -110,7 +110,8 @@ pub(crate) fn register_cssrule<'js>(
         Accessor::new_get(JsFn(CSSRuleGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "cssText",
@@ -123,21 +124,24 @@ pub(crate) fn register_cssrule<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "parentRule",
         Accessor::new_get(JsFn(CSSRuleGetParentRule {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "parentStyleSheet",
         Accessor::new_get(JsFn(CSSRuleGetParentStyleSheet {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

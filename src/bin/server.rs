@@ -878,6 +878,12 @@ async fn parse_top(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn parse_extract_handler(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
+    let max_items = if req.top_n > 0 { req.top_n } else { 20 };
+    let result = aether_agent::parse_extract(&req.html, &req.goal, &req.url, max_items);
+    (StatusCode::OK, result)
+}
+
 async fn click(Json(req): Json<ClickRequest>) -> impl IntoResponse {
     let result = aether_agent::find_and_click(&req.html, &req.goal, &req.url, &req.target_label);
     (StatusCode::OK, result)
@@ -1120,12 +1126,11 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     };
     let fetch_ms = fetch_result.fetch_time_ms;
 
+    // Adaptiv parse: väljer automatiskt rätt pipeline-tier
+    // Tier 0 (Hydration) → Tier 1 (Static) → Tier 2 (QuickJS+DOM) → fallback
     let parse_start = std::time::Instant::now();
-    let tree_json = aether_agent::parse_to_semantic_tree(
-        &fetch_result.body,
-        &req.goal,
-        &fetch_result.final_url,
-    );
+    let adaptive_json =
+        aether_agent::parse_adaptive(&fetch_result.body, &req.goal, &fetch_result.final_url);
     let parse_ms = parse_start.elapsed().as_millis() as u64;
 
     // Fas C.13: Inline XHR-URLs i svaret (om de finns i HTML:en)
@@ -1139,10 +1144,14 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         fetch_result.body_size_bytes / 1024
     ));
 
-    // Fas C.12: Per-steg timing i svaret
+    // Extrahera tree och tier_used från adaptive-resultatet
+    let adaptive_value: serde_json::Value =
+        serde_json::from_str(&adaptive_json).unwrap_or_default();
+
     let mut result_value = serde_json::json!({
         "fetch": fetch_result,
-        "tree": serde_json::from_str::<serde_json::Value>(&tree_json).unwrap_or_default(),
+        "tree": adaptive_value.get("tree").cloned().unwrap_or_default(),
+        "tier_used": adaptive_value.get("tier_used").cloned().unwrap_or_default(),
         "total_time_ms": total_time_ms,
         "timing": {
             "fetch_ms": fetch_ms,
@@ -1161,6 +1170,33 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         StatusCode::OK,
         serde_json::to_string(&result_value).unwrap_or_default(),
     )
+}
+
+// ─── Extract endpoint (compact, ranked, deduped) ───────────────────────────
+
+async fn fetch_extract_smart(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
+    let config = req.config.unwrap_or_default();
+
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let result =
+        aether_agent::parse_extract(&fetch_result.body, &req.goal, &fetch_result.final_url, 20);
+    (StatusCode::OK, result)
 }
 
 // ─── Markdown endpoints ──────────────────────────────────────────────────────
@@ -4880,6 +4916,8 @@ fn build_router(state: AppState) -> Router {
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
+        .route("/api/extract-smart", post(parse_extract_handler))
+        .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))
         .route("/api/wrap-untrusted", post(wrap_untrusted))
         // Fas 4a: Semantic diff
@@ -5199,6 +5237,43 @@ async fn main() {
     };
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
+
+    // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+    #[cfg(feature = "embeddings")]
+    {
+        if let (Ok(model_path), Ok(vocab_path)) = (
+            std::env::var("AETHER_EMBEDDING_MODEL"),
+            std::env::var("AETHER_EMBEDDING_VOCAB"),
+        ) {
+            match (
+                std::fs::read(&model_path),
+                std::fs::read_to_string(&vocab_path),
+            ) {
+                (Ok(model_bytes), Ok(vocab_text)) => {
+                    eprintln!(
+                        "[Embedding] Laddar modell: {} ({:.1} MB) + vocab: {}",
+                        model_path,
+                        model_bytes.len() as f64 / 1_048_576.0,
+                        vocab_path
+                    );
+                    match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
+                        Ok(()) => eprintln!("[Embedding] Modell redo"),
+                        Err(e) => eprintln!("[Embedding] WARN: Kunde inte ladda: {e}"),
+                    }
+                }
+                (Err(e), _) => eprintln!(
+                    "[Embedding] WARN: Kan inte läsa modell '{}': {e}",
+                    model_path
+                ),
+                (_, Err(e)) => eprintln!(
+                    "[Embedding] WARN: Kan inte läsa vocab '{}': {e}",
+                    vocab_path
+                ),
+            }
+        } else {
+            eprintln!("[Embedding] Ingen embedding-modell konfigurerad (AETHER_EMBEDDING_MODEL/AETHER_EMBEDDING_VOCAB ej satta)");
+        }
+    }
 
     log_rss("7. before router build");
     // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)

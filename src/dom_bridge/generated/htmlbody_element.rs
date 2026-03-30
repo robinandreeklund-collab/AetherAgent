@@ -245,7 +245,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "link",
@@ -258,7 +259,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "vLink",
@@ -271,7 +273,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "aLink",
@@ -284,7 +287,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "bgColor",
@@ -297,7 +301,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "background",
@@ -310,7 +315,8 @@ pub(crate) fn register_htmlbody_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

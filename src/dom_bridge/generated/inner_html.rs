@@ -65,7 +65,8 @@ pub(crate) fn register_inner_html<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

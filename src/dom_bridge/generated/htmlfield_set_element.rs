@@ -160,7 +160,8 @@ pub(crate) fn register_htmlfield_set_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -173,14 +174,16 @@ pub(crate) fn register_htmlfield_set_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
         Accessor::new_get(JsFn(HTMLFieldSetElementGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",

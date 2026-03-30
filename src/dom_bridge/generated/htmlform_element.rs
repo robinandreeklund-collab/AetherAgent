@@ -378,9 +378,9 @@ pub(crate) struct HTMLFormElementCheckValidity {
     pub(crate) key: NodeKey,
 }
 impl JsHandler for HTMLFormElementCheckValidity {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = super::super::computed::check_validity(&s, self.key);
+        let val = super::super::computed::form_check_validity(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -390,9 +390,9 @@ pub(crate) struct HTMLFormElementReportValidity {
     pub(crate) key: NodeKey,
 }
 impl JsHandler for HTMLFormElementReportValidity {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let s = self.state.borrow();
-        let val = super::super::computed::check_validity(&s, self.key);
+        let val = super::super::computed::form_check_validity(&s, self.key);
         Ok(Value::new_bool(ctx.clone(), val))
     }
 }
@@ -419,7 +419,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "action",
@@ -432,7 +433,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "autocomplete",
@@ -445,7 +447,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "encoding",
@@ -458,7 +461,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "enctype",
@@ -471,7 +475,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "method",
@@ -484,7 +489,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -497,7 +503,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "noValidate",
@@ -510,7 +517,8 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "target",
@@ -523,14 +531,16 @@ pub(crate) fn register_htmlform_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "length",
         Accessor::new_get(JsFn(HTMLFormElementGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "submit",

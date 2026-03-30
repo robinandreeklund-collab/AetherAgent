@@ -444,7 +444,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formAction",
@@ -457,7 +458,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formEnctype",
@@ -470,7 +472,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formMethod",
@@ -483,7 +486,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formNoValidate",
@@ -496,7 +500,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "formTarget",
@@ -509,7 +514,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -522,7 +528,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
@@ -535,7 +542,8 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -548,28 +556,32 @@ pub(crate) fn register_htmlbutton_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "willValidate",
         Accessor::new_get(JsFn(HTMLButtonElementGetWillValidate {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "validationMessage",
         Accessor::new_get(JsFn(HTMLButtonElementGetValidationMessage {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "labels",
         Accessor::new_get(JsFn(HTMLButtonElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",

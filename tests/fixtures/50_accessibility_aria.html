@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Accessible App – Profile Settings</title></head>
+<body>
+  <header>
+    <nav role="navigation" aria-label="Main navigation">
+      <a href="/" aria-label="Go to homepage">Home</a>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/settings" aria-current="page">Settings</a>
+    </nav>
+  </header>
+  <main role="main">
+    <h1>Profile Settings</h1>
+    <form role="form" aria-label="Profile settings form">
+      <div role="group" aria-labelledby="personal-info">
+        <h2 id="personal-info">Personal Information</h2>
+        <label for="fullname">Full name</label>
+        <input type="text" id="fullname" value="Jane Doe" aria-required="true" />
+        <label for="email">Email address</label>
+        <input type="email" id="email" value="jane@example.com" aria-required="true" />
+        <label for="bio">Bio</label>
+        <textarea id="bio" aria-describedby="bio-hint">Software engineer and open source contributor.</textarea>
+        <p id="bio-hint">Maximum 200 characters.</p>
+      </div>
+      <div role="group" aria-labelledby="preferences">
+        <h2 id="preferences">Preferences</h2>
+        <label for="theme">Theme</label>
+        <select id="theme">
+          <option>Light</option>
+          <option>Dark</option>
+          <option>System default</option>
+        </select>
+        <label for="lang">Language</label>
+        <select id="lang">
+          <option>English</option>
+          <option>Swedish</option>
+          <option>Spanish</option>
+        </select>
+      </div>
+      <div role="group" aria-labelledby="actions">
+        <h2 id="actions">Actions</h2>
+        <button type="submit" aria-label="Save profile settings">Save changes</button>
+        <button type="button" aria-label="Discard changes and reset form">Reset</button>
+        <button type="button" aria-label="Delete your account permanently" class="danger">Delete account</button>
+      </div>
+    </form>
+  </main>
+  <footer role="contentinfo">
+    <a href="/help">Help</a>
+    <a href="/accessibility-statement">Accessibility Statement</a>
+  </footer>
+</body>
+</html>

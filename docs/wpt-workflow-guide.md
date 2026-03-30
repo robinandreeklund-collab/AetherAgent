@@ -18,6 +18,166 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 
 ---
 
+## Arkitektur: Hur DOM-implementation fungerar
+
+### Pipeline: WebIDL → Codegen → Rust Handlers → JS Bridge
+
+```
+webidl/*.webidl          WebIDL interface-definitioner (HTML spec)
+       ↓
+codegen/src/             Rust-baserat code generator
+  ├── webidl_parser.rs   Parsar WebIDL-filer
+  ├── attr_classify.rs   Klassificerar: REFLECTED / STATE-BACKED / COMPUTED
+  ├── type_map.rs        WebIDL → Rust typ-mappning
+  └── rust_gen.rs        Genererar JsHandler structs
+       ↓
+src/dom_bridge/generated/  Auto-genererade property accessors (växer med varje codegen-körning)
+  ├── register.rs          Master-registrering per tag-namn
+  ├── htmlinput_element.rs En fil per WebIDL interface
+  └── ...                  (antal filer = antal interfaces i webidl/*.webidl)
+       ↓
+src/dom_bridge/dom_impls/  Manuellt portad beteendelogik (från jsdom)
+  ├── constraint_validation.rs  ValidityState + checkValidity
+  ├── input_value.rs            Value modes, dirty state, sanitization
+  ├── form_association.rs       form.elements, form owner
+  ├── select_element.rs         selectedIndex, options
+  └── xml_serializer.rs         innerHTML/outerHTML
+       ↓
+src/dom_bridge/mod.rs      Orkestrering: make_element_object() binder allt
+```
+
+### Tre lager av DOM-implementation
+
+**Lager 1: Codegen (auto-genererat)**
+- Parsar `.webidl`-filer med `webidl-rs`
+- Genererar getter/setter för varje HTML-attribut
+- Antal filer/rader växer automatiskt när nya `.webidl`-interfaces läggs till
+- Kör med: `cd codegen && cargo run`
+
+**Lager 2: dom_impls (manuellt portat)**
+- Beteendelogik som INTE kan auto-genereras
+- Portad från jsdom MIT-licensierade `-impl`-filer
+- Constraint validation, input value modes, form association
+
+**Lager 3: Computed properties**
+- `computed.rs` — beräknade properties (willValidate, labels, URL-decomposition)
+- Anropas av genererad kod via `super::super::computed::funktionsnamn`
+
+---
+
+## Arbetsflöde: Implementera ny DOM-funktionalitet
+
+### Metod 1: Codegen + dom_impls (för HTML element properties)
+
+**Steg 1: Skapa WebIDL-fil**
+
+```webidl
+// webidl/html_input.webidl
+interface HTMLInputElement : HTMLElement {
+    attribute DOMString accept;
+    attribute DOMString value;
+    readonly attribute ValidityState validity;
+};
+```
+
+**Steg 2: Kör codegen**
+
+```bash
+cd codegen && cargo run
+# Genererar: src/dom_bridge/generated/htmlinput_element.rs
+```
+
+**Steg 3: Klassificera attribut**
+
+I `codegen/src/attr_classify.rs`:
+```rust
+("HTMLInputElement", "accept") => Reflected,     // Direkt HTML-attribut
+("HTMLInputElement", "value") => StateBacked,     // ElementState
+("HTMLInputElement", "validity") => Computed("create_validity_state"),
+```
+
+**Steg 4: Implementera beteendelogik**
+
+I `src/dom_bridge/dom_impls/` — porta från jsdom:
+
+```rust
+// constraint_validation.rs
+pub fn compute_validity(state: &BridgeState, key: NodeKey) -> ValidityState {
+    // Riktig beteendelogik portad från jsdom
+}
+```
+
+**Steg 5: Registrera i dom_bridge**
+
+I `register_dom_impl_properties()` i `mod.rs`:
+```rust
+if tag == "input" {
+    obj.prop("validity", Accessor::new_get(JsFn(ValidityStateGetter { ... })).configurable())?;
+}
+```
+
+### Metod 2: Direkt Rust-implementation (för DOM Core APIs)
+
+**Steg 1: Identifiera saknad API**
+
+```bash
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/ --verbose 2>&1 | grep "^   -"
+```
+
+**Steg 2: Implementera i rätt modul**
+
+| API-typ | Fil |
+|---------|-----|
+| Node-metoder (appendChild, cloneNode) | `node_ops.rs` |
+| Event dispatch, listeners | `events.rs` |
+| Element attributes | `attributes.rs` |
+| CSS selectors | `selectors.rs` |
+| CharacterData (substringData etc.) | `chardata.rs` |
+| Window/Document/Console | `window.rs` |
+| Form validation/behavior | `dom_impls/` |
+
+**Steg 3: Registrera som JsHandler**
+
+```rust
+struct MyNewHandler { state: SharedState, key: NodeKey }
+impl JsHandler for MyNewHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        // Implementation
+    }
+}
+// Registrera i make_element_object() eller register_document()
+obj.set("myMethod", Function::new(ctx.clone(), JsFn(MyNewHandler { ... }))?)?;
+```
+
+### Metod 3: Porta från jsdom (för komplex beteendelogik)
+
+jsdom (MIT-licens) har `-impl`-filer med exakt den beteendelogik vi behöver.
+
+**Process:**
+1. Hitta jsdom-filen: `lib/jsdom/living/nodes/HTMLInputElement-impl.js`
+2. Identifiera algoritmen (t.ex. value mode-logik, radio group unchecking)
+3. Skriv om i Rust med AetherAgent's API:er:
+   - `BridgeState` istället för jsdom's `this`
+   - `NodeKey` istället för node-referens
+   - `arena.nodes.get(key)` istället för DOM traversal
+
+**Exempel — Input Value Modes (portad från jsdom):**
+
+```rust
+// jsdom: HTMLInputElement-impl.js getValueMode()
+// → Rust: dom_impls/input_value.rs
+pub fn get_value_mode(input_type: &str) -> &'static str {
+    match input_type {
+        "hidden" | "submit" | "image" | "reset" | "button" => "default",
+        "checkbox" | "radio" => "default/on",
+        "file" => "filename",
+        _ => "value",
+    }
+}
+```
+
+---
+
 ## Arbetsflöde: Förbättra WPT-score
 
 ### Steg 1: Välj fokusområde
@@ -32,20 +192,17 @@ Titta i `docs/wpt-dashboard.md` och välj den subkategori som ger störst impact
 ### Steg 2: Kör baseline
 
 ```bash
-# Spara baseline INNAN du gör ändringar
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json > /tmp/wpt-before.json
-
-# Eller anteckna summary-raden:
-# dom/nodes: 1234/1500 passed (82.3%)
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ 2>&1 | grep "Passed:"
 ```
 
 ### Steg 3: Analysera failures
 
 ```bash
-# Kör med --verbose för att se varje enskilt testcase
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose 2>&1 | grep "FAIL"
+# Top failure-mönster
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose 2>&1 \
+  | grep "^   -" | sed 's/: .*//' | sort | uniq -c | sort -rn | head -20
 
-# Kör specifik fil som failar
+# Specifik fil
 cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Node-cloneNode.html --verbose
 ```
 
@@ -53,130 +210,124 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 
 | Mönster | Orsak | Lösning |
 |---------|-------|---------|
-| `TypeError: X is not a function` | API saknas | Implementera i dom_bridge/ eller polyfills.js |
-| `X is undefined` | Property saknas | Lägg till getter i dom_bridge/ |
-| `assert_equals: got null expected "..."` | Returnerar fel värde | Fixa logik i Rust-implementation |
-| `assert_throws_dom` | DOMException saknas | Lägg till felhantering |
-| `TIMEOUT` | Oändlig loop eller för långsam | Optimera eller öka timeout |
+| `TypeError: X is not a function` | API saknas | Implementera i dom_bridge/ |
+| `X is undefined` | Property saknas | Lägg till getter i make_element_object() |
+| `assert_equals: got null expected "..."` | Returnerar fel värde | Fixa logik i dom_impls/ |
+| `property is not configurable` | Accessor saknar .configurable() | Lägg till i generated code |
+| `no test suite completion` | Kräver iframe/external resource | Ej fixbar utan iframe-stöd |
+| `ReferenceError: X is not defined` | QuickJS strict mode | Variabel saknar var/let deklaration |
 
 ### Steg 4: Implementera fix
-
-**Beslutsträd: Polyfill eller Native?**
-
-```
-Är API:et enkelt och fristående?
-├── JA → Implementera direkt i Rust (dom_bridge.rs)
-│         Exempel: prepend(), append(), replaceChildren()
-│
-└── NEJ, komplext med många edge cases?
-    ├── Finns redan i polyfills.js?
-    │   ├── JA → Fixa i polyfills.js, planera Rust-migration
-    │   └── NEJ → Lägg till polyfill TEMPORÄRT, skapa migrations-task
-    │
-    └── Är det en helt ny API-yta?
-        └── Implementera i Rust från start (native first)
-```
 
 **Var implementerar du?**
 
 | Fil | Vad |
 |-----|-----|
-| `src/dom_bridge/mod.rs` | Core DOM bridge — entry points, make_element_object, register_document |
-| `src/dom_bridge/attributes.rs` | Attribute get/set/remove/NS variants |
-| `src/dom_bridge/events.rs` | Event listener add/remove/dispatch/click/focus |
-| `src/dom_bridge/node_ops.rs` | Node tree manipulation (appendChild/removeChild/insertBefore/cloneNode) |
-| `src/dom_bridge/style.rs` | classList + inline style property handling |
-| `src/dom_bridge/window.rs` | Window, Console, Storage, DOMException registration |
-| `src/dom_bridge/selectors.rs` | CSS selector matching engine |
-| `src/dom_bridge/chardata.rs` | CharacterData methods (substring/append/insert/delete) |
-| `src/dom_bridge/state.rs` | Shared types (BridgeState, SharedState, DomEvalResult) |
-| `src/dom_bridge/utils.rs` | Utility functions (base64, URL, layout, media) |
-| `src/arena_dom.rs` | ArenaDom — underliggande DOM-datastruktur och operationer |
-| `src/event_loop.rs` | Event loop — setTimeout, rAF, MutationObserver |
-| `src/js_eval.rs` | JS sandbox — eval, säkerhetsfilter |
-| `wpt/polyfills.js` | Temporära JS-polyfills (MIGRERA TILL RUST) |
+| `src/dom_bridge/mod.rs` | Core: make_element_object, register_document, register_dom_impl_properties |
+| `src/dom_bridge/dom_impls/` | Beteendelogik: validation, input values, form association |
+| `src/dom_bridge/generated/` | Auto-genererat (redigera INTE manuellt, kör codegen istället) |
+| `src/dom_bridge/computed.rs` | Beräknade properties (willValidate, labels, URL-decomposition) |
+| `src/dom_bridge/events.rs` | Event dispatch, addEventListener, removeEventListener |
+| `src/dom_bridge/node_ops.rs` | appendChild, removeChild, insertBefore, cloneNode |
+| `src/dom_bridge/window.rs` | Event constructors, DOM type hierarchy, NodeFilter |
+| `src/dom_bridge/chardata.rs` | CharacterData methods (native Rust, UTF-16 aware) |
+| `src/dom_bridge/element_state.rs` | Per-element mutable state (value, checked, dirty flags) |
 
-### Steg 5: Verifiera förbättring
+### Steg 5: Verifiera + Regressionskontroll
 
 ```bash
-# Kör samma suite igen
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json > /tmp/wpt-after.json
-
-# Jämför
-echo "Before: $(cat /tmp/wpt-before.json | grep passed)"
-echo "After:  $(cat /tmp/wpt-after.json | grep passed)"
-```
-
-### Steg 6: Kör regressionskontroll
-
-```bash
-# Kör ALLA Tier 1 tester — ingen regression tillåten
+# Suite du jobbade med
 cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/events/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ranges/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/traversal/
 
-# Plus standard CI
-cargo test && cargo clippy -- -D warnings && cargo fmt --check
+# Regressionskontroll — Tier 1 (alla MÅSTE passa)
+for s in dom/nodes dom/events dom/traversal dom/collections; do
+  echo "=== $s ==="
+  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/$s/ 2>&1 | grep "Passed:"
+done
+
+# Standard CI
+cargo test --features js-eval,blitz,fetch --lib && cargo clippy --features js-eval,blitz,fetch -- -D warnings && cargo fmt --check
 ```
 
-### Steg 7: Uppdatera dokumentation
+### Steg 6: Uppdatera dokumentation + Commit
 
 1. Uppdatera `docs/wpt-dashboard.md` med nya scores
-2. Om polyfill → Rust migration: uppdatera `docs/dom-implementation-status.md`
-3. Commit-meddelande format:
+2. Commit-meddelande format:
 
 ```
-feat: implement prepend/append/replaceChildren native
+feat: implement input value sanitization (color, text, number, date)
 
 WPT Results:
-- dom/nodes: 1234/1500 (82.3%) → 1290/1500 (86.0%)
-- Nya pass: Node-appendChild, ParentNode-prepend, ParentNode-append
-- Regression: inga
+- html/semantics/forms/the-input-element: 8→504 (+496)
+- color.html: 1→18, text.html: 12→14, range.html: 11→22
 ```
 
 ---
 
-## Arbetsflöde: Migrera Polyfill → Rust
+## Arbetsflöde: Migrera Polyfill → Rust Native
 
-### Steg 1: Identifiera polyfill
+### Princip: Allt ska vara native Rust
 
-Läs `wpt/polyfills.js` och hitta den polyfill du vill migrera.
-Notera exakt vilka metoder/properties den implementerar.
+Polyfills i `wpt/polyfills.js` är TEMPORÄRA. Varje polyfill ska migreras till Rust.
 
-### Steg 2: Kör baseline med polyfill aktiv
+### Säker migrationsprocess
 
-```bash
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose > /tmp/baseline-with-polyfill.txt
-```
-
-### Steg 3: Implementera i Rust
-
-Lägg till implementation i `src/dom_bridge/` (relevant submodul):
-
-```rust
-// I register_element_methods() eller liknande
-// Implementera metoden som en QuickJS-funktion
-```
-
-### Steg 4: Ta bort polyfill
-
-Ta bort motsvarande kod i `wpt/polyfills.js`.
-
-### Steg 5: Verifiera — score får INTE gå ner
+**Steg 1: Verifiera att Rust redan implementerar funktionen**
 
 ```bash
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose > /tmp/after-migration.txt
-
-# Jämför pass-counts
-diff <(grep "passed" /tmp/baseline-with-polyfill.txt) <(grep "passed" /tmp/after-migration.txt)
+# Kolla om API:et redan finns i dom_bridge
+grep -rn "ownerDocument\|createEvent\|textContent" src/dom_bridge/
 ```
 
-### Steg 6: Uppdatera docs
+**Steg 2: Ta bort polyfill**
 
-I `docs/dom-implementation-status.md`:
-- Flytta API:et från "Polyfill" till "Native"
-- Lägg till migrationsdatum
+Ersätt med kommentar:
+```js
+// ─── document.createEvent() — MIGRERAD till native Rust (dom_bridge/mod.rs) ──
+// Registrerad som NativeCreateEvent i register_document().
+```
+
+**Steg 3: Verifiera — score får INTE gå ner**
+
+```bash
+# Kör INNAN (med polyfill)
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ 2>&1 | grep "Passed:"
+# Ta bort polyfill, kör EFTER
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ 2>&1 | grep "Passed:"
+# Vid regression: revert med git checkout
+```
+
+### Migrerade polyfills (2026-03-29)
+
+| Polyfill | Rader | Rust-ersättning |
+|----------|-------|-----------------|
+| CharacterData .data/.nodeValue/.length | 40 | Rust getter/setter i make_element_object() |
+| document.createEvent | 70 | NativeCreateEvent handler |
+| document.title | 20 | DocTitleGetter/DocTitleSetter |
+| document.URL/location | 24 | Statisk i register_document() |
+| ownerDocument patching | 80 | OwnerDocumentGetter (lazy) — wrapper borttagen Session 4 |
+| NodeFilter constants | 16 | window.rs JS eval |
+| createElementNS fallback | 19 | Native CreateElementNS |
+| getElementsByTagNameNS | 9 | Native GetElementsByTagNameNSDoc |
+| createAttribute fallback | 14 | Native CreateAttribute |
+| compareDocumentPosition | 9 | Native i register_window |
+| TouchEvent (simpleTypes) | 3 | Native Touch/TouchEvent/TouchList i window.rs — Session 4 |
+| id/className polyfill | 15 | Native AttrGetter/AttrSetter i make_element_object() — Session 4 |
+| prefix/namespaceURI/localName | 8 | Native i make_element_object() — Session 4 |
+
+### Kvar i polyfills.js (med motivering)
+
+| Polyfill | Rader | Varför kvar |
+|----------|-------|-------------|
+| createHTMLDocument | 150 | Kräver ALLA document-metoder i Rust (inkl. XPath-patching) |
+| __patchPrototype | 176 | Behövs för `instanceof HTMLDivElement` |
+| NamedNodeMap .attributes | 130 | Behöver Proxy-baserad Rust-implementation |
+| Window-globalThis sync | 34 | JS Proxy, svårt i Rust |
+| Event simple subclasses | 20 | Trivial overhead (AnimationEvent, ProgressEvent etc.) |
+| NS-metadata tracking | 30 | setAttributeNS prefix/namespace tracking |
+| Document/XMLDocument constructor | 20 | new Document() delegerar till createHTMLDocument |
+| __patchChildNode wrapper | 50 | Prototyp-patching + getAttributeNodeNS |
+| NodeList/HTMLCollection stubs | 10 | Utility-typer |
 
 ---
 
@@ -184,14 +335,14 @@ I `docs/dom-implementation-status.md`:
 
 ```
 □ Baseline WPT-score noterad (before)
-□ Ändringar implementerade
+□ Ändringar implementerade (native Rust, ej polyfill)
 □ WPT-score efter (after) — ingen regression
-□ cargo test PASS
-□ cargo clippy -- -D warnings PASS
+□ cargo test --features js-eval,blitz,fetch --lib PASS
+□ cargo clippy --features js-eval,blitz,fetch -- -D warnings PASS
 □ cargo fmt --check PASS
 □ docs/wpt-dashboard.md uppdaterad
-□ docs/dom-implementation-status.md uppdaterad (om migration)
 □ Commit-meddelande innehåller WPT before/after
+□ Generated code: alla Accessor properties har .configurable()
 ```
 
 ---
@@ -203,66 +354,39 @@ I `docs/dom-implementation-status.md`:
 ./wpt/setup.sh                    # Ladda ner WPT-tester
 
 # === KÖR TESTER ===
-# Hel svit
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/           # Hel svit
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose  # Med detaljer
+cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Node-cloneNode.html --verbose  # Specifik fil
 
-# Subkategori
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/
-
-# Specifik fil
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/Node-cloneNode.html
-
-# Med verbose (varje testcase)
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --verbose
-
-# JSON-output
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes/ --json
-
-# Filtrering
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/ --filter querySelector
-
-# === ALLA SVITER ===
-for suite in dom/nodes dom/events dom/ranges dom/traversal dom/collections \
-             dom/abort dom/lists domparsing html/syntax html/dom \
-             css/selectors css/cssom encoding webstorage xhr hr-time console url; do
-  echo "=== $suite ==="
-  cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/$suite/
-done
+# === CODEGEN ===
+cd codegen && cargo run            # Regenerera från webidl/*.webidl
 
 # === CI PIPELINE ===
-cargo test && cargo clippy -- -D warnings && cargo fmt --check
+cargo test --features js-eval,blitz,fetch --lib && cargo clippy --features js-eval,blitz,fetch -- -D warnings && cargo fmt --check
+
+# === ALLA SVITER ===
+for s in dom/nodes dom/events dom/ranges dom/traversal dom/collections dom/lists domparsing html/semantics css/selectors; do
+  echo "=== $s ===" && cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/$s/ 2>&1 | grep "Passed:"
+done
 ```
 
 ---
 
 ## Felsökning
 
-### "Stack overflow" vid stor svit
+### "no test suite completion" (vanligaste felet)
 
-Kör subkategorier istället för hela sviten:
-```bash
-# Istället för: wpt-suite/html/dom/  (stack overflow)
-# Kör:
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/dom/elements/
-cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/html/dom/documents/
-```
+**Orsak:** Testet kräver iframes, external resources, eller DOMContentLoaded-event.
+**Status:** ~2100 tester blockerade. Fixas inte av harness-ändringar.
+**Workaround:** Fokusera på tester som KÖR men failar (mer impact).
 
-### "TIMEOUT" på specifik fil
+### "property is not configurable"
 
-Filen har tester som kräver async-operationer som tar för lång tid.
-- Kontrollera om testet kräver nätverks-access (inte stött)
-- Kontrollera om testet har infinite loop
-- Öka timeout i runner om motiverat
-
-### Noll testcases detekterade
-
-- Kontrollera att filen har `<script src="/resources/testharness.js">`
-- Kontrollera att polyfills.js laddas korrekt
-- Kör med `--verbose` för att se eventuella JS-fel
+**Orsak:** Generated Accessor saknar `.configurable()`.
+**Fix:** Kör codegen med uppdaterad `rust_gen.rs`, eller fixa manuellt.
 
 ### Score gick ner efter ändring
 
-1. Kör `git diff` för att se vad som ändrades
-2. Kör den specifika failande filen med `--verbose`
-3. Jämför output med baseline
-4. Fixa regression INNAN du commitar (Bug Policy i CLAUDE.md)
+1. `git stash` → kör WPT → bekräfta att stashed code har rätt score
+2. `git stash pop` → kör specifik failande fil med `--verbose`
+3. Fixa regression INNAN commit (Bug Policy i CLAUDE.md)

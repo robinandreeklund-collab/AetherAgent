@@ -65,7 +65,8 @@ pub(crate) fn register_htmlmap_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

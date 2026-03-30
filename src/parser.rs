@@ -1,10 +1,26 @@
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
+#[cfg(feature = "js-eval")]
+use html5ever::{parse_fragment, QualName};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 /// Parsar HTML-sträng till ett rcdom-träd
 pub fn parse_html(html: &str) -> RcDom {
     parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .read_from(&mut html.as_bytes())
+        .unwrap_or_else(|_| RcDom::default())
+}
+
+/// Parsar HTML-fragment (för innerHTML) — returnerar en lista av child-noder utan <html>/<head>/<body>-wrapper
+#[cfg(feature = "js-eval")]
+pub fn parse_html_fragment(html: &str, context_tag: &str) -> RcDom {
+    let context = QualName::new(
+        None,
+        html5ever::ns!(html),
+        html5ever::LocalName::from(context_tag),
+    );
+    parse_fragment(RcDom::default(), Default::default(), context, vec![], false)
         .from_utf8()
         .read_from(&mut html.as_bytes())
         .unwrap_or_else(|_| RcDom::default())

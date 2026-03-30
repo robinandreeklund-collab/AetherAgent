@@ -1,0 +1,52 @@
+[
+  {
+    "site": "apple.com",
+    "goal": "find iPhone price",
+    "html_tokens": 58985,
+    "lp_html_tokens": 32,
+    "lp_st_tokens": 252,
+    "lp_nodes": 7,
+    "gross_ms": 178.34693200006768,
+    "net_ms": 0
+  },
+  {
+    "site": "Hacker News",
+    "goal": "find latest news articles",
+    "html_tokens": 8669,
+    "lp_html_tokens": 32,
+    "lp_st_tokens": 252,
+    "lp_nodes": 7,
+    "gross_ms": 187.54671000010603,
+    "net_ms": 0
+  },
+  {
+    "site": "books.toscrape",
+    "goal": "find book titles and prices",
+    "html_tokens": 12818,
+    "lp_html_tokens": 32,
+    "lp_st_tokens": 252,
+    "lp_nodes": 7,
+    "gross_ms": 187.66402000005655,
+    "net_ms": 0
+  },
+  {
+    "site": "lobste.rs",
+    "goal": "find technology articles",
+    "html_tokens": 15408,
+    "lp_html_tokens": 32,
+    "lp_st_tokens": 252,
+    "lp_nodes": 7,
+    "gross_ms": 185.71465799982434,
+    "net_ms": 0
+  },
+  {
+    "site": "rust-lang.org",
+    "goal": "download and install Rust",
+    "html_tokens": 4614,
+    "lp_html_tokens": 32,
+    "lp_st_tokens": 252,
+    "lp_nodes": 7,
+    "gross_ms": 183.5043979999682,
+    "net_ms": 0
+  }
+]

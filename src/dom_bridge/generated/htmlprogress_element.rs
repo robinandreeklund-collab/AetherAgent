@@ -132,7 +132,8 @@ pub(crate) fn register_htmlprogress_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "max",
@@ -145,21 +146,24 @@ pub(crate) fn register_htmlprogress_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "position",
         Accessor::new_get(JsFn(HTMLProgressElementGetPosition {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "labels",
         Accessor::new_get(JsFn(HTMLProgressElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

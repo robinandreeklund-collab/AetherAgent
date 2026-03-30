@@ -13,6 +13,7 @@ pub mod css_compiler;
 mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
+pub mod embedding;
 mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;
@@ -398,15 +399,19 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     let mut tree = build_tree(html, goal, url);
     tree.parse_time_ms = now_ms() - start;
 
-    // Samla alla noder platt och sortera
+    // Samla alla noder platt och sortera efter relevans
     let mut all_nodes = collect_all_nodes(&tree.nodes);
     all_nodes.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    // Ta topp-N
+    // Ta topp-N — strippa children för att bara returnera själva noden (inte hela subtree)
     let top: Vec<_> = all_nodes
         .into_iter()
         .take(top_n as usize)
-        .cloned()
+        .map(|n| {
+            let mut flat = n.clone();
+            flat.children.clear();
+            flat
+        })
         .collect();
 
     let result = serde_json::json!({
@@ -421,7 +426,110 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Parse HTML with streaming and early-stopping
+/// Extract goal-relevant content from HTML — optimized for LLM consumption.
+///
+/// Pipeline: HTML → adaptive parse → goal-filter → flatten → rank → top-N
+///
+/// Returns compact JSON with only the most relevant content:
+/// - Flat list (no nesting) — each item has role, label, score
+/// - Ranked by embedding similarity to goal
+/// - Deduped: labels that are substrings of higher-ranked labels are removed
+/// - Optional: action hints for clickable elements
+///
+/// This is the recommended endpoint for AI agents — minimal tokens, maximum signal.
+#[wasm_bindgen]
+pub fn parse_extract(html: &str, goal: &str, url: &str, max_items: u32) -> String {
+    let start = now_ms();
+    let adaptive_json = parse_adaptive(html, goal, url);
+
+    // Extrahera tree från adaptive-resultat
+    let adaptive: serde_json::Value = serde_json::from_str(&adaptive_json).unwrap_or_default();
+    let tier_used = adaptive
+        .get("tier_used")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let tree: types::SemanticTree = match adaptive.get("tree") {
+        Some(t) => serde_json::from_value(t.clone()).unwrap_or_default(),
+        None => return "{\"error\":\"parse failed\"}".to_string(),
+    };
+
+    // Flatten alla noder
+    let mut flat: Vec<&types::SemanticNode> = Vec::new();
+    fn collect_refs<'a>(nodes: &'a [types::SemanticNode], out: &mut Vec<&'a types::SemanticNode>) {
+        for n in nodes {
+            out.push(n);
+            collect_refs(&n.children, out);
+        }
+    }
+    collect_refs(&tree.nodes, &mut flat);
+
+    // Sortera efter relevance (embedding-score)
+    flat.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    // Dedup: skippa noder vars label är substring av redan inkluderad nod
+    let mut seen_labels: Vec<String> = Vec::new();
+    let mut deduped: Vec<&types::SemanticNode> = Vec::new();
+
+    for node in &flat {
+        let label = node.label.trim();
+        if label.is_empty() || label.len() < 4 {
+            continue;
+        }
+
+        // Skippa om labeln redan finns som substring i en tidigare (högre rankad) nod
+        let is_dup = seen_labels
+            .iter()
+            .any(|prev| prev.contains(label) || label.contains(prev.as_str()));
+        if is_dup {
+            continue;
+        }
+
+        seen_labels.push(label.to_string());
+        deduped.push(node);
+
+        if deduped.len() >= max_items as usize {
+            break;
+        }
+    }
+
+    let parse_ms = now_ms() - start;
+
+    // Bygg compact output
+    #[derive(serde::Serialize)]
+    struct CompactNode {
+        role: String,
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        action: Option<String>,
+        score: f32,
+    }
+
+    let items: Vec<CompactNode> = deduped
+        .iter()
+        .map(|n| CompactNode {
+            role: n.role.clone(),
+            text: n.label.trim().chars().take(200).collect(),
+            action: n.action.clone(),
+            score: (n.relevance * 100.0).round() / 100.0,
+        })
+        .collect();
+
+    let result = serde_json::json!({
+        "url": tree.url,
+        "title": tree.title,
+        "goal": tree.goal,
+        "tier": tier_used,
+        "items": items,
+        "total_nodes": flat.len(),
+        "filtered_to": items.len(),
+        "injection_warnings": tree.injection_warnings.len(),
+        "parse_ms": parse_ms,
+    });
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
 ///
 /// Builds semantic nodes incrementally and stops when max_nodes is reached.
 /// More memory-efficient than full parse for large pages (1000+ elements).
@@ -3134,14 +3242,30 @@ pub fn semantic_tree_to_markdown(tree_json: &str) -> String {
     md
 }
 
-/// Convert HTML directly to Markdown (parse → semantic tree → markdown)
+/// Convert HTML directly to Markdown using adaptive pipeline
+/// (auto-selects: Hydration → Static → QuickJS+DOM → fallback)
 #[wasm_bindgen]
 pub fn html_to_markdown(html: &str, goal: &str, url: &str) -> String {
+    let adaptive_json = parse_adaptive(html, goal, url);
+    // Extrahera tree-delen från adaptive-resultatet
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&adaptive_json) {
+        if let Some(tree) = v.get("tree") {
+            let tree_str = serde_json::to_string(tree).unwrap_or_default();
+            return semantic_tree_to_markdown(&tree_str);
+        }
+    }
+    // Fallback: direkt parse
     let tree_json = parse_to_semantic_tree(html, goal, url);
     semantic_tree_to_markdown(&tree_json)
 }
 
-/// Intern: konvertera en nod till markdown rekursivt
+/// Min relevance for markdown output. Set to 0.0 because goal-based
+/// pre-filtering in SemanticBuilder already removes irrelevant nodes.
+/// All nodes that survive the goal-filter should be rendered.
+const MARKDOWN_MIN_RELEVANCE: f32 = 0.0;
+
+/// Intern: konvertera en nod till markdown rekursivt.
+/// Skippar noder under relevance-tröskeln — bara goal-relevanta noder renderas.
 fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
     let role = node.role.as_str();
     let label = node.label.trim();
@@ -3150,9 +3274,29 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
         return;
     }
 
+    // Goal-baserad filtrering: skippa noder med låg relevans.
+    // Undantag: headings (strukturellt viktiga) och noder med relevanta barn.
+    let dominated_by_threshold = node.relevance < MARKDOWN_MIN_RELEVANCE
+        && role != "heading"
+        && role != "navigation"
+        && role != "nav";
+
+    if dominated_by_threshold {
+        // Kolla om någon child har hög relevans — om så, rendera bara children
+        let has_relevant_child = node
+            .children
+            .iter()
+            .any(|c| c.relevance >= MARKDOWN_MIN_RELEVANCE);
+        if has_relevant_child {
+            for child in &node.children {
+                node_to_markdown(child, md, depth);
+            }
+        }
+        return;
+    }
+
     match role {
         "heading" => {
-            // Bestäm heading-nivå baserat på djup (h1-h6)
             let level = (depth + 1).min(6);
             let prefix = "#".repeat(level);
             if !label.is_empty() {
@@ -3225,6 +3369,16 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
     }
 
     for child in &node.children {
+        // Skippa barn vars label är identisk med eller substring av förälderns
+        // (undviker duplicerad text i markdown — nästlade noder ärver parent-label)
+        let child_label = child.label.trim();
+        if !child_label.is_empty() && !label.is_empty() && label.contains(child_label) {
+            // Rendera barnets barn direkt istället (hoppa över duplikaten)
+            for grandchild in &child.children {
+                node_to_markdown(grandchild, md, depth + 1);
+            }
+            continue;
+        }
         node_to_markdown(child, md, depth + 1);
     }
 }

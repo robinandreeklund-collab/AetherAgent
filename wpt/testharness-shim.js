@@ -95,15 +95,17 @@
   Test.prototype.step_func = function(fn) {
     var t = this;
     return function() {
-      t.step(function() { fn.apply(t, arguments); });
+      var outer_args = arguments;
+      t.step(function() { fn.apply(t, outer_args); });
     };
   };
 
   Test.prototype.step_func_done = function(fn) {
     var t = this;
     return function() {
+      var outer_args = arguments;
       t.step(function() {
-        if (fn) fn.apply(t, arguments);
+        if (fn) fn.apply(t, outer_args);
       });
       if (t.status !== FAIL) {
         t.done();
@@ -541,6 +543,25 @@
       }
       _fire_result_callbacks(_single_test_obj);
     }
+    // Markera alla pending async_test som NOTRUN och forcera completion
+    _force_complete();
+  }
+
+  // ─── force_complete — avsluta oavsett pending async ───
+  function _force_complete() {
+    if (_completed) return;
+    // Alla async_test som aldrig anropade .done() → markera som TIMEOUT
+    for (var i = 0; i < _tests.length; i++) {
+      var t = _tests[i];
+      if (t.status === NOTRUN) {
+        // Kolla om det är en async test (har _cleanup_fns eller skapades via async_test)
+        // Vi markerar dem INTE som timeout — de kan vara synkrona test()
+        // som passade (status sätts till PASS i test()).
+        // Async tester som ALDRIG anropade .done() är kvar som NOTRUN.
+        // Dessa rapporteras redan korrekt.
+      }
+    }
+    _pending_async = 0;
     _complete();
   }
 

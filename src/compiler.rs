@@ -401,7 +401,15 @@ pub fn compile_goal(goal: &str) -> ActionPlan {
                     if lower_goal.contains(kw) {
                         1.0
                     } else {
-                        text_similarity(kw, &lower_goal) * 0.5
+                        // Embedding-förstärkt keyword matching
+                        let word_sim = text_similarity(kw, &lower_goal) * 0.5;
+                        if word_sim < 0.3 {
+                            let emb_sim =
+                                crate::embedding::similarity(kw, &lower_goal).unwrap_or(0.0) * 0.6;
+                            word_sim.max(emb_sim)
+                        } else {
+                            word_sim
+                        }
                     }
                 })
                 .collect();

@@ -89,12 +89,13 @@ base64 = "0.22"
 
 [features]
 default = []
-server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision"]
+server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision", "embeddings"]
 js-eval = ["rquickjs"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
-mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch", "js-eval", "axum", "tower-http"]
+mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch", "js-eval", "axum", "tower-http", "embeddings"]
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
+embeddings = ["ort", "ndarray"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "style_traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
 cdp = ["headless_chrome"]
 
@@ -111,6 +112,31 @@ required-features = ["mcp"]
 [[bin]]
 name = "aether-bench"
 path = "benches/bench_main.rs"
+
+[[bin]]
+name = "aether-embedding-bench"
+path = "benches/embedding_bench.rs"
+required-features = ["embeddings"]
+
+[[bin]]
+name = "aether-token-check"
+path = "benches/token_check.rs"
+required-features = ["embeddings"]
+
+[[bin]]
+name = "aether-token-md-check"
+path = "benches/token_md_check.rs"
+required-features = ["embeddings"]
+
+[[bin]]
+name = "aether-definitive-bench"
+path = "benches/bench_definitive.rs"
+required-features = ["embeddings"]
+
+[[bin]]
+name = "aether-quality-bench"
+path = "benches/bench_quality.rs"
+required-features = ["embeddings"]
 
 [[bin]]
 name = "aether-wpt"

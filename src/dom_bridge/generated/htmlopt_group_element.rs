@@ -101,7 +101,8 @@ pub(crate) fn register_htmlopt_group_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "label",
@@ -114,7 +115,8 @@ pub(crate) fn register_htmlopt_group_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     Ok(())
 }

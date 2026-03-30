@@ -74,21 +74,24 @@ pub(crate) fn register_cssimport_rule<'js>(
         Accessor::new_get(JsFn(CSSImportRuleGetHref {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "media",
         Accessor::new_get(JsFn(CSSImportRuleGetMedia {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "styleSheet",
         Accessor::new_get(JsFn(CSSImportRuleGetStyleSheet {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }

@@ -51,7 +51,8 @@ pub(crate) fn register_style_sheet_list<'js>(
         Accessor::new_get(JsFn(StyleSheetListGetLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "item",

@@ -5,51 +5,10 @@
  * Laddas före testharness.js.
  */
 
-// ─── CharacterData: .data, .length, .substringData, .replaceData, etc. ──────
-// Text (nodeType=3) och Comment (nodeType=8) måste ha CharacterData-metoder
-(function() {
-  if (typeof document === 'undefined') return;
-
-  function patchCharacterData(node) {
-    if (!node || typeof node !== 'object') return node;
-    var nt = node.nodeType;
-    if (nt !== 3 && nt !== 8) return node;
-
-    // .data getter/setter — alias för textContent (spec: null → "", undefined → "undefined")
-    if (!('data' in node)) {
-      Object.defineProperty(node, 'data', {
-        get: function() { return this.textContent || ''; },
-        set: function(val) {
-          this.textContent = (val === null) ? '' : String(val);
-        },
-        configurable: true
-      });
-    }
-
-    // .length
-    if (!('length' in node)) {
-      Object.defineProperty(node, 'length', {
-        get: function() { return (this.data || '').length; },
-        configurable: true
-      });
-    }
-
-    // .nodeValue — alias för data
-    if (!('nodeValue' in node)) {
-      Object.defineProperty(node, 'nodeValue', {
-        get: function() { return this.data; },
-        set: function(val) { this.data = val; },
-        configurable: true
-      });
-    }
-
-    // CharacterData methods — nu Rust-native med UTF-16 code unit counting
-
-    return node;
-  }
-
-  globalThis.__patchCharacterData = patchCharacterData;
-})();
+// ─── CharacterData: native Rust (dom_bridge/mod.rs) ──────────────────────────
+// .data, .nodeValue, .length = Rust getter/setter i make_element_object()
+// substringData, appendData, etc. = Rust-native i chardata.rs
+globalThis.__patchCharacterData = function(n) { return n; };
 
 // ─── document.implementation ─────────────────────────────────────────────────
 // DOMImplementation med createDocument, createHTMLDocument, createDocumentType
@@ -82,6 +41,15 @@
       doc.nodeName = '#document';
       doc.nodeValue = null;
       doc.documentElement = html;
+      // Skapa doctype-nod (lazy — sätts efter doc är klar)
+      try {
+        if (document.__createDocumentType) {
+          var dt = document.__createDocumentType('html', '', '');
+          doc.doctype = dt;
+        }
+      } catch(e) {
+        doc.doctype = null;
+      }
       doc.head = head;
       doc.body = body;
       doc.title = (title === null) ? 'null' : (title || '');
@@ -156,6 +124,12 @@
       doc.addEventListener = function() {};
       doc.removeEventListener = function() {};
       doc.dispatchEvent = function() { return true; };
+      // XPath methods (registered by dom_bridge/window.rs)
+      if (globalThis.__xpathEvaluate && !doc.evaluate) {
+        doc.evaluate = globalThis.__xpathEvaluate;
+        doc.createExpression = globalThis.__xpathCreateExpr;
+        doc.createNSResolver = globalThis.__xpathCreateNSRes;
+      }
       return doc;
     };
   }
@@ -163,7 +137,16 @@
   if (!impl.createDocument) {
     impl.createDocument = function(namespace, qualifiedName, doctype) {
       var doc = impl.createHTMLDocument('');
-      doc.contentType = namespace ? 'application/xml' : 'text/html';
+      // Sätt contentType baserat på namespace per spec
+      if (namespace === 'http://www.w3.org/1999/xhtml') {
+        doc.contentType = 'application/xhtml+xml';
+      } else if (namespace === 'http://www.w3.org/2000/svg') {
+        doc.contentType = 'image/svg+xml';
+      } else if (namespace) {
+        doc.contentType = 'application/xml';
+      } else {
+        doc.contentType = 'application/xml';
+      }
       return doc;
     };
   }
@@ -203,56 +186,10 @@
   }
 })();
 
-// ─── document.title ─────────────────────────────────────────────────────────
-// Många WPT-tester läser document.title för att identifiera sig.
-(function() {
-  if (typeof document !== 'undefined' && !('title' in document)) {
-    Object.defineProperty(document, 'title', {
-      get: function() {
-        var el = document.querySelector('title');
-        return el ? el.textContent : '';
-      },
-      set: function(val) {
-        var el = document.querySelector('title');
-        if (!el) {
-          el = document.createElement('title');
-          var head = document.head || document.querySelector('head');
-          if (head) head.appendChild(el);
-        }
-        el.textContent = val;
-      },
-      configurable: true
-    });
-  }
-})();
+// ─── document.title — MIGRERAD till native Rust (DocTitleGetter/Setter) ──────
 
-// ─── document.URL ───────────────────────────────────────────────────────────
-(function() {
-  if (typeof document !== 'undefined' && !('URL' in document)) {
-    Object.defineProperty(document, 'URL', {
-      get: function() {
-        return (typeof window !== 'undefined' && window.location)
-          ? window.location.href
-          : 'about:blank';
-      },
-      configurable: true
-    });
-  }
-})();
-
-// ─── document.location alias ────────────────────────────────────────────────
-(function() {
-  if (typeof document !== 'undefined' && typeof window !== 'undefined') {
-    if (!document.location && window.location) {
-      try {
-        Object.defineProperty(document, 'location', {
-          get: function() { return window.location; },
-          configurable: true
-        });
-      } catch(e) {}
-    }
-  }
-})();
+// ─── document.URL / document.location — native Rust (register_document) ──────
+// URL sätts till "about:blank" i Rust. location alias sätts i register_window.
 
 // ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
 // MIGRERAD: UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent,
@@ -261,8 +198,9 @@
 (function() {
   if (typeof Event === 'undefined') return;
   // Enkla event-typer (ärver Event direkt, inga spec-properties)
+  // OBS: TouchEvent migrerad till native Rust (window.rs) med Touch/TouchList
   var simpleTypes = [
-    'TouchEvent', 'AnimationEvent', 'TransitionEvent',
+    'AnimationEvent', 'TransitionEvent',
     'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
     'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
     'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
@@ -278,167 +216,17 @@
   });
 })();
 
-// ─── document.createEvent() ─────────────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
+// ─── document.createEvent() — MIGRERAD till native Rust (dom_bridge/mod.rs) ──
+// Registrerad som NativeCreateEvent i register_document().
 
-  // Mappning: case-insensitive alias → konstruktor
-  var aliases = {
-    'event': Event, 'events': Event, 'htmlevents': Event,
-    'customevent': typeof CustomEvent !== 'undefined' ? CustomEvent : Event,
-    'uievent': UIEvent, 'uievents': UIEvent,
-    'mouseevent': MouseEvent, 'mouseevents': MouseEvent,
-    'keyboardevent': KeyboardEvent,
-    'compositionevent': CompositionEvent,
-    'focusevent': FocusEvent,
-    'inputevent': InputEvent,
-    'wheelevent': WheelEvent,
-    'beforeunloadevent': BeforeUnloadEvent,
-    'touchevent': typeof TouchEvent !== 'undefined' ? TouchEvent : null,
-    'animationevent': AnimationEvent,
-    'transitionevent': TransitionEvent,
-    'pointerevent': PointerEvent,
-    'hashchangeevent': HashChangeEvent,
-    'popstateevent': PopStateEvent,
-    'storageevent': StorageEvent,
-    'progressevent': ProgressEvent,
-    'messageevent': MessageEvent,
-    'dragevent': DragEvent,
-    'errorevent': ErrorEvent,
-    'clipboardevent': ClipboardEvent,
-    'submitevent': SubmitEvent,
-    'svgevents': Event, 'svgevent': Event,
-    'textevent': 'TextEvent',
-    'mutationevent': Event, 'mutationevents': Event,
-    'devicemotionevent': DeviceMotionEvent,
-    'deviceorientationevent': DeviceOrientationEvent,
-    'gamepadevent': GamepadEvent,
-    'mediaquerylistevent': MediaQueryListEvent,
-    'formdataevent': FormDataEvent,
-    'promiserejectionevent': PromiseRejectionEvent,
-    'securitypolicyviolationevent': SecurityPolicyViolationEvent
-  };
+// ─── node.ownerDocument — MIGRERAD till native Rust (OwnerDocumentGetter) ───
+// Alla noder skapade via dom_bridge har ownerDocument som native Accessor.
+// Wrapper borttagen — Rust sätter ownerDocument i make_element_object().
 
-  document.createEvent = function(type) {
-    var key = type.toLowerCase();
-    var Ctor = aliases[key];
-    if (!Ctor) {
-      throw new DOMException("The operation is not supported.", "NotSupportedError");
-    }
-    // TextEvent har illegal constructor — skapa via Object.create
-    if (Ctor === 'TextEvent') {
-      var e = Object.create(TextEvent.prototype);
-      e.type = ''; e.bubbles = false; e.cancelable = false;
-      e.defaultPrevented = false; e.target = null; e.currentTarget = null;
-      e.eventPhase = 0; e.isTrusted = false;
-      e.timeStamp = Date.now();
-      e.view = null; e.detail = 0; e.data = '';
-      e.preventDefault = Event.prototype.preventDefault || function() { if (this.cancelable && !this.__passive) { this.defaultPrevented = true; } };
-      e.stopPropagation = Event.prototype.stopPropagation || function() { this._stopPropagationFlag = true; };
-      e.stopImmediatePropagation = Event.prototype.stopImmediatePropagation || function() { this._stopPropagationFlag = true; this._stopImmediatePropagationFlag = true; };
-      e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
-      return e;
-    }
-    var e = new Ctor('');
-    e.initEvent = function(t, b, c) { this.type = t; this.bubbles = !!b; this.cancelable = !!c; };
-    return e;
-  };
-})();
+// ─── node.compareDocumentPosition — native Rust (register_window) ────────────
+// Node-konstanter sätts av dom_bridge.rs
 
-// ─── node.ownerDocument ─────────────────────────────────────────────────────
-// WPT-tester kontrollerar ofta att noder hör till rätt dokument
-(function() {
-  if (typeof document === 'undefined') return;
-
-  // Patcha createElement så att returnerade element har ownerDocument
-  var _origCreateElement = document.createElement;
-  if (_origCreateElement) {
-    document.createElement = function(tag) {
-      var el = _origCreateElement.call(document, tag);
-      if (el && !('ownerDocument' in el)) {
-        try {
-          Object.defineProperty(el, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {
-          el.ownerDocument = document;
-        }
-      }
-      return el;
-    };
-  }
-
-  // Patcha createTextNode
-  var _origCreateTextNode = document.createTextNode;
-  if (_origCreateTextNode) {
-    document.createTextNode = function(text) {
-      var node = _origCreateTextNode.call(document, text);
-      if (node && !('ownerDocument' in node)) {
-        try {
-          Object.defineProperty(node, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
-      }
-      return node;
-    };
-  }
-
-  // Patcha createComment
-  var _origCreateComment = document.createComment;
-  if (_origCreateComment) {
-    document.createComment = function(text) {
-      var node = _origCreateComment.call(document, text);
-      if (node && !('ownerDocument' in node)) {
-        try {
-          Object.defineProperty(node, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {
-          node.ownerDocument = document;
-        }
-      }
-      return node;
-    };
-  }
-
-  // Patcha createDocumentFragment
-  var _origCreateFragment = document.createDocumentFragment;
-  if (_origCreateFragment) {
-    document.createDocumentFragment = function() {
-      var frag = _origCreateFragment.call(document);
-      if (frag && !('ownerDocument' in frag)) {
-        try {
-          Object.defineProperty(frag, 'ownerDocument', {
-            get: function() { return document; },
-            configurable: true
-          });
-        } catch(e) {
-          frag.ownerDocument = document;
-        }
-      }
-      return frag;
-    };
-  }
-})();
-
-// ─── node.compareDocumentPosition() ─────────────────────────────────────────
-// Returnerar bitmask: DISCONNECTED=1, PRECEDING=2, FOLLOWING=4,
-// Node-konstanter — nu native i dom_bridge.rs (register_window)
-// Fallback om dom_bridge inte körts ännu (edge case)
-(function() {
-  if (typeof Node === 'undefined') {
-    // Minimal fallback — dom_bridge.rs sätter riktiga Node-konstanter
-    globalThis.Node = function Node() {};
-  }
-})();
-
-// ─── Element.remove() ───────────────────────────────────────────────────────
+// ─── Element/Node metoder — native Rust (dom_bridge.rs) ─────────────────────
 // Syntaktisk socker: el.remove() === el.parentNode.removeChild(el)
 // Patcha via document.createElement wrapper
 (function() {
@@ -652,30 +440,8 @@
       }
     }
 
-    // id, className — måste skriva tillbaka till arena via setAttribute
-    if (el.nodeType === 1 && el.setAttribute) {
-      var _origId = el.id || '';
-      Object.defineProperty(el, 'id', {
-        get: function() { return this.getAttribute('id') || ''; },
-        set: function(v) { this.setAttribute('id', v); },
-        configurable: true
-      });
-      var _origClass = el.className || '';
-      Object.defineProperty(el, 'className', {
-        get: function() { return this.getAttribute('class') || ''; },
-        set: function(v) { this.setAttribute('class', v); },
-        configurable: true
-      });
-    }
-
-    // prefix, namespaceURI, localName — HTML-element har aldrig prefix/namespace
-    if (el.nodeType === 1) {
-      if (!('prefix' in el)) el.prefix = null;
-      if (!('namespaceURI' in el)) el.namespaceURI = 'http://www.w3.org/1999/xhtml';
-      if (!('localName' in el)) {
-        el.localName = (el.tagName || '').toLowerCase();
-      }
-    }
+    // id, className, prefix, namespaceURI, localName — ALLA native i Rust
+    // Borttagna: Rust sätter dessa som native Accessors i make_element_object()
 
     // toggleAttribute — nu Rust-native i dom_bridge.rs
 
@@ -732,71 +498,13 @@
   }
 })();
 
-// ─── document.createElementNS ────────────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.createElementNS) {
-    document.createElementNS = function(ns, qname) {
-      var local = qname.indexOf(':') >= 0 ? qname.split(':')[1] : qname;
-      var el = document.createElement(local);
-      if (el) {
-        try {
-          Object.defineProperty(el, 'namespaceURI', { value: ns, configurable: true });
-          if (qname.indexOf(':') >= 0) {
-            Object.defineProperty(el, 'prefix', { value: qname.split(':')[0], configurable: true });
-          }
-          Object.defineProperty(el, 'localName', { value: local, configurable: true });
-        } catch(e) {}
-      }
-      return el;
-    };
-  }
-})();
+// ─── document.createElementNS — native Rust (CreateElementNS) ────────────────
+// ─── document.getElementsByTagNameNS — native Rust (GetElementsByTagNameNSDoc) ─
 
-// ─── document.getElementsByTagNameNS ─────────────────────────────────────────
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.getElementsByTagNameNS) {
-    document.getElementsByTagNameNS = function(ns, tag) {
-      if (tag === '*') return document.querySelectorAll('*');
-      return document.querySelectorAll(tag.toLowerCase());
-    };
-  }
-})();
+// ─── NodeFilter konstanter — MIGRERAD till window.rs (native) ────────────────
 
-// ─── NodeFilter konstanter ──────────────────────────────────────────────────
-(function() {
-  if (!globalThis.NodeFilter) globalThis.NodeFilter = {};
-  NodeFilter.FILTER_ACCEPT = 1;
-  NodeFilter.FILTER_REJECT = 2;
-  NodeFilter.FILTER_SKIP = 3;
-  NodeFilter.SHOW_ALL = 0xFFFFFFFF;
-  NodeFilter.SHOW_ELEMENT = 0x1;
-  NodeFilter.SHOW_ATTRIBUTE = 0x2;
-  NodeFilter.SHOW_TEXT = 0x4;
-  NodeFilter.SHOW_CDATA_SECTION = 0x8;
-  NodeFilter.SHOW_PROCESSING_INSTRUCTION = 0x40;
-  NodeFilter.SHOW_COMMENT = 0x80;
-  NodeFilter.SHOW_DOCUMENT = 0x100;
-  NodeFilter.SHOW_DOCUMENT_TYPE = 0x200;
-  NodeFilter.SHOW_DOCUMENT_FRAGMENT = 0x400;
-})();
-
-// Range API — nu native i dom_bridge.rs (migrerad 2026-03-25)
-// document.createAttribute (behövs fortfarande som polyfill)
-(function() {
-  if (typeof document === 'undefined') return;
-  if (!document.createAttribute) {
-    document.createAttribute = function(name) {
-      var attr = { nodeType: 2, nodeName: name.toLowerCase(), name: name.toLowerCase(), value: '', nodeValue: '', specified: true,
-        ownerElement: null, ownerDocument: document,
-        toString: function() { return '[object Attr]'; }
-      };
-      Object.defineProperty(attr, Symbol.toStringTag, { value: 'Attr' });
-      return attr;
-    };
-  }
-})();
+// Range API — native Rust (dom_bridge.rs)
+// document.createAttribute — native Rust (CreateAttribute handler)
 
 // ─── Document konstruktor → skapar riktig arena-backed doc ──────────────────
 (function() {
@@ -812,8 +520,12 @@
   globalThis.Document.prototype = _origDocProto;
   globalThis.Document.prototype.constructor = globalThis.Document;
 
-  // XMLDocument — alias
-  globalThis.XMLDocument = globalThis.Document;
+  // XMLDocument — separat konstruktor (INTE subclass av Document)
+  // DOMParser spec: parseFromString returnerar Document, INTE XMLDocument
+  // Så instanceof XMLDocument === false för DOMParser-resultat
+  globalThis.XMLDocument = function XMLDocument() {};
+  globalThis.XMLDocument.prototype = {};
+  globalThis.XMLDocument.prototype.constructor = globalThis.XMLDocument;
 })();
 
 // ─── Patcha document.body/head/documentElement (pre-cache-skapade) ───────────
@@ -984,12 +696,18 @@
     }
   });
 
+  // Patcha document.implementation prototype för instanceof DOMImplementation
+  if (typeof document !== 'undefined' && document.implementation && globalThis.DOMImplementation) {
+    try { Object.setPrototypeOf(document.implementation, DOMImplementation.prototype); } catch(e) {}
+  }
+
   // ─── setPrototypeOf på element-objekt ─────────────────────────────
   // make_element_object skapar plain objects — vi patchas via __patchProto
   globalThis.__tagToConstructor = tagMap;
   globalThis.__patchPrototype = function(el) {
-    if (!el || typeof el !== 'object' || !el.tagName) return el;
+    if (!el || typeof el !== 'object') return el;
     var nt = el.nodeType;
+    if (!nt) return el;
     var proto = null;
     if (nt === 1) {
       // Element — välj via tagName

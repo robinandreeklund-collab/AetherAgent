@@ -1,0 +1,198 @@
+{
+  "ae_campfire": {
+    "total": 128.94918899991126,
+    "median": 1.2022420000050715,
+    "p99": 3.5524910000219734
+  },
+  "ae_amiibo": {
+    "total": 96.81782300006603,
+    "median": 0.8781160000239652
+  },
+  "ae_live": [
+    {
+      "name": "apple.com",
+      "url": "https://www.apple.com",
+      "goal": "find iPhone price",
+      "total_ms": 231.9951890000027,
+      "parse_ms": 47,
+      "total_nodes": 39,
+      "relevant_nodes": 1,
+      "html_tok": 0,
+      "md_tok": 13,
+      "top3": [
+        {
+          "role": "data",
+          "label": "openGraph.description: Discover the innovative world of Apple and shop",
+          "relevance": 0.4
+        },
+        {
+          "role": "data",
+          "label": "jsonLd.@context: http://schema.org",
+          "relevance": 0.1
+        },
+        {
+          "role": "data",
+          "label": "jsonLd.@id: https://www.apple.com/#organization",
+          "relevance": 0.1
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "Hacker News",
+      "url": "https://news.ycombinator.com",
+      "goal": "find latest news articles",
+      "total_ms": 1645.1537290000147,
+      "parse_ms": 1373,
+      "total_nodes": 492,
+      "relevant_nodes": 4,
+      "html_tok": 0,
+      "md_tok": 13,
+      "top3": [
+        {
+          "role": "generic",
+          "label": "Hacker News Hacker News new | past | comments | ask | show | jobs | su",
+          "relevance": 0.25415435
+        },
+        {
+          "role": "generic",
+          "label": "Hacker News new | past | comments | ask | show | jobs | submit login 1",
+          "relevance": 0.16925232
+        },
+        {
+          "role": "link",
+          "label": "Hacker News",
+          "relevance": 0.15327641
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "books.toscrape",
+      "url": "https://books.toscrape.com",
+      "goal": "find book titles and prices",
+      "total_ms": 1674.5700799999952,
+      "parse_ms": 52,
+      "total_nodes": 0,
+      "relevant_nodes": 0,
+      "html_tok": 0,
+      "md_tok": 0,
+      "top3": [],
+      "ok": false
+    },
+    {
+      "name": "lobste.rs",
+      "url": "https://lobste.rs",
+      "goal": "find technology articles",
+      "total_ms": 1968.3075920000022,
+      "parse_ms": 1298,
+      "total_nodes": 495,
+      "relevant_nodes": 13,
+      "html_tok": 0,
+      "md_tok": 13,
+      "top3": [
+        {
+          "role": "link",
+          "label": "Search",
+          "relevance": 0.2744798
+        },
+        {
+          "role": "link",
+          "label": "Lobsters (Current traffic: 0%)",
+          "relevance": 0.20132002
+        },
+        {
+          "role": "link",
+          "label": "Login",
+          "relevance": 0.12000002
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "rust-lang.org",
+      "url": "https://www.rust-lang.org",
+      "goal": "download and install Rust",
+      "total_ms": 3016.1650729999965,
+      "parse_ms": 1319,
+      "total_nodes": 139,
+      "relevant_nodes": 31,
+      "html_tok": 0,
+      "md_tok": 13,
+      "top3": [
+        {
+          "role": "generic",
+          "label": "Rust Programming Language Install Learn Playground Tools Governance Co",
+          "relevance": 0.38448593
+        },
+        {
+          "role": "link",
+          "label": "Install",
+          "relevance": 0.2706306
+        },
+        {
+          "role": "navigation",
+          "label": "Install Learn Playground Tools Governance Community Blog Language Engl",
+          "relevance": 0.26500002
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "lp_campfire": {
+    "total": 78236.37369400021,
+    "median": 144.28560999999718,
+    "p99": 30014.597820000006
+  },
+  "lp_amiibo": {
+    "total": 14246.206467000151,
+    "median": 136.15369699999746
+  },
+  "lp_live": [
+    {
+      "name": "apple.com",
+      "ms": 5249.936609000031,
+      "nodes": 1870,
+      "tokens": 146160,
+      "ok": true
+    },
+    {
+      "name": "Hacker News",
+      "ms": 386.0859260000211,
+      "nodes": 1220,
+      "tokens": 79373,
+      "ok": true
+    },
+    {
+      "name": "books.toscrape",
+      "ms": 892.4985979999747,
+      "nodes": 669,
+      "tokens": 45656,
+      "ok": true
+    },
+    {
+      "name": "lobste.rs",
+      "ms": 613.8861150000139,
+      "nodes": 1082,
+      "tokens": 65691,
+      "ok": true
+    },
+    {
+      "name": "rust-lang.org",
+      "ms": 1408.9289830000098,
+      "nodes": 255,
+      "tokens": 15362,
+      "ok": true
+    }
+  ],
+  "chrome_campfire": {
+    "total": 1648,
+    "median": 16,
+    "p99": 26
+  },
+  "chrome_amiibo": {
+    "total": 1031,
+    "median": 10,
+    "p99": 16
+  }
+}

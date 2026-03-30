@@ -467,10 +467,11 @@ impl CausalGraph {
 
 /// Flernivå semantisk matchning av goal mot ett tillstånd
 ///
-/// Tre nivåer:
+/// Tre nivåer (+ embedding-boost):
 /// 1. Direkt likhet (text_similarity) mot URL och key_elements
 /// 2. Ordnivå: varje nyckelord i goal matchas mot varje element
 /// 3. Kontextord: domänspecifika synonymer (kontakt↔telefon, köp↔pris, etc.)
+/// 4. Embedding-similarity: om modell laddad, använd cosine similarity som catch-all
 fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
     let goal_lower = goal.to_lowercase();
 
@@ -482,6 +483,16 @@ fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
         .key_elements
         .iter()
         .any(|e| text_similarity(&goal_lower, e) > 0.25)
+    {
+        return true;
+    }
+
+    // Embedding-boost: om modell laddad, kolla semantisk likhet
+    if crate::embedding::is_loaded()
+        && state
+            .key_elements
+            .iter()
+            .any(|e| crate::embedding::similarity(&goal_lower, e).is_some_and(|score| score > 0.5))
     {
         return true;
     }
@@ -594,19 +605,29 @@ fn semantic_goal_match(goal: &str, state: &CausalState) -> bool {
 ///
 /// Högre poäng = starkare match. Används för att rangordna goal-states
 /// och undvika att start-staten alltid väljs som mål.
+/// Embedding-förstärkt: om modell finns, combineras word-overlap med cosine sim.
 fn semantic_goal_score(goal: &str, state: &CausalState) -> f32 {
     let goal_lower = goal.to_lowercase();
     let mut score = 0.0f32;
 
-    // URL-likhet
+    // URL-likhet (word-overlap)
     let url_sim = text_similarity(&goal_lower, &state.url);
     score += url_sim * 0.3;
 
-    // Key-element likhet (summera bästa matchning)
+    // Key-element likhet — max av word-overlap och embedding
     let best_elem_sim = state
         .key_elements
         .iter()
-        .map(|e| text_similarity(&goal_lower, e))
+        .map(|e| {
+            let word_sim = text_similarity(&goal_lower, e);
+            if word_sim < 0.8 {
+                // Embedding-boost om word-overlap inte är övertygande
+                let emb_sim = crate::embedding::similarity(&goal_lower, e).unwrap_or(0.0);
+                word_sim.max(emb_sim)
+            } else {
+                word_sim
+            }
+        })
         .fold(0.0f32, f32::max);
     score += best_elem_sim * 0.3;
 

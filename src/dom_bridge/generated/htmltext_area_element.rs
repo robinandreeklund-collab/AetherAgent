@@ -662,7 +662,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "cols",
@@ -675,7 +676,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defaultValue",
@@ -688,7 +690,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "dirName",
@@ -701,7 +704,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "disabled",
@@ -714,7 +718,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "maxLength",
@@ -727,7 +732,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "minLength",
@@ -740,7 +746,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "name",
@@ -753,7 +760,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "placeholder",
@@ -766,7 +774,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "readOnly",
@@ -779,7 +788,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "required",
@@ -792,7 +802,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "rows",
@@ -805,7 +816,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -818,7 +830,8 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "wrap",
@@ -831,42 +844,48 @@ pub(crate) fn register_htmltext_area_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "type",
         Accessor::new_get(JsFn(HTMLTextAreaElementGetType {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "textLength",
         Accessor::new_get(JsFn(HTMLTextAreaElementGetTextLength {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "willValidate",
         Accessor::new_get(JsFn(HTMLTextAreaElementGetWillValidate {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "validationMessage",
         Accessor::new_get(JsFn(HTMLTextAreaElementGetValidationMessage {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.prop(
         "labels",
         Accessor::new_get(JsFn(HTMLTextAreaElementGetLabels {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     obj.set(
         "checkValidity",

@@ -95,8 +95,11 @@ pub(super) fn compute_will_validate(state: &BridgeState, key: NodeKey) -> bool {
     if tag == "input" && node.has_attr("readonly") {
         return false;
     }
-    if tag == "input" && node.get_attr("type") == Some("hidden") {
-        return false;
+    if tag == "input" {
+        let t = node.get_attr("type").unwrap_or("text");
+        if matches!(t, "hidden" | "reset" | "button") {
+            return false;
+        }
     }
     if tag == "button" {
         let btn_type = node.get_attr("type").unwrap_or("submit");
@@ -115,6 +118,42 @@ pub(super) fn check_validity(state: &BridgeState, key: NodeKey) -> bool {
     }
     let vs = super::dom_impls::constraint_validation::compute_validity(state, key);
     vs.valid
+}
+
+/// form.checkValidity — kontrollerar alla submittable descendants
+/// Returnerar true om alla element är valid
+pub(super) fn form_check_validity(state: &BridgeState, form_key: NodeKey) -> bool {
+    let node = match state.arena.nodes.get(form_key) {
+        Some(n) => n,
+        None => return true,
+    };
+    // Om det inte är ett <form>, delegera till vanlig check
+    if node.tag.as_deref() != Some("form") {
+        return check_validity(state, form_key);
+    }
+    // Samla alla submittable descendants
+    let mut all_valid = true;
+    check_descendants_validity(state, form_key, &mut all_valid);
+    all_valid
+}
+
+fn check_descendants_validity(state: &BridgeState, key: NodeKey, all_valid: &mut bool) {
+    let children = match state.arena.nodes.get(key) {
+        Some(n) => n.children.clone(),
+        None => return,
+    };
+    for child in children {
+        if let Some(node) = state.arena.nodes.get(child) {
+            if matches!(
+                node.tag.as_deref(),
+                Some("input") | Some("select") | Some("textarea") | Some("button")
+            ) && !check_validity(state, child)
+            {
+                *all_valid = false;
+            }
+        }
+        check_descendants_validity(state, child, all_valid);
+    }
 }
 
 /// validationMessage — returnerar aktuellt valideringsmeddelande

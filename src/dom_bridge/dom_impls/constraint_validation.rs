@@ -188,15 +188,24 @@ fn compute_input_validity(
     // ─── rangeUnderflow / rangeOverflow / stepMismatch ───────────────
     if matches!(
         input_type,
-        "number" | "range" | "date" | "time" | "datetime-local"
+        "number" | "range" | "date" | "time" | "datetime-local" | "month" | "week"
     ) {
-        if let Ok(num_val) = value.parse::<f64>() {
-            if let Some(min) = node.get_attr("min").and_then(|v| v.parse::<f64>().ok()) {
+        let num_val = parse_input_as_number(input_type, value);
+        if !num_val.is_nan() {
+            let min_val = node
+                .get_attr("min")
+                .map(|v| parse_input_as_number(input_type, v))
+                .filter(|n| !n.is_nan());
+            let max_val = node
+                .get_attr("max")
+                .map(|v| parse_input_as_number(input_type, v))
+                .filter(|n| !n.is_nan());
+            if let Some(min) = min_val {
                 if num_val < min {
                     vs.range_underflow = true;
                 }
             }
-            if let Some(max) = node.get_attr("max").and_then(|v| v.parse::<f64>().ok()) {
+            if let Some(max) = max_val {
                 if num_val > max {
                     vs.range_overflow = true;
                 }
@@ -206,12 +215,8 @@ fn compute_input_validity(
                 if step_str != "any" {
                     if let Ok(step) = step_str.parse::<f64>() {
                         if step > 0.0 {
-                            let min = node
-                                .get_attr("min")
-                                .and_then(|v| v.parse::<f64>().ok())
-                                .unwrap_or(0.0);
-                            let diff = num_val - min;
-                            // Kolla om diff är jämnt delbart med step (med epsilon)
+                            let base = min_val.unwrap_or(0.0);
+                            let diff = num_val - base;
                             let remainder = diff % step;
                             let epsilon = step * 1e-10;
                             if remainder.abs() > epsilon && (step - remainder.abs()).abs() > epsilon
@@ -222,8 +227,8 @@ fn compute_input_validity(
                     }
                 }
             }
-        } else if !value.is_empty() {
-            // Kan inte parsa som nummer → badInput
+        } else if !value.is_empty() && matches!(input_type, "number" | "range") {
+            // Bara number/range ger badInput vid ogiltig parsning
             vs.bad_input = true;
         }
     }
@@ -311,6 +316,108 @@ fn search_radio_group(state: &BridgeState, node: NodeKey, name: &str) -> bool {
         }
     }
     false
+}
+
+/// Konvertera input value till nummer baserat på typ (för range/step-validering)
+fn parse_input_as_number(input_type: &str, value: &str) -> f64 {
+    if value.is_empty() {
+        return f64::NAN;
+    }
+    match input_type {
+        "number" | "range" => value.parse::<f64>().unwrap_or(f64::NAN),
+        "date" => {
+            // YYYY-MM-DD → ms since epoch
+            let parts: Vec<&str> = value.split('-').collect();
+            if parts.len() == 3 {
+                let y = parts[0].parse::<i64>().unwrap_or(0);
+                let m = parts[1].parse::<u32>().unwrap_or(0);
+                let d = parts[2].parse::<u32>().unwrap_or(0);
+                if y == 0 || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+                    return f64::NAN;
+                }
+                days_from_civil(y, m, d) as f64 * 86_400_000.0
+            } else {
+                f64::NAN
+            }
+        }
+        "time" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            if parts.len() >= 2 {
+                let h = parts[0].parse::<f64>().unwrap_or(-1.0);
+                let m = parts[1].parse::<f64>().unwrap_or(-1.0);
+                if !(0.0..=23.0).contains(&h) || !(0.0..=59.0).contains(&m) {
+                    return f64::NAN;
+                }
+                let s = if parts.len() > 2 {
+                    parts[2].parse::<f64>().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                h * 3_600_000.0 + m * 60_000.0 + s * 1000.0
+            } else {
+                f64::NAN
+            }
+        }
+        "datetime-local" => {
+            let parts: Vec<&str> = value.splitn(2, 'T').collect();
+            if parts.len() == 2 {
+                let date_ms = parse_input_as_number("date", parts[0]);
+                let time_ms = parse_input_as_number("time", parts[1]);
+                if date_ms.is_nan() || time_ms.is_nan() {
+                    f64::NAN
+                } else {
+                    date_ms + time_ms
+                }
+            } else {
+                f64::NAN
+            }
+        }
+        "month" => {
+            let parts: Vec<&str> = value.split('-').collect();
+            if parts.len() == 2 {
+                let y = parts[0].parse::<f64>().unwrap_or(f64::NAN);
+                let m = parts[1].parse::<f64>().unwrap_or(f64::NAN);
+                if y.is_nan() || m.is_nan() {
+                    return f64::NAN;
+                }
+                (y - 1970.0) * 12.0 + (m - 1.0)
+            } else {
+                f64::NAN
+            }
+        }
+        "week" => {
+            if value.len() >= 8 && value.contains("-W") {
+                let parts: Vec<&str> = value.split("-W").collect();
+                if parts.len() == 2 {
+                    let y = parts[0].parse::<i64>().unwrap_or(0);
+                    let w = parts[1].parse::<i64>().unwrap_or(0);
+                    if y == 0 || !(1..=53).contains(&w) {
+                        return f64::NAN;
+                    }
+                    let jan4 = days_from_civil(y, 1, 4);
+                    let dow_jan4 = ((jan4 % 7) + 3) % 7;
+                    let week1_monday = jan4 - dow_jan4;
+                    let target_day = week1_monday + (w - 1) * 7;
+                    target_day as f64 * 86_400_000.0
+                } else {
+                    f64::NAN
+                }
+            } else {
+                f64::NAN
+            }
+        }
+        _ => f64::NAN,
+    }
+}
+
+/// Dagar sedan epoch — Howard Hinnants algoritm
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe as i64 - 719468
 }
 
 /// Enkel email-validering per HTML spec

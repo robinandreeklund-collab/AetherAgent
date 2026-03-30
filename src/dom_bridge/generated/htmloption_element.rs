@@ -266,7 +266,8 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "label",
@@ -279,7 +280,8 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "defaultSelected",
@@ -292,7 +294,8 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "selected",
@@ -305,7 +308,8 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "value",
@@ -318,7 +322,8 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "text",
@@ -331,14 +336,16 @@ pub(crate) fn register_htmloption_element<'js>(
                 state: Rc::clone(state),
                 key,
             }),
-        ),
+        )
+        .configurable(),
     )?;
     obj.prop(
         "index",
         Accessor::new_get(JsFn(HTMLOptionElementGetIndex {
             state: Rc::clone(state),
             key,
-        })),
+        }))
+        .configurable(),
     )?;
     Ok(())
 }
