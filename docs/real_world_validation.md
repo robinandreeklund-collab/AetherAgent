@@ -4,6 +4,26 @@
 **Mode:** Release build, no embeddings (text similarity only)
 **Method:** Fetch → Legacy parse_top_nodes → Hybrid parse_top_nodes_hybrid
 
+## MCP Server Validation (Live AetherAgent MCP)
+
+8 additional sites tested via the running MCP server (`mcp__parse` tool):
+
+| # | Site | Nodes | Total DOM | Parse ms | Tier | Best Relevance |
+|---|------|-------|-----------|----------|------|----------------|
+| 1 | python.org | 0 | 0 | 93 | js | — (SPA, needs JS) |
+| 2 | MDN HTML | 10 | 1,050 | 370 | static | 0.700 |
+| 3 | w3.org | 0 | 0 | 60 | js | — (SPA, needs JS) |
+| 4 | example.com | 7 | 7 | 81 | static | 0.535 |
+| 5 | BBC News | 10 | 3,340 | 381 | static | 0.588 |
+| 6 | crates.io | 1 | 1 | 41 | js | 0.450 (SPA shell) |
+| 7 | Stack Overflow | 10 | 713 | 320 | static | 0.456 |
+| 8 | Reuters | 1 | 1 | 16 | static | 0.070 (JS required) |
+
+**Key observations:**
+- Server-rendered sites (MDN, BBC, SO) → rich results, 0.45–0.70 relevance
+- SPA/JS-heavy sites (python.org, w3.org, crates.io) → 0-1 nodes (expected without JS)
+- BBC News surfaced 3,340 nodes including JSON-LD hydration data
+
 ## Summary
 
 | Metric | Value |
