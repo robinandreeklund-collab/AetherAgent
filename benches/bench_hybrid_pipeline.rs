@@ -7,6 +7,7 @@
 /// Run: cargo run --bin aether-hybrid-bench
 use std::time::Instant;
 
+use aether_agent::scoring::hdc::HDC_DIM;
 use aether_agent::{parse_top_nodes, parse_top_nodes_hybrid};
 
 // ─── HTML Fixtures ───────────────────────────────────────────────────────────
@@ -170,6 +171,11 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════════════");
     println!("  AetherAgent — Hybrid Scoring Pipeline Benchmark");
     println!("  Legacy (single-pass) vs Hybrid (TF-IDF → HDC → Embedding)");
+    println!(
+        "  HDC dimension: {} bits ({} bytes/vector)",
+        HDC_DIM,
+        HDC_DIM / 8
+    );
     println!("═══════════════════════════════════════════════════════════════════\n");
 
     let simple = simple_page();
@@ -279,30 +285,54 @@ fn main() {
             + pipeline["prune_hdc_us"].as_u64().unwrap_or(0)
             + pipeline["score_embed_us"].as_u64().unwrap_or(0);
         let total_us = pipeline["total_pipeline_us"].as_u64().unwrap_or(0);
+        let cached = pipeline["cache_hit"].as_bool().unwrap_or(false);
 
         println!(
-            "  Build phase:       {:>6} µs (cached per URL, one-time cost)",
-            build_us
+            "  Build phase:       {:>6} µs (original build, {})",
+            build_us,
+            if cached { "CACHED" } else { "fresh" }
         );
         println!("  Query phase:       {:>6} µs (per goal-query)", query_us);
-        println!(
-            "  Overhead:          {:>6} µs (index lookup, scoring)",
-            total_us - build_us - query_us
-        );
+        println!("  Total pipeline:    {:>6} µs (wall clock this query)", total_us);
         println!();
         println!(
             "  → Med cache: hybrid query = {} µs vs legacy full = {} µs",
-            query_us,
+            total_us,
             results.last().map(|r| r.legacy_us).unwrap_or(0)
         );
 
         let legacy_last = results.last().map(|r| r.legacy_us).unwrap_or(1) as f64;
-        if query_us > 0 {
+        if total_us > 0 {
             println!(
                 "  → Amortized speedup: {:.1}x snabbare",
-                legacy_last / query_us as f64
+                legacy_last / total_us as f64
             );
         }
+    }
+
+    // ─── Cache Verification ────────────────────────────────────────────────
+
+    println!("\n── Cache Verification ──\n");
+
+    // Kör samma HTML två gånger — andra borde vara cache-hit
+    let json1 = parse_top_nodes_hybrid(&large, "different goal first", "https://bench.test", 5);
+    let p1: serde_json::Value = serde_json::from_str(&json1).unwrap_or_default();
+    let hit1 = p1["pipeline"]["cache_hit"].as_bool().unwrap_or(false);
+
+    let json2 = parse_top_nodes_hybrid(&large, "different goal second", "https://bench.test", 5);
+    let p2: serde_json::Value = serde_json::from_str(&json2).unwrap_or_default();
+    let hit2 = p2["pipeline"]["cache_hit"].as_bool().unwrap_or(false);
+
+    let time1 = p1["pipeline"]["total_pipeline_us"].as_u64().unwrap_or(0);
+    let time2 = p2["pipeline"]["total_pipeline_us"].as_u64().unwrap_or(0);
+
+    println!("  First query:  cache_hit={}, total={}µs", hit1, time1);
+    println!("  Second query: cache_hit={}, total={}µs", hit2, time2);
+    if time1 > 0 {
+        println!(
+            "  Cache speedup: {:.1}x",
+            time1 as f64 / time2.max(1) as f64
+        );
     }
 
     println!("\n═══════════════════════════════════════════════════════════════════");

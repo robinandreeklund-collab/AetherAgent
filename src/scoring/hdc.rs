@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use crate::types::SemanticNode;
 
 /// Dimensionalitet för hypervektorer (antal bits)
-pub const HDC_DIM: usize = 1024;
+/// 2048 ger bra separation på långa noder med marginell extra kostnad (~+0.02ms query)
+pub const HDC_DIM: usize = 2048;
 /// Antal u64-ord per hypervector
 const WORDS: usize = HDC_DIM / 64;
 
