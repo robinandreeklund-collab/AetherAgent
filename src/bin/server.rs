@@ -797,6 +797,7 @@ async fn api_endpoints() -> impl IntoResponse {
             "GET /health": "Health check",
             "POST /api/parse": "Parse HTML to semantic tree",
             "POST /api/parse-top": "Parse top-N relevant nodes",
+            "POST /api/parse-hybrid": "Parse with hybrid BM25+HDC+Embedding pipeline (recommended)",
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
@@ -885,6 +886,12 @@ async fn parse(Json(req): Json<ParseRequest>) -> impl IntoResponse {
 
 async fn parse_top(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     let result = aether_agent::parse_top_nodes(&req.html, &req.goal, &req.url, req.top_n);
+    (StatusCode::OK, result)
+}
+
+async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
+    let top_n = if req.top_n > 0 { req.top_n } else { 100 };
+    let result = aether_agent::parse_top_nodes_hybrid(&req.html, &req.goal, &req.url, top_n);
     (StatusCode::OK, result)
 }
 
@@ -1862,6 +1869,18 @@ async fn ws_api_dispatch(
             let top_n = params["top_n"].as_u64().unwrap_or(10) as u32;
             tokio::task::spawn_blocking(move || {
                 let r = aether_agent::parse_top_nodes(&html, &goal, &url, top_n);
+                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+        "parse_hybrid" => {
+            let html = params["html"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let top_n = params["top_n"].as_u64().unwrap_or(100) as u32;
+            tokio::task::spawn_blocking(move || {
+                let r = aether_agent::parse_top_nodes_hybrid(&html, &goal, &url, top_n);
                 serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
             })
             .await
@@ -3240,6 +3259,20 @@ fn mcp_tool_definitions_legacy() -> serde_json::Value {
             }
         },
         {
+            "name": "parse_hybrid",
+            "description": "RECOMMENDED: Parse HTML using the hybrid BM25+HDC+Embedding pipeline. Three-stage scoring: (1) BM25 keyword retrieval, (2) HDC bitvector pruning, (3) bottom-up embedding. 2.5x faster and better quality than parse_top. Returns 100 nodes by default so the LLM agent can pick the best 5-10. Includes pipeline timing metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "goal": {"type": "string", "description": "The agent's current goal"},
+                    "url": {"type": "string", "description": "The page URL"},
+                    "top_n": {"type": "integer", "description": "Max nodes to return (default: 100)", "default": 100}
+                },
+                "required": ["html", "goal", "url"]
+            }
+        },
+        {
             "name": "fetch_parse",
             "description": "Fetch a URL and parse it into a semantic tree in one call. REAL-TIME: Via WebSocket /ws/api, receive multi-stage progress (fetching → parsing → result).",
             "inputSchema": {
@@ -4170,6 +4203,13 @@ async fn mcp_dispatch_tool_legacy(
             let url = args["url"].as_str().unwrap_or("");
             let top_n = args["top_n"].as_u64().unwrap_or(10) as u32;
             text_ok(aether_agent::parse_top_nodes(html, goal, url, top_n))
+        }
+        "parse_hybrid" => {
+            let html = args["html"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let url = args["url"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(100) as u32;
+            text_ok(aether_agent::parse_top_nodes_hybrid(html, goal, url, top_n))
         }
         "fetch_parse" => {
             let url = args["url"].as_str().unwrap_or("");
@@ -5346,6 +5386,7 @@ fn build_router(state: AppState) -> Router {
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
+        .route("/api/parse-hybrid", post(parse_hybrid))
         .route("/api/extract-smart", post(parse_extract_handler))
         .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))
@@ -5725,6 +5766,7 @@ async fn main() {
     println!("  GET  /                    – API documentation");
     println!("  POST /api/parse           – Parse HTML to semantic tree");
     println!("  POST /api/parse-top       – Parse top-N relevant nodes");
+    println!("  POST /api/parse-hybrid    – Hybrid BM25+HDC+Embedding pipeline (recommended)");
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");

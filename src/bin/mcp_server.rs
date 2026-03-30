@@ -57,6 +57,23 @@ struct ParseTopParams {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ParseHybridParams {
+    /// Raw HTML string
+    html: String,
+    /// The agent's current goal
+    goal: String,
+    /// The page URL
+    url: String,
+    /// Max number of nodes to return (default: 100 — intentionally high so YOU can pick the best 5-10)
+    #[serde(default = "default_hybrid_top_n")]
+    top_n: u32,
+}
+
+fn default_hybrid_top_n() -> u32 {
+    100
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct ClickParams {
     /// Raw HTML string
     html: String,
@@ -499,6 +516,14 @@ impl AetherMcpServer {
     )]
     fn parse_top(&self, Parameters(params): Parameters<ParseTopParams>) -> String {
         aether_agent::parse_top_nodes(&params.html, &params.goal, &params.url, params.top_n)
+    }
+
+    #[tool(
+        name = "parse_hybrid",
+        description = "RECOMMENDED: Parse HTML using the hybrid BM25 + HDC + Embedding pipeline. Returns the most goal-relevant nodes ranked by a three-stage scoring system:\n\n1. BM25 keyword retrieval — finds candidate nodes matching goal terms (with prefix fallback)\n2. HDC (Hyperdimensional Computing) pruning — eliminates structurally irrelevant subtrees using 2048-bit bitvector similarity in nanoseconds\n3. Bottom-up embedding scoring — runs neural embedding (all-MiniLM-L6-v2) only on survivors, scoring leaf nodes first so wrapper nodes can't steal relevance from children\n\nAdvantages over parse_top:\n- 2.5x faster on average (embedding runs on 30-100 survivors, not all 300 nodes)\n- Better quality: leaf content nodes rank above wrapper divs (fixes wrapper-bias)\n- Includes pipeline timing metadata (build_tfidf_us, build_hdc_us, query_tfidf_us, prune_hdc_us, score_embed_us)\n- top_n defaults to 100 — intentionally high so YOU (the LLM agent) can pick the best 5-10 nodes from a pre-ranked list\n\nUSE THIS TOOL WHEN: you want the highest quality relevance ranking with minimal tokens. Set top_n to 100 (default) and pick what you need from the ranked results. The response includes a 'pipeline' object with detailed timing for each stage."
+    )]
+    fn parse_hybrid(&self, Parameters(params): Parameters<ParseHybridParams>) -> String {
+        aether_agent::parse_top_nodes_hybrid(&params.html, &params.goal, &params.url, params.top_n)
     }
 
     #[tool(
@@ -1995,6 +2020,12 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
         "parse_top" => {
             aether_agent::parse_top_nodes(s("html"), s("goal"), s("url"), u32_or("top_n", 10))
         }
+        "parse_hybrid" => aether_agent::parse_top_nodes_hybrid(
+            s("html"),
+            s("goal"),
+            s("url"),
+            u32_or("top_n", 100),
+        ),
         "find_and_click" => {
             aether_agent::find_and_click(s("html"), s("goal"), s("url"), s("target_label"))
         }
