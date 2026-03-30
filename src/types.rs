@@ -354,6 +354,10 @@ pub struct FetchAndPlanResult {
 // ─── Implementations ─────────────────────────────────────────────────────────
 
 impl SemanticNode {
+    pub fn default() -> Self {
+        Self::new(0, "", "")
+    }
+
     pub fn new(id: u32, role: &str, label: &str) -> Self {
         SemanticNode {
             id,
