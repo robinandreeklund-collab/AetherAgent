@@ -348,6 +348,240 @@ pub(super) fn register_dom_exception(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     Ok(())
 }
 
+/// Native CSS.supports() — ersätter JS-polyfill
+struct CssSupportsHandler;
+
+/// Kända CSS-properties som CSS.supports() ska returnera true för
+const KNOWN_CSS_PROPERTIES: &[&str] = &[
+    "display",
+    "color",
+    "background",
+    "background-color",
+    "margin",
+    "padding",
+    "border",
+    "width",
+    "height",
+    "font-size",
+    "font-family",
+    "font-weight",
+    "text-align",
+    "text-decoration",
+    "position",
+    "top",
+    "left",
+    "right",
+    "bottom",
+    "float",
+    "clear",
+    "overflow",
+    "z-index",
+    "opacity",
+    "visibility",
+    "flex",
+    "flex-direction",
+    "flex-wrap",
+    "justify-content",
+    "align-items",
+    "align-content",
+    "align-self",
+    "order",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "grid",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-gap",
+    "gap",
+    "transform",
+    "transition",
+    "animation",
+    "box-shadow",
+    "border-radius",
+    "outline",
+    "cursor",
+    "pointer-events",
+    "user-select",
+    "content",
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+    "white-space",
+    "text-transform",
+    "text-indent",
+    "vertical-align",
+    "list-style",
+    "list-style-type",
+    "table-layout",
+    "border-collapse",
+    "background-image",
+    "background-size",
+    "background-position",
+    "background-repeat",
+    "box-sizing",
+    "resize",
+    "appearance",
+    "filter",
+    "backdrop-filter",
+    "clip-path",
+    "mask",
+    "object-fit",
+    "object-position",
+    "scroll-behavior",
+    "accent-color",
+    "aspect-ratio",
+    "container-type",
+    "container-name",
+    "inset",
+    "isolation",
+    "mix-blend-mode",
+    "will-change",
+    "writing-mode",
+    "column-count",
+    "column-gap",
+    "column-width",
+    "column-span",
+    "text-overflow",
+    "word-break",
+    "overflow-wrap",
+    "hyphens",
+    "font-style",
+    "font-variant",
+    "text-shadow",
+    "direction",
+    "unicode-bidi",
+    "all",
+    "contain",
+    "touch-action",
+    "overscroll-behavior",
+    "scroll-snap-type",
+    "scroll-snap-align",
+    "rotate",
+    "scale",
+    "translate",
+    "offset-path",
+    "color-scheme",
+    "forced-color-adjust",
+    "print-color-adjust",
+    "background-blend-mode",
+];
+
+/// Properties som tillåter unitless numbers (inte quirky length)
+const UNITLESS_PROPERTIES: &[&str] = &[
+    "opacity",
+    "z-index",
+    "order",
+    "flex-grow",
+    "flex-shrink",
+    "line-height",
+    "font-weight",
+    "column-count",
+];
+
+impl JsHandler for CssSupportsHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let (prop, val, has_val) = if args.len() == 1 {
+            // CSS.supports("display: flex") syntax
+            let s = args[0]
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            let s = s.trim().to_string();
+            if let Some(colon_pos) = s.find(':') {
+                let p = s[..colon_pos].trim().to_string();
+                let v = s[colon_pos + 1..].trim().to_string();
+                (p, v, true)
+            } else {
+                return Ok(Value::new_bool(ctx.clone(), false));
+            }
+        } else if args.len() >= 2 {
+            let p = args[0]
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let v = args[1]
+                .as_string()
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            (p, v, true)
+        } else {
+            return Ok(Value::new_bool(ctx.clone(), false));
+        };
+
+        // Kolla om property är känd
+        if !KNOWN_CSS_PROPERTIES.contains(&prop.as_str()) {
+            return Ok(Value::new_bool(ctx.clone(), false));
+        }
+
+        // Validera värde om tvåarguments-form
+        if has_val {
+            if val.is_empty() {
+                return Ok(Value::new_bool(ctx.clone(), false));
+            }
+            // Avvisa bara numbers (quirky length) för properties som kräver units
+            if !UNITLESS_PROPERTIES.contains(&prop.as_str()) {
+                for part in val.split_whitespace() {
+                    if part != "0" && part.chars().all(|c| c.is_ascii_digit()) {
+                        return Ok(Value::new_bool(ctx.clone(), false));
+                    }
+                }
+            }
+            // Avvisa ogiltig quirky color
+            if prop == "color" || prop == "background-color" {
+                let v = val.to_ascii_lowercase();
+                let valid = v.starts_with('#')
+                    || v.starts_with("rgb")
+                    || v.starts_with("hsl")
+                    || v == "transparent"
+                    || v == "inherit"
+                    || v == "initial"
+                    || v == "unset"
+                    || v == "currentcolor"
+                    || v == "revert"
+                    || v.chars().all(|c| c.is_ascii_alphabetic());
+                if !valid {
+                    return Ok(Value::new_bool(ctx.clone(), false));
+                }
+            }
+        }
+
+        Ok(Value::new_bool(ctx.clone(), true))
+    }
+}
+
+/// Native CSS.escape()
+struct CssEscapeHandler;
+impl JsHandler for CssEscapeHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut result = String::with_capacity(s.len() * 2);
+        for c in s.chars() {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                result.push(c);
+            } else if c == '\0' {
+                result.push('\u{FFFD}');
+            } else {
+                result.push('\\');
+                result.push(c);
+            }
+        }
+        Ok(rquickjs::String::from_str(ctx.clone(), &result)?.into_value())
+    }
+}
+
 pub(super) fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
     register_window_with_viewport(ctx, state, 1280, 900)
 }
@@ -661,6 +895,20 @@ pub(super) fn register_window_with_viewport<'js>(
         // Sätt på location-objektet
         let loc: Object = win.get("location")?;
         loc.set("searchParams", search_params)?;
+    }
+
+    // CSS object med native supports() och escape()
+    {
+        let css = Object::new(ctx.clone())?;
+        css.set(
+            "supports",
+            Function::new(ctx.clone(), JsFn(CssSupportsHandler))?,
+        )?;
+        css.set(
+            "escape",
+            Function::new(ctx.clone(), JsFn(CssEscapeHandler))?,
+        )?;
+        ctx.globals().set("CSS", css)?;
     }
 
     // Kopiera till globalThis
@@ -1178,80 +1426,9 @@ pub(super) fn register_window_with_viewport<'js>(
             // WPT tests verify their absence from GlobalEventHandlers when not in a touch context
         })();
 
-        // ─── CSS.supports() ─────────────────────────────────────────────────
-        (function() {
-            var CSS = globalThis.CSS || {};
-            CSS.supports = function supports(prop, val) {
-                if (arguments.length === 1) {
-                    // CSS.supports("display: flex") syntax
-                    var str = String(prop).trim();
-                    // @supports condition — basic parsing
-                    if (str.indexOf(':') === -1) return false;
-                    var parts = str.split(':');
-                    prop = parts[0].trim();
-                    val = parts.slice(1).join(':').trim();
-                }
-                prop = String(prop).trim();
-                val = String(val).trim();
-                // Known CSS properties (extensive list)
-                var known = [
-                    'display','color','background','background-color','margin','padding',
-                    'border','width','height','font-size','font-family','font-weight',
-                    'text-align','text-decoration','position','top','left','right','bottom',
-                    'float','clear','overflow','z-index','opacity','visibility',
-                    'flex','flex-direction','flex-wrap','justify-content','align-items',
-                    'align-content','align-self','order','flex-grow','flex-shrink','flex-basis',
-                    'grid','grid-template-columns','grid-template-rows','grid-gap','gap',
-                    'transform','transition','animation','box-shadow','border-radius',
-                    'outline','cursor','pointer-events','user-select','content',
-                    'min-width','max-width','min-height','max-height',
-                    'line-height','letter-spacing','word-spacing','white-space',
-                    'text-transform','text-indent','vertical-align',
-                    'list-style','list-style-type','table-layout','border-collapse',
-                    'background-image','background-size','background-position','background-repeat',
-                    'box-sizing','resize','appearance','filter','backdrop-filter',
-                    'clip-path','mask','object-fit','object-position','scroll-behavior',
-                    'accent-color','aspect-ratio','container-type','container-name',
-                    'inset','isolation','mix-blend-mode','will-change','writing-mode',
-                    'column-count','column-gap','column-width','column-span',
-                    'text-overflow','word-break','overflow-wrap','hyphens',
-                    'font-style','font-variant','text-shadow','direction',
-                    'unicode-bidi','all','contain','touch-action',
-                    'overscroll-behavior','scroll-snap-type','scroll-snap-align',
-                    'rotate','scale','translate','offset-path',
-                    'color-scheme','forced-color-adjust','print-color-adjust',
-                    'background-blend-mode'
-                ];
-                if (known.indexOf(prop) === -1) return false;
-                // Two-argument form: validate value isn't obviously invalid
-                if (arguments.length >= 2) {
-                    val = String(val).trim();
-                    if (!val) return false;
-                    // Reject bare numbers for properties that need units (quirky length test)
-                    if (prop !== 'opacity' && prop !== 'z-index' && prop !== 'order' &&
-                        prop !== 'flex-grow' && prop !== 'flex-shrink' && prop !== 'line-height' &&
-                        prop !== 'font-weight' && prop !== 'column-count') {
-                        // Bare number without units is quirky length — not valid in CSS.supports
-                        // Also reject multi-value bare numbers like "1 1"
-                        var valParts = val.split(/\s+/);
-                        for (var vpi = 0; vpi < valParts.length; vpi++) {
-                            if (/^\d+$/.test(valParts[vpi]) && valParts[vpi] !== '0') return false;
-                        }
-                    }
-                    // Reject obviously invalid color values (quirky color test)
-                    if (prop === 'color' || prop === 'background-color') {
-                        // Valid: keywords, #hex, rgb(), hsl(), transparent, inherit, etc.
-                        var colorValid = /^(#[0-9a-fA-F]{3,8}|rgba?\s*\(|hsla?\s*\(|transparent|inherit|initial|unset|currentColor|revert|[a-zA-Z]+)$/i;
-                        if (!colorValid.test(val)) return false;
-                    }
-                }
-                return true;
-            };
-            CSS.escape = function(str) {
-                return String(str).replace(/([^\w-])/g, '\\$1');
-            };
-            globalThis.CSS = CSS;
-        })();
+        // ─── CSS.supports() — MIGRERAD till native Rust (CssSupportsHandler) ─
+        // CSS.escape — MIGRERAD till native Rust (CssEscapeHandler)
+        // Registrering sker i register_window() nedan via win.set("CSS", ...)
 
         // ─── document.hidden / visibilityState ──────────────────────────────
         if (typeof document !== 'undefined') {
