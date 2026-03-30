@@ -116,11 +116,23 @@ pub fn build_blitz_computed_styles(
             if let Some(style) = node.primary_styles() {
                 let mut props = std::collections::HashMap::new();
 
-                // Display
-                props.insert(
-                    "display".to_string(),
-                    format!("{:?}", style.clone_display()).to_lowercase(),
-                );
+                // Display — konvertera via ToCss, med post-processing för ogiltiga värden
+                {
+                    use style_traits::values::ToCss;
+                    let mut display_str = style.clone_display().to_css_string();
+                    // "math" är inte ett giltigt display-värde i CSS — resolve till inner/outer
+                    if display_str.contains("math") {
+                        if display_str == "math"
+                            || display_str == "inline math"
+                            || display_str == "math inline"
+                        {
+                            display_str = "inline".to_string();
+                        } else if display_str == "block math" || display_str == "math block" {
+                            display_str = "block".to_string();
+                        }
+                    }
+                    props.insert("display".to_string(), display_str);
+                }
 
                 // Color — resolved to rgb() format
                 let color = style.clone_color().into_srgb_legacy();
@@ -2256,6 +2268,81 @@ impl JsHandler for GetSelection {
         selection.set("collapse", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         selection.set("collapseToStart", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         selection.set("collapseToEnd", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("extend", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("setBaseAndExtent", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("empty", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set("modify", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        selection.set(
+            "deleteFromDocument",
+            Function::new(ctx.clone(), JsFn(NoOp))?,
+        )?;
+        selection.set("containsNode", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        // selectAllChildren — selects all text content of a node
+        // Lagrar vald text i selection-objektet via closure
+        ctx.eval::<(), _>(
+            r#"(function() {
+                var _sel = null;
+                if (typeof document !== 'undefined' && document.getSelection) {
+                    _sel = document.getSelection;
+                }
+                // Patcha Selection-liknande objekt med selectAllChildren + toString
+                var _patchSel = function(sel) {
+                    sel._selectedText = '';
+                    sel.selectAllChildren = function(node) {
+                        // Kolla om noden eller en HTML-förälder har inert
+                        // Per spec: inert attribut gäller bara HTML-element
+                        var htmlNS = 'http://www.w3.org/1999/xhtml';
+                        var n = node;
+                        while (n) {
+                            if (n.getAttribute && n.getAttribute('inert') !== null) {
+                                // Kontrollera att det är ett HTML-element
+                                var ns = n.namespaceURI;
+                                var isHTML = !ns || ns === htmlNS;
+                                if (isHTML) {
+                                    sel._selectedText = '';
+                                    return;
+                                }
+                            }
+                            n = n.parentNode;
+                        }
+                        sel._selectedText = (node && node.textContent) || '';
+                        sel.anchorNode = node;
+                        sel.focusNode = node;
+                        sel.rangeCount = 1;
+                        sel.type = 'Range';
+                        sel.isCollapsed = false;
+                    };
+                    sel.getRangeAt = function(idx) {
+                        if (typeof Range !== 'undefined') return new Range();
+                        return null;
+                    };
+                    var origToString = sel.toString;
+                    sel.toString = function() { return sel._selectedText || ''; };
+                    sel.removeAllRanges = function() {
+                        sel._selectedText = '';
+                        sel.rangeCount = 0;
+                        sel.type = 'None';
+                        sel.isCollapsed = true;
+                    };
+                    return sel;
+                };
+                // Patcha document.getSelection att returnera patchad Selection
+                if (typeof document !== 'undefined') {
+                    var _cachedSel = null;
+                    document.getSelection = function() {
+                        if (!_cachedSel) {
+                            _cachedSel = {
+                                anchorNode: null, anchorOffset: 0,
+                                focusNode: null, focusOffset: 0,
+                                isCollapsed: true, rangeCount: 0, type: 'None'
+                            };
+                            _patchSel(_cachedSel);
+                        }
+                        return _cachedSel;
+                    };
+                }
+            })()"#,
+        )?;
         selection.set(
             "toString",
             Function::new(ctx.clone(), JsFn(SelectionToString))?,
@@ -4071,6 +4158,12 @@ pub(super) fn js_value_to_dom_string(val: Option<&rquickjs::Value<'_>>) -> Strin
                 } else {
                     format!("{}", n)
                 }
+            } else if let Some(obj) = v.as_object() {
+                // Anropa toString() på objekt per WebIDL DOMString konvertering
+                obj.get::<_, rquickjs::Function>("toString")
+                    .ok()
+                    .and_then(|func| func.call::<_, String>((v.clone(),)).ok())
+                    .unwrap_or_default()
             } else {
                 String::new()
             }
@@ -6112,9 +6205,23 @@ pub(super) fn make_element_object<'js>(
                     parent
                 };
 
-                let html_str = js_value_to_dom_string(args.first());
+                // outerHTML setter: null → "" per spec (DOMString? coercion)
+                let html_str = {
+                    let val = args.first();
+                    match val {
+                        Some(v) if v.is_null() => String::new(),
+                        _ => js_value_to_dom_string(val),
+                    }
+                };
 
                 if let Some(parent_key) = parent_key {
+                    if html_str.is_empty() {
+                        // null/empty → bara ta bort elementet (inga nya noder)
+                        let mut s = self.state.borrow_mut();
+                        s.arena.remove_child(parent_key, self.key);
+                        return Ok(Value::new_undefined(ctx.clone()));
+                    }
+
                     // Parsa HTML till nya noder
                     let new_keys = {
                         let mut s = self.state.borrow_mut();

@@ -671,7 +671,72 @@ pub(super) struct FocusHandler {
 impl JsHandler for FocusHandler {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let mut s = self.state.borrow_mut();
-        s.focused_element = Some(node_key_to_f64(self.key) as u64);
+        // Kontrollera om elementet eller en förfader är inert eller display:none
+        let mut focusable = true;
+        let mut current = Some(self.key);
+        while let Some(key) = current {
+            if let Some(node) = s.arena.nodes.get(key) {
+                // Kolla inert-attribut (bara för HTML-element, inte MathML/SVG)
+                if node.get_attr("inert").is_some() {
+                    let is_html = node
+                        .tag
+                        .as_deref()
+                        .map(|t| {
+                            !matches!(
+                                t,
+                                "math"
+                                    | "mi"
+                                    | "mo"
+                                    | "mn"
+                                    | "ms"
+                                    | "mtext"
+                                    | "mrow"
+                                    | "mfrac"
+                                    | "msup"
+                                    | "msub"
+                                    | "mover"
+                                    | "munder"
+                                    | "svg"
+                                    | "g"
+                                    | "path"
+                                    | "circle"
+                                    | "rect"
+                                    | "line"
+                                    | "polygon"
+                                    | "polyline"
+                                    | "text"
+                                    | "tspan"
+                                    | "foreignObject"
+                                    | "use"
+                                    | "defs"
+                                    | "clipPath"
+                                    | "mask"
+                                    | "image"
+                                    | "pattern"
+                            )
+                        })
+                        .unwrap_or(true);
+                    if is_html {
+                        focusable = false;
+                        break;
+                    }
+                }
+                // Kolla display:none (inline style)
+                if let Some(style) = node.get_attr("style") {
+                    let lower = style.to_lowercase();
+                    if lower.contains("display") && lower.contains("none") {
+                        focusable = false;
+                        break;
+                    }
+                }
+                current = node.parent;
+            } else {
+                break;
+            }
+        }
+        if focusable {
+            s.focused_element = Some(node_key_to_f64(self.key) as u64);
+        }
         Ok(Value::new_undefined(ctx.clone()))
     }
 }
