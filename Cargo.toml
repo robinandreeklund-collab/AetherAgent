@@ -143,6 +143,10 @@ name = "aether-hybrid-bench"
 path = "benches/bench_hybrid_pipeline.rs"
 
 [[bin]]
+name = "aether-real-world"
+path = "benches/real_world_validation.rs"
+
+[[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
 required-features = ["js-eval", "blitz", "fetch"]

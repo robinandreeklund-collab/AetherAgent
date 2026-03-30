@@ -78,7 +78,8 @@ impl TfIdfIndex {
         }
     }
 
-    /// Sök kandidater: returnerar node_ids rankade efter TF-IDF-likhet med goal
+    /// Sök kandidater: returnerar node_ids rankade efter TF-IDF-likhet med goal.
+    /// Steg 1: exakt token-match. Steg 2: prefix-match om steg 1 ger 0 resultat.
     pub fn query(&self, goal: &str, top_k: usize) -> Vec<(u32, f32)> {
         let tokens = tokenize(goal);
         if tokens.is_empty() {
@@ -87,10 +88,29 @@ impl TfIdfIndex {
 
         let mut scores: HashMap<u32, f32> = HashMap::new();
 
+        // Steg 1: Exakt token-match
         for token in &tokens {
             if let Some(entries) = self.index.get(token) {
                 for &(node_id, score) in entries {
                     *scores.entry(node_id).or_insert(0.0) += score;
+                }
+            }
+        }
+
+        // Steg 2: Prefix-match fallback om exakt match ger 0 resultat
+        if scores.is_empty() {
+            for token in &tokens {
+                if token.len() >= 3 {
+                    for (index_term, entries) in &self.index {
+                        if index_term.starts_with(token.as_str())
+                            || token.starts_with(index_term.as_str())
+                        {
+                            for &(node_id, score) in entries {
+                                // Reducerad score för prefix-match (70%)
+                                *scores.entry(node_id).or_insert(0.0) += score * 0.7;
+                            }
+                        }
+                    }
                 }
             }
         }
