@@ -1,7 +1,7 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-29 (Session 4: +767 WPT pass, Tier B DOM integrations)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-30 (Session 4: +870 WPT pass, Tier B DOM integrations)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
@@ -48,7 +48,7 @@
 |-------|--------|-------|------|-------|
 | **css/selectors** | 1,651 | 3,457 | **47.8%** | ─ stabil |
 | **css/css-values** | 164 | 1,526 | **10.7%** | ─ stabil |
-| **css/cssom** | 123 | 676 | **18.2%** | ↑ från 17.1% |
+| **css/cssom** | 149 | 676 | **22.0%** | ↑↑ från 17.1% |
 | **css/css-display** | 21 | 44 | **47.7%** | ↑ från 36.4% |
 | **css/css-color** | 12 | 87 | **13.8%** | ─ stabil |
 | **css/css-cascade** | 33 | 402 | **8.2%** | ↑ från 6.7% |
@@ -58,13 +58,13 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **html/semantics** | 1,966 | 4,936 | **39.8%** | ↑ från ~50% (forms only) |
+| **html/semantics** | 2,020 | 4,933 | **40.9%** | ↑ från 39.8% |
 
 ### Tier 5 — Events & Interaction
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **selection** | 7,317 | 29,396 | **24.9%** | ─ stabil |
+| **selection** | 7,445 | 29,718 | **25.1%** | ↑ från 24.9% |
 | **pointerevents** | 192 | 320 | **60.0%** | ─ stabil |
 | **input-events** | 262 | 379 | **69.1%** | ↑↑ från 31.0% |
 | **touch-events** | 27 | 32 | **84.4%** | ↑↑ från 37.5% |
@@ -90,7 +90,7 @@
 | **domxpath** | 54 | 109 | **49.5%** | ↑↑ ny (1.9%) |
 | **trusted-types** | 330 | 917 | **36.0%** | ↑↑ från 10.0% |
 | **webmessaging** | 12 | 71 | **16.9%** | ↑ från 14.3% |
-| **svg** | 135 | 958 | **14.1%** | ↑↑ från 6.5% |
+| **svg** | 139 | 958 | **14.5%** | ↑↑ från 6.5% |
 | **editing** | 20 | 223 | **9.0%** | ↑↑ från 1.7% |
 | **xhr** | 31 | 461 | **6.7%** | ─ stabil |
 | **encoding** | 6 | 331 | **1.8%** | ─ stabil |
