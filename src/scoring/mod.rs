@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod embed_score;
 pub mod hdc;
 pub mod pipeline;

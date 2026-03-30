@@ -114,11 +114,16 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
 fn build_tree_hybrid(html: &str, goal: &str, url: &str) -> (SemanticTree, scoring::PipelineResult) {
     let mut tree = build_tree(html, goal, url);
 
-    // Kör hybrid pipeline
+    // Kör hybrid pipeline med cache (build-fas cachas per HTML-innehåll)
     let goal_embedding = crate::embedding::embed(goal);
     let config = scoring::PipelineConfig::default();
-    let result =
-        scoring::ScoringPipeline::run(&tree.nodes, goal, goal_embedding.as_deref(), &config);
+    let result = scoring::ScoringPipeline::run_cached(
+        html,
+        &tree.nodes,
+        goal,
+        goal_embedding.as_deref(),
+        &config,
+    );
 
     // Applicera scores tillbaka på trädet
     let score_map = scoring::pipeline::scores_to_map(&result.scored_nodes);
@@ -533,6 +538,7 @@ pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> 
             "prune_hdc_us": timings.prune_hdc_us,
             "score_embed_us": timings.score_embed_us,
             "total_pipeline_us": timings.total_us,
+            "cache_hit": timings.cache_hit,
         }
     });
 

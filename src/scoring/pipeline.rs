@@ -48,6 +48,7 @@ pub struct PipelineTimings {
     pub tfidf_candidates: usize,
     pub hdc_survivors: usize,
     pub final_scored: usize,
+    pub cache_hit: bool,
 }
 
 /// Resultat från hela pipelinen
@@ -115,6 +116,97 @@ impl ScoringPipeline {
         let goal_hv = HdcTree::project_goal(goal);
         let survivors = if config.adaptive_hdc {
             // Adaptiv: filtrera per nod baserat på roll + djup
+            candidates
+                .iter()
+                .filter(|(id, _)| {
+                    if let Some(info) = node_index.get(id) {
+                        let threshold = hdc::adaptive_threshold(&info.role, info.depth);
+                        hdc_tree
+                            .node_similarity(*id, &goal_hv)
+                            .map(|sim| sim >= threshold)
+                            .unwrap_or(true)
+                    } else {
+                        true
+                    }
+                })
+                .copied()
+                .collect::<Vec<_>>()
+        } else {
+            hdc_tree.prune(&candidates, &goal_hv, config.hdc_threshold)
+        };
+        timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
+        timings.hdc_survivors = survivors.len();
+
+        // Steg 3: Bottom-up embedding scoring
+        let t4 = Instant::now();
+        let scored = embed_score::score_bottom_up(
+            &survivors,
+            &node_index,
+            goal,
+            &goal_words,
+            goal_embedding,
+        );
+        timings.score_embed_us = t4.elapsed().as_micros() as u64;
+        timings.final_scored = scored.len();
+
+        timings.total_us = pipeline_start.elapsed().as_micros() as u64;
+
+        PipelineResult {
+            scored_nodes: scored,
+            timings,
+        }
+    }
+
+    /// Kör hybrid-pipeline med cache: build-fas cachas per HTML-innehåll.
+    /// Andra och efterföljande queries mot samma sida skippar build (~6ms → ~0ms).
+    pub fn run_cached(
+        html: &str,
+        tree_nodes: &[SemanticNode],
+        goal: &str,
+        goal_embedding: Option<&[f32]>,
+        config: &PipelineConfig,
+    ) -> PipelineResult {
+        let pipeline_start = Instant::now();
+        let mut timings = PipelineTimings::default();
+
+        // Pre-compute goal words
+        let goal_lower = goal.to_lowercase();
+        let goal_words: Vec<String> = goal_lower
+            .split_whitespace()
+            .filter(|s| s.len() > 2)
+            .map(String::from)
+            .collect();
+
+        // Cache-aware build
+        let build_result = super::cache::get_or_build(html, tree_nodes);
+        timings.build_tfidf_us = build_result.build_tfidf_us;
+        timings.build_hdc_us = build_result.build_hdc_us;
+        timings.cache_hit = build_result.cache_hit;
+
+        let tfidf_index = build_result.tfidf_index;
+        let hdc_tree = build_result.hdc_tree;
+        let node_index = build_result.node_index;
+
+        // Steg 1: TF-IDF kandidatretrieval
+        let t2 = Instant::now();
+        let candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
+        timings.tfidf_candidates = candidates.len();
+
+        let flat_nodes = tfidf::flatten_tree(tree_nodes);
+        let candidates = if candidates.is_empty() {
+            flat_nodes
+                .iter()
+                .map(|&(id, _)| (id, 0.1f32))
+                .collect::<Vec<_>>()
+        } else {
+            candidates
+        };
+
+        // Steg 2: HDC pruning
+        let t3 = Instant::now();
+        let goal_hv = HdcTree::project_goal(goal);
+        let survivors = if config.adaptive_hdc {
             candidates
                 .iter()
                 .filter(|(id, _)| {
