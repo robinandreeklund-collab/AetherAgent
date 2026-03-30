@@ -269,6 +269,23 @@ impl HdcTree {
         self.nodes.get(&node_id).map(|hv| hv.similarity(goal_hv))
     }
 
+    /// Ren strukturell HDC-pruning: rankar ALLA noder efter HV-likhet med goal.
+    ///
+    /// Används som fallback när BM25 ger 0 kandidater (semantiska frågor
+    /// utan keyword-overlap). Returnerar top_k noder sorterade efter HDC-likhet.
+    /// Mycket snabbare än embedding (~0.5ms vs ~400ms) men grövre precision.
+    pub fn prune_pure(&self, goal_hv: &Hypervector, top_k: usize) -> Vec<(u32, f32)> {
+        let mut scored: Vec<(u32, f32)> = self
+            .nodes
+            .iter()
+            .map(|(&id, hv)| (id, hv.similarity(goal_hv)))
+            .collect();
+
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        scored.truncate(top_k);
+        scored
+    }
+
     /// Antal noder i trädet
     pub fn node_count(&self) -> usize {
         self.nodes.len()

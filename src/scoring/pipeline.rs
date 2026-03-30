@@ -18,12 +18,16 @@ use super::tfidf::{self, TfIdfIndex};
 /// Konfiguration för hybrid-pipelinen
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
-    /// Max antal TF-IDF-kandidater (steg 1)
+    /// Max antal BM25-kandidater (steg 1)
     pub tfidf_top_k: usize,
     /// HDC threshold-multiplikator (lägre = fler passerar)
     pub hdc_threshold: f32,
     /// Använd adaptiv HDC threshold per nod
     pub adaptive_hdc: bool,
+    /// Max antal survivors efter HDC-pruning (adaptivt om 0)
+    pub max_survivors: usize,
+    /// Returnera alltid minst detta antal scorade noder till downstream
+    pub min_output: usize,
 }
 
 impl Default for PipelineConfig {
@@ -32,6 +36,8 @@ impl Default for PipelineConfig {
             tfidf_top_k: 300,
             hdc_threshold: 0.02,
             adaptive_hdc: true,
+            max_survivors: 0, // 0 = adaptivt baserat på BM25-confidence + DOM-storlek
+            min_output: 100,  // Returnera alltid minst 100 noder till LLM
         }
     }
 }
@@ -95,44 +101,65 @@ impl ScoringPipeline {
 
         let node_index = build_node_index(tree_nodes);
 
-        // Steg 1: TF-IDF kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval
         let t2 = Instant::now();
         let candidates = tfidf_index.query(goal, config.tfidf_top_k);
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
-        // Om TF-IDF ger 0 kandidater: fallback till alla noder (med bas-score)
-        let candidates = if candidates.is_empty() {
-            flat_nodes
-                .iter()
-                .map(|&(id, _)| (id, 0.1f32))
-                .collect::<Vec<_>>()
-        } else {
-            candidates
-        };
-
-        // Steg 2: HDC pruning
+        // Steg 2: Två-stegs HDC pruning
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
-        let survivors = if config.adaptive_hdc {
-            // Adaptiv: filtrera per nod baserat på roll + djup
-            candidates
-                .iter()
-                .filter(|(id, _)| {
-                    if let Some(info) = node_index.get(id) {
-                        let threshold = hdc::adaptive_threshold(&info.role, info.depth);
-                        hdc_tree
-                            .node_similarity(*id, &goal_hv)
-                            .map(|sim| sim >= threshold)
-                            .unwrap_or(true)
-                    } else {
-                        true
-                    }
-                })
-                .copied()
-                .collect::<Vec<_>>()
+
+        // Beräkna adaptiv survivor-cap baserat på BM25-confidence + DOM-storlek
+        let survivor_cap = if config.max_survivors > 0 {
+            config.max_survivors
         } else {
-            hdc_tree.prune(&candidates, &goal_hv, config.hdc_threshold)
+            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+        };
+
+        let survivors = if !candidates.is_empty() {
+            // Steg 2a: Bred HDC-pruning (låg threshold, behåll de flesta)
+            let broad = if config.adaptive_hdc {
+                candidates
+                    .iter()
+                    .filter(|(id, _)| {
+                        if let Some(info) = node_index.get(id) {
+                            let threshold = hdc::adaptive_threshold(&info.role, info.depth);
+                            hdc_tree
+                                .node_similarity(*id, &goal_hv)
+                                .map(|sim| sim >= threshold)
+                                .unwrap_or(true)
+                        } else {
+                            true
+                        }
+                    })
+                    .copied()
+                    .collect::<Vec<_>>()
+            } else {
+                hdc_tree.prune(&candidates, &goal_hv, config.hdc_threshold)
+            };
+
+            // Steg 2b: Om fortfarande för många → strikt HDC top-K ranking
+            if broad.len() > survivor_cap {
+                let mut ranked: Vec<(u32, f32, f32)> = broad
+                    .iter()
+                    .map(|&(id, bm25_score)| {
+                        let hdc_sim = hdc_tree.node_similarity(id, &goal_hv).unwrap_or(0.0);
+                        // Kombinerad score: 60% BM25 + 40% HDC
+                        let combined = bm25_score * 0.6 + hdc_sim * 0.4;
+                        (id, combined, bm25_score)
+                    })
+                    .collect();
+                ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+                ranked.truncate(survivor_cap);
+                ranked.iter().map(|&(id, _, bm25)| (id, bm25)).collect()
+            } else {
+                broad
+            }
+        } else {
+            // BM25 gav 0 → ren HDC-pruning som fallback
+            hdc_tree.prune_pure(&goal_hv, survivor_cap)
         };
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
@@ -187,43 +214,61 @@ impl ScoringPipeline {
         let hdc_tree = build_result.hdc_tree;
         let node_index = build_result.node_index;
 
-        // Steg 1: TF-IDF kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval
         let t2 = Instant::now();
         let candidates = tfidf_index.query(goal, config.tfidf_top_k);
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
-        let flat_nodes = tfidf::flatten_tree(tree_nodes);
-        let candidates = if candidates.is_empty() {
-            flat_nodes
-                .iter()
-                .map(|&(id, _)| (id, 0.1f32))
-                .collect::<Vec<_>>()
-        } else {
-            candidates
-        };
-
-        // Steg 2: HDC pruning
+        // Steg 2: Två-stegs HDC pruning (samma logik som run())
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
-        let survivors = if config.adaptive_hdc {
-            candidates
-                .iter()
-                .filter(|(id, _)| {
-                    if let Some(info) = node_index.get(id) {
-                        let threshold = hdc::adaptive_threshold(&info.role, info.depth);
-                        hdc_tree
-                            .node_similarity(*id, &goal_hv)
-                            .map(|sim| sim >= threshold)
-                            .unwrap_or(true)
-                    } else {
-                        true
-                    }
-                })
-                .copied()
-                .collect::<Vec<_>>()
+        let flat_nodes = tfidf::flatten_tree(tree_nodes);
+
+        let survivor_cap = if config.max_survivors > 0 {
+            config.max_survivors
         } else {
-            hdc_tree.prune(&candidates, &goal_hv, config.hdc_threshold)
+            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+        };
+
+        let survivors = if !candidates.is_empty() {
+            let broad = if config.adaptive_hdc {
+                candidates
+                    .iter()
+                    .filter(|(id, _)| {
+                        if let Some(info) = node_index.get(id) {
+                            let threshold = hdc::adaptive_threshold(&info.role, info.depth);
+                            hdc_tree
+                                .node_similarity(*id, &goal_hv)
+                                .map(|sim| sim >= threshold)
+                                .unwrap_or(true)
+                        } else {
+                            true
+                        }
+                    })
+                    .copied()
+                    .collect::<Vec<_>>()
+            } else {
+                hdc_tree.prune(&candidates, &goal_hv, config.hdc_threshold)
+            };
+
+            if broad.len() > survivor_cap {
+                let mut ranked: Vec<(u32, f32, f32)> = broad
+                    .iter()
+                    .map(|&(id, bm25_score)| {
+                        let hdc_sim = hdc_tree.node_similarity(id, &goal_hv).unwrap_or(0.0);
+                        let combined = bm25_score * 0.6 + hdc_sim * 0.4;
+                        (id, combined, bm25_score)
+                    })
+                    .collect();
+                ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+                ranked.truncate(survivor_cap);
+                ranked.iter().map(|&(id, _, bm25)| (id, bm25)).collect()
+            } else {
+                broad
+            }
+        } else {
+            hdc_tree.prune_pure(&goal_hv, survivor_cap)
         };
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
@@ -255,6 +300,37 @@ impl ScoringPipeline {
             None => scored,
         }
     }
+}
+
+/// Adaptiv survivor-cap baserat på BM25-confidence och DOM-storlek.
+///
+/// Fler BM25-kandidater = högre confidence → tillåt fler survivors.
+/// Större DOM = behöver mer aggressiv pruning.
+///
+/// Returnerar max antal noder som skickas till embedding-steget.
+fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize) -> usize {
+    // Bas: 30-80 survivors beroende på DOM-storlek
+    let base = if total_nodes < 50 {
+        total_nodes // Liten sida — behåll allt
+    } else if total_nodes < 200 {
+        60
+    } else if total_nodes < 500 {
+        80
+    } else {
+        100
+    };
+
+    // BM25-confidence boost: om BM25 hittade många → bra keyword-overlap → vi kan
+    // vara striktare (behöver inte HDC-fallback för att kompensera)
+    let confidence_factor = if bm25_candidates > 100 {
+        0.6 // Högt antal kandidater — var strikt
+    } else if bm25_candidates > 30 {
+        0.8
+    } else {
+        1.0 // Få kandidater — behåll fler
+    };
+
+    ((base as f32 * confidence_factor) as usize).max(20) // Minimum 20
 }
 
 /// Applicera pipeline-scores tillbaka på SemanticNodes i trädet

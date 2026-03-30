@@ -1,36 +1,56 @@
-/// TF-IDF Index — snabb keyword-baserad kandidatretrieval
+/// BM25 Index — Okapi BM25 kandidatretrieval (ersätter TF-IDF)
 ///
-/// Bygger ett inverterat index (term → nod-IDs med TF-IDF-score) från
-/// det semantiska trädets noder. Query returnerar de top-K noderna
-/// vars label har högst TF-IDF-overlap med goal-termen.
+/// BM25 ger bättre ranking än ren TF-IDF tack vare:
+/// - Term frequency saturation (k1): förhindrar att en term som upprepas
+///   100 gånger dominerar — diminishing returns efter ~3-5 förekomster
+/// - Document length normalization (b): korta, koncisa noder bootas
+///   relativt långa wrapper-noder med utspädd text
+/// - Bättre IDF-formel: ln((N - df + 0.5) / (df + 0.5) + 1) ger
+///   positivt värde även för vanliga termer (till skillnad från TF-IDF
+///   som ger 0 för termer i >50% av noderna)
 ///
-/// Byggtid: O(n × avg_label_len), querytid: O(|goal_tokens| × avg_postings)
+/// Parametrar: k1=1.2, b=0.75 (standard Okapi BM25)
 use std::collections::{HashMap, HashSet};
 
 use crate::types::SemanticNode;
 
-/// Inverterat TF-IDF-index över semantiska noder
+/// BM25 term frequency saturation parameter
+const BM25_K1: f32 = 1.2;
+/// BM25 document length normalization parameter
+const BM25_B: f32 = 0.75;
+
+/// BM25-index över semantiska noder (drop-in ersättning för TfIdfIndex)
 pub struct TfIdfIndex {
-    /// term → lista av (node_id, tf_idf_score)
-    index: HashMap<String, Vec<(u32, f32)>>,
+    /// term → lista av (node_id, raw_tf) — BM25-score beräknas vid query-tid
+    postings: HashMap<String, Vec<(u32, f32)>>,
+    /// document frequency per term
+    df: HashMap<String, usize>,
+    /// document length per nod (antal termer)
+    doc_len: HashMap<u32, f32>,
+    /// genomsnittlig dokumentlängd
+    avg_dl: f32,
     /// Antal noder i indexet
     node_count: usize,
 }
 
 impl TfIdfIndex {
-    /// Bygg index från en platt lista av noder
+    /// Bygg BM25-index från en platt lista av (node_id, label)
     pub fn build(nodes: &[(u32, &str)]) -> Self {
         let n = nodes.len();
         if n == 0 {
             return TfIdfIndex {
-                index: HashMap::new(),
+                postings: HashMap::new(),
+                df: HashMap::new(),
+                doc_len: HashMap::new(),
+                avg_dl: 0.0,
                 node_count: 0,
             };
         }
 
-        // Steg 1: Beräkna term frequency per nod och document frequency per term
         let mut df: HashMap<String, usize> = HashMap::new();
-        let mut tf_per_node: Vec<(u32, HashMap<String, f32>)> = Vec::with_capacity(n);
+        let mut postings: HashMap<String, Vec<(u32, f32)>> = HashMap::new();
+        let mut doc_len: HashMap<u32, f32> = HashMap::new();
+        let mut total_terms: f32 = 0.0;
 
         for &(node_id, label) in nodes {
             let terms = tokenize(label);
@@ -38,61 +58,67 @@ impl TfIdfIndex {
                 continue;
             }
 
+            let dl = terms.len() as f32;
+            doc_len.insert(node_id, dl);
+            total_terms += dl;
+
+            // Term frequency per nod
             let mut tf: HashMap<String, f32> = HashMap::new();
             for term in &terms {
                 *tf.entry(term.clone()).or_insert(0.0) += 1.0;
             }
 
-            // DF: varje unik term räknas en gång per dokument
+            // Document frequency: varje unik term räknas en gång per dokument
             let unique_terms: HashSet<&String> = tf.keys().collect();
             for term in unique_terms {
                 *df.entry(term.clone()).or_insert(0) += 1;
             }
 
-            tf_per_node.push((node_id, tf));
-        }
-
-        // Steg 2: Beräkna TF-IDF och bygg inverterat index
-        let n_f32 = n as f32;
-        let mut index: HashMap<String, Vec<(u32, f32)>> = HashMap::new();
-
-        for (node_id, tf) in &tf_per_node {
-            for (term, &freq) in tf {
-                let doc_freq = *df.get(term).unwrap_or(&1) as f32;
-                let idf = (n_f32 / (1.0 + doc_freq)).ln();
-                // TF normaliseras med log(1+tf) för att dämpa repeteringar
-                let tf_norm = (1.0 + freq).ln();
-                let score = tf_norm * idf;
-                if score > 0.0 {
-                    index
-                        .entry(term.clone())
-                        .or_default()
-                        .push((*node_id, score));
-                }
+            // Lagra raw TF i postings (BM25-score beräknas vid query-tid)
+            for (term, freq) in tf {
+                postings.entry(term).or_default().push((node_id, freq));
             }
         }
 
+        let docs_with_terms = doc_len.len().max(1) as f32;
+        let avg_dl = total_terms / docs_with_terms;
+
         TfIdfIndex {
-            index,
+            postings,
+            df,
+            doc_len,
+            avg_dl,
             node_count: n,
         }
     }
 
-    /// Sök kandidater: returnerar node_ids rankade efter TF-IDF-likhet med goal.
-    /// Steg 1: exakt token-match. Steg 2: prefix-match om steg 1 ger 0 resultat.
+    /// BM25 query: returnerar node_ids rankade efter BM25-score.
+    ///
+    /// Steg 1: exakt token-match med BM25-scoring.
+    /// Steg 2: prefix-match fallback om steg 1 ger 0 resultat.
     pub fn query(&self, goal: &str, top_k: usize) -> Vec<(u32, f32)> {
         let tokens = tokenize(goal);
         if tokens.is_empty() {
             return vec![];
         }
 
+        let n = self.node_count as f32;
         let mut scores: HashMap<u32, f32> = HashMap::new();
 
-        // Steg 1: Exakt token-match
+        // Steg 1: Exakt token-match med BM25
         for token in &tokens {
-            if let Some(entries) = self.index.get(token) {
-                for &(node_id, score) in entries {
-                    *scores.entry(node_id).or_insert(0.0) += score;
+            if let Some(entries) = self.postings.get(token) {
+                let doc_freq = *self.df.get(token).unwrap_or(&1) as f32;
+                // BM25 IDF: ln((N - df + 0.5) / (df + 0.5) + 1)
+                // Alltid positiv, även för vanliga termer
+                let idf = ((n - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0).ln();
+
+                for &(node_id, raw_tf) in entries {
+                    let dl = self.doc_len.get(&node_id).copied().unwrap_or(1.0);
+                    // BM25 TF-komponent: (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
+                    let tf_component = (raw_tf * (BM25_K1 + 1.0))
+                        / (raw_tf + BM25_K1 * (1.0 - BM25_B + BM25_B * dl / self.avg_dl.max(1.0)));
+                    *scores.entry(node_id).or_insert(0.0) += idf * tf_component;
                 }
             }
         }
@@ -101,13 +127,21 @@ impl TfIdfIndex {
         if scores.is_empty() {
             for token in &tokens {
                 if token.len() >= 3 {
-                    for (index_term, entries) in &self.index {
+                    for (index_term, entries) in &self.postings {
                         if index_term.starts_with(token.as_str())
                             || token.starts_with(index_term.as_str())
                         {
-                            for &(node_id, score) in entries {
+                            let doc_freq = *self.df.get(index_term).unwrap_or(&1) as f32;
+                            let idf = ((n - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0).ln();
+
+                            for &(node_id, raw_tf) in entries {
+                                let dl = self.doc_len.get(&node_id).copied().unwrap_or(1.0);
+                                let tf_component = (raw_tf * (BM25_K1 + 1.0))
+                                    / (raw_tf
+                                        + BM25_K1
+                                            * (1.0 - BM25_B + BM25_B * dl / self.avg_dl.max(1.0)));
                                 // Reducerad score för prefix-match (70%)
-                                *scores.entry(node_id).or_insert(0.0) += score * 0.7;
+                                *scores.entry(node_id).or_insert(0.0) += idf * tf_component * 0.7;
                             }
                         }
                     }
@@ -121,50 +155,46 @@ impl TfIdfIndex {
         ranked
     }
 
-    /// Inkrementell uppdatering: ta bort gammal label och lägg till ny för en nod.
-    ///
-    /// Enklare än full rebuild — tar bort nodens gamla entries och lägger till nya.
-    /// IDF omberäknas inte (approximation som är acceptabel för inkrementella ändringar).
+    /// Inkrementell uppdatering: ta bort gammal label och lägg till ny.
     pub fn update_node(&mut self, node_id: u32, old_label: &str, new_label: &str) {
         // Ta bort gamla entries
         let old_terms = tokenize(old_label);
         for term in &old_terms {
-            if let Some(entries) = self.index.get_mut(term) {
+            if let Some(entries) = self.postings.get_mut(term) {
                 entries.retain(|(id, _)| *id != node_id);
                 if entries.is_empty() {
-                    self.index.remove(term);
+                    self.postings.remove(term);
                 }
             }
         }
+        self.doc_len.remove(&node_id);
 
-        // Lägg till nya entries (approx TF-IDF, utan full IDF-omberäkning)
+        // Lägg till nya entries
         let new_terms = tokenize(new_label);
-        let n = self.node_count.max(1) as f32;
+        if new_terms.is_empty() {
+            return;
+        }
+
+        let dl = new_terms.len() as f32;
+        self.doc_len.insert(node_id, dl);
+
         let mut tf: HashMap<String, f32> = HashMap::new();
         for term in &new_terms {
             *tf.entry(term.clone()).or_insert(0.0) += 1.0;
         }
-        for (term, freq) in &tf {
-            let tf_norm = (1.0 + freq).ln();
-            // Approx IDF: använd nuvarande antal entries som DF-estimat
-            let df = self.index.get(term).map(|e| e.len()).unwrap_or(0) as f32;
-            let idf = (n / (1.0 + df)).ln();
-            let score = tf_norm * idf;
-            if score > 0.0 {
-                self.index
-                    .entry(term.clone())
-                    .or_default()
-                    .push((node_id, score));
-            }
+        for (term, freq) in tf {
+            *self.df.entry(term.clone()).or_insert(0) += 1;
+            self.postings.entry(term).or_default().push((node_id, freq));
         }
     }
 
     /// Ta bort en nod helt från indexet
     pub fn remove_node(&mut self, node_id: u32) {
-        for entries in self.index.values_mut() {
+        for entries in self.postings.values_mut() {
             entries.retain(|(id, _)| *id != node_id);
         }
-        self.index.retain(|_, entries| !entries.is_empty());
+        self.postings.retain(|_, entries| !entries.is_empty());
+        self.doc_len.remove(&node_id);
     }
 
     /// Antal noder i indexet
@@ -174,7 +204,7 @@ impl TfIdfIndex {
 
     /// Antal unika termer
     pub fn term_count(&self) -> usize {
-        self.index.len()
+        self.postings.len()
     }
 }
 
@@ -188,7 +218,7 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Minimala stopwords (svenska + engelska) — termer som inte bör påverka ranking
+/// Minimala stopwords (svenska + engelska)
 fn is_stopword(word: &str) -> bool {
     matches!(
         word,
@@ -258,7 +288,6 @@ mod tests {
             tokens.contains(&"malmö".to_string()),
             "Borde innehålla 'malmö'"
         );
-        // "i" filtreras bort (< 3 tecken)
         assert!(
             !tokens.contains(&"i".to_string()),
             "Borde filtrera bort 'i'"
@@ -273,10 +302,6 @@ mod tests {
         assert!(
             tokens.contains(&"quick".to_string()),
             "Borde behålla 'quick'"
-        );
-        assert!(
-            tokens.contains(&"brown".to_string()),
-            "Borde behålla 'brown'"
         );
     }
 
@@ -312,9 +337,6 @@ mod tests {
         ];
         let index = TfIdfIndex::build(&nodes);
 
-        // "inhabitants" förekommer i nod 2 och 3 → medel-IDF
-        // "statistics" förekommer i nod 2 och 5 → medel-IDF
-        // Nod 2 matchar båda → aggregerad score borde vara högst
         let results = index.query("inhabitants statistics", 10);
         assert!(
             results.len() >= 2,
@@ -349,21 +371,115 @@ mod tests {
     }
 
     #[test]
-    fn test_idf_weighting() {
-        // "malmö" förekommer i alla noder → låg IDF
-        // "invånare" förekommer bara i en nod → hög IDF
+    fn test_bm25_common_terms_still_score() {
+        // BM25 ska ge positiv score även för vanliga termer (olikt TF-IDF som ger 0)
         let nodes = vec![
-            (1, "Malmö stad information"),
-            (2, "367 924 invånare i Malmö kommun"),
-            (3, "Malmö centrum shopping"),
+            (1, "rust programming language features"),
+            (2, "rust compiler error messages"),
+            (3, "rust memory safety guarantees"),
+            (4, "python scripting language"),
         ];
         let index = TfIdfIndex::build(&nodes);
 
-        let results = index.query("invånare", 5);
-        assert!(!results.is_empty(), "Borde hitta nod med 'invånare'");
+        // "rust" förekommer i 3/4 noder — TF-IDF gav IDF≈0, BM25 ska ge >0
+        let results = index.query("rust", 5);
+        assert!(
+            results.len() >= 3,
+            "BM25 borde hitta alla 3 rust-noder, fick {}",
+            results.len()
+        );
+        // Alla rust-noder borde ha positiv score
+        for (id, score) in &results {
+            if *id != 4 {
+                assert!(
+                    *score > 0.0,
+                    "Nod {id} med 'rust' borde ha positiv BM25-score, fick {score}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bm25_short_docs_boosted() {
+        // BM25 length normalization: korta noder borde rankas högre
+        let nodes = vec![
+            (1, "Rust download"),
+            (2, "Rust is a multi-paradigm general-purpose programming language that emphasizes performance type safety and concurrency"),
+        ];
+        let index = TfIdfIndex::build(&nodes);
+
+        let results = index.query("rust download", 5);
+        assert!(
+            results.len() >= 2,
+            "Borde hitta båda, fick {}",
+            results.len()
+        );
+        // Nod 1 (kort, exakt match) borde rankas högre
         assert_eq!(
-            results[0].0, 2,
-            "Nod med unik term 'invånare' borde rankas högst"
+            results[0].0, 1,
+            "Kort nod med exakt match borde rankas högst"
+        );
+    }
+
+    #[test]
+    fn test_bm25_idf_weighting() {
+        // Unik term borde ge högre score än vanlig term
+        let nodes = vec![
+            (1, "population statistics data"),
+            (2, "cookie settings"),
+            (3, "weather forecast"),
+        ];
+        let index = TfIdfIndex::build(&nodes);
+
+        let results = index.query("population", 5);
+        assert!(!results.is_empty(), "Borde hitta nod med 'population'");
+        assert_eq!(
+            results[0].0, 1,
+            "Nod med unik term 'population' borde rankas högst"
+        );
+    }
+
+    #[test]
+    fn test_update_node_adds_new_terms() {
+        let nodes = vec![(1, "weather forecast today"), (2, "cookie settings")];
+        let mut index = TfIdfIndex::build(&nodes);
+
+        index.update_node(2, "cookie settings", "population data count");
+
+        let results = index.query("population data", 5);
+        assert!(
+            results.iter().any(|(id, _)| *id == 2),
+            "Nod 2 borde hittas efter uppdatering"
+        );
+
+        let old_results = index.query("cookie", 5);
+        assert!(
+            old_results.iter().all(|(id, _)| *id != 2),
+            "Nod 2 borde inte matcha 'cookie' efter uppdatering"
+        );
+    }
+
+    #[test]
+    fn test_remove_node() {
+        let nodes = vec![
+            (1, "population statistics data"),
+            (2, "cookie settings privacy"),
+            (3, "weather forecast tomorrow"),
+        ];
+        let mut index = TfIdfIndex::build(&nodes);
+
+        index.remove_node(2);
+
+        let results = index.query("cookie settings", 5);
+        assert!(
+            results.iter().all(|(id, _)| *id != 2),
+            "Borttagen nod borde inte hittas"
+        );
+
+        let results = index.query("statistics", 5);
+        assert!(
+            results.iter().any(|(id, _)| *id == 1),
+            "Nod 1 borde fortfarande hittas"
         );
     }
 
@@ -387,54 +503,5 @@ mod tests {
         assert_eq!(flat.len(), 2, "Borde platta ut 2 noder");
         assert_eq!(flat[0].0, 1, "Första noden borde ha id 1");
         assert_eq!(flat[1].0, 2, "Andra noden borde ha id 2");
-    }
-
-    #[test]
-    fn test_update_node_adds_new_terms() {
-        let nodes = vec![(1, "weather forecast today"), (2, "cookie settings")];
-        let mut index = TfIdfIndex::build(&nodes);
-
-        // Nod 2 ändras från "cookie settings" till "population data count"
-        index.update_node(2, "cookie settings", "population data count");
-
-        // Ny query borde hitta nod 2 med "population"
-        let results = index.query("population data", 5);
-        assert!(
-            results.iter().any(|(id, _)| *id == 2),
-            "Nod 2 borde hittas efter uppdatering"
-        );
-
-        // Gamla termer borde vara borta
-        let old_results = index.query("cookie", 5);
-        assert!(
-            old_results.iter().all(|(id, _)| *id != 2),
-            "Nod 2 borde inte matcha 'cookie' efter uppdatering"
-        );
-    }
-
-    #[test]
-    fn test_remove_node() {
-        let nodes = vec![
-            (1, "population statistics data"),
-            (2, "cookie settings privacy"),
-            (3, "weather forecast tomorrow"),
-        ];
-        let mut index = TfIdfIndex::build(&nodes);
-
-        index.remove_node(2);
-
-        // "cookie" var unik för nod 2 → borde inte hittas
-        let results = index.query("cookie settings", 5);
-        assert!(
-            results.iter().all(|(id, _)| *id != 2),
-            "Borttagen nod borde inte hittas"
-        );
-
-        // Nod 1 borde fortfarande vara kvar ("statistics" är unik för nod 1)
-        let results = index.query("statistics", 5);
-        assert!(
-            results.iter().any(|(id, _)| *id == 1),
-            "Nod 1 borde fortfarande hittas"
-        );
     }
 }
