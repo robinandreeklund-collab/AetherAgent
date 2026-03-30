@@ -777,6 +777,16 @@ async fn root() -> impl IntoResponse {
     )
 }
 
+/// MCP Tool Explorer – Interactive frontend for testing all tools
+async fn tool_explorer() -> impl IntoResponse {
+    let html = include_str!("tool_explorer.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
 /// JSON API endpoint listing (moved from root)
 async fn api_endpoints() -> impl IntoResponse {
     let body = serde_json::json!({
@@ -4910,6 +4920,7 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         // Root & Health
         .route("/", get(root))
+        .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
