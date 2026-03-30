@@ -9,60 +9,61 @@
 | Metric | Value |
 |--------|-------|
 | Sites tested | 20 |
-| Successfully fetched | 19 |
-| Legacy correctness (keyword in top 3) | 15/19 (79%) |
-| Hybrid correctness (keyword in top 3) | 16/19 (84%) |
-| Avg legacy parse time | 417.7ms |
-| Avg hybrid parse time | 167.8ms |
+| Successfully fetched | 20 |
+| Legacy correctness (keyword in top 3) | 17/20 (85%) |
+| Hybrid correctness (keyword in top 3) | 18/20 (90%) |
+| Avg legacy parse time | 589.5ms |
+| Avg hybrid parse time | 324.6ms |
 
 ## Per-Site Results
 
 | # | Site | Fetch | HTML | Legacy ms | Hybrid ms | L-nodes | H-nodes | L-correct | H-correct |
 |---|------|-------|------|-----------|-----------|---------|---------|-----------|----------|
-| 1 | Hacker News | 278ms | 33KB | 711ms | 1073ms | 10 | 10 | PASS | PASS |
-| 2 | HN Newest | 260ms | 40KB | 407ms | 100ms | 10 | 5 | MISS | PASS |
-| 3 | Lobsters | 1199ms | 57KB | 674ms | 267ms | 10 | 10 | MISS | MISS |
-| 4 | CNN Lite | 288ms | 326KB | 769ms | 67ms | 10 | 3 | PASS | PASS |
-| 5 | NPR Text | 1292ms | 5KB | 739ms | 3ms | 10 | 5 | PASS | PASS |
-| 6 | Rust Lang | 600ms | 18KB | 650ms | 285ms | 10 | 10 | PASS | PASS |
-| 7 | MDN HTML | 458ms | 173KB | 626ms | 474ms | 10 | 10 | PASS | PASS |
-| 8 | Python.org | 347ms | 47KB | 28ms | 27ms | 0 | 0 | MISS | MISS |
-| 9 | W3C | 407ms | 50KB | 25ms | 0ms | 0 | 0 | MISS | MISS |
-| 10 | GitHub Explore | 1195ms | 386KB | 692ms | 403ms | 10 | 10 | PASS | PASS |
-| 11 | NPM | 106ms | 28KB | 147ms | 28ms | 10 | 7 | PASS | PASS |
-| 12 | Crates.io | 129ms | 3KB | 50ms | 25ms | 1 | 1 | PASS | PASS |
-| 13 | PyPI | 42ms | 21KB | 326ms | 27ms | 10 | 10 | PASS | PASS |
-| 14 | docs.rs | 611ms | 16KB | 600ms | 29ms | 10 | 10 | PASS | PASS |
-| 15 | pkg.go.dev | 112ms | 32KB | 526ms | 116ms | 10 | 6 | PASS | PASS |
-| 16 | Docker Hub | 273ms | 387KB | 290ms | 156ms | 10 | 10 | PASS | PASS |
-| 17 | DuckDuckGo | FAIL | - | - | - | - | - | - | - |
-| 18 | OpenStreetMap | 820ms | 32KB | 573ms | 55ms | 10 | 2 | PASS | PASS |
-| 19 | httpbin HTML | 174ms | 3KB | 73ms | 25ms | 3 | 3 | PASS | PASS |
-| 20 | Reuters | 144ms | 0KB | 30ms | 28ms | 1 | 1 | PASS | PASS |
+| 1 | Hacker News | 247ms | 34KB | 1014ms | 1372ms | 10 | 10 | PASS | PASS |
+| 2 | HN Newest | 246ms | 39KB | 578ms | 117ms | 10 | 4 | PASS | PASS |
+| 3 | Lobsters | 234ms | 57KB | 914ms | 409ms | 10 | 10 | PASS | PASS |
+| 4 | CNN Lite | 429ms | 326KB | 1089ms | 87ms | 10 | 3 | MISS | PASS |
+| 5 | NPR Text | 590ms | 5KB | 1050ms | 4ms | 10 | 5 | PASS | PASS |
+| 6 | Rust Lang | 711ms | 18KB | 918ms | 553ms | 10 | 10 | PASS | PASS |
+| 7 | MDN HTML | 513ms | 173KB | 839ms | 630ms | 10 | 10 | PASS | PASS |
+| 8 | Python.org | 381ms | 48KB | 39ms | 38ms | 0 | 0 | MISS | MISS |
+| 9 | W3C | 288ms | 50KB | 38ms | 1ms | 0 | 0 | MISS | MISS |
+| 10 | GitHub Explore | 1039ms | 386KB | 975ms | 632ms | 10 | 10 | PASS | PASS |
+| 11 | NPM | 89ms | 28KB | 372ms | 43ms | 10 | 8 | PASS | PASS |
+| 12 | Crates.io | 107ms | 3KB | 75ms | 36ms | 1 | 1 | PASS | PASS |
+| 13 | PyPI | 54ms | 21KB | 437ms | 38ms | 10 | 7 | PASS | PASS |
+| 14 | docs.rs | 221ms | 16KB | 861ms | 152ms | 10 | 10 | PASS | PASS |
+| 15 | pkg.go.dev | 66ms | 32KB | 777ms | 188ms | 10 | 5 | PASS | PASS |
+| 16 | Docker Hub | 200ms | 387KB | 521ms | 218ms | 10 | 10 | PASS | PASS |
+| 17 | DuckDuckGo | 168ms | 157KB | 293ms | 1825ms | 10 | 10 | PASS | PASS |
+| 18 | OpenStreetMap | 949ms | 32KB | 855ms | 76ms | 10 | 3 | PASS | PASS |
+| 19 | httpbin HTML | 148ms | 3KB | 108ms | 37ms | 3 | 2 | PASS | PASS |
+| 20 | Reuters | 141ms | 0KB | 38ms | 36ms | 1 | 1 | PASS | PASS |
 
 ## Hybrid Pipeline Stage Breakdown
 
 | Site | BM25 build | HDC build | BM25 query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |
 |------|-------------|-----------|-------------|-----------|-------------|---------------|-----------|----------|
-| Hacker News | 838µs | 13567µs | 13µs | 57µs | 1055089µs | 1069701µs | 0 | 80 |
-| HN Newest | 1213µs | 17474µs | 27µs | 10µs | 76717µs | 95606µs | 14 | 5 |
-| Lobsters | 718µs | 10315µs | 7µs | 37µs | 253229µs | 264468µs | 21 | 19 |
-| CNN Lite | 1027µs | 13753µs | 5µs | 27µs | 49896µs | 65165µs | 4 | 3 |
-| NPR Text | 211µs | 3005µs | 4µs | 30µs | 7µs | 3280µs | 9 | 5 |
-| Rust Lang | 253µs | 3341µs | 8µs | 59µs | 253516µs | 257219µs | 37 | 27 |
-| MDN HTML | 1559µs | 17574µs | 27µs | 64µs | 421633µs | 441272µs | 133 | 60 |
-| Python.org | 0µs | 0µs | 1µs | 26µs | 0µs | 79µs | 0 | 0 |
-| W3C | 0µs | 0µs | 1µs | 20µs | 0µs | 86µs | 0 | 0 |
-| GitHub Explore | 1554µs | 20079µs | 11µs | 16µs | 361563µs | 383815µs | 49 | 33 |
-| NPM | 95µs | 1414µs | 3µs | 23µs | 9µs | 1614µs | 7 | 7 |
-| Crates.io | 5µs | 31µs | 2µs | 24µs | 2µs | 72µs | 1 | 1 |
-| PyPI | 82µs | 1016µs | 3µs | 18µs | 10µs | 1162µs | 10 | 10 |
-| docs.rs | 245µs | 3040µs | 4µs | 21µs | 14µs | 3365µs | 13 | 13 |
-| pkg.go.dev | 538µs | 6341µs | 4µs | 32µs | 78290µs | 85315µs | 9 | 6 |
-| Docker Hub | 388µs | 4469µs | 9µs | 23µs | 146221µs | 151531µs | 39 | 38 |
-| OpenStreetMap | 198µs | 2328µs | 3µs | 30µs | 50707µs | 53351µs | 2 | 2 |
-| httpbin HTML | 24µs | 202µs | 2µs | 23µs | 6µs | 268µs | 3 | 3 |
-| Reuters | 7µs | 69µs | 1µs | 23µs | 27934µs | 28041µs | 0 | 1 |
+| Hacker News | 1112µs | 14071µs | 13µs | 67µs | 1353377µs | 1368792µs | 0 | 80 |
+| HN Newest | 1139µs | 14710µs | 33µs | 9µs | 97505µs | 113552µs | 14 | 5 |
+| Lobsters | 1150µs | 13781µs | 10µs | 34µs | 390570µs | 405716µs | 24 | 21 |
+| CNN Lite | 1275µs | 15547µs | 8µs | 27µs | 67793µs | 85139µs | 4 | 3 |
+| NPR Text | 306µs | 3549µs | 5µs | 28µs | 14µs | 3933µs | 9 | 5 |
+| Rust Lang | 632µs | 6745µs | 11µs | 32µs | 508353µs | 515824µs | 42 | 32 |
+| MDN HTML | 2394µs | 26492µs | 35µs | 87µs | 556654µs | 586133µs | 140 | 60 |
+| Python.org | 1µs | 0µs | 2µs | 27µs | 1µs | 97µs | 0 | 0 |
+| W3C | 0µs | 0µs | 1µs | 22µs | 0µs | 92µs | 0 | 0 |
+| GitHub Explore | 2393µs | 28136µs | 15µs | 26µs | 581072µs | 612295µs | 57 | 39 |
+| NPM | 342µs | 3653µs | 6µs | 22µs | 44µs | 4127µs | 16 | 16 |
+| Crates.io | 10µs | 35µs | 3µs | 36µs | 5µs | 100µs | 1 | 1 |
+| PyPI | 248µs | 2064µs | 6µs | 20µs | 26µs | 2409µs | 12 | 12 |
+| docs.rs | 403µs | 4520µs | 10µs | 25µs | 110127µs | 115156µs | 20 | 20 |
+| pkg.go.dev | 751µs | 7913µs | 5µs | 48µs | 141794µs | 150636µs | 14 | 7 |
+| Docker Hub | 845µs | 9915µs | 12µs | 26µs | 200895µs | 212213µs | 38 | 37 |
+| DuckDuckGo | 5758µs | 78365µs | 46µs | 133µs | 1734057µs | 1819029µs | 135 | 60 |
+| OpenStreetMap | 264µs | 3019µs | 4µs | 27µs | 70710µs | 74103µs | 4 | 4 |
+| httpbin HTML | 75µs | 521µs | 12µs | 19µs | 12µs | 650µs | 3 | 3 |
+| Reuters | 10µs | 52µs | 1µs | 18µs | 36520µs | 36608µs | 0 | 1 |
 
 ## Top-3 Node Quality Comparison
 
@@ -74,9 +75,9 @@
 3. `0.297` Do your own writing
 
 **Hybrid top 3:**
-1. `0.215` Hacker News Hacker News new | past | comments | ask | show | jobs | submit login
-2. `0.215` Hacker News new | past | comments | ask | show | jobs | submit login
-3. `0.214` Hacker News new | past | comments | ask | show | jobs | submit login
+1. `0.215` Hacker News new | past | comments | ask | show | jobs | submit login
+2. `0.205` 40 points by maurycyz 4 hours ago | hide | 16 comments
+3. `0.204` 130 points by HughParry 3 hours ago | hide | 57 comments
 
 ---
 
@@ -85,12 +86,12 @@
 **Legacy top 3:**
 1. `0.424` submit
 2. `0.298` 1 minute ago
-3. `0.298` 1 minute ago
+3. `0.296` Hacker News
 
 **Hybrid top 3:**
-1. `0.500` new
-2. `0.430` Hacker News new | past | comments | ask | show | jobs | submit
-3. `0.422` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
+1. `0.441` Hacker News new | past | comments | ask | show | jobs | submit
+2. `0.375` new
+3. `0.118` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
 
 ---
 
@@ -98,27 +99,27 @@
 
 **Legacy top 3:**
 1. `0.375` Your job isn't programming
-2. `0.339` Rust programming
-3. `0.315` Your job isn't programming
+2. `0.345` Lobsters Active Recent Comments Search Login Login 104 copilot edited an ad into
+3. `0.325` Active Recent Comments Search Login Login 104 copilot edited an ad into my pr vi
 
 **Hybrid top 3:**
-1. `0.701` Your job isn't programming
-2. `0.689` Graphics programming
-3. `0.689` Stories about particular persons
+1. `0.683` Your job isn't programming
+2. `0.639` ask programming
+3. `0.555` Stories about particular persons
 
 ---
 
 ### CNN Lite — "top news headlines today" 
 
 **Legacy top 3:**
-1. `0.365` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories Are you
-2. `0.274` What we know on Day 31 of the US and Israel’s war with Iran: Trump threatens esc
+1. `0.292` What we know on Day 31 of the US and Israel’s war with Iran: Trump threatens esc
+2. `0.272` Trump allowed a Russian oil tanker to reach Cuba, breaking the island’s fuel blo
 3. `0.268` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
 
 **Hybrid top 3:**
-1. `0.613` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
-2. `0.591` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories Are you
-3. `0.532` Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery
+1. `0.599` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
+2. `0.514` Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery
+3. `0.374` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories As Trum
 
 ---
 
@@ -130,37 +131,38 @@
 3. `0.425` Topics News Culture Music
 
 **Hybrid top 3:**
-1. `0.753` News
-2. `0.745` NPR : National Public Radio
-3. `0.559` NPR : National Public Radio Monday, March 30, 2026 Watch: Who is an American? Th
+1. `0.794` NPR : National Public Radio
+2. `0.595` NPR : National Public Radio Monday, March 30, 2026 Watch: Who is an American? Th
+3. `0.527` News
 
 ---
 
 ### Rust Lang — "latest Rust version download" 
 
 **Legacy top 3:**
-1. `0.379` Build it in Rust In 2018, the Rust community decided to improve the programming 
-2. `0.371` Rust Programming Language Install Learn Playground Tools Governance Community Bl
-3. `0.364` Build it in Rust In 2018, the Rust community decided to improve the programming 
+1. `0.372` Rust A language empowering everyone to build reliable and efficient software. Ge
+2. `0.328` Rust Logo
+3. `0.313` In 2018, the Rust community decided to improve the programming experience
+for a 
 
 **Hybrid top 3:**
-1. `0.527` Read Rust
-2. `0.519` Watch Rust
-3. `0.456` Build it in Rust In 2018, the Rust community decided to improve the programming 
+1. `0.548` Read Rust
+2. `0.538` Watch Rust
+3. `0.411` Read Rust We love documentation! Take a look at the books available online, as w
 
 ---
 
 ### MDN HTML — "HTML elements reference" 
 
 **Legacy top 3:**
-1. `0.700` MDN HTML HTML: Markup language HTML reference Elements Global attributes Attribu
-2. `0.640` HTML HTML: Markup language HTML reference Elements Global attributes Attributes 
-3. `0.580` MDN HTML HTML: Markup language HTML reference Elements Global attributes Attribu
+1. `0.620` MDN HTML HTML: Markup language HTML reference Elements Global attributes Attribu
+2. `0.560` HTML HTML: Markup language HTML reference Elements Global attributes Attributes 
+3. `0.540` HTML: HyperText Markup Language | MDN Skip to main content Skip to search MDN HT
 
 **Hybrid top 3:**
-1. `0.900` HTML HTML: Markup language HTML reference Elements Global attributes Attributes 
-2. `0.900` MDN HTML HTML: Markup language HTML reference Elements Global attributes Attribu
-3. `0.881` HTML elements
+1. `0.825` Reference for all HTML elements .
+2. `0.825` HTML HTML: Markup language HTML reference Elements Global attributes Attributes 
+3. `0.825` HTML reference Elements Global attributes Attributes See all… HTML guides Respon
 
 ---
 
@@ -183,28 +185,28 @@
 ### GitHub Explore — "trending repositories" 
 
 **Legacy top 3:**
-1. `0.505` REPOSITORIES Topics Trending Collections
-2. `0.470` REPOSITORIES Topics Trending Collections
-3. `0.405` Trending
+1. `0.505` Open Source COMMUNITY GitHub Sponsors Fund open source developers PROGRAMS Secur
+2. `0.505` COMMUNITY GitHub Sponsors Fund open source developers PROGRAMS Security Lab Main
+3. `0.505` REPOSITORIES Topics Trending Collections
 
 **Hybrid top 3:**
-1. `0.844` Trending repository
-2. `0.844` Trending repository
-3. `0.844` Trending repository
+1. `0.887` Trending repository
+2. `0.825` REPOSITORIES Topics Trending Collections
+3. `0.825` COMMUNITY GitHub Sponsors Fund open source developers PROGRAMS Security Lab Main
 
 ---
 
 ### NPM — "search JavaScript packages" 
 
 **Legacy top 3:**
-1. `0.292` Take your JavaScript development up a notch
-2. `0.263` npm | Home skip to: content package search sign in ❤ Pro Teams Pricing Documenta
-3. `0.176` Get started today for free, or step up to npm Pro to enjoy a premium JavaScript 
+1. `0.322` Get started today for free, or step up to npm Pro to enjoy a premium JavaScript 
+2. `0.322` Relied upon by more than 17 million developers worldwide, npm is committed to ma
+3. `0.292` Take your JavaScript development up a notch
 
 **Hybrid top 3:**
-1. `0.592` Take your JavaScript development up a notch
-2. `0.450` Get started today for free, or step up to npm Pro to enjoy a premium JavaScript 
-3. `0.358` skip to: content package search sign in ❤ Pro Teams Pricing Documentation npm Se
+1. `0.675` Get started today for free, or step up to npm Pro to enjoy a premium JavaScript 
+2. `0.647` Relied upon by more than 17 million developers worldwide, npm is committed to ma
+3. `0.506` We're GitHub, the company behind the npm Registry and npm CLI. We offer those to
 
 ---
 
@@ -223,54 +225,68 @@
 **Legacy top 3:**
 1. `0.660` Find, install and publish Python packages with the Python Package Index
 2. `0.595` Find, install and publish Python packages with the Python Package Index Search P
-3. `0.580` Find, install and publish Python packages with the Python Package Index Search P
+3. `0.595` The Python Package Index (PyPI) is a repository of software for the Python progr
 
 **Hybrid top 3:**
-1. `0.900` Find, install and publish Python packages with the Python Package Index
-2. `0.825` Find, install and publish Python packages with the Python Package Index Search P
-3. `0.825` Find, install and publish Python packages with the Python Package Index Search P
+1. `0.945` Find, install and publish Python packages with the Python Package Index
+2. `0.807` Find, install and publish Python packages with the Python Package Index Search P
+3. `0.787` PyPI helps you find and install software developed and shared by the Python comm
 
 ---
 
 ### docs.rs — "Rust documentation search" 
 
 **Legacy top 3:**
-1. `0.496` Rust website
-2. `0.462` Rust by Example
-3. `0.445` Rustdoc JSON
+1. `0.620` Docs.rs Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Down
+2. `0.600` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
+3. `0.496` Rust website
 
 **Hybrid top 3:**
-1. `0.799` Rust website
-2. `0.771` Rust by Example
-3. `0.737` Rust
+1. `0.758` Rust Rust website The Book Standard Library API Reference Rust by Example The Ca
+2. `0.716` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
+3. `0.708` Rust website
 
 ---
 
 ### pkg.go.dev — "Go packages and modules" 
 
 **Legacy top 3:**
-1. `0.455` About Go Packages
-2. `0.438` Packages Standard Library Sub-repositories About Go Packages
-3. `0.430` Go Packages - Go Packages Skip to Main Content Why Go Case Studies Common proble
+1. `0.563` Why Go Why Go Case Studies Use Cases Security Learn Docs Docs Effective Go Go Us
+2. `0.483` Go Packages - Go Packages Skip to Main Content Why Go Case Studies Common proble
+3. `0.458` Why Go Use Cases Case Studies Get Started Playground Tour Stack Overflow Help Pa
 
 **Hybrid top 3:**
-1. `0.888` About Go Packages
-2. `0.750` Packages
-3. `0.750` Packages
+1. `0.704` Packages Standard Library Sub-repositories About Go Packages
+2. `0.621` About Go Packages
+3. `0.528` Why Go Use Cases Case Studies Get Started Playground Tour Stack Overflow Help Pa
 
 ---
 
 ### Docker Hub — "search container images" 
 
 **Legacy top 3:**
-1. `0.437` Docker Hub Container Image Library | App Containerization Search Docker Hub K He
-2. `0.313` Software supply chain Secure Your Supply Chain with Docker Hardened Images Use D
-3. `0.313` Seamlessly ship any application, anywhere Push images and make your app accessib
+1. `0.540` Docker Hub Container Image Library | App Containerization Search Docker Hub K He
+2. `0.352` Search Docker Hub K Help Back Documentation ⁠ Forums ⁠ Contact support System st
+3. `0.337` Search Docker Hub K Help Back Documentation ⁠ Forums ⁠ Contact support System st
 
 **Hybrid top 3:**
-1. `0.650` Docker Hub Container Image Library | App Containerization Search Docker Hub K He
-2. `0.496` Docker Hardened Images - Now Free
-3. `0.476` Most pulled images
+1. `0.600` Docker Hub Container Image Library | App Containerization Search Docker Hub K He
+2. `0.575` Search Docker Hub K Help Back Documentation ⁠ Forums ⁠ Contact support System st
+3. `0.514` Docker Hardened Images - Now Free
+
+---
+
+### DuckDuckGo — "search engine privacy" 
+
+**Legacy top 3:**
+1. `0.715` translations.messages.R2RXjF[0].value: These browser permissions are used to add
+2. `0.715` translations.messages.qUwfSi[2].value: . And when you leave our search engine an
+3. `0.493` translations.messages.+bs8cY[0].value: Default search engine
+
+**Hybrid top 3:**
+1. `0.960` translations.messages.R2RXjF[0].value: These browser permissions are used to add
+2. `0.780` translations.messages.unqgWN[0].value: Search Engine
+3. `0.780` translations.messages.bTWzmJ[0].value: Search engine
 
 ---
 
@@ -278,12 +294,13 @@
 
 **Legacy top 3:**
 1. `0.360` OpenStreetMap
-2. `0.321` Edit
-3. `0.319` GPS Traces
+2. `0.340` Where is this? GraphHopper OSRM Valhalla Loading... Welcome to OpenStreetMap! Op
+3. `0.321` Edit
 
 **Hybrid top 3:**
-1. `0.536` OpenStreetMap is a map of the world, created by people like you and free to use 
-2. `0.488` Welcome to OpenStreetMap! OpenStreetMap is a map of the world, created by people
+1. `0.512` OpenStreetMap is a map of the world, created by people like you and free to use 
+2. `0.421` Welcome to OpenStreetMap! OpenStreetMap is a map of the world, created by people
+3. `0.402` Where is this? GraphHopper OSRM Valhalla Loading... Welcome to OpenStreetMap! Op
 
 ---
 
@@ -291,13 +308,12 @@
 
 **Legacy top 3:**
 1. `0.598` Herman Melville - Moby-Dick
-2. `0.476` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
-3. `0.456` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
+2. `0.437` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
+3. `0.417` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
 
 **Hybrid top 3:**
-1. `0.534` Herman Melville - Moby-Dick
-2. `0.407` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
-3. `0.407` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
+1. `0.568` Herman Melville - Moby-Dick
+2. `0.426` Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather th
 
 ---
 

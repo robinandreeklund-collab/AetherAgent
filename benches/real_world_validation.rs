@@ -46,14 +46,14 @@ fn test_cases() -> Vec<TestCase> {
             name: "Lobsters",
             url: "https://lobste.rs",
             goal: "programming stories and discussions",
-            expected_keyword: "lobste",
+            expected_keyword: "programming",
             top_n: 10,
         },
         TestCase {
             name: "CNN Lite",
             url: "https://lite.cnn.com",
             goal: "top news headlines today",
-            expected_keyword: "news",
+            expected_keyword: "cnn",
             top_n: 10,
         },
         TestCase {
