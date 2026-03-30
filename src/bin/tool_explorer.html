@@ -488,41 +488,220 @@ function errorPipeline(msg) {
 
 // ─── Result Display ──────────────────────────────────────────────────────────
 function showResult(data, elapsed) {
-  const area = document.getElementById('resultArea');
-  const json = JSON.stringify(data, null, 2);
-  area.innerHTML = `<pre>${syntaxHighlight(json)}</pre>`;
+  var area = document.getElementById('resultArea');
+  document.getElementById('runTime').textContent = elapsed.toFixed(0) + 'ms total';
 
-  // Time
-  document.getElementById('runTime').textContent = `${elapsed.toFixed(0)}ms total`;
+  // Unwrap ToolResult wrapper: data → data.data
+  var inner = data;
+  if (data && data.data) inner = data.data;
 
-  // Stats
-  if (activeTool.extract) {
-    const stats = activeTool.extract(data);
-    const bar = document.getElementById('statsBar');
-    bar.style.display = 'flex';
-    document.getElementById('statNodes').textContent = stats.nodes ?? '-';
-    document.getElementById('statTime').textContent = (stats.time ?? '-') + 'ms';
-    document.getElementById('statSize').textContent = formatBytes(json.length);
-    document.getElementById('statWarnings').textContent = stats.warnings ?? 0;
+  var html = '';
 
-    // Extra stats
-    if (stats.extra) {
-      for (const [k, v] of Object.entries(stats.extra)) {
-        const existing = document.querySelector(`.stat[data-key="${k}"]`);
-        if (existing) {
-          existing.querySelector('.val').textContent = v;
-        } else {
-          const stat = document.createElement('div');
-          stat.className = 'stat';
-          stat.dataset.key = k;
-          stat.innerHTML = `${k}: <span class="val">${v}</span>`;
-          bar.appendChild(stat);
-        }
-      }
+  // ─── Summary header ───
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 16px;margin-bottom:12px">';
+  html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">';
+
+  var timeMs = data.time_ms || inner.parse_time_ms || inner.parse_ms || inner.compile_time_ms || inner.diff_time_ms || inner.scan_time_ms || 0;
+  html += '<span style="color:var(--accent)">Tid: <b>' + timeMs + 'ms</b></span>';
+
+  if (inner.node_count !== undefined) html += '<span>Noder: <b style="color:var(--accent2)">' + inner.node_count + '</b></span>';
+  if (inner.total_nodes !== undefined) html += '<span>Totalt: <b>' + inner.total_nodes + '</b></span>';
+  if (inner.nodes_emitted !== undefined) html += '<span>Emitterade: <b style="color:var(--accent2)">' + inner.nodes_emitted + '</b></span>';
+  if (inner.total_dom_nodes !== undefined) html += '<span>DOM-noder: <b>' + inner.total_dom_nodes + '</b></span>';
+  if (inner.token_savings_ratio !== undefined) html += '<span style="color:var(--accent2)">Token savings: <b>' + (inner.token_savings_ratio * 100).toFixed(1) + '%</b></span>';
+  if (inner.total_steps !== undefined) html += '<span>Steg: <b style="color:var(--accent2)">' + inner.total_steps + '</b></span>';
+  if (inner.format) html += '<span>Format: <b>' + inner.format + '</b></span>';
+  if (inner.tier) html += '<span>Tier: <b>' + inner.tier + '</b></span>';
+  if (inner.scan_type) html += '<span>Typ: <b>' + inner.scan_type + '</b></span>';
+  if (inner.injection_detected !== undefined) html += '<span style="color:' + (inner.injection_detected ? 'var(--err)' : 'var(--accent2)') + '">Injection: <b>' + (inner.injection_detected ? 'HITTAD' : 'ren') + '</b></span>';
+  if (inner.allowed !== undefined) html += '<span style="color:' + (inner.allowed ? 'var(--accent2)' : 'var(--err)') + '">Tillåten: <b>' + (inner.allowed ? 'JA' : 'NEJ') + '</b></span>';
+  if (inner.found !== undefined) html += '<span style="color:' + (inner.found ? 'var(--accent2)' : 'var(--warn)') + '">Hittad: <b>' + (inner.found ? 'JA' : 'NEJ') + '</b></span>';
+
+  html += '</div></div>';
+
+  // ─── Injection warnings ───
+  var warnings = data.injection_warnings || inner.injection_warnings || [];
+  if (warnings.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    for (var w = 0; w < warnings.length; w++) {
+      html += '<div class="warn-item injection"><span class="severity">' + (warnings[w].severity || '?') + '</span>' + esc(warnings[w].reason || '') + '</div>';
     }
+    html += '</div>';
   }
 
-  // Warnings
+  // ─── Firewall block ───
+  if (data.firewall_blocked) {
+    html += '<div class="warn-item firewall" style="margin-bottom:12px"><span class="severity">BLOCKED</span>' + esc(data.firewall_blocked) + '</div>';
+  }
+
+  // ─── Error ───
+  if (data.error || inner.error) {
+    html += '<div style="background:#f441;border:1px solid var(--err);border-radius:4px;padding:12px;margin-bottom:12px;color:var(--err);font-size:12px">';
+    html += '<b>Fel:</b> ' + esc(data.error || inner.error);
+    html += '</div>';
+  }
+
+  // ─── Markdown output ───
+  if (inner.markdown) {
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:12px;white-space:pre-wrap;font-size:12px;line-height:1.8;color:#e6e1cf">';
+    html += esc(inner.markdown);
+    html += '</div>';
+  }
+
+  // ─── Nodes list (parse/stream) ───
+  var nodes = inner.nodes || (inner.tree && inner.tree.nodes) || [];
+  if (typeof nodes === 'object' && Array.isArray(nodes) && nodes.length > 0 && nodes[0] && nodes[0].role) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">NODER (' + nodes.length + ')</h4>';
+    html += '<div style="display:flex;flex-direction:column;gap:2px">';
+    var maxShow = Math.min(nodes.length, 50);
+    for (var n = 0; n < maxShow; n++) {
+      var nd = nodes[n];
+      var relColor = nd.relevance > 0.7 ? 'var(--accent2)' : nd.relevance > 0.4 ? 'var(--accent)' : 'var(--text2)';
+      var label = (nd.label || '').substring(0, 80);
+      if ((nd.label || '').length > 80) label += '...';
+      html += '<div style="display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:11px;align-items:center">';
+      html += '<span style="color:' + relColor + ';font-weight:700;min-width:35px">' + (nd.relevance || 0).toFixed(2) + '</span>';
+      html += '<span style="background:var(--surface2);padding:1px 6px;border-radius:2px;color:var(--accent);min-width:70px;text-align:center;font-size:10px">' + esc(nd.role || '?') + '</span>';
+      html += '<span style="flex:1;color:var(--text)">' + esc(label) + '</span>';
+      if (nd.html_id) html += '<span style="color:var(--text2);font-size:10px">#' + esc(nd.html_id) + '</span>';
+      if (nd.action) html += '<span style="color:var(--text2);font-size:10px">' + esc((nd.action || '').substring(0, 30)) + '</span>';
+      html += '</div>';
+    }
+    if (nodes.length > maxShow) {
+      html += '<div style="padding:4px 8px;color:var(--text2);font-size:11px">...och ' + (nodes.length - maxShow) + ' fler noder</div>';
+    }
+    html += '</div></div>';
+  }
+
+  // ─── Sub-goals (plan) ───
+  if (inner.sub_goals && inner.sub_goals.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">PLAN (' + inner.sub_goals.length + ' steg)</h4>';
+    for (var g = 0; g < inner.sub_goals.length; g++) {
+      var sg = inner.sub_goals[g];
+      var depStr = (sg.depends_on || []).length > 0 ? ' \u2190 [' + sg.depends_on.join(',') + ']' : '';
+      html += '<div style="display:flex;gap:8px;padding:6px 8px;background:var(--surface);border-radius:3px;font-size:11px;margin-bottom:2px;align-items:center">';
+      html += '<span style="color:var(--accent);font-weight:700;min-width:20px">' + sg.index + '</span>';
+      html += '<span style="background:var(--surface2);padding:1px 6px;border-radius:2px;color:var(--warn);min-width:70px;text-align:center;font-size:10px">' + esc(sg.action_type || '?') + '</span>';
+      html += '<span style="flex:1;color:var(--text)">' + esc(sg.description || '') + '</span>';
+      if (depStr) html += '<span style="color:var(--text2);font-size:10px">' + depStr + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── Changes (diff) ───
+  if (inner.changes && inner.changes.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">ÄNDRINGAR (' + inner.changes.length + ')</h4>';
+    for (var c = 0; c < inner.changes.length; c++) {
+      var ch = inner.changes[c];
+      var chColor = ch.change_type === 'Added' ? 'var(--accent2)' : ch.change_type === 'Removed' ? 'var(--err)' : 'var(--warn)';
+      html += '<div style="padding:6px 8px;background:var(--surface);border-radius:3px;font-size:11px;margin-bottom:2px;border-left:3px solid ' + chColor + '">';
+      html += '<span style="color:' + chColor + ';font-weight:700">' + esc(ch.change_type) + '</span> ';
+      html += '<span style="color:var(--accent)">[' + esc(ch.role || '') + ']</span> ';
+      html += esc((ch.label || '').substring(0, 60));
+      if (ch.changes) {
+        for (var fc = 0; fc < ch.changes.length; fc++) {
+          var fld = ch.changes[fc];
+          html += '<div style="margin-left:16px;color:var(--text2);font-size:10px">';
+          html += esc(fld.field) + ': <span style="color:var(--err)">' + esc((fld.before || '').substring(0, 40)) + '</span> \u2192 <span style="color:var(--accent2)">' + esc((fld.after || '').substring(0, 40)) + '</span>';
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── Mappings (fill form) ───
+  if (inner.mappings && inner.mappings.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">FORMULÄRMAPPNING (' + inner.mappings.length + ')</h4>';
+    for (var m = 0; m < inner.mappings.length; m++) {
+      var mp = inner.mappings[m];
+      html += '<div style="display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:11px;align-items:center">';
+      html += '<span style="color:var(--accent);font-weight:700">' + esc(mp.matched_key || '') + '</span>';
+      html += '<span style="color:var(--text2)">\u2192</span>';
+      html += '<span>[' + esc(mp.field_role || '') + ']</span>';
+      html += '<span style="color:var(--accent2)">' + esc(mp.selector_hint || '') + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── Entries (extract) ───
+  if (inner.entries && inner.entries.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">EXTRAHERAD DATA (' + inner.entries.length + ')</h4>';
+    for (var e = 0; e < inner.entries.length; e++) {
+      var en = inner.entries[e];
+      html += '<div style="display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:11px;align-items:center">';
+      html += '<span style="color:var(--accent);font-weight:700;min-width:60px">' + esc(en.key || '') + '</span>';
+      html += '<span style="flex:1;color:var(--text)">' + esc((en.value || '').substring(0, 100)) + '</span>';
+      html += '<span style="color:var(--text2)">' + (en.confidence || 0).toFixed(2) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── Search results ───
+  if (inner.results && inner.results.length > 0 && inner.query) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">S\u00D6KRESULTAT (' + inner.results.length + ')</h4>';
+    for (var r = 0; r < inner.results.length; r++) {
+      var res = inner.results[r];
+      html += '<div style="padding:8px;background:var(--surface);border-radius:3px;font-size:11px;margin-bottom:4px">';
+      html += '<div style="color:var(--accent);font-weight:700">' + esc(res.title || '') + '</div>';
+      html += '<div style="color:var(--accent2);font-size:10px">' + esc(res.url || '') + '</div>';
+      html += '<div style="color:var(--text);margin-top:4px">' + esc(res.snippet || '') + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── WebMCP tools (discover) ───
+  if (inner.webmcp && inner.webmcp.tools) {
+    html += '<div style="margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">WEBMCP TOOLS (' + inner.webmcp.tools.length + ')</h4>';
+    for (var t = 0; t < inner.webmcp.tools.length; t++) {
+      var tool = inner.webmcp.tools[t];
+      html += '<div style="padding:4px 8px;background:var(--surface);border-radius:3px;font-size:11px;margin-bottom:2px">';
+      html += '<span style="color:var(--accent);font-weight:700">' + esc(tool.name || '') + '</span>';
+      html += ' \u2014 <span style="color:var(--text)">' + esc(tool.description || '') + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ─── Click result ───
+  if (inner.found !== undefined && inner.role) {
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px;margin-bottom:12px;font-size:12px">';
+    html += '<div>Element: <b style="color:var(--accent)">[' + esc(inner.role) + ']</b> ' + esc(inner.label || '') + '</div>';
+    if (inner.selector_hint) html += '<div>Selector: <b style="color:var(--accent2)">' + esc(inner.selector_hint) + '</b></div>';
+    if (inner.relevance) html += '<div>Relevans: <b>' + inner.relevance.toFixed(2) + '</b></div>';
+    html += '</div>';
+  }
+
+  // ─── Collapsible raw JSON ───
+  html += '<details style="margin-top:8px">';
+  html += '<summary style="cursor:pointer;font-size:11px;color:var(--text2);padding:4px 0">Visa r\u00E5 JSON (' + formatBytes(JSON.stringify(data).length) + ')</summary>';
+  html += '<pre style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin-top:4px;max-height:400px;overflow-y:auto">';
+  html += syntaxHighlight(JSON.stringify(data, null, 2));
+  html += '</pre></details>';
+
+  area.innerHTML = html;
+
+  // Stats bar
+  var bar = document.getElementById('statsBar');
+  bar.style.display = 'flex';
+  document.getElementById('statNodes').textContent = inner.node_count || inner.nodes_emitted || (nodes.length > 0 ? nodes.length : '-');
+  document.getElementById('statTime').textContent = timeMs + 'ms';
+  document.getElementById('statSize').textContent = formatBytes(JSON.stringify(data).length);
+  document.getElementById('statWarnings').textContent = warnings.length;
+
+  // Show warning panel
   showWarnings(data);
 }
 
