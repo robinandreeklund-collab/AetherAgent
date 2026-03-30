@@ -3,7 +3,11 @@
 /// Fetches real pages, runs both pipelines, compares quality + latency.
 /// Outputs structured results to stdout and docs/real_world_validation.md.
 ///
-/// Run: cargo run --release --bin aether-real-world --features fetch
+/// Run with embeddings:
+///   cargo run --release --bin aether-real-world --features embeddings
+///
+/// Run without embeddings (text similarity only):
+///   cargo run --release --bin aether-real-world
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -350,11 +354,15 @@ fn run_test(tc: &TestCase) -> SiteResult {
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
-fn generate_markdown(results: &[SiteResult]) -> String {
+fn generate_markdown(results: &[SiteResult], has_embeddings: bool) -> String {
     let mut md = String::new();
     md.push_str("# Real-World Validation — Hybrid Scoring Pipeline\n\n");
     md.push_str(&format!("**Date:** {}\n", chrono_date()));
-    md.push_str("**Mode:** Release build, no embeddings (text similarity only)\n");
+    if has_embeddings {
+        md.push_str("**Mode:** Release build, WITH embeddings (all-MiniLM-L6-v2, 384-dim)\n");
+    } else {
+        md.push_str("**Mode:** Release build, no embeddings (text similarity only)\n");
+    }
     md.push_str("**Method:** Fetch → Legacy parse_top_nodes → Hybrid parse_top_nodes_hybrid\n\n");
 
     // Summary table
@@ -485,10 +493,62 @@ fn chrono_date() -> String {
     "2026-03-30".to_string()
 }
 
+fn init_embeddings() -> bool {
+    #[cfg(feature = "embeddings")]
+    {
+        // Försök ladda embedding-modell
+        let model_path = std::env::var("AETHER_EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "models/all-MiniLM-L6-v2.onnx".to_string());
+        let vocab_path = std::env::var("AETHER_EMBEDDING_VOCAB")
+            .unwrap_or_else(|_| "models/vocab.txt".to_string());
+
+        match (
+            std::fs::read(&model_path),
+            std::fs::read_to_string(&vocab_path),
+        ) {
+            (Ok(model_bytes), Ok(vocab_text)) => {
+                match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
+                    Ok(()) => {
+                        println!(
+                            "  Embedding model loaded: {} ({} bytes)",
+                            model_path,
+                            model_bytes.len()
+                        );
+                        println!(
+                            "  Vocab loaded: {} ({} tokens)",
+                            vocab_path,
+                            vocab_text.lines().count()
+                        );
+                        return true;
+                    }
+                    Err(e) => {
+                        eprintln!("  Embedding init error: {e}");
+                    }
+                }
+            }
+            (Err(e), _) => eprintln!("  Model not found: {model_path} ({e})"),
+            (_, Err(e)) => eprintln!("  Vocab not found: {vocab_path} ({e})"),
+        }
+    }
+    #[cfg(not(feature = "embeddings"))]
+    {
+        println!("  Embeddings feature not enabled (compile with --features embeddings)");
+    }
+    false
+}
+
 fn main() {
     println!("╔═══════════════════════════════════════════════════════════════════════╗");
     println!("║  AetherAgent Real-World Validation — 20 Sites, Legacy vs Hybrid     ║");
     println!("╚═══════════════════════════════════════════════════════════════════════╝\n");
+
+    let has_embeddings = init_embeddings();
+    let mode = if has_embeddings {
+        "FULL (text similarity + ONNX embedding)"
+    } else {
+        "TEXT-ONLY (word overlap, no neural embeddings)"
+    };
+    println!("  Mode: {mode}\n");
 
     let cases = test_cases();
     let mut results = Vec::new();
@@ -570,7 +630,7 @@ fn main() {
     }
 
     // Generate markdown
-    let md = generate_markdown(&results);
+    let md = generate_markdown(&results, has_embeddings);
     match std::fs::write("docs/real_world_validation.md", &md) {
         Ok(()) => println!("\n  Results written to docs/real_world_validation.md"),
         Err(e) => eprintln!("\n  Failed to write docs: {e}"),
