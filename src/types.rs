@@ -15,6 +15,7 @@ pub struct SemanticNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
     pub relevance: f32,
+    #[serde(default)]
     pub trust: TrustLevel,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<SemanticNode>,
@@ -86,9 +87,10 @@ fn is_zero_u32(v: &u32) -> bool {
 }
 
 /// Säkerhetsnivå för innehåll – kärnan i trust shield
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum TrustLevel {
     /// Innehåll från sidan – behandla alltid som opålitligt
+    #[default]
     Untrusted,
     /// Strukturellt element (knapp, länk, formulär) – halvpålitligt
     Structural,

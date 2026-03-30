@@ -56,10 +56,17 @@ pub struct SearchResult {
 
 // ─── DDG URL-byggare ─────────────────────────────────────────────────────────
 
-/// Bygg DuckDuckGo HTML-sök-URL med svensk locale
+/// Bygg DuckDuckGo Lite-sök-URL (lägre risk för CAPTCHA)
 pub fn build_ddg_url(query: &str) -> String {
     let encoded = percent_encode(query);
-    format!("https://html.duckduckgo.com/html/?q={}&kl=se-sv", encoded)
+    format!("https://lite.duckduckgo.com/lite/?q={}", encoded)
+}
+
+/// Detektera om DDG returnerade en CAPTCHA/anomaly-sida istället för resultat
+pub fn is_ddg_captcha(html: &str) -> bool {
+    html.contains("anomaly-modal")
+        || html.contains("bots use DuckDuckGo")
+        || html.contains("challenge to confirm")
 }
 
 /// Enkel percent-encoding för URL-query-parametrar.
@@ -303,7 +310,7 @@ mod tests {
     fn test_build_ddg_url_basic() {
         let url = build_ddg_url("hello world");
         assert_eq!(
-            url, "https://html.duckduckgo.com/html/?q=hello+world&kl=se-sv",
+            url, "https://lite.duckduckgo.com/lite/?q=hello+world",
             "Enkel query med mellanslag ska plus-kodas"
         );
     }
@@ -315,7 +322,7 @@ mod tests {
             url.contains("hur+m"),
             "Svenska tecken ska percent-kodas korrekt"
         );
-        assert!(url.contains("kl=se-sv"), "Locale ska vara se-sv");
+        assert!(url.contains("lite.duckduckgo.com"), "Ska använda DDG Lite");
     }
 
     #[test]

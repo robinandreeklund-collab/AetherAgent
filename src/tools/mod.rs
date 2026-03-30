@@ -186,6 +186,15 @@ pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::Se
     build_tree(html, goal, url)
 }
 
+/// Räkna alla noder rekursivt (inkl. barn)
+pub fn count_all_nodes(nodes: &[crate::types::SemanticNode]) -> usize {
+    let mut count = nodes.len();
+    for node in nodes {
+        count += count_all_nodes(&node.children);
+    }
+    count
+}
+
 /// Sortera noder efter relevans (högst först)
 pub fn sort_by_relevance(tree: &mut crate::types::SemanticTree) {
     tree.nodes

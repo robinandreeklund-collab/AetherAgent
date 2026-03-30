@@ -77,6 +77,14 @@ pub fn execute_with_html(ddg_html: &str, req: &SearchRequest) -> ToolResult {
         (req.top_n as usize).min(10)
     };
 
+    // Detektera DDG CAPTCHA
+    if crate::search::is_ddg_captcha(ddg_html) {
+        return ToolResult::err(
+            "DuckDuckGo returnerade en CAPTCHA-sida istället för sökresultat. DDG blockerar bot-liknande requests. Prova igen senare eller använd en annan sökmotor.",
+            now_ms() - start,
+        );
+    }
+
     let ddg_url = crate::search::build_ddg_url(&req.query);
     let tree = super::build_tree(ddg_html, &effective_goal, &ddg_url);
     let results = crate::search::extract_results(&tree.nodes, effective_top_n);

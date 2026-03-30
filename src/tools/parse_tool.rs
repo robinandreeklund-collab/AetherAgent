@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    build_tree, build_tree_with_js, detect_input, limit_top_n, now_ms, sort_by_relevance,
-    tree_to_markdown, InputKind, ToolResult,
+    build_tree, build_tree_with_js, count_all_nodes, detect_input, limit_top_n, now_ms,
+    sort_by_relevance, tree_to_markdown, InputKind, ToolResult,
 };
 
 /// Request-parametrar för parse-verktyget
@@ -159,7 +159,7 @@ fn execute_html_inner(
     };
 
     tree.parse_time_ms = now_ms() - start;
-    let total_nodes = tree.nodes.len();
+    let total_nodes = count_all_nodes(&tree.nodes);
 
     // Sortera och begränsa
     sort_by_relevance(&mut tree);
@@ -167,7 +167,7 @@ fn execute_html_inner(
         limit_top_n(&mut tree, n);
     }
 
-    let node_count = tree.nodes.len();
+    let node_count = count_all_nodes(&tree.nodes);
     let warnings = tree.injection_warnings.clone();
 
     // Format
@@ -348,9 +348,13 @@ mod tests {
 
         let data = result.data.unwrap();
         let node_count = data["node_count"].as_u64().unwrap_or(0);
+        // node_count räknar alla noder (inkl barn), top_n begränsar rotnoder
+        // Rotnoder <= 2 men totalt kan vara fler pga barn
+        let tree = &data["tree"];
+        let root_count = tree["nodes"].as_array().map(|a| a.len()).unwrap_or(0);
         assert!(
-            node_count <= 2,
-            "Ska begränsa till top_n=2, fick {node_count}"
+            root_count <= 2,
+            "Ska begränsa rotnoder till top_n=2, fick {root_count}"
         );
     }
 
