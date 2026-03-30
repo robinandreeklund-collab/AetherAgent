@@ -4158,6 +4158,12 @@ pub(super) fn js_value_to_dom_string(val: Option<&rquickjs::Value<'_>>) -> Strin
                 } else {
                     format!("{}", n)
                 }
+            } else if let Some(obj) = v.as_object() {
+                // Anropa toString() på objekt per WebIDL DOMString konvertering
+                obj.get::<_, rquickjs::Function>("toString")
+                    .ok()
+                    .and_then(|func| func.call::<_, String>((v.clone(),)).ok())
+                    .unwrap_or_default()
             } else {
                 String::new()
             }
@@ -6199,9 +6205,23 @@ pub(super) fn make_element_object<'js>(
                     parent
                 };
 
-                let html_str = js_value_to_dom_string(args.first());
+                // outerHTML setter: null → "" per spec (DOMString? coercion)
+                let html_str = {
+                    let val = args.first();
+                    match val {
+                        Some(v) if v.is_null() => String::new(),
+                        _ => js_value_to_dom_string(val),
+                    }
+                };
 
                 if let Some(parent_key) = parent_key {
+                    if html_str.is_empty() {
+                        // null/empty → bara ta bort elementet (inga nya noder)
+                        let mut s = self.state.borrow_mut();
+                        s.arena.remove_child(parent_key, self.key);
+                        return Ok(Value::new_undefined(ctx.clone()));
+                    }
+
                     // Parsa HTML till nya noder
                     let new_keys = {
                         let mut s = self.state.borrow_mut();
