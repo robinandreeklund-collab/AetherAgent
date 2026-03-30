@@ -37,8 +37,9 @@ pub struct ParseRequest {
     /// Tvinga JS-eval (true/false/auto)
     #[serde(default)]
     pub js: Option<bool>,
-    /// Använd hybrid BM25+HDC+Embedding pipeline (default: true)
-    #[serde(default = "default_true")]
+    /// Använd hybrid BM25+HDC+Embedding pipeline (default: false).
+    /// Sätt till true för bättre relevans-ranking vid top_n-filtrering.
+    #[serde(default)]
     pub hybrid: bool,
     /// Streaming-läge (default: true)
     #[serde(default = "default_true")]
@@ -307,7 +308,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -337,7 +338,7 @@ mod tests {
             top_n: None,
             format: Some("markdown".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -363,7 +364,7 @@ mod tests {
             top_n: Some(2),
             format: Some("tree".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -391,7 +392,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -408,7 +409,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -432,7 +433,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -457,7 +458,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(true),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -479,7 +480,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -496,7 +497,7 @@ mod tests {
             top_n: Some(5),
             format: Some("markdown".to_string()),
             js: Some(false),
-            hybrid: true,
+            hybrid: false,
             stream: false,
         };
         let result = execute_with_html(simple_html(), &req, "https://example.com");

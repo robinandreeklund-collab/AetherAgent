@@ -71,6 +71,7 @@ fn test_ecommerce_parse_tree() {
         top_n: None,
         format: Some("tree".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let result = tools::parse_tool::execute(&req);
@@ -100,6 +101,7 @@ fn test_ecommerce_parse_markdown() {
         top_n: Some(10),
         format: Some("markdown".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let result = tools::parse_tool::execute(&req);
@@ -260,6 +262,7 @@ fn test_injection_detected_in_parse() {
         top_n: None,
         format: Some("tree".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let result = tools::parse_tool::execute(&req);
@@ -310,6 +313,7 @@ fn test_safe_content_no_warnings() {
         top_n: None,
         format: Some("tree".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let result = tools::parse_tool::execute(&req);
@@ -734,6 +738,7 @@ fn test_parse_then_diff_pipeline() {
         top_n: None,
         format: Some("tree".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let r1 = tools::parse_tool::execute(&req1);
@@ -749,6 +754,7 @@ fn test_parse_then_diff_pipeline() {
         top_n: None,
         format: Some("tree".to_string()),
         js: Some(false),
+        hybrid: false,
         stream: false,
     };
     let r2 = tools::parse_tool::execute(&req2);
