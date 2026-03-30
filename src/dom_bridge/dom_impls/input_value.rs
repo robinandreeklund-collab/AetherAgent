@@ -374,9 +374,110 @@ fn sanitize_color(value: &str) -> String {
         "whitesmoke" => "#f5f5f5",
         "yellow" => "#ffff00",
         "yellowgreen" => "#9acd32",
-        _ => "#000000",
+        _ => {
+            // rgb(r, g, b) / rgba(r, g, b, a)
+            let lower = v.to_ascii_lowercase();
+            if lower.starts_with("rgb") {
+                if let Some(hex) = parse_rgb_to_hex(&lower) {
+                    return hex;
+                }
+            }
+            // hsl(h, s%, l%) / hsla(h, s%, l%, a)
+            if lower.starts_with("hsl") {
+                if let Some(hex) = parse_hsl_to_hex(&lower) {
+                    return hex;
+                }
+            }
+            return "#000000".to_string();
+        }
     }
     .to_string()
+}
+
+/// Parsa rgb(r, g, b) / rgba(r, g, b, a) till #rrggbb
+fn parse_rgb_to_hex(s: &str) -> Option<String> {
+    // Extrahera innehållet i parenteser
+    let inner = s
+        .trim_start_matches("rgba(")
+        .trim_start_matches("rgb(")
+        .trim_end_matches(')');
+    // Separera med komma eller mellanslag
+    let parts: Vec<&str> = if inner.contains(',') {
+        inner.split(',').map(|p| p.trim()).collect()
+    } else {
+        inner.split_whitespace().collect()
+    };
+    if parts.len() < 3 {
+        return None;
+    }
+    let r = parse_color_component(parts[0])?;
+    let g = parse_color_component(parts[1])?;
+    let b = parse_color_component(parts[2])?;
+    Some(format!("#{:02x}{:02x}{:02x}", r, g, b))
+}
+
+/// Parsa en färgkomponent (0-255 eller 0%-100%)
+fn parse_color_component(s: &str) -> Option<u8> {
+    let s = s.trim();
+    if s.ends_with('%') {
+        let pct: f64 = s.trim_end_matches('%').trim().parse().ok()?;
+        Some((pct * 2.55).round().clamp(0.0, 255.0) as u8)
+    } else {
+        let v: f64 = s.parse().ok()?;
+        Some(v.round().clamp(0.0, 255.0) as u8)
+    }
+}
+
+/// Parsa hsl(h, s%, l%) till #rrggbb
+fn parse_hsl_to_hex(s: &str) -> Option<String> {
+    let inner = s
+        .trim_start_matches("hsla(")
+        .trim_start_matches("hsl(")
+        .trim_end_matches(')');
+    let parts: Vec<&str> = if inner.contains(',') {
+        inner.split(',').map(|p| p.trim()).collect()
+    } else {
+        inner.split_whitespace().collect()
+    };
+    if parts.len() < 3 {
+        return None;
+    }
+    // Hue: tal, möjligen med deg/rad/grad/turn suffix
+    let h_str = parts[0]
+        .trim_end_matches("deg")
+        .trim_end_matches("rad")
+        .trim_end_matches("grad")
+        .trim_end_matches("turn")
+        .trim();
+    let h: f64 = h_str.parse().ok()?;
+    let s_str = parts[1].trim_end_matches('%').trim();
+    let s_val: f64 = s_str.parse().ok()?;
+    let l_str = parts[2].trim_end_matches('%').trim();
+    let l_val: f64 = l_str.parse().ok()?;
+    // HSL → RGB konvertering
+    let s_norm = s_val / 100.0;
+    let l_norm = l_val / 100.0;
+    let c = (1.0 - (2.0 * l_norm - 1.0).abs()) * s_norm;
+    let h_prime = (h % 360.0) / 60.0;
+    let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = if h_prime < 1.0 {
+        (c, x, 0.0)
+    } else if h_prime < 2.0 {
+        (x, c, 0.0)
+    } else if h_prime < 3.0 {
+        (0.0, c, x)
+    } else if h_prime < 4.0 {
+        (0.0, x, c)
+    } else if h_prime < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = l_norm - c / 2.0;
+    let r = ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    let g = ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    let b = ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    Some(format!("#{:02x}{:02x}{:02x}", r, g, b))
 }
 
 fn is_valid_date_string(s: &str) -> bool {
