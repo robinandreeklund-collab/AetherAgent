@@ -3,47 +3,48 @@
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 pub mod arena_dom;
 pub mod arena_dom_sink;
-mod causal;
-mod collab;
-mod compiler;
+pub(crate) mod causal;
+pub(crate) mod collab;
+pub(crate) mod compiler;
 #[cfg(feature = "js-eval")]
 mod css_cascade;
 #[cfg(feature = "blitz")]
 pub mod css_compiler;
-mod diff;
+pub(crate) mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
 pub mod embedding;
-mod escalation;
+pub(crate) mod escalation;
 #[cfg(feature = "js-eval")]
 mod event_loop;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod firewall;
-mod grounding;
-mod hydration;
-mod intent;
+pub(crate) mod grounding;
+pub(crate) mod hydration;
+pub(crate) mod intent;
 pub mod intercept;
-mod js_bridge;
-mod js_eval;
+pub(crate) mod js_bridge;
+pub(crate) mod js_eval;
 mod memory;
-mod orchestrator;
-mod parser;
+pub(crate) mod orchestrator;
+pub(crate) mod parser;
 pub mod search;
-mod semantic;
-mod session;
+pub(crate) mod semantic;
+pub(crate) mod session;
 pub mod stream_engine;
 pub mod stream_state;
-mod streaming;
+pub(crate) mod streaming;
 #[cfg(feature = "blitz")]
 #[allow(dead_code)]
 mod taffy_render;
 mod temporal;
-mod trust;
+pub mod tools;
+pub(crate) mod trust;
 pub mod types;
 pub mod vision;
 pub mod vision_backend;
-mod webmcp;
+pub(crate) mod webmcp;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
