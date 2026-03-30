@@ -231,14 +231,16 @@ fn execute_screenshot(b64: &str, goal: &str, start: u64) -> ToolResult {
         let config = crate::vision::VisionConfig::default();
         match crate::vision::detect_ui_elements(&png_bytes, &model_bytes, goal, &config) {
             Ok(result) => {
+                let vision_json = serde_json::to_value(&result).ok();
+                let node_count = result.tree.nodes.len();
                 let data = serde_json::to_value(&ParseResponse {
                     format: "tree".to_string(),
                     tier: "vision".to_string(),
-                    node_count: result.tree.nodes.len(),
-                    total_nodes: result.tree.nodes.len(),
+                    node_count,
+                    total_nodes: node_count,
                     tree: Some(result.tree),
                     markdown: None,
-                    vision: serde_json::to_value(&result).ok(),
+                    vision: vision_json,
                     parse_time_ms: now_ms() - start,
                 })
                 .unwrap_or_default();

@@ -110,7 +110,7 @@ fn execute_screenshot(req: &VisionRequest, start: u64) -> ToolResult {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(&result.png_bytes);
                 let data = serde_json::json!({
                     "mode": "screenshot",
-                    "tier": format!("{:?}", result.tier),
+                    "tier": format!("{:?}", result.tier_used),
                     "png_b64_length": b64.len(),
                     "png_b64": b64,
                     "width": req.width,
