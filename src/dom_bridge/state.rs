@@ -29,20 +29,6 @@ pub struct DomEvalResult {
     pub fetched_urls: Vec<String>,
 }
 
-impl Default for DomEvalResult {
-    fn default() -> Self {
-        DomEvalResult {
-            value: None,
-            error: None,
-            mutations: vec![],
-            eval_time_us: 0,
-            event_loop_ticks: 0,
-            timers_fired: 0,
-            fetched_urls: vec![],
-        }
-    }
-}
-
 /// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar
 pub type DomMutation = std::borrow::Cow<'static, str>;
 

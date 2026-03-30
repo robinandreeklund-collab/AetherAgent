@@ -286,9 +286,10 @@ pub async fn resolve_pending_fetches(tree: &mut crate::types::SemanticTree, goal
         tree.nodes.push(node);
     }
 
-    tree.xhr_intercepted += result.intercepted;
-    tree.xhr_blocked += result.blocked;
-    tree.injection_warnings.extend(result.warnings);
+    tree.xhr_intercepted += result.intercepted_count;
+    tree.xhr_blocked += result.blocked_count;
+    tree.injection_warnings
+        .extend(result.xhr_injection_warnings);
     tree.pending_fetch_urls.clear();
 }
 
