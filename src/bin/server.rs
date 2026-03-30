@@ -890,9 +890,70 @@ async fn parse_top(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
 }
 
 async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
-    let top_n = if req.top_n > 0 { req.top_n } else { 100 };
-    let result = aether_agent::parse_top_nodes_hybrid(&req.html, &req.goal, &req.url, top_n);
-    (StatusCode::OK, result)
+    let top_n = if req.top_n > 0 { req.top_n } else { 20 };
+    let html = req.html.clone();
+    let goal = req.goal.clone();
+    let url = req.url.clone();
+
+    // Bygg träd med JS-eval (synk)
+    let mut tree = tokio::task::spawn_blocking(move || {
+        aether_agent::tools::build_tree_with_js(&html, &goal, &url)
+    })
+    .await
+    .unwrap_or_default();
+
+    // Resolve pending fetch-URLs (async — BUGG J)
+    #[cfg(feature = "fetch")]
+    aether_agent::tools::resolve_pending_fetches(&mut tree, &req.goal).await;
+
+    // Kör hybrid scoring (synk)
+    let goal2 = req.goal.clone();
+    let url2 = req.url.clone();
+    let html2 = req.html.clone();
+    let result_json = tokio::task::spawn_blocking(move || {
+        // Bygg hybrid-score manuellt
+        let goal_embedding = aether_agent::embedding::embed(&goal2);
+        let config = aether_agent::scoring::PipelineConfig::default();
+        let pipeline = aether_agent::scoring::ScoringPipeline::run_cached(
+            &html2,
+            &tree.nodes,
+            &goal2,
+            goal_embedding.as_deref(),
+            &config,
+        );
+        let score_map = aether_agent::scoring::pipeline::scores_to_map(&pipeline.scored_nodes);
+        aether_agent::scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+
+        let top_scored = aether_agent::scoring::ScoringPipeline::apply_top_n(
+            pipeline.scored_nodes,
+            Some(top_n as usize),
+        );
+
+        serde_json::json!({
+            "url": url2,
+            "goal": tree.goal,
+            "title": tree.title,
+            "top_nodes": top_scored.iter().map(|s| serde_json::json!({
+                "id": s.id, "role": s.role, "label": s.label, "relevance": s.relevance,
+            })).collect::<Vec<_>>(),
+            "node_count": top_scored.len(),
+            "total_nodes": aether_agent::tools::count_all_nodes(&tree.nodes),
+            "injection_warnings": tree.injection_warnings.len(),
+            "xhr_intercepted": tree.xhr_intercepted,
+            "pipeline": {
+                "method": "hybrid_bm25_hdc_embedding",
+                "bm25_candidates": pipeline.timings.tfidf_candidates,
+                "hdc_survivors": pipeline.timings.hdc_survivors,
+                "total_pipeline_us": pipeline.timings.total_us,
+                "cache_hit": pipeline.timings.cache_hit,
+            }
+        })
+        .to_string()
+    })
+    .await
+    .unwrap_or_else(|_| "{}".to_string());
+
+    (StatusCode::OK, result_json)
 }
 
 async fn parse_extract_handler(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
@@ -4674,6 +4735,28 @@ async fn mcp_dispatch_tool(
                 }
             }
 
+            // HTML-input: kör async variant för att resolve pending fetch-URLs
+            if let Some(ref html) = req.html {
+                if !html.is_empty() {
+                    let url = req.url.as_deref().unwrap_or("");
+                    #[cfg(feature = "fetch")]
+                    {
+                        let result =
+                            aether_agent::tools::parse_hybrid_tool::execute_with_html_async(
+                                html, &req, url,
+                            )
+                            .await;
+                        return text_ok(result.to_json());
+                    }
+                    #[cfg(not(feature = "fetch"))]
+                    {
+                        let result = aether_agent::tools::parse_hybrid_tool::execute_with_html(
+                            html, &req, url,
+                        );
+                        return text_ok(result.to_json());
+                    }
+                }
+            }
             let result = aether_agent::tools::parse_hybrid_tool::execute(&req);
             text_ok(result.to_json())
         }
