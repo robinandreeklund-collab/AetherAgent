@@ -2837,6 +2837,82 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         }
 
+        // ─── VTTCue / TextTrackCue ──────────────────────────────────────────
+        (function() {
+            if (!globalThis.TextTrackCue) {
+                globalThis.TextTrackCue = function TextTrackCue() {
+                    throw new TypeError('Illegal constructor');
+                };
+                TextTrackCue.prototype = {};
+            }
+            if (!globalThis.VTTCue) {
+                globalThis.VTTCue = function VTTCue(startTime, endTime, text) {
+                    this.startTime = startTime || 0;
+                    this.endTime = endTime || 0;
+                    this.text = text !== undefined ? String(text) : '';
+                    this.id = '';
+                    this.pauseOnExit = false;
+                    this.track = null;
+                    this.vertical = '';
+                    this.snapToLines = true;
+                    this.line = 'auto';
+                    this.lineAlign = 'start';
+                    this.position = 'auto';
+                    this.positionAlign = 'auto';
+                    this.size = 100;
+                    this.align = 'center';
+                    this.region = null;
+                };
+                VTTCue.prototype = Object.create(TextTrackCue.prototype);
+                VTTCue.prototype.constructor = VTTCue;
+                VTTCue.prototype.getCueAsHTML = function() {
+                    if (typeof document !== 'undefined') return document.createDocumentFragment();
+                    return null;
+                };
+            }
+        })();
+
+        // ─── DataTransfer / DataTransferItem ────────────────────────────────
+        (function() {
+            if (!globalThis.DataTransfer) {
+                globalThis.DataTransfer = function DataTransfer() {
+                    this.dropEffect = 'none';
+                    this.effectAllowed = 'uninitialized';
+                    this.items = [];
+                    this.types = [];
+                    this.files = typeof FileList !== 'undefined' ? new FileList() : [];
+                    this._data = {};
+                };
+                DataTransfer.prototype.setData = function(format, data) {
+                    this._data[format] = data;
+                    if (this.types.indexOf(format) === -1) this.types.push(format);
+                };
+                DataTransfer.prototype.getData = function(format) { return this._data[format] || ''; };
+                DataTransfer.prototype.clearData = function(format) {
+                    if (format) { delete this._data[format]; var i = this.types.indexOf(format); if (i >= 0) this.types.splice(i, 1); }
+                    else { this._data = {}; this.types = []; }
+                };
+                DataTransfer.prototype.setDragImage = function() {};
+            }
+            if (!globalThis.DataTransferItem) {
+                globalThis.DataTransferItem = function DataTransferItem() {};
+            }
+            if (!globalThis.DataTransferItemList) {
+                globalThis.DataTransferItemList = function DataTransferItemList() {};
+            }
+        })();
+
+        // ─── InterestEvent ──────────────────────────────────────────────────
+        if (!globalThis.InterestEvent) {
+            globalThis.InterestEvent = function InterestEvent(type, opts) {
+                Event.call(this, type, opts || {});
+                var o = opts || {};
+                this.interestTarget = o.interestTarget || null;
+            };
+            InterestEvent.prototype = Object.create(Event.prototype);
+            InterestEvent.prototype.constructor = InterestEvent;
+        }
+
         // ─── AbortController / AbortSignal ──────────────────────────────────
         (function() {
             if (!globalThis.AbortController) {
