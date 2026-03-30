@@ -163,10 +163,37 @@ fn compute_node_score(
     // Normalisera TF-IDF till [0, 1] — clamp vid 3.0 (empirisk max)
     let tfidf_norm = (tfidf_score / 3.0).min(1.0);
 
-    // Viktat medelvärde: semantisk 45%, roll 25%, tfidf 30%
-    let raw = (semantic_score * 0.45) + (role_score * 0.25) + (tfidf_norm * 0.30) - label_penalty;
+    // 6. Role-multiplier: referens-länkar nedprioriteras, faktanoder upprioriteras
+    let role_mult = role_multiplier(role, label);
+
+    // Viktat medelvärde: semantisk 45%, roll 25%, bm25 30%
+    let raw = ((semantic_score * 0.45) + (role_score * 0.25) + (tfidf_norm * 0.30) - label_penalty)
+        * role_mult;
 
     raw.clamp(0.0, 1.0)
+}
+
+/// Role-multiplier: nedprioritera referens-/nav-länkar, upprioritera faktanoder.
+///
+/// Wikipedia-sidor har tusentals referens-länktexter som råkar innehålla goal-
+/// nyckelord och tränger undan infobox/table-noder med faktiska svar (Bugg G).
+fn role_multiplier(role: &str, label: &str) -> f32 {
+    match role {
+        // Referens-länkar: citat-titlar, "See also", fotnoter
+        "link" if label.starts_with('"') || label.starts_with('\u{201C}') => 0.4,
+        // Korta nav-länkar (<40 tecken): "Home", "About", "Page 2"
+        "link" if label.len() < 40 => 0.7,
+        // Vanliga länkar — neutral
+        "link" => 0.85,
+        // Strukturerade faktanoder — boost
+        "row" | "cell" | "definition" | "listitem" => 1.15,
+        "data" => 1.2,
+        // Tabellrubriker
+        "columnheader" | "rowheader" => 1.1,
+        // Headings — mild boost (ofta innehåller fråge-kontext)
+        "heading" => 1.05,
+        _ => 1.0,
+    }
 }
 
 /// Info om en nod i det platta indexet

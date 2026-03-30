@@ -29,7 +29,7 @@ pub struct ParseHybridRequest {
 }
 
 fn default_top_n() -> u32 {
-    100
+    20
 }
 
 /// Kör parse_hybrid synkront (utan fetch)
@@ -128,6 +128,6 @@ mod tests {
 
     #[test]
     fn test_parse_hybrid_default_top_n() {
-        assert_eq!(default_top_n(), 100, "Default top_n ska vara 100");
+        assert_eq!(default_top_n(), 20, "Default top_n ska vara 20");
     }
 }

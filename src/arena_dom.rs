@@ -940,9 +940,10 @@ impl ArenaDom {
             }
         }
         // 6. Inre text (pre-extraherad)
+        // 300 tecken — tillräckligt för embedding, 80 klippte bort fakta
         let trimmed = precomputed_text.trim();
         if !trimmed.is_empty() {
-            let truncated: String = trimmed.chars().take(80).collect();
+            let truncated: String = trimmed.chars().take(300).collect();
             return truncated;
         }
         // 7. name-attribut
