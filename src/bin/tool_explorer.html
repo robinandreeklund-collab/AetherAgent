@@ -269,7 +269,7 @@ const TOOLS = [
     endpoint: null, // Special: two calls
     fields: [
       { key: 'html', label: 'HTML', type: 'textarea', required: true,
-        placeholder: '<script type="application/mcp+json">{"tools":[...]}</script>\n<script>fetch("/api/data")</script>' },
+        placeholder: '<script type="application/mcp+json">{"tools":[...]}<\/script>\n<script>fetch("/api/data")<\/script>' },
       { key: 'url', label: 'URL', type: 'text', placeholder: 'https://app.se' },
     ],
     pipeline: ['scan_scripts', 'detect_mcp_json', 'detect_window_mcp', 'extract_xhr'],
@@ -290,7 +290,7 @@ const TOOLS = [
     endpoint: '/api/detect-js',
     fields: [
       { key: 'html', label: 'HTML', type: 'textarea', required: true,
-        placeholder: '<div id="root" data-reactroot></div>\n<script src="app.js"></script>' },
+        placeholder: '<div id="root" data-reactroot><\/div>\n<script src="app.js"><\/script>' },
     ],
     pipeline: ['scan_inline', 'scan_event_handlers', 'detect_framework'],
     extract: d => ({ nodes: d.total_inline_scripts||0, warnings: 0, time: 0 })
