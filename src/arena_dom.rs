@@ -461,6 +461,12 @@ impl ArenaDom {
         match &node.node_type {
             NodeType::Text => node.text.as_deref().unwrap_or("").to_string(),
             NodeType::Comment => format!("<!--{}-->", node.text.as_deref().unwrap_or("")),
+            // Document / DocumentFragment: serialisera alla barn
+            NodeType::Document => node
+                .children
+                .iter()
+                .map(|&c| self.serialize_html(c))
+                .collect(),
             NodeType::Element => {
                 let tag = node.tag.as_deref().unwrap_or("div");
                 let mut attrs = String::new();

@@ -173,7 +173,7 @@ pub fn build_tree(html: &str, goal: &str, url: &str) -> crate::types::SemanticTr
 /// 1. Om JS muterade DOM:en → bygg träd från modifierad arena-HTML
 /// 2. Om JS hade fel → logga, fall tillbaka på pre-JS DOM (original HTML)
 /// 3. Om JS körde utan mutationer och utan fel → prova arena-HTML
-/// Pre-JS DOM bevaras ALLTID som fallback vid JS-fel.
+///    Pre-JS DOM bevaras ALLTID som fallback vid JS-fel.
 #[allow(unused_variables)]
 pub fn build_tree_with_js(html: &str, goal: &str, url: &str) -> crate::types::SemanticTree {
     #[cfg(all(feature = "js-eval", feature = "blitz"))]

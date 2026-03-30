@@ -1458,9 +1458,9 @@ pub fn render_html_to_png(
                 );
                 if !eval_result.result.mutations.is_empty() {
                     let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
-                    // Säkerhetskontroll: om serialisering producerar drastiskt
-                    // mindre HTML har arena-roundtrip traskat DOM:en — fallback
-                    if serialized.len() >= html.len() / 3 {
+                    // Säkerhetskontroll: om serialisering producerar tom HTML
+                    // har arena-roundtrip traskat DOM:en — fallback
+                    if serialized.len() > 20 {
                         std::borrow::Cow::Owned(serialized)
                     } else {
                         std::borrow::Cow::Borrowed(html)
