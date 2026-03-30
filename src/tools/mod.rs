@@ -219,17 +219,38 @@ pub fn count_all_nodes(nodes: &[crate::types::SemanticNode]) -> usize {
     count
 }
 
-/// Sortera noder efter relevans (högst först)
+/// Sortera noder efter relevans (högst först) — sorterar rotnoder
 pub fn sort_by_relevance(tree: &mut crate::types::SemanticTree) {
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 }
 
-/// Begränsa till top N noder
-pub fn limit_top_n(tree: &mut crate::types::SemanticTree, top_n: u32) {
-    if top_n > 0 {
-        tree.nodes.truncate(top_n as usize);
+/// Flattena alla noder rekursivt till en platt lista
+fn flatten_all_nodes(nodes: &[crate::types::SemanticNode]) -> Vec<crate::types::SemanticNode> {
+    let mut result = Vec::new();
+    for node in nodes {
+        result.push(node.clone_shallow());
+        result.extend(flatten_all_nodes(&node.children));
     }
+    result
+}
+
+/// Begränsa till top N mest relevanta noder.
+///
+/// Flattenar hela trädet, sorterar efter relevans, tar top N.
+/// Returnerar platt lista (inga children) — rätt beteende för top_n
+/// där agenten vill ha de N bästa noderna oavsett trädposition.
+pub fn limit_top_n(tree: &mut crate::types::SemanticTree, top_n: u32) {
+    if top_n == 0 {
+        return;
+    }
+    // Flattena hela trädet
+    let mut flat = flatten_all_nodes(&tree.nodes);
+    // Sortera efter relevans (högst först)
+    flat.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+    // Ta top N
+    flat.truncate(top_n as usize);
+    tree.nodes = flat;
 }
 
 /// Konvertera semantiskt träd till markdown
