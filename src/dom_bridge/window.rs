@@ -3050,6 +3050,72 @@ pub(super) fn register_window_with_viewport<'js>(
             });
         }
 
+        // ─── HTMLTitleElement.text / HTMLScriptElement.text ──────────────────
+        // .text returns child text node content (not element descendants)
+        if (typeof HTMLElement !== 'undefined') {
+            // title.text — per spec: child text node content only
+            Object.defineProperty(HTMLElement.prototype, 'text', {
+                get: function() {
+                    // Only return text from direct Text node children
+                    var result = '';
+                    if (this.childNodes) {
+                        for (var i = 0; i < this.childNodes.length; i++) {
+                            if (this.childNodes[i].nodeType === 3) { // TEXT_NODE
+                                result += this.childNodes[i].data || this.childNodes[i].textContent || '';
+                            }
+                        }
+                    }
+                    return result;
+                },
+                set: function(v) {
+                    // Remove all children and set text
+                    while (this.firstChild) this.removeChild(this.firstChild);
+                    if (v !== undefined && v !== null) {
+                        this.appendChild(document.createTextNode(String(v)));
+                    }
+                },
+                configurable: true, enumerable: true
+            });
+        }
+
+        // ─── HTMLAnchorElement.relList / HTMLLinkElement.relList ─────────────
+        if (typeof HTMLElement !== 'undefined' && typeof DOMTokenList !== 'undefined') {
+            Object.defineProperty(HTMLElement.prototype, 'relList', {
+                get: function() {
+                    var self = this;
+                    var rel = self.getAttribute('rel') || '';
+                    var tokens = rel ? rel.trim().split(/\s+/) : [];
+                    var list = Object.create(DOMTokenList.prototype || {});
+                    list.length = tokens.length;
+                    for (var i = 0; i < tokens.length; i++) list[i] = tokens[i];
+                    list.value = rel;
+                    list.contains = function(t) { return tokens.indexOf(t) !== -1; };
+                    list.add = function() {
+                        for (var a = 0; a < arguments.length; a++) {
+                            if (tokens.indexOf(arguments[a]) === -1) tokens.push(arguments[a]);
+                        }
+                        self.setAttribute('rel', tokens.join(' '));
+                    };
+                    list.remove = function() {
+                        for (var a = 0; a < arguments.length; a++) {
+                            var idx = tokens.indexOf(arguments[a]);
+                            if (idx !== -1) tokens.splice(idx, 1);
+                        }
+                        self.setAttribute('rel', tokens.join(' '));
+                    };
+                    list.toggle = function(t, force) {
+                        if (force !== undefined) { if (force) list.add(t); else list.remove(t); return force; }
+                        if (list.contains(t)) { list.remove(t); return false; }
+                        list.add(t); return true;
+                    };
+                    list.toString = function() { return self.getAttribute('rel') || ''; };
+                    list.supports = function() { return true; };
+                    return list;
+                },
+                configurable: true, enumerable: true
+            });
+        }
+
         // ─── Element.insertAdjacentHTML stub ────────────────────────────────
         if (typeof Element !== 'undefined' && !Element.prototype.insertAdjacentHTML) {
             Element.prototype.insertAdjacentHTML = function(position, text) {
