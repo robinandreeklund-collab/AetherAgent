@@ -1075,19 +1075,45 @@ fn score_entry_relevance(key: &str, value: &str, goal_words: &[&str]) -> f32 {
     let key_lower = key.to_lowercase();
     let value_lower = value.to_lowercase();
 
-    let mut matches = 0;
-    for word in goal_words {
-        if word.len() < 2 {
-            continue;
+    // Scora key och value separat — ta den bästa
+    let mut key_matches = 0;
+    let mut value_matches = 0;
+    let meaningful_words: Vec<&&str> = goal_words
+        .iter()
+        .filter(|w| w.len() >= 3) // Skippa "of", "in", etc.
+        .collect();
+
+    if meaningful_words.is_empty() {
+        return 0.3;
+    }
+
+    for word in &meaningful_words {
+        if key_lower.contains(**word) {
+            key_matches += 1;
         }
-        if key_lower.contains(word) || value_lower.contains(word) {
-            matches += 1;
+        if value_lower.contains(**word) {
+            value_matches += 1;
         }
     }
 
-    let ratio = matches as f32 / goal_words.len() as f32;
-    // Skala till 0.1–1.0 (alltid minst lite relevans för hydration-data)
-    0.1 + ratio * 0.9
+    let key_ratio = key_matches as f32 / meaningful_words.len() as f32;
+    let value_ratio = value_matches as f32 / meaningful_words.len() as f32;
+
+    // Value-score viktas högre — det är datan, key är bara fältnamnet
+    let combined = (key_ratio * 0.3) + (value_ratio * 0.7);
+
+    // Penalisera URL-fält och korta värden (< 10 tecken)
+    let content_penalty =
+        if value_lower.starts_with("http://") || value_lower.starts_with("https://") {
+            0.3 // URL:er sällan relevanta som svar
+        } else if value.len() < 10 {
+            0.1 // Mycket korta värden (slug, id) sällan svaret
+        } else {
+            0.0
+        };
+
+    // Skala till 0.05–1.0
+    (0.05 + combined * 0.95 - content_penalty).clamp(0.05, 1.0)
 }
 
 // ─── Tester ────────────────────────────────────────────────────────────────
@@ -1417,13 +1443,30 @@ mod tests {
     #[test]
     fn test_score_entry_relevance_with_goal() {
         let goal_words = vec!["buy", "product"];
+        // "product" matchar key → positiv score
+        let product_score = score_entry_relevance("product_name", "Nike Air", &goal_words);
+        let random_score = score_entry_relevance("random_field", "random_value", &goal_words);
         assert!(
-            score_entry_relevance("product_name", "Nike Air", &goal_words) > 0.3,
-            "Nyckel med goal-ord borde ha hög relevans"
+            product_score > random_score,
+            "Nyckel med goal-ord ({product_score:.3}) borde vara högre än random ({random_score:.3})"
         );
         assert!(
-            score_entry_relevance("random_field", "random_value", &goal_words) < 0.2,
-            "Orelaterad nyckel borde ha låg relevans"
+            random_score < 0.1,
+            "Orelaterad nyckel borde ha låg relevans: {random_score:.3}"
+        );
+
+        // Value-match viktas högt
+        let value_match = score_entry_relevance("name", "Great product for you", &goal_words);
+        assert!(
+            value_match > product_score,
+            "Value-match ({value_match:.3}) borde vara högre än bara key-match ({product_score:.3})"
+        );
+
+        // URL penaliseras
+        let url_score = score_entry_relevance("url", "https://example.com/product", &goal_words);
+        assert!(
+            url_score < value_match,
+            "URL ({url_score:.3}) borde rankas lägre än text-value ({value_match:.3})"
         );
     }
 
