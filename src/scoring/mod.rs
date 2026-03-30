@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod embed_score;
 pub mod hdc;
+pub mod page_cache;
 pub mod pipeline;
 // Scoring Module — Hybrid TF-IDF + HDC + Embedding pipeline
 //

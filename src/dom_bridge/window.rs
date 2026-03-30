@@ -3812,15 +3812,21 @@ pub(super) fn register_window_with_viewport<'js>(
     "#,
     )?;
 
-    // SPA-stöd: fetch/XHR/Observer-stubs som förhindrar krascher i SPA-bundles
+    // SPA-stöd: fetch/XHR/Observer-stubs + URL-capture för Rust-side fetch
     ctx.eval::<(), _>(
         r#"
-        // fetch() — returnera tom Response (förhindrar ReferenceError i SPA-bundles)
+        // Samlar fetch-URLs för Rust-side interception (BUGG J fix)
+        globalThis.__fetchedUrls = [];
+
+        // fetch() — samla URL för Rust-fetch, returnera stub-Response
         globalThis.fetch = function(url, opts) {
+            if (typeof url === 'string' && url.length > 0) {
+                globalThis.__fetchedUrls.push(url);
+            }
             return Promise.resolve({
                 ok: false,
                 status: 0,
-                statusText: 'Sandbox: network disabled',
+                statusText: 'Sandbox: fetch deferred to Rust',
                 url: typeof url === 'string' ? url : '',
                 redirected: false,
                 type: 'basic',
@@ -3832,7 +3838,7 @@ pub(super) fn register_window_with_viewport<'js>(
                     keys: function() { return []; },
                     values: function() { return []; }
                 },
-                json: function() { return Promise.reject(new Error('Sandbox: fetch disabled')); },
+                json: function() { return Promise.reject(new Error('Sandbox: fetch deferred')); },
                 text: function() { return Promise.resolve(''); },
                 blob: function() { return Promise.resolve(new Blob ? new Blob([]) : {}); },
                 arrayBuffer: function() { return Promise.resolve(new ArrayBuffer(0)); },

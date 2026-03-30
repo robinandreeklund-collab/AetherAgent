@@ -24,6 +24,23 @@ pub struct DomEvalResult {
     pub event_loop_ticks: usize,
     /// Antal timer-callbacks som kördes
     pub timers_fired: usize,
+    /// URLs som JS anropade via fetch() — för Rust-side interception (BUGG J)
+    #[cfg_attr(not(feature = "js-eval"), allow(dead_code))]
+    pub fetched_urls: Vec<String>,
+}
+
+impl Default for DomEvalResult {
+    fn default() -> Self {
+        DomEvalResult {
+            value: None,
+            error: None,
+            mutations: vec![],
+            eval_time_us: 0,
+            event_loop_ticks: 0,
+            timers_fired: 0,
+            fetched_urls: vec![],
+        }
+    }
 }
 
 /// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar
