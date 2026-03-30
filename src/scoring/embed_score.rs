@@ -96,15 +96,26 @@ pub fn score_bottom_up(
         }
     }
 
-    // Steg 3: Samla resultat och sortera
+    // Steg 3: Samla resultat, dedup, och sortera
     let mut result: Vec<ScoredNode> = survivors
         .iter()
         .filter_map(|&(id, _)| {
             let info = all_nodes.get(&id)?;
-            let relevance = scores.get(&id).copied().unwrap_or(0.0);
+            let mut relevance = scores.get(&id).copied().unwrap_or(0.0);
+
+            // Leaf-link boost: löv-noder med roll link och lagom label-längd (30-200)
+            // är typiska story-titlar, artikelrubriker, produktnamn — hög signal
+            if info.is_leaf
+                && info.role == "link"
+                && info.label.len() >= 30
+                && info.label.len() <= 200
+            {
+                relevance *= 1.15;
+            }
+
             Some(ScoredNode {
                 id,
-                relevance,
+                relevance: relevance.min(1.0),
                 role: info.role.clone(),
                 label: info.label.clone(),
             })
@@ -112,6 +123,25 @@ pub fn score_bottom_up(
         .collect();
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    // Steg 4: Dedup — identiska labels → behåll bara den med högst score.
+    // Wrappers på olika djup har ofta exakt samma label (aggregerad barntext).
+    let mut seen_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
+    result.retain(|node| {
+        // Normalisera label: ta första 80 tecken, trimma whitespace
+        let key: String = node
+            .label
+            .chars()
+            .take(80)
+            .collect::<String>()
+            .trim()
+            .to_string();
+        if key.is_empty() {
+            return true; // behåll tomma labels (strukturella noder)
+        }
+        seen_labels.insert(key)
+    });
+
     result
 }
 
@@ -150,9 +180,19 @@ fn compute_node_score(
     // 3. Roll-prioritet
     let role_score = SemanticNode::role_priority(role);
 
-    // 4. Label-längd penalty (wrapper-detektion)
-    let label_penalty = if label.len() > 500 {
+    // 4. Wrapper-penalty: aggregerade labels (lång text + strukturell roll)
+    let is_structural = matches!(
+        role,
+        "generic" | "table" | "main" | "banner" | "complementary"
+    );
+    let label_penalty = if is_structural && label.len() > 200 {
+        // Lång strukturell wrapper — hög penalty (döljer riktiga content-noder)
+        0.20
+    } else if label.len() > 500 {
         0.15
+    } else if is_structural && label.len() > 100 {
+        // Medellång wrapper — mildare
+        0.10
     } else if label.len() > 300 {
         0.08
     } else {
