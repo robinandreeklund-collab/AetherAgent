@@ -641,7 +641,11 @@ pub fn text_similarity(query: &str, candidate: &str) -> f32 {
 ///
 /// Används av SemanticBuilder::score_relevance() som anropar denna per nod.
 /// Sparar ~300 allokeringar per typisk sida.
-fn text_similarity_cached(query_lower: &str, query_words: &[String], candidate: &str) -> f32 {
+pub(crate) fn text_similarity_cached(
+    query_lower: &str,
+    query_words: &[String],
+    candidate: &str,
+) -> f32 {
     if query_words.is_empty() {
         return 0.0;
     }
