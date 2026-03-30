@@ -135,15 +135,6 @@ impl Hypervector {
     /// med positionspermutation, och bundlar allt via majority-vote.
     /// Ger ordningskänslig representation ("katt jagar hund" ≠ "hund jagar katt").
     pub fn from_text_ngrams(text: &str) -> Self {
-        let words: Vec<&str> = text
-            .to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|s| s.len() > 1)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .collect();
-
-        // Workaround: split borrow — re-tokenize since we consumed the lowercase string
         let lower = text.to_lowercase();
         let words: Vec<&str> = lower
             .split(|c: char| !c.is_alphanumeric())
