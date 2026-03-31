@@ -146,6 +146,11 @@ path = "benches/bench_quality.rs"
 required-features = ["embeddings"]
 
 [[bin]]
+name = "aether-colbert-validation"
+path = "benches/colbert_validation.rs"
+required-features = ["embeddings", "colbert"]
+
+[[bin]]
 name = "aether-colbert-bench"
 path = "benches/colbert_bench.rs"
 
