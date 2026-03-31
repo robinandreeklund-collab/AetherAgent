@@ -1,12 +1,12 @@
 # Neuro-Symbolic DOM Retrieval via Hyperdimensional Pruning
 
-**Version:** 2.0 · **Date:** 2026-03-31
+**Version:** 3.0 · **Date:** 2026-03-31
 
 ---
 
 ## Abstract
 
-We present a three-stage neuro-symbolic retrieval pipeline for goal-directed DOM node ranking in autonomous browser agents. The system combines BM25 lexical retrieval (Robertson & Zaragoza, 2009), Hyperdimensional Computing structural pruning (Kanerva, 2009), and bottom-up neural embedding scoring (Reimers & Gurevych, 2019) to address the *wrapper-bias problem* — where structural container nodes absorb their children's text and dominate relevance rankings. On 20 real-world websites, the pipeline achieves 90% goal-correctness (vs 80% baseline), runs 1.8× faster by restricting neural inference to 20–80 survivors (vs 300+ nodes), and integrates prompt injection defense as a scoring signal. To our knowledge, this is the first application of HDC as an intermediate pruning layer in a multi-stage DOM retrieval pipeline for browser agents.
+We present a three-stage neuro-symbolic retrieval pipeline for goal-directed DOM node ranking in autonomous browser agents. The system combines BM25 lexical retrieval (Robertson & Zaragoza, 2009), Hyperdimensional Computing structural pruning (Kanerva, 2009), and bottom-up neural embedding scoring (Reimers & Gurevych, 2019) to address the *wrapper-bias problem* — where structural container nodes absorb their children's text and dominate relevance rankings. On 44 real-world websites, the pipeline achieves 75% goal-correctness (vs 80% legacy baseline with embeddings), runs at comparable latency by restricting neural inference to 20–80 survivors (vs 300+ nodes), and integrates prompt injection defense as a scoring signal. Version 3.0 adds an optional ColBERT late interaction reranker (Khattab & Zaharia, 2020) as an alternative Stage 3 strategy, evaluated on 44 live sites against the default bi-encoder. To our knowledge, this is the first application of HDC as an intermediate pruning layer in a multi-stage DOM retrieval pipeline for browser agents.
 
 ---
 
@@ -329,6 +329,32 @@ role_multiplier = 0.40 for quoted reference links
 1. **Leaf-link boost**: Leaf `<a>` nodes with label 30–200 chars receive ×1.15 — typical story titles, article links, product names
 2. **Label dedup**: Identical labels (first 80 chars) → keep only highest-scored. Eliminates wrapper duplicates at different DOM depths
 
+### 7.4 Optional: ColBERT Late Interaction Reranker
+
+Stage 3 supports an optional ColBERT MaxSim reranker (Khattab & Zaharia, 2020) as an alternative to the default bi-encoder mean pooling. ColBERT retains per-token embeddings instead of compressing to a single vector, computing relevance via the MaxSim operator:
+
+```
+score(q, d) = Σ_i max_j cosine(q_i, d_j)
+```
+
+For each query token, the best-matching document token is found. This provides token-level matching — a node ranks high only if it has strong *local* matches for the query's key tokens, not just global word overlap.
+
+**Implementation:** The ColBERT reranker reuses the same ONNX model (all-MiniLM-L6-v2) as the bi-encoder, but skips mean pooling. The `encode_tokens()` function returns L2-normalized per-token embeddings directly from the ONNX session output. This eliminates the need for a separate model download — the `colbert` feature flag depends only on `embeddings`.
+
+**Configuration:**
+
+```rust
+pub enum Stage3Reranker {
+    MiniLM,                                    // Default bi-encoder
+    ColBert,                                   // MaxSim late interaction
+    Hybrid { alpha: f32, use_adaptive_alpha: bool },  // Weighted combination
+}
+```
+
+**Adaptive alpha:** For Hybrid mode, `adaptive_alpha(token_len)` varies the ColBERT weight based on node length — short nodes (≤20 tokens) use α=0.3 (mostly bi-encoder), long nodes (>200 tokens) use α=0.95 (mostly ColBERT).
+
+**44-site evaluation results (Section 10.6)** show that ColBERT achieves comparable correctness to the bi-encoder (72.7% vs 75.0%) at similar latency (~830ms vs ~886ms) when using ONNX Runtime, with significantly higher average top-1 relevance scores (0.773 vs 0.517). The higher per-node confidence makes ColBERT suitable for applications where score calibration matters (e.g., threshold-based filtering).
+
 ---
 
 ## 8. Supporting Infrastructure
@@ -437,6 +463,37 @@ Cache hit delivers **3.3× speedup** with correct per-goal re-ranking.
 | HTML with `fetch(users API)` | 1 | "Leanne Graham" user data merged |
 | HTML with 2× `fetch()` calls | 2 | 5 total nodes (3 static + 2 XHR) |
 
+### 10.6 ColBERT vs MiniLM vs Hybrid (44 Live Sites)
+
+Stage 3 was evaluated with three reranker strategies on 44 successfully-fetched sites (45 attempted, 1 fetch timeout). All three use the same ONNX model (all-MiniLM-L6-v2, 384-dim) via ONNX Runtime.
+
+| Method | Correctness | Avg Latency | Avg Top-1 Score |
+|--------|-------------|-------------|-----------------|
+| **MiniLM** (bi-encoder, default) | **33/44 (75.0%)** | 886ms | 0.517 |
+| **ColBERT** (MaxSim) | 32/44 (72.7%) | **828ms** | **0.773** |
+| **Hybrid** (adaptive α) | 32/44 (72.7%) | 832ms | 0.638 |
+
+**Key findings:**
+
+1. **Correctness is comparable.** MiniLM wins by 1 site (75% vs 73%). ColBERT never finds a correct result that MiniLM misses — the 11 misses are shared (JS-rendered SPAs, Cloudflare challenges, empty DOMs).
+
+2. **ColBERT produces higher-confidence scores.** Average top-1 relevance 0.773 vs 0.517 — ColBERT is 50% more confident per node. This is the expected advantage of late interaction: token-level matching produces sharper score distributions.
+
+3. **Latency is equivalent with ONNX.** Initial Candle-based implementation was 11× slower (9.3s vs 830ms). After migrating to ONNX Runtime (reusing the existing `ort` session), ColBERT runs at the same speed as the bi-encoder — both are dominated by ONNX inference time, not the MaxSim computation.
+
+4. **Hybrid mode does not improve correctness.** The adaptive-alpha hybrid (0.3-0.95 depending on node length) scores between MiniLM and ColBERT on every metric. It is useful when score calibration matters but does not beat either pure method on keyword-correctness.
+
+**Backend comparison (ColBERT inference):**
+
+| Backend | Avg Latency | Dependencies | WASM-compatible |
+|---------|-------------|--------------|-----------------|
+| Candle (initial) | 9,284ms | candle-core, candle-nn, candle-transformers, tokenizers | Yes |
+| **ONNX Runtime** (final) | **828ms** | ort, ndarray (shared with embeddings) | No* |
+
+*ONNX Runtime does not support wasm32-unknown-unknown. For WASM targets, the Candle backend can be restored behind a `colbert-candle` feature flag.
+
+**Recommendation:** Use `Stage3Reranker::MiniLM` (default) for maximum correctness. Use `Stage3Reranker::ColBert` when score calibration or per-node confidence matters. Use `Stage3Reranker::Hybrid` for a balanced approach where long nodes benefit from ColBERT's token-level matching.
+
 ---
 
 ## 11. Conclusion
@@ -445,9 +502,9 @@ The neuro-symbolic pipeline — BM25 for lexical recall, HDC for structural prun
 
 The HDC middle tier is the key architectural contribution. It provides structural awareness that neither BM25 (bag-of-words) nor flat embeddings (sequence-only) capture: a node's ARIA role, tree depth, sibling context, and n-gram text are all encoded into a single 4096-bit vector queryable in nanoseconds. This is, to our knowledge, the first application of Hyperdimensional Computing to DOM element retrieval in an agent context.
 
-**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches.
+**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches. (4) ColBERT late interaction, while producing higher-confidence scores (0.773 vs 0.517 avg top-1), does not improve keyword-correctness over the bi-encoder on the current test suite — suggesting that mean-pooled embeddings capture sufficient goal-relevance signal for DOM node ranking at the current scale.
 
-**Future work:** Integration with ColBERT late interaction (Khattab & Zaharia, 2020) for token-level goal-node matching; learned HDC threshold calibration via feedback from agent task success; and evaluation on standardized web agent benchmarks.
+**Future work:** Learned HDC threshold calibration via feedback from agent task success; evaluation on standardized web agent benchmarks (WebArena, Mind2Web); ColBERT with a dedicated late-interaction model (e.g., `colbert-ir/colbertv2.0` via ONNX export) rather than repurposing the bi-encoder; and investigation of whether ColBERT's higher score calibration translates to better downstream agent task success in multi-step workflows.
 
 ---
 
