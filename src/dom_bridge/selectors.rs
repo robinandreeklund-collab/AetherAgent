@@ -790,7 +790,16 @@ pub(super) fn find_first_matching(
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    find_first_matching_compiled(arena, key, &selector_list, &mut context)
+    // Per spec: element.querySelector() söker bara bland descendants
+    let node = arena.nodes.get(key)?;
+    for &child in &node.children {
+        if let Some(found) =
+            find_first_matching_compiled(arena, child, &selector_list, &mut context)
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Bakåtkompatibel wrapper: hittar alla matchande noder under given nod
@@ -817,7 +826,14 @@ pub(super) fn find_all_matching(
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );
-    find_all_matching_compiled(arena, key, &selector_list, &mut context, results);
+    // Per spec: element.querySelectorAll() söker bara bland descendants, inte elementet själv.
+    // Starta från barn istället för key.
+    if let Some(node) = arena.nodes.get(key) {
+        let children: Vec<NodeKey> = node.children.clone();
+        for child in children {
+            find_all_matching_compiled(arena, child, &selector_list, &mut context, results);
+        }
+    }
 }
 
 // ─── Hjälpfunktioner som används av andra moduler ────────────────────────────
