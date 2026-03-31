@@ -2719,6 +2719,20 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
             )?,
         )?;
         doc.set(
+            "lookupPrefix",
+            Function::new(ctx.clone(), JsFn(LookupPrefix { _key: doc_key }))?,
+        )?;
+        doc.set(
+            "isDefaultNamespace",
+            Function::new(
+                ctx.clone(),
+                JsFn(IsDefaultNamespace {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
             "isSameNode",
             Function::new(ctx.clone(), JsFn(IsSameNode { key: doc_key }))?,
         )?;
@@ -3619,31 +3633,134 @@ struct LookupNamespaceURI {
     key: NodeKey,
 }
 impl JsHandler for LookupNamespaceURI {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let s = self.state.borrow();
-        let node = s.arena.nodes.get(self.key);
-        let nt = node.map(|n| n.node_type.clone());
-        let parent_key = node.and_then(|n| n.parent);
-        drop(s);
-        match nt {
-            Some(NodeType::Element) | Some(NodeType::Document) => Ok(rquickjs::String::from_str(
-                ctx.clone(),
-                "http://www.w3.org/1999/xhtml",
-            )?
-            .into_value()),
-            Some(NodeType::Text) | Some(NodeType::Comment) => {
-                if let Some(pk) = parent_key {
-                    let h = LookupNamespaceURI {
-                        state: Rc::clone(&self.state),
-                        key: pk,
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let prefix = args.first().and_then(|v| {
+            if v.is_null() || v.is_undefined() {
+                None
+            } else {
+                v.as_string()
+                    .and_then(|s| s.to_string().ok())
+                    .and_then(|s| if s.is_empty() { None } else { Some(s) })
+            }
+        });
+        let result = lookup_ns_uri(&self.state, self.key, prefix.as_deref());
+        match result {
+            Some(ns) => Ok(rquickjs::String::from_str(ctx.clone(), &ns)?.into_value()),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+/// Per spec: Node.lookupNamespaceURI(prefix) algoritm
+fn lookup_ns_uri(state: &SharedState, key: NodeKey, prefix: Option<&str>) -> Option<String> {
+    let s = state.borrow();
+    let node = s.arena.nodes.get(key)?;
+    let nt = node.node_type.clone();
+    drop(s);
+
+    // DocumentFragment och DocumentType returnerar alltid null
+    if matches!(
+        nt,
+        NodeType::DocumentFragment | NodeType::Doctype | NodeType::Other
+    ) {
+        return None;
+    }
+
+    // Inbyggda namespace-prefix per spec (bara för Element/Document/Text/Comment/PI)
+    if let Some(p) = prefix {
+        if p == "xml" {
+            return Some("http://www.w3.org/XML/1998/namespace".to_string());
+        }
+        if p == "xmlns" {
+            return Some("http://www.w3.org/2000/xmlns/".to_string());
+        }
+    }
+
+    let s = state.borrow();
+    let node = s.arena.nodes.get(key)?;
+    match nt {
+        NodeType::Element => {
+            // Steg 1: Kolla elementets eget namespace
+            let ns = node.get_attr("__ns__").map(|s| s.to_string());
+            let node_prefix = node.get_attr("__prefix__").map(|s| s.to_string());
+            // Om inget __ns__-attribut finns → HTML-parsat element → XHTML
+            let effective_ns = ns.or_else(|| Some("http://www.w3.org/1999/xhtml".to_string()));
+
+            if let Some(ref ns_val) = effective_ns {
+                if !ns_val.is_empty() {
+                    let matches = match (prefix, node_prefix.as_deref()) {
+                        (None, None) => true,
+                        (Some(p), Some(np)) => p == np,
+                        _ => false,
                     };
-                    h.handle(ctx, &[])
-                } else {
-                    Ok(Value::new_null(ctx.clone()))
+                    if matches {
+                        return Some(ns_val.clone());
+                    }
                 }
             }
-            _ => Ok(Value::new_null(ctx.clone())),
+
+            // Steg 2: Sök xmlns-attribut
+            for (attr_name, attr_val) in &node.attributes {
+                if attr_name == "xmlns" && prefix.is_none() {
+                    return if attr_val.is_empty() {
+                        None
+                    } else {
+                        Some(attr_val.clone())
+                    };
+                }
+                if let Some(p) = prefix {
+                    if let Some(suffix) = attr_name.strip_prefix("xmlns:") {
+                        if suffix == p {
+                            return if attr_val.is_empty() {
+                                None
+                            } else {
+                                Some(attr_val.clone())
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Steg 3: Gå till parent
+            let parent_key = node.parent;
+            drop(s);
+            if let Some(pk) = parent_key {
+                let ps = state.borrow();
+                if ps
+                    .arena
+                    .nodes
+                    .get(pk)
+                    .map(|n| n.node_type == NodeType::Element)
+                    .unwrap_or(false)
+                {
+                    drop(ps);
+                    return lookup_ns_uri(state, pk, prefix);
+                }
+            }
+            None
         }
+        NodeType::Document => {
+            // Delegera till documentElement
+            let doc_element = node
+                .children
+                .iter()
+                .find(|&&c| {
+                    s.arena
+                        .nodes
+                        .get(c)
+                        .map(|n| n.node_type == NodeType::Element)
+                        .unwrap_or(false)
+                })
+                .copied();
+            drop(s);
+            doc_element.and_then(|de| lookup_ns_uri(state, de, prefix))
+        }
+        NodeType::Text | NodeType::Comment | NodeType::ProcessingInstruction => {
+            let parent_key = node.parent;
+            drop(s);
+            parent_key.and_then(|pk| lookup_ns_uri(state, pk, prefix))
+        }
+        _ => None,
     }
 }
 
@@ -3664,21 +3781,19 @@ impl JsHandler for IsDefaultNamespace {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let ns = args
             .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
+            .and_then(|v| {
+                if v.is_null() || v.is_undefined() {
+                    Some(String::new())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
             .unwrap_or_default();
-        let s = self.state.borrow();
-        let is_html = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.node_type == NodeType::Element)
-            .unwrap_or(false);
-        drop(s);
-        let result = if is_html {
-            ns == "http://www.w3.org/1999/xhtml"
-        } else {
-            ns.is_empty()
+        // lookupNamespaceURI(null) ger default namespace
+        let default_ns = lookup_ns_uri(&self.state, self.key, None);
+        let result = match default_ns {
+            Some(ref dns) => *dns == ns,
+            None => ns.is_empty(),
         };
         Ok(Value::new_bool(ctx.clone(), result))
     }

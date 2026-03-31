@@ -201,12 +201,10 @@ impl JsHandler for RemoveChild {
                 .unwrap_or(false);
             if !is_child {
                 drop(s);
-                return Err(ctx.throw(
-                    rquickjs::String::from_str(
-                        ctx.clone(),
-                        "NotFoundError: child is not a child of this node",
-                    )?
-                    .into(),
+                return Err(super::throw_dom_exception(
+                    ctx,
+                    "NotFoundError",
+                    "The node to be removed is not a child of this node.",
                 ));
             }
             old_index = s
