@@ -4217,3 +4217,83 @@ fn test_parse_with_js_produces_semantic_tree() {
         "Borde detektera inline script"
     );
 }
+
+// ─── Performance Benchmark: QuickJS + DOM Bridge Timing ────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_performance_benchmark() {
+    fn measure(name: &str, html: &str, code: &str) -> u64 {
+        let result = eval_js_with_dom(html, code);
+        let p: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let us = p["eval_time_us"].as_u64().unwrap_or(0);
+        let val = p["value"].as_str().unwrap_or("null");
+        let short = if val.len() > 40 { &val[..40] } else { val };
+        eprintln!(
+            "  {:45} {:>7}us ({:>5.1}ms)  = {}",
+            name,
+            us,
+            us as f64 / 1000.0,
+            short
+        );
+        us
+    }
+
+    eprintln!("\n== QuickJS + DOM Bridge Performance ==");
+    let t1 = measure(
+        "getElementById + textContent",
+        "<html><body><div id='x'>hello</div></body></html>",
+        "document.getElementById('x').textContent",
+    );
+    measure(
+        "querySelector + querySelectorAll",
+        "<html><body><h1 class='t'>X</h1><ul id='i'><li>A</li><li>B</li></ul></body></html>",
+        "document.querySelector('.t').textContent='NY';document.querySelectorAll('#i li').length",
+    );
+    measure("classList (add/remove/toggle)",
+        "<html><body><div id='c' class='a b'>X</div></body></html>",
+        "var c=document.getElementById('c');c.classList.add('x','y');c.classList.remove('a');c.classList.toggle('z');c.className");
+    measure("style Proxy (3 props)",
+        "<html><body><div id='b' style='color:red'>X</div></body></html>",
+        "var b=document.getElementById('b');b.style.backgroundColor='blue';b.style.setProperty('font-size','20px');b.style.margin='10px';b.style.cssText");
+    let t5 = measure("createElement x10",
+        "<html><body><div id='c'></div></body></html>",
+        "var c=document.getElementById('c');for(var i=0;i<10;i++){var d=document.createElement('div');d.className='item';d.textContent='P'+i;c.appendChild(d)}document.querySelectorAll('.item').length");
+    let t6 = measure("createElement x100",
+        "<html><body><div id='c'></div></body></html>",
+        "var c=document.getElementById('c');for(var i=0;i<100;i++){var d=document.createElement('div');d.className='i';d.textContent='P'+i;c.appendChild(d)}document.querySelectorAll('.i').length");
+    measure(
+        "innerHTML x3",
+        "<html><body><div id='p'></div></body></html>",
+        r##"var h='';for(var i=0;i<3;i++)h+='<div class="p"><span>'+i+'</span></div>';document.getElementById('p').innerHTML=h;document.querySelectorAll('.p').length"##,
+    );
+    measure("dispatchEvent",
+        "<html><body><button id='b'>X</button><div id='o'>-</div></body></html>",
+        "document.getElementById('b').addEventListener('click',function(){document.getElementById('o').textContent='ok'});document.getElementById('b').dispatchEvent(new Event('click'));document.getElementById('o').textContent");
+    measure(":has() selector",
+        "<html><body><div class='c'><span>A</span></div><div class='c'><span class='s'>B</span></div><div class='c'><span>C</span></div></body></html>",
+        "document.querySelectorAll('.c:has(.s)').length");
+    let t10 = measure("E-commerce SPA",
+        "<html><body><span id='cc'>0</span><div id='pl'></div><div id='t'>0</div></body></html>",
+        "var p=[{n:'A',p:299},{n:'B',p:599},{n:'C',p:899},{n:'D',p:199}];var l=document.getElementById('pl');p.forEach(function(x){var d=document.createElement('div');d.className='pc';d.innerHTML='<h3>'+x.n+'</h3>';l.appendChild(d)});var cs=document.querySelectorAll('.pc');cs[0].classList.add('cart');cs[2].classList.add('cart');document.getElementById('cc').textContent='2';document.getElementById('t').textContent=(299+899)+' kr';JSON.stringify({p:cs.length,t:document.getElementById('t').textContent})");
+    let big = format!(
+        "<html><body>{}</body></html>",
+        (0..200)
+            .map(|i| format!("<div class='item' id='n{}'><span>P{}</span></div>", i, i))
+            .collect::<Vec<_>>()
+            .join("")
+    );
+    let t11 = measure(
+        "200 noder querySelectorAll",
+        &big,
+        "document.querySelectorAll('.item').length",
+    );
+    eprintln!("======================================");
+    // Debug-builds inkluderar ~20ms QuickJS init overhead per anrop.
+    // Release-builds är ~5-10x snabbare.
+    assert!(t1 < 100_000, "getElementById < 100ms (debug): {}us", t1);
+    assert!(t5 < 100_000, "createElement x10 < 100ms (debug): {}us", t5);
+    assert!(t6 < 300_000, "createElement x100 < 300ms (debug): {}us", t6);
+    assert!(t10 < 100_000, "SPA < 100ms (debug): {}us", t10);
+    assert!(t11 < 500_000, "200 noder < 500ms (debug): {}us", t11);
+}
