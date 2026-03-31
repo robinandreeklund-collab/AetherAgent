@@ -154,6 +154,23 @@ pub fn encode_tokens(_text: &str) -> Option<Vec<Vec<f32>>> {
     None
 }
 
+/// Batch-encode N texter → per-token embeddings i en enda ONNX-inference.
+/// Använder ColBERT-modellen om initialiserad, annars den globala modellen.
+/// Returnerar `[batch][tokens][dim]`.
+#[cfg(feature = "embeddings")]
+pub fn encode_tokens_batch(texts: &[&str]) -> Option<Vec<Vec<Vec<f32>>>> {
+    if let Some(colbert) = COLBERT_EMBEDDING.get() {
+        return colbert.encode_tokens_batch(texts).ok();
+    }
+    GLOBAL_EMBEDDING.get()?.encode_tokens_batch(texts).ok()
+}
+
+/// Stub: embedding feature ej aktiverad
+#[cfg(not(feature = "embeddings"))]
+pub fn encode_tokens_batch(_texts: &[&str]) -> Option<Vec<Vec<Vec<f32>>>> {
+    None
+}
+
 /// Returnerar embedding-dimensionen (t.ex. 384 för MiniLM).
 #[cfg(feature = "embeddings")]
 pub fn dimension() -> Option<usize> {
@@ -355,6 +372,95 @@ impl EmbeddingModel {
         }
 
         Ok(token_embeddings)
+    }
+
+    /// Batch-encode N texter → per-token embeddings i EN ONNX-inference.
+    ///
+    /// Paddar alla sekvenser till samma längd och kör en enda forward pass.
+    /// Returnerar `Vec<Vec<Vec<f32>>>` — `[batch][tokens][dim]`.
+    /// Dramatiskt snabbare än N separata `encode_tokens()`-anrop:
+    /// eliminerar session-lock overhead och utnyttjar SIMD/cache bättre.
+    pub fn encode_tokens_batch(&self, texts: &[&str]) -> Result<Vec<Vec<Vec<f32>>>, String> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Tokenisera alla texter
+        let tokenized: Vec<_> = texts.iter().map(|t| self.tokenizer.tokenize(t)).collect();
+        let batch_size = tokenized.len();
+
+        // Hitta max sekvens-längd för padding
+        let max_len = tokenized
+            .iter()
+            .map(|t| t.input_ids.len())
+            .max()
+            .unwrap_or(0);
+        if max_len == 0 {
+            return Ok(vec![vec![]; batch_size]);
+        }
+
+        // Bygg paddade tensorer: [batch_size, max_len]
+        let mut all_ids = vec![0i64; batch_size * max_len];
+        let mut all_masks = vec![0i64; batch_size * max_len];
+        let mut all_types = vec![0i64; batch_size * max_len];
+
+        for (i, tok) in tokenized.iter().enumerate() {
+            let len = tok.input_ids.len().min(max_len);
+            let offset = i * max_len;
+            for j in 0..len {
+                all_ids[offset + j] = tok.input_ids[j] as i64;
+                all_masks[offset + j] = tok.attention_mask[j] as i64;
+                all_types[offset + j] = tok.token_type_ids[j] as i64;
+            }
+        }
+
+        let ids_tensor = TensorRef::<i64>::from_array_view(([batch_size, max_len], &all_ids[..]))
+            .map_err(|e| format!("Batch ids tensor: {e}"))?;
+        let mask_tensor =
+            TensorRef::<i64>::from_array_view(([batch_size, max_len], &all_masks[..]))
+                .map_err(|e| format!("Batch mask tensor: {e}"))?;
+        let type_tensor =
+            TensorRef::<i64>::from_array_view(([batch_size, max_len], &all_types[..]))
+                .map_err(|e| format!("Batch type tensor: {e}"))?;
+
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| format!("Session lock: {e}"))?;
+        let outputs = session
+            .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
+            .map_err(|e| format!("ORT batch inference: {e}"))?;
+
+        let (_name, output_value) = outputs
+            .iter()
+            .next()
+            .ok_or_else(|| "Inget output".to_string())?;
+        let (_shape, data) = output_value
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("Output extract: {e}"))?;
+
+        // Output: [batch_size, max_len, dim] — extrahera per-text token-embeddings
+        let dim = self.dim;
+        let mut results = Vec::with_capacity(batch_size);
+
+        for (i, tok) in tokenized.iter().enumerate() {
+            let mut token_embeddings = Vec::new();
+            let seq_len = tok.input_ids.len().min(max_len);
+            for (j, &mask) in tok.attention_mask.iter().enumerate().take(seq_len) {
+                if mask == 0 {
+                    continue;
+                }
+                let offset = (i * max_len + j) * dim;
+                if offset + dim > data.len() {
+                    break;
+                }
+                let token_vec: Vec<f32> = data[offset..offset + dim].to_vec();
+                token_embeddings.push(l2_normalize(&token_vec));
+            }
+            results.push(token_embeddings);
+        }
+
+        Ok(results)
     }
 
     /// Cosine similarity mellan två text-strängar.

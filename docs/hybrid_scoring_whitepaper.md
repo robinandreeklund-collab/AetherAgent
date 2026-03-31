@@ -484,17 +484,20 @@ Stage 3 was evaluated with three reranker strategies on 30 verified-reachable si
    - **Lobsters**: ColBERT picks "Programming language theory, types, design" (content tag); MiniLM picks an article title
    - **Go Dev**: ColBERT picks "Build simple, secure, scalable systems with Go" (value proposition); MiniLM picks "Get Started Download Go" (CTA)
 
-4. **ColBERT is 5.3× slower** (6.2s vs 1.2s). The 768-dim ColBERTv2 model requires ~200ms per ONNX inference call. With 20-80 survivors, this accumulates. The latency can be reduced via: (a) int8 quantization (~3× speedup), (b) batch encoding, (c) GPU inference.
+4. **ColBERT is 2.9× slower** after optimization (3.6s vs 1.2s). Two optimizations reduced latency from the initial 6.2s:
+   - **Batch encoding**: All survivors encoded in a single ONNX inference call (padded to max sequence length). Eliminates N separate session-lock + kernel-launch overheads. Improves CPU cache utilization and SIMD throughput.
+   - **Int8 dynamic quantization**: Model weights quantized from FP32 to INT8 (415MB → 105MB, 75% smaller). ONNX Runtime's optimized int8 kernels leverage AVX2/AVX-512 VNNI instructions.
 
-5. **Hybrid mode is a middle ground.** Adaptive alpha (0.3-0.95 based on node token length) produces top-1 scores between MiniLM and ColBERT (0.786) at ColBERT-level latency. It does not improve correctness.
+5. **Hybrid mode is a middle ground.** Adaptive alpha (0.3-0.95 based on node token length) produces top-1 scores between MiniLM and ColBERT (0.789) at ColBERT-level latency. It does not improve correctness.
 
-**Backend evolution:**
+**Optimization progression:**
 
-| Backend | Model | Avg Latency | Dependencies |
-|---------|-------|-------------|--------------|
-| Candle (initial) | ColBERTv2 safetensors | 9,284ms | candle-core, candle-nn, candle-transformers, tokenizers |
-| ONNX (MiniLM as ColBERT) | all-MiniLM-L6-v2, 384-dim | 828ms | ort, ndarray (shared) |
-| **ONNX (ColBERTv2)** | colbert-ir/colbertv2.0, 768-dim | **6,245ms** | ort, ndarray (shared) |
+| Configuration | Avg Latency | Speedup vs baseline |
+|---------------|-------------|---------------------|
+| Candle backend (initial) | 9,284ms | — |
+| ONNX FP32, sequential | 6,252ms | 1.5× |
+| **ONNX Int8, batch** | **3,590ms** | **2.6×** |
+| MiniLM (reference) | 1,216ms | — |
 
 **Recommendation:** Use `Stage3Reranker::MiniLM` (default) for best latency with excellent correctness. Use `Stage3Reranker::ColBert` when score calibration, ranking quality, or per-node confidence matters — especially for downstream tasks where the LLM benefits from higher-quality node rankings (e.g., data extraction from long mixed-content pages). Use `Stage3Reranker::Hybrid` when a balance between speed and quality is needed.
 
@@ -506,9 +509,9 @@ The neuro-symbolic pipeline — BM25 for lexical recall, HDC for structural prun
 
 The HDC middle tier is the key architectural contribution. It provides structural awareness that neither BM25 (bag-of-words) nor flat embeddings (sequence-only) capture: a node's ARIA role, tree depth, sibling context, and n-gram text are all encoded into a single 4096-bit vector queryable in nanoseconds. This is, to our knowledge, the first application of Hyperdimensional Computing to DOM element retrieval in an agent context.
 
-**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches. (4) ColBERTv2 is 5.3× slower than the bi-encoder (6.2s vs 1.2s on 30 sites) due to per-node ONNX inference with the full 768-dim model — int8 quantization and batch encoding are expected to close this gap significantly.
+**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches. (4) ColBERTv2 (int8, batch) is still 2.9× slower than the bi-encoder (3.6s vs 1.2s) — further gains possible via GPU inference or a smaller dedicated ColBERT model.
 
-**Future work:** Int8 quantization of ColBERTv2 ONNX model for production-viable latency (~1-2s target); batch encoding of survivors in a single ONNX call; learned HDC threshold calibration via feedback from agent task success; evaluation on standardized web agent benchmarks (WebArena, Mind2Web); and investigation of whether ColBERT's 41% higher score calibration translates to better downstream LLM task success in multi-step workflows where node quality directly impacts extraction accuracy.
+**Future work:** GPU inference for ColBERT via ONNX Runtime CUDA/CoreML execution providers (~10× expected speedup); learned HDC threshold calibration via feedback from agent task success; evaluation on standardized web agent benchmarks (WebArena, Mind2Web); and investigation of whether ColBERT's 41% higher score calibration translates to better downstream LLM task success in multi-step workflows where node quality directly impacts extraction accuracy.
 
 ---
 

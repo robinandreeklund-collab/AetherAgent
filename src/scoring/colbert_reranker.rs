@@ -102,7 +102,50 @@ fn maxsim(q_embs: &[Vec<f32>], d_embs: &[Vec<f32>]) -> f32 {
 
 // ── ColBERT scoring (feature-gatad) ──────────────────────────────────────────
 
-/// Score survivors med ColBERT MaxSim via ONNX-modellen i embedding.rs.
+/// Batch-encode alla survivors och beräkna MaxSim mot query.
+/// EN ONNX-inference istället för N separata — utnyttjar SIMD och cache.
+/// Returnerar raw MaxSim-scores (onormaliserade).
+#[cfg(feature = "colbert")]
+fn batch_colbert_scores(
+    q_embs: &[Vec<f32>],
+    survivors: &[(u32, f32)],
+    all_nodes: &HashMap<u32, NodeInfo>,
+) -> (Vec<u32>, Vec<f32>) {
+    let mut ids = Vec::with_capacity(survivors.len());
+    let mut texts: Vec<&str> = Vec::with_capacity(survivors.len());
+    let mut empty_indices: Vec<usize> = Vec::new();
+
+    for &(id, _) in survivors {
+        if let Some(info) = all_nodes.get(&id) {
+            let idx = ids.len();
+            ids.push(id);
+            if info.label.is_empty() {
+                texts.push(""); // placeholder, markeras som tom
+                empty_indices.push(idx);
+            } else {
+                texts.push(&info.label);
+            }
+        }
+    }
+
+    // EN enda ONNX-inference för alla nod-texter
+    let batch_embs =
+        crate::embedding::encode_tokens_batch(&texts).unwrap_or_else(|| vec![vec![]; texts.len()]);
+
+    // MaxSim per nod
+    let mut raw_scores = Vec::with_capacity(ids.len());
+    for (i, d_embs) in batch_embs.iter().enumerate() {
+        if empty_indices.contains(&i) || d_embs.is_empty() {
+            raw_scores.push(0.0);
+        } else {
+            raw_scores.push(maxsim(q_embs, d_embs));
+        }
+    }
+
+    (ids, raw_scores)
+}
+
+/// Score survivors med ColBERT MaxSim via batch ONNX-inference.
 /// Returnerar `ScoredNode`-lista sorterad efter relevance (högst först).
 #[cfg(feature = "colbert")]
 pub fn score_colbert(
@@ -110,32 +153,12 @@ pub fn score_colbert(
     all_nodes: &HashMap<u32, NodeInfo>,
     goal: &str,
 ) -> Vec<ScoredNode> {
-    // Encode query → per-token embeddings
     let q_embs = match crate::embedding::encode_tokens(goal) {
         Some(e) if !e.is_empty() => e,
         _ => return fallback_zero_scores(survivors, all_nodes),
     };
 
-    let mut ids = Vec::with_capacity(survivors.len());
-    let mut raw_scores = Vec::with_capacity(survivors.len());
-
-    for &(id, _) in survivors {
-        if let Some(info) = all_nodes.get(&id) {
-            ids.push(id);
-            if info.label.is_empty() {
-                raw_scores.push(0.0);
-                continue;
-            }
-            // Encode varje nod → per-token embeddings
-            match crate::embedding::encode_tokens(&info.label) {
-                Some(d_embs) if !d_embs.is_empty() => {
-                    raw_scores.push(maxsim(&q_embs, &d_embs));
-                }
-                _ => raw_scores.push(0.0),
-            }
-        }
-    }
-
+    let (ids, raw_scores) = batch_colbert_scores(&q_embs, survivors, all_nodes);
     let normed = normalize_scores(&raw_scores);
 
     let mut result: Vec<ScoredNode> = ids
@@ -156,7 +179,7 @@ pub fn score_colbert(
     result
 }
 
-/// Score survivors med hybrid ColBERT + MiniLM.
+/// Score survivors med hybrid ColBERT + MiniLM via batch ONNX-inference.
 #[cfg(feature = "colbert")]
 pub fn score_hybrid(
     survivors: &[(u32, f32)],
@@ -166,7 +189,6 @@ pub fn score_hybrid(
     alpha: f32,
     use_adaptive_alpha: bool,
 ) -> Vec<ScoredNode> {
-    // Encode query
     let q_embs = match crate::embedding::encode_tokens(goal) {
         Some(e) if !e.is_empty() => e,
         _ => return minilm_scores.to_vec(),
@@ -174,26 +196,8 @@ pub fn score_hybrid(
 
     let minilm_map: HashMap<u32, f32> = minilm_scores.iter().map(|n| (n.id, n.relevance)).collect();
 
-    let mut ids = Vec::with_capacity(survivors.len());
-    let mut raw_colbert = Vec::with_capacity(survivors.len());
-
-    for &(id, _) in survivors {
-        if let Some(info) = all_nodes.get(&id) {
-            ids.push(id);
-            if info.label.is_empty() {
-                raw_colbert.push(0.0);
-                continue;
-            }
-            match crate::embedding::encode_tokens(&info.label) {
-                Some(d_embs) if !d_embs.is_empty() => {
-                    raw_colbert.push(maxsim(&q_embs, &d_embs));
-                }
-                _ => raw_colbert.push(0.0),
-            }
-        }
-    }
-
-    let normed_colbert = normalize_scores(&raw_colbert);
+    let (ids, raw_scores) = batch_colbert_scores(&q_embs, survivors, all_nodes);
+    let normed_colbert = normalize_scores(&raw_scores);
 
     let mut result: Vec<ScoredNode> = ids
         .iter()
