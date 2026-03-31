@@ -97,7 +97,8 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     );
     request = request.header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8");
-    request = request.header("Accept-Encoding", "gzip, deflate, br");
+    // Accept-Encoding hanteras automatiskt av reqwest (.gzip(true).brotli(true))
+    // Manuell header kolliderar med automatisk dekompression — BUGG N fix
     request = request.header("DNT", "1");
     request = request.header("Sec-Fetch-Dest", "document");
     request = request.header("Sec-Fetch-Mode", "navigate");

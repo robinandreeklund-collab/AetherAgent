@@ -159,6 +159,16 @@ fn compute_node_score(
         return 0.0;
     }
 
+    // 0a. Filter i18n-templates (BUGG M): {{key}}, {key}, translations.messages.*
+    if is_template_artifact(label) {
+        return 0.0;
+    }
+
+    // 0b. Filter numeriska artefakter (BUGG L): rena siffror, badge-räknare
+    if is_numeric_artifact(label) {
+        return 0.0;
+    }
+
     // 1. Text-likhet (snabb word-overlap)
     let text_score = text_similarity_cached(goal_lower, goal_words, label);
 
@@ -218,22 +228,83 @@ fn compute_node_score(
 /// Wikipedia-sidor har tusentals referens-länktexter som råkar innehålla goal-
 /// nyckelord och tränger undan infobox/table-noder med faktiska svar (Bugg G).
 fn role_multiplier(role: &str, label: &str) -> f32 {
+    let label_lower = label.to_ascii_lowercase();
     match role {
-        // Referens-länkar: citat-titlar, "See also", fotnoter
-        "link" if label.starts_with('"') || label.starts_with('\u{201C}') => 0.4,
-        // Korta nav-länkar (<40 tecken): "Home", "About", "Page 2"
-        "link" if label.len() < 40 => 0.7,
-        // Vanliga länkar — neutral
-        "link" => 0.85,
+        // Referens-länkar: citat-titlar (BUGG G stärkt)
+        "link" if label.starts_with('"') || label.starts_with('\u{201C}') => 0.3,
+        // Referens-fotnot-länkar: "[1]", "[2]", "[edit]", "^"
+        "link" if label.starts_with('[') || label.starts_with('^') => 0.2,
+        // "See also", "References", "External links" (Wikipedia nav)
+        "link"
+            if label_lower.starts_with("see also")
+                || label_lower.starts_with("reference")
+                || label_lower.starts_with("external link")
+                || label_lower.starts_with("further reading") =>
+        {
+            0.3
+        }
+        // Korta nav-länkar (<30 tecken): "Home", "About", "Page 2"
+        "link" if label.len() < 30 => 0.65,
+        // Vanliga länkar
+        "link" => 0.80,
+        // Sidebar/complementary — nedprioritera (BUGG K)
+        "complementary" => 0.5,
+        "navigation" => 0.6,
         // Strukturerade faktanoder — boost
         "row" | "cell" | "definition" | "listitem" => 1.15,
         "data" => 1.2,
         // Tabellrubriker
         "columnheader" | "rowheader" => 1.1,
-        // Headings — mild boost (ofta innehåller fråge-kontext)
+        // Headings — mild boost
         "heading" => 1.05,
         _ => 1.0,
     }
+}
+
+/// BUGG M: Detektera i18n-template-artefakter som inte ska scoreas.
+/// React/Vue/Angular-appar kan exponera oöversatta template-strängar.
+fn is_template_artifact(label: &str) -> bool {
+    // {{key}}, {key}, translations.messages.*, %{key}
+    if label.contains("{{") || label.contains("translations.messages") {
+        return true;
+    }
+    // Labels som börjar med "translations." eller "i18n."
+    let lower = label.to_ascii_lowercase();
+    if lower.starts_with("translations.") || lower.starts_with("i18n.") {
+        return true;
+    }
+    // Labels som är enbart template-variabler: {variableName}
+    if label.starts_with('{') && label.ends_with('}') && label.len() < 50 && !label.contains(' ') {
+        return true;
+    }
+    false
+}
+
+/// BUGG L: Detektera numeriska artefakter som inte ska scoreas.
+/// Badge-räknare ("42"), UI-kontroller ("1/5"), version-nummer ("v2.3.1").
+fn is_numeric_artifact(label: &str) -> bool {
+    let trimmed = label.trim();
+    if trimmed.is_empty() || trimmed.len() > 20 {
+        return false; // Tomma eller långa labels — inte artefakter
+    }
+    // Ren siffra: "42", "1,234"
+    if trimmed
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == ',' || c == '.')
+    {
+        return true;
+    }
+    // Fraktioner: "1/5", "3 of 10"
+    if trimmed.contains('/') && trimmed.len() < 8 {
+        let parts: Vec<&str> = trimmed.split('/').collect();
+        if parts.len() == 2
+            && parts[0].trim().chars().all(|c| c.is_ascii_digit())
+            && parts[1].trim().chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Info om en nod i det platta indexet
