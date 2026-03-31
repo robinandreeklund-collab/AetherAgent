@@ -4649,11 +4649,21 @@ impl JsHandler for InnerHTMLSetter {
                 })
                 .or_else(|| v.as_bool().map(|b| b.to_string()))
                 .or_else(|| {
-                    // Anropa .toString() på objektet
-                    v.as_object()
-                        .and_then(|obj| obj.get::<_, Function>("toString").ok())
-                        .and_then(|f| f.call::<_, rquickjs::String>(()).ok())
-                        .and_then(|s| s.to_string().ok())
+                    // Anropa .toString() på objektet, fallback till valueOf()
+                    let obj = v.as_object()?;
+                    // Prova toString först (om det är en funktion)
+                    if let Ok(f) = obj.get::<_, Function>("toString") {
+                        if let Ok(s) = f.call::<_, rquickjs::String>(()) {
+                            return s.to_string().ok();
+                        }
+                    }
+                    // Fallback: valueOf()
+                    if let Ok(f) = obj.get::<_, Function>("valueOf") {
+                        if let Ok(s) = f.call::<_, rquickjs::String>(()) {
+                            return s.to_string().ok();
+                        }
+                    }
+                    None
                 })
                 .unwrap_or_default(),
             None => String::new(),
