@@ -23,9 +23,16 @@ pub struct SearchRequest {
     /// Max noder per resultat (vid deep)
     #[serde(default = "default_max_nodes")]
     pub max_nodes_per_result: u32,
+    /// Scoring-metod: "hybrid" (BM25+HDC+Embedding) eller "legacy" (enkel relevans)
+    #[serde(default = "default_scoring")]
+    pub scoring: String,
     /// Streaming-läge
     #[serde(default = "default_true")]
     pub stream: bool,
+}
+
+fn default_scoring() -> String {
+    "hybrid".to_string()
 }
 
 fn default_top_n() -> u32 {
@@ -121,30 +128,43 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
             max_nodes
         };
 
-        // Kör hybrid_parse
+        // Kör parse med vald metod
         let html = fetched.body;
         let url_clone = url.clone();
         let goal_clone = goal.to_string();
+        let scoring = req.scoring.clone();
         let nodes = tokio::task::spawn_blocking(move || {
-            let json = crate::parse_top_nodes_hybrid(
-                &html,
-                &goal_clone,
-                &url_clone,
-                effective_top_n as u32,
-            );
-            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-            parsed["top_nodes"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .map(|n| crate::search::PageNode {
-                            role: n["role"].as_str().unwrap_or("").to_string(),
-                            label: n["label"].as_str().unwrap_or("").to_string(),
-                            relevance: n["relevance"].as_f64().unwrap_or(0.0) as f32,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
+            if scoring == "full_markdown" {
+                // Komplett DOM som markdown — inga rankade noder
+                let md = crate::html_to_markdown(&html, &goal_clone, &url_clone);
+                // Wrappa markdown som en enda PageNode
+                vec![crate::search::PageNode {
+                    role: "markdown".to_string(),
+                    label: md.chars().take(2000).collect(),
+                    relevance: 1.0,
+                }]
+            } else {
+                // Hybrid scoring — top-N rankade noder
+                let json = crate::parse_top_nodes_hybrid(
+                    &html,
+                    &goal_clone,
+                    &url_clone,
+                    effective_top_n as u32,
+                );
+                let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+                parsed["top_nodes"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|n| crate::search::PageNode {
+                                role: n["role"].as_str().unwrap_or("").to_string(),
+                                label: n["label"].as_str().unwrap_or("").to_string(),
+                                relevance: n["relevance"].as_f64().unwrap_or(0.0) as f32,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            }
         })
         .await
         .unwrap_or_default();
@@ -241,6 +261,7 @@ mod tests {
             top_n: 5,
             deep: false,
             max_nodes_per_result: 10,
+            scoring: "hybrid".to_string(),
             stream: false,
         };
         let result = execute(&req);
@@ -279,6 +300,7 @@ mod tests {
             top_n: 5,
             deep: false,
             max_nodes_per_result: 10,
+            scoring: "hybrid".to_string(),
             stream: false,
         };
         let result = execute_with_html(ddg_html, &req);
@@ -297,6 +319,7 @@ mod tests {
             top_n: 3,
             deep: true,
             max_nodes_per_result: 5,
+            scoring: "hybrid".to_string(),
             stream: false,
         };
         let result = execute(&req);

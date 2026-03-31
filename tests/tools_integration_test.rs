@@ -791,6 +791,7 @@ fn test_search_builds_correct_url() {
         top_n: 3,
         deep: false,
         max_nodes_per_result: 5,
+        scoring: "hybrid".to_string(),
         stream: false,
     };
     let result = tools::search_tool::execute(&req);
