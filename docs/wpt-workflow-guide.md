@@ -297,7 +297,7 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 # Vid regression: revert med git checkout
 ```
 
-### Migrerade polyfills (2026-03-29)
+### Migrerade polyfills (2026-03-31)
 
 | Polyfill | Rader | Rust-ersättning |
 |----------|-------|-----------------|
@@ -314,19 +314,22 @@ cargo run --bin aether-wpt --features js-eval,blitz,fetch -- wpt-suite/dom/nodes
 | TouchEvent (simpleTypes) | 3 | Native Touch/TouchEvent/TouchList i window.rs — Session 4 |
 | id/className polyfill | 15 | Native AttrGetter/AttrSetter i make_element_object() — Session 4 |
 | prefix/namespaceURI/localName | 8 | Native i make_element_object() — Session 4 |
+| Simple event types (18 st) | 20 | Native i window.rs — Session 5 |
+| __patchPrototype | 30 | Native Object.setPrototypeOf i make_element_object() — Session 5 |
+| __patchCharacterData | 1 | No-op borttagen — redan native i chardata.rs — Session 5 |
+| __patchChildNode (partial) | 15 | Förenklad — prototype+chardata hanteras native — Session 5 |
 
 ### Kvar i polyfills.js (med motivering)
 
 | Polyfill | Rader | Varför kvar |
 |----------|-------|-------------|
 | createHTMLDocument | 150 | Kräver ALLA document-metoder i Rust (inkl. XPath-patching) |
-| __patchPrototype | 176 | Behövs för `instanceof HTMLDivElement` |
 | NamedNodeMap .attributes | 130 | Behöver Proxy-baserad Rust-implementation |
 | Window-globalThis sync | 34 | JS Proxy, svårt i Rust |
-| Event simple subclasses | 20 | Trivial overhead (AnimationEvent, ProgressEvent etc.) |
 | NS-metadata tracking | 30 | setAttributeNS prefix/namespace tracking |
 | Document/XMLDocument constructor | 20 | new Document() delegerar till createHTMLDocument |
-| __patchChildNode wrapper | 50 | Prototyp-patching + getAttributeNodeNS |
+| DOM Type Hierarchy | 180 | HTMLDivElement etc. konstruktorer för instanceof |
+| NodeList stub | 6 | Trivial |
 | NodeList/HTMLCollection stubs | 10 | Utility-typer |
 
 ---

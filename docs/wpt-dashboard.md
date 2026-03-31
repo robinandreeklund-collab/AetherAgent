@@ -28,10 +28,10 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **dom/nodes** | 6,094 | 6,673 | **91.3%** | ↑↑ från 90.3% |
+| **dom/nodes** | 6,094 | 6,673 | **91.3%** | ↑↑ från 90.4% |
 | **dom/events** | 271 | 322 | **84.2%** | ─ stabil |
-| **dom/ranges** | 8,181 | 11,082 | **73.8%** | ─ stabil |
-| **dom/traversal** | 1,534 | 1,591 | **96.4%** | ─ stabil |
+| **dom/ranges** | 4,360 | 5,788 | **75.3%** | ─ stabil |
+| **dom/traversal** | 1,533 | 1,591 | **96.3%** | ─ stabil |
 | **dom/collections** | 30 | 48 | **62.5%** | ─ stabil |
 | **dom/lists** | 181 | 189 | **95.8%** | ─ stabil |
 
@@ -58,7 +58,7 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **html/semantics** | 2,023 | 4,922 | **41.1%** | ↑ från 40.9% |
+| **html/semantics** | 2,022 | 4,922 | **41.1%** | ↑ från 40.9% |
 
 ### Tier 5 — Events & Interaction
 
