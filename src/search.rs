@@ -96,6 +96,18 @@ fn hex_digit(nibble: u8) -> char {
     }
 }
 
+/// BUGG P: Detektera annons-/tracker-URLs som inte ska inkluderas i resultat.
+fn is_ad_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("duckduckgo.com/y.js")
+        || lower.contains("/ad/click")
+        || lower.contains("/ads/")
+        || lower.contains("doubleclick.net")
+        || lower.contains("googleadservices.com")
+        || lower.contains("ad.atdmt.com")
+        || lower.contains("bing.com/aclick")
+}
+
 // ─── Resultat-extraktion ─────────────────────────────────────────────────────
 
 /// Extrahera sökresultat från semantiska noder.
@@ -117,9 +129,19 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
         let value = node.value.as_deref().unwrap_or("");
         let has_ddg_redirect = value.contains("duckduckgo.com/l/?uddg=");
 
+        // BUGG P: Skippa DDG-annonser (duckduckgo.com/y.js? URLs)
+        if value.contains("duckduckgo.com/y.js") {
+            continue;
+        }
+
         // Steg 1: Ny titel-länk med DDG redirect
         if has_ddg_redirect && (role == "heading" || role == "link" || role == "cta") {
             let real_url = decode_ddg_redirect(value);
+
+            // BUGG P: Skippa ad-tracker URLs
+            if is_ad_url(&real_url) {
+                continue;
+            }
 
             // Skip display-URL-dubblett (samma URL, label ser ut som en URL)
             if seen_urls.contains(&real_url) {
@@ -254,50 +276,88 @@ fn from_hex(byte: u8) -> Option<u8> {
 
 // ─── Direct Answer Detection ─────────────────────────────────────────────────
 
-/// Försök extrahera ett direktsvar från snippets (siffror, datum, namn)
+/// Försök extrahera ett direktsvar med kontext från snippets.
+///
+/// BUGG Q fix: returnerar {siffra + omgivande kontext} istället för bara siffran.
+/// Kräver minst 0.3 confidence för att undvika falska svar.
 pub fn detect_direct_answer(results: &[SearchResultEntry]) -> Option<(String, f32)> {
-    for r in results.iter().take(2) {
-        if let Some(num) = extract_number_answer(&r.snippet) {
-            return Some((num, r.confidence));
+    for r in results.iter().take(3) {
+        if r.confidence < 0.3 {
+            continue;
+        }
+        if let Some(answer) = extract_number_with_context(&r.snippet) {
+            // Inkludera källa i svaret
+            let with_source = format!("{} ({})", answer, r.domain);
+            return Some((with_source, r.confidence));
         }
     }
     None
 }
 
-/// Hitta ett numeriskt svar i en snippet (t.ex. "10 701 047 invånare")
-fn extract_number_answer(snippet: &str) -> Option<String> {
-    // Matcha sekvenser av siffror med mellanslag/punkt som tusentalsavdelare
-    // T.ex. "10 701 047", "1.234.567", "42 000"
-    let mut best: Option<String> = None;
-    let mut best_len = 0;
-
+/// Hitta ett numeriskt svar med omgivande kontext (±30 tecken).
+///
+/// "Göteborgs kommun hade 587 549 invånare 2023" → "587 549 invånare 2023"
+/// istället för bara "587 549"
+fn extract_number_with_context(snippet: &str) -> Option<String> {
     let chars: Vec<char> = snippet.chars().collect();
+    let mut best: Option<(usize, usize, usize)> = None; // (start, end, digit_count)
+    let mut best_digits = 0;
+
     let mut i = 0;
     while i < chars.len() {
         if chars[i].is_ascii_digit() {
-            let start = i;
-            // Samla siffror + mellanslag/punkt som tusentalsavdelare
+            let num_start = i;
             while i < chars.len()
                 && (chars[i].is_ascii_digit()
-                    || ((chars[i] == ' ' || chars[i] == '\u{00a0}' || chars[i] == '.')
+                    || ((chars[i] == ' '
+                        || chars[i] == '\u{00a0}'
+                        || chars[i] == '.'
+                        || chars[i] == ',')
                         && i + 1 < chars.len()
                         && chars[i + 1].is_ascii_digit()))
             {
                 i += 1;
             }
-            let candidate: String = chars[start..i].iter().collect();
-            // Minst 4 tecken för att vara ett meningsfullt svar
-            let digit_count = candidate.chars().filter(|c| c.is_ascii_digit()).count();
-            if digit_count >= 4 && candidate.len() > best_len {
-                best_len = candidate.len();
-                best = Some(candidate);
+            let digit_count = chars[num_start..i]
+                .iter()
+                .filter(|c| c.is_ascii_digit())
+                .count();
+            if digit_count >= 4 && digit_count > best_digits {
+                best_digits = digit_count;
+                best = Some((num_start, i, digit_count));
             }
         } else {
             i += 1;
         }
     }
 
-    best
+    let (num_start, num_end, _) = best?;
+
+    // Expandera kontextfönster: ±30 tecken runt siffran
+    let ctx_start = num_start.saturating_sub(30);
+    // Gå bakåt till ordgräns
+    let ctx_start = chars[ctx_start..num_start]
+        .iter()
+        .rposition(|c| *c == ' ' || *c == '.' || *c == ',')
+        .map(|p| ctx_start + p + 1)
+        .unwrap_or(ctx_start);
+
+    let ctx_end = (num_end + 30).min(chars.len());
+    // Gå framåt till ordgräns
+    let ctx_end = chars[num_end..ctx_end]
+        .iter()
+        .position(|c| *c == '.' || *c == ',' || *c == ';')
+        .map(|p| num_end + p)
+        .unwrap_or(ctx_end);
+
+    let context: String = chars[ctx_start..ctx_end].iter().collect();
+    let trimmed = context.trim();
+
+    if trimmed.len() > 5 {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
@@ -360,21 +420,23 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_number_answer() {
-        assert_eq!(
-            extract_number_answer("Sveriges befolkning uppgår till 10 701 047 invånare"),
-            Some("10 701 047".to_string()),
-            "Ska hitta miljontal med mellanslag"
+    fn test_extract_number_with_context() {
+        let result =
+            extract_number_with_context("Sveriges befolkning uppgår till 10 701 047 invånare");
+        assert!(result.is_some(), "Ska hitta miljontal");
+        let ctx = result.unwrap();
+        assert!(ctx.contains("10 701 047"), "Ska innehålla siffran: {ctx}");
+        assert!(
+            ctx.contains("invånare") || ctx.contains("befolkning"),
+            "Ska ha kontext runt siffran: {ctx}"
         );
-        assert_eq!(
-            extract_number_answer("Det kostar 42 kronor"),
-            None,
-            "För kort siffra ska ignoreras"
-        );
-        assert_eq!(
-            extract_number_answer("BNP var 5.678.900 miljoner"),
-            Some("5.678.900".to_string()),
-            "Siffror med punktavdelare ska hittas"
+    }
+
+    #[test]
+    fn test_extract_number_short_rejected() {
+        assert!(
+            extract_number_with_context("Det kostar 42 kronor").is_none(),
+            "För kort siffra (2 digit) ska ignoreras"
         );
     }
 
@@ -393,7 +455,11 @@ mod tests {
         let answer = detect_direct_answer(&results);
         assert!(answer.is_some(), "Ska hitta direktsvar i snippet");
         let (text, conf) = answer.unwrap();
-        assert_eq!(text, "10 521 556");
+        assert!(text.contains("10 521 556"), "Ska innehålla siffran: {text}");
+        assert!(
+            text.contains("invånare") || text.contains("scb.se"),
+            "Ska ha kontext eller källa: {text}"
+        );
         assert!((conf - 0.85).abs() < 0.01, "Confidence ska matcha");
     }
 

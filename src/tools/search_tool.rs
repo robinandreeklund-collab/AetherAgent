@@ -83,6 +83,9 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
     let max_nodes = req.max_nodes_per_result as usize;
     let deep_start = now_ms();
 
+    // BUGG R: Per-URL timeout cap (3s) + Wikipedia top_n begränsning
+    const DEEP_FETCH_TIMEOUT_MS: u64 = 3000;
+
     let top_n_deep = results_for_deep.len().min(3);
     for i in 0..top_n_deep {
         let url = &results_for_deep[i];
@@ -93,11 +96,29 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
             continue;
         }
 
-        // Fetch sidan
+        // BUGG R: Timeout-skyddad fetch (3s per URL)
         let config = crate::types::FetchConfig::default();
-        let fetched = match crate::fetch::fetch_page(url, &config).await {
-            Ok(r) => r,
-            Err(_) => continue,
+        let fetch_fut = crate::fetch::fetch_page(url, &config);
+        let fetched = match tokio::time::timeout(
+            std::time::Duration::from_millis(DEEP_FETCH_TIMEOUT_MS),
+            fetch_fut,
+        )
+        .await
+        {
+            Ok(Ok(r)) => r,
+            _ => continue, // Timeout eller fetch-fel → skippa
+        };
+
+        // BUGG R: Kolla elapsed — skippa om vi redan överskridit timeout
+        if now_ms() - fetch_start > DEEP_FETCH_TIMEOUT_MS + 500 {
+            continue;
+        }
+
+        // BUGG R: Wikipedia/stora sidor → begränsa top_n för att hålla latens
+        let effective_top_n = if url.contains("wikipedia.org") || fetched.body.len() > 200_000 {
+            max_nodes.min(10) // Max 10 noder från stora sidor
+        } else {
+            max_nodes
         };
 
         // Kör hybrid_parse
@@ -105,8 +126,12 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
         let url_clone = url.clone();
         let goal_clone = goal.to_string();
         let nodes = tokio::task::spawn_blocking(move || {
-            let json =
-                crate::parse_top_nodes_hybrid(&html, &goal_clone, &url_clone, max_nodes as u32);
+            let json = crate::parse_top_nodes_hybrid(
+                &html,
+                &goal_clone,
+                &url_clone,
+                effective_top_n as u32,
+            );
             let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
             parsed["top_nodes"]
                 .as_array()
