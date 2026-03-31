@@ -4845,13 +4845,17 @@ async fn mcp_dispatch_tool(
             )
             .map_err(|e| format!("Ogiltiga parametrar: {e}"))?;
 
-            // Auto-fetch DDG
+            // Auto-fetch DDG + deep hybrid_parse på top-3
             let ddg_url = aether_agent::search::build_ddg_url(&req.query);
             let config = aether_agent::types::FetchConfig::default();
             match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
                 Ok(fetched) => {
-                    let result =
-                        aether_agent::tools::search_tool::execute_with_html(&fetched.body, &req);
+                    // Async: deep-fetch top-3 resultat med hybrid_parse
+                    let result = aether_agent::tools::search_tool::execute_with_html_async(
+                        &fetched.body,
+                        &req,
+                    )
+                    .await;
                     text_ok(result.to_json())
                 }
                 Err(_) => {

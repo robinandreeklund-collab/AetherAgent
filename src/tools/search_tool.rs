@@ -64,7 +64,90 @@ pub fn execute(req: &SearchRequest) -> ToolResult {
 /// Kör search med redan hämtad DDG HTML
 pub fn execute_with_html(ddg_html: &str, req: &SearchRequest) -> ToolResult {
     let start = now_ms();
+    let (search_result, _results_for_deep) = parse_ddg_results(ddg_html, req, start);
 
+    let data = serde_json::to_value(&search_result)
+        .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+    ToolResult::ok(data, now_ms() - start)
+}
+
+/// Async variant: extrahera DDG-resultat + hybrid_parse top-3 resultat-sidor
+#[cfg(feature = "fetch")]
+pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> ToolResult {
+    let start = now_ms();
+    let (mut search_result, results_for_deep) = parse_ddg_results(ddg_html, req, start);
+
+    // Deep fetch: hybrid_parse top-3 resultat-sidor
+    let goal = req.goal.as_deref().unwrap_or(&req.query);
+    let max_nodes = req.max_nodes_per_result as usize;
+    let deep_start = now_ms();
+
+    let top_n_deep = results_for_deep.len().min(3);
+    for i in 0..top_n_deep {
+        let url = &results_for_deep[i];
+        let fetch_start = now_ms();
+
+        // Firewall-check
+        if super::firewall_check(url, goal).is_some() {
+            continue;
+        }
+
+        // Fetch sidan
+        let config = crate::types::FetchConfig::default();
+        let fetched = match crate::fetch::fetch_page(url, &config).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        // Kör hybrid_parse
+        let html = fetched.body;
+        let url_clone = url.clone();
+        let goal_clone = goal.to_string();
+        let nodes = tokio::task::spawn_blocking(move || {
+            let json =
+                crate::parse_top_nodes_hybrid(&html, &goal_clone, &url_clone, max_nodes as u32);
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+            parsed["top_nodes"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|n| crate::search::PageNode {
+                            role: n["role"].as_str().unwrap_or("").to_string(),
+                            label: n["label"].as_str().unwrap_or("").to_string(),
+                            relevance: n["relevance"].as_f64().unwrap_or(0.0) as f32,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+
+        let fetch_ms = now_ms() - fetch_start;
+
+        // Berika sökresultatet
+        if i < search_result.results.len() && !nodes.is_empty() {
+            search_result.results[i].page_content = Some(nodes);
+            search_result.results[i].fetch_ms = Some(fetch_ms);
+        }
+    }
+
+    search_result.deep = Some(true);
+    search_result.deep_fetch_ms = Some(now_ms() - deep_start);
+
+    let data = serde_json::to_value(&search_result)
+        .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+    ToolResult::ok(data, now_ms() - start)
+}
+
+/// Gemensam DDG-parsningslogik
+fn parse_ddg_results(
+    ddg_html: &str,
+    req: &SearchRequest,
+    start: u64,
+) -> (crate::search::SearchResult, Vec<String>) {
     let goal = req.goal.as_deref().unwrap_or(&req.query);
     let effective_goal = if goal.is_empty() {
         format!("hitta svar på: {}", req.query)
@@ -77,17 +160,29 @@ pub fn execute_with_html(ddg_html: &str, req: &SearchRequest) -> ToolResult {
         (req.top_n as usize).min(10)
     };
 
-    // Detektera DDG CAPTCHA
     if crate::search::is_ddg_captcha(ddg_html) {
-        return ToolResult::err(
-            "DuckDuckGo returnerade en CAPTCHA-sida istället för sökresultat. DDG blockerar bot-liknande requests. Prova igen senare eller använd en annan sökmotor.",
-            now_ms() - start,
+        return (
+            crate::search::SearchResult {
+                query: req.query.clone(),
+                results: vec![],
+                direct_answer: None,
+                direct_answer_confidence: 0.0,
+                source_url: crate::search::build_ddg_url(&req.query),
+                parse_ms: now_ms() - start,
+                nodes_seen: 0,
+                nodes_emitted: 0,
+                deep: None,
+                deep_fetch_ms: None,
+            },
+            vec![],
         );
     }
 
     let ddg_url = crate::search::build_ddg_url(&req.query);
     let tree = super::build_tree(ddg_html, &effective_goal, &ddg_url);
     let results = crate::search::extract_results(&tree.nodes, effective_top_n);
+
+    let urls_for_deep: Vec<String> = results.iter().map(|r| r.url.clone()).collect();
 
     let (direct_answer, direct_answer_confidence) = crate::search::detect_direct_answer(&results)
         .map(|(a, c)| (Some(a), c))
@@ -106,10 +201,7 @@ pub fn execute_with_html(ddg_html: &str, req: &SearchRequest) -> ToolResult {
         deep_fetch_ms: None,
     };
 
-    let data = serde_json::to_value(&search_result)
-        .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-
-    ToolResult::ok(data, now_ms() - start)
+    (search_result, urls_for_deep)
 }
 
 #[cfg(test)]
