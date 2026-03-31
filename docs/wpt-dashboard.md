@@ -1,7 +1,7 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-31 (Session 5: +105 WPT pass, Live CSSStyleDeclaration + qSA scoping + MutationObserver)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-31 (Session 5: +142 WPT pass, Live CSSStyleDeclaration + qSA + MutationObserver + Namespace)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
@@ -28,7 +28,7 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **dom/nodes** | 6,057 | 6,673 | **90.8%** | ↑ från 90.3% |
+| **dom/nodes** | 6,094 | 6,673 | **91.3%** | ↑↑ från 90.3% |
 | **dom/events** | 271 | 322 | **84.2%** | ─ stabil |
 | **dom/ranges** | 8,181 | 11,082 | **73.8%** | ─ stabil |
 | **dom/traversal** | 1,534 | 1,591 | **96.4%** | ─ stabil |
@@ -120,17 +120,17 @@
 
 ## Historik — Sessionsloggar
 
-### Session 5 (2026-03-31) — Live CSSStyleDeclaration + qSA Scoping + MutationObserver (+105 WPT, 5 commits)
+### Session 5 (2026-03-31) — Live CSSStyleDeclaration + qSA + MutationObserver + Namespace (+142 WPT, 6 commits)
 
-Fokus på CSSOM-korrekthet, CSS-selektor-scoping, och MutationObserver-integration i produktionspipelinen.
+Fokus på CSSOM-korrekthet, CSS-selektor-scoping, MutationObserver och namespace-hantering.
 
 | Suite | Före | Efter | Delta | Nyckelförbättringar |
 |-------|------|-------|-------|---------------------|
+| dom/nodes | 6,029 (90.3%) | **6,094 (91.3%)** | **+65** | lookupNamespaceURI, MutationObserver attr, createEvent, classList, removeChild DOMException |
 | css/selectors | 1,651 (47.8%) | **1,693 (49.0%)** | **+42** | querySelector/querySelectorAll scoping fix — context element excluded per spec |
 | css/cssom | 149 (22.0%) | **179 (26.5%)** | **+30** | Live CSSStyleDeclaration Proxy, shorthand aggregation/expansion, cssText getter/setter |
-| dom/nodes | 6,029 (90.3%) | **6,057 (90.8%)** | **+28** | MutationObserver attr notifications, createEvent spec-compliance, classList null-class fix |
 | domparsing | 156 (41.6%) | **161 (42.9%)** | **+5** | style_attribute_html: live style + CSS validation, innerHTML valueOf fallback |
-| **Totalt** | | | **+105** | |
+| **Totalt** | | | **+142** | |
 
 **Alla implementationer native Rust/JS i produktionspipelinen:**
 - `CSSStyleDeclaration` — live JS Proxy, delegerar till Rust handlers per property access
@@ -146,6 +146,9 @@ Fokus på CSSOM-korrekthet, CSS-selektor-scoping, och MutationObserver-integrati
 - `document.createEvent()` — spec-korrekt legacy-only interfaces, DeviceMotionEvent/DeviceOrientationEvent/TextEvent
 - `classList.remove()` på null class attribute → bevarar null (ingen tom sträng)
 - `innerHTML` — valueOf() fallback vid string conversion
+- `lookupNamespaceURI()` — full spec-algoritm: ancestor chain walk, xmlns: attributes, xml/xmlns built-in
+- `isDefaultNamespace()` — delegerar till lookupNamespaceURI(null) per spec
+- `removeChild` — kastar proper DOMException istället för plain string
 
 ### Session 4 (2026-03-29) — Tier B DOM Integrations (+767 WPT, 11 commits)
 
