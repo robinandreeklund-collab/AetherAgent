@@ -261,17 +261,41 @@ fn role_multiplier(role: &str, label: &str) -> f32 {
     }
 }
 
-/// BUGG M: Detektera i18n-template-artefakter som inte ska scoreas.
-/// React/Vue/Angular-appar kan exponera oöversatta template-strängar.
+/// BUGG M/M2: Detektera i18n-template-artefakter som inte ska scoreas.
+/// React/Vue/Angular/i18n-frameworks kan exponera oöversatta template-strängar
+/// och interna resursnyckelnamn (commonI18nResources.currencies.BHD.displayName).
 fn is_template_artifact(label: &str) -> bool {
     // {{key}}, {key}, translations.messages.*, %{key}
     if label.contains("{{") || label.contains("translations.messages") {
         return true;
     }
-    // Labels som börjar med "translations." eller "i18n."
+    // Dot-path resursnyckelnamn: commonI18nResources.*, translations.*, i18n.*
+    // Matchar labels som börjar med ett känt prefix följt av punkt
     let lower = label.to_ascii_lowercase();
-    if lower.starts_with("translations.") || lower.starts_with("i18n.") {
+    if lower.starts_with("translations.")
+        || lower.starts_with("i18n.")
+        || lower.starts_with("commoni18nresources.")
+        || lower.starts_with("locale.")
+        || lower.starts_with("messages.")
+    {
         return true;
+    }
+    // Generellt: label som ser ut som en programmatisk dot-path key
+    // Fångar: "currencyData.EUR.isObsolete", "fields.sections[1].body"
+    // Kräver: inga mellanslag, 2+ punkter, och minst ett camelCase/bracket-segment
+    if !label.contains(' ')
+        && label.matches('.').count() >= 2
+        && label.len() < 200
+        && !label.contains("://")
+        && !label.starts_with(|c: char| c.is_ascii_digit())
+    {
+        let has_camel = label.chars().any(|c| c.is_ascii_uppercase());
+        let has_bracket = label.contains('[');
+        let has_bool =
+            label.ends_with("true") || label.ends_with("false") || label.ends_with("null");
+        if has_camel || has_bracket || has_bool {
+            return true;
+        }
     }
     // Labels som är enbart template-variabler: {variableName}
     if label.starts_with('{') && label.ends_with('}') && label.len() < 50 && !label.contains(' ') {
@@ -280,9 +304,30 @@ fn is_template_artifact(label: &str) -> bool {
     false
 }
 
-/// BUGG L: Detektera numeriska artefakter som inte ska scoreas.
-/// Badge-räknare ("42"), UI-kontroller ("1/5"), version-nummer ("v2.3.1").
+/// BUGG L/L2: Detektera numeriska artefakter och teknisk metadata.
+/// Badge-räknare ("42"), UI-kontroller ("1/5"), jsonLd metadata ("image[0].height: 1080").
 fn is_numeric_artifact(label: &str) -> bool {
+    // L2: jsonLd teknisk metadata — inte sakinnehåll
+    let lower = label.to_ascii_lowercase();
+    if lower.starts_with("jsonld.")
+        || lower.starts_with("page.seo.")
+        || lower.starts_with("schema.")
+    {
+        // Kolla om det är teknisk metadata (image.width, seo.robots, etc.)
+        if lower.contains(".image")
+            || lower.contains(".width")
+            || lower.contains(".height")
+            || lower.contains(".robots")
+            || lower.contains(".canonical")
+            || lower.contains(".og.")
+            || lower.contains("opengraph")
+            || lower.contains(".twitter.")
+            || lower.contains(".@type")
+            || lower.contains(".@context")
+        {
+            return true;
+        }
+    }
     let trimmed = label.trim();
     if trimmed.is_empty() || trimmed.len() > 20 {
         return false; // Tomma eller långa labels — inte artefakter
