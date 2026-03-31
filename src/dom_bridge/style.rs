@@ -10,7 +10,11 @@ use crate::event_loop::{JsFn, JsHandler};
 #[cfg(feature = "blitz")]
 use super::invalidate_blitz_cache;
 use super::state::SharedState;
-use super::utils::{parse_inline_styles, serialize_inline_styles};
+use super::utils::{
+    expand_shorthand, parse_inline_styles, parse_inline_styles_ordered,
+    reconstruct_shorthand, remove_shorthand_longhands,
+    serialize_css_text_ordered, serialize_inline_styles,
+};
 use super::{js_value_to_dom_string, validate_token};
 
 pub(super) struct ClassListAdd {
@@ -478,14 +482,44 @@ impl JsHandler for StyleSetProperty {
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let style_str = node.get_attr("style").unwrap_or("").to_string();
-            let mut styles = parse_inline_styles(&style_str);
+            let mut ordered = parse_inline_styles_ordered(&style_str);
             if val.is_empty() {
-                styles.remove(&css_prop);
+                ordered.retain(|(k, _)| k != &css_prop);
+                // Ta bort longhands vid shorthand-removal
+                let mut as_map: std::collections::HashMap<String, String> =
+                    ordered.iter().cloned().collect();
+                let before = as_map.len();
+                remove_shorthand_longhands(&css_prop, &mut as_map);
+                if as_map.len() < before {
+                    ordered.retain(|(k, _)| as_map.contains_key(k));
+                }
             } else {
-                styles.insert(css_prop, val);
+                // Expandera shorthand → ersätt shorthand med longhands
+                let mut expanded = std::collections::HashMap::new();
+                expand_shorthand(&css_prop, &val, &mut expanded);
+                if !expanded.is_empty() {
+                    // Shorthand: ta bort shorthand-propertyn, sätt longhands
+                    ordered.retain(|(k, _)| k != &css_prop);
+                    // Ta bort gamla longhands, bevara position
+                    let insert_pos = ordered.len();
+                    for (k, v) in &expanded {
+                        if let Some(existing) = ordered.iter_mut().find(|(ek, _)| ek == k) {
+                            existing.1 = v.clone();
+                        } else {
+                            ordered.insert(insert_pos.min(ordered.len()), (k.clone(), v.clone()));
+                        }
+                    }
+                } else {
+                    // Longhand: sätt direkt
+                    if let Some(existing) = ordered.iter_mut().find(|(k, _)| k == &css_prop) {
+                        existing.1 = val;
+                    } else {
+                        ordered.push((css_prop, val));
+                    }
+                }
             }
-            node.attributes
-                .insert("style".to_string(), serialize_inline_styles(&styles));
+            let serialized = serialize_css_text_ordered(&ordered);
+            node.attributes.insert("style".to_string(), serialized);
         }
         Ok(Value::new_undefined(ctx.clone()))
     }
@@ -511,7 +545,12 @@ impl JsHandler for StyleGetPropertyValue {
             .and_then(|n| n.get_attr("style"))
             .map(|style_str| {
                 let styles = parse_inline_styles(style_str);
-                styles.get(&css_prop).cloned().unwrap_or_default()
+                // Direkt match
+                if let Some(v) = styles.get(&css_prop) {
+                    return v.clone();
+                }
+                // Rekonstruera shorthand från longhands
+                reconstruct_shorthand(&css_prop, &styles)
             })
             .unwrap_or_default();
         Ok(rquickjs::String::from_str(ctx.clone(), &val)?.into_value())
@@ -531,14 +570,18 @@ impl JsHandler for StyleRemoveProperty {
             .unwrap_or_default();
         let css_prop = camel_to_kebab(&prop);
         let mut s = self.state.borrow_mut();
-        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+        let old_val = if let Some(node) = s.arena.nodes.get_mut(self.key) {
             let style_str = node.get_attr("style").unwrap_or("").to_string();
             let mut styles = parse_inline_styles(&style_str);
-            styles.remove(&css_prop);
+            let old = styles.remove(&css_prop).unwrap_or_default();
+            remove_shorthand_longhands(&css_prop, &mut styles);
             node.attributes
                 .insert("style".to_string(), serialize_inline_styles(&styles));
-        }
-        Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value())
+            old
+        } else {
+            String::new()
+        };
+        Ok(rquickjs::String::from_str(ctx.clone(), &old_val)?.into_value())
     }
 }
 
@@ -555,14 +598,146 @@ pub(super) fn camel_to_kebab(name: &str) -> String {
     result
 }
 
+// ─── Nya live-handlers för style-proxy ─────────────────────────────────────
+
+pub(super) struct StyleGetCssText {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for StyleGetCssText {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let css_text = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("style"))
+            .map(|style_str| {
+                let ordered = parse_inline_styles_ordered(style_str);
+                serialize_css_text_ordered(&ordered)
+            })
+            .unwrap_or_default();
+        Ok(rquickjs::String::from_str(ctx.clone(), &css_text)?.into_value())
+    }
+}
+
+pub(super) struct StyleSetCssText {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for StyleSetCssText {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let mut s = self.state.borrow_mut();
+        if let Some(node) = s.arena.nodes.get_mut(self.key) {
+            // Parsa med ordning bevarad — ingen shorthand-expansion
+            let ordered = parse_inline_styles_ordered(&val);
+            let serialized = serialize_css_text_ordered(&ordered);
+            node.attributes.insert("style".to_string(), serialized);
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+pub(super) struct StyleGetLength {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for StyleGetLength {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let len = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("style"))
+            .map(|style_str| parse_inline_styles(style_str).len())
+            .unwrap_or(0);
+        Ok(Value::new_int(ctx.clone(), len as i32))
+    }
+}
+
+pub(super) struct StyleItem {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for StyleItem {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let idx = args.first().and_then(|v| v.as_int()).unwrap_or(-1);
+        if idx < 0 {
+            return Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value());
+        }
+        let s = self.state.borrow();
+        let prop = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("style"))
+            .map(|style_str| {
+                let styles = parse_inline_styles(style_str);
+                let mut keys: Vec<&String> = styles.keys().collect();
+                keys.sort();
+                keys.get(idx as usize)
+                    .map(|k| k.to_string())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        Ok(rquickjs::String::from_str(ctx.clone(), &prop)?.into_value())
+    }
+}
+
+pub(super) struct StyleGetPropertyPriority {
+    pub(super) state: SharedState,
+    pub(super) key: NodeKey,
+}
+impl JsHandler for StyleGetPropertyPriority {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let prop = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        let css_prop = camel_to_kebab(&prop);
+        let s = self.state.borrow();
+        let priority = s
+            .arena
+            .nodes
+            .get(self.key)
+            .and_then(|n| n.get_attr("style"))
+            .map(|style_str| {
+                // Kolla om property har !important
+                for part in style_str.split(';') {
+                    let part = part.trim();
+                    if let Some(colon) = part.find(':') {
+                        let p = part[..colon].trim().to_lowercase();
+                        if p == css_prop {
+                            let v = part[colon + 1..].trim();
+                            if v.ends_with("!important") || v.ends_with("! important") {
+                                return "important".to_string();
+                            }
+                        }
+                    }
+                }
+                String::new()
+            })
+            .unwrap_or_default();
+        Ok(rquickjs::String::from_str(ctx.clone(), &priority)?.into_value())
+    }
+}
+
 pub(super) fn make_style_object<'js>(
     ctx: &Ctx<'js>,
     key: NodeKey,
     state: &SharedState,
 ) -> rquickjs::Result<Value<'js>> {
     let obj = Object::new(ctx.clone())?;
+    // Registrera Rust-backade metoder
     obj.set(
-        "setProperty",
+        "__setProperty",
         Function::new(
             ctx.clone(),
             JsFn(StyleSetProperty {
@@ -572,7 +747,7 @@ pub(super) fn make_style_object<'js>(
         )?,
     )?;
     obj.set(
-        "getPropertyValue",
+        "__getPropertyValue",
         Function::new(
             ctx.clone(),
             JsFn(StyleGetPropertyValue {
@@ -582,7 +757,7 @@ pub(super) fn make_style_object<'js>(
         )?,
     )?;
     obj.set(
-        "removeProperty",
+        "__removeProperty",
         Function::new(
             ctx.clone(),
             JsFn(StyleRemoveProperty {
@@ -591,30 +766,101 @@ pub(super) fn make_style_object<'js>(
             }),
         )?,
     )?;
-
-    // Sätt inline-stilar som egenskaper
-    let s = state.borrow();
-    let styles = s
-        .arena
-        .nodes
-        .get(key)
-        .and_then(|n| n.get_attr("style"))
-        .map(parse_inline_styles)
-        .unwrap_or_default();
     obj.set(
-        "cssText",
-        s.arena
-            .nodes
-            .get(key)
-            .and_then(|n| n.get_attr("style"))
-            .unwrap_or(""),
+        "__getCssText",
+        Function::new(
+            ctx.clone(),
+            JsFn(StyleGetCssText {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
     )?;
-    for (prop, val) in &styles {
-        // Konvertera kebab-case till camelCase
-        let camel = kebab_to_camel(prop);
-        obj.set(camel.as_str(), val.as_str())?;
-    }
-    Ok(obj.into_value())
+    obj.set(
+        "__setCssText",
+        Function::new(
+            ctx.clone(),
+            JsFn(StyleSetCssText {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "__getLength",
+        Function::new(
+            ctx.clone(),
+            JsFn(StyleGetLength {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "__item",
+        Function::new(
+            ctx.clone(),
+            JsFn(StyleItem {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+    obj.set(
+        "__getPropertyPriority",
+        Function::new(
+            ctx.clone(),
+            JsFn(StyleGetPropertyPriority {
+                state: Rc::clone(state),
+                key,
+            }),
+        )?,
+    )?;
+
+    // Wrap i JS Proxy för live get/set — global factory (eval:as en gång)
+    let globals = ctx.globals();
+    let proxy_fn: Function = if let Ok(f) = globals.get::<_, Function>("__makeStyleProxy") {
+        f
+    } else {
+        let proxy_code = r#"(function() {
+            function camelToKebab(s) {
+                return s.replace(/[A-Z]/g, function(m){return '-'+m.toLowerCase();});
+            }
+            var handler_proto = {
+                get: function(t, prop) {
+                    if (prop === 'cssText') return t.__getCssText();
+                    if (prop === 'length') return t.__getLength();
+                    if (prop === 'parentRule') return null;
+                    if (prop === 'setProperty') return function(p,v,pri) { return t.__setProperty(p,v||'',pri||''); };
+                    if (prop === 'getPropertyValue') return function(p) { return t.__getPropertyValue(p); };
+                    if (prop === 'removeProperty') return function(p) { return t.__removeProperty(p); };
+                    if (prop === 'getPropertyPriority') return function(p) { return t.__getPropertyPriority(p); };
+                    if (prop === 'item') return function(i) { return t.__item(i); };
+                    if (prop === Symbol.toStringTag) return 'CSSStyleDeclaration';
+                    if (typeof prop === 'symbol') return undefined;
+                    if (typeof prop === 'number' || /^\d+$/.test(prop)) return t.__item(Number(prop));
+                    var kebab = camelToKebab(String(prop));
+                    return t.__getPropertyValue(kebab);
+                },
+                set: function(t, prop, value) {
+                    if (prop === 'cssText') { t.__setCssText(String(value)); return true; }
+                    var kebab = camelToKebab(String(prop));
+                    if (value === '' || value === null || value === undefined) {
+                        t.__removeProperty(kebab);
+                    } else {
+                        t.__setProperty(kebab, String(value));
+                    }
+                    return true;
+                }
+            };
+            return function(target) { return new Proxy(target, handler_proto); };
+        })()"#;
+        let f: Function = ctx.eval(proxy_code)?;
+        globals.set("__makeStyleProxy", f.clone())?;
+        f
+    };
+    let result = proxy_fn.call::<_, Value>((obj,))?;
+    Ok(result)
 }
 
 pub(super) fn kebab_to_camel(name: &str) -> String {
