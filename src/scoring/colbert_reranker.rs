@@ -11,7 +11,7 @@
 #[cfg(any(feature = "colbert", test))]
 use std::collections::HashMap;
 #[cfg(feature = "colbert")]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(feature = "colbert")]
 use std::sync::{Arc, OnceLock};
 
@@ -288,8 +288,12 @@ impl ColBertReranker {
         let len = ids.len().min(COLBERT_MAX_LEN);
         let truncated: Vec<u32> = ids[..len].to_vec();
 
-        let input_ids = Tensor::new(&[truncated.as_slice()], &self.device)
-            .map_err(|e| format!("Tensor-skapande misslyckades: {e}"))?;
+        // Candle kräver Vec<i64> för BERT input
+        let ids_i64: Vec<i64> = truncated.iter().map(|&id| id as i64).collect();
+        let seq_len = ids_i64.len();
+
+        let input_ids =
+            Tensor::from_vec(ids_i64, (1, seq_len), &self.device).map_err(|e| format!("{e}"))?;
 
         let token_type_ids = input_ids
             .zeros_like()
@@ -378,9 +382,14 @@ static COLBERT_INSTANCE: OnceLock<Arc<ColBertReranker>> = OnceLock::new();
 
 #[cfg(feature = "colbert")]
 fn get_or_init_colbert(model_dir: &Path) -> Result<Arc<ColBertReranker>, String> {
-    COLBERT_INSTANCE
-        .get_or_try_init(|| ColBertReranker::load(model_dir).map(Arc::new))
-        .cloned()
+    // OnceLock::get_or_try_init är instabil — manuell fallback
+    if let Some(instance) = COLBERT_INSTANCE.get() {
+        return Ok(instance.clone());
+    }
+    let reranker = Arc::new(ColBertReranker::load(model_dir)?);
+    // Ignorera race — första tråden vinner, alla får samma resultat
+    let _ = COLBERT_INSTANCE.set(reranker.clone());
+    Ok(COLBERT_INSTANCE.get().cloned().unwrap_or(reranker))
 }
 
 // ── Tester ───────────────────────────────────────────────────────────────────

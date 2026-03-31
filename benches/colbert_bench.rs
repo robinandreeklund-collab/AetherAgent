@@ -7,13 +7,14 @@
 ///
 /// Kräver `colbert` feature och en lokal ColBERTv2-modell.
 ///
-/// Run: cargo run --bin aether-colbert-bench --features colbert,embeddings
+/// Run: cargo run --release --bin aether-colbert-bench --features colbert,embeddings
 ///
 /// Referens: Khattab & Zaharia (2020), ColBERT: Efficient and Effective
 /// Passage Search via Contextualized Late Interaction over BERT. SIGIR 2020.
 use std::time::Instant;
 
 use aether_agent::scoring::colbert_reranker::adaptive_alpha;
+use aether_agent::scoring::embed_score::ScoredNode;
 use aether_agent::scoring::pipeline::{PipelineConfig, ScoringPipeline};
 use aether_agent::types::SemanticNode;
 
@@ -22,8 +23,8 @@ use aether_agent::types::SemanticNode;
 struct TestCase {
     name: &'static str,
     goal: &'static str,
-    /// Nod-IDs som anses vara ground truth (relevanta svar)
-    ground_truth_ids: Vec<u32>,
+    /// Nyckelord som BÖR finnas i top-3 labels — keyword-baserad ground truth
+    expected_keywords: Vec<&'static str>,
     html: String,
 }
 
@@ -32,37 +33,37 @@ fn test_cases() -> Vec<TestCase> {
         TestCase {
             name: "coinmarketcap/bitcoin",
             goal: "bitcoin price USD today",
-            ground_truth_ids: vec![3, 5, 7], // Prisnoder
+            expected_keywords: vec!["price", "$66,825", "bitcoin"],
             html: bitcoin_page(),
         },
         TestCase {
             name: "malmo.se/befolkning",
             goal: "antal invånare Malmö 2025",
-            ground_truth_ids: vec![3, 4],
+            expected_keywords: vec!["invånare", "357", "folkmängd"],
             html: malmo_page(),
         },
         TestCase {
             name: "gov.uk/minimum-wage",
             goal: "National Living Wage rate per hour",
-            ground_truth_ids: vec![3, 5],
+            expected_keywords: vec!["£12.21", "living wage", "per hour"],
             html: wage_page(),
         },
         TestCase {
             name: "wikipedia/tim-cook",
             goal: "what year did Tim Cook become Apple CEO",
-            ground_truth_ids: vec![4, 5],
+            expected_keywords: vec!["2011", "ceo", "august"],
             html: tim_cook_page(),
         },
         TestCase {
             name: "bankofengland",
             goal: "current Bank Rate percentage",
-            ground_truth_ids: vec![3, 4],
+            expected_keywords: vec!["4.50%", "bank rate", "rate"],
             html: bank_rate_page(),
         },
         TestCase {
             name: "space.com/moon",
             goal: "distance Earth to Moon kilometres",
-            ground_truth_ids: vec![3, 5],
+            expected_keywords: vec!["384,400", "kilomet", "distance"],
             html: moon_page(),
         },
     ]
@@ -172,12 +173,34 @@ fn moon_page() -> String {
         .to_string()
 }
 
-// ─── Precision@K beräkning ───────────────────────────────────────────────────
+// ─── Keyword-match scoring ───────────────────────────────────────────────────
 
-fn precision_at_k(ranked_ids: &[u32], ground_truth: &[u32], k: usize) -> f32 {
-    let top_k: Vec<u32> = ranked_ids.iter().take(k).copied().collect();
-    let hits = top_k.iter().filter(|id| ground_truth.contains(id)).count();
-    hits as f32 / k as f32
+/// Räkna hur många keywords som finns i top-K labels (case-insensitive)
+fn keyword_hits_at_k(top_nodes: &[ScoredNode], keywords: &[&str], k: usize) -> (usize, usize) {
+    let top_labels: Vec<String> = top_nodes
+        .iter()
+        .take(k)
+        .map(|n| n.label.to_lowercase())
+        .collect();
+    let concat = top_labels.join(" ");
+    let hits = keywords
+        .iter()
+        .filter(|kw| concat.contains(&kw.to_lowercase()))
+        .count();
+    (hits, keywords.len())
+}
+
+fn format_top3(nodes: &[ScoredNode]) -> String {
+    nodes
+        .iter()
+        .take(3)
+        .enumerate()
+        .map(|(i, n)| {
+            let trunc: String = n.label.chars().take(70).collect();
+            format!("    {}. [{:.3}] {}", i + 1, n.relevance, trunc)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -188,23 +211,66 @@ fn main() {
     println!("╚═══════════════════════════════════════════════════════════════╝");
     println!();
 
+    // Initiera embeddings om tillgängliga
+    #[cfg(feature = "embeddings")]
+    {
+        let model_path = std::env::var("AETHER_EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "models/all-MiniLM-L6-v2.onnx".to_string());
+        let vocab_path = std::env::var("AETHER_EMBEDDING_VOCAB")
+            .unwrap_or_else(|_| "models/vocab.txt".to_string());
+        if let (Ok(model_bytes), Ok(vocab_text)) = (
+            std::fs::read(&model_path),
+            std::fs::read_to_string(&vocab_path),
+        ) {
+            if aether_agent::embedding::init_global(&model_bytes, &vocab_text).is_ok() {
+                println!("  Embeddings: LOADED ({model_path})");
+            }
+        } else {
+            println!("  Embeddings: NOT FOUND (text-only scoring)");
+        }
+    }
+
     let cases = test_cases();
     let config_minilm = PipelineConfig::default();
 
-    let mut minilm_total_p3 = 0.0f32;
-    let mut total_cases = 0;
+    // Compute goal embeddings
+    #[cfg(feature = "embeddings")]
+    let goal_embeddings: Vec<Option<Vec<f32>>> = cases
+        .iter()
+        .map(|c| aether_agent::embedding::embed(c.goal))
+        .collect();
+    #[cfg(not(feature = "embeddings"))]
+    let goal_embeddings: Vec<Option<Vec<f32>>> = cases.iter().map(|_| None).collect();
 
-    for case in &cases {
+    let mut minilm_wins = 0u32;
+    #[cfg(feature = "colbert")]
+    let mut colbert_wins = 0u32;
+    #[cfg(feature = "colbert")]
+    let mut hybrid_wins = 0u32;
+    let mut total_cases = 0u32;
+
+    for (idx, case) in cases.iter().enumerate() {
         println!("── {} ──", case.name);
         println!("  Goal: \"{}\"", case.goal);
-        println!("  Ground truth IDs: {:?}", case.ground_truth_ids);
+        println!("  Keywords: {:?}", case.expected_keywords);
 
         // Parse HTML → SemanticTree
         let tree_json = aether_agent::parse_to_semantic_tree(case.html.as_str(), case.goal, "");
-        let tree_nodes: Vec<SemanticNode> = match serde_json::from_str(&tree_json) {
+        let parsed: serde_json::Value = match serde_json::from_str(&tree_json) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("  SKIP: JSON parse error: {e}");
+                continue;
+            }
+        };
+        let nodes_value = parsed
+            .get("nodes")
+            .cloned()
+            .unwrap_or(serde_json::Value::Array(vec![]));
+        let tree_nodes: Vec<SemanticNode> = match serde_json::from_value(nodes_value) {
             Ok(nodes) => nodes,
             Err(e) => {
-                println!("  SKIP: kunde inte parsa HTML: {e}");
+                println!("  SKIP: node deserialization error: {e}");
                 continue;
             }
         };
@@ -214,22 +280,27 @@ fn main() {
             continue;
         }
 
+        println!("  Noder: {} st", tree_nodes.len());
+
+        let goal_emb = goal_embeddings[idx].as_deref();
+
         // ── MiniLM (baseline) ──
         let t0 = Instant::now();
-        let minilm_result = ScoringPipeline::run(&tree_nodes, case.goal, None, &config_minilm);
+        let minilm_result = ScoringPipeline::run(&tree_nodes, case.goal, goal_emb, &config_minilm);
         let minilm_ms = t0.elapsed().as_micros() as f64 / 1000.0;
 
-        let minilm_ids: Vec<u32> = minilm_result.scored_nodes.iter().map(|n| n.id).collect();
-        let minilm_p3 = precision_at_k(&minilm_ids, &case.ground_truth_ids, 3);
-
+        let (m_hits, m_total) =
+            keyword_hits_at_k(&minilm_result.scored_nodes, &case.expected_keywords, 3);
         println!(
-            "  MiniLM:  P@3={:.2}  top3={:?}  {:.1}ms",
-            minilm_p3,
-            &minilm_ids[..minilm_ids.len().min(3)],
-            minilm_ms
+            "  MiniLM:  {}/{} keywords  {:.1}ms",
+            m_hits, m_total, minilm_ms
         );
+        println!("{}", format_top3(&minilm_result.scored_nodes));
 
-        // ── ColBERT (om feature aktiv) ──
+        #[cfg(feature = "colbert")]
+        let mut best_hits = m_hits;
+
+        // ── ColBERT ──
         #[cfg(feature = "colbert")]
         {
             use aether_agent::scoring::colbert_reranker::Stage3Reranker;
@@ -248,19 +319,21 @@ fn main() {
 
                 let t1 = Instant::now();
                 let colbert_result =
-                    ScoringPipeline::run(&tree_nodes, case.goal, None, &config_colbert);
+                    ScoringPipeline::run(&tree_nodes, case.goal, goal_emb, &config_colbert);
                 let colbert_ms = t1.elapsed().as_micros() as f64 / 1000.0;
 
-                let colbert_ids: Vec<u32> =
-                    colbert_result.scored_nodes.iter().map(|n| n.id).collect();
-                let colbert_p3 = precision_at_k(&colbert_ids, &case.ground_truth_ids, 3);
-
+                let (c_hits, c_total) =
+                    keyword_hits_at_k(&colbert_result.scored_nodes, &case.expected_keywords, 3);
                 println!(
-                    "  ColBERT: P@3={:.2}  top3={:?}  {:.1}ms",
-                    colbert_p3,
-                    &colbert_ids[..colbert_ids.len().min(3)],
-                    colbert_ms
+                    "  ColBERT: {}/{} keywords  {:.1}ms",
+                    c_hits, c_total, colbert_ms
                 );
+                println!("{}", format_top3(&colbert_result.scored_nodes));
+
+                if c_hits > best_hits {
+                    best_hits = c_hits;
+                    colbert_wins += 1;
+                }
 
                 // ── Hybrid ──
                 let config_hybrid = PipelineConfig {
@@ -274,23 +347,24 @@ fn main() {
 
                 let t2 = Instant::now();
                 let hybrid_result =
-                    ScoringPipeline::run(&tree_nodes, case.goal, None, &config_hybrid);
+                    ScoringPipeline::run(&tree_nodes, case.goal, goal_emb, &config_hybrid);
                 let hybrid_ms = t2.elapsed().as_micros() as f64 / 1000.0;
 
-                let hybrid_ids: Vec<u32> =
-                    hybrid_result.scored_nodes.iter().map(|n| n.id).collect();
-                let hybrid_p3 = precision_at_k(&hybrid_ids, &case.ground_truth_ids, 3);
+                let (h_hits, h_total) =
+                    keyword_hits_at_k(&hybrid_result.scored_nodes, &case.expected_keywords, 3);
+                println!(
+                    "  Hybrid:  {}/{} keywords  {:.1}ms  (adaptive alpha)",
+                    h_hits, h_total, hybrid_ms
+                );
+                println!("{}", format_top3(&hybrid_result.scored_nodes));
 
-                println!(
-                    "  Hybrid:  P@3={:.2}  top3={:?}  {:.1}ms  (alpha=0.7, adaptive)",
-                    hybrid_p3,
-                    &hybrid_ids[..hybrid_ids.len().min(3)],
-                    hybrid_ms
-                );
+                if h_hits > best_hits {
+                    hybrid_wins += 1;
+                } else if h_hits == best_hits && h_hits > m_hits {
+                    hybrid_wins += 1;
+                }
             } else {
-                println!(
-                    "  ColBERT: SKIP — modell saknas (set COLBERT_MODEL_DIR eller placera i models/colbertv2/)"
-                );
+                println!("  ColBERT: SKIP — modell saknas (set COLBERT_MODEL_DIR)");
             }
         }
 
@@ -299,21 +373,26 @@ fn main() {
             println!("  ColBERT: SKIP — kompilera med --features colbert");
         }
 
-        minilm_total_p3 += minilm_p3;
+        #[cfg(feature = "colbert")]
+        if m_hits >= best_hits {
+            minilm_wins += 1;
+        }
+        #[cfg(not(feature = "colbert"))]
+        {
+            minilm_wins += 1;
+        }
         total_cases += 1;
         println!();
     }
 
     // ── Sammanfattning ──
     println!("═══════════════════════════════════════════════════════════════");
-    println!(
-        "MiniLM genomsnitt P@3: {:.2}",
-        if total_cases > 0 {
-            minilm_total_p3 / total_cases as f32
-        } else {
-            0.0
-        }
-    );
+    println!("Resultat ({total_cases} testfall):");
+    println!("  MiniLM bäst/delad:  {minilm_wins}/{total_cases}");
+    #[cfg(feature = "colbert")]
+    println!("  ColBERT bäst:       {colbert_wins}/{total_cases}");
+    #[cfg(feature = "colbert")]
+    println!("  Hybrid bäst:        {hybrid_wins}/{total_cases}");
     println!();
     println!("adaptive_alpha-tabell:");
     for len in [5, 20, 50, 80, 100, 200, 300] {
