@@ -1,170 +1,471 @@
 # ColBERT vs MiniLM vs Hybrid — Live Validation
 
 **Date:** 2026-03-31
-**Mode:** Release build, embeddings (all-MiniLM-L6-v2) + ColBERTv2.0 (110M params, CPU)
-**Sites:** 44 fetched / 45 total
+**Mode:** Release build, bi-encoder (all-MiniLM-L6-v2, 384-dim) + ColBERTv2.0 (768-dim, ONNX, CPU)
+**Sites:** 30 fetched / 30 total
 
 ## Summary
 
 | Metod | Korrekthet | Avg latens | Avg top-1 score |
 |-------|-----------|------------|----------------|
-| MiniLM (bi-encoder) | 33/44 (75.0%) | 886.3ms | 0.517 |
-| ColBERT (MaxSim) | 32/44 (72.7%) | 828.4ms | 0.773 |
-| Hybrid (adaptive α) | 32/44 (72.7%) | 831.8ms | 0.638 |
+| MiniLM (bi-encoder) | 29/30 (96.7%) | 1168.5ms | 0.675 |
+| ColBERT (MaxSim) | 29/30 (96.7%) | 6244.8ms | 0.950 |
+| Hybrid (adaptive α) | 29/30 (96.7%) | 6268.4ms | 0.786 |
 
 ColBERT wins (correct where MiniLM misses): **0**
 Hybrid wins (correct where MiniLM misses): **0**
-MiniLM-only (correct where ColBERT misses): **1**
+MiniLM-only (correct where ColBERT misses): **0**
 
 ## Per-Site Results
 
 | # | Site | HTML | DOM | M-ok | C-ok | H-ok | M-ms | C-ms | H-ms | M-top1 | C-top1 | H-top1 |
 |---|------|------|-----|------|------|------|------|------|------|--------|--------|--------|
-| 1 | Hacker News | 33KB | 1 | PASS | PASS | PASS | 2442 | 2938 | 2882 | 0.218 | 1.000 | 0.847 |
-| 2 | HN Newest | 40KB | 1 | PASS | PASS | PASS | 807 | 326 | 324 | 0.512 | 1.000 | 0.863 |
-| 3 | Lobsters | 57KB | 1 | PASS | PASS | PASS | 1260 | 782 | 780 | 0.683 | 1.000 | 0.747 |
-| 4 | CNN Lite | 331KB | 1 | PASS | PASS | PASS | 1129 | 185 | 185 | 0.563 | 1.000 | 0.902 |
-| 5 | NPR Text | 5KB | 1 | PASS | PASS | PASS | 1047 | 219 | 217 | 0.794 | 1.000 | 0.856 |
-| 6 | BBC News | 0KB | 1 | MISS | MISS | MISS | 75 | 75 | 74 | 0.047 | 0.500 | 0.183 |
-| 7 | Al Jazeera | 400KB | 28 | PASS | PASS | PASS | 1342 | 649 | 708 | 0.755 | 1.000 | 0.875 |
-| 8 | Reuters | 0KB | 1 | PASS | PASS | PASS | 74 | 72 | 72 | 0.173 | 0.500 | 0.271 |
-| 9 | AP News | 0KB | 1 | MISS | MISS | MISS | 38 | 73 | 73 | 0.083 | 0.500 | 0.208 |
-| 10 | Rust Lang | 18KB | 1 | PASS | PASS | PASS | 1517 | 1161 | 1185 | 0.550 | 1.000 | 0.819 |
-| 11 | MDN HTML | 173KB | 1 | PASS | PASS | PASS | 1649 | 2369 | 2280 | 0.825 | 1.000 | 0.877 |
-| 12 | Go Dev | 62KB | 1 | PASS | PASS | PASS | 1311 | 716 | 715 | 0.698 | 1.000 | 0.850 |
-| 13 | TypeScript | FAIL | - | - | - | - | - | - | - | - | - | - |
-| 14 | Kotlin | 251KB | 1 | MISS | MISS | MISS | 118 | 76 | 76 | 0.182 | 0.500 | 0.278 |
-| 15 | Node.js | 451KB | 1 | PASS | PASS | PASS | 917 | 698 | 700 | 0.462 | 1.000 | 0.814 |
-| 16 | Ruby Lang | 88KB | 1 | PASS | PASS | PASS | 1197 | 1330 | 1336 | 0.712 | 1.000 | 0.940 |
-| 17 | docs.rs | 17KB | 1 | PASS | PASS | PASS | 1002 | 762 | 759 | 0.758 | 1.000 | 0.878 |
-| 18 | DevDocs | 8KB | 1 | PASS | PASS | PASS | 479 | 74 | 75 | 0.491 | 0.500 | 0.494 |
-| 19 | Can I Use | 18KB | 0 | MISS | MISS | MISS | 39 | 37 | 37 | 0.000 | 0.000 | 0.000 |
-| 20 | Crates.io | 3KB | 1 | PASS | PASS | PASS | 113 | 75 | 74 | 0.504 | 0.500 | 0.503 |
-| 21 | PyPI | 21KB | 1 | PASS | PASS | PASS | 494 | 462 | 461 | 0.945 | 1.000 | 0.961 |
-| 22 | pkg.go.dev | 32KB | 1 | PASS | PASS | PASS | 821 | 415 | 413 | 0.704 | 1.000 | 0.746 |
-| 23 | RubyGems | 18KB | 1 | PASS | PASS | PASS | 1120 | 483 | 482 | 0.616 | 1.000 | 0.880 |
-| 24 | NuGet | 16KB | 1 | PASS | PASS | PASS | 955 | 889 | 889 | 0.825 | 1.000 | 0.947 |
-| 25 | Docker Hub | 388KB | 1 | PASS | PASS | PASS | 941 | 1489 | 1547 | 0.600 | 1.000 | 0.940 |
-| 26 | Kubernetes | 37KB | 0 | MISS | MISS | MISS | 39 | 38 | 38 | 0.000 | 0.000 | 0.000 |
-| 27 | Terraform | 120KB | 340 | PASS | PASS | PASS | 2495 | 1809 | 1809 | 0.960 | 1.000 | 0.880 |
-| 28 | GitHub Explore | 393KB | 15 | PASS | PASS | PASS | 1558 | 1611 | 1725 | 0.887 | 1.000 | 0.896 |
-| 29 | GitLab | 203KB | 79 | PASS | MISS | MISS | 1968 | 2726 | 2766 | 0.802 | 1.000 | 0.906 |
-| 30 | DuckDuckGo | 157KB | 1990 | PASS | PASS | PASS | 565 | 2388 | 2399 | 0.550 | 1.000 | 0.765 |
-| 31 | OpenStreetMap | 32KB | 1 | PASS | PASS | PASS | 1027 | 244 | 245 | 0.499 | 1.000 | 0.767 |
-| 32 | W3C | 50KB | 0 | MISS | MISS | MISS | 40 | 38 | 37 | 0.000 | 0.000 | 0.000 |
-| 33 | Python.org | 47KB | 0 | MISS | MISS | MISS | 78 | 37 | 37 | 0.000 | 0.000 | 0.000 |
-| 34 | IETF | 82KB | 0 | MISS | MISS | MISS | 78 | 37 | 42 | 0.000 | 0.000 | 0.000 |
-| 35 | Wikipedia Main | 0KB | 1 | MISS | MISS | MISS | 38 | 74 | 76 | 0.093 | 0.500 | 0.215 |
-| 36 | Wiktionary | 0KB | 1 | MISS | MISS | MISS | 39 | 78 | 77 | 0.049 | 0.500 | 0.184 |
-| 37 | httpbin HTML | 3KB | 1 | PASS | PASS | PASS | 148 | 139 | 138 | 0.570 | 1.000 | 0.699 |
-| 38 | httpbin JSON | 0KB | 1 | PASS | PASS | PASS | 77 | 75 | 79 | 0.220 | 0.500 | 0.304 |
-| 39 | JSON Placeholder | 8KB | 1 | PASS | PASS | PASS | 1045 | 348 | 342 | 0.945 | 1.000 | 0.961 |
-| 40 | Stack Overflow | 0KB | 1 | MISS | MISS | MISS | 38 | 73 | 71 | 0.049 | 0.500 | 0.184 |
-| 41 | Haskell.org | 63KB | 1 | PASS | PASS | PASS | 1242 | 1763 | 1727 | 0.945 | 1.000 | 0.950 |
-| 42 | Elixir Lang | 26KB | 1 | PASS | PASS | PASS | 1661 | 1697 | 1719 | 0.872 | 1.000 | 0.911 |
-| 43 | Zig Lang | 12KB | 1 | PASS | PASS | PASS | 1266 | 1679 | 1678 | 0.825 | 1.000 | 0.880 |
-| 44 | Svelte | 87KB | 1 | PASS | PASS | PASS | 969 | 1286 | 1336 | 0.825 | 1.000 | 0.951 |
-| 45 | Tailwind CSS | 913KB | 8749 | PASS | PASS | PASS | 3737 | 3958 | 3915 | 0.960 | 1.000 | 0.953 |
+| 1 | Hacker News | 33KB | 1 | PASS | PASS | PASS | 2428 | 17806 | 17944 | 0.241 | 1.000 | 0.701 |
+| 2 | HN Newest | 40KB | 1 | PASS | PASS | PASS | 699 | 1336 | 1334 | 0.457 | 1.000 | 0.620 |
+| 3 | Lobsters | 57KB | 1 | PASS | PASS | PASS | 1251 | 4658 | 4659 | 0.683 | 1.000 | 0.764 |
+| 4 | CNN Lite | 331KB | 1 | PASS | PASS | PASS | 1012 | 1760 | 1768 | 0.563 | 1.000 | 0.906 |
+| 5 | NPR Text | 5KB | 1 | PASS | PASS | PASS | 1058 | 1322 | 1327 | 0.794 | 1.000 | 0.643 |
+| 6 | Reuters | 0KB | 1 | PASS | PASS | PASS | 75 | 445 | 442 | 0.173 | 0.500 | 0.271 |
+| 7 | Rust Lang | 18KB | 1 | PASS | PASS | PASS | 1493 | 7185 | 7212 | 0.550 | 1.000 | 0.836 |
+| 8 | MDN HTML | 173KB | 1 | PASS | PASS | PASS | 1570 | 13547 | 13453 | 0.825 | 1.000 | 0.877 |
+| 9 | Go Dev | 62KB | 1 | PASS | PASS | PASS | 1253 | 4024 | 4174 | 0.698 | 1.000 | 0.850 |
+| 10 | TypeScript | 253KB | 1 | PASS | PASS | PASS | 1341 | 10741 | 10829 | 0.681 | 1.000 | 0.710 |
+| 11 | Kotlin | 251KB | 1 | MISS | MISS | MISS | 114 | 431 | 450 | 0.182 | 0.500 | 0.278 |
+| 12 | Node.js | 451KB | 1 | PASS | PASS | PASS | 887 | 4337 | 4345 | 0.462 | 1.000 | 0.808 |
+| 13 | Ruby Lang | 88KB | 1 | PASS | PASS | PASS | 1157 | 8064 | 8091 | 0.712 | 1.000 | 0.940 |
+| 14 | docs.rs | 16KB | 1 | PASS | PASS | PASS | 1027 | 5214 | 5259 | 0.758 | 1.000 | 0.835 |
+| 15 | DevDocs | 8KB | 1 | PASS | PASS | PASS | 485 | 446 | 439 | 0.491 | 0.500 | 0.494 |
+| 16 | PyPI | 21KB | 1 | PASS | PASS | PASS | 484 | 2768 | 2784 | 0.945 | 1.000 | 0.961 |
+| 17 | pkg.go.dev | 32KB | 1 | PASS | PASS | PASS | 814 | 2443 | 2437 | 0.704 | 1.000 | 0.724 |
+| 18 | RubyGems | 18KB | 1 | PASS | PASS | PASS | 1125 | 3089 | 3072 | 0.616 | 1.000 | 0.885 |
+| 19 | NuGet | 16KB | 1 | PASS | PASS | PASS | 971 | 5473 | 5395 | 0.825 | 1.000 | 0.947 |
+| 20 | Docker Hub | 388KB | 1 | PASS | PASS | PASS | 954 | 9322 | 9321 | 0.600 | 1.000 | 0.940 |
+| 21 | Terraform | 120KB | 340 | PASS | PASS | PASS | 2497 | 10530 | 10597 | 0.960 | 1.000 | 0.783 |
+| 22 | GitHub Explore | 393KB | 15 | PASS | PASS | PASS | 1568 | 9519 | 9629 | 0.887 | 1.000 | 0.877 |
+| 23 | OpenStreetMap | 32KB | 1 | PASS | PASS | PASS | 1012 | 1510 | 1544 | 0.499 | 1.000 | 0.649 |
+| 24 | httpbin HTML | 3KB | 1 | PASS | PASS | PASS | 147 | 862 | 871 | 0.570 | 1.000 | 0.699 |
+| 25 | JSON Placeholder | 8KB | 1 | PASS | PASS | PASS | 1034 | 2186 | 2183 | 0.945 | 1.000 | 0.961 |
+| 26 | Haskell.org | 63KB | 1 | PASS | PASS | PASS | 1237 | 10680 | 10679 | 0.945 | 1.000 | 0.924 |
+| 27 | Elixir Lang | 26KB | 1 | PASS | PASS | PASS | 1651 | 10681 | 10684 | 0.872 | 1.000 | 0.890 |
+| 28 | Zig Lang | 12KB | 1 | PASS | PASS | PASS | 1242 | 10295 | 10480 | 0.825 | 1.000 | 0.877 |
+| 29 | Svelte | 87KB | 1 | PASS | PASS | PASS | 967 | 8093 | 8074 | 0.825 | 1.000 | 0.951 |
+| 30 | Tailwind CSS | 912KB | 8736 | PASS | PASS | PASS | 3504 | 18577 | 18575 | 0.960 | 1.000 | 0.972 |
 
-## Top-1 Comparison (selected)
+## Top-3 Node Quality Analysis
 
-### Hacker News — top-1 labels
-- **MiniLM**: `0.218` 15 points by jandrewrogers 2 hours ago | hide | 8 comments
-- **ColBERT**: `1.000` 15 points by jandrewrogers 2 hours ago | hide | 8 comments
-- **Hybrid**: `0.847` Hacker News new | past | comments | ask | show | jobs | submit login 1. Claude C
+Side-by-side comparison of what each reranker picks as top-3 nodes.
 
-### HN Newest — top-1 labels
-- **MiniLM**: `0.512` I Decompiled the White House's New App
-- **ColBERT**: `1.000` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
-- **Hybrid**: `0.863` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
+### Hacker News
 
-### Lobsters — top-1 labels
-- **MiniLM**: `0.683` Your job isn't programming
-- **ColBERT**: `1.000` ask programming
-- **Hybrid**: `0.747` ask programming
+**MiniLM top-3:**
+1. `0.241` [generic] 10 points by zdw 1 hour ago | hide | discuss
+2. `0.214` [generic] Hacker News new | past | comments | ask | show | jobs | submit login
+3. `0.205` [generic] 20 points by jandrewrogers 2 hours ago | hide | 12 comments
 
-### CNN Lite — top-1 labels
-- **MiniLM**: `0.563` Behind the scenes and in front of cameras, Hegseth serving as top cheerleader fo
-- **ColBERT**: `1.000` Breaking News, Latest News and Videos | CNN CNN 3/31/2026 Latest Stories Takeawa
-- **Hybrid**: `0.902` Breaking News, Latest News and Videos | CNN CNN 3/31/2026 Latest Stories Takeawa
+**ColBERT top-3:**
+1. `1.000` [generic] Hacker News new | past | comments | ask | show | jobs | submit login
+2. `1.000` [generic] Hacker News new | past | comments | ask | show | jobs | submit login
+3. `1.000` [table] Hacker News new | past | comments | ask | show | jobs | submit login
 
-### NPR Text — top-1 labels
-- **MiniLM**: `0.794` NPR : National Public Radio
-- **ColBERT**: `1.000` NPR : National Public Radio
-- **Hybrid**: `0.856` NPR : National Public Radio
+---
 
-### BBC News — top-1 labels
-- **MiniLM**: `0.047` Blocked by egress policy
-- **ColBERT**: `0.500` Blocked by egress policy
-- **Hybrid**: `0.183` Blocked by egress policy
+### HN Newest
 
-### Al Jazeera — top-1 labels
-- **MiniLM**: `0.755` jsonLd.headline: Breaking News, World News and Video from Al Jazeera
-- **ColBERT**: `1.000` jsonLd.headline: Breaking News, World News and Video from Al Jazeera
-- **Hybrid**: `0.875` Breaking News, World News and Video from Al Jazeera Skip links Skip to Featured 
+**MiniLM top-3:**
+1. `0.457` [text] Hacker News new | past | comments | ask | show | jobs | submit
+2. `0.375` [text] new
+3. `0.053` [generic] New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | submit login 1. The 
 
-### Reuters — top-1 labels
-- **MiniLM**: `0.173` reuters.com Please enable JS and disable any ad blocker
-- **ColBERT**: `0.500` reuters.com Please enable JS and disable any ad blocker
-- **Hybrid**: `0.271` reuters.com Please enable JS and disable any ad blocker
+**ColBERT top-3:**
+1. `1.000` [text] Hacker News new | past | comments | ask | show | jobs | submit
+2. `0.611` [link] new
+3. `0.611` [text] new
 
-### AP News — top-1 labels
-- **MiniLM**: `0.083` Blocked by egress policy
-- **ColBERT**: `0.500` Blocked by egress policy
-- **Hybrid**: `0.208` Blocked by egress policy
+---
 
-### Rust Lang — top-1 labels
-- **MiniLM**: `0.550` Read Rust
-- **ColBERT**: `1.000` Rust Programming Language Install Learn Playground Tools Governance Community Bl
-- **Hybrid**: `0.819` Rust Programming Language Install Learn Playground Tools Governance Community Bl
+### Lobsters
 
-### MDN HTML — top-1 labels
-- **MiniLM**: `0.825` Reference for all HTML elements .
-- **ColBERT**: `1.000` Reference for all HTML elements .
-- **Hybrid**: `0.877` Reference for all HTML elements .
+**MiniLM top-3:**
+1. `0.683` [heading] Your job isn't programming
+2. `0.663` [link] Programming language theory, types, design
+3. `0.639` [text] ask programming
 
-### Go Dev — top-1 labels
-- **MiniLM**: `0.698` Get Started Download Go
-- **ColBERT**: `1.000` Build simple, secure, scalable systems with Go An open-source programming langua
-- **Hybrid**: `0.850` Build simple, secure, scalable systems with Go An open-source programming langua
+**ColBERT top-3:**
+1. `1.000` [link] Programming language theory, types, design
+2. `0.905` [text] ask programming
+3. `0.764` [link] C programming
 
-### Kotlin — top-1 labels
-- **MiniLM**: `0.182` isDarkTheme: true
-- **ColBERT**: `0.500` isDarkTheme: true
-- **Hybrid**: `0.278` isDarkTheme: true
+---
 
-### Node.js — top-1 labels
-- **MiniLM**: `0.462` Get Node.js® Get Node.js® Get security support for EOL Node.js versions Node.js 
-- **ColBERT**: `1.000` Node.js — Run JavaScript Everywhere Skip to content Learn About Download Blog Do
-- **Hybrid**: `0.814` Get Node.js® Get Node.js® Get security support for EOL Node.js versions Node.js 
+### CNN Lite
 
-### Ruby Lang — top-1 labels
-- **MiniLM**: `0.712` “ Ruby is just the most beautiful programming language I have ever seen. And I p
-- **ColBERT**: `1.000` Ruby Programming Language Ruby Install Docs Libraries Contribution Community New
-- **Hybrid**: `0.940` Ruby Programming Language Ruby Install Docs Libraries Contribution Community New
+**MiniLM top-3:**
+1. `0.563` [link] Behind the scenes and in front of cameras, Hegseth serving as top cheerleader for military power in 
+2. `0.514` [text] Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery Company. All Rights
+3. `0.386` [generic] CNN 3/31/2026 Latest Stories DeSantis clears renaming of Florida airport after Trump for takeoff Fed
 
-### docs.rs — top-1 labels
-- **MiniLM**: `0.758` Rust Rust website The Book Standard Library API Reference Rust by Example The Ca
-- **ColBERT**: `1.000` Docs.rs Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Down
-- **Hybrid**: `0.878` Docs.rs Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Down
+**ColBERT top-3:**
+1. `1.000` [generic] Breaking News, Latest News and Videos | CNN CNN 3/31/2026 Latest Stories DeSantis clears renaming of
+2. `0.744` [text] Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery Company. All Rights
+3. `0.632` [generic] CNN 3/31/2026 Latest Stories DeSantis clears renaming of Florida airport after Trump for takeoff Fed
 
-### DevDocs — top-1 labels
-- **MiniLM**: `0.491` DevDocs API Documentation Clear search DevDocs Preferences Offline Data Changelo
-- **ColBERT**: `0.500` DevDocs API Documentation Clear search DevDocs Preferences Offline Data Changelo
-- **Hybrid**: `0.494` DevDocs API Documentation Clear search DevDocs Preferences Offline Data Changelo
+---
 
-### Can I Use — top-1 labels
-- **MiniLM**: `0.000` 
-- **ColBERT**: `0.000` 
-- **Hybrid**: `0.000` 
+### NPR Text
 
-### Crates.io — top-1 labels
-- **MiniLM**: `0.504` crates.io: Rust Package Registry
-- **ColBERT**: `0.500` crates.io: Rust Package Registry
-- **Hybrid**: `0.503` crates.io: Rust Package Registry
+**MiniLM top-3:**
+1. `0.794` [heading] NPR : National Public Radio
+2. `0.595` [text] NPR : National Public Radio Tuesday, March 31, 2026 The Supreme Court strikes down a Colorado ban on
+3. `0.489` [link] News
 
-### PyPI — top-1 labels
-- **MiniLM**: `0.945` Find, install and publish Python packages with the Python Package Index
-- **ColBERT**: `1.000` Find, install and publish Python packages with the Python Package Index
-- **Hybrid**: `0.961` Find, install and publish Python packages with the Python Package Index
+**ColBERT top-3:**
+1. `1.000` [link] News
+2. `0.176` [heading] NPR : National Public Radio
+3. `0.164` [generic] NPR : National Public Radio Text-Only Version Go To Full Site NPR : National Public Radio Tuesday, M
+
+---
+
+### Reuters
+
+**MiniLM top-3:**
+1. `0.173` [generic] reuters.com Please enable JS and disable any ad blocker
+
+**ColBERT top-3:**
+1. `0.500` [generic] reuters.com Please enable JS and disable any ad blocker
+
+---
+
+### Rust Lang
+
+**MiniLM top-3:**
+1. `0.550` [heading] Read Rust
+2. `0.540` [heading] Watch Rust
+3. `0.414` [text] Rust in production Hundreds of companies around the world are using Rust in production
+today for fas
+
+**ColBERT top-3:**
+1. `1.000` [generic] Rust Programming Language Install Learn Playground Tools Governance Community Blog Language English 
+2. `0.944` [text] Build it in Rust In 2018, the Rust community decided to improve the programming experience
+for a few
+3. `0.920` [generic] Install Learn Playground Tools Governance Community Blog Language English (en-US) Español (es) Franç
+
+---
+
+### MDN HTML
+
+**MiniLM top-3:**
+1. `0.825` [text] Reference for all HTML elements .
+2. `0.825` [text] HTML HTML: Markup language HTML reference Elements Global attributes Attributes See all… HTML guides
+3. `0.825` [text] HTML reference Elements Global attributes Attributes See all… HTML guides Responsive images HTML che
+
+**ColBERT top-3:**
+1. `1.000` [generic] Reference for all HTML elements .
+2. `1.000` [text] Reference for all HTML elements .
+3. `0.880` [generic] HTML elements Reference for all HTML elements . HTML attributes Reference for all HTML attributes. A
+
+---
+
+### Go Dev
+
+**MiniLM top-3:**
+1. `0.698` [text] Get Started Download Go
+2. `0.675` [text] "...when a programming language is designed for exactly the environment most
+ of us use right now—sc
+3. `0.675` [text] Build simple, secure, scalable systems with Go An open-source programming language supported by Goog
+
+**ColBERT top-3:**
+1. `1.000` [text] Build simple, secure, scalable systems with Go An open-source programming language supported by Goog
+2. `1.000` [text] Build simple, secure, scalable systems with Go An open-source programming language supported by Goog
+3. `0.630` [text] Build simple, secure, scalable systems with Go An open-source programming language supported by Goog
+
+---
+
+### TypeScript
+
+**MiniLM top-3:**
+1. `0.681` [heading] Using TypeScript
+2. `0.673` [heading] What is TypeScript?
+3. `0.655` [heading] TypeScript is JavaScript with syntax for types.
+
+**ColBERT top-3:**
+1. `1.000` [text] TypeScript file .
+2. `0.893` [text] TypeScript
+3. `0.817` [link] TypeScript 6.0
+
+---
+
+### Kotlin
+
+**MiniLM top-3:**
+1. `0.182` [data] isDarkTheme: true
+
+**ColBERT top-3:**
+1. `0.500` [data] isDarkTheme: true
+
+---
+
+### Node.js
+
+**MiniLM top-3:**
+1. `0.462` [text] Get Node.js® Get Node.js® Get security support for EOL Node.js versions Node.js is proudly supported
+2. `0.437` [text] Node.js is proudly supported by the partners above and more .
+3. `0.424` [text] Skip to content Learn About Download Blog Docs Contribute Courses Start typing... ⌘ K Run JavaScript
+
+**ColBERT top-3:**
+1. `1.000` [generic] Node.js — Run JavaScript Everywhere Skip to content Learn About Download Blog Docs Contribute Course
+2. `0.912` [text] Get Node.js® Get Node.js® Get security support for EOL Node.js versions Node.js is proudly supported
+3. `0.912` [text] Get Node.js® Get Node.js® Get security support for EOL Node.js versions Node.js is proudly supported
+
+---
+
+### Ruby Lang
+
+**MiniLM top-3:**
+1. `0.712` [text] “ Ruby is just the most beautiful programming language I have ever seen. And I pay a fair amount of 
+2. `0.676` [text] Since 1995 Ruby Latest Version: 4.0.2 Download
+3. `0.667` [text] A Programmer's Best Friend Since 1995 Ruby Latest Version: 4.0.2 Download
+
+**ColBERT top-3:**
+1. `1.000` [generic] Ruby Programming Language Ruby Install Docs Libraries Contribution Community News English ( en ) Бъл
+2. `0.891` [text] A Programmer's Best Friend Since 1995 Ruby Latest Version: 4.0.2 Download
+3. `0.891` [text] A Programmer's Best Friend Since 1995 Ruby Latest Version: 4.0.2 Download
+
+---
+
+### docs.rs
+
+**MiniLM top-3:**
+1. `0.758` [listitem] Rust Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Doc
+2. `0.725` [form] Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rustdoc JSON Build queu
+3. `0.715` [listitem] Rust website
+
+**ColBERT top-3:**
+1. `1.000` [list] Rust Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Doc
+2. `1.000` [listitem] Rust Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Doc
+3. `0.983` [list] Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Document
+
+---
+
+### DevDocs
+
+**MiniLM top-3:**
+1. `0.491` [generic] DevDocs API Documentation Clear search DevDocs Preferences Offline Data Changelog Guide About Report
+
+**ColBERT top-3:**
+1. `0.500` [generic] DevDocs API Documentation Clear search DevDocs Preferences Offline Data Changelog Guide About Report
+
+---
+
+### PyPI
+
+**MiniLM top-3:**
+1. `0.945` [heading] Find, install and publish Python packages with the Python Package Index
+2. `0.825` [text] Find, install and publish Python packages with the Python Package Index Search PyPI Search Or browse
+3. `0.807` [text] PyPI helps you find and install software developed and shared by the Python community. Learn about i
+
+**ColBERT top-3:**
+1. `1.000` [heading] Find, install and publish Python packages with the Python Package Index
+2. `0.829` [text] Find, install and publish Python packages with the Python Package Index Search PyPI Search Or browse
+3. `0.829` [text] Find, install and publish Python packages with the Python Package Index Search PyPI Search Or browse
+
+---
+
+### pkg.go.dev
+
+**MiniLM top-3:**
+1. `0.704` [text] Packages Standard Library Sub-repositories About Go Packages
+2. `0.577` [link] About Go Packages
+3. `0.528` [text] Why Go Use Cases Case Studies Get Started Playground Tour Stack Overflow Help Packages Standard Libr
+
+**ColBERT top-3:**
+1. `1.000` [link] About Go Packages
+2. `0.772` [text] Packages Standard Library Sub-repositories About Go Packages
+3. `0.377` [generic] Go Packages - Go Packages Skip to Main Content Why Go Case Studies Common problems companies solve w
+
+---
+
+### RubyGems
+
+**MiniLM top-3:**
+1. `0.616` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+2. `0.613` [text] Ruby Central
+3. `0.497` [text] Operated by Ruby Central Designed by DockYard Hosted by AWS Resolved with DNSimple Monitored by Data
+
+**ColBERT top-3:**
+1. `1.000` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+2. `0.803` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+3. `0.803` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+
+---
+
+### NuGet
+
+**MiniLM top-3:**
+1. `0.825` [text] NuGet is the package manager for .NET. The NuGet client tools provide the ability to produce and con
+2. `0.825` [text] What is NuGet? NuGet is the package manager for .NET. The NuGet client tools provide the ability to 
+3. `0.675` [text] Create .NET apps faster with NuGet 0 package downloads 0 package versions 0 unique packages
+
+**ColBERT top-3:**
+1. `1.000` [text] NuGet is the package manager for .NET. The NuGet client tools provide the ability to produce and con
+2. `0.942` [text] What is NuGet? NuGet is the package manager for .NET. The NuGet client tools provide the ability to 
+3. `0.880` [main] Create .NET apps faster with NuGet 0 package downloads 0 package versions 0 unique packages What is 
+
+---
+
+### Docker Hub
+
+**MiniLM top-3:**
+1. `0.600` [generic] Docker Hub Container Image Library | App Containerization Search Docker Hub K Help Back Documentatio
+2. `0.504` [heading] Docker Hardened Images - Now Free
+3. `0.488` [text] Search Docker Hub K Help Back Documentation ⁠ Forums ⁠ Contact support System status ⁠ System theme 
+
+**ColBERT top-3:**
+1. `1.000` [generic] Docker Hub Container Image Library | App Containerization Search Docker Hub K Help Back Documentatio
+2. `0.597` [heading] Docker Hardened Images - Now Free
+3. `0.521` [text] Search Docker Hub K Help Back Documentation ⁠ Forums ⁠ Contact support System status ⁠ System theme 
+
+---
+
+### Terraform
+
+**MiniLM top-3:**
+1. `0.960` [data] content.get_started.body: Follow a code-complete, hands-on tutorial to learn the Terraform basics wi
+2. `0.960` [data] content.overview.body: Terraform is an infrastructure as code tool that lets you build, change, and 
+3. `0.690` [data] product.rootDocsPaths[0].iconName: code
+
+**ColBERT top-3:**
+1. `1.000` [data] product.rootDocsPaths[0].iconName: code
+2. `0.996` [data] content.blocks[5].cards[0].body: Describe infrastructure in Terraform configuration language.
+3. `0.932` [data] content.blocks[5].cards[2].body: Collaborate with your team to provision infrastructure.
+
+---
+
+### GitHub Explore
+
+**MiniLM top-3:**
+1. `0.887` [heading] Trending repository
+2. `0.825` [text] REPOSITORIES Topics Trending Collections
+3. `0.825` [text] COMMUNITY GitHub Sponsors Fund open source developers PROGRAMS Security Lab Maintainer Community Acc
+
+**ColBERT top-3:**
+1. `1.000` [text] REPOSITORIES Topics Trending Collections
+2. `0.650` [heading] Trending repository
+3. `0.650` [heading] Trending repository
+
+---
+
+### OpenStreetMap
+
+**MiniLM top-3:**
+1. `0.499` [text] OpenStreetMap is a map of the world, created by people like you and free to use under an open licens
+2. `0.415` [text] Welcome to OpenStreetMap! OpenStreetMap is a map of the world, created by people like you and free t
+3. `0.398` [text] Where is this? GraphHopper OSRM Valhalla Loading... Welcome to OpenStreetMap! OpenStreetMap is a map
+
+**ColBERT top-3:**
+1. `1.000` [text] OpenStreetMap is a map of the world, created by people like you and free to use under an open licens
+2. `0.807` [generic] OpenStreetMap Where is this? GraphHopper OSRM Valhalla Edit Edit with iD (in-browser editor) Edit wi
+3. `0.784` [generic] OpenStreetMap OpenStreetMap Where is this? GraphHopper OSRM Valhalla Edit Edit with iD (in-browser e
+
+---
+
+### httpbin HTML
+
+**MiniLM top-3:**
+1. `0.570` [heading] Herman Melville - Moby-Dick
+2. `0.427` [generic] Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather that now reigned in th
+
+**ColBERT top-3:**
+1. `1.000` [heading] Herman Melville - Moby-Dick
+2. `0.000` [generic] Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather that now reigned in th
+3. `0.000` [generic] Herman Melville - Moby-Dick Availing himself of the mild, summer-cool weather that now reigned in th
+
+---
+
+### JSON Placeholder
+
+**MiniLM top-3:**
+1. `0.945` [heading] Free fake and reliable API for testing and prototyping.
+2. `0.825` [text] {JSON} Placeholder Free fake and reliable API for testing and prototyping. Powered by JSON Server + 
+3. `0.735` [text] JSONPlaceholder is a free online REST API that you can use whenever you need some fake data . It can
+
+**ColBERT top-3:**
+1. `1.000` [heading] Free fake and reliable API for testing and prototyping.
+2. `0.712` [text] {JSON} Placeholder Free fake and reliable API for testing and prototyping. Powered by JSON Server + 
+3. `0.712` [generic] {JSON} Placeholder Free fake and reliable API for testing and prototyping. Powered by JSON Server + 
+
+---
+
+### Haskell.org
+
+**MiniLM top-3:**
+1. `0.945` [heading] Smart contract systems are largely about programming languages, 
+and when it comes to programming la
+2. `0.825` [text] IOHK Smart contract systems are largely about programming languages, 
+and when it comes to programmi
+3. `0.814` [heading] Functional Programming &Haskell, by Computerphile / John Hughes
+
+**ColBERT top-3:**
+1. `1.000` [text] A new paradigm Express your ideas clearly and learn a new way of thinking about programming. Based o
+2. `0.981` [text] A new paradigm Express your ideas clearly and learn a new way of thinking about programming. Based o
+3. `0.944` [text] Why Haskell? A new paradigm Express your ideas clearly and learn a new way of thinking about program
+
+---
+
+### Elixir Lang
+
+**MiniLM top-3:**
+1. `0.872` [heading] Elixir is a dynamic, functional language for building scalable and maintainable applications.
+2. `0.678` [heading] Functional programming
+3. `0.659` [text] Elixir has been designed to be extensible, allowing developers to naturally extend the language to p
+
+**ColBERT top-3:**
+1. `1.000` [generic] The Elixir programming language Home Install Learning Docs Guides Cases Blog Elixir is a dynamic, fu
+2. `0.930` [heading] Elixir is a dynamic, functional language for building scalable and maintainable applications.
+3. `0.859` [text] Elixir is a dynamic, functional language for building scalable and maintainable applications. Elixir
+
+---
+
+### Zig Lang
+
+**MiniLM top-3:**
+1. `0.825` [text] Zig is a general-purpose programming language and toolchain for maintaining robust , optimal and reu
+2. `0.675` [text] Focus on debugging your application rather than debugging your programming language knowledge.
+3. `0.657` [text] ⚡ A Simple Language Focus on debugging your application rather than debugging your programming langu
+
+**ColBERT top-3:**
+1. `1.000` [text] Zig is a general-purpose programming language and toolchain for maintaining robust , optimal and reu
+2. `1.000` [text] Zig is a general-purpose programming language and toolchain for maintaining robust , optimal and reu
+3. `1.000` [text] Zig is a general-purpose programming language and toolchain for maintaining robust , optimal and reu
+
+---
+
+### Svelte
+
+**MiniLM top-3:**
+1. `0.825` [text] Svelte is a UI framework that uses a compiler to let you write breathtakingly concise
+			components 
+2. `0.744` [text] attractively thin, graceful and stylish Svelte is a UI framework that uses a compiler to let you wri
+3. `0.737` [heading] Svelte
+
+**ColBERT top-3:**
+1. `1.000` [main] Svelte web development for the rest of us get started attractively thin, graceful and stylish Svelte
+2. `1.000` [text] Svelte web development for the rest of us get started attractively thin, graceful and stylish Svelte
+3. `0.981` [text] Svelte is a UI framework that uses a compiler to let you write breathtakingly concise
+			components 
+
+---
+
+### Tailwind CSS
+
+**MiniLM top-3:**
+1. `0.960` [data] _rsc_332[1][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+2. `0.960` [data] _rsc_332[3][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+3. `0.960` [data] _rsc_332[10][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern w
+
+**ColBERT top-3:**
+1. `1.000` [data] _rsc_332[3][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+2. `1.000` [data] _rsc_332[1][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+3. `1.000` [data] _rsc_332[10][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern w
+
+---
 

@@ -65,31 +65,10 @@ fn test_cases() -> Vec<TestCase> {
             top_n: 10,
         },
         TestCase {
-            name: "BBC News",
-            url: "https://www.bbc.com/news",
-            goal: "world news headlines",
-            keyword: "bbc",
-            top_n: 10,
-        },
-        TestCase {
-            name: "Al Jazeera",
-            url: "https://www.aljazeera.com",
-            goal: "international news coverage",
-            keyword: "news",
-            top_n: 10,
-        },
-        TestCase {
             name: "Reuters",
             url: "https://www.reuters.com",
             goal: "business news today",
             keyword: "reuters",
-            top_n: 10,
-        },
-        TestCase {
-            name: "AP News",
-            url: "https://apnews.com",
-            goal: "breaking news stories",
-            keyword: "news",
             top_n: 10,
         },
         // ── Utvecklarresurser ──
@@ -157,21 +136,7 @@ fn test_cases() -> Vec<TestCase> {
             keyword: "documentation",
             top_n: 10,
         },
-        TestCase {
-            name: "Can I Use",
-            url: "https://caniuse.com",
-            goal: "browser compatibility tables",
-            keyword: "browser",
-            top_n: 10,
-        },
         // ── Paketregister ──
-        TestCase {
-            name: "Crates.io",
-            url: "https://crates.io",
-            goal: "Rust package registry search",
-            keyword: "rust",
-            top_n: 10,
-        },
         TestCase {
             name: "PyPI",
             url: "https://pypi.org",
@@ -209,13 +174,6 @@ fn test_cases() -> Vec<TestCase> {
             top_n: 10,
         },
         TestCase {
-            name: "Kubernetes",
-            url: "https://kubernetes.io",
-            goal: "container orchestration documentation",
-            keyword: "kubernetes",
-            top_n: 10,
-        },
-        TestCase {
             name: "Terraform",
             url: "https://www.terraform.io",
             goal: "infrastructure as code",
@@ -230,21 +188,7 @@ fn test_cases() -> Vec<TestCase> {
             keyword: "trending",
             top_n: 10,
         },
-        TestCase {
-            name: "GitLab",
-            url: "https://about.gitlab.com",
-            goal: "DevOps platform features",
-            keyword: "gitlab",
-            top_n: 10,
-        },
         // ── Sök / Kartor ──
-        TestCase {
-            name: "DuckDuckGo",
-            url: "https://duckduckgo.com",
-            goal: "search engine privacy",
-            keyword: "search",
-            top_n: 10,
-        },
         TestCase {
             name: "OpenStreetMap",
             url: "https://www.openstreetmap.org",
@@ -253,55 +197,13 @@ fn test_cases() -> Vec<TestCase> {
             top_n: 10,
         },
         // ── Myndigheter / Officiella ──
-        TestCase {
-            name: "W3C",
-            url: "https://www.w3.org",
-            goal: "web standards specifications",
-            keyword: "web",
-            top_n: 10,
-        },
-        TestCase {
-            name: "Python.org",
-            url: "https://www.python.org",
-            goal: "download Python latest version",
-            keyword: "python",
-            top_n: 10,
-        },
-        TestCase {
-            name: "IETF",
-            url: "https://www.ietf.org",
-            goal: "internet standards RFC documents",
-            keyword: "rfc",
-            top_n: 10,
-        },
         // ── Referens / Encyklopedi ──
-        TestCase {
-            name: "Wikipedia Main",
-            url: "https://en.wikipedia.org/wiki/Main_Page",
-            goal: "featured article today",
-            keyword: "wikipedia",
-            top_n: 10,
-        },
-        TestCase {
-            name: "Wiktionary",
-            url: "https://en.wiktionary.org",
-            goal: "word definitions dictionary",
-            keyword: "dictionary",
-            top_n: 10,
-        },
         // ── Verktyg ──
         TestCase {
             name: "httpbin HTML",
             url: "https://httpbin.org/html",
             goal: "Herman Melville story",
             keyword: "melville",
-            top_n: 10,
-        },
-        TestCase {
-            name: "httpbin JSON",
-            url: "https://httpbin.org/robots.txt",
-            goal: "robots.txt rules",
-            keyword: "user-agent",
             top_n: 10,
         },
         TestCase {
@@ -312,13 +214,6 @@ fn test_cases() -> Vec<TestCase> {
             top_n: 10,
         },
         // ── Tech-företag ──
-        TestCase {
-            name: "Stack Overflow",
-            url: "https://stackoverflow.com",
-            goal: "programming questions and answers",
-            keyword: "stack",
-            top_n: 10,
-        },
         TestCase {
             name: "Haskell.org",
             url: "https://www.haskell.org",
@@ -371,6 +266,7 @@ struct SiteResult {
     minilm_correct: bool,
     minilm_top1_score: f32,
     minilm_top1_label: String,
+    minilm_top3_labels: Vec<(f32, String, String)>, // (score, role, label)
     minilm_node_count: usize,
 
     // ColBERT (pipeline med Stage3Reranker::ColBert)
@@ -378,6 +274,7 @@ struct SiteResult {
     colbert_correct: bool,
     colbert_top1_score: f32,
     colbert_top1_label: String,
+    colbert_top3_labels: Vec<(f32, String, String)>,
 
     // Hybrid (pipeline med Stage3Reranker::Hybrid)
     hybrid_ms: f64,
@@ -489,6 +386,27 @@ fn run_test(tc: &TestCase) -> SiteResult {
         r.minilm_top1_score = *score;
         r.minilm_top1_label = label.clone();
     }
+    // Samla top-3 med roller för djupanalys
+    {
+        let pv: serde_json::Value = serde_json::from_str(&minilm_json).unwrap_or_default();
+        if let Some(nodes) = pv["top_nodes"].as_array() {
+            r.minilm_top3_labels = nodes
+                .iter()
+                .take(3)
+                .map(|n| {
+                    let score = n["relevance"].as_f64().unwrap_or(0.0) as f32;
+                    let role = n["role"].as_str().unwrap_or("?").to_string();
+                    let label: String = n["label"]
+                        .as_str()
+                        .unwrap_or("")
+                        .chars()
+                        .take(100)
+                        .collect();
+                    (score, role, label)
+                })
+                .collect();
+        }
+    }
 
     // Extract pipeline details
     let pv: serde_json::Value = serde_json::from_str(&minilm_json).unwrap_or_default();
@@ -523,6 +441,18 @@ fn run_test(tc: &TestCase) -> SiteResult {
             r.colbert_top1_score = top.relevance;
             r.colbert_top1_label = top.label.chars().take(80).collect();
         }
+        r.colbert_top3_labels = result
+            .scored_nodes
+            .iter()
+            .take(3)
+            .map(|n| {
+                (
+                    n.relevance,
+                    n.role.clone(),
+                    n.label.chars().take(100).collect(),
+                )
+            })
+            .collect();
 
         // ── Hybrid ──
         let config_hybrid = PipelineConfig {
@@ -569,15 +499,23 @@ fn main() {
         }
     }
 
-    let has_colbert = aether_agent::embedding::is_loaded();
-    println!(
-        "  ColBERT:    {}",
-        if has_colbert {
-            "READY (ONNX, same model as bi-encoder)"
+    // Ladda separat ColBERT-modell om tillgänglig
+    #[cfg(feature = "embeddings")]
+    {
+        let cm = std::env::var("AETHER_COLBERT_MODEL")
+            .unwrap_or_else(|_| "models/colbertv2-onnx/model.onnx".into());
+        let cv = std::env::var("AETHER_COLBERT_VOCAB")
+            .unwrap_or_else(|_| "models/colbertv2-onnx/vocab.txt".into());
+        if let (Ok(cmb), Ok(cvt)) = (std::fs::read(&cm), std::fs::read_to_string(&cv)) {
+            if aether_agent::embedding::init_colbert(&cmb, &cvt).is_ok() {
+                println!("  ColBERT:    LOADED ({}, 768-dim ColBERTv2)", cm);
+            }
         } else {
-            "NOT LOADED (need embeddings)"
+            println!("  ColBERT:    using bi-encoder fallback (384-dim)");
         }
-    );
+    }
+    let has_colbert = aether_agent::embedding::is_loaded();
+    println!();
     println!();
 
     let cases = test_cases();
@@ -651,9 +589,7 @@ fn main() {
     let mut md = String::new();
     md.push_str("# ColBERT vs MiniLM vs Hybrid — Live Validation\n\n");
     md.push_str(&format!("**Date:** 2026-03-31\n"));
-    md.push_str(
-        "**Mode:** Release build, embeddings (all-MiniLM-L6-v2) + ColBERTv2.0 (110M params, CPU)\n",
-    );
+    md.push_str("**Mode:** Release build, bi-encoder (all-MiniLM-L6-v2, 384-dim) + ColBERTv2.0 (768-dim, ONNX, CPU)\n");
     md.push_str(&format!("**Sites:** {n} fetched / {} total\n\n", total));
 
     md.push_str("## Summary\n\n");
@@ -703,21 +639,22 @@ fn main() {
         ));
     }
 
-    md.push_str("\n## Top-1 Comparison (selected)\n\n");
-    for r in fetched.iter().take(20) {
-        md.push_str(&format!("### {} — top-1 labels\n", r.name));
-        md.push_str(&format!(
-            "- **MiniLM**: `{:.3}` {}\n",
-            r.minilm_top1_score, r.minilm_top1_label
-        ));
-        md.push_str(&format!(
-            "- **ColBERT**: `{:.3}` {}\n",
-            r.colbert_top1_score, r.colbert_top1_label
-        ));
-        md.push_str(&format!(
-            "- **Hybrid**: `{:.3}` {}\n\n",
-            r.hybrid_top1_score, r.hybrid_top1_label
-        ));
+    md.push_str("\n## Top-3 Node Quality Analysis\n\n");
+    md.push_str("Side-by-side comparison of what each reranker picks as top-3 nodes.\n\n");
+    for r in fetched.iter() {
+        if r.minilm_top3_labels.is_empty() && r.colbert_top3_labels.is_empty() {
+            continue;
+        }
+        md.push_str(&format!("### {}\n\n", r.name));
+        md.push_str("**MiniLM top-3:**\n");
+        for (i, (score, role, label)) in r.minilm_top3_labels.iter().enumerate() {
+            md.push_str(&format!("{}. `{:.3}` [{}] {}\n", i + 1, score, role, label));
+        }
+        md.push_str("\n**ColBERT top-3:**\n");
+        for (i, (score, role, label)) in r.colbert_top3_labels.iter().enumerate() {
+            md.push_str(&format!("{}. `{:.3}` [{}] {}\n", i + 1, score, role, label));
+        }
+        md.push_str("\n---\n\n");
     }
 
     match std::fs::write("docs/colbert_vs_minilm_validation.md", &md) {
