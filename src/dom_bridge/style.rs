@@ -68,16 +68,21 @@ impl JsHandler for ClassListRemove {
         }
         let mut s = self.state.borrow_mut();
         if let Some(node) = s.arena.nodes.get_mut(self.key) {
-            let current = node.get_attr("class").unwrap_or("").to_string();
-            // Ordered set: dedup + remove
-            let mut seen = std::collections::HashSet::new();
-            let new_cls: Vec<&str> = current
-                .split_whitespace()
-                .filter(|c| seen.insert(*c))
-                .filter(|&c| !tokens.iter().any(|t| t == c))
-                .collect();
-            node.attributes
-                .insert("class".to_string(), new_cls.join(" "));
+            let has_attr = node.get_attr("class").is_some();
+            if !has_attr {
+                // Inget class-attribut → ingen ändring
+            } else {
+                let current = node.get_attr("class").unwrap_or("").to_string();
+                // Ordered set: dedup + remove
+                let mut seen = std::collections::HashSet::new();
+                let new_cls: Vec<&str> = current
+                    .split_whitespace()
+                    .filter(|c| seen.insert(*c))
+                    .filter(|&c| !tokens.iter().any(|t| t == c))
+                    .collect();
+                node.attributes
+                    .insert("class".to_string(), new_cls.join(" "));
+            }
         }
         #[cfg(feature = "blitz")]
         invalidate_blitz_cache(&self.state);
@@ -399,7 +404,7 @@ pub(super) fn make_class_list<'js>(
             key,
         }),
     )?;
-    let update_fn_code = r#"(function(obj, getClasses, getRawClass, setValue) {
+    let update_fn_code = r#"(function(obj, getClasses, getRawClass, setValue, nodeKey) {
         Object.defineProperty(obj, 'length', { get: function(){ return getClasses().length; }, configurable: true });
         Object.defineProperty(obj, 'value', {
             get: function(){ return getRawClass(); },
@@ -426,6 +431,12 @@ pub(super) fn make_class_list<'js>(
         };
         obj[Symbol.iterator] = obj.values;
         obj.supports = function(){ throw new TypeError("DOMTokenList has no supported tokens"); };
+        // Notifiera MutationObserver vid attribut-ändring
+        function notifyMut() {
+            if (typeof __pushAttributeMutation === 'function') {
+                __pushAttributeMutation(nodeKey, 'class');
+            }
+        }
         // Index-access: uppdatera [0], [1], etc. dynamiskt
         var origAdd = obj.add, origRemove = obj.remove, origToggle = obj.toggle, origReplace = obj.replace;
         function syncIndices() {
@@ -434,10 +445,10 @@ pub(super) fn make_class_list<'js>(
             for (var j = 0; j < cls.length; j++) { obj[j] = cls[j]; }
         }
         syncIndices();
-        obj.add = function() { origAdd.apply(this, arguments); syncIndices(); };
-        obj.remove = function() { origRemove.apply(this, arguments); syncIndices(); };
-        obj.toggle = function() { var r = origToggle.apply(this, arguments); syncIndices(); return r; };
-        obj.replace = function() { var r = origReplace.apply(this, arguments); syncIndices(); return r; };
+        obj.add = function() { origAdd.apply(this, arguments); notifyMut(); syncIndices(); };
+        obj.remove = function() { origRemove.apply(this, arguments); notifyMut(); syncIndices(); };
+        obj.toggle = function() { var r = origToggle.apply(this, arguments); notifyMut(); syncIndices(); return r; };
+        obj.replace = function() { var r = origReplace.apply(this, arguments); notifyMut(); syncIndices(); return r; };
         return obj;
     })"#;
     let get_classes_fn = Function::new(
@@ -447,12 +458,15 @@ pub(super) fn make_class_list<'js>(
             key,
         }),
     )?;
+    // NodeKey som f64 för JS-anrop
+    let node_key_f64 = super::node_key_to_f64(key);
     if let Ok(update_fn) = ctx.eval::<Function, _>(update_fn_code) {
         let _ = update_fn.call::<_, Value>((
             obj.clone(),
             get_classes_fn,
             get_raw_class_fn,
             set_value_fn,
+            node_key_f64,
         ));
     }
 

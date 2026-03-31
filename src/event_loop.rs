@@ -564,6 +564,32 @@ fn register_mutation_observer(ctx: &Ctx<'_>, el: SharedEventLoop) -> rquickjs::R
         };"#,
     )?;
 
+    // Registrera __pushAttributeMutation(nodeKey, attrName) för setAttribute/classList
+    struct PushAttrMutation {
+        el: SharedEventLoop,
+    }
+    impl JsHandler for PushAttrMutation {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let target = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as u64;
+            let attr_name = args
+                .get(1)
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok())
+                .unwrap_or_default();
+            let mut state = self.el.borrow_mut();
+            state.pending_mutations.push_back(MutationRecord {
+                mutation_type: "attributes".to_string(),
+                target,
+                attribute_name: Some(attr_name),
+            });
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+    ctx.globals().set(
+        "__pushAttributeMutation",
+        Function::new(ctx.clone(), JsFn(PushAttrMutation { el: Rc::clone(&el) }))?,
+    )?;
+
     Ok(())
 }
 
