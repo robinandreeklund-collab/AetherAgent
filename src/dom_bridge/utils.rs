@@ -252,8 +252,6 @@ pub(super) fn is_valid_css_declaration(prop: &str, val: &str) -> bool {
     true
 }
 
-
-
 // ─── CSS Shorthand expansion/aggregation ──────────────────────────────────────
 
 /// Fyrvärdes-shorthands: margin, padding, border-width, border-style, border-color

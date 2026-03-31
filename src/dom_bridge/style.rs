@@ -11,9 +11,8 @@ use crate::event_loop::{JsFn, JsHandler};
 use super::invalidate_blitz_cache;
 use super::state::SharedState;
 use super::utils::{
-    expand_shorthand, parse_inline_styles, parse_inline_styles_ordered,
-    reconstruct_shorthand, remove_shorthand_longhands,
-    serialize_css_text_ordered, serialize_inline_styles,
+    expand_shorthand, parse_inline_styles, parse_inline_styles_ordered, reconstruct_shorthand,
+    remove_shorthand_longhands, serialize_css_text_ordered, serialize_inline_styles,
 };
 use super::{js_value_to_dom_string, validate_token};
 
