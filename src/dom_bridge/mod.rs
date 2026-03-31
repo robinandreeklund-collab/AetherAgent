@@ -6658,16 +6658,105 @@ pub(super) fn make_element_object<'js>(
         }
     }
 
-    // Cacha objektet + applicera JS-polyfills (prototypkedja, CharacterData, ChildNode-metoder)
+    // Cacha + applicera prototypkedja + polyfill-patching
     {
         let global = ctx.globals();
         let cache_key = format!("__nc_{}", key_bits as u64);
         let _ = global.set(cache_key.as_str(), obj.clone());
+        // Sätt prototype direkt i Rust (ersätter __patchPrototype polyfill)
+        let proto_name = match node_type_val {
+            1 => {
+                // Element — välj konstruktor baserat på tagName
+                let tag_upper = tag_name.to_ascii_uppercase();
+                match tag_upper.as_str() {
+                    "DIV" => "HTMLDivElement",
+                    "SPAN" => "HTMLSpanElement",
+                    "P" => "HTMLParagraphElement",
+                    "A" => "HTMLAnchorElement",
+                    "BUTTON" => "HTMLButtonElement",
+                    "INPUT" => "HTMLInputElement",
+                    "FORM" => "HTMLFormElement",
+                    "SELECT" => "HTMLSelectElement",
+                    "OPTION" => "HTMLOptionElement",
+                    "TEXTAREA" => "HTMLTextAreaElement",
+                    "IMG" => "HTMLImageElement",
+                    "TABLE" => "HTMLTableElement",
+                    "TR" => "HTMLTableRowElement",
+                    "TD" | "TH" => "HTMLTableCellElement",
+                    "THEAD" | "TBODY" | "TFOOT" => "HTMLTableSectionElement",
+                    "UL" => "HTMLUListElement",
+                    "OL" => "HTMLOListElement",
+                    "LI" => "HTMLLIElement",
+                    "DL" => "HTMLDListElement",
+                    "H1" | "H2" | "H3" | "H4" | "H5" | "H6" => "HTMLHeadingElement",
+                    "LABEL" => "HTMLLabelElement",
+                    "FIELDSET" => "HTMLFieldSetElement",
+                    "SCRIPT" => "HTMLScriptElement",
+                    "STYLE" => "HTMLStyleElement",
+                    "LINK" => "HTMLLinkElement",
+                    "META" => "HTMLMetaElement",
+                    "BODY" => "HTMLBodyElement",
+                    "HEAD" => "HTMLHeadElement",
+                    "HTML" => "HTMLHtmlElement",
+                    "BR" => "HTMLBRElement",
+                    "HR" => "HTMLHRElement",
+                    "IFRAME" => "HTMLIFrameElement",
+                    "CANVAS" => "HTMLCanvasElement",
+                    "VIDEO" => "HTMLVideoElement",
+                    "AUDIO" => "HTMLAudioElement",
+                    "TEMPLATE" => "HTMLTemplateElement",
+                    "DIALOG" => "HTMLDialogElement",
+                    "PRE" => "HTMLPreElement",
+                    "TITLE" => "HTMLTitleElement",
+                    "OUTPUT" => "HTMLOutputElement",
+                    "PROGRESS" => "HTMLProgressElement",
+                    "METER" => "HTMLMeterElement",
+                    "DETAILS" => "HTMLDetailsElement",
+                    "SUMMARY" => "HTMLSummaryElement",
+                    "EMBED" => "HTMLEmbedElement",
+                    "OBJECT" => "HTMLObjectElement",
+                    "AREA" => "HTMLAreaElement",
+                    "MAP" => "HTMLMapElement",
+                    "SOURCE" => "HTMLSourceElement",
+                    "TRACK" => "HTMLTrackElement",
+                    "OPTGROUP" => "HTMLOptGroupElement",
+                    "DATALIST" => "HTMLDataListElement",
+                    "SLOT" => "HTMLSlotElement",
+                    "PICTURE" => "HTMLPictureElement",
+                    "MENU" => "HTMLMenuElement",
+                    "DATA" => "HTMLDataElement",
+                    "TIME" => "HTMLTimeElement",
+                    "CAPTION" => "HTMLTableCaptionElement",
+                    "LEGEND" => "HTMLLegendElement",
+                    "BASE" => "HTMLBaseElement",
+                    "BLOCKQUOTE" | "Q" => "HTMLQuoteElement",
+                    "INS" | "DEL" => "HTMLModElement",
+                    "COL" | "COLGROUP" => "HTMLTableColElement",
+                    "FONT" => "HTMLFontElement",
+                    "DIR" => "HTMLDirectoryElement",
+                    "MARQUEE" => "HTMLMarqueeElement",
+                    _ => "HTMLUnknownElement",
+                }
+            }
+            3 => "Text",
+            8 => "Comment",
+            9 => "Document",
+            10 => "DocumentType",
+            11 => "DocumentFragment",
+            7 => "ProcessingInstruction",
+            _ => "",
+        };
+        if !proto_name.is_empty() {
+            let proto_code = format!(
+                "globalThis.{p}&&globalThis.{p}.prototype&&Object.setPrototypeOf(globalThis.{ck},globalThis.{p}.prototype)",
+                p = proto_name, ck = cache_key
+            );
+            let _ = ctx.eval::<Value, _>(proto_code.as_str());
+        }
+        // Kvar: __patchChildNode (NamedNodeMap, NS-metadata) — behövs fortfarande tills migrerad
         let patch_code = format!(
             concat!(
                 "globalThis.__nodeCache && globalThis.__nodeCache.set({kb}, globalThis.{ck});",
-                "if(globalThis.__patchPrototype) globalThis.__patchPrototype(globalThis.{ck});",
-                "if(globalThis.__patchCharacterData) globalThis.__patchCharacterData(globalThis.{ck});",
                 "if(globalThis.__patchChildNode) globalThis.__patchChildNode(globalThis.{ck});"
             ),
             kb = key_bits,

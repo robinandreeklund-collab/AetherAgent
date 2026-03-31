@@ -5,10 +5,8 @@
  * Laddas före testharness.js.
  */
 
-// ─── CharacterData: native Rust (dom_bridge/mod.rs) ──────────────────────────
-// .data, .nodeValue, .length = Rust getter/setter i make_element_object()
-// substringData, appendData, etc. = Rust-native i chardata.rs
-globalThis.__patchCharacterData = function(n) { return n; };
+// ─── CharacterData — MIGRERAD till native Rust (chardata.rs) ────────────────
+// .data, .nodeValue, .length, substringData, appendData etc. = Rust-native
 
 // ─── document.implementation ─────────────────────────────────────────────────
 // DOMImplementation med createDocument, createHTMLDocument, createDocumentType
@@ -191,30 +189,12 @@ globalThis.__patchCharacterData = function(n) { return n; };
 // ─── document.URL / document.location — native Rust (register_document) ──────
 // URL sätts till "about:blank" i Rust. location alias sätts i register_window.
 
-// ─── Event-typ-konstruktorer ─────────────────────────────────────────────────
-// MIGRERAD: UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent,
-// WheelEvent, PointerEvent, CompositionEvent → native i dom_bridge.rs
-// Kvar: enklare event-typer som inte ännu migrerats
-(function() {
-  if (typeof Event === 'undefined') return;
-  // Enkla event-typer (ärver Event direkt, inga spec-properties)
-  // OBS: TouchEvent migrerad till native Rust (window.rs) med Touch/TouchList
-  var simpleTypes = [
-    'AnimationEvent', 'TransitionEvent',
-    'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
-    'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
-    'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
-    'DeviceMotionEvent', 'DeviceOrientationEvent', 'GamepadEvent',
-    'MediaQueryListEvent', 'FormDataEvent', 'SubmitEvent', 'BeforeUnloadEvent'
-  ];
-  simpleTypes.forEach(function(name) {
-    if (!globalThis[name]) {
-      globalThis[name] = function(type, opts) { Event.call(this, type, opts); };
-      globalThis[name].prototype = Object.create(Event.prototype);
-      globalThis[name].prototype.constructor = globalThis[name];
-    }
-  });
-})();
+// ─── Event-typ-konstruktorer — MIGRERAD till native Rust (window.rs) ────────
+// Alla event-typer (UIEvent, MouseEvent, KeyboardEvent, FocusEvent, InputEvent,
+// WheelEvent, PointerEvent, CompositionEvent, TouchEvent, AnimationEvent,
+// TransitionEvent, HashChangeEvent, PopStateEvent, StorageEvent, ProgressEvent,
+// ClipboardEvent, DragEvent, ErrorEvent, MessageEvent, DeviceMotionEvent,
+// DeviceOrientationEvent, GamepadEvent, etc.) registreras native i window.rs.
 
 // ─── document.createEvent() — MIGRERAD till native Rust (dom_bridge/mod.rs) ──
 // Registrerad som NativeCreateEvent i register_document().
@@ -242,20 +222,10 @@ globalThis.__patchCharacterData = function(n) { return n; };
     return document.createTextNode(String(arg));
   }
 
-  // Utility: lägg till ChildNode-metoder på ett element-objekt
+  // Utility: patcha element med NamedNodeMap och NS-metadata
+  // Prototypkedja sätts nu native i Rust (make_element_object)
   function patchChildNode(el) {
     if (!el || typeof el !== 'object') return el;
-    // Sätt rätt prototypkedja (instanceof HTMLDivElement etc.)
-    if (typeof __patchPrototype === 'function') __patchPrototype(el);
-    // CharacterData-metoder för text/comment-noder
-    if (typeof __patchCharacterData === 'function') __patchCharacterData(el);
-
-    // remove(), before(), after() — nu Rust-native i dom_bridge.rs
-
-    // after(), replaceWith() — nu Rust-native i dom_bridge.rs
-
-    // prepend, append, replaceChildren — nu Rust-native i dom_bridge.rs
-
     return el;
   }
 
