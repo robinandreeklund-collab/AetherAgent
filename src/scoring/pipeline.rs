@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use crate::types::SemanticNode;
 
+use super::colbert_reranker::Stage3Reranker;
 use super::embed_score::{self, build_node_index, ScoredNode};
 use super::hdc::{self, HdcTree};
 use super::tfidf::{self, TfIdfIndex};
@@ -28,6 +29,8 @@ pub struct PipelineConfig {
     pub max_survivors: usize,
     /// Returnera alltid minst detta antal scorade noder till downstream
     pub min_output: usize,
+    /// Stage 3 reranker: MiniLM (default), ColBERT, eller Hybrid
+    pub stage3_reranker: Stage3Reranker,
 }
 
 impl Default for PipelineConfig {
@@ -38,6 +41,7 @@ impl Default for PipelineConfig {
             adaptive_hdc: true,
             max_survivors: 0, // 0 = adaptivt baserat på BM25-confidence + DOM-storlek
             min_output: 100,  // Returnera alltid minst 100 noder till LLM
+            stage3_reranker: Stage3Reranker::default(),
         }
     }
 }
@@ -169,9 +173,10 @@ impl ScoringPipeline {
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
 
-        // Steg 3: Bottom-up embedding scoring
+        // Steg 3: Scoring — dispatcha till rätt reranker
         let t4 = Instant::now();
-        let scored = embed_score::score_bottom_up(
+        let scored = dispatch_stage3(
+            &config.stage3_reranker,
             &survivors,
             &node_index,
             goal,
@@ -278,9 +283,10 @@ impl ScoringPipeline {
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
 
-        // Steg 3: Bottom-up embedding scoring
+        // Steg 3: Scoring — dispatcha till rätt reranker
         let t4 = Instant::now();
-        let scored = embed_score::score_bottom_up(
+        let scored = dispatch_stage3(
+            &config.stage3_reranker,
             &survivors,
             &node_index,
             goal,
@@ -303,6 +309,54 @@ impl ScoringPipeline {
         match top_n {
             Some(n) => scored.into_iter().take(n).collect(),
             None => scored,
+        }
+    }
+}
+
+/// Dispatcha Stage 3 scoring till rätt reranker.
+///
+/// MiniLM: befintlig bottom-up bi-encoder (default).
+/// ColBERT: MaxSim late interaction (kräver `colbert` feature).
+/// Hybrid: viktad kombination av ColBERT + MiniLM.
+fn dispatch_stage3(
+    reranker: &Stage3Reranker,
+    survivors: &[(u32, f32)],
+    node_index: &std::collections::HashMap<u32, embed_score::NodeInfo>,
+    goal: &str,
+    goal_words: &[String],
+    goal_embedding: Option<&[f32]>,
+) -> Vec<ScoredNode> {
+    match reranker {
+        Stage3Reranker::MiniLM => {
+            embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
+        }
+        #[cfg(feature = "colbert")]
+        Stage3Reranker::ColBert { model_dir } => {
+            super::colbert_reranker::score_colbert(survivors, node_index, goal, model_dir)
+        }
+        #[cfg(feature = "colbert")]
+        Stage3Reranker::Hybrid {
+            model_dir,
+            alpha,
+            use_adaptive_alpha,
+        } => {
+            // Kör MiniLM först som bas
+            let minilm_scores = embed_score::score_bottom_up(
+                survivors,
+                node_index,
+                goal,
+                goal_words,
+                goal_embedding,
+            );
+            super::colbert_reranker::score_hybrid(
+                survivors,
+                node_index,
+                goal,
+                &minilm_scores,
+                model_dir,
+                *alpha,
+                *use_adaptive_alpha,
+            )
         }
     }
 }
