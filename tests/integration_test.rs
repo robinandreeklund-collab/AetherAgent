@@ -1256,6 +1256,7 @@ mod fetch_tests {
                 parse_time_ms: 5,
                 xhr_intercepted: 0,
                 xhr_blocked: 0,
+                pending_fetch_urls: vec![],
             },
             total_time_ms: 105,
         };
@@ -3843,4 +3844,456 @@ fn test_hybrid_vs_legacy_both_work() {
 
     // Hybrid borde respektera top_n strikt
     assert!(hybrid_nodes.len() <= 5, "Hybrid top_n borde respekteras");
+}
+
+// ─── REAL-WORLD DOM Integration Tests ──────────────────────────────────────────
+// Verifierar att QuickJS + DOM Bridge fungerar i AetherAgents produktionspipeline.
+// Testar: querySelector, classList, style manipulation, MutationObserver,
+//         createElement, textContent, innerHTML, event dispatch, timers.
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_queryselector_and_textcontent() {
+    // Scenario: JS ändrar textContent via querySelector
+    // eval_js_with_dom kör code-parametern mot HTML-dokumentets DOM
+    let html = r##"<html><body>
+        <div id="app">
+            <h1 class="title">Placeholder</h1>
+            <p class="price">0 kr</p>
+            <ul id="items"><li>Item 1</li><li>Item 2</li></ul>
+        </div>
+    </body></html>"##;
+
+    let code = r#"
+        var title = document.querySelector('.title');
+        title.textContent = 'Äkta Produktnamn';
+        document.querySelector('.price').textContent = '299 kr';
+        var count = document.querySelectorAll('#items li').length;
+        document.querySelector('.price').textContent = count + ' artiklar, 299 kr';
+        document.querySelector('.price').textContent;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "2 artiklar, 299 kr",
+        "querySelector + textContent borde fungera med räknat querySelectorAll"
+    );
+    assert!(parsed["error"].is_null(), "Borde inte ha fel");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_classlist_manipulation() {
+    let html = r##"<html><body>
+        <div id="card" class="product"><span id="badge">Nyhet</span></div>
+    </body></html>"##;
+
+    let code = r#"
+        var card = document.getElementById('card');
+        card.classList.add('featured', 'sale');
+        card.classList.remove('product');
+        card.classList.toggle('highlighted');
+        document.getElementById('badge').classList.add('red');
+        card.className;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let class_val = parsed["value"].as_str().unwrap_or("");
+    assert!(
+        class_val.contains("featured"),
+        "classList.add('featured') borde fungera: got '{}'",
+        class_val
+    );
+    assert!(
+        class_val.contains("sale"),
+        "classList.add('sale') borde fungera: got '{}'",
+        class_val
+    );
+    assert!(
+        !class_val.contains("product"),
+        "classList.remove('product') borde ta bort: got '{}'",
+        class_val
+    );
+    assert!(
+        class_val.contains("highlighted"),
+        "classList.toggle('highlighted') borde lägga till: got '{}'",
+        class_val
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_style_live_proxy() {
+    let html = r##"<html><body>
+        <div id="box" style="color: red; margin: 10px">Hello</div>
+    </body></html>"##;
+
+    let code = r#"
+        var box = document.getElementById('box');
+        box.style.backgroundColor = 'blue';
+        box.style.setProperty('font-size', '20px');
+        box.style.backgroundColor;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "blue",
+        "style.backgroundColor borde vara 'blue'"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_createelement_and_appendchild() {
+    let html = r##"<html><body><div id="container"></div></body></html>"##;
+
+    let code = r#"
+        var container = document.getElementById('container');
+        for (var i = 0; i < 5; i++) {
+            var item = document.createElement('div');
+            item.className = 'item';
+            item.textContent = 'Produkt ' + (i + 1);
+            container.appendChild(item);
+        }
+        document.querySelectorAll('.item').length;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "5",
+        "Borde ha 5 dynamiskt skapade .item-element"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_innerhtml_dynamic_content() {
+    let html = r##"<html><body><div id="products"></div></body></html>"##;
+
+    let code = r#"
+        var products = [
+            { name: 'Laptop', price: 12999 },
+            { name: 'Mus', price: 499 },
+            { name: 'Tangentbord', price: 899 }
+        ];
+        var html = '';
+        for (var i = 0; i < products.length; i++) {
+            html += '<div class="product"><span class="name">' + products[i].name +
+                '</span><span class="price">' + products[i].price + ' kr</span></div>';
+        }
+        document.getElementById('products').innerHTML = html;
+        document.querySelectorAll('.product').length;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "3",
+        "innerHTML borde skapa 3 produktelement"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_settimeout_and_event_loop() {
+    let html = r##"<html><body><div id="status">loading</div></body></html>"##;
+
+    let code = r#"
+        setTimeout(function() {
+            document.getElementById('status').textContent = 'loaded';
+        }, 10);
+        // Returnera status efter event-loop har dränerats
+        document.getElementById('status').textContent;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    // setTimeout dräneras efter eval, borde ha kört
+    assert!(
+        parsed["timers_fired"].as_u64().unwrap_or(0) >= 1,
+        "Minst 1 timer borde ha avfyrats"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_event_dispatch() {
+    let html = r##"<html><body>
+        <button id="btn">Klicka</button>
+        <div id="output">inget</div>
+    </body></html>"##;
+
+    let code = r#"
+        document.getElementById('btn').addEventListener('click', function(e) {
+            document.getElementById('output').textContent = 'klickad!';
+        });
+        var evt = new Event('click', { bubbles: true });
+        document.getElementById('btn').dispatchEvent(evt);
+        document.getElementById('output').textContent;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "klickad!",
+        "Event dispatch borde trigga click listener"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_has_selector_in_queryselector() {
+    let html = r##"<html><body>
+        <div class="card"><h2>Produkt A</h2></div>
+        <div class="card"><h2>Produkt B</h2><span class="sale">REA</span></div>
+        <div class="card"><h2>Produkt C</h2></div>
+    </body></html>"##;
+
+    let result = eval_js_with_dom(html, "document.querySelectorAll('.card:has(.sale)').length");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "1",
+        ":has(.sale) borde matcha 1 kort"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_attribute_manipulation() {
+    let html = r##"<html><body>
+        <a id="link" href="/old">Länk</a>
+        <input id="email" type="text">
+    </body></html>"##;
+
+    let code = r#"
+        document.getElementById('link').setAttribute('href', '/new-page');
+        document.getElementById('link').setAttribute('data-tracking', 'product-click');
+        document.getElementById('email').setAttribute('type', 'email');
+        document.getElementById('link').getAttribute('href');
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(
+        parsed["value"].as_str().unwrap_or(""),
+        "/new-page",
+        "setAttribute borde uppdatera href"
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_promise_and_microtasks() {
+    let html = r##"<html><body><div id="result">pending</div></body></html>"##;
+
+    let code = r#"
+        Promise.resolve('data loaded').then(function(val) {
+            document.getElementById('result').textContent = val;
+        });
+        // Microtasks dräneras efter eval
+        document.getElementById('result').textContent;
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    // Promise.then dräneras av QuickJS job-kö
+    assert!(
+        parsed["error"].is_null(),
+        "Borde inte ha fel: {:?}",
+        parsed["error"]
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_full_ecommerce_spa_simulation() {
+    // Realistisk e-handels-SPA: produktlista, varukorg, classList, data-attribut
+    let html = r##"<html><body>
+        <nav><span id="cart-count">0</span> varor</nav>
+        <div id="product-list"></div>
+        <div id="total">Totalt: 0 kr</div>
+    </body></html>"##;
+
+    let code = r#"
+        var products = [
+            { id: 1, name: 'T-shirt', price: 299, category: 'kläder' },
+            { id: 2, name: 'Jeans', price: 599, category: 'kläder' },
+            { id: 3, name: 'Skor', price: 899, category: 'skor' },
+            { id: 4, name: 'Keps', price: 199, category: 'accessoarer' }
+        ];
+        var list = document.getElementById('product-list');
+        var cartItems = [];
+        products.forEach(function(p) {
+            var div = document.createElement('div');
+            div.className = 'product-card';
+            div.setAttribute('data-id', p.id);
+            div.setAttribute('data-price', p.price);
+            div.innerHTML = '<h3>' + p.name + '</h3><span class="price">' + p.price + ' kr</span>';
+            list.appendChild(div);
+        });
+        cartItems.push(products[0]);
+        cartItems.push(products[2]);
+        document.getElementById('cart-count').textContent = cartItems.length;
+        var total = cartItems.reduce(function(sum, p) { return sum + p.price; }, 0);
+        document.getElementById('total').textContent = 'Totalt: ' + total + ' kr';
+        // Markera produkter direkt via index
+        var cards = document.querySelectorAll('.product-card');
+        if (cards[0]) cards[0].classList.add('in-cart');
+        if (cards[2]) cards[2].classList.add('in-cart');
+        var inCartEls = document.querySelectorAll('.in-cart');
+        JSON.stringify({
+            products: cards.length,
+            cart: document.getElementById('cart-count').textContent,
+            total: document.getElementById('total').textContent,
+            inCart: inCartEls.length,
+            firstInCart: inCartEls.length > 0 ? inCartEls[0].querySelector('h3').textContent : 'none'
+        });
+    "#;
+
+    let result = eval_js_with_dom(html, code);
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert!(
+        parsed["error"].is_null(),
+        "Borde inte ha fel: {:?}",
+        parsed["error"]
+    );
+    let val: serde_json::Value =
+        serde_json::from_str(parsed["value"].as_str().unwrap_or("{}")).unwrap();
+    assert_eq!(val["products"], 4, "4 produkter borde renderas");
+    assert_eq!(val["cart"], "2", "2 varor i varukorgen");
+    assert_eq!(val["total"], "Totalt: 1198 kr", "Totalsumma 299+899=1198");
+    assert_eq!(
+        val["inCart"], 2,
+        "2 produkter markerade som in-cart: got {:?}",
+        val
+    );
+    assert_eq!(
+        val["firstInCart"], "T-shirt",
+        "Första in-cart produkten borde vara T-shirt: got {:?}",
+        val
+    );
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_parse_with_js_produces_semantic_tree() {
+    // Scenario: parse_with_js ska ge en riktig semantisk träd med JS-berikade noder
+    let html = r##"<html><body>
+        <script>
+            document.getElementById('dynamic-price').textContent = '1499 kr';
+        </script>
+        <div id="product">
+            <h1>Laptop Pro 16</h1>
+            <p id="dynamic-price">Laddar...</p>
+            <button id="buy">Lägg i varukorg</button>
+        </div>
+    </body></html>"##;
+
+    let result = parse_with_js(html, "köp laptop pris", "https://shop.se/laptop");
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+    // Verifiera att vi har ett semantic tree
+    assert!(parsed["tree"].is_object(), "Borde ha semantic tree");
+    let nodes = parsed["tree"]["nodes"].as_array();
+    assert!(nodes.is_some(), "Borde ha noder i trädet");
+    assert!(!nodes.unwrap().is_empty(), "Borde ha minst 1 nod i trädet");
+
+    // Verifiera JS-analys
+    assert!(
+        parsed["js_analysis"]["total_inline_scripts"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "Borde detektera inline script"
+    );
+}
+
+// ─── Performance Benchmark: QuickJS + DOM Bridge Timing ────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_dom_performance_benchmark() {
+    fn measure(name: &str, html: &str, code: &str) -> u64 {
+        let result = eval_js_with_dom(html, code);
+        let p: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let us = p["eval_time_us"].as_u64().unwrap_or(0);
+        let val = p["value"].as_str().unwrap_or("null");
+        let short = if val.len() > 40 { &val[..40] } else { val };
+        eprintln!(
+            "  {:45} {:>7}us ({:>5.1}ms)  = {}",
+            name,
+            us,
+            us as f64 / 1000.0,
+            short
+        );
+        us
+    }
+
+    eprintln!("\n== QuickJS + DOM Bridge Performance ==");
+    let t1 = measure(
+        "getElementById + textContent",
+        "<html><body><div id='x'>hello</div></body></html>",
+        "document.getElementById('x').textContent",
+    );
+    measure(
+        "querySelector + querySelectorAll",
+        "<html><body><h1 class='t'>X</h1><ul id='i'><li>A</li><li>B</li></ul></body></html>",
+        "document.querySelector('.t').textContent='NY';document.querySelectorAll('#i li').length",
+    );
+    measure("classList (add/remove/toggle)",
+        "<html><body><div id='c' class='a b'>X</div></body></html>",
+        "var c=document.getElementById('c');c.classList.add('x','y');c.classList.remove('a');c.classList.toggle('z');c.className");
+    measure("style Proxy (3 props)",
+        "<html><body><div id='b' style='color:red'>X</div></body></html>",
+        "var b=document.getElementById('b');b.style.backgroundColor='blue';b.style.setProperty('font-size','20px');b.style.margin='10px';b.style.cssText");
+    let t5 = measure("createElement x10",
+        "<html><body><div id='c'></div></body></html>",
+        "var c=document.getElementById('c');for(var i=0;i<10;i++){var d=document.createElement('div');d.className='item';d.textContent='P'+i;c.appendChild(d)}document.querySelectorAll('.item').length");
+    let t6 = measure("createElement x100",
+        "<html><body><div id='c'></div></body></html>",
+        "var c=document.getElementById('c');for(var i=0;i<100;i++){var d=document.createElement('div');d.className='i';d.textContent='P'+i;c.appendChild(d)}document.querySelectorAll('.i').length");
+    measure(
+        "innerHTML x3",
+        "<html><body><div id='p'></div></body></html>",
+        r##"var h='';for(var i=0;i<3;i++)h+='<div class="p"><span>'+i+'</span></div>';document.getElementById('p').innerHTML=h;document.querySelectorAll('.p').length"##,
+    );
+    measure("dispatchEvent",
+        "<html><body><button id='b'>X</button><div id='o'>-</div></body></html>",
+        "document.getElementById('b').addEventListener('click',function(){document.getElementById('o').textContent='ok'});document.getElementById('b').dispatchEvent(new Event('click'));document.getElementById('o').textContent");
+    measure(":has() selector",
+        "<html><body><div class='c'><span>A</span></div><div class='c'><span class='s'>B</span></div><div class='c'><span>C</span></div></body></html>",
+        "document.querySelectorAll('.c:has(.s)').length");
+    let t10 = measure("E-commerce SPA",
+        "<html><body><span id='cc'>0</span><div id='pl'></div><div id='t'>0</div></body></html>",
+        "var p=[{n:'A',p:299},{n:'B',p:599},{n:'C',p:899},{n:'D',p:199}];var l=document.getElementById('pl');p.forEach(function(x){var d=document.createElement('div');d.className='pc';d.innerHTML='<h3>'+x.n+'</h3>';l.appendChild(d)});var cs=document.querySelectorAll('.pc');cs[0].classList.add('cart');cs[2].classList.add('cart');document.getElementById('cc').textContent='2';document.getElementById('t').textContent=(299+899)+' kr';JSON.stringify({p:cs.length,t:document.getElementById('t').textContent})");
+    let big = format!(
+        "<html><body>{}</body></html>",
+        (0..200)
+            .map(|i| format!("<div class='item' id='n{}'><span>P{}</span></div>", i, i))
+            .collect::<Vec<_>>()
+            .join("")
+    );
+    let t11 = measure(
+        "200 noder querySelectorAll",
+        &big,
+        "document.querySelectorAll('.item').length",
+    );
+    eprintln!("======================================");
+    // Debug-builds inkluderar ~20ms QuickJS init overhead per anrop.
+    // Release-builds är ~5-10x snabbare.
+    assert!(t1 < 100_000, "getElementById < 100ms (debug): {}us", t1);
+    assert!(t5 < 100_000, "createElement x10 < 100ms (debug): {}us", t5);
+    assert!(t6 < 300_000, "createElement x100 < 300ms (debug): {}us", t6);
+    assert!(t10 < 100_000, "SPA < 100ms (debug): {}us", t10);
+    assert!(t11 < 500_000, "200 noder < 500ms (debug): {}us", t11);
 }

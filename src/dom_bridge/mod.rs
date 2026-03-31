@@ -1063,31 +1063,26 @@ impl JsHandler for NativeCreateEvent {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        // Mappa event-typ till konstruktor (per spec)
+        // Mappa legacy event-typ till konstruktor per DOM spec
+        // Exakt de interfaces som spec:en listar i createEvent-tabellen.
+        // Non-legacy interfaces (PointerEvent, WheelEvent, etc.) ska kasta NOT_SUPPORTED_ERR.
         let ctor_name = match type_str.as_str() {
-            "event" | "events" | "htmlevents" | "svgevents" | "svgevent" => "Event",
+            "event" | "events" | "htmlevents" | "svgevents" => "Event",
             "customevent" => "CustomEvent",
             "uievent" | "uievents" => "UIEvent",
             "mouseevent" | "mouseevents" => "MouseEvent",
             "keyboardevent" => "KeyboardEvent",
             "focusevent" => "FocusEvent",
-            "inputevent" => "InputEvent",
-            "wheelevent" => "WheelEvent",
             "compositionevent" => "CompositionEvent",
-            "pointerevent" => "PointerEvent",
-            "beforeunloadevent" => "BeforeUnloadEvent",
-            "hashchangeevent" => "HashChangeEvent",
-            "popstateevent" => "PopStateEvent",
-            "storageevent" => "StorageEvent",
-            "progressevent" => "ProgressEvent",
-            "messageevent" => "MessageEvent",
-            "dragevent" => "DragEvent",
             "touchevent" => "TouchEvent",
-            // Legacy aliases per spec — returnerar Event-objekt
-            "devicemotionevent" => "Event",
-            "deviceorientationevent" => "Event",
-            "textevent" => "Event",
-            "mutationevent" | "mutationevents" => "Event",
+            "dragevent" => "DragEvent",
+            "messageevent" => "MessageEvent",
+            "storageevent" => "StorageEvent",
+            "hashchangeevent" => "HashChangeEvent",
+            "beforeunloadevent" => "BeforeUnloadEvent",
+            "devicemotionevent" => "DeviceMotionEvent",
+            "deviceorientationevent" => "DeviceOrientationEvent",
+            "textevent" => "TextEvent",
             _ => {
                 return Err(throw_dom_exception(
                     ctx,
@@ -1096,8 +1091,11 @@ impl JsHandler for NativeCreateEvent {
                 ));
             }
         };
-        // Skapa event via konstruktor i JS-kontexten
-        let code = format!("new {}('')", ctor_name);
+        // Skapa event via Object.create + prototype chain (undviker Illegal constructor)
+        let code = format!(
+            "(function(){{var e=Object.create({ctor}.prototype);Event.call(e,'');e.type='';e.bubbles=false;e.cancelable=false;e.defaultPrevented=false;e.isTrusted=false;e.eventPhase=0;e.target=null;e.currentTarget=null;return e;}})()",
+            ctor = ctor_name
+        );
         match ctx.eval::<Value, _>(code.as_str()) {
             Ok(v) => Ok(v),
             Err(_) => {
@@ -2721,6 +2719,20 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
             )?,
         )?;
         doc.set(
+            "lookupPrefix",
+            Function::new(ctx.clone(), JsFn(LookupPrefix { _key: doc_key }))?,
+        )?;
+        doc.set(
+            "isDefaultNamespace",
+            Function::new(
+                ctx.clone(),
+                JsFn(IsDefaultNamespace {
+                    state: Rc::clone(&state),
+                    key: doc_key,
+                }),
+            )?,
+        )?;
+        doc.set(
             "isSameNode",
             Function::new(ctx.clone(), JsFn(IsSameNode { key: doc_key }))?,
         )?;
@@ -3621,31 +3633,134 @@ struct LookupNamespaceURI {
     key: NodeKey,
 }
 impl JsHandler for LookupNamespaceURI {
-    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let s = self.state.borrow();
-        let node = s.arena.nodes.get(self.key);
-        let nt = node.map(|n| n.node_type.clone());
-        let parent_key = node.and_then(|n| n.parent);
-        drop(s);
-        match nt {
-            Some(NodeType::Element) | Some(NodeType::Document) => Ok(rquickjs::String::from_str(
-                ctx.clone(),
-                "http://www.w3.org/1999/xhtml",
-            )?
-            .into_value()),
-            Some(NodeType::Text) | Some(NodeType::Comment) => {
-                if let Some(pk) = parent_key {
-                    let h = LookupNamespaceURI {
-                        state: Rc::clone(&self.state),
-                        key: pk,
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let prefix = args.first().and_then(|v| {
+            if v.is_null() || v.is_undefined() {
+                None
+            } else {
+                v.as_string()
+                    .and_then(|s| s.to_string().ok())
+                    .and_then(|s| if s.is_empty() { None } else { Some(s) })
+            }
+        });
+        let result = lookup_ns_uri(&self.state, self.key, prefix.as_deref());
+        match result {
+            Some(ns) => Ok(rquickjs::String::from_str(ctx.clone(), &ns)?.into_value()),
+            None => Ok(Value::new_null(ctx.clone())),
+        }
+    }
+}
+
+/// Per spec: Node.lookupNamespaceURI(prefix) algoritm
+fn lookup_ns_uri(state: &SharedState, key: NodeKey, prefix: Option<&str>) -> Option<String> {
+    let s = state.borrow();
+    let node = s.arena.nodes.get(key)?;
+    let nt = node.node_type.clone();
+    drop(s);
+
+    // DocumentFragment och DocumentType returnerar alltid null
+    if matches!(
+        nt,
+        NodeType::DocumentFragment | NodeType::Doctype | NodeType::Other
+    ) {
+        return None;
+    }
+
+    // Inbyggda namespace-prefix per spec (bara för Element/Document/Text/Comment/PI)
+    if let Some(p) = prefix {
+        if p == "xml" {
+            return Some("http://www.w3.org/XML/1998/namespace".to_string());
+        }
+        if p == "xmlns" {
+            return Some("http://www.w3.org/2000/xmlns/".to_string());
+        }
+    }
+
+    let s = state.borrow();
+    let node = s.arena.nodes.get(key)?;
+    match nt {
+        NodeType::Element => {
+            // Steg 1: Kolla elementets eget namespace
+            let ns = node.get_attr("__ns__").map(|s| s.to_string());
+            let node_prefix = node.get_attr("__prefix__").map(|s| s.to_string());
+            // Om inget __ns__-attribut finns → HTML-parsat element → XHTML
+            let effective_ns = ns.or_else(|| Some("http://www.w3.org/1999/xhtml".to_string()));
+
+            if let Some(ref ns_val) = effective_ns {
+                if !ns_val.is_empty() {
+                    let matches = match (prefix, node_prefix.as_deref()) {
+                        (None, None) => true,
+                        (Some(p), Some(np)) => p == np,
+                        _ => false,
                     };
-                    h.handle(ctx, &[])
-                } else {
-                    Ok(Value::new_null(ctx.clone()))
+                    if matches {
+                        return Some(ns_val.clone());
+                    }
                 }
             }
-            _ => Ok(Value::new_null(ctx.clone())),
+
+            // Steg 2: Sök xmlns-attribut
+            for (attr_name, attr_val) in &node.attributes {
+                if attr_name == "xmlns" && prefix.is_none() {
+                    return if attr_val.is_empty() {
+                        None
+                    } else {
+                        Some(attr_val.clone())
+                    };
+                }
+                if let Some(p) = prefix {
+                    if let Some(suffix) = attr_name.strip_prefix("xmlns:") {
+                        if suffix == p {
+                            return if attr_val.is_empty() {
+                                None
+                            } else {
+                                Some(attr_val.clone())
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Steg 3: Gå till parent
+            let parent_key = node.parent;
+            drop(s);
+            if let Some(pk) = parent_key {
+                let ps = state.borrow();
+                if ps
+                    .arena
+                    .nodes
+                    .get(pk)
+                    .map(|n| n.node_type == NodeType::Element)
+                    .unwrap_or(false)
+                {
+                    drop(ps);
+                    return lookup_ns_uri(state, pk, prefix);
+                }
+            }
+            None
         }
+        NodeType::Document => {
+            // Delegera till documentElement
+            let doc_element = node
+                .children
+                .iter()
+                .find(|&&c| {
+                    s.arena
+                        .nodes
+                        .get(c)
+                        .map(|n| n.node_type == NodeType::Element)
+                        .unwrap_or(false)
+                })
+                .copied();
+            drop(s);
+            doc_element.and_then(|de| lookup_ns_uri(state, de, prefix))
+        }
+        NodeType::Text | NodeType::Comment | NodeType::ProcessingInstruction => {
+            let parent_key = node.parent;
+            drop(s);
+            parent_key.and_then(|pk| lookup_ns_uri(state, pk, prefix))
+        }
+        _ => None,
     }
 }
 
@@ -3666,21 +3781,19 @@ impl JsHandler for IsDefaultNamespace {
     fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let ns = args
             .first()
-            .and_then(|v| v.as_string())
-            .and_then(|s| s.to_string().ok())
+            .and_then(|v| {
+                if v.is_null() || v.is_undefined() {
+                    Some(String::new())
+                } else {
+                    v.as_string().and_then(|s| s.to_string().ok())
+                }
+            })
             .unwrap_or_default();
-        let s = self.state.borrow();
-        let is_html = s
-            .arena
-            .nodes
-            .get(self.key)
-            .map(|n| n.node_type == NodeType::Element)
-            .unwrap_or(false);
-        drop(s);
-        let result = if is_html {
-            ns == "http://www.w3.org/1999/xhtml"
-        } else {
-            ns.is_empty()
+        // lookupNamespaceURI(null) ger default namespace
+        let default_ns = lookup_ns_uri(&self.state, self.key, None);
+        let result = match default_ns {
+            Some(ref dns) => *dns == ns,
+            None => ns.is_empty(),
         };
         Ok(Value::new_bool(ctx.clone(), result))
     }
@@ -4651,11 +4764,21 @@ impl JsHandler for InnerHTMLSetter {
                 })
                 .or_else(|| v.as_bool().map(|b| b.to_string()))
                 .or_else(|| {
-                    // Anropa .toString() på objektet
-                    v.as_object()
-                        .and_then(|obj| obj.get::<_, Function>("toString").ok())
-                        .and_then(|f| f.call::<_, rquickjs::String>(()).ok())
-                        .and_then(|s| s.to_string().ok())
+                    // Anropa .toString() på objektet, fallback till valueOf()
+                    let obj = v.as_object()?;
+                    // Prova toString först (om det är en funktion)
+                    if let Ok(f) = obj.get::<_, Function>("toString") {
+                        if let Ok(s) = f.call::<_, rquickjs::String>(()) {
+                            return s.to_string().ok();
+                        }
+                    }
+                    // Fallback: valueOf()
+                    if let Ok(f) = obj.get::<_, Function>("valueOf") {
+                        if let Ok(s) = f.call::<_, rquickjs::String>(()) {
+                            return s.to_string().ok();
+                        }
+                    }
+                    None
                 })
                 .unwrap_or_default(),
             None => String::new(),
@@ -6535,16 +6658,105 @@ pub(super) fn make_element_object<'js>(
         }
     }
 
-    // Cacha objektet + applicera JS-polyfills (prototypkedja, CharacterData, ChildNode-metoder)
+    // Cacha + applicera prototypkedja + polyfill-patching
     {
         let global = ctx.globals();
         let cache_key = format!("__nc_{}", key_bits as u64);
         let _ = global.set(cache_key.as_str(), obj.clone());
+        // Sätt prototype direkt i Rust (ersätter __patchPrototype polyfill)
+        let proto_name = match node_type_val {
+            1 => {
+                // Element — välj konstruktor baserat på tagName
+                let tag_upper = tag_name.to_ascii_uppercase();
+                match tag_upper.as_str() {
+                    "DIV" => "HTMLDivElement",
+                    "SPAN" => "HTMLSpanElement",
+                    "P" => "HTMLParagraphElement",
+                    "A" => "HTMLAnchorElement",
+                    "BUTTON" => "HTMLButtonElement",
+                    "INPUT" => "HTMLInputElement",
+                    "FORM" => "HTMLFormElement",
+                    "SELECT" => "HTMLSelectElement",
+                    "OPTION" => "HTMLOptionElement",
+                    "TEXTAREA" => "HTMLTextAreaElement",
+                    "IMG" => "HTMLImageElement",
+                    "TABLE" => "HTMLTableElement",
+                    "TR" => "HTMLTableRowElement",
+                    "TD" | "TH" => "HTMLTableCellElement",
+                    "THEAD" | "TBODY" | "TFOOT" => "HTMLTableSectionElement",
+                    "UL" => "HTMLUListElement",
+                    "OL" => "HTMLOListElement",
+                    "LI" => "HTMLLIElement",
+                    "DL" => "HTMLDListElement",
+                    "H1" | "H2" | "H3" | "H4" | "H5" | "H6" => "HTMLHeadingElement",
+                    "LABEL" => "HTMLLabelElement",
+                    "FIELDSET" => "HTMLFieldSetElement",
+                    "SCRIPT" => "HTMLScriptElement",
+                    "STYLE" => "HTMLStyleElement",
+                    "LINK" => "HTMLLinkElement",
+                    "META" => "HTMLMetaElement",
+                    "BODY" => "HTMLBodyElement",
+                    "HEAD" => "HTMLHeadElement",
+                    "HTML" => "HTMLHtmlElement",
+                    "BR" => "HTMLBRElement",
+                    "HR" => "HTMLHRElement",
+                    "IFRAME" => "HTMLIFrameElement",
+                    "CANVAS" => "HTMLCanvasElement",
+                    "VIDEO" => "HTMLVideoElement",
+                    "AUDIO" => "HTMLAudioElement",
+                    "TEMPLATE" => "HTMLTemplateElement",
+                    "DIALOG" => "HTMLDialogElement",
+                    "PRE" => "HTMLPreElement",
+                    "TITLE" => "HTMLTitleElement",
+                    "OUTPUT" => "HTMLOutputElement",
+                    "PROGRESS" => "HTMLProgressElement",
+                    "METER" => "HTMLMeterElement",
+                    "DETAILS" => "HTMLDetailsElement",
+                    "SUMMARY" => "HTMLSummaryElement",
+                    "EMBED" => "HTMLEmbedElement",
+                    "OBJECT" => "HTMLObjectElement",
+                    "AREA" => "HTMLAreaElement",
+                    "MAP" => "HTMLMapElement",
+                    "SOURCE" => "HTMLSourceElement",
+                    "TRACK" => "HTMLTrackElement",
+                    "OPTGROUP" => "HTMLOptGroupElement",
+                    "DATALIST" => "HTMLDataListElement",
+                    "SLOT" => "HTMLSlotElement",
+                    "PICTURE" => "HTMLPictureElement",
+                    "MENU" => "HTMLMenuElement",
+                    "DATA" => "HTMLDataElement",
+                    "TIME" => "HTMLTimeElement",
+                    "CAPTION" => "HTMLTableCaptionElement",
+                    "LEGEND" => "HTMLLegendElement",
+                    "BASE" => "HTMLBaseElement",
+                    "BLOCKQUOTE" | "Q" => "HTMLQuoteElement",
+                    "INS" | "DEL" => "HTMLModElement",
+                    "COL" | "COLGROUP" => "HTMLTableColElement",
+                    "FONT" => "HTMLFontElement",
+                    "DIR" => "HTMLDirectoryElement",
+                    "MARQUEE" => "HTMLMarqueeElement",
+                    _ => "HTMLUnknownElement",
+                }
+            }
+            3 => "Text",
+            8 => "Comment",
+            9 => "Document",
+            10 => "DocumentType",
+            11 => "DocumentFragment",
+            7 => "ProcessingInstruction",
+            _ => "",
+        };
+        if !proto_name.is_empty() {
+            let proto_code = format!(
+                "globalThis.{p}&&globalThis.{p}.prototype&&Object.setPrototypeOf(globalThis.{ck},globalThis.{p}.prototype)",
+                p = proto_name, ck = cache_key
+            );
+            let _ = ctx.eval::<Value, _>(proto_code.as_str());
+        }
+        // Kvar: __patchChildNode (NamedNodeMap, NS-metadata) — behövs fortfarande tills migrerad
         let patch_code = format!(
             concat!(
                 "globalThis.__nodeCache && globalThis.__nodeCache.set({kb}, globalThis.{ck});",
-                "if(globalThis.__patchPrototype) globalThis.__patchPrototype(globalThis.{ck});",
-                "if(globalThis.__patchCharacterData) globalThis.__patchCharacterData(globalThis.{ck});",
                 "if(globalThis.__patchChildNode) globalThis.__patchChildNode(globalThis.{ck});"
             ),
             kb = key_bits,

@@ -10,11 +10,16 @@ pub(super) fn parse_inline_styles(style_attr: &str) -> std::collections::HashMap
     let mut styles = std::collections::HashMap::new();
     for part in style_attr.split(';') {
         let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
         if let Some(colon_pos) = part.find(':') {
             let prop = part[..colon_pos].trim().to_lowercase();
             let val = part[colon_pos + 1..].trim().to_string();
-            if !prop.is_empty() {
+            if !prop.is_empty() && is_valid_css_declaration(&prop, &val) && !val.is_empty() {
                 styles.insert(prop, val);
+            } else if !prop.is_empty() && !is_valid_css_declaration(&prop, &val) {
+                return std::collections::HashMap::new();
             }
         }
     }
@@ -25,12 +30,486 @@ pub(super) fn parse_inline_styles(style_attr: &str) -> std::collections::HashMap
 pub(super) fn serialize_inline_styles(
     styles: &std::collections::HashMap<String, String>,
 ) -> String {
+    if styles.is_empty() {
+        return String::new();
+    }
     let mut parts: Vec<String> = styles
         .iter()
         .map(|(k, v)| format!("{}: {}", k, v))
         .collect();
     parts.sort();
     parts.join("; ")
+}
+
+/// Serialisera inline CSS som cssText med bevarad ordning och shorthand-aggregering
+pub(super) fn serialize_css_text_ordered(props: &[(String, String)]) -> String {
+    if props.is_empty() {
+        return String::new();
+    }
+    // Aggregera longhands till shorthands
+    let aggregated = aggregate_shorthands_ordered(props);
+    let parts: Vec<String> = aggregated
+        .iter()
+        .map(|(k, v)| format!("{}: {};", k, v))
+        .collect();
+    parts.join(" ")
+}
+
+/// Aggregera longhands till shorthands, bevarar ordning
+fn aggregate_shorthands_ordered(props: &[(String, String)]) -> Vec<(String, String)> {
+    let result: Vec<(String, String)> = props.to_vec();
+    let mut to_remove = std::collections::HashSet::new();
+    let mut to_insert: Vec<(usize, String, String)> = Vec::new();
+
+    // Fyrvärdes-aggregering
+    for &(shorthand, ref longhands) in FOUR_VALUE_SHORTHANDS {
+        let vals: Vec<Option<(usize, &str)>> = longhands
+            .iter()
+            .map(|l| {
+                result
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (k, _))| k == l && !to_remove.contains(k.as_str()))
+                    .map(|(i, (_, v))| (i, v.as_str()))
+            })
+            .collect();
+        if vals.iter().all(|v| v.is_some()) {
+            let v: Vec<(usize, &str)> = vals.into_iter().map(|v| v.unwrap()).collect();
+            // Alla longhands finns — aggregera
+            let min_pos = v.iter().map(|(i, _)| *i).min().unwrap_or(0);
+            for l in longhands {
+                to_remove.insert(*l);
+            }
+            // Komprimera: 4→1, 4→2, 4→3
+            let aggregated = if v[0].1 == v[1].1 && v[1].1 == v[2].1 && v[2].1 == v[3].1 {
+                v[0].1.to_string()
+            } else if v[0].1 == v[2].1 && v[1].1 == v[3].1 {
+                format!("{} {}", v[0].1, v[1].1)
+            } else if v[1].1 == v[3].1 {
+                format!("{} {} {}", v[0].1, v[1].1, v[2].1)
+            } else {
+                format!("{} {} {} {}", v[0].1, v[1].1, v[2].1, v[3].1)
+            };
+            to_insert.push((min_pos, shorthand.to_string(), aggregated));
+        }
+    }
+
+    // Tvåvärdes-aggregering
+    for &(shorthand, ref longhands) in TWO_VALUE_SHORTHANDS {
+        let v0 = result
+            .iter()
+            .enumerate()
+            .find(|(_, (k, _))| k == longhands[0] && !to_remove.contains(k.as_str()));
+        let v1 = result
+            .iter()
+            .enumerate()
+            .find(|(_, (k, _))| k == longhands[1] && !to_remove.contains(k.as_str()));
+        if let (Some((i0, (_, a))), Some((_, (_, b)))) = (v0, v1) {
+            to_remove.insert(longhands[0]);
+            to_remove.insert(longhands[1]);
+            let aggregated = if a == b {
+                a.clone()
+            } else {
+                format!("{} {}", a, b)
+            };
+            to_insert.push((i0, shorthand.to_string(), aggregated));
+        }
+    }
+
+    // Outline-aggregering
+    let oc = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "outline-color" && !to_remove.contains(k.as_str()));
+    let os = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "outline-style" && !to_remove.contains(k.as_str()));
+    let ow = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "outline-width" && !to_remove.contains(k.as_str()));
+    if let (Some((ic, (_, c))), Some((_, (_, s))), Some((_, (_, w)))) = (oc, os, ow) {
+        to_remove.insert("outline-color");
+        to_remove.insert("outline-style");
+        to_remove.insert("outline-width");
+        to_insert.push((ic, "outline".to_string(), format!("{} {} {}", c, s, w)));
+    }
+
+    // List-style-aggregering — bara om minst 2 av 3 sub-properties finns
+    let lt = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "list-style-type" && !to_remove.contains(k.as_str()));
+    let lp = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "list-style-position" && !to_remove.contains(k.as_str()));
+    let li = result
+        .iter()
+        .enumerate()
+        .find(|(_, (k, _))| k == "list-style-image" && !to_remove.contains(k.as_str()));
+    let ls_count = [lt.is_some(), lp.is_some(), li.is_some()]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+    if ls_count >= 2 {
+        let mut parts = Vec::new();
+        let mut min_pos = usize::MAX;
+        if let Some((i, (_, p))) = lp {
+            parts.push(p.clone());
+            min_pos = min_pos.min(i);
+            to_remove.insert("list-style-position");
+        }
+        if let Some((i, (_, t))) = lt {
+            parts.push(t.clone());
+            min_pos = min_pos.min(i);
+            to_remove.insert("list-style-type");
+        }
+        if let Some((i, (_, img))) = li {
+            if img != "none" {
+                parts.push(img.clone());
+            }
+            min_pos = min_pos.min(i);
+            to_remove.insert("list-style-image");
+        }
+        if !parts.is_empty() {
+            to_insert.push((min_pos, "list-style".to_string(), parts.join(" ")));
+        }
+    }
+
+    // Sortera inserts efter originalposition
+    to_insert.sort_by_key(|(pos, _, _)| *pos);
+
+    // Bygg ny ordnad lista: ersätt första longhand med shorthand, ta bort resten
+    let mut final_result = Vec::new();
+    let mut insert_iter = to_insert.iter().peekable();
+    for (i, (k, v)) in result.iter().enumerate() {
+        if to_remove.contains(k.as_str()) {
+            // Kolla om en shorthand ska infogas på denna position
+            while let Some((pos, name, val)) = insert_iter.peek() {
+                if *pos == i {
+                    final_result.push((name.clone(), val.clone()));
+                    insert_iter.next();
+                } else {
+                    break;
+                }
+            }
+            // Longhand hoppas över
+        } else {
+            final_result.push((k.clone(), v.clone()));
+        }
+    }
+    // Infoga eventuella kvarvarande shorthands i slutet
+    for (_, name, val) in insert_iter {
+        final_result.push((name.clone(), val.clone()));
+    }
+
+    final_result
+}
+
+/// Parsa inline styles med ordning bevarad
+pub(super) fn parse_inline_styles_ordered(style_attr: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    for part in style_attr.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(colon_pos) = part.find(':') {
+            let prop = part[..colon_pos].trim().to_lowercase();
+            let val = part[colon_pos + 1..].trim().to_string();
+            if !prop.is_empty() && is_valid_css_declaration(&prop, &val) && !val.is_empty() {
+                // Uppdatera om redan finns, annars lägg till
+                if let Some(existing) = result.iter_mut().find(|(k, _)| k == &prop) {
+                    existing.1 = val;
+                } else {
+                    result.push((prop, val));
+                }
+            } else if !prop.is_empty() && !is_valid_css_declaration(&prop, &val) {
+                return Vec::new();
+            }
+        }
+    }
+    result
+}
+
+/// Validera en enskild CSS-deklaration (prop: val)
+pub(super) fn is_valid_css_declaration(prop: &str, val: &str) -> bool {
+    let prop = prop.trim();
+    if prop.is_empty() {
+        return false;
+    }
+    // Reject property med mellanslag eller dubbla kolon
+    if prop.contains("::") || prop.contains(' ') {
+        return false;
+    }
+    // Reject value som börjar med kolon (t.ex. "color:: invalid" → prop="color", val=": invalid")
+    let val = val.trim();
+    if val.starts_with(':') {
+        return false;
+    }
+    true
+}
+
+// ─── CSS Shorthand expansion/aggregation ──────────────────────────────────────
+
+/// Fyrvärdes-shorthands: margin, padding, border-width, border-style, border-color
+const FOUR_VALUE_SHORTHANDS: &[(&str, [&str; 4])] = &[
+    (
+        "margin",
+        ["margin-top", "margin-right", "margin-bottom", "margin-left"],
+    ),
+    (
+        "padding",
+        [
+            "padding-top",
+            "padding-right",
+            "padding-bottom",
+            "padding-left",
+        ],
+    ),
+    (
+        "border-width",
+        [
+            "border-top-width",
+            "border-right-width",
+            "border-bottom-width",
+            "border-left-width",
+        ],
+    ),
+    (
+        "border-style",
+        [
+            "border-top-style",
+            "border-right-style",
+            "border-bottom-style",
+            "border-left-style",
+        ],
+    ),
+    (
+        "border-color",
+        [
+            "border-top-color",
+            "border-right-color",
+            "border-bottom-color",
+            "border-left-color",
+        ],
+    ),
+];
+
+/// Tvåvärdes-shorthands: overflow
+const TWO_VALUE_SHORTHANDS: &[(&str, [&str; 2])] = &[("overflow", ["overflow-x", "overflow-y"])];
+
+/// Expandera shorthand till longhands (används vid setProperty)
+pub(super) fn expand_shorthand(
+    prop: &str,
+    val: &str,
+    styles: &mut std::collections::HashMap<String, String>,
+) {
+    // Behåll shorthand också (för serialisering)
+    for &(shorthand, ref longhands) in FOUR_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            let parts: Vec<&str> = val.split_whitespace().collect();
+            let (t, r, b, l) = match parts.len() {
+                1 => (parts[0], parts[0], parts[0], parts[0]),
+                2 => (parts[0], parts[1], parts[0], parts[1]),
+                3 => (parts[0], parts[1], parts[2], parts[1]),
+                4 => (parts[0], parts[1], parts[2], parts[3]),
+                _ => return,
+            };
+            styles.insert(longhands[0].to_string(), t.to_string());
+            styles.insert(longhands[1].to_string(), r.to_string());
+            styles.insert(longhands[2].to_string(), b.to_string());
+            styles.insert(longhands[3].to_string(), l.to_string());
+            return;
+        }
+    }
+    for &(shorthand, ref longhands) in TWO_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            let parts: Vec<&str> = val.split_whitespace().collect();
+            let (x, y) = match parts.len() {
+                1 => (parts[0], parts[0]),
+                2 => (parts[0], parts[1]),
+                _ => return,
+            };
+            styles.insert(longhands[0].to_string(), x.to_string());
+            styles.insert(longhands[1].to_string(), y.to_string());
+            return;
+        }
+    }
+    // outline: color style width
+    if prop == "outline" && val != "none" {
+        let parts: Vec<&str> = val.split_whitespace().collect();
+        if parts.len() >= 3 {
+            styles.insert("outline-color".to_string(), parts[0].to_string());
+            styles.insert("outline-style".to_string(), parts[1].to_string());
+            styles.insert("outline-width".to_string(), parts[2].to_string());
+        }
+    }
+    // list-style: type position image
+    if prop == "list-style" {
+        let parts: Vec<&str> = val.split_whitespace().collect();
+        // Förenklad: positionsord
+        for p in &parts {
+            if *p == "inside" || *p == "outside" {
+                styles.insert("list-style-position".to_string(), p.to_string());
+            } else if *p == "none"
+                || *p == "disc"
+                || *p == "circle"
+                || *p == "square"
+                || *p == "decimal"
+                || *p == "lower-alpha"
+                || *p == "upper-alpha"
+                || *p == "lower-roman"
+                || *p == "upper-roman"
+            {
+                styles.insert("list-style-type".to_string(), p.to_string());
+            } else if p.starts_with("url(") {
+                styles.insert("list-style-image".to_string(), p.to_string());
+            }
+        }
+    }
+}
+
+/// Aggregera longhands till shorthands (vid serialisering)
+#[allow(dead_code)]
+fn aggregate_shorthands(styles: &mut std::collections::HashMap<String, String>) {
+    // Fyrvärdes-aggregering
+    for &(shorthand, ref longhands) in FOUR_VALUE_SHORTHANDS {
+        let vals: Vec<Option<String>> = longhands.iter().map(|l| styles.get(*l).cloned()).collect();
+        if vals.iter().all(|v| v.is_some()) {
+            let v: Vec<&str> = vals.iter().map(|v| v.as_deref().unwrap_or("")).collect();
+            // Ta bort longhands
+            for l in longhands {
+                styles.remove(*l);
+            }
+            // Ta bort ev. befintlig shorthand
+            styles.remove(shorthand);
+            // Komprimera: 4→1, 4→2, 4→3
+            let aggregated = if v[0] == v[1] && v[1] == v[2] && v[2] == v[3] {
+                v[0].to_string()
+            } else if v[0] == v[2] && v[1] == v[3] {
+                format!("{} {}", v[0], v[1])
+            } else if v[1] == v[3] {
+                format!("{} {} {}", v[0], v[1], v[2])
+            } else {
+                format!("{} {} {} {}", v[0], v[1], v[2], v[3])
+            };
+            styles.insert(shorthand.to_string(), aggregated);
+        }
+    }
+    // Tvåvärdes-aggregering
+    for &(shorthand, ref longhands) in TWO_VALUE_SHORTHANDS {
+        let v0 = styles.get(longhands[0]).cloned();
+        let v1 = styles.get(longhands[1]).cloned();
+        if let (Some(a), Some(b)) = (v0, v1) {
+            styles.remove(longhands[0]);
+            styles.remove(longhands[1]);
+            styles.remove(shorthand);
+            let aggregated = if a == b { a } else { format!("{} {}", a, b) };
+            styles.insert(shorthand.to_string(), aggregated);
+        }
+    }
+    // outline-aggregering
+    let oc = styles.get("outline-color").cloned();
+    let os = styles.get("outline-style").cloned();
+    let ow = styles.get("outline-width").cloned();
+    if let (Some(c), Some(s), Some(w)) = (oc, os, ow) {
+        styles.remove("outline-color");
+        styles.remove("outline-style");
+        styles.remove("outline-width");
+        styles.remove("outline");
+        styles.insert("outline".to_string(), format!("{} {} {}", c, s, w));
+    }
+    // list-style-aggregering
+    let lt = styles.get("list-style-type").cloned();
+    let lp = styles.get("list-style-position").cloned();
+    let li = styles.get("list-style-image").cloned();
+    if lt.is_some() || lp.is_some() || li.is_some() {
+        let mut parts = Vec::new();
+        if let Some(ref p) = lp {
+            parts.push(p.as_str());
+            styles.remove("list-style-position");
+        }
+        if let Some(ref t) = lt {
+            parts.push(t.as_str());
+            styles.remove("list-style-type");
+        }
+        if let Some(ref i) = li {
+            if i != "none" {
+                parts.push(i.as_str());
+            }
+            styles.remove("list-style-image");
+        }
+        if !parts.is_empty() {
+            styles.remove("list-style");
+            styles.insert("list-style".to_string(), parts.join(" "));
+        }
+    }
+}
+
+/// Rekonstruera shorthand-värde från longhands (för getPropertyValue)
+pub(super) fn reconstruct_shorthand(
+    prop: &str,
+    styles: &std::collections::HashMap<String, String>,
+) -> String {
+    for &(shorthand, ref longhands) in FOUR_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            let vals: Vec<Option<&String>> = longhands.iter().map(|l| styles.get(*l)).collect();
+            if vals.iter().all(|v| v.is_some()) {
+                let v: Vec<&str> = vals.into_iter().map(|v| v.unwrap().as_str()).collect();
+                return if v[0] == v[1] && v[1] == v[2] && v[2] == v[3] {
+                    v[0].to_string()
+                } else if v[0] == v[2] && v[1] == v[3] {
+                    format!("{} {}", v[0], v[1])
+                } else if v[1] == v[3] {
+                    format!("{} {} {}", v[0], v[1], v[2])
+                } else {
+                    format!("{} {} {} {}", v[0], v[1], v[2], v[3])
+                };
+            }
+            return String::new();
+        }
+    }
+    for &(shorthand, ref longhands) in TWO_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            let v0 = styles.get(longhands[0]);
+            let v1 = styles.get(longhands[1]);
+            if let (Some(a), Some(b)) = (v0, v1) {
+                return if a == b {
+                    a.clone()
+                } else {
+                    format!("{} {}", a, b)
+                };
+            }
+            return String::new();
+        }
+    }
+    String::new()
+}
+
+/// Ta bort longhands om shorthand sätts (vid removeProperty)
+pub(super) fn remove_shorthand_longhands(
+    prop: &str,
+    styles: &mut std::collections::HashMap<String, String>,
+) {
+    for &(shorthand, ref longhands) in FOUR_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            for l in longhands {
+                styles.remove(*l);
+            }
+            return;
+        }
+    }
+    for &(shorthand, ref longhands) in TWO_VALUE_SHORTHANDS {
+        if prop == shorthand {
+            for l in longhands {
+                styles.remove(*l);
+            }
+            return;
+        }
+    }
 }
 
 /// Parsea px-värde från CSS-egenskap

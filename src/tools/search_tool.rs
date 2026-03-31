@@ -94,8 +94,7 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
     const DEEP_FETCH_TIMEOUT_MS: u64 = 3000;
 
     let top_n_deep = results_for_deep.len().min(3);
-    for i in 0..top_n_deep {
-        let url = &results_for_deep[i];
+    for (i, url) in results_for_deep.iter().enumerate().take(top_n_deep) {
         let fetch_start = now_ms();
 
         // Firewall-check

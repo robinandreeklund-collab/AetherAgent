@@ -1373,6 +1373,42 @@ pub(super) fn register_window_with_viewport<'js>(
                     this.data = data !== undefined ? String(data) : 'undefined';
                 };
             }
+
+            // ── DeviceMotionEvent (legacy) ──
+            if (!globalThis.DeviceMotionEvent) {
+                globalThis.DeviceMotionEvent = function DeviceMotionEvent(type, opts) {
+                    Event.call(this, type || '', opts || {});
+                };
+                DeviceMotionEvent.prototype = Object.create(Event.prototype);
+                DeviceMotionEvent.prototype.constructor = DeviceMotionEvent;
+            }
+
+            // ── DeviceOrientationEvent (legacy) ──
+            if (!globalThis.DeviceOrientationEvent) {
+                globalThis.DeviceOrientationEvent = function DeviceOrientationEvent(type, opts) {
+                    Event.call(this, type || '', opts || {});
+                };
+                DeviceOrientationEvent.prototype = Object.create(Event.prototype);
+                DeviceOrientationEvent.prototype.constructor = DeviceOrientationEvent;
+            }
+
+            // ── Enkla event-typer (migrerade från polyfills.js) ──
+            // Ärver Event direkt, inga extra spec-properties
+            var simpleEventTypes = [
+                'AnimationEvent', 'TransitionEvent',
+                'HashChangeEvent', 'PopStateEvent', 'StorageEvent', 'PageTransitionEvent',
+                'ProgressEvent', 'ClipboardEvent', 'DragEvent', 'ErrorEvent',
+                'MessageEvent', 'PromiseRejectionEvent', 'SecurityPolicyViolationEvent',
+                'GamepadEvent', 'MediaQueryListEvent', 'FormDataEvent',
+                'SubmitEvent', 'BeforeUnloadEvent'
+            ];
+            simpleEventTypes.forEach(function(name) {
+                if (!globalThis[name]) {
+                    globalThis[name] = function(type, opts) { Event.call(this, type, opts); };
+                    globalThis[name].prototype = Object.create(Event.prototype);
+                    globalThis[name].prototype.constructor = globalThis[name];
+                }
+            });
         })();
 
         // ─── Touch API (W3C Touch Events) ───────────────────────────────────

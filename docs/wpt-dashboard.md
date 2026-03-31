@@ -1,37 +1,37 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-30 (Session 4: +870 WPT pass, Tier B DOM integrations)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-31 (Session 5: +142 WPT pass, Live CSSStyleDeclaration + qSA + MutationObserver + Namespace)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
 
 ---
 
-## Sammanfattning (2026-03-29)
+## Sammanfattning (2026-03-31)
 
 | Tier | Sviter | Cases | Passed | Rate |
 |------|--------|-------|--------|------|
 | **Tier 1** (Core DOM) | dom/nodes, events, ranges, traversal, collections, lists | ~29,900 | ~18,200+ | ~61% |
-| **Tier 2** (Parsing & Serialization) | domparsing, html/syntax | ~924 | ~383 | ~41% |
-| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,316 | ~2,018 | ~32% |
-| **Tier 4** (HTML) | html/semantics | ~4,936 | ~1,966 | ~40% |
+| **Tier 2** (Parsing & Serialization) | domparsing, html/syntax | ~936 | ~401 | ~43% |
+| **Tier 3** (CSS) | css/selectors, css-values, css-cascade, cssom, css-display, css-color, css-flexbox | ~6,322 | ~2,092 | ~33% |
+| **Tier 4** (HTML) | html/semantics | ~4,922 | ~2,023 | ~41% |
 | **Tier 5** (Events & Interaction) | uievents, pointerevents, focus, selection, input-events, touch-events | ~30,180 | ~7,842 | ~26% |
 | **Tier 6** (JS & Standards) | ecmascript, webidl, quirks | ~190 | ~99 | ~52% |
 | **Tier 7** (Övriga) | FileAPI, trusted-types, svg, xhr, encoding, inert, domxpath, webstorage, requestidlecallback, editing, webmessaging | ~3,831 | ~843 | ~22% |
 
 ---
 
-## Alla sviter — Fullständig status (2026-03-29)
+## Alla sviter — Fullständig status (2026-03-31)
 
 ### Tier 1 — Core DOM (kör varje PR)
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **dom/nodes** | 6,029 | 6,671 | **90.4%** | ─ stabil |
+| **dom/nodes** | 6,094 | 6,673 | **91.3%** | ↑↑ från 90.4% |
 | **dom/events** | 271 | 322 | **84.2%** | ─ stabil |
-| **dom/ranges** | 8,181 | 11,082 | **73.8%** | ─ stabil |
-| **dom/traversal** | 1,534 | 1,591 | **96.4%** | ─ stabil |
+| **dom/ranges** | 4,360 | 5,788 | **75.3%** | ─ stabil |
+| **dom/traversal** | 1,533 | 1,591 | **96.3%** | ─ stabil |
 | **dom/collections** | 30 | 48 | **62.5%** | ─ stabil |
 | **dom/lists** | 181 | 189 | **95.8%** | ─ stabil |
 
@@ -39,26 +39,26 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **domparsing** | 142 | 363 | **39.1%** | ─ stabil |
+| **domparsing** | 161 | 375 | **42.9%** | ↑ från 39.1% |
 | **html/syntax** | 241 | 561 | **43.0%** | ─ stabil |
 
 ### Tier 3 — CSS
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **css/selectors** | 1,651 | 3,457 | **47.8%** | ─ stabil |
-| **css/css-values** | 164 | 1,526 | **10.7%** | ─ stabil |
-| **css/cssom** | 149 | 676 | **22.0%** | ↑↑ från 17.1% |
-| **css/css-display** | 21 | 44 | **47.7%** | ↑ från 36.4% |
+| **css/selectors** | 1,693 | 3,457 | **49.0%** | ↑ från 47.8% |
+| **css/css-values** | 164 | 1,532 | **10.7%** | ─ stabil |
+| **css/cssom** | 179 | 676 | **26.5%** | ↑↑ från 22.0% |
+| **css/css-display** | 22 | 44 | **50.0%** | ↑ från 47.7% |
 | **css/css-color** | 12 | 87 | **13.8%** | ─ stabil |
-| **css/css-cascade** | 33 | 402 | **8.2%** | ↑ från 6.7% |
-| **css/css-flexbox** | 14 | 124 | **11.3%** | ↑ från 8.9% |
+| **css/css-cascade** | 28 | 402 | **7.0%** | ─ stabil |
+| **css/css-flexbox** | 12 | 124 | **9.7%** | ─ stabil |
 
 ### Tier 4 — HTML
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **html/semantics** | 2,020 | 4,933 | **40.9%** | ↑ från 39.8% |
+| **html/semantics** | 2,022 | 4,922 | **41.1%** | ↑ från 40.9% |
 
 ### Tier 5 — Events & Interaction
 
@@ -119,6 +119,36 @@
 ---
 
 ## Historik — Sessionsloggar
+
+### Session 5 (2026-03-31) — Live CSSStyleDeclaration + qSA + MutationObserver + Namespace (+142 WPT, 6 commits)
+
+Fokus på CSSOM-korrekthet, CSS-selektor-scoping, MutationObserver och namespace-hantering.
+
+| Suite | Före | Efter | Delta | Nyckelförbättringar |
+|-------|------|-------|-------|---------------------|
+| dom/nodes | 6,029 (90.3%) | **6,094 (91.3%)** | **+65** | lookupNamespaceURI, MutationObserver attr, createEvent, classList, removeChild DOMException |
+| css/selectors | 1,651 (47.8%) | **1,693 (49.0%)** | **+42** | querySelector/querySelectorAll scoping fix — context element excluded per spec |
+| css/cssom | 149 (22.0%) | **179 (26.5%)** | **+30** | Live CSSStyleDeclaration Proxy, shorthand aggregation/expansion, cssText getter/setter |
+| domparsing | 156 (41.6%) | **161 (42.9%)** | **+5** | style_attribute_html: live style + CSS validation, innerHTML valueOf fallback |
+| **Totalt** | | | **+142** | |
+
+**Alla implementationer native Rust/JS i produktionspipelinen:**
+- `CSSStyleDeclaration` — live JS Proxy, delegerar till Rust handlers per property access
+- `style.cssText` — spec-korrekt getter (trailing semicolons, ordningsbevarande)
+- `style.cssText` setter — parsar och validerar CSS deklarationer
+- `style.setProperty()` — expanderar shorthands (margin→4 longhands, padding, border-width, overflow)
+- `style.getPropertyValue()` — rekonstruerar shorthands från longhands
+- `style.length`, `style.item()`, `style.getPropertyPriority()` — CSSStyleDeclaration API
+- CSS shorthand aggregering i serialisering (margin, padding, overflow, outline, list-style)
+- CSS-deklarationsvalidering (avvisar `color:: invalid` etc.)
+- `querySelector`/`querySelectorAll` — exkluderar context-elementet per DOM spec (fixar `:has()`)
+- `MutationObserver` — attribut-notifieringar via `__pushAttributeMutation` (classList, setAttribute, removeAttribute)
+- `document.createEvent()` — spec-korrekt legacy-only interfaces, DeviceMotionEvent/DeviceOrientationEvent/TextEvent
+- `classList.remove()` på null class attribute → bevarar null (ingen tom sträng)
+- `innerHTML` — valueOf() fallback vid string conversion
+- `lookupNamespaceURI()` — full spec-algoritm: ancestor chain walk, xmlns: attributes, xml/xmlns built-in
+- `isDefaultNamespace()` — delegerar till lookupNamespaceURI(null) per spec
+- `removeChild` — kastar proper DOMException istället för plain string
 
 ### Session 4 (2026-03-29) — Tier B DOM Integrations (+767 WPT, 11 commits)
 

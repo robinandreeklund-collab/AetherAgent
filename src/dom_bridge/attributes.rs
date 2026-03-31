@@ -110,6 +110,13 @@ impl JsHandler for SetAttribute {
                 name
             )));
         }
+        // Notifiera MutationObserver om attribut-ändring
+        let key_f64 = node_key_to_f64(self.key);
+        let _ = ctx.eval::<Value, _>(format!(
+            "typeof __pushAttributeMutation==='function'&&__pushAttributeMutation({},'{}')",
+            key_f64,
+            name.replace('\'', "\\'")
+        ));
         #[cfg(feature = "blitz")]
         invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
@@ -133,6 +140,13 @@ impl JsHandler for RemoveAttribute {
             node.attributes.remove(&lc_name);
         }
         drop(s);
+        // Notifiera MutationObserver
+        let key_f64 = node_key_to_f64(self.key);
+        let _ = ctx.eval::<Value, _>(format!(
+            "typeof __pushAttributeMutation==='function'&&__pushAttributeMutation({},'{}')",
+            key_f64,
+            name.replace('\'', "\\'")
+        ));
         #[cfg(feature = "blitz")]
         invalidate_blitz_cache(&self.state);
         Ok(Value::new_undefined(ctx.clone()))
