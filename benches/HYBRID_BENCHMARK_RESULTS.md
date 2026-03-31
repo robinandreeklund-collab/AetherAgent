@@ -77,12 +77,27 @@ Prevents embedding from running on hundreds of nodes:
 1. **Broad filter**: Adaptive threshold per role/depth (navigation stricter, buttons pass)
 2. **Strict ranking**: If still > cap, rank by 60% BM25 + 40% HDC-similarity, truncate
 
+### HDC Dimension Benchmark (2048 vs 4096 bits)
+
+Tested on 20 real sites with embeddings (all-MiniLM-L6-v2):
+
+| Metric | 2048-bit | 4096-bit |
+|--------|----------|----------|
+| Correctness | 18/20 (90%) | 18/20 (90%) |
+| Avg hybrid parse | 356ms | 365ms (+2.5%) |
+| Avg pipeline | 335ms | 345ms (+3%) |
+| HDC build (MDN, 1050 nodes) | ~19ms | ~22ms |
+| HDC prune quality | identical | identical |
+| Memory per vector | 256 bytes | 512 bytes |
+
+**Conclusion:** 4096-bit selected for production. No quality gain on current workloads but provides headroom for very large DOMs (10k+ nodes) where hash collisions become more likely. Cost increase is negligible vs embedding time (95%+ of pipeline).
+
 ### Pipeline Stage Breakdown (MDN, 173KB, 1050 nodes)
 
 | Stage | Time | % |
 |-------|------|---|
 | BM25 build | 1.9ms | 0.4% |
-| HDC build (2048-bit, n-grams) | 18.9ms | 4.3% |
+| HDC build (4096-bit, n-grams) | 22ms | 4.8% |
 | BM25 query | 0.02ms | 0% |
 | HDC prune (two-step) | 0.05ms | 0% |
 | Embedding score (~80 survivors) | 441ms | 95% |
