@@ -1063,31 +1063,26 @@ impl JsHandler for NativeCreateEvent {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        // Mappa event-typ till konstruktor (per spec)
+        // Mappa legacy event-typ till konstruktor per DOM spec
+        // Exakt de interfaces som spec:en listar i createEvent-tabellen.
+        // Non-legacy interfaces (PointerEvent, WheelEvent, etc.) ska kasta NOT_SUPPORTED_ERR.
         let ctor_name = match type_str.as_str() {
-            "event" | "events" | "htmlevents" | "svgevents" | "svgevent" => "Event",
+            "event" | "events" | "htmlevents" | "svgevents" => "Event",
             "customevent" => "CustomEvent",
             "uievent" | "uievents" => "UIEvent",
             "mouseevent" | "mouseevents" => "MouseEvent",
             "keyboardevent" => "KeyboardEvent",
             "focusevent" => "FocusEvent",
-            "inputevent" => "InputEvent",
-            "wheelevent" => "WheelEvent",
             "compositionevent" => "CompositionEvent",
-            "pointerevent" => "PointerEvent",
-            "beforeunloadevent" => "BeforeUnloadEvent",
-            "hashchangeevent" => "HashChangeEvent",
-            "popstateevent" => "PopStateEvent",
-            "storageevent" => "StorageEvent",
-            "progressevent" => "ProgressEvent",
-            "messageevent" => "MessageEvent",
-            "dragevent" => "DragEvent",
             "touchevent" => "TouchEvent",
-            // Legacy aliases per spec — returnerar Event-objekt
-            "devicemotionevent" => "Event",
-            "deviceorientationevent" => "Event",
-            "textevent" => "Event",
-            "mutationevent" | "mutationevents" => "Event",
+            "dragevent" => "DragEvent",
+            "messageevent" => "MessageEvent",
+            "storageevent" => "StorageEvent",
+            "hashchangeevent" => "HashChangeEvent",
+            "beforeunloadevent" => "BeforeUnloadEvent",
+            "devicemotionevent" => "DeviceMotionEvent",
+            "deviceorientationevent" => "DeviceOrientationEvent",
+            "textevent" => "TextEvent",
             _ => {
                 return Err(throw_dom_exception(
                     ctx,
@@ -1096,8 +1091,11 @@ impl JsHandler for NativeCreateEvent {
                 ));
             }
         };
-        // Skapa event via konstruktor i JS-kontexten
-        let code = format!("new {}('')", ctor_name);
+        // Skapa event via Object.create + prototype chain (undviker Illegal constructor)
+        let code = format!(
+            "(function(){{var e=Object.create({ctor}.prototype);Event.call(e,'');e.type='';e.bubbles=false;e.cancelable=false;e.defaultPrevented=false;e.isTrusted=false;e.eventPhase=0;e.target=null;e.currentTarget=null;return e;}})()",
+            ctor = ctor_name
+        );
         match ctx.eval::<Value, _>(code.as_str()) {
             Ok(v) => Ok(v),
             Err(_) => {
