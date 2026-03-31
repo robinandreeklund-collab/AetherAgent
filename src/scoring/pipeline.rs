@@ -331,16 +331,14 @@ fn dispatch_stage3(
             embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
         }
         #[cfg(feature = "colbert")]
-        Stage3Reranker::ColBert { model_dir } => {
-            super::colbert_reranker::score_colbert(survivors, node_index, goal, model_dir)
+        Stage3Reranker::ColBert => {
+            super::colbert_reranker::score_colbert(survivors, node_index, goal)
         }
         #[cfg(feature = "colbert")]
         Stage3Reranker::Hybrid {
-            model_dir,
             alpha,
             use_adaptive_alpha,
         } => {
-            // Kör MiniLM först som bas
             let minilm_scores = embed_score::score_bottom_up(
                 survivors,
                 node_index,
@@ -353,7 +351,6 @@ fn dispatch_stage3(
                 node_index,
                 goal,
                 &minilm_scores,
-                model_dir,
                 *alpha,
                 *use_adaptive_alpha,
             )

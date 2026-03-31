@@ -48,12 +48,6 @@ rmcp = { version = "1.2", features = ["server", "transport-io", "macros"], optio
 schemars = { version = "0.8", optional = true }
 base64 = { version = "0.22", optional = true }
 
-# ColBERTv2 late interaction reranker (optional, feature-gated)
-candle-core = { version = "0.8", optional = true }
-candle-nn = { version = "0.8", optional = true }
-candle-transformers = { version = "0.8", optional = true }
-tokenizers = { version = "0.20", optional = true, default-features = false, features = ["onig"] }
-
 # Fas 11: Vision – YOLOv8 inference via ONNX Runtime (optional, feature-gated)
 # [RTEN-ROLLBACK-ID:vision-deps] Gamla rten-deps:
 # rten = { version = "0.15", optional = true }
@@ -102,7 +96,7 @@ mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fet
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
 embeddings = ["ort", "ndarray"]
-colbert = ["candle-core", "candle-nn", "candle-transformers", "tokenizers"]
+colbert = ["embeddings"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "style_traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
 cdp = ["headless_chrome"]
 

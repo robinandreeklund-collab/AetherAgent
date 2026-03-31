@@ -300,20 +300,14 @@ fn main() {
         #[cfg(feature = "colbert")]
         let mut best_hits = m_hits;
 
-        // ── ColBERT ──
+        // ── ColBERT (ONNX, samma modell som bi-encoder) ──
         #[cfg(feature = "colbert")]
         {
             use aether_agent::scoring::colbert_reranker::Stage3Reranker;
 
-            let colbert_model_dir =
-                std::env::var("COLBERT_MODEL_DIR").unwrap_or_else(|_| "models/colbertv2".into());
-            let model_path = std::path::PathBuf::from(&colbert_model_dir);
-
-            if model_path.join("config.json").exists() {
+            if aether_agent::embedding::is_loaded() {
                 let config_colbert = PipelineConfig {
-                    stage3_reranker: Stage3Reranker::ColBert {
-                        model_dir: model_path.clone(),
-                    },
+                    stage3_reranker: Stage3Reranker::ColBert,
                     ..PipelineConfig::default()
                 };
 
@@ -338,7 +332,6 @@ fn main() {
                 // ── Hybrid ──
                 let config_hybrid = PipelineConfig {
                     stage3_reranker: Stage3Reranker::Hybrid {
-                        model_dir: model_path,
                         alpha: 0.7,
                         use_adaptive_alpha: true,
                     },
@@ -364,7 +357,7 @@ fn main() {
                     hybrid_wins += 1;
                 }
             } else {
-                println!("  ColBERT: SKIP — modell saknas (set COLBERT_MODEL_DIR)");
+                println!("  ColBERT: SKIP — embeddings ej laddade");
             }
         }
 

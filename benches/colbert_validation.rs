@@ -6,10 +6,9 @@
 /// - Hybrid (adaptive alpha × ColBERT + (1-alpha) × MiniLM)
 ///
 /// Run:
-///   COLBERT_MODEL_DIR=models/colbertv2 \
 ///   AETHER_EMBEDDING_MODEL=models/all-MiniLM-L6-v2.onnx \
 ///   AETHER_EMBEDDING_VOCAB=models/vocab.txt \
-///   cargo run --release --bin aether-colbert-validation --features embeddings,colbert
+///   cargo run --release --bin aether-colbert-validation --features colbert
 use std::time::Instant;
 
 use aether_agent::parse_top_nodes_hybrid;
@@ -460,7 +459,7 @@ fn keyword_in_top3(
         .any(|n| n.label.to_lowercase().contains(keyword))
 }
 
-fn run_test(tc: &TestCase, colbert_dir: &std::path::Path) -> SiteResult {
+fn run_test(tc: &TestCase) -> SiteResult {
     let mut r = SiteResult {
         name: tc.name.to_string(),
         ..Default::default()
@@ -509,12 +508,10 @@ fn run_test(tc: &TestCase, colbert_dir: &std::path::Path) -> SiteResult {
     #[cfg(not(feature = "embeddings"))]
     let goal_emb: Option<Vec<f32>> = None;
 
-    // ── ColBERT ──
-    if colbert_dir.join("config.json").exists() {
+    // ── ColBERT (använder samma ONNX-modell som MiniLM, i late-interaction-mode) ──
+    if aether_agent::embedding::is_loaded() {
         let config_colbert = PipelineConfig {
-            stage3_reranker: Stage3Reranker::ColBert {
-                model_dir: colbert_dir.to_path_buf(),
-            },
+            stage3_reranker: Stage3Reranker::ColBert,
             ..PipelineConfig::default()
         };
         let t2 = Instant::now();
@@ -530,7 +527,6 @@ fn run_test(tc: &TestCase, colbert_dir: &std::path::Path) -> SiteResult {
         // ── Hybrid ──
         let config_hybrid = PipelineConfig {
             stage3_reranker: Stage3Reranker::Hybrid {
-                model_dir: colbert_dir.to_path_buf(),
                 alpha: 0.7,
                 use_adaptive_alpha: true,
             },
@@ -573,13 +569,14 @@ fn main() {
         }
     }
 
-    let colbert_dir = std::path::PathBuf::from(
-        std::env::var("COLBERT_MODEL_DIR").unwrap_or_else(|_| "models/colbertv2".into()),
-    );
-    let has_colbert = colbert_dir.join("config.json").exists();
+    let has_colbert = aether_agent::embedding::is_loaded();
     println!(
         "  ColBERT:    {}",
-        if has_colbert { "LOADED" } else { "NOT FOUND" }
+        if has_colbert {
+            "READY (ONNX, same model as bi-encoder)"
+        } else {
+            "NOT LOADED (need embeddings)"
+        }
     );
     println!();
 
@@ -590,7 +587,7 @@ fn main() {
     for (i, tc) in cases.iter().enumerate() {
         print!("[{:2}/{}] {:<20} ", i + 1, total, tc.name);
 
-        let r = run_test(tc, &colbert_dir);
+        let r = run_test(tc);
 
         if r.fetch_error {
             println!("FETCH FAIL");

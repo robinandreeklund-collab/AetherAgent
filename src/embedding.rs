@@ -123,6 +123,32 @@ pub fn embed_batch(_texts: &[&str]) -> Option<Vec<Vec<f32>>> {
     None
 }
 
+/// Encode text → per-token embeddings (utan mean pooling).
+/// Returnerar `[seq_len, dim]` matris — varje rad är en token-embedding.
+/// Används av ColBERT MaxSim reranker.
+#[cfg(feature = "embeddings")]
+pub fn encode_tokens(text: &str) -> Option<Vec<Vec<f32>>> {
+    GLOBAL_EMBEDDING.get()?.encode_tokens(text).ok()
+}
+
+/// Stub: embedding feature ej aktiverad
+#[cfg(not(feature = "embeddings"))]
+pub fn encode_tokens(_text: &str) -> Option<Vec<Vec<f32>>> {
+    None
+}
+
+/// Returnerar embedding-dimensionen (t.ex. 384 för MiniLM).
+#[cfg(feature = "embeddings")]
+pub fn dimension() -> Option<usize> {
+    Some(GLOBAL_EMBEDDING.get()?.dimension())
+}
+
+/// Stub
+#[cfg(not(feature = "embeddings"))]
+pub fn dimension() -> Option<usize> {
+    None
+}
+
 // ─── EmbeddingModel ────────────────────────────────────────────────────────────
 
 /// Embedding-modell som kapslar in ONNX session + WordPiece tokenizer + cache.
@@ -231,6 +257,61 @@ impl EmbeddingModel {
         }
 
         Ok(embedding)
+    }
+
+    /// Encode text → per-token L2-normaliserade embeddings `[seq_len][dim]`.
+    ///
+    /// Skip mean pooling — behåll varje tokens individuella embedding.
+    /// Används av ColBERT MaxSim reranker för late interaction scoring.
+    pub fn encode_tokens(&self, text: &str) -> Result<Vec<Vec<f32>>, String> {
+        let tokens = self.tokenizer.tokenize(text);
+        let seq_len = tokens.input_ids.len();
+
+        let input_ids: Vec<i64> = tokens.input_ids.iter().map(|&x| x as i64).collect();
+        let attention_mask: Vec<i64> = tokens.attention_mask.iter().map(|&x| x as i64).collect();
+        let token_type_ids: Vec<i64> = tokens.token_type_ids.iter().map(|&x| x as i64).collect();
+
+        let ids_tensor = TensorRef::<i64>::from_array_view(([1usize, seq_len], &input_ids[..]))
+            .map_err(|e| format!("Tensor input_ids: {e}"))?;
+        let mask_tensor =
+            TensorRef::<i64>::from_array_view(([1usize, seq_len], &attention_mask[..]))
+                .map_err(|e| format!("Tensor attention_mask: {e}"))?;
+        let type_tensor =
+            TensorRef::<i64>::from_array_view(([1usize, seq_len], &token_type_ids[..]))
+                .map_err(|e| format!("Tensor token_type_ids: {e}"))?;
+
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| format!("Session lock: {e}"))?;
+        let outputs = session
+            .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
+            .map_err(|e| format!("ORT inference: {e}"))?;
+
+        let (_name, output_value) = outputs
+            .iter()
+            .next()
+            .ok_or_else(|| "Inget output från modellen".to_string())?;
+        let (_shape, data) = output_value
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("Output extract: {e}"))?;
+
+        // Bygg per-token embeddings, L2-normaliserade, skippa padding
+        let dim = self.dim;
+        let mut token_embeddings = Vec::with_capacity(seq_len);
+        for (i, &mask) in tokens.attention_mask.iter().enumerate().take(seq_len) {
+            if mask == 0 {
+                continue;
+            }
+            let offset = i * dim;
+            if offset + dim > data.len() {
+                break;
+            }
+            let token_vec: Vec<f32> = data[offset..offset + dim].to_vec();
+            token_embeddings.push(l2_normalize(&token_vec));
+        }
+
+        Ok(token_embeddings)
     }
 
     /// Cosine similarity mellan två text-strängar.
