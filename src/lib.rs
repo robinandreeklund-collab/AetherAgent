@@ -112,17 +112,28 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
 ///
 /// Returnerar (tree, pipeline_result) där tree har uppdaterade relevance-scores.
 fn build_tree_hybrid(html: &str, goal: &str, url: &str) -> (SemanticTree, scoring::PipelineResult) {
+    let config = scoring::PipelineConfig::default();
+    build_tree_hybrid_with_config(html, goal, url, &config)
+}
+
+/// Bygg semantiskt träd med hybrid pipeline och valfri PipelineConfig.
+/// Tillåter att välja Stage 3 reranker (MiniLM, ColBERT, Hybrid).
+fn build_tree_hybrid_with_config(
+    html: &str,
+    goal: &str,
+    url: &str,
+    config: &scoring::PipelineConfig,
+) -> (SemanticTree, scoring::PipelineResult) {
     let mut tree = build_tree(html, goal, url);
 
     // Kör hybrid pipeline med cache (build-fas cachas per HTML-innehåll)
     let goal_embedding = crate::embedding::embed(goal);
-    let config = scoring::PipelineConfig::default();
     let result = scoring::ScoringPipeline::run_cached(
         html,
         &tree.nodes,
         goal,
         goal_embedding.as_deref(),
-        &config,
+        config,
     );
 
     // Applicera scores tillbaka på trädet
@@ -569,6 +580,87 @@ pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> 
         "parse_time_ms": tree.parse_time_ms,
         "pipeline": {
             "method": "hybrid_bm25_hdc_embedding",
+            "bm25_candidates": timings.tfidf_candidates,
+            "hdc_survivors": timings.hdc_survivors,
+            "final_scored": timings.final_scored,
+            "build_bm25_us": timings.build_tfidf_us,
+            "build_hdc_us": timings.build_hdc_us,
+            "query_bm25_us": timings.query_tfidf_us,
+            "prune_hdc_us": timings.prune_hdc_us,
+            "score_embed_us": timings.score_embed_us,
+            "total_pipeline_us": timings.total_us,
+            "cache_hit": timings.cache_hit,
+        }
+    });
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Parse HTML med hybrid pipeline och valfri Stage 3 reranker.
+///
+/// Samma pipeline som `parse_top_nodes_hybrid` men med konfigurerbar
+/// `PipelineConfig` — t.ex. `Stage3Reranker::ColBert` eller `Hybrid`.
+/// Går genom hela pipelinen: HTML parse → semantic tree → BM25 → HDC → Stage 3.
+pub fn parse_top_nodes_with_config(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    config: &scoring::PipelineConfig,
+) -> String {
+    let start = now_ms();
+    let (mut tree, pipeline_result) = build_tree_hybrid_with_config(html, goal, url, config);
+    tree.parse_time_ms = now_ms() - start;
+
+    let top_scored =
+        scoring::ScoringPipeline::apply_top_n(pipeline_result.scored_nodes, Some(top_n as usize));
+
+    let all_node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect_map<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for node in nodes {
+                m.insert(node.id, node);
+                collect_map(&node.children, m);
+            }
+        }
+        collect_map(&tree.nodes, &mut m);
+        m
+    };
+
+    let top: Vec<_> = top_scored
+        .iter()
+        .filter_map(|scored| {
+            all_node_map.get(&scored.id).map(|node| {
+                let mut flat = (*node).clone();
+                flat.children.clear();
+                flat.relevance = scored.relevance;
+                flat
+            })
+        })
+        .collect();
+
+    let timings = &pipeline_result.timings;
+    let reranker_name = match &config.stage3_reranker {
+        scoring::Stage3Reranker::MiniLM => "minilm",
+        #[cfg(feature = "colbert")]
+        scoring::Stage3Reranker::ColBert => "colbert_maxsim",
+        #[cfg(feature = "colbert")]
+        scoring::Stage3Reranker::Hybrid { .. } => "hybrid_colbert_minilm",
+    };
+    let result = serde_json::json!({
+        "url": tree.url,
+        "title": tree.title,
+        "goal": tree.goal,
+        "top_nodes": top,
+        "node_count": top.len(),
+        "total_nodes": collect_all_nodes(&tree.nodes).len(),
+        "injection_warnings": tree.injection_warnings.len(),
+        "parse_time_ms": tree.parse_time_ms,
+        "pipeline": {
+            "method": reranker_name,
             "bm25_candidates": timings.tfidf_candidates,
             "hdc_survivors": timings.hdc_survivors,
             "final_scored": timings.final_scored,

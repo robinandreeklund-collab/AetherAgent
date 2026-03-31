@@ -11,10 +11,8 @@
 ///   cargo run --release --bin aether-colbert-validation --features colbert
 use std::time::Instant;
 
-use aether_agent::parse_top_nodes_hybrid;
 use aether_agent::scoring::colbert_reranker::Stage3Reranker;
-use aether_agent::scoring::pipeline::{PipelineConfig, ScoringPipeline};
-use aether_agent::types::SemanticNode;
+use aether_agent::scoring::pipeline::PipelineConfig;
 
 // ─── TestCase ────────────────────────────────────────────────────────────────
 
@@ -339,23 +337,6 @@ fn label_has_keyword(json: &str, keyword: &str, top_n: usize) -> (bool, usize, V
     (has, count, top3)
 }
 
-fn extract_tree(html: &str, goal: &str) -> Option<Vec<SemanticNode>> {
-    let json = aether_agent::parse_to_semantic_tree(html, goal, "");
-    let parsed: serde_json::Value = serde_json::from_str(&json).ok()?;
-    let nodes_val = parsed.get("nodes")?.clone();
-    serde_json::from_value(nodes_val).ok()
-}
-
-fn keyword_in_top3(
-    nodes: &[aether_agent::scoring::embed_score::ScoredNode],
-    keyword: &str,
-) -> bool {
-    nodes
-        .iter()
-        .take(3)
-        .any(|n| n.label.to_lowercase().contains(keyword))
-}
-
 fn run_test(tc: &TestCase) -> SiteResult {
     let mut r = SiteResult {
         name: tc.name.to_string(),
@@ -374,87 +355,81 @@ fn run_test(tc: &TestCase) -> SiteResult {
     r.fetch_ms = t0.elapsed().as_millis() as u64;
     r.html_kb = html.len() / 1024;
 
-    // ── MiniLM (via parse_top_nodes_hybrid — default Stage3) ──
+    // Alla tre rerankers kör genom exakt samma fullständiga pipeline:
+    // HTML parse → semantic tree → BM25 → HDC → Stage 3 (med vald reranker)
+    // via parse_top_nodes_with_config(). Ingen genväg.
+
+    // Hjälpfunktion: extrahera top-3 (score, role, label) från JSON
+    fn top3_from_json(json: &str) -> Vec<(f32, String, String)> {
+        let pv: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+        pv["top_nodes"]
+            .as_array()
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .take(3)
+                    .map(|n| {
+                        let score = n["relevance"].as_f64().unwrap_or(0.0) as f32;
+                        let role = n["role"].as_str().unwrap_or("?").to_string();
+                        let label: String = n["label"]
+                            .as_str()
+                            .unwrap_or("")
+                            .chars()
+                            .take(100)
+                            .collect();
+                        (score, role, label)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // ── 1. MiniLM (bi-encoder, default Stage 3) ──
+    let config_minilm = PipelineConfig::default();
     let t1 = Instant::now();
-    let minilm_json = parse_top_nodes_hybrid(&html, tc.goal, tc.url, tc.top_n);
+    let minilm_json =
+        aether_agent::parse_top_nodes_with_config(&html, tc.goal, tc.url, tc.top_n, &config_minilm);
     r.minilm_ms = t1.elapsed().as_micros() as f64 / 1000.0;
 
-    let (ok, count, top3) = label_has_keyword(&minilm_json, tc.keyword, tc.top_n as usize);
+    let (ok, count, _) = label_has_keyword(&minilm_json, tc.keyword, tc.top_n as usize);
     r.minilm_correct = ok;
     r.minilm_node_count = count;
-    if let Some((score, label)) = top3.first() {
+    r.minilm_top3_labels = top3_from_json(&minilm_json);
+    if let Some((score, _, label)) = r.minilm_top3_labels.first() {
         r.minilm_top1_score = *score;
         r.minilm_top1_label = label.clone();
     }
-    // Samla top-3 med roller för djupanalys
-    {
-        let pv: serde_json::Value = serde_json::from_str(&minilm_json).unwrap_or_default();
-        if let Some(nodes) = pv["top_nodes"].as_array() {
-            r.minilm_top3_labels = nodes
-                .iter()
-                .take(3)
-                .map(|n| {
-                    let score = n["relevance"].as_f64().unwrap_or(0.0) as f32;
-                    let role = n["role"].as_str().unwrap_or("?").to_string();
-                    let label: String = n["label"]
-                        .as_str()
-                        .unwrap_or("")
-                        .chars()
-                        .take(100)
-                        .collect();
-                    (score, role, label)
-                })
-                .collect();
-        }
-    }
-
-    // Extract pipeline details
     let pv: serde_json::Value = serde_json::from_str(&minilm_json).unwrap_or_default();
     r.bm25_candidates = pv["pipeline"]["bm25_candidates"].as_u64().unwrap_or(0) as usize;
     r.hdc_survivors = pv["pipeline"]["hdc_survivors"].as_u64().unwrap_or(0) as usize;
+    r.dom_nodes = pv["total_nodes"].as_u64().unwrap_or(0) as usize;
 
-    // Parse tree for ColBERT/Hybrid
-    let tree_nodes = match extract_tree(&html, tc.goal) {
-        Some(n) => n,
-        None => return r,
-    };
-    r.dom_nodes = tree_nodes.len();
-
-    // Goal embedding
-    #[cfg(feature = "embeddings")]
-    let goal_emb = aether_agent::embedding::embed(tc.goal);
-    #[cfg(not(feature = "embeddings"))]
-    let goal_emb: Option<Vec<f32>> = None;
-
-    // ── ColBERT (använder samma ONNX-modell som MiniLM, i late-interaction-mode) ──
+    // ── 2. ColBERT (MaxSim, exakt samma pipeline) ──
+    #[cfg(feature = "colbert")]
     if aether_agent::embedding::is_loaded() {
         let config_colbert = PipelineConfig {
             stage3_reranker: Stage3Reranker::ColBert,
             ..PipelineConfig::default()
         };
         let t2 = Instant::now();
-        let result =
-            ScoringPipeline::run(&tree_nodes, tc.goal, goal_emb.as_deref(), &config_colbert);
+        let colbert_json = aether_agent::parse_top_nodes_with_config(
+            &html,
+            tc.goal,
+            tc.url,
+            tc.top_n,
+            &config_colbert,
+        );
         r.colbert_ms = t2.elapsed().as_micros() as f64 / 1000.0;
-        r.colbert_correct = keyword_in_top3(&result.scored_nodes, tc.keyword);
-        if let Some(top) = result.scored_nodes.first() {
-            r.colbert_top1_score = top.relevance;
-            r.colbert_top1_label = top.label.chars().take(80).collect();
-        }
-        r.colbert_top3_labels = result
-            .scored_nodes
-            .iter()
-            .take(3)
-            .map(|n| {
-                (
-                    n.relevance,
-                    n.role.clone(),
-                    n.label.chars().take(100).collect(),
-                )
-            })
-            .collect();
 
-        // ── Hybrid ──
+        let (ok, _, _) = label_has_keyword(&colbert_json, tc.keyword, tc.top_n as usize);
+        r.colbert_correct = ok;
+        r.colbert_top3_labels = top3_from_json(&colbert_json);
+        if let Some((score, _, label)) = r.colbert_top3_labels.first() {
+            r.colbert_top1_score = *score;
+            r.colbert_top1_label = label.clone();
+        }
+
+        // ── 3. Hybrid (adaptive α, exakt samma pipeline) ──
         let config_hybrid = PipelineConfig {
             stage3_reranker: Stage3Reranker::Hybrid {
                 alpha: 0.7,
@@ -463,13 +438,20 @@ fn run_test(tc: &TestCase) -> SiteResult {
             ..PipelineConfig::default()
         };
         let t3 = Instant::now();
-        let result =
-            ScoringPipeline::run(&tree_nodes, tc.goal, goal_emb.as_deref(), &config_hybrid);
+        let hybrid_json = aether_agent::parse_top_nodes_with_config(
+            &html,
+            tc.goal,
+            tc.url,
+            tc.top_n,
+            &config_hybrid,
+        );
         r.hybrid_ms = t3.elapsed().as_micros() as f64 / 1000.0;
-        r.hybrid_correct = keyword_in_top3(&result.scored_nodes, tc.keyword);
-        if let Some(top) = result.scored_nodes.first() {
-            r.hybrid_top1_score = top.relevance;
-            r.hybrid_top1_label = top.label.chars().take(80).collect();
+
+        let (ok, _, _) = label_has_keyword(&hybrid_json, tc.keyword, tc.top_n as usize);
+        r.hybrid_correct = ok;
+        if let Some((score, _, label)) = top3_from_json(&hybrid_json).first() {
+            r.hybrid_top1_score = *score;
+            r.hybrid_top1_label = label.clone();
         }
     }
 
