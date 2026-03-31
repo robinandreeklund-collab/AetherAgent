@@ -24,6 +24,9 @@ pub struct DomEvalResult {
     pub event_loop_ticks: usize,
     /// Antal timer-callbacks som kördes
     pub timers_fired: usize,
+    /// URLs som JS anropade via fetch() — för Rust-side interception (BUGG J)
+    #[cfg_attr(not(feature = "js-eval"), allow(dead_code))]
+    pub fetched_urls: Vec<String>,
 }
 
 /// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar

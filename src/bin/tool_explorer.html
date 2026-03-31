@@ -141,16 +141,29 @@ a:hover{text-decoration:underline}
 // Alla tools anropas via /mcp (JSON-RPC tools/call) med auto-fetch av URL:er.
 const TOOLS = [
   {
-    id: 'parse', name: 'parse', desc: 'URL/HTML → semantiskt trad eller markdown',
+    id: 'parse', name: 'parse', desc: 'URL/HTML → semantiskt träd eller markdown',
     mcpName: 'parse',
     fields: [
       { key: 'url', label: 'URL', type: 'text', placeholder: 'https://sv.wikipedia.org/wiki/Rust_(programspråk)', hint: 'AetherAgent hämtar sidan automatiskt' },
       { key: 'goal', label: 'Goal', type: 'text', required: true, placeholder: 'hitta information om Rust' },
       { key: 'top_n', label: 'Top N noder', type: 'text', placeholder: '20', hint: 'Begränsa antal noder (lämna tomt för alla)' },
       { key: 'format', label: 'Format', type: 'select', options: ['tree', 'markdown'], hint: 'tree = JSON, markdown = ren text för LLM' },
+      { key: 'hybrid', label: 'Hybrid scoring', type: 'select', options: ['false', 'true'], hint: 'true = BM25+HDC+Embedding pipeline' },
       { key: 'html', label: 'HTML (valfritt)', type: 'textarea', placeholder: 'Klistra in HTML här om du inte anger URL', collapsed: true },
     ],
     pipeline: ['firewall_check', 'fetch_url', 'parse_html', 'semantic_tree', 'relevance_sort', 'format_output'],
+    transform: d => { if(d.top_n) d.top_n=parseInt(d.top_n); if(d.hybrid==='true') d.hybrid=true; else delete d.hybrid; return d },
+  },
+  {
+    id: 'parse_hybrid', name: 'parse_hybrid', desc: 'BM25 + HDC + Embedding — bästa ranking',
+    mcpName: 'parse_hybrid',
+    fields: [
+      { key: 'url', label: 'URL', type: 'text', placeholder: 'https://pypi.org', hint: 'Hämtas automatiskt' },
+      { key: 'goal', label: 'Goal', type: 'text', required: true, placeholder: 'find Python packages' },
+      { key: 'top_n', label: 'Top N', type: 'text', placeholder: '20', hint: 'Default: 20. Öka till 50-100 för komplex sida' },
+      { key: 'html', label: 'HTML (valfritt)', type: 'textarea', placeholder: 'Klistra in HTML här om du inte anger URL', collapsed: true },
+    ],
+    pipeline: ['fetch_url', 'parse_html', 'bm25_build', 'hdc_build', 'bm25_query', 'hdc_prune', 'embed_score', 'top_n'],
     transform: d => { if(d.top_n) d.top_n=parseInt(d.top_n); return d },
   },
   {
@@ -204,15 +217,18 @@ const TOOLS = [
     pipeline: ['flatten_old', 'flatten_new', 'match_keys', 'diff_fields', 'calc_savings'],
   },
   {
-    id: 'search', name: 'search', desc: 'Sök på webben via DuckDuckGo',
+    id: 'search', name: 'search', desc: 'DDG-sök + auto hybrid_parse top-3',
     mcpName: 'search',
     fields: [
-      { key: 'query', label: 'Sökfråga', type: 'text', required: true, placeholder: 'bästa laptop 2026' },
-      { key: 'goal', label: 'Goal', type: 'text', placeholder: 'köp billigaste laptop' },
+      { key: 'query', label: 'Sökfråga', type: 'text', required: true, placeholder: 'hur många bor i Göteborg?' },
+      { key: 'goal', label: 'Goal', type: 'text', placeholder: 'befolkning Göteborg antal invånare' },
       { key: 'top_n', label: 'Antal resultat', type: 'text', placeholder: '5' },
+      { key: 'deep', label: 'Deep fetch', type: 'select', options: ['true', 'false'], hint: 'true = parsa top-3 resultat-sidor' },
+      { key: 'scoring', label: 'Deep-parse metod', type: 'select', options: ['hybrid', 'full_markdown'], hint: 'hybrid = top-N rankade noder, full_markdown = komplett sida som markdown' },
+      { key: 'max_nodes_per_result', label: 'Max noder/sida', type: 'text', placeholder: '10', hint: 'Noder per deep-fetchad sida' },
     ],
-    pipeline: ['build_ddg_url', 'fetch_ddg', 'parse_results', 'rank_relevance'],
-    transform: d => { if(d.top_n) d.top_n=parseInt(d.top_n); return d },
+    pipeline: ['build_ddg_url', 'fetch_ddg', 'parse_results', 'ad_filter', 'deep_fetch_1', 'deep_fetch_2', 'deep_fetch_3', 'direct_answer'],
+    transform: d => { if(d.top_n) d.top_n=parseInt(d.top_n); if(d.max_nodes_per_result) d.max_nodes_per_result=parseInt(d.max_nodes_per_result); if(d.deep==='false') d.deep=false; else d.deep=true; return d },
   },
   {
     id: 'secure', name: 'secure', desc: 'Injection scan / Firewall check',
@@ -548,28 +564,64 @@ function showResult(data, elapsed) {
     html += '</div>';
   }
 
-  // ─── Nodes list (parse/stream) ───
-  var nodes = inner.nodes || (inner.tree && inner.tree.nodes) || [];
-  if (typeof nodes === 'object' && Array.isArray(nodes) && nodes.length > 0 && nodes[0] && nodes[0].role) {
+  // ─── Pipeline timing (parse_hybrid) ───
+  var pipe = inner.pipeline || {};
+  if (pipe.method) {
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 16px;margin-bottom:12px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">PIPELINE: ' + esc(pipe.method) + (pipe.cache_hit ? ' <span style="color:var(--accent2)">(CACHE HIT)</span>' : '') + '</h4>';
+    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px">';
+    if (pipe.bm25_candidates !== undefined) html += '<span>BM25: <b style="color:var(--accent)">' + pipe.bm25_candidates + '</b> kandidater</span>';
+    if (pipe.hdc_survivors !== undefined) html += '<span>HDC: <b style="color:var(--accent2)">' + pipe.hdc_survivors + '</b> survivors</span>';
+    if (pipe.total_pipeline_us !== undefined) html += '<span>Pipeline: <b style="color:var(--warn)">' + (pipe.total_pipeline_us/1000).toFixed(1) + 'ms</b></span>';
+    if (pipe.build_bm25_us !== undefined) html += '<span style="color:var(--text2)">BM25 build: ' + (pipe.build_bm25_us/1000).toFixed(1) + 'ms</span>';
+    if (pipe.build_hdc_us !== undefined) html += '<span style="color:var(--text2)">HDC build: ' + (pipe.build_hdc_us/1000).toFixed(1) + 'ms</span>';
+    if (pipe.score_embed_us !== undefined) html += '<span style="color:var(--text2)">Embed: ' + (pipe.score_embed_us/1000).toFixed(1) + 'ms</span>';
+    html += '</div></div>';
+  }
+
+  // ─── Top nodes / Nodes list ───
+  var topNodes = inner.top_nodes || [];
+  var nodes = topNodes.length > 0 ? topNodes : (inner.nodes || (inner.tree && inner.tree.nodes) || []);
+  if (typeof nodes === 'object' && Array.isArray(nodes) && nodes.length > 0 && nodes[0] && (nodes[0].role || nodes[0].label)) {
+    var isTopN = topNodes.length > 0;
     html += '<div style="margin-bottom:12px">';
-    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">NODER (' + nodes.length + ')</h4>';
-    html += '<div style="display:flex;flex-direction:column;gap:2px">';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">' + (isTopN ? 'TOP NODER' : 'NODER') + ' (' + nodes.length + ')</h4>';
+    html += '<div style="display:flex;flex-direction:column;gap:3px">';
+    var maxRel = 0;
+    for (var n0 = 0; n0 < nodes.length; n0++) { if ((nodes[n0].relevance||0) > maxRel) maxRel = nodes[n0].relevance; }
     var maxShow = Math.min(nodes.length, 50);
     for (var n = 0; n < maxShow; n++) {
       var nd = nodes[n];
-      var relColor = nd.relevance > 0.7 ? 'var(--accent2)' : nd.relevance > 0.4 ? 'var(--accent)' : 'var(--text2)';
-      var label = (nd.label || '').substring(0, 80);
-      if ((nd.label || '').length > 80) label += '...';
-      html += '<div style="display:flex;gap:8px;padding:4px 8px;background:var(--surface);border-radius:3px;font-size:11px;align-items:center">';
-      html += '<span style="color:' + relColor + ';font-weight:700;min-width:35px">' + (nd.relevance || 0).toFixed(2) + '</span>';
-      html += '<span style="background:var(--surface2);padding:1px 6px;border-radius:2px;color:var(--accent);min-width:70px;text-align:center;font-size:10px">' + esc(nd.role || '?') + '</span>';
-      html += '<span style="flex:1;color:var(--text)">' + esc(label) + '</span>';
-      if (nd.html_id) html += '<span style="color:var(--text2);font-size:10px">#' + esc(nd.html_id) + '</span>';
-      if (nd.action) html += '<span style="color:var(--text2);font-size:10px">' + esc((nd.action || '').substring(0, 30)) + '</span>';
+      var rel = nd.relevance || 0;
+      var relPct = maxRel > 0 ? (rel / maxRel * 100) : 0;
+      var relColor = rel > 0.7 ? '#0fa' : rel > 0.4 ? '#0af' : rel > 0.2 ? '#fa0' : '#637777';
+      var label = (nd.label || '').substring(0, 120);
+      if ((nd.label || '').length > 120) label += '\u2026';
+      html += '<div style="position:relative;padding:8px 12px;background:var(--surface);border-radius:4px;border-left:3px solid ' + relColor + ';overflow:hidden">';
+      // Relevance bar background
+      html += '<div style="position:absolute;top:0;left:0;height:100%;width:' + relPct.toFixed(0) + '%;background:' + relColor + ';opacity:0.06"></div>';
+      html += '<div style="position:relative;display:flex;gap:8px;align-items:flex-start">';
+      // Rank number
+      html += '<span style="color:var(--text2);font-size:10px;min-width:16px;text-align:right;padding-top:1px">' + (n+1) + '</span>';
+      // Score
+      html += '<span style="color:' + relColor + ';font-weight:700;font-size:12px;min-width:38px">' + rel.toFixed(3) + '</span>';
+      // Role badge
+      html += '<span style="background:var(--surface2);padding:1px 8px;border-radius:3px;color:var(--accent);font-size:10px;white-space:nowrap">' + esc(nd.role || '?') + '</span>';
+      // Label
+      html += '<span style="flex:1;font-size:11px;line-height:1.4;color:var(--text)">' + esc(label) + '</span>';
+      html += '</div>';
+      // Action / ID / Value row
+      var meta = [];
+      if (nd.html_id) meta.push('#' + nd.html_id);
+      if (nd.action) meta.push(nd.action);
+      if (nd.value && nd.value.length < 60) meta.push(nd.value);
+      if (meta.length > 0) {
+        html += '<div style="position:relative;margin-top:3px;margin-left:62px;font-size:10px;color:var(--text2)">' + esc(meta.join(' \u00B7 ')) + '</div>';
+      }
       html += '</div>';
     }
     if (nodes.length > maxShow) {
-      html += '<div style="padding:4px 8px;color:var(--text2);font-size:11px">...och ' + (nodes.length - maxShow) + ' fler noder</div>';
+      html += '<div style="padding:6px 12px;color:var(--text2);font-size:11px;text-align:center">\u2026 och ' + (nodes.length - maxShow) + ' fler noder</div>';
     }
     html += '</div></div>';
   }
@@ -646,16 +698,46 @@ function showResult(data, elapsed) {
     html += '</div>';
   }
 
+  // ─── Direct answer (search) ───
+  if (inner.direct_answer) {
+    html += '<div style="background:#0fa1;border:1px solid var(--accent2);border-radius:4px;padding:12px 16px;margin-bottom:12px">';
+    html += '<div style="font-size:10px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Direktsvar</div>';
+    html += '<div style="font-size:13px;color:#fff;line-height:1.5">' + esc(inner.direct_answer) + '</div>';
+    if (inner.direct_answer_confidence) html += '<div style="font-size:10px;color:var(--text2);margin-top:4px">Confidence: ' + inner.direct_answer_confidence.toFixed(2) + '</div>';
+    html += '</div>';
+  }
+
   // ─── Search results ───
   if (inner.results && inner.results.length > 0 && inner.query) {
+    var deepInfo = inner.deep ? ' \u2014 deep fetch ' + (inner.deep_fetch_ms || 0) + 'ms' : '';
     html += '<div style="margin-bottom:12px">';
-    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">S\u00D6KRESULTAT (' + inner.results.length + ')</h4>';
+    html += '<h4 style="font-size:11px;color:var(--text2);margin-bottom:8px">S\u00D6KRESULTAT (' + inner.results.length + ')' + deepInfo + '</h4>';
     for (var r = 0; r < inner.results.length; r++) {
       var res = inner.results[r];
-      html += '<div style="padding:8px;background:var(--surface);border-radius:3px;font-size:11px;margin-bottom:4px">';
-      html += '<div style="color:var(--accent);font-weight:700">' + esc(res.title || '') + '</div>';
-      html += '<div style="color:var(--accent2);font-size:10px">' + esc(res.url || '') + '</div>';
-      html += '<div style="color:var(--text);margin-top:4px">' + esc(res.snippet || '') + '</div>';
+      var hasPc = res.page_content && res.page_content.length > 0;
+      html += '<div style="padding:10px 12px;background:var(--surface);border-radius:4px;font-size:11px;margin-bottom:6px;border-left:3px solid ' + (hasPc ? 'var(--accent2)' : 'var(--border)') + '">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+      html += '<span style="color:var(--accent);font-weight:700;font-size:12px">' + esc(res.title || '') + '</span>';
+      if (res.fetch_ms) html += '<span style="font-size:10px;color:var(--text2)">' + res.fetch_ms + 'ms</span>';
+      html += '</div>';
+      html += '<div style="color:var(--accent2);font-size:10px;margin-top:2px">' + esc(res.domain || '') + ' \u2014 ' + esc(res.url || '').substring(0, 80) + '</div>';
+      if (res.snippet) html += '<div style="color:var(--text);margin-top:6px;line-height:1.4">' + esc(res.snippet) + '</div>';
+      // Page content (deep-fetch resultat)
+      if (hasPc) {
+        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">';
+        html += '<div style="font-size:10px;color:var(--accent2);margin-bottom:4px">DEEP FETCH \u2014 ' + res.page_content.length + ' noder fr\u00E5n sidan</div>';
+        for (var pc = 0; pc < Math.min(res.page_content.length, 5); pc++) {
+          var pn = res.page_content[pc];
+          var pcColor = pn.relevance > 0.7 ? '#0fa' : pn.relevance > 0.4 ? '#0af' : '#637777';
+          html += '<div style="display:flex;gap:6px;padding:3px 0;font-size:10px;align-items:flex-start">';
+          html += '<span style="color:' + pcColor + ';font-weight:700;min-width:32px">' + (pn.relevance||0).toFixed(2) + '</span>';
+          html += '<span style="color:var(--accent);min-width:50px">' + esc(pn.role||'') + '</span>';
+          html += '<span style="color:var(--text);flex:1;line-height:1.3">' + esc((pn.label||'').substring(0, 100)) + '</span>';
+          html += '</div>';
+        }
+        if (res.page_content.length > 5) html += '<div style="font-size:10px;color:var(--text2)">\u2026 +' + (res.page_content.length-5) + ' fler</div>';
+        html += '</div>';
+      }
       html += '</div>';
     }
     html += '</div>';

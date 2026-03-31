@@ -308,6 +308,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 eval_time_us: start.elapsed().as_micros() as u64,
                 event_loop_ticks: 0,
                 timers_fired: 0,
+                fetched_urls: vec![],
             };
         }
     }
@@ -361,6 +362,9 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 };
                 let mutations = state.borrow().mutations.clone();
 
+                // Extrahera fetch-URLs som JS anropade (BUGG J)
+                let fetched_urls = extract_fetched_urls(&ctx);
+
                 DomEvalResult {
                     value: if value_str == "undefined" {
                         None
@@ -372,6 +376,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                     eval_time_us: start.elapsed().as_micros() as u64,
                     event_loop_ticks: ticks,
                     timers_fired: timers,
+                    fetched_urls,
                 }
             }
             Err(e) => {
@@ -383,6 +388,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                     eval_time_us: start.elapsed().as_micros() as u64,
                     event_loop_ticks: 0,
                     timers_fired: 0,
+                    fetched_urls: vec![],
                 }
             }
         };
@@ -436,6 +442,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     eval_time_us: start.elapsed().as_micros() as u64,
                     event_loop_ticks: 0,
                     timers_fired: 0,
+                    fetched_urls: vec![],
                 },
                 arena,
             };
@@ -497,6 +504,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     eval_time_us: start.elapsed().as_micros() as u64,
                     event_loop_ticks: ticks,
                     timers_fired: timers,
+                    fetched_urls: vec![],
                 }
             }
             Err(e) => {
@@ -508,6 +516,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     eval_time_us: start.elapsed().as_micros() as u64,
                     event_loop_ticks: 0,
                     timers_fired: 0,
+                    fetched_urls: vec![],
                 }
             }
         };
@@ -592,6 +601,7 @@ fn eval_js_with_lifecycle_internal(
             eval_time_us: start.elapsed().as_micros() as u64,
             event_loop_ticks: 0,
             timers_fired: 0,
+            fetched_urls: vec![],
         };
     }
 
@@ -689,6 +699,7 @@ fn eval_js_with_lifecycle_internal(
             eval_time_us: start.elapsed().as_micros() as u64,
             event_loop_ticks: ticks,
             timers_fired: timers,
+            fetched_urls: vec![],
         }
     });
 
@@ -724,6 +735,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 eval_time_us: start.elapsed().as_micros() as u64,
                 event_loop_ticks: 0,
                 timers_fired: 0,
+                fetched_urls: vec![],
             },
             arena,
         };
@@ -822,6 +834,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
             eval_time_us: start.elapsed().as_micros() as u64,
             event_loop_ticks: ticks,
             timers_fired: timers,
+            fetched_urls: vec![],
         }
     });
 
@@ -7866,6 +7879,15 @@ impl JsHandler for FormSubmit {
 }
 
 // ─── Tester ────────────────────────────────────────────────────────────────
+
+/// Extrahera fetch-URLs som JS anropade via globalThis.__fetchedUrls
+fn extract_fetched_urls(ctx: &rquickjs::Ctx<'_>) -> Vec<String> {
+    ctx.eval::<rquickjs::Value, _>("JSON.stringify(globalThis.__fetchedUrls || [])")
+        .ok()
+        .and_then(|v| v.as_string().and_then(|s| s.to_string().ok()))
+        .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+        .unwrap_or_default()
+}
 
 #[cfg(test)]
 mod tests {

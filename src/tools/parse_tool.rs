@@ -37,6 +37,10 @@ pub struct ParseRequest {
     /// Tvinga JS-eval (true/false/auto)
     #[serde(default)]
     pub js: Option<bool>,
+    /// Använd hybrid BM25+HDC+Embedding pipeline (default: false).
+    /// Sätt till true för bättre relevans-ranking vid top_n-filtrering.
+    #[serde(default)]
+    pub hybrid: bool,
     /// Streaming-läge (default: true)
     #[serde(default = "default_true")]
     pub stream: bool,
@@ -97,40 +101,124 @@ pub fn execute(req: &ParseRequest) -> ToolResult {
     }
 }
 
-/// Kör parse med redan hämtad HTML (anropas efter fetch i async-kontext)
+/// Kör parse med redan hämtad HTML (synkron)
 pub fn execute_with_html(html: &str, req: &ParseRequest, url: &str) -> ToolResult {
     let start = now_ms();
-    execute_html_inner(
+    execute_html_with_options(
         html,
         &req.goal,
         req.top_n,
         req.format.as_deref(),
         req.js,
+        req.hybrid,
         url,
         start,
     )
+}
+
+/// Async variant — resolvar pending fetch-URLs innan scoring (BUGG J)
+#[cfg(feature = "fetch")]
+pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) -> ToolResult {
+    // Bygg träd (synk)
+    let start = now_ms();
+    let use_js = match req.js {
+        Some(true) => true,
+        Some(false) => false,
+        None => {
+            let decision = crate::escalation::select_tier(html, url);
+            matches!(
+                decision.tier,
+                crate::escalation::ParseTier::QuickJsDom { .. }
+                    | crate::escalation::ParseTier::QuickJsLifecycle { .. }
+            )
+        }
+    };
+    let mut tree = if use_js {
+        build_tree_with_js(html, &req.goal, url)
+    } else {
+        build_tree(html, &req.goal, url)
+    };
+    tree.parse_time_ms = now_ms() - start;
+
+    // Resolve pending fetch-URLs (async)
+    super::resolve_pending_fetches(&mut tree, &req.goal).await;
+
+    let total_nodes = count_all_nodes(&tree.nodes);
+
+    // Scoring
+    if req.hybrid {
+        let goal_embedding = crate::embedding::embed(&req.goal);
+        let config = crate::scoring::PipelineConfig::default();
+        let result = crate::scoring::ScoringPipeline::run_cached(
+            html,
+            &tree.nodes,
+            &req.goal,
+            goal_embedding.as_deref(),
+            &config,
+        );
+        let score_map = crate::scoring::pipeline::scores_to_map(&result.scored_nodes);
+        crate::scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+    }
+    sort_by_relevance(&mut tree);
+    if let Some(n) = req.top_n {
+        limit_top_n(&mut tree, n);
+    }
+
+    let node_count = count_all_nodes(&tree.nodes);
+    let tier_name = if use_js { "js" } else { "static" };
+    let fmt = req.format.as_deref().unwrap_or("tree");
+    let warnings = tree.injection_warnings.clone();
+
+    let response = match fmt {
+        "markdown" => super::parse_tool::ParseResponse {
+            format: "markdown".to_string(),
+            tier: tier_name.to_string(),
+            node_count,
+            total_nodes,
+            tree: None,
+            markdown: Some(tree_to_markdown(&tree)),
+            vision: None,
+            parse_time_ms: now_ms() - start,
+        },
+        _ => super::parse_tool::ParseResponse {
+            format: "tree".to_string(),
+            tier: tier_name.to_string(),
+            node_count,
+            total_nodes,
+            tree: Some(tree),
+            markdown: None,
+            vision: None,
+            parse_time_ms: now_ms() - start,
+        },
+    };
+
+    let data = serde_json::to_value(&response).unwrap_or_default();
+    ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
 }
 
 /// Intern parse av HTML
 fn execute_html(html: &str, req: &ParseRequest, start: u64) -> ToolResult {
     let url = req.url.as_deref().unwrap_or("");
-    execute_html_inner(
+    execute_html_with_options(
         html,
         &req.goal,
         req.top_n,
         req.format.as_deref(),
         req.js,
+        req.hybrid,
         url,
         start,
     )
 }
 
-fn execute_html_inner(
+#[allow(clippy::too_many_arguments)]
+fn execute_html_with_options(
     html: &str,
     goal: &str,
     top_n: Option<u32>,
     format: Option<&str>,
     js: Option<bool>,
+    hybrid: bool,
     url: &str,
     start: u64,
 ) -> ToolResult {
@@ -161,7 +249,20 @@ fn execute_html_inner(
     tree.parse_time_ms = now_ms() - start;
     let total_nodes = count_all_nodes(&tree.nodes);
 
-    // Sortera och begränsa
+    // Scoring: hybrid BM25+HDC+Embedding eller legacy sort
+    if hybrid {
+        let goal_embedding = crate::embedding::embed(goal);
+        let config = crate::scoring::PipelineConfig::default();
+        let result = crate::scoring::ScoringPipeline::run_cached(
+            html,
+            &tree.nodes,
+            goal,
+            goal_embedding.as_deref(),
+            &config,
+        );
+        let score_map = crate::scoring::pipeline::scores_to_map(&result.scored_nodes);
+        crate::scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+    }
     sort_by_relevance(&mut tree);
     if let Some(n) = top_n {
         limit_top_n(&mut tree, n);
@@ -287,6 +388,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -316,6 +418,7 @@ mod tests {
             top_n: None,
             format: Some("markdown".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -341,6 +444,7 @@ mod tests {
             top_n: Some(2),
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -368,6 +472,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -384,6 +489,7 @@ mod tests {
             top_n: None,
             format: None,
             js: None,
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -407,6 +513,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -431,6 +538,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(true),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -452,6 +560,7 @@ mod tests {
             top_n: None,
             format: Some("tree".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute(&req);
@@ -468,6 +577,7 @@ mod tests {
             top_n: Some(5),
             format: Some("markdown".to_string()),
             js: Some(false),
+            hybrid: false,
             stream: false,
         };
         let result = execute_with_html(simple_html(), &req, "https://example.com");

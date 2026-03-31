@@ -3712,3 +3712,135 @@ fn test_has_selector_resolve_no_crash() {
 
     assert!(result.is_ok(), ":has() resolve kraschade! Se output ovan.");
 }
+
+// ─── Hybrid Scoring Pipeline Integration Tests ─────────────────────────────────
+
+#[test]
+fn test_hybrid_pipeline_top_n_respects_limit() {
+    let html = r##"<html><body>
+        <h1>Population Statistics</h1>
+        <p>367924 inhabitants in the municipality</p>
+        <p>Weather forecast for tomorrow</p>
+        <button>Download report</button>
+        <button>Cookie settings</button>
+        <a href="/contact">Contact us</a>
+        <nav>Skip to main content</nav>
+    </body></html>"##;
+
+    let json_str = parse_top_nodes_hybrid(html, "population statistics", "https://example.com", 3);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    let top_nodes = parsed["top_nodes"]
+        .as_array()
+        .expect("Borde ha top_nodes array");
+
+    assert!(
+        top_nodes.len() <= 3,
+        "top_n=3 borde ge max 3 noder, fick {}",
+        top_nodes.len()
+    );
+
+    // Verifiera pipeline-metadata
+    assert!(
+        parsed["pipeline"]["method"].as_str() == Some("hybrid_bm25_hdc_embedding"),
+        "Borde rapportera hybrid-metod"
+    );
+}
+
+#[test]
+fn test_hybrid_pipeline_ranks_content_over_wrapper() {
+    // Bugg B-test: löv-nod med faktiskt svar borde rankas högre än wrapper
+    let html = r##"<html><body>
+        <div>
+            <div>
+                <p>367924 inhabitants in the municipality population count</p>
+            </div>
+            <div>
+                <p>Cookie consent and privacy terms about many different topics</p>
+            </div>
+        </div>
+    </body></html>"##;
+
+    let json_str = parse_top_nodes_hybrid(
+        html,
+        "population inhabitants count",
+        "https://example.com",
+        5,
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    let top_nodes = parsed["top_nodes"].as_array().expect("Borde ha top_nodes");
+
+    // Noden med "inhabitants" borde vara bland topp 2
+    let top_labels: Vec<&str> = top_nodes
+        .iter()
+        .take(2)
+        .filter_map(|n| n["label"].as_str())
+        .collect();
+
+    let has_population_node = top_labels
+        .iter()
+        .any(|label| label.contains("inhabitants") || label.contains("367924"));
+
+    assert!(
+        has_population_node,
+        "Nod med 'inhabitants' borde vara bland topp 2, fick: {:?}",
+        top_labels
+    );
+}
+
+#[test]
+fn test_hybrid_pipeline_reports_timings() {
+    let html = r##"<html><body>
+        <h1>Test Page</h1>
+        <p>Some content here</p>
+    </body></html>"##;
+
+    let json_str = parse_top_nodes_hybrid(html, "content", "https://example.com", 10);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Borde vara giltig JSON");
+
+    let pipeline = &parsed["pipeline"];
+    assert!(
+        pipeline["total_pipeline_us"].as_u64().is_some(),
+        "Borde rapportera pipeline-timings"
+    );
+    assert!(
+        pipeline["bm25_candidates"].as_u64().is_some(),
+        "Borde rapportera TF-IDF kandidater"
+    );
+}
+
+#[test]
+fn test_hybrid_vs_legacy_both_work() {
+    let html = r##"<html><body>
+        <h1>Main Heading</h1>
+        <p>Important content about programming</p>
+        <button>Click me</button>
+    </body></html>"##;
+
+    // Legacy
+    let legacy_json = parse_top_nodes(html, "programming", "https://example.com", 5);
+    let legacy: serde_json::Value =
+        serde_json::from_str(&legacy_json).expect("Legacy borde vara giltig JSON");
+    let legacy_nodes = legacy["top_nodes"]
+        .as_array()
+        .expect("Legacy borde ha top_nodes");
+
+    // Hybrid
+    let hybrid_json = parse_top_nodes_hybrid(html, "programming", "https://example.com", 5);
+    let hybrid: serde_json::Value =
+        serde_json::from_str(&hybrid_json).expect("Hybrid borde vara giltig JSON");
+    let hybrid_nodes = hybrid["top_nodes"]
+        .as_array()
+        .expect("Hybrid borde ha top_nodes");
+
+    // Båda borde returnera noder
+    assert!(!legacy_nodes.is_empty(), "Legacy borde returnera noder");
+    assert!(!hybrid_nodes.is_empty(), "Hybrid borde returnera noder");
+
+    // Hybrid borde respektera top_n strikt
+    assert!(hybrid_nodes.len() <= 5, "Hybrid top_n borde respekteras");
+}

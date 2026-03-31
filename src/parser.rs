@@ -549,8 +549,9 @@ pub fn extract_label_with_text(cache: &AttrCache, inner_text: &str) -> String {
     let inner = inner_text;
     let trimmed = inner.trim();
     if !trimmed.is_empty() {
-        // Begränsa till 80 tecken
-        let truncated: String = trimmed.chars().take(80).collect();
+        // Begränsa till 300 tecken — tillräckligt för embedding-scoring
+        // (80 tecken klippte bort fakta-siffror som satt efter position 80)
+        let truncated: String = trimmed.chars().take(512).collect();
         return truncated;
     }
 
@@ -1078,8 +1079,8 @@ mod tests {
     }
 
     #[test]
-    fn test_label_truncation_80_chars() {
-        let long_text = "A".repeat(120);
+    fn test_label_truncation_512_chars() {
+        let long_text = "A".repeat(600);
         let html = format!(
             r#"<html><body><button>{}</button></body></html>"#,
             long_text
@@ -1088,8 +1089,13 @@ mod tests {
         let btn = find_element(&dom.document, "button").expect("Borde hitta <button>");
         let label = extract_label(&btn);
         assert!(
-            label.len() <= 80,
-            "Label ska trunkeras till max 80 tecken, got {} tecken",
+            label.len() <= 512,
+            "Label ska trunkeras till max 512 tecken, got {} tecken",
+            label.len()
+        );
+        assert!(
+            label.len() > 300,
+            "Label ska tillåta >300 tecken nu, got {} tecken",
             label.len()
         );
     }

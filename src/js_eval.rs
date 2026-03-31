@@ -19,10 +19,12 @@ const MAX_STACK_SIZE: usize = 1024 * 1024;
 #[cfg(feature = "js-eval")]
 const MAX_MEMORY: usize = 16 * 1024 * 1024;
 
-/// Max exekveringstid i millisekunder (väggklocka) innan interrupt
-/// Höjd till 5000ms för SPA-bundles som tar längre tid att evaluera
+/// Max exekveringstid i millisekunder (väggklocka) innan interrupt.
+/// 5000ms räcker för typiska SPA-bundles (React/Vue/Svelte hydration).
+/// Lägre värden (1000ms) riskerar att avbryta legitima framework-scripts.
+/// Högre värden (30s) gör att interrupt-skyddet blir verkningslöst.
 #[cfg(feature = "js-eval")]
-const MAX_EVAL_MS: u64 = 30000;
+const MAX_EVAL_MS: u64 = 5000;
 
 /// Interrupt-state som håller referens till deadline-baserad avbrottslogik.
 /// Ingen separat tråd behövs — interrupt-handlern kollar Instant direkt.

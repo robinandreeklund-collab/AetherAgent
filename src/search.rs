@@ -96,6 +96,18 @@ fn hex_digit(nibble: u8) -> char {
     }
 }
 
+/// BUGG P: Detektera annons-/tracker-URLs som inte ska inkluderas i resultat.
+fn is_ad_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("duckduckgo.com/y.js")
+        || lower.contains("/ad/click")
+        || lower.contains("/ads/")
+        || lower.contains("doubleclick.net")
+        || lower.contains("googleadservices.com")
+        || lower.contains("ad.atdmt.com")
+        || lower.contains("bing.com/aclick")
+}
+
 // ─── Resultat-extraktion ─────────────────────────────────────────────────────
 
 /// Extrahera sökresultat från semantiska noder.
@@ -117,9 +129,19 @@ pub fn extract_results(nodes: &[SemanticNode], top_n: usize) -> Vec<SearchResult
         let value = node.value.as_deref().unwrap_or("");
         let has_ddg_redirect = value.contains("duckduckgo.com/l/?uddg=");
 
+        // BUGG P: Skippa DDG-annonser (duckduckgo.com/y.js? URLs)
+        if value.contains("duckduckgo.com/y.js") {
+            continue;
+        }
+
         // Steg 1: Ny titel-länk med DDG redirect
         if has_ddg_redirect && (role == "heading" || role == "link" || role == "cta") {
             let real_url = decode_ddg_redirect(value);
+
+            // BUGG P: Skippa ad-tracker URLs
+            if is_ad_url(&real_url) {
+                continue;
+            }
 
             // Skip display-URL-dubblett (samma URL, label ser ut som en URL)
             if seen_urls.contains(&real_url) {
@@ -254,50 +276,45 @@ fn from_hex(byte: u8) -> Option<u8> {
 
 // ─── Direct Answer Detection ─────────────────────────────────────────────────
 
-/// Försök extrahera ett direktsvar från snippets (siffror, datum, namn)
+/// Confidence-gate: generera inte direct_answer vid låg relevance
+const DIRECT_ANSWER_MIN_CONFIDENCE: f32 = 0.3;
+
+/// Välj bästa noden för direct_answer.
+///
+/// Prioritet:
+/// 1. Bästa page_content-nod (deep-fetch resultat) — har faktisk siddata
+/// 2. Bästa snippet — DDG:s sammanfattning
+///
+/// Returnerar hela nodens label orörd + källdomän.
+/// AetherAgent tolkar INTE innehållet — det är LLM:ens ansvar.
 pub fn detect_direct_answer(results: &[SearchResultEntry]) -> Option<(String, f32)> {
-    for r in results.iter().take(2) {
-        if let Some(num) = extract_number_answer(&r.snippet) {
-            return Some((num, r.confidence));
+    // Steg 1: Sök bland alla page_content-noder (deep-fetch)
+    let mut best_deep: Option<(&str, f32, &str)> = None; // (label, relevance, domain)
+    for r in results {
+        if let Some(ref pages) = r.page_content {
+            for node in pages {
+                if node.relevance >= DIRECT_ANSWER_MIN_CONFIDENCE
+                    && node.label.len() > 20
+                    && best_deep.is_none_or(|(_, rel, _)| node.relevance > rel)
+                {
+                    best_deep = Some((&node.label, node.relevance, &r.domain));
+                }
+            }
         }
     }
+
+    if let Some((label, relevance, domain)) = best_deep {
+        return Some((format!("{} ({})", label.trim(), domain), relevance));
+    }
+
+    // Steg 2: Fallback till bästa snippet
+    for r in results.iter().take(3) {
+        if r.confidence >= DIRECT_ANSWER_MIN_CONFIDENCE && r.snippet.len() > 20 {
+            return Some((format!("{} ({})", r.snippet.trim(), r.domain), r.confidence));
+        }
+    }
+
     None
-}
-
-/// Hitta ett numeriskt svar i en snippet (t.ex. "10 701 047 invånare")
-fn extract_number_answer(snippet: &str) -> Option<String> {
-    // Matcha sekvenser av siffror med mellanslag/punkt som tusentalsavdelare
-    // T.ex. "10 701 047", "1.234.567", "42 000"
-    let mut best: Option<String> = None;
-    let mut best_len = 0;
-
-    let chars: Vec<char> = snippet.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_ascii_digit() {
-            let start = i;
-            // Samla siffror + mellanslag/punkt som tusentalsavdelare
-            while i < chars.len()
-                && (chars[i].is_ascii_digit()
-                    || ((chars[i] == ' ' || chars[i] == '\u{00a0}' || chars[i] == '.')
-                        && i + 1 < chars.len()
-                        && chars[i + 1].is_ascii_digit()))
-            {
-                i += 1;
-            }
-            let candidate: String = chars[start..i].iter().collect();
-            // Minst 4 tecken för att vara ett meningsfullt svar
-            let digit_count = candidate.chars().filter(|c| c.is_ascii_digit()).count();
-            if digit_count >= 4 && candidate.len() > best_len {
-                best_len = candidate.len();
-                best = Some(candidate);
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    best
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
@@ -360,31 +377,12 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_number_answer() {
-        assert_eq!(
-            extract_number_answer("Sveriges befolkning uppgår till 10 701 047 invånare"),
-            Some("10 701 047".to_string()),
-            "Ska hitta miljontal med mellanslag"
-        );
-        assert_eq!(
-            extract_number_answer("Det kostar 42 kronor"),
-            None,
-            "För kort siffra ska ignoreras"
-        );
-        assert_eq!(
-            extract_number_answer("BNP var 5.678.900 miljoner"),
-            Some("5.678.900".to_string()),
-            "Siffror med punktavdelare ska hittas"
-        );
-    }
-
-    #[test]
-    fn test_detect_direct_answer_from_results() {
+    fn test_detect_direct_answer_from_snippet() {
         let results = vec![SearchResultEntry {
             rank: 1,
             title: "SCB".to_string(),
             url: "https://scb.se".to_string(),
-            snippet: "Sverige har 10 521 556 invånare".to_string(),
+            snippet: "Sverige har 10 521 556 invånare enligt SCB 2024".to_string(),
             domain: "scb.se".to_string(),
             confidence: 0.85,
             page_content: None,
@@ -393,8 +391,55 @@ mod tests {
         let answer = detect_direct_answer(&results);
         assert!(answer.is_some(), "Ska hitta direktsvar i snippet");
         let (text, conf) = answer.unwrap();
-        assert_eq!(text, "10 521 556");
-        assert!((conf - 0.85).abs() < 0.01, "Confidence ska matcha");
+        assert!(
+            text.contains("10 521 556 invånare"),
+            "Ska innehålla hela snippeten: {text}"
+        );
+        assert!(text.contains("scb.se"), "Ska ha källdomän: {text}");
+        assert!((conf - 0.85).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_detect_direct_answer_prefers_page_content() {
+        let results = vec![SearchResultEntry {
+            rank: 1,
+            title: "SCB".to_string(),
+            url: "https://scb.se".to_string(),
+            snippet: "SCB statistik kort snippet".to_string(),
+            domain: "scb.se".to_string(),
+            confidence: 0.5,
+            page_content: Some(vec![crate::search::PageNode {
+                role: "text".to_string(),
+                label: "Sveriges befolkning uppgår till 10 521 556 invånare per 2024".to_string(),
+                relevance: 0.9,
+            }]),
+            fetch_ms: Some(100),
+        }];
+        let answer = detect_direct_answer(&results);
+        assert!(answer.is_some(), "Ska hitta svar i page_content");
+        let (text, _) = answer.unwrap();
+        assert!(
+            text.contains("10 521 556 invånare"),
+            "Ska föredra page_content: {text}"
+        );
+    }
+
+    #[test]
+    fn test_detect_direct_answer_low_confidence_rejected() {
+        let results = vec![SearchResultEntry {
+            rank: 1,
+            title: "X".to_string(),
+            url: "https://example.com".to_string(),
+            snippet: "Short".to_string(),
+            domain: "example.com".to_string(),
+            confidence: 0.1,
+            page_content: None,
+            fetch_ms: None,
+        }];
+        assert!(
+            detect_direct_answer(&results).is_none(),
+            "Låg confidence ska inte ge direct_answer"
+        );
     }
 
     #[test]

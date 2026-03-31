@@ -29,6 +29,7 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+pub mod scoring;
 pub mod search;
 pub(crate) mod semantic;
 pub(crate) mod session;
@@ -107,6 +108,30 @@ fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
     tree
 }
 
+/// Bygg träd med hybrid scoring pipeline (TF-IDF → HDC → Embedding)
+///
+/// Returnerar (tree, pipeline_result) där tree har uppdaterade relevance-scores.
+fn build_tree_hybrid(html: &str, goal: &str, url: &str) -> (SemanticTree, scoring::PipelineResult) {
+    let mut tree = build_tree(html, goal, url);
+
+    // Kör hybrid pipeline med cache (build-fas cachas per HTML-innehåll)
+    let goal_embedding = crate::embedding::embed(goal);
+    let config = scoring::PipelineConfig::default();
+    let result = scoring::ScoringPipeline::run_cached(
+        html,
+        &tree.nodes,
+        goal,
+        goal_embedding.as_deref(),
+        &config,
+    );
+
+    // Applicera scores tillbaka på trädet
+    let score_map = scoring::pipeline::scores_to_map(&result.scored_nodes);
+    scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
+
+    (tree, result)
+}
+
 /// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd.
 /// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
 /// och används för att bygga det semantiska trädet.
@@ -119,6 +144,9 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
             let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
             let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
 
+            // Samla fetch-URLs från JS runtime (BUGG J)
+            let runtime_urls = eval_with_arena.result.fetched_urls.clone();
+
             // Logga JS-fel (FIX-SPA-001)
             if let Some(ref err) = eval_with_arena.result.error {
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
@@ -129,7 +157,9 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                 let modified_html = eval_with_arena
                     .arena
                     .serialize_html(eval_with_arena.arena.document);
-                return build_tree(&modified_html, goal, url);
+                let mut tree = build_tree(&modified_html, goal, url);
+                attach_pending_urls(&mut tree, html, &runtime_urls);
+                return tree;
             }
 
             // Om JS körde utan fel — prova arena-HTML (kan ha ändrats utan mutation-record)
@@ -138,14 +168,49 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
                     .arena
                     .serialize_html(eval_with_arena.arena.document);
                 if arena_html.len() > 10 && arena_html != html {
-                    return build_tree(&arena_html, goal, url);
+                    let mut tree = build_tree(&arena_html, goal, url);
+                    attach_pending_urls(&mut tree, html, &runtime_urls);
+                    return tree;
                 }
             }
 
-            // Fallback: pre-JS DOM
+            // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
+            let mut tree = build_tree(html, goal, url);
+            attach_pending_urls(&mut tree, html, &runtime_urls);
+            return tree;
         }
     }
-    build_tree(html, goal, url)
+    // Ingen JS — extrahera fetch-URLs statiskt
+    let mut tree = build_tree(html, goal, url);
+    attach_pending_urls(&mut tree, html, &[]);
+    tree
+}
+
+/// Samla pending fetch-URLs från (1) statisk HTML-analys + (2) runtime JS-capture.
+/// Deduplicera och filtrera bort tomma/relativa URLs.
+fn attach_pending_urls(tree: &mut SemanticTree, html: &str, runtime_urls: &[String]) {
+    let mut urls: Vec<String> = Vec::new();
+
+    // Statisk extraktion: hitta fetch()/XHR-URLs i inline scripts
+    let static_urls = js_bridge::extract_xhr_from_snippets(html);
+    for capture in &static_urls {
+        if !capture.url.is_empty() && capture.url.starts_with("http") {
+            urls.push(capture.url.clone());
+        }
+    }
+
+    // Runtime-capture: URLs som JS anropade via fetch()
+    for url in runtime_urls {
+        if !url.is_empty() && url.starts_with("http") && !urls.contains(url) {
+            urls.push(url.clone());
+        }
+    }
+
+    // Dedup
+    urls.sort();
+    urls.dedup();
+
+    tree.pending_fetch_urls = urls;
 }
 
 /// Pre-allokerad JSON-serialisering via serde_json::to_writer.
@@ -439,6 +504,82 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
         "top_nodes": top,
         "injection_warnings": tree.injection_warnings.len(),
         "parse_time_ms": tree.parse_time_ms,
+    });
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Hybrid scoring version — TF-IDF + HDC + Embedding pipeline
+///
+/// Löser Bugg B (wrapper-bias) genom bottom-up scoring och Bugg A (top_n)
+/// genom korrekt filtrering. Returnerar dessutom pipeline-timings.
+///
+/// # Arguments
+/// * `html` - Raw HTML string
+/// * `goal` - The agent's goal
+/// * `url` - The page URL
+/// * `top_n` - Max number of nodes to return
+#[wasm_bindgen]
+pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> String {
+    let start = now_ms();
+    let (mut tree, pipeline_result) = build_tree_hybrid(html, goal, url);
+    tree.parse_time_ms = now_ms() - start;
+
+    // Applicera top_n på pipeline-scorade noder
+    let top_scored =
+        scoring::ScoringPipeline::apply_top_n(pipeline_result.scored_nodes, Some(top_n as usize));
+
+    // Konvertera till flat SemanticNode-lista
+    let all_node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect_map<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for node in nodes {
+                m.insert(node.id, node);
+                collect_map(&node.children, m);
+            }
+        }
+        collect_map(&tree.nodes, &mut m);
+        m
+    };
+
+    let top: Vec<_> = top_scored
+        .iter()
+        .filter_map(|scored| {
+            all_node_map.get(&scored.id).map(|node| {
+                let mut flat = (*node).clone();
+                flat.children.clear();
+                flat.relevance = scored.relevance;
+                flat
+            })
+        })
+        .collect();
+
+    let timings = &pipeline_result.timings;
+    let result = serde_json::json!({
+        "url": tree.url,
+        "title": tree.title,
+        "goal": tree.goal,
+        "top_nodes": top,
+        "node_count": top.len(),
+        "total_nodes": collect_all_nodes(&tree.nodes).len(),
+        "injection_warnings": tree.injection_warnings.len(),
+        "parse_time_ms": tree.parse_time_ms,
+        "pipeline": {
+            "method": "hybrid_bm25_hdc_embedding",
+            "bm25_candidates": timings.tfidf_candidates,
+            "hdc_survivors": timings.hdc_survivors,
+            "final_scored": timings.final_scored,
+            "build_bm25_us": timings.build_tfidf_us,
+            "build_hdc_us": timings.build_hdc_us,
+            "query_bm25_us": timings.query_tfidf_us,
+            "prune_hdc_us": timings.prune_hdc_us,
+            "score_embed_us": timings.score_embed_us,
+            "total_pipeline_us": timings.total_us,
+            "cache_hit": timings.cache_hit,
+        }
     });
 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
