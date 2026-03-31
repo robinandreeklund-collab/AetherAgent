@@ -1,7 +1,7 @@
 # WPT Dashboard — AetherAgent
 
 > Komplett Web Platform Tests resultat per svit och subkategori.
-> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-31 (Session 5: +78 WPT pass, Live CSSStyleDeclaration + qSA scoping)
+> Baseline-datum: 2026-03-25 | Senast uppdaterad: 2026-03-31 (Session 5: +105 WPT pass, Live CSSStyleDeclaration + qSA scoping + MutationObserver)
 >
 > **Referens:** Se [wpt-testing-strategy.md](wpt-testing-strategy.md) för strategi
 > och [wpt-workflow-guide.md](wpt-workflow-guide.md) för arbetsflöde.
@@ -28,7 +28,7 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **dom/nodes** | 6,031 | 6,673 | **90.4%** | ↑ från 90.3% |
+| **dom/nodes** | 6,057 | 6,673 | **90.8%** | ↑ från 90.3% |
 | **dom/events** | 271 | 322 | **84.2%** | ─ stabil |
 | **dom/ranges** | 8,181 | 11,082 | **73.8%** | ─ stabil |
 | **dom/traversal** | 1,534 | 1,591 | **96.4%** | ─ stabil |
@@ -39,7 +39,7 @@
 
 | Suite | Passed | Total | Rate | Trend |
 |-------|--------|-------|------|-------|
-| **domparsing** | 160 | 375 | **42.7%** | ↑ från 39.1% |
+| **domparsing** | 161 | 375 | **42.9%** | ↑ från 39.1% |
 | **html/syntax** | 241 | 561 | **43.0%** | ─ stabil |
 
 ### Tier 3 — CSS
@@ -120,19 +120,17 @@
 
 ## Historik — Sessionsloggar
 
-### Session 5 (2026-03-31) — Live CSSStyleDeclaration + qSA Scoping (+78 WPT, 2 commits)
+### Session 5 (2026-03-31) — Live CSSStyleDeclaration + qSA Scoping + MutationObserver (+105 WPT, 5 commits)
 
-Fokus på CSSOM-korrekthet och CSS-selektor-scoping i produktionspipelinen.
+Fokus på CSSOM-korrekthet, CSS-selektor-scoping, och MutationObserver-integration i produktionspipelinen.
 
 | Suite | Före | Efter | Delta | Nyckelförbättringar |
 |-------|------|-------|-------|---------------------|
-| css/cssom | 149 (22.0%) | **179 (26.5%)** | **+30** | Live CSSStyleDeclaration Proxy, shorthand aggregation/expansion, cssText getter/setter |
 | css/selectors | 1,651 (47.8%) | **1,693 (49.0%)** | **+42** | querySelector/querySelectorAll scoping fix — context element excluded per spec |
-| domparsing | 156 (41.6%) | **160 (42.7%)** | **+4** | style_attribute_html: live style + CSS validation |
-| dom/nodes | 6,029 (90.3%) | **6,031 (90.4%)** | **+2** | qSA scoping fix hjälpte 2 nod-tester |
-| css/css-display | 21 (47.7%) | **22 (50.0%)** | **+1** | |
-| html/semantics | 2,020 (40.9%) | **2,023 (41.1%)** | **+3** | |
-| **Totalt** | | | **+78** | |
+| css/cssom | 149 (22.0%) | **179 (26.5%)** | **+30** | Live CSSStyleDeclaration Proxy, shorthand aggregation/expansion, cssText getter/setter |
+| dom/nodes | 6,029 (90.3%) | **6,057 (90.8%)** | **+28** | MutationObserver attr notifications, createEvent spec-compliance, classList null-class fix |
+| domparsing | 156 (41.6%) | **161 (42.9%)** | **+5** | style_attribute_html: live style + CSS validation, innerHTML valueOf fallback |
+| **Totalt** | | | **+105** | |
 
 **Alla implementationer native Rust/JS i produktionspipelinen:**
 - `CSSStyleDeclaration` — live JS Proxy, delegerar till Rust handlers per property access
@@ -144,6 +142,10 @@ Fokus på CSSOM-korrekthet och CSS-selektor-scoping i produktionspipelinen.
 - CSS shorthand aggregering i serialisering (margin, padding, overflow, outline, list-style)
 - CSS-deklarationsvalidering (avvisar `color:: invalid` etc.)
 - `querySelector`/`querySelectorAll` — exkluderar context-elementet per DOM spec (fixar `:has()`)
+- `MutationObserver` — attribut-notifieringar via `__pushAttributeMutation` (classList, setAttribute, removeAttribute)
+- `document.createEvent()` — spec-korrekt legacy-only interfaces, DeviceMotionEvent/DeviceOrientationEvent/TextEvent
+- `classList.remove()` på null class attribute → bevarar null (ingen tom sträng)
+- `innerHTML` — valueOf() fallback vid string conversion
 
 ### Session 4 (2026-03-29) — Tier B DOM Integrations (+767 WPT, 11 commits)
 
