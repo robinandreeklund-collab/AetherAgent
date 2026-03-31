@@ -275,8 +275,20 @@ fn main() {
             std::env::var("AETHER_EMBEDDING_VOCAB").unwrap_or_else(|_| "models/vocab.txt".into());
         if let (Ok(mb), Ok(vt)) = (std::fs::read(&mp), std::fs::read_to_string(&vp)) {
             if aether_agent::embedding::init_global(&mb, &vt).is_ok() {
-                println!("  Embeddings: LOADED");
+                println!("  Bi-encoder: LOADED ({})", mp);
             }
+        }
+        // Ladda separat ColBERT-modell om tillgänglig
+        let cm = std::env::var("AETHER_COLBERT_MODEL")
+            .unwrap_or_else(|_| "models/colbertv2-onnx/model.onnx".into());
+        let cv = std::env::var("AETHER_COLBERT_VOCAB")
+            .unwrap_or_else(|_| "models/colbertv2-onnx/vocab.txt".into());
+        if let (Ok(cmb), Ok(cvt)) = (std::fs::read(&cm), std::fs::read_to_string(&cv)) {
+            if aether_agent::embedding::init_colbert(&cmb, &cvt).is_ok() {
+                println!("  ColBERT:    LOADED ({}, 768-dim)", cm);
+            }
+        } else {
+            println!("  ColBERT:    using bi-encoder model (384-dim fallback)");
         }
     }
 

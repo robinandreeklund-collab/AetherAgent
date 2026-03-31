@@ -22,6 +22,10 @@ use ort::value::TensorRef;
 #[cfg(feature = "embeddings")]
 static GLOBAL_EMBEDDING: OnceLock<EmbeddingModel> = OnceLock::new();
 
+/// Separat modell för ColBERT late interaction (kan ha annan dim, t.ex. 768)
+#[cfg(feature = "embeddings")]
+static COLBERT_EMBEDDING: OnceLock<EmbeddingModel> = OnceLock::new();
+
 /// Initialisera den globala embedding-modellen.
 ///
 /// Anropas en gång vid server-/MCP-startup. Returnerar Err om modell/vocab
@@ -123,11 +127,24 @@ pub fn embed_batch(_texts: &[&str]) -> Option<Vec<Vec<f32>>> {
     None
 }
 
+/// Initialisera separat ColBERT-modell (valfritt, för 768-dim ColBERTv2).
+/// Om inte initialiserad faller `encode_tokens` tillbaka på den globala modellen.
+#[cfg(feature = "embeddings")]
+pub fn init_colbert(model_bytes: &[u8], vocab_text: &str) -> Result<(), String> {
+    let model = EmbeddingModel::load(model_bytes, vocab_text)?;
+    let _ = COLBERT_EMBEDDING.set(model);
+    Ok(())
+}
+
 /// Encode text → per-token embeddings (utan mean pooling).
 /// Returnerar `[seq_len, dim]` matris — varje rad är en token-embedding.
-/// Används av ColBERT MaxSim reranker.
+/// Använder ColBERT-modellen om initialiserad, annars den globala modellen.
 #[cfg(feature = "embeddings")]
 pub fn encode_tokens(text: &str) -> Option<Vec<Vec<f32>>> {
+    // Prioritera separat ColBERT-modell om den finns
+    if let Some(colbert) = COLBERT_EMBEDDING.get() {
+        return colbert.encode_tokens(text).ok();
+    }
     GLOBAL_EMBEDDING.get()?.encode_tokens(text).ok()
 }
 
@@ -169,7 +186,7 @@ impl EmbeddingModel {
     ///
     /// Detekterar automatiskt embedding-dimension från modellens output-shape.
     pub fn load(model_bytes: &[u8], vocab_text: &str) -> Result<Self, String> {
-        let session = ort::session::Session::builder()
+        let mut session = ort::session::Session::builder()
             .map_err(|e| format!("ORT session builder: {e}"))?
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level1)
             .map_err(|e| format!("ORT opt level: {e}"))?
@@ -180,9 +197,35 @@ impl EmbeddingModel {
             .commit_from_memory(model_bytes)
             .map_err(|e| format!("ORT model load: {e}"))?;
 
-        // Embedding dimension — 384 för all-MiniLM-L6-v2, 768 för BERT-base
-        // Detekteras vid första inference om modellen har annan dim
-        let dim = 384;
+        // Detektera embedding-dimension via en probe-inference
+        // 384 för all-MiniLM-L6-v2, 768 för BERT-base/ColBERTv2
+        let dim = {
+            let probe_ids: Vec<i64> = vec![101, 2023, 2003, 1037, 2814, 102]; // "[CLS] this is a test [SEP]"
+            let probe_mask: Vec<i64> = vec![1; probe_ids.len()];
+            let probe_types: Vec<i64> = vec![0; probe_ids.len()];
+            let plen = probe_ids.len();
+
+            let ids_t = TensorRef::<i64>::from_array_view(([1usize, plen], &probe_ids[..]))
+                .map_err(|e| format!("Probe tensor: {e}"))?;
+            let mask_t = TensorRef::<i64>::from_array_view(([1usize, plen], &probe_mask[..]))
+                .map_err(|e| format!("Probe tensor: {e}"))?;
+            let type_t = TensorRef::<i64>::from_array_view(([1usize, plen], &probe_types[..]))
+                .map_err(|e| format!("Probe tensor: {e}"))?;
+
+            let outputs = session
+                .run(ort::inputs![ids_t, mask_t, type_t])
+                .map_err(|e| format!("Probe inference: {e}"))?;
+            let (_name, val) = outputs
+                .iter()
+                .next()
+                .ok_or_else(|| "Probe: no output".to_string())?;
+            let (_shape, data) = val
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("Probe extract: {e}"))?;
+
+            // data.len() = batch(1) × seq_len × dim → dim = data.len() / seq_len
+            data.len() / plen
+        };
 
         let tokenizer = WordPieceTokenizer::from_vocab_text(vocab_text)?;
 
