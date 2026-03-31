@@ -12,58 +12,58 @@
 | Successfully fetched | 20 |
 | Legacy correctness (keyword in top 3) | 16/20 (80%) |
 | Hybrid correctness (keyword in top 3) | 18/20 (90%) |
-| Avg legacy parse time | 596.0ms |
-| Avg hybrid parse time | 365.3ms |
+| Avg legacy parse time | 601.3ms |
+| Avg hybrid parse time | 333.1ms |
 
 ## Per-Site Results
 
 | # | Site | Fetch | HTML | Legacy ms | Hybrid ms | L-nodes | H-nodes | L-correct | H-correct |
 |---|------|-------|------|-----------|-----------|---------|---------|-----------|----------|
-| 1 | Hacker News | 553ms | 34KB | 1043ms | 1442ms | 10 | 10 | PASS | PASS |
-| 2 | HN Newest | 274ms | 40KB | 571ms | 288ms | 10 | 8 | MISS | PASS |
-| 3 | Lobsters | 278ms | 57KB | 955ms | 455ms | 10 | 10 | PASS | PASS |
-| 4 | CNN Lite | 324ms | 326KB | 1093ms | 115ms | 10 | 3 | MISS | PASS |
-| 5 | NPR Text | 407ms | 5KB | 1036ms | 11ms | 10 | 5 | PASS | PASS |
-| 6 | Rust Lang | 1178ms | 18KB | 927ms | 568ms | 10 | 10 | PASS | PASS |
-| 7 | MDN HTML | 240ms | 173KB | 850ms | 712ms | 10 | 10 | PASS | PASS |
-| 8 | Python.org | 120ms | 48KB | 38ms | 37ms | 0 | 0 | MISS | MISS |
-| 9 | W3C | 1488ms | 50KB | 38ms | 1ms | 0 | 0 | MISS | MISS |
-| 10 | GitHub Explore | 1157ms | 366KB | 1000ms | 736ms | 10 | 10 | PASS | PASS |
-| 11 | NPM | 168ms | 28KB | 374ms | 52ms | 10 | 8 | PASS | PASS |
-| 12 | Crates.io | 160ms | 3KB | 70ms | 37ms | 1 | 1 | PASS | PASS |
-| 13 | PyPI | 54ms | 21KB | 431ms | 43ms | 10 | 7 | PASS | PASS |
-| 14 | docs.rs | 341ms | 16KB | 839ms | 155ms | 10 | 10 | PASS | PASS |
-| 15 | pkg.go.dev | 126ms | 32KB | 841ms | 213ms | 10 | 5 | PASS | PASS |
-| 16 | Docker Hub | 300ms | 387KB | 535ms | 254ms | 10 | 10 | PASS | PASS |
-| 17 | DuckDuckGo | 661ms | 157KB | 319ms | 2035ms | 10 | 10 | PASS | PASS |
-| 18 | OpenStreetMap | 794ms | 32KB | 820ms | 80ms | 10 | 3 | PASS | PASS |
-| 19 | httpbin HTML | 215ms | 3KB | 105ms | 38ms | 3 | 2 | PASS | PASS |
-| 20 | Reuters | 377ms | 0KB | 36ms | 34ms | 1 | 1 | PASS | PASS |
+| 1 | Hacker News | 340ms | 34KB | 1015ms | 1426ms | 10 | 10 | PASS | PASS |
+| 2 | HN Newest | 302ms | 40KB | 587ms | 78ms | 10 | 4 | MISS | PASS |
+| 3 | Lobsters | 472ms | 57KB | 940ms | 451ms | 10 | 10 | PASS | PASS |
+| 4 | CNN Lite | 752ms | 330KB | 1113ms | 82ms | 10 | 3 | MISS | PASS |
+| 5 | NPR Text | 434ms | 5KB | 1047ms | 2ms | 10 | 5 | PASS | PASS |
+| 6 | Rust Lang | 884ms | 18KB | 949ms | 566ms | 10 | 10 | PASS | PASS |
+| 7 | MDN HTML | 1864ms | 173KB | 876ms | 634ms | 10 | 10 | PASS | PASS |
+| 8 | Python.org | 386ms | 47KB | 39ms | 39ms | 0 | 0 | MISS | MISS |
+| 9 | W3C | 289ms | 50KB | 37ms | 1ms | 0 | 0 | MISS | MISS |
+| 10 | GitHub Explore | 1113ms | 368KB | 1025ms | 659ms | 10 | 10 | PASS | PASS |
+| 11 | NPM | 154ms | 28KB | 355ms | 39ms | 10 | 8 | PASS | PASS |
+| 12 | Crates.io | 113ms | 3KB | 81ms | 37ms | 1 | 1 | PASS | PASS |
+| 13 | PyPI | 51ms | 21KB | 440ms | 39ms | 10 | 7 | PASS | PASS |
+| 14 | docs.rs | 265ms | 16KB | 843ms | 220ms | 10 | 10 | PASS | PASS |
+| 15 | pkg.go.dev | 82ms | 32KB | 794ms | 184ms | 10 | 5 | PASS | PASS |
+| 16 | Docker Hub | 275ms | 388KB | 536ms | 221ms | 10 | 10 | PASS | PASS |
+| 17 | DuckDuckGo | 255ms | 157KB | 298ms | 1839ms | 10 | 10 | PASS | PASS |
+| 18 | OpenStreetMap | 897ms | 32KB | 906ms | 74ms | 10 | 3 | PASS | PASS |
+| 19 | httpbin HTML | 369ms | 3KB | 107ms | 36ms | 3 | 2 | PASS | PASS |
+| 20 | Reuters | 239ms | 0KB | 38ms | 36ms | 1 | 1 | PASS | PASS |
 
 ## Hybrid Pipeline Stage Breakdown
 
 | Site | BM25 build | HDC build | BM25 query | HDC prune | Embed score | Total pipeline | Candidates | Survivors |
 |------|-------------|-----------|-------------|-----------|-------------|---------------|-----------|----------|
-| Hacker News | 1343µs | 39977µs | 19µs | 123µs | 1396337µs | 1437996µs | 0 | 80 |
-| HN Newest | 1352µs | 42376µs | 45µs | 17µs | 239139µs | 283120µs | 22 | 9 |
-| Lobsters | 1437µs | 39773µs | 15µs | 82µs | 409288µs | 450852µs | 24 | 21 |
-| CNN Lite | 1578µs | 41127µs | 10µs | 79µs | 69676µs | 113071µs | 4 | 3 |
-| NPR Text | 404µs | 10557µs | 6µs | 67µs | 18µs | 11080µs | 9 | 5 |
-| Rust Lang | 760µs | 21695µs | 15µs | 78µs | 509976µs | 532605µs | 42 | 32 |
-| MDN HTML | 3016µs | 82545µs | 44µs | 332µs | 576035µs | 662694µs | 140 | 60 |
-| Python.org | 1µs | 0µs | 2µs | 72µs | 0µs | 149µs | 0 | 0 |
-| W3C | 1µs | 0µs | 3µs | 83µs | 1µs | 177µs | 0 | 0 |
-| GitHub Explore | 3053µs | 81824µs | 34µs | 93µs | 626053µs | 712033µs | 55 | 38 |
-| NPM | 354µs | 14736µs | 7µs | 48µs | 52µs | 15256µs | 16 | 16 |
-| Crates.io | 13µs | 82µs | 3µs | 65µs | 6µs | 180µs | 1 | 1 |
-| PyPI | 231µs | 7057µs | 7µs | 49µs | 32µs | 7423µs | 12 | 12 |
-| docs.rs | 665µs | 12405µs | 8µs | 50µs | 105555µs | 118745µs | 20 | 20 |
-| pkg.go.dev | 840µs | 24477µs | 11µs | 106µs | 147506µs | 173090µs | 14 | 7 |
-| Docker Hub | 938µs | 32083µs | 13µs | 63µs | 213290µs | 246983µs | 38 | 37 |
-| DuckDuckGo | 7694µs | 223886µs | 58µs | 180µs | 1795418µs | 2028258µs | 135 | 60 |
-| OpenStreetMap | 293µs | 8609µs | 4µs | 66µs | 69388µs | 78450µs | 4 | 4 |
-| httpbin HTML | 80µs | 1813µs | 4µs | 44µs | 16µs | 1970µs | 3 | 3 |
-| Reuters | 11µs | 143µs | 1µs | 45µs | 33918µs | 34125µs | 0 | 1 |
+| Hacker News | 1180µs | 7331µs | 13µs | 39µs | 1414115µs | 1422827µs | 0 | 80 |
+| HN Newest | 1117µs | 7215µs | 72µs | 10µs | 65936µs | 74491µs | 14 | 5 |
+| Lobsters | 1190µs | 7046µs | 10µs | 21µs | 438659µs | 447091µs | 25 | 22 |
+| CNN Lite | 1198µs | 7431µs | 4µs | 15µs | 70850µs | 79951µs | 4 | 3 |
+| NPR Text | 307µs | 1765µs | 5µs | 16µs | 13µs | 2131µs | 9 | 5 |
+| Rust Lang | 632µs | 3299µs | 12µs | 20µs | 524694µs | 528706µs | 42 | 32 |
+| MDN HTML | 2364µs | 12996µs | 32µs | 82µs | 573923µs | 590068µs | 140 | 60 |
+| Python.org | 1µs | 0µs | 2µs | 16µs | 0µs | 91µs | 0 | 0 |
+| W3C | 0µs | 0µs | 1µs | 13µs | 0µs | 83µs | 0 | 0 |
+| GitHub Explore | 2329µs | 13896µs | 16µs | 23µs | 622882µs | 639930µs | 55 | 38 |
+| NPM | 300µs | 1732µs | 7µs | 13µs | 74µs | 2181µs | 16 | 16 |
+| Crates.io | 12µs | 20µs | 4µs | 14µs | 6µs | 67µs | 1 | 1 |
+| PyPI | 230µs | 1040µs | 7µs | 12µs | 26µs | 1403µs | 12 | 12 |
+| docs.rs | 491µs | 2189µs | 10µs | 16µs | 179901µs | 182666µs | 24 | 24 |
+| pkg.go.dev | 712µs | 3917µs | 5µs | 19µs | 141572µs | 146463µs | 14 | 7 |
+| Docker Hub | 784µs | 4869µs | 11µs | 17µs | 208833µs | 215052µs | 38 | 37 |
+| DuckDuckGo | 5582µs | 38728µs | 42µs | 78µs | 1788427µs | 1833485µs | 135 | 60 |
+| OpenStreetMap | 278µs | 1469µs | 4µs | 20µs | 70156µs | 72029µs | 4 | 4 |
+| httpbin HTML | 79µs | 234µs | 4µs | 11µs | 11µs | 351µs | 3 | 3 |
+| Reuters | 11µs | 32µs | 2µs | 11µs | 36331µs | 36394µs | 0 | 1 |
 
 ## Top-3 Node Quality Comparison
 
@@ -71,13 +71,13 @@
 
 **Legacy top 3:**
 1. `0.354` Hacker News
-2. `0.297` past
-3. `0.297` Do your own writing
+2. `0.313` Show HN: Raincast – Describe an app, get a native desktop app (open source)
+3. `0.313` historytoday.com
 
 **Hybrid top 3:**
-1. `0.214` Hacker News new | past | comments | ask | show | jobs | submit login
-2. `0.209` 43 points by maurycyz 5 hours ago | hide | 16 comments
-3. `0.205` 103 points by taubek 3 hours ago | hide | 53 comments
+1. `0.212` Hacker News new | past | comments | ask | show | jobs | submit login
+2. `0.201` 25 points by DavidCanHelp 4 hours ago | hide | 1 comment
+3. `0.199` 9 points by samizdis 2 hours ago | hide | discuss
 
 ---
 
@@ -89,9 +89,9 @@
 3. `0.297` 2 minutes ago
 
 **Hybrid top 3:**
-1. `0.449` David Sacks' new role shaping Trump's AI agenda
-2. `0.423` Hacker News new | past | comments | ask | show | jobs | submit
-3. `0.387` What's New in Flutter 3.41
+1. `0.443` Hacker News new | past | comments | ask | show | jobs | submit
+2. `0.375` new
+3. `0.083` New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | 
 
 ---
 
@@ -99,27 +99,27 @@
 
 **Legacy top 3:**
 1. `0.375` Your job isn't programming
-2. `0.345` Lobsters Active Recent Comments Search Login Login 111 copilot edited an ad into
-3. `0.325` Active Recent Comments Search Login Login 111 copilot edited an ad into my pr vi
+2. `0.345` Lobsters Active Recent Comments Search Login Login 123 copilot edited an ad into
+3. `0.325` Active Recent Comments Search Login Login 123 copilot edited an ad into my pr vi
 
 **Hybrid top 3:**
-1. `0.683` Your job isn't programming
-2. `0.639` ask programming
-3. `0.555` Stories about particular persons
+1. `0.704` Programming language theory, types, design
+2. `0.683` Your job isn't programming
+3. `0.639` ask programming
 
 ---
 
 ### CNN Lite — "top news headlines today" 
 
 **Legacy top 3:**
-1. `0.292` What we know on Day 31 of the US and Israel’s war with Iran: Trump threatens esc
+1. `0.305` Trump ramps up threats, oil tanker struck: What we know on Day 32 of the US and 
 2. `0.272` Trump allowed a Russian oil tanker to reach Cuba, breaking the island’s fuel blo
 3. `0.268` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
 
 **Hybrid top 3:**
 1. `0.599` Actor James Tolkan of ‘Top Gun’ and ‘Back to the Future’ fame dies at 94
 2. `0.514` Go to the full CNN experience ©2026 Cable News Network. A Warner Bros. Discovery
-3. `0.265` Breaking News, Latest News and Videos | CNN CNN 3/30/2026 Latest Stories Student
+3. `0.361` Breaking News, Latest News and Videos | CNN CNN 3/31/2026 Latest Stories Why the
 
 ---
 
@@ -132,7 +132,7 @@
 
 **Hybrid top 3:**
 1. `0.794` NPR : National Public Radio
-2. `0.595` NPR : National Public Radio Monday, March 30, 2026 Watch: Who is an American? Th
+2. `0.595` NPR : National Public Radio Tuesday, March 31, 2026 Iran's strike wounded over a
 3. `0.527` News
 
 ---
@@ -243,8 +243,8 @@ for a
 
 **Hybrid top 3:**
 1. `0.758` Rust Rust website The Book Standard Library API Reference Rust by Example The Ca
-2. `0.707` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
-3. `0.686` Rust website
+2. `0.684` Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rus
+3. `0.650` Rust website The Book Standard Library API Reference Rust by Example The Cargo G
 
 ---
 
@@ -323,7 +323,7 @@ for a
 1. `0.070` reuters.com Please enable JS and disable any ad blocker
 
 **Hybrid top 3:**
-1. `0.173` reuters.com Please enable JS and disable any ad blocker
+1. `0.172` reuters.com Please enable JS and disable any ad blocker
 
 ---
 

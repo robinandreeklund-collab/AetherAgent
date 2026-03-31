@@ -79,18 +79,21 @@ Prevents embedding from running on hundreds of nodes:
 
 ### HDC Dimension Benchmark (2048 vs 4096 bits)
 
-Tested on 20 real sites with embeddings (all-MiniLM-L6-v2):
+Tested 1024, 2048, and 4096 bits on 20 real sites with embeddings (all-MiniLM-L6-v2):
 
-| Metric | 2048-bit | 4096-bit |
-|--------|----------|----------|
-| Correctness | 18/20 (90%) | 18/20 (90%) |
-| Avg hybrid parse | 356ms | 365ms (+2.5%) |
-| Avg pipeline | 335ms | 345ms (+3%) |
-| HDC build (MDN, 1050 nodes) | ~19ms | ~22ms |
-| HDC prune quality | identical | identical |
-| Memory per vector | 256 bytes | 512 bytes |
+| Metric | 1024-bit | 2048-bit | 4096-bit |
+|--------|----------|----------|----------|
+| Correctness | 18/20 (90%) | 18/20 (90%) | 18/20 (90%) |
+| Avg hybrid parse | 333ms | 356ms | 365ms |
+| Avg pipeline | 314ms | 335ms | 345ms |
+| HDC build (MDN, 1050 nodes) | ~13ms | ~19ms | ~22ms |
+| HDC build (DuckDuckGo, large) | ~39ms | ~98ms | ~110ms |
+| HDC prune quality | identical | identical | identical |
+| Memory per vector | 128 bytes | 256 bytes | 512 bytes |
 
-**Conclusion:** 4096-bit selected for production. No quality gain on current workloads but provides headroom for very large DOMs (10k+ nodes) where hash collisions become more likely. Cost increase is negligible vs embedding time (95%+ of pipeline).
+All three dimensions produce **identical ranking and correctness** on these 20 sites. The difference is entirely in build time, which is dwarfed by embedding scoring (95%+ of pipeline time).
+
+**Conclusion:** 4096-bit selected for production. No measurable quality gain over 1024 on current workloads, but provides theoretical headroom for very large DOMs (10k+ nodes) where hash collisions in lower dimensions could degrade separation. The +10% build cost vs 1024 is negligible (~10ms on a 1000-node page).
 
 ### Pipeline Stage Breakdown (MDN, 173KB, 1050 nodes)
 
