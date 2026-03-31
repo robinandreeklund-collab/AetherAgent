@@ -276,88 +276,45 @@ fn from_hex(byte: u8) -> Option<u8> {
 
 // ─── Direct Answer Detection ─────────────────────────────────────────────────
 
-/// Försök extrahera ett direktsvar med kontext från snippets.
+/// Confidence-gate: generera inte direct_answer vid låg relevance
+const DIRECT_ANSWER_MIN_CONFIDENCE: f32 = 0.3;
+
+/// Välj bästa noden för direct_answer.
 ///
-/// BUGG Q fix: returnerar {siffra + omgivande kontext} istället för bara siffran.
-/// Kräver minst 0.3 confidence för att undvika falska svar.
+/// Prioritet:
+/// 1. Bästa page_content-nod (deep-fetch resultat) — har faktisk siddata
+/// 2. Bästa snippet — DDG:s sammanfattning
+///
+/// Returnerar hela nodens label orörd + källdomän.
+/// AetherAgent tolkar INTE innehållet — det är LLM:ens ansvar.
 pub fn detect_direct_answer(results: &[SearchResultEntry]) -> Option<(String, f32)> {
+    // Steg 1: Sök bland alla page_content-noder (deep-fetch)
+    let mut best_deep: Option<(&str, f32, &str)> = None; // (label, relevance, domain)
+    for r in results {
+        if let Some(ref pages) = r.page_content {
+            for node in pages {
+                if node.relevance >= DIRECT_ANSWER_MIN_CONFIDENCE
+                    && node.label.len() > 20
+                    && best_deep.is_none_or(|(_, rel, _)| node.relevance > rel)
+                {
+                    best_deep = Some((&node.label, node.relevance, &r.domain));
+                }
+            }
+        }
+    }
+
+    if let Some((label, relevance, domain)) = best_deep {
+        return Some((format!("{} ({})", label.trim(), domain), relevance));
+    }
+
+    // Steg 2: Fallback till bästa snippet
     for r in results.iter().take(3) {
-        if r.confidence < 0.3 {
-            continue;
-        }
-        if let Some(answer) = extract_number_with_context(&r.snippet) {
-            // Inkludera källa i svaret
-            let with_source = format!("{} ({})", answer, r.domain);
-            return Some((with_source, r.confidence));
+        if r.confidence >= DIRECT_ANSWER_MIN_CONFIDENCE && r.snippet.len() > 20 {
+            return Some((format!("{} ({})", r.snippet.trim(), r.domain), r.confidence));
         }
     }
+
     None
-}
-
-/// Hitta ett numeriskt svar med omgivande kontext (±30 tecken).
-///
-/// "Göteborgs kommun hade 587 549 invånare 2023" → "587 549 invånare 2023"
-/// istället för bara "587 549"
-fn extract_number_with_context(snippet: &str) -> Option<String> {
-    let chars: Vec<char> = snippet.chars().collect();
-    let mut best: Option<(usize, usize, usize)> = None; // (start, end, digit_count)
-    let mut best_digits = 0;
-
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_ascii_digit() {
-            let num_start = i;
-            while i < chars.len()
-                && (chars[i].is_ascii_digit()
-                    || ((chars[i] == ' '
-                        || chars[i] == '\u{00a0}'
-                        || chars[i] == '.'
-                        || chars[i] == ',')
-                        && i + 1 < chars.len()
-                        && chars[i + 1].is_ascii_digit()))
-            {
-                i += 1;
-            }
-            let digit_count = chars[num_start..i]
-                .iter()
-                .filter(|c| c.is_ascii_digit())
-                .count();
-            if digit_count >= 4 && digit_count > best_digits {
-                best_digits = digit_count;
-                best = Some((num_start, i, digit_count));
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    let (num_start, num_end, _) = best?;
-
-    // Expandera kontextfönster: ±30 tecken runt siffran
-    let ctx_start = num_start.saturating_sub(30);
-    // Gå bakåt till ordgräns
-    let ctx_start = chars[ctx_start..num_start]
-        .iter()
-        .rposition(|c| *c == ' ' || *c == '.' || *c == ',')
-        .map(|p| ctx_start + p + 1)
-        .unwrap_or(ctx_start);
-
-    let ctx_end = (num_end + 30).min(chars.len());
-    // Gå framåt till ordgräns
-    let ctx_end = chars[num_end..ctx_end]
-        .iter()
-        .position(|c| *c == '.' || *c == ',' || *c == ';')
-        .map(|p| num_end + p)
-        .unwrap_or(ctx_end);
-
-    let context: String = chars[ctx_start..ctx_end].iter().collect();
-    let trimmed = context.trim();
-
-    if trimmed.len() > 5 {
-        Some(trimmed.to_string())
-    } else {
-        None
-    }
 }
 
 // ─── Tester ──────────────────────────────────────────────────────────────────
@@ -420,33 +377,12 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_number_with_context() {
-        let result =
-            extract_number_with_context("Sveriges befolkning uppgår till 10 701 047 invånare");
-        assert!(result.is_some(), "Ska hitta miljontal");
-        let ctx = result.unwrap();
-        assert!(ctx.contains("10 701 047"), "Ska innehålla siffran: {ctx}");
-        assert!(
-            ctx.contains("invånare") || ctx.contains("befolkning"),
-            "Ska ha kontext runt siffran: {ctx}"
-        );
-    }
-
-    #[test]
-    fn test_extract_number_short_rejected() {
-        assert!(
-            extract_number_with_context("Det kostar 42 kronor").is_none(),
-            "För kort siffra (2 digit) ska ignoreras"
-        );
-    }
-
-    #[test]
-    fn test_detect_direct_answer_from_results() {
+    fn test_detect_direct_answer_from_snippet() {
         let results = vec![SearchResultEntry {
             rank: 1,
             title: "SCB".to_string(),
             url: "https://scb.se".to_string(),
-            snippet: "Sverige har 10 521 556 invånare".to_string(),
+            snippet: "Sverige har 10 521 556 invånare enligt SCB 2024".to_string(),
             domain: "scb.se".to_string(),
             confidence: 0.85,
             page_content: None,
@@ -455,12 +391,55 @@ mod tests {
         let answer = detect_direct_answer(&results);
         assert!(answer.is_some(), "Ska hitta direktsvar i snippet");
         let (text, conf) = answer.unwrap();
-        assert!(text.contains("10 521 556"), "Ska innehålla siffran: {text}");
         assert!(
-            text.contains("invånare") || text.contains("scb.se"),
-            "Ska ha kontext eller källa: {text}"
+            text.contains("10 521 556 invånare"),
+            "Ska innehålla hela snippeten: {text}"
         );
-        assert!((conf - 0.85).abs() < 0.01, "Confidence ska matcha");
+        assert!(text.contains("scb.se"), "Ska ha källdomän: {text}");
+        assert!((conf - 0.85).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_detect_direct_answer_prefers_page_content() {
+        let results = vec![SearchResultEntry {
+            rank: 1,
+            title: "SCB".to_string(),
+            url: "https://scb.se".to_string(),
+            snippet: "SCB statistik kort snippet".to_string(),
+            domain: "scb.se".to_string(),
+            confidence: 0.5,
+            page_content: Some(vec![crate::search::PageNode {
+                role: "text".to_string(),
+                label: "Sveriges befolkning uppgår till 10 521 556 invånare per 2024".to_string(),
+                relevance: 0.9,
+            }]),
+            fetch_ms: Some(100),
+        }];
+        let answer = detect_direct_answer(&results);
+        assert!(answer.is_some(), "Ska hitta svar i page_content");
+        let (text, _) = answer.unwrap();
+        assert!(
+            text.contains("10 521 556 invånare"),
+            "Ska föredra page_content: {text}"
+        );
+    }
+
+    #[test]
+    fn test_detect_direct_answer_low_confidence_rejected() {
+        let results = vec![SearchResultEntry {
+            rank: 1,
+            title: "X".to_string(),
+            url: "https://example.com".to_string(),
+            snippet: "Short".to_string(),
+            domain: "example.com".to_string(),
+            confidence: 0.1,
+            page_content: None,
+            fetch_ms: None,
+        }];
+        assert!(
+            detect_direct_answer(&results).is_none(),
+            "Låg confidence ska inte ge direct_answer"
+        );
     }
 
     #[test]
