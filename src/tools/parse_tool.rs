@@ -37,10 +37,13 @@ pub struct ParseRequest {
     /// Tvinga JS-eval (true/false/auto)
     #[serde(default)]
     pub js: Option<bool>,
-    /// Använd hybrid BM25+HDC+Embedding pipeline (default: false).
+    /// Använd hybrid BM25+HDC+Neural pipeline (default: false).
     /// Sätt till true för bättre relevans-ranking vid top_n-filtrering.
     #[serde(default)]
     pub hybrid: bool,
+    /// Stage 3 reranker: "minilm", "colbert" (recommended), "hybrid"
+    #[serde(default)]
+    pub reranker: Option<String>,
     /// Streaming-läge (default: true)
     #[serde(default = "default_true")]
     pub stream: bool,
@@ -111,6 +114,7 @@ pub fn execute_with_html(html: &str, req: &ParseRequest, url: &str) -> ToolResul
         req.format.as_deref(),
         req.js,
         req.hybrid,
+        req.reranker.as_deref(),
         url,
         start,
     )
@@ -148,7 +152,7 @@ pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) 
     // Scoring
     if req.hybrid {
         let goal_embedding = crate::embedding::embed(&req.goal);
-        let config = crate::scoring::PipelineConfig::default();
+        let config = crate::tools::parse_hybrid_tool::build_config(req.reranker.as_deref());
         let result = crate::scoring::ScoringPipeline::run_cached(
             html,
             &tree.nodes,
@@ -206,6 +210,7 @@ fn execute_html(html: &str, req: &ParseRequest, start: u64) -> ToolResult {
         req.format.as_deref(),
         req.js,
         req.hybrid,
+        req.reranker.as_deref(),
         url,
         start,
     )
@@ -219,6 +224,7 @@ fn execute_html_with_options(
     format: Option<&str>,
     js: Option<bool>,
     hybrid: bool,
+    reranker: Option<&str>,
     url: &str,
     start: u64,
 ) -> ToolResult {
@@ -252,7 +258,7 @@ fn execute_html_with_options(
     // Scoring: hybrid BM25+HDC+Embedding eller legacy sort
     if hybrid {
         let goal_embedding = crate::embedding::embed(goal);
-        let config = crate::scoring::PipelineConfig::default();
+        let config = crate::tools::parse_hybrid_tool::build_config(reranker);
         let result = crate::scoring::ScoringPipeline::run_cached(
             html,
             &tree.nodes,
@@ -389,6 +395,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -419,6 +426,7 @@ mod tests {
             format: Some("markdown".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -445,6 +453,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -473,6 +482,7 @@ mod tests {
             format: None,
             js: None,
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -490,6 +500,7 @@ mod tests {
             format: None,
             js: None,
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -514,6 +525,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -539,6 +551,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(true),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -561,6 +574,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -578,6 +592,7 @@ mod tests {
             format: Some("markdown".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute_with_html(simple_html(), &req, "https://example.com");
