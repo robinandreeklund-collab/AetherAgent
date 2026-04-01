@@ -496,10 +496,13 @@ Stage 3 was evaluated with three reranker strategies on 30 verified-reachable si
 |---------------|-------------|---------------------|
 | Candle backend (initial) | 9,284ms | — |
 | ONNX FP32, sequential | 6,252ms | 1.5× |
-| **ONNX Int8, batch** | **3,590ms** | **2.6×** |
-| MiniLM (reference) | 1,216ms | — |
+| ONNX Int8 ColBERTv2, batch | 3,590ms | 2.6× |
+| **ONNX Int8 MiniLM-ColBERT, batch** | **691ms** | **13.4×** |
+| MiniLM bi-encoder FP32 (reference) | 1,175ms | — |
 
-**Recommendation:** Use `Stage3Reranker::MiniLM` (default) for best latency with excellent correctness. Use `Stage3Reranker::ColBert` when score calibration, ranking quality, or per-node confidence matters — especially for downstream tasks where the LLM benefits from higher-quality node rankings (e.g., data extraction from long mixed-content pages). Use `Stage3Reranker::Hybrid` when a balance between speed and quality is needed.
+**The int8 MiniLM-ColBERT configuration is now 1.7× faster than the FP32 bi-encoder while producing 41% higher top-1 relevance scores.** This makes ColBERT the recommended default for production deployments where the `colbert` feature is enabled.
+
+**Recommendation:** With the int8 MiniLM-ColBERT configuration, `Stage3Reranker::ColBert` is faster AND produces better quality than the FP32 bi-encoder. Use ColBERT as default when the `colbert` feature is enabled. Use `Stage3Reranker::MiniLM` only when the `colbert` feature is not compiled in (e.g., WASM builds).
 
 ---
 
