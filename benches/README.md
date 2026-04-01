@@ -352,6 +352,32 @@ In a production stack, they can be complementary: Lightpanda handles JS-heavy SP
 
 ---
 
+## 14. ColBERT vs MiniLM — Stage 3 Reranker Quality (30 Sites)
+
+Optional ColBERTv2 late interaction reranker as Stage 3 alternative. Both go through the same full pipeline (HTML parse → BM25 → HDC → Stage 3).
+
+| Method | Correctness | Avg Latency | Avg Top-1 Score |
+|--------|-------------|-------------|-----------------|
+| **MiniLM** (bi-encoder, default) | 29/30 (96.7%) | **1,216ms** | 0.674 |
+| **ColBERT** (MaxSim, int8+batch) | 29/30 (96.7%) | 3,590ms | **0.950** |
+| **Hybrid** (adaptive α) | 29/30 (96.7%) | 3,529ms | 0.789 |
+
+ColBERT produces **41% higher confidence scores** and ranks fact-bearing nodes (prices, rates, statistics) above headings and navigation. MiniLM sometimes ranks footers or reference links as top-1.
+
+**Key insight:** Same keyword-correctness (29/30), but the *quality of the top-1 node* is significantly better with ColBERT — critical for LLM data extraction where the agent needs the right fact, not just a node containing the right keyword.
+
+> **Run it yourself:**
+> ```bash
+> AETHER_EMBEDDING_MODEL=models/all-MiniLM-L6-v2.onnx \
+> AETHER_EMBEDDING_VOCAB=models/vocab.txt \
+> AETHER_COLBERT_MODEL=models/colbertv2-onnx/model-int8.onnx \
+> AETHER_COLBERT_VOCAB=models/colbertv2-onnx/vocab.txt \
+> cargo run --release --bin aether-colbert-validation --features colbert
+> ```
+> Full results: **[docs/colbert_vs_minilm_validation.md](../docs/colbert_vs_minilm_validation.md)**
+
+---
+
 ## Reproduce
 
 ```bash

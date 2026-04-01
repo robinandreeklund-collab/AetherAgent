@@ -17,7 +17,35 @@ Parses HTML into a structured accessibility tree with roles, labels, states, and
 |----------|-------------|
 | `parse_to_semantic_tree` | Full semantic tree with goal-relevance scoring |
 | `parse_top_nodes` | Top-N most relevant nodes (token-efficient) |
+| `parse_top_nodes_hybrid` | Top-N via BM25 → HDC → Embedding pipeline |
+| `parse_top_nodes_with_config` | Top-N with configurable Stage 3 reranker |
 | `parse_with_js` | Parse with automatic JS detection and evaluation |
+
+---
+
+## 1b. Hybrid Scoring Pipeline
+
+**Module:** `scoring/pipeline.rs`, `scoring/tfidf.rs`, `scoring/hdc.rs`, `scoring/embed_score.rs`, `scoring/colbert_reranker.rs`
+
+Three-stage neuro-symbolic retrieval pipeline for goal-directed DOM node ranking:
+
+| Stage | Method | Latency | What it does |
+|-------|--------|---------|-------------|
+| 1. BM25 | Lexical retrieval | ~0.1ms | Keyword-match candidates (300 → 50-300) |
+| 2. HDC | 4096-bit structural pruning | ~0.5ms | Subtree-level relevance (300 → 20-80 survivors) |
+| 3. Neural | Embedding scoring | ~1-4s | Semantic precision on survivors |
+
+**Stage 3 Reranker options** (configurable via `PipelineConfig.stage3_reranker`):
+
+| Reranker | Model | How it works | Latency | Top-1 quality |
+|----------|-------|-------------|---------|---------------|
+| `MiniLM` (default) | all-MiniLM-L6-v2 (384-dim) | Mean-pooled bi-encoder cosine similarity | ~1.2s | 0.674 |
+| `ColBert` | ColBERTv2.0 (768-dim, int8) | MaxSim late interaction — per-token matching | ~3.6s | **0.950** |
+| `Hybrid` | Both | Adaptive α blend (0.3–0.95 by node length) | ~3.5s | 0.789 |
+
+ColBERT produces **41% higher confidence scores** and consistently ranks information-bearing nodes (facts, data) above headings and navigation — critical for LLM data extraction from long mixed-content pages.
+
+Feature flags: `embeddings` (MiniLM), `colbert` (ColBERT + Hybrid, depends on `embeddings`).
 
 ---
 

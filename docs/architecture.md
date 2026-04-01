@@ -93,6 +93,8 @@ AetherAgent is **not** a Chrome replacement. It fetches pages and builds semanti
 | Capability | AetherAgent | Playwright | Browser Use | Scrapy |
 |-----------|:-----------:|:----------:|:-----------:|:------:|
 | Semantic tree with goal scoring | **Yes** | No | Partial | No |
+| Multi-stage retrieval (BM25+HDC+Neural) | **Yes** | No | No | No |
+| ColBERT late interaction reranking | **Yes** | No | No | No |
 | Prompt injection protection | **Yes** | No | No | No |
 | Startup time | <1 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
 | Memory per instance | ~27 MB | ~150 MB | ~200 MB | ~30 MB |
