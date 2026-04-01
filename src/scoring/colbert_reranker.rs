@@ -373,6 +373,83 @@ fn length_penalty(label_len: usize, is_leaf: bool) -> f32 {
     }
 }
 
+// ── Query expansion ──────────────────────────────────────────────────────────
+
+/// Expandera query med hög-IDF termer från top-BM25-survivors.
+///
+/// Tar top-5 survivors (sorterade efter BM25-score), extraherar ord,
+/// rankar efter IDF (lågfrekventa = informativa), och lägger till max 4
+/// expansionstermer som inte redan finns i query.
+///
+/// Expansion-termer ges lägre vikt i ColBERT via positionen i query-strängen
+/// (de hamnar efter [SEP] i tokeniseringen → lägre attention).
+#[cfg(feature = "colbert")]
+fn expand_query(
+    goal: &str,
+    survivors: &[(u32, f32)],
+    all_nodes: &HashMap<u32, NodeInfo>,
+) -> String {
+    const MAX_EXPANSION_TERMS: usize = 4;
+    const MIN_WORD_LEN: usize = 4; // Skippa korta ord (a, the, is, etc.)
+
+    let goal_lower = goal.to_lowercase();
+    let goal_words: std::collections::HashSet<&str> = goal_lower.split_whitespace().collect();
+
+    // Ta top-5 BM25-survivors
+    let mut top_survivors: Vec<(u32, f32)> = survivors.to_vec();
+    top_survivors.sort_by(|a, b| b.1.total_cmp(&a.1));
+    top_survivors.truncate(5);
+
+    // Räkna ordfrekvens i top-survivors
+    let mut word_freq: HashMap<String, u32> = HashMap::new();
+    let mut total_words = 0u32;
+    for &(id, _) in &top_survivors {
+        if let Some(info) = all_nodes.get(&id) {
+            for word in info.label.to_lowercase().split_whitespace() {
+                // Skippa korta ord, siffror, URL-fragment
+                if word.len() < MIN_WORD_LEN
+                    || word.chars().all(|c| c.is_ascii_digit())
+                    || word.contains("://")
+                    || word.contains('.')
+                {
+                    continue;
+                }
+                *word_freq.entry(word.to_string()).or_insert(0) += 1;
+                total_words += 1;
+            }
+        }
+    }
+
+    if word_freq.is_empty() || total_words == 0 {
+        return goal.to_string();
+    }
+
+    // IDF = log(total / freq) — lågfrekventa ord i survivors = informativa
+    let total_f = total_words as f32;
+    let mut scored_words: Vec<(String, f32)> = word_freq
+        .into_iter()
+        .filter(|(word, _)| !goal_words.contains(word.as_str()))
+        .map(|(word, freq)| {
+            let idf = (total_f / freq as f32).ln();
+            (word, idf)
+        })
+        .collect();
+    scored_words.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+    // Ta top expansionstermer
+    let expansion: Vec<String> = scored_words
+        .into_iter()
+        .take(MAX_EXPANSION_TERMS)
+        .map(|(w, _)| w)
+        .collect();
+
+    if expansion.is_empty() {
+        goal.to_string()
+    } else {
+        format!("{} {}", goal, expansion.join(" "))
+    }
+}
+
 // ── ColBERT score cache ──────────────────────────────────────────────────────
 
 /// Cache för MaxSim-scores: (goal_hash, survivors_hash) → ScoredNode-lista.
@@ -496,7 +573,12 @@ pub fn score_colbert(
         }
     }
 
-    let q_embs = match crate::embedding::encode_tokens(goal) {
+    // Query expansion: lägg till hög-IDF termer från top-BM25-survivors.
+    // Bron mellan BM25 (lexical recall) och ColBERT (semantic precision).
+    // Ex: goal "population stockholm" + expansion "inhabitants" → bättre recall.
+    let expanded_goal = expand_query(goal, survivors, all_nodes);
+
+    let q_embs = match crate::embedding::encode_tokens(&expanded_goal) {
         Some(e) if !e.is_empty() => e,
         _ => return fallback_zero_scores(survivors, all_nodes),
     };

@@ -389,12 +389,66 @@ impl EmbeddingModel {
         let tokenized: Vec<_> = texts.iter().map(|t| self.tokenizer.tokenize(t)).collect();
         let batch_size = tokenized.len();
 
-        // Hitta max sekvens-längd för padding
-        let max_len = tokenized
-            .iter()
-            .map(|t| t.input_ids.len())
-            .max()
-            .unwrap_or(0);
+        // Token pruning: för noder >48 tokens, behåll bara de mest
+        // informativa tokens (hög-IDF). Reducerar brus från nav/boilerplate
+        // och minskar ONNX tensor-storlek.
+        const PRUNE_THRESHOLD: usize = 48;
+        const MAX_KEPT_TOKENS: usize = 48;
+
+        // Räkna token-frekvens i batchen (approx IDF)
+        let mut token_freq: HashMap<u32, u32> = HashMap::new();
+        for tok in &tokenized {
+            for &id in &tok.input_ids {
+                *token_freq.entry(id).or_insert(0) += 1;
+            }
+        }
+        let total_docs = batch_size.max(1) as f32;
+
+        // Pruna långa sekvenser: behåll [CLS] + top-k hög-IDF tokens + [SEP]
+        let pruned: Vec<TokenizedInput> = tokenized
+            .into_iter()
+            .map(|tok| {
+                if tok.input_ids.len() <= PRUNE_THRESHOLD {
+                    return tok; // Kort nog — behåll allt
+                }
+
+                let len = tok.input_ids.len();
+                // CLS = index 0, SEP = sista. Resten rankas efter IDF.
+                let mut token_scores: Vec<(usize, f32)> = (1..len.saturating_sub(1))
+                    .map(|i| {
+                        let freq = *token_freq.get(&tok.input_ids[i]).unwrap_or(&1) as f32;
+                        let idf = (total_docs / freq).ln().max(0.0);
+                        (i, idf)
+                    })
+                    .collect();
+                token_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+                token_scores.truncate(MAX_KEPT_TOKENS - 2); // -2 för CLS+SEP
+                token_scores.sort_by_key(|&(i, _)| i); // Behåll originalordning
+
+                let mut new_ids = vec![tok.input_ids[0]]; // [CLS]
+                let mut new_mask = vec![tok.attention_mask[0]];
+                let mut new_types = vec![tok.token_type_ids[0]];
+                for &(i, _) in &token_scores {
+                    new_ids.push(tok.input_ids[i]);
+                    new_mask.push(tok.attention_mask[i]);
+                    new_types.push(tok.token_type_ids[i]);
+                }
+                if len > 1 {
+                    new_ids.push(tok.input_ids[len - 1]); // [SEP]
+                    new_mask.push(tok.attention_mask[len - 1]);
+                    new_types.push(tok.token_type_ids[len - 1]);
+                }
+
+                TokenizedInput {
+                    input_ids: new_ids,
+                    attention_mask: new_mask,
+                    token_type_ids: new_types,
+                }
+            })
+            .collect();
+
+        // Hitta max sekvens-längd för padding (efter pruning)
+        let max_len = pruned.iter().map(|t| t.input_ids.len()).max().unwrap_or(0);
         if max_len == 0 {
             return Ok(vec![vec![]; batch_size]);
         }
@@ -404,7 +458,7 @@ impl EmbeddingModel {
         let mut all_masks = vec![0i64; batch_size * max_len];
         let mut all_types = vec![0i64; batch_size * max_len];
 
-        for (i, tok) in tokenized.iter().enumerate() {
+        for (i, tok) in pruned.iter().enumerate() {
             let len = tok.input_ids.len().min(max_len);
             let offset = i * max_len;
             for j in 0..len {
@@ -443,7 +497,7 @@ impl EmbeddingModel {
         let dim = self.dim;
         let mut results = Vec::with_capacity(batch_size);
 
-        for (i, tok) in tokenized.iter().enumerate() {
+        for (i, tok) in pruned.iter().enumerate() {
             let mut token_embeddings = Vec::new();
             let seq_len = tok.input_ids.len().min(max_len);
             for (j, &mask) in tok.attention_mask.iter().enumerate().take(seq_len) {
