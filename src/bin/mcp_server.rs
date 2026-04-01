@@ -60,7 +60,7 @@ struct ParseTopParams {
 struct ParseHybridParams {
     /// Raw HTML string
     html: String,
-    /// The agent's current goal
+    /// EXPAND THIS: Include the user's question PLUS 5-10 synonyms, translations, and related terms. Example: "population Malmö invånare befolkning inhabitants kommun antal" — NOT just "population Malmö". The pipeline matches keywords literally in stage 1.
     goal: String,
     /// The page URL
     url: String,
@@ -369,7 +369,7 @@ struct SearchParams {
     query: String,
     /// Number of results to return (1-10, default: 3)
     top_n: Option<usize>,
-    /// Agent goal for relevance scoring (default: same as query)
+    /// EXPAND THIS with synonyms/translations for better page scoring. Example: "population Sweden invånare befolkning inhabitants antal" — NOT just the search query. Used by ColBERT to rank nodes on fetched pages.
     goal: Option<String>,
 }
 
@@ -543,7 +543,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_hybrid",
-        description = "RECOMMENDED: Parse HTML using the hybrid BM25 + HDC + Neural scoring pipeline. Returns the most goal-relevant nodes ranked by a three-stage system:\n\n1. BM25 keyword retrieval — finds candidate nodes matching goal terms\n2. HDC pruning — eliminates structurally irrelevant subtrees using 4096-bit bitvector similarity\n3. Neural scoring — ranks survivors using either MiniLM bi-encoder or ColBERT MaxSim\n\nSTAGE 3 RERANKER (set via 'reranker' parameter):\n- 'minilm' (default): bi-encoder, mean-pooled cosine similarity (~1.2s)\n- 'colbert': MaxSim late interaction with per-token matching (~0.4s, 2.8x FASTER, 41% higher quality). Ranks fact-bearing nodes (prices, statistics, rates) above headings/navigation.\n- 'hybrid': adaptive blend of ColBERT + MiniLM (α varies by node length)\n\nTIP: Use reranker='colbert' for best speed AND quality. It produces sharper score separation — the top-1 node is almost always the one containing the actual answer.\n\nThe response includes a 'pipeline' object with timing for each stage."
+        description = "RECOMMENDED: Parse HTML using the hybrid BM25 + HDC + Neural scoring pipeline.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking stages. Before calling this tool, YOU (the LLM) MUST expand the goal with synonyms, related terms, and alternative phrasings. The pipeline uses keyword matching in stage 1 — if a term isn't in the goal, matching nodes won't be found.\n\nExample: User asks 'hur många bor i Hjo?'\n  BAD goal:  'hur många bor i Hjo'\n  GOOD goal: 'hur många bor i Hjo invånare befolkning folkmängd population inhabitants Hjo kommun antal personer'\n\nExample: User asks 'what is the price of gold?'\n  BAD goal:  'gold price'\n  GOOD goal: 'gold price per ounce USD cost value melting point boiling point density element Au'\n\nAlways include: the original query + 5-10 synonyms/translations + domain-specific terms + the entity name in full.\n\nThree-stage ranking:\n1. BM25 keyword retrieval — matches goal terms against node text\n2. HDC 4096-bit structural pruning — eliminates irrelevant subtrees\n3. ColBERT MaxSim neural scoring — per-token semantic matching\n\nThe response includes a 'pipeline' object with timing for each stage."
     )]
     fn parse_hybrid(&self, Parameters(params): Parameters<ParseHybridParams>) -> String {
         let config =
@@ -857,7 +857,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "search",
-        description = "Search the web via DuckDuckGo and return structured results with title, URL, snippet, domain, and optional direct answer. USE THIS TOOL WHEN: the agent has a free-text question but no URL — e.g. 'how many people live in Sweden?', 'what is the capital of France?', 'latest news about AI'. This is the entry point for web research: it searches DDG, parses results, and returns ranked hits. If a direct factual answer is found in snippets (numbers, dates), it is extracted as direct_answer. Use top_n=1 for quick lookups, top_n=5 for research. NOTE: This tool requires the server to fetch from DuckDuckGo — use fetch_search for the full pipeline, or provide pre-fetched DDG HTML. REAL-TIME: Also available via WebSocket at /ws/api — send {\"method\":\"search\", ...} for streaming progress updates and results."
+        description = "Search the web via DuckDuckGo and return structured results. USE THIS TOOL WHEN: the agent has a question but no URL.\n\nIMPORTANT: Set the 'goal' parameter with an EXPANDED version of the query — include 5-10 synonyms, translations, and related terms. This drives the ColBERT scoring of fetched pages.\n\nExample: query='hur många bor i Hjo', goal='hur många bor i Hjo invånare befolkning folkmängd population inhabitants Hjo kommun antal personer'\n\nThe goal expansion ensures that when pages are fetched and parsed, the ranking system finds nodes containing synonyms like 'invånare' even if the original query only says 'bor'."
     )]
     fn search(&self, Parameters(params): Parameters<SearchParams>) -> String {
         // Returnera DDG-URL som klienten ska hämta — search_from_html behöver HTML
