@@ -307,7 +307,7 @@ pub fn profile_parse_stages(html: &str, goal: &str, url: &str) -> String {
 pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     let start = now_ms();
     let mut tree = build_tree(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Sortera noder efter relevance (högst först) för LLM-effektivitet
     tree.nodes
@@ -346,7 +346,7 @@ pub fn extract_hydration(html: &str, goal: &str) -> String {
             framework,
             nodes: result.nodes,
             warnings: result.warnings,
-            extract_time_ms: now_ms() - start,
+            extract_time_ms: now_ms().saturating_sub(start),
         };
 
         match serialize_json(&output, node_count) {
@@ -455,7 +455,7 @@ pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
         }
     };
 
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Sortera noder efter relevance
     tree.nodes
@@ -491,7 +491,7 @@ pub fn parse_adaptive(html: &str, goal: &str, url: &str) -> String {
 pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String {
     let start = now_ms();
     let mut tree = build_tree(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Samla alla noder platt och sortera efter relevans
     let mut all_nodes = collect_all_nodes(&tree.nodes);
@@ -534,7 +534,7 @@ pub fn parse_top_nodes(html: &str, goal: &str, url: &str, top_n: u32) -> String 
 pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> String {
     let start = now_ms();
     let (mut tree, pipeline_result) = build_tree_hybrid(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Applicera top_n på pipeline-scorade noder
     let top_scored =
@@ -610,7 +610,7 @@ pub fn parse_top_nodes_with_config(
 ) -> String {
     let start = now_ms();
     let (mut tree, pipeline_result) = build_tree_hybrid_with_config(html, goal, url, config);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     let top_scored =
         scoring::ScoringPipeline::apply_top_n(pipeline_result.scored_nodes, Some(top_n as usize));
@@ -758,7 +758,7 @@ pub fn parse_extract(html: &str, goal: &str, url: &str, max_items: u32) -> Strin
         }
     }
 
-    let parse_ms = now_ms() - start;
+    let parse_ms = now_ms().saturating_sub(start);
 
     // Bygg compact output
     #[derive(serde::Serialize)]
@@ -812,7 +812,7 @@ pub fn parse_streaming(html: &str, goal: &str, url: &str, max_nodes: u32) -> Str
         max_nodes as usize
     };
     let mut tree = streaming::stream_parse_limited(html, goal, url, limit);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     tree.nodes
         .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
@@ -963,7 +963,7 @@ pub fn health_check() -> String {
 pub fn find_and_click(html: &str, goal: &str, url: &str, target_label: &str) -> String {
     let start = now_ms();
     let mut tree = build_tree(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     let result = intent::find_best_clickable(&tree, target_label);
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
@@ -983,7 +983,7 @@ pub fn find_and_click(html: &str, goal: &str, url: &str, target_label: &str) -> 
 pub fn fill_form(html: &str, goal: &str, url: &str, fields_json: &str) -> String {
     let start = now_ms();
     let mut tree = build_tree(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     let fields: HashMap<String, String> = match serde_json::from_str(fields_json) {
         Ok(f) => f,
@@ -1010,7 +1010,7 @@ pub fn fill_form(html: &str, goal: &str, url: &str, fields_json: &str) -> String
 pub fn extract_data(html: &str, goal: &str, url: &str, data_keys_json: &str) -> String {
     let start = now_ms();
     let mut tree = build_tree(html, goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     let keys: Vec<String> = match serde_json::from_str(data_keys_json) {
         Ok(k) => k,
@@ -1121,7 +1121,7 @@ pub fn diff_semantic_trees(old_tree_json: &str, new_tree_json: &str) -> String {
     };
 
     let mut delta = diff::diff_trees(&old_tree, &new_tree);
-    delta.diff_time_ms = now_ms() - start;
+    delta.diff_time_ms = now_ms().saturating_sub(start);
 
     match serde_json::to_string(&delta) {
         Ok(json) => json,
@@ -1208,7 +1208,7 @@ pub fn parse_with_js(html: &str, goal: &str, url: &str) -> String {
     let tree = build_tree(html, goal, url);
 
     let mut result = js_bridge::selective_exec(&tree, html);
-    result.exec_time_ms = now_ms() - start;
+    result.exec_time_ms = now_ms().saturating_sub(start);
     result.tree.parse_time_ms = result.exec_time_ms;
 
     match serde_json::to_string(&result) {
@@ -1300,7 +1300,7 @@ pub fn analyze_temporal(memory_json: &str) -> String {
     };
 
     let mut analysis = mem.analyze();
-    analysis.analysis_time_ms = now_ms() - start;
+    analysis.analysis_time_ms = now_ms().saturating_sub(start);
 
     match serde_json::to_string(&analysis) {
         Ok(json) => json,
@@ -1345,7 +1345,7 @@ pub fn predict_temporal(memory_json: &str) -> String {
 pub fn compile_goal(goal: &str) -> String {
     let start = now_ms();
     let mut plan = compiler::compile_goal(goal);
-    plan.compile_time_ms = now_ms() - start;
+    plan.compile_time_ms = now_ms().saturating_sub(start);
 
     match serde_json::to_string(&plan) {
         Ok(json) => json,
@@ -1535,7 +1535,7 @@ pub fn find_safest_path(graph_json: &str, goal: &str) -> String {
 pub fn discover_webmcp(html: &str, url: &str) -> String {
     let start = now_ms();
     let mut result = webmcp::discover_webmcp_tools(html, url);
-    result.scan_time_ms = now_ms() - start;
+    result.scan_time_ms = now_ms().saturating_sub(start);
 
     match serde_json::to_string(&result) {
         Ok(json) => json,
@@ -1569,7 +1569,7 @@ pub fn ground_semantic_tree(html: &str, goal: &str, url: &str, annotations_json:
     };
 
     let mut result = grounding::ground_tree(&tree, &annotations);
-    result.grounding_time_ms = now_ms() - start;
+    result.grounding_time_ms = now_ms().saturating_sub(start);
 
     match serde_json::to_string(&result) {
         Ok(json) => json,
@@ -2704,7 +2704,7 @@ fn render_with_js_opts(
     // Steg 4: Rendera med Blitz
     let render_result = render_html_to_png(&modified_html, base_url, width, height, fast_render);
 
-    let total_ms = now_ms() - start;
+    let total_ms = now_ms().saturating_sub(start);
 
     #[derive(serde::Serialize)]
     struct RenderWithJsOutput {
@@ -3450,7 +3450,7 @@ pub fn search_from_html(query: &str, html: &str, top_n: usize, goal: &str) -> St
         direct_answer,
         direct_answer_confidence,
         source_url: ddg_url,
-        parse_ms: now_ms() - start,
+        parse_ms: now_ms().saturating_sub(start),
         nodes_seen: total_nodes,
         nodes_emitted: total_nodes,
         deep: None,

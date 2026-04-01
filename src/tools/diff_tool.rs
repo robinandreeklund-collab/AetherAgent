@@ -23,29 +23,39 @@ pub fn execute(req: &DiffRequest) -> ToolResult {
 
     let old_json = match &req.old_tree {
         Some(t) => t.as_str(),
-        None => return ToolResult::err("'old_tree' krävs", now_ms() - start),
+        None => return ToolResult::err("'old_tree' krävs", now_ms().saturating_sub(start)),
     };
 
     let new_json = match &req.new_tree {
         Some(t) => t.as_str(),
-        None => return ToolResult::err("'new_tree' krävs", now_ms() - start),
+        None => return ToolResult::err("'new_tree' krävs", now_ms().saturating_sub(start)),
     };
 
     let old_tree: crate::types::SemanticTree = match serde_json::from_str(old_json) {
         Ok(t) => t,
-        Err(e) => return ToolResult::err(format!("Ogiltig old_tree JSON: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig old_tree JSON: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let new_tree: crate::types::SemanticTree = match serde_json::from_str(new_json) {
         Ok(t) => t,
-        Err(e) => return ToolResult::err(format!("Ogiltig new_tree JSON: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig new_tree JSON: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let delta = crate::diff::diff_trees(&old_tree, &new_tree);
     let data = serde_json::to_value(&delta)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

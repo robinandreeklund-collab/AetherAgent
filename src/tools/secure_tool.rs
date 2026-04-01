@@ -43,7 +43,7 @@ pub fn execute(req: &SecureRequest) -> ToolResult {
 
     ToolResult::err(
         "Ange 'content' (injection-scan), 'url' (firewall), eller 'urls' (batch-firewall).",
-        now_ms() - start,
+        now_ms().saturating_sub(start),
     )
 }
 
@@ -63,7 +63,7 @@ fn execute_injection_scan(content: &str, start: u64) -> ToolResult {
         "content_length": content.len(),
     });
 
-    let mut result = ToolResult::ok(data, now_ms() - start);
+    let mut result = ToolResult::ok(data, now_ms().saturating_sub(start));
     if let Some(w) = warning {
         result.injection_warnings = vec![w];
     }
@@ -85,7 +85,7 @@ fn execute_classify(url: &str, goal: Option<&str>, start: u64) -> ToolResult {
         "relevance_score": verdict.relevance_score,
     });
 
-    let mut result = ToolResult::ok(data, now_ms() - start);
+    let mut result = ToolResult::ok(data, now_ms().saturating_sub(start));
     if !verdict.allowed {
         result.firewall_blocked = Some(verdict.reason.clone());
     }
@@ -123,7 +123,7 @@ fn execute_batch_classify(urls: &[String], goal: Option<&str>, start: u64) -> To
         },
     });
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

@@ -76,11 +76,14 @@ pub fn execute(req: &ParseHybridRequest) -> ToolResult {
         (_, Some(_)) => {
             return ToolResult::err(
                 "URL-input kräver asynkron fetch. Använd HTTP/MCP-endpointen.",
-                now_ms() - start,
+                now_ms().saturating_sub(start),
             );
         }
         _ => {
-            return ToolResult::err("Ingen input: ange html eller url", now_ms() - start);
+            return ToolResult::err(
+                "Ingen input: ange html eller url",
+                now_ms().saturating_sub(start),
+            );
         }
     };
 
@@ -110,7 +113,7 @@ pub async fn execute_with_html_async(
 
     // Steg 1: Bygg träd med JS-eval (samlar pending fetch-URLs)
     let mut tree = super::build_tree_with_js(html, &req.goal, url);
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Steg 2: Resolve pending fetch-URLs (async — hämtar via reqwest)
     super::resolve_pending_fetches(&mut tree, &req.goal).await;
@@ -189,7 +192,7 @@ fn result_from_json(data: serde_json::Value, start: u64) -> ToolResult {
         })
         .unwrap_or_default();
 
-    ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+    ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
 }
 
 #[cfg(test)]

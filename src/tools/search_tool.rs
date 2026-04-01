@@ -65,7 +65,7 @@ pub fn execute(req: &SearchRequest) -> ToolResult {
         "max_nodes_per_result": req.max_nodes_per_result,
     });
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 /// Kör search med redan hämtad DDG HTML
@@ -76,7 +76,7 @@ pub fn execute_with_html(ddg_html: &str, req: &SearchRequest) -> ToolResult {
     let data = serde_json::to_value(&search_result)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 /// Async variant: extrahera DDG-resultat + hybrid_parse top-3 resultat-sidor
@@ -116,7 +116,7 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
         };
 
         // BUGG R: Kolla elapsed — skippa om vi redan överskridit timeout
-        if now_ms() - fetch_start > DEEP_FETCH_TIMEOUT_MS + 500 {
+        if now_ms().saturating_sub(fetch_start) > DEEP_FETCH_TIMEOUT_MS + 500 {
             continue;
         }
 
@@ -170,7 +170,7 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
         .await
         .unwrap_or_default();
 
-        let fetch_ms = now_ms() - fetch_start;
+        let fetch_ms = now_ms().saturating_sub(fetch_start);
 
         // Berika sökresultatet
         if i < search_result.results.len() && !nodes.is_empty() {
@@ -180,12 +180,12 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
     }
 
     search_result.deep = Some(true);
-    search_result.deep_fetch_ms = Some(now_ms() - deep_start);
+    search_result.deep_fetch_ms = Some(now_ms().saturating_sub(deep_start));
 
     let data = serde_json::to_value(&search_result)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 /// Gemensam DDG-parsningslogik
@@ -214,7 +214,7 @@ fn parse_ddg_results(
                 direct_answer: None,
                 direct_answer_confidence: 0.0,
                 source_url: crate::search::build_ddg_url(&req.query),
-                parse_ms: now_ms() - start,
+                parse_ms: now_ms().saturating_sub(start),
                 nodes_seen: 0,
                 nodes_emitted: 0,
                 deep: None,
@@ -240,7 +240,7 @@ fn parse_ddg_results(
         direct_answer,
         direct_answer_confidence,
         source_url: ddg_url,
-        parse_ms: now_ms() - start,
+        parse_ms: now_ms().saturating_sub(start),
         nodes_seen: tree.nodes.len(),
         nodes_emitted: tree.nodes.len(),
         deep: None,

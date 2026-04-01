@@ -39,7 +39,7 @@ pub fn execute(req: &CollabRequest) -> ToolResult {
                 "store_json": store.to_json(),
                 "status": "created",
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "register" => execute_register(req, start),
         "publish" => execute_publish(req, start),
@@ -47,7 +47,7 @@ pub fn execute(req: &CollabRequest) -> ToolResult {
         "stats" => execute_stats(req, start),
         other => ToolResult::err(
             format!("Okänd action: '{other}'. Använd: create, register, publish, fetch, stats."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -57,9 +57,16 @@ fn parse_store(
     start: u64,
 ) -> Result<crate::collab::SharedDiffStore, ToolResult> {
     match json {
-        Some(j) => crate::collab::SharedDiffStore::from_json(j)
-            .map_err(|e| ToolResult::err(format!("Ogiltig store_json: {e}"), now_ms() - start)),
-        None => Err(ToolResult::err("'store_json' krävs", now_ms() - start)),
+        Some(j) => crate::collab::SharedDiffStore::from_json(j).map_err(|e| {
+            ToolResult::err(
+                format!("Ogiltig store_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }),
+        None => Err(ToolResult::err(
+            "'store_json' krävs",
+            now_ms().saturating_sub(start),
+        )),
     }
 }
 
@@ -70,7 +77,12 @@ fn execute_register(req: &CollabRequest, start: u64) -> ToolResult {
     };
     let agent_id = match &req.agent_id {
         Some(id) => id.as_str(),
-        None => return ToolResult::err("'agent_id' krävs för action=register", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'agent_id' krävs för action=register",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let goal = req.goal.as_deref().unwrap_or("");
 
@@ -80,7 +92,7 @@ fn execute_register(req: &CollabRequest, start: u64) -> ToolResult {
         "store_json": store.to_json(),
         "registered": agent_id,
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_publish(req: &CollabRequest, start: u64) -> ToolResult {
@@ -90,20 +102,40 @@ fn execute_publish(req: &CollabRequest, start: u64) -> ToolResult {
     };
     let agent_id = match &req.agent_id {
         Some(id) => id.as_str(),
-        None => return ToolResult::err("'agent_id' krävs för action=publish", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'agent_id' krävs för action=publish",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let url = match &req.url {
         Some(u) => u.as_str(),
-        None => return ToolResult::err("'url' krävs för action=publish", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'url' krävs för action=publish",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let delta_json = match &req.delta_json {
         Some(d) => d.as_str(),
-        None => return ToolResult::err("'delta_json' krävs för action=publish", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'delta_json' krävs för action=publish",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let delta: crate::types::SemanticDelta = match serde_json::from_str(delta_json) {
         Ok(d) => d,
-        Err(e) => return ToolResult::err(format!("Ogiltig delta_json: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig delta_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     store.publish_delta(agent_id, url, delta, now_ms());
@@ -112,7 +144,7 @@ fn execute_publish(req: &CollabRequest, start: u64) -> ToolResult {
         "store_json": store.to_json(),
         "published": true,
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_fetch(req: &CollabRequest, start: u64) -> ToolResult {
@@ -122,7 +154,12 @@ fn execute_fetch(req: &CollabRequest, start: u64) -> ToolResult {
     };
     let agent_id = match &req.agent_id {
         Some(id) => id.as_str(),
-        None => return ToolResult::err("'agent_id' krävs för action=fetch", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'agent_id' krävs för action=fetch",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     // Automatisk cleanup
@@ -134,7 +171,7 @@ fn execute_fetch(req: &CollabRequest, start: u64) -> ToolResult {
         "store_json": store.to_json(),
         "deltas": serde_json::to_value(&result).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_stats(req: &CollabRequest, start: u64) -> ToolResult {
@@ -155,7 +192,7 @@ fn execute_stats(req: &CollabRequest, start: u64) -> ToolResult {
         "collab": collab_stats.map(|s| serde_json::to_value(s).unwrap_or_default()),
         "tier_stats": serde_json::to_value(&tier_stats).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

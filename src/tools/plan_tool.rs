@@ -58,7 +58,7 @@ pub fn execute(req: &PlanRequest) -> ToolResult {
         "execute" => execute_plan(req, start),
         other => ToolResult::err(
             format!("Okänd action: '{other}'. Använd 'compile', 'predict', 'safest_path', eller 'execute'."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -67,24 +67,34 @@ fn execute_compile(req: &PlanRequest, start: u64) -> ToolResult {
     let plan = crate::compiler::compile_goal(&req.goal);
     let data =
         serde_json::to_value(&plan).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_predict(req: &PlanRequest, start: u64) -> ToolResult {
     let graph_json = match &req.graph_json {
         Some(g) => g.as_str(),
-        None => return ToolResult::err("'graph_json' krävs för action=predict", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'graph_json' krävs för action=predict",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let graph = match crate::causal::CausalGraph::from_json(graph_json) {
         Ok(g) => g,
-        Err(e) => return ToolResult::err(format!("Ogiltig graph_json: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig graph_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let outcome = graph.predict_outcome(&req.goal, None);
     let data = serde_json::to_value(&outcome)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_safest_path(req: &PlanRequest, start: u64) -> ToolResult {
@@ -93,26 +103,36 @@ fn execute_safest_path(req: &PlanRequest, start: u64) -> ToolResult {
         None => {
             return ToolResult::err(
                 "'graph_json' krävs för action=safest_path",
-                now_ms() - start,
+                now_ms().saturating_sub(start),
             )
         }
     };
 
     let graph = match crate::causal::CausalGraph::from_json(graph_json) {
         Ok(g) => g,
-        Err(e) => return ToolResult::err(format!("Ogiltig graph_json: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig graph_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let path = graph.find_safest_path(&req.goal, req.max_steps);
     let data =
         serde_json::to_value(&path).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_plan(req: &PlanRequest, start: u64) -> ToolResult {
     let html = match &req.html {
         Some(h) => h.as_str(),
-        None => return ToolResult::err("'html' krävs för action=execute", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'html' krävs för action=execute",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let url = req.url.as_deref().unwrap_or("");
 
@@ -122,7 +142,7 @@ fn execute_plan(req: &PlanRequest, start: u64) -> ToolResult {
 
     let data = serde_json::to_value(&result)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

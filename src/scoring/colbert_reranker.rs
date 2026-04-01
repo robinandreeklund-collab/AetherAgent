@@ -302,7 +302,14 @@ fn has_informational_content(label: &str) -> bool {
 fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
     match role {
         // Text-noder — boost BARA om informationsinnehåll (Bugg 1 fix)
-        "text" if has_informational_content(label) && label.len() > 50 => 1.15,
+        "text" if has_informational_content(label) && label.len() > 50 => {
+            // Ytterligare check: historisk datum-text straffas
+            if label.starts_with("Between ") || label.starts_with("Before ") {
+                0.85 // Lägre boost för historik-kontext
+            } else {
+                1.15
+            }
+        }
         "text" if has_informational_content(label) => 1.05,
         "text" => 0.95, // Kort text utan siffror/meningar = trolig nav-aggregat
         // Tabeller = text i boost-hierarkin (Bugg 1 fix: table parity)
@@ -669,8 +676,7 @@ pub fn score_colbert(
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    // Dedup: identiska/substring labels → behåll bara högst-scorade (Bugg 4 fix)
-    // Substring-check: om en labels text finns i en redan sedd labels → dup
+    // Dedup: identiska/substring/overlap labels → behåll bara högst-scorade
     {
         let mut seen_labels: Vec<String> = Vec::new();
         result.retain(|node| {
@@ -684,12 +690,24 @@ pub fn score_colbert(
             if key.is_empty() || key.len() < 4 {
                 return true;
             }
-            // Exakt match eller substring av redan sedd label
-            let is_dup = seen_labels
+            // Exakt substring match
+            let is_substring = seen_labels
                 .iter()
                 .any(|prev| prev.contains(&key) || key.contains(prev.as_str()));
-            if is_dup {
+            if is_substring {
                 return false;
+            }
+            // Ord-overlap: om >70% av orden redan setts i en högre-rankad nod → dup
+            // Fångar "Group 11 Melting..." vs "Fact box Group 11 Melting..."
+            let key_words: Vec<&str> = key.split_whitespace().collect();
+            if key_words.len() >= 4 {
+                let is_overlap = seen_labels.iter().any(|prev| {
+                    let matches = key_words.iter().filter(|w| prev.contains(**w)).count();
+                    matches as f32 / key_words.len() as f32 > 0.7
+                });
+                if is_overlap {
+                    return false;
+                }
             }
             seen_labels.push(key);
             true
