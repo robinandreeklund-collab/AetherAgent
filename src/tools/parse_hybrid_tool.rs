@@ -35,15 +35,18 @@ fn default_top_n() -> u32 {
     20
 }
 
-/// Bygg PipelineConfig baserat på reranker-parameter
+/// Bygg PipelineConfig baserat på reranker-parameter.
+///
+/// Med `colbert` feature: default är ColBERT (snabbare + bättre kvalitet).
+/// Utan `colbert` feature: alltid MiniLM.
 pub fn build_config(reranker: Option<&str>) -> crate::scoring::PipelineConfig {
     #[allow(unused_mut)]
     let mut config = crate::scoring::PipelineConfig::default();
     #[cfg(feature = "colbert")]
     {
         match reranker {
-            Some("colbert") => {
-                config.stage3_reranker = crate::scoring::Stage3Reranker::ColBert;
+            Some("minilm") => {
+                config.stage3_reranker = crate::scoring::Stage3Reranker::MiniLM;
             }
             Some("hybrid") => {
                 config.stage3_reranker = crate::scoring::Stage3Reranker::Hybrid {
@@ -51,10 +54,13 @@ pub fn build_config(reranker: Option<&str>) -> crate::scoring::PipelineConfig {
                     use_adaptive_alpha: true,
                 };
             }
-            _ => {} // MiniLM default
+            // Default: ColBERT (2.8x snabbare, 41% bättre nodkvalitet)
+            _ => {
+                config.stage3_reranker = crate::scoring::Stage3Reranker::ColBert;
+            }
         }
     }
-    let _ = reranker; // undvik unused warning utan colbert-feature
+    let _ = reranker;
     config
 }
 
