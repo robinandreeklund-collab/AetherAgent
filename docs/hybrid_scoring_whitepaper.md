@@ -154,3 +154,101 @@ ColBERT top-1 on the same sites:
 | Reference | 5 | 5/5 (100%) | 28K→250 | 99% |
 | Finance | 4 | 4/4 (100%) | 480K→500 | 100% |
 | Other | 3 | 3/4 (75%) | 10K→300 | 97% |
+
+---
+
+## 4. Implementation
+
+### 4.1 Single Model, Two Modes
+
+One ONNX model (`colbert-small-int8.onnx`, 22MB) serves both roles:
+- **Bi-encoder** (mean pooling → single vector): Dense retrieval fallback
+- **ColBERT** (per-token embeddings → MaxSim): Stage 3 HLIR scoring
+
+Base: all-MiniLM-L6-v2 (384-dim, 6 layers, 22M parameters), int8 dynamic quantization.
+
+### 4.2 Parse Speed
+
+Benchmarked against LightPanda (Zig, "9× faster than Chrome") and Chrome (Playwright):
+
+| Engine | Parse median | Parallel throughput | Memory |
+|--------|:-----------:|:------------------:|:------:|
+| **AetherAgent** | **1.1ms** | **1,051 req/s** | 27 MB |
+| LightPanda CDP | 4.0ms | — | 19 MB/inst |
+| Chrome (Playwright) | 14ms | — | 200–500 MB |
+
+4× faster than LightPanda, 14× faster than Chrome. Persistent server, no cold starts.
+
+Parse speed from 12 Rust-level optimizations including custom html5ever TreeSink (eliminates RcDom), zero-allocation text extraction, and thread-local QuickJS pooling (eval: 431µs → 2µs, 215× speedup).
+
+### 4.3 LLM-Driven Goal Expansion
+
+The MCP tool description instructs the LLM to expand goals with specific terms:
+
+```
+BAD:  "minimum wage 2025"
+GOOD: "minimum wage 2025 National Living Wage £12.21 £12.71 hourly rate per hour April"
+```
+
+Zero-cost: no extra model inference. The LLM uses knowledge it already has. Measured effect: BM25 candidates +55%, latency −50% (prevents dense fallback trigger).
+
+### 4.4 Zero-Config Deployment
+
+```bash
+cargo run --features server,colbert --bin aether-server --release
+```
+
+Model and vocabulary checked into repository. No environment variables, downloads, or GPU required.
+
+---
+
+## 5. Positioning
+
+**Training-free high-recall retrieval.** No labels, no fine-tuning, no task-specific models — yet 95.5% answer recall. The system works on any website without adaptation.
+
+**Drop-in replacement for RAG chunking.** Instead of `split text → embed → retrieve`, HLIR does `parse structure → retrieve semantically + structurally`. Applicable to any tree-structured document (HTML, JSON, XML, document outlines).
+
+**Generalized HLIR operator.** The bottom-up scoring formula `S(n) = max(S_self(n), λ · max_c S(c))` is a general tree-aware retrieval primitive, comparable to max pooling with decay. It can be applied to any late interaction scorer over hierarchical documents.
+
+---
+
+## 6. Limitations
+
+1. **JS-rendered SPAs** (2/44 failures) require JavaScript evaluation tier. Static parser returns empty shells for React/Next.js without SSR.
+2. **Table content** often appears as a single concatenated node rather than individual rows.
+3. **Dense fallback** adds 100–500ms when triggered on large DOMs.
+4. **Goal expansion quality** depends on the calling LLM — generic terms hurt precision.
+
+---
+
+## 7. Conclusion
+
+HLIR delivers goal-relevant DOM nodes with 95.5% answer recall and 97% token savings across 44 websites. The core contribution — bottom-up ColBERT scoring over DOM trees — ranks fact-bearing nodes as top-1 in 83% of cases versus 33% for standard bi-encoders. The system is training-free, runs on CPU with a 22MB model, and parses pages in 1ms at 1,051 requests/second.
+
+**Faster. Cheaper. Safer. Greener.** By reducing tokens 97%, the system proportionally reduces compute cost, inference energy, carbon emissions, and the attack surface exposed to prompt injection.
+
+---
+
+## References
+
+### Retrieval & Scoring
+- Khattab, O. & Zaharia, M. (2020). ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT. *SIGIR 2020*.
+- Kanerva, P. (2009). Hyperdimensional Computing. *Cognitive Computation*, 1(2).
+- Reimers, N. & Gurevych, I. (2019). Sentence-BERT. *EMNLP 2019*.
+- Robertson, S. & Zaragoza, H. (2009). BM25 and Beyond. *Foundations and Trends in IR*, 3(4).
+- Nogueira, R. & Cho, K. (2019). Passage Re-ranking with BERT. *arXiv:1901.04085*.
+
+### Web Agents
+- Zhou, S. et al. (2024). WebArena. *ICLR 2024*.
+- Deng, X. et al. (2023). Mind2Web. *NeurIPS 2023*.
+- Zheng, B. et al. (2024). SeeAct. *ICML 2024*.
+- Drouin, A. et al. (2024). BrowserGym. *arXiv 2024*.
+- Koh, J. Y. et al. (2024). Tree Search for Language Model Agents. *arXiv 2024*.
+
+### Environment & Safety
+- Luccioni, A. S. et al. (2023). Power Hungry Processing. *FAccT 2024*.
+- Patterson, D. et al. (2022). Carbon Footprint of ML Training. *IEEE Computer*.
+- Li, P. et al. (2023). Making AI Less Thirsty. *arXiv:2304.03271*.
+- Schwartz, R. et al. (2020). Green AI. *CACM*, 63(12).
+- Greshake, K. et al. (2023). Indirect Prompt Injection. *AISec 2023*.
+- Zhan, Q. et al. (2024). InjecAgent. *ACL Findings 2024*.
