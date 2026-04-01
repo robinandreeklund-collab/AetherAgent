@@ -8,9 +8,9 @@
 
 | Metod | Korrekthet | Avg latens | Avg top-1 score |
 |-------|-----------|------------|----------------|
-| MiniLM (bi-encoder) | 29/30 (96.7%) | 1234.0ms | 0.675 |
-| ColBERT (MaxSim) | 29/30 (96.7%) | 433.5ms | 0.950 |
-| Hybrid (adaptive α) | 29/30 (96.7%) | 430.9ms | 0.817 |
+| MiniLM (bi-encoder) | 29/30 (96.7%) | 1286.7ms | 0.675 |
+| ColBERT (MaxSim) | 29/30 (96.7%) | 476.5ms | 0.950 |
+| Hybrid (adaptive α) | 29/30 (96.7%) | 470.8ms | 0.814 |
 
 ColBERT wins (correct where MiniLM misses): **0**
 Hybrid wins (correct where MiniLM misses): **0**
@@ -20,36 +20,36 @@ MiniLM-only (correct where ColBERT misses): **0**
 
 | # | Site | HTML | DOM | M-ok | C-ok | H-ok | M-ms | C-ms | H-ms | M-top1 | C-top1 | H-top1 |
 |---|------|------|-----|------|------|------|------|------|------|--------|--------|--------|
-| 1 | Hacker News | 34KB | 496 | PASS | PASS | PASS | 2462 | 865 | 886 | 0.238 | 1.000 | 0.850 |
-| 2 | HN Newest | 40KB | 521 | PASS | PASS | PASS | 737 | 146 | 144 | 0.452 | 1.000 | 0.861 |
-| 3 | Lobsters | 57KB | 484 | PASS | PASS | PASS | 1442 | 476 | 472 | 0.683 | 1.000 | 0.714 |
-| 4 | CNN Lite | 330KB | 208 | PASS | PASS | PASS | 1287 | 116 | 121 | 0.563 | 1.000 | 0.893 |
-| 5 | NPR Text | 5KB | 54 | PASS | PASS | PASS | 1085 | 127 | 132 | 0.794 | 1.000 | 0.939 |
-| 6 | Reuters | 0KB | 1 | PASS | PASS | PASS | 78 | 50 | 47 | 0.173 | 0.500 | 0.271 |
-| 7 | Rust Lang | 18KB | 79 | PASS | PASS | PASS | 1603 | 589 | 526 | 0.550 | 1.000 | 0.884 |
-| 8 | MDN HTML | 173KB | 1050 | PASS | PASS | PASS | 1637 | 707 | 647 | 0.825 | 1.000 | 0.880 |
-| 9 | Go Dev | 62KB | 245 | PASS | PASS | PASS | 1318 | 463 | 492 | 0.698 | 1.000 | 0.893 |
-| 10 | TypeScript | 253KB | 201 | PASS | PASS | PASS | 1403 | 570 | 571 | 0.681 | 1.000 | 0.850 |
-| 11 | Kotlin | 251KB | 1 | MISS | MISS | MISS | 116 | 49 | 51 | 0.182 | 0.500 | 0.278 |
-| 12 | Node.js | 448KB | 32 | PASS | PASS | PASS | 930 | 516 | 521 | 0.462 | 1.000 | 0.850 |
-| 13 | Ruby Lang | 88KB | 242 | PASS | PASS | PASS | 1181 | 444 | 440 | 0.712 | 1.000 | 0.869 |
-| 14 | docs.rs | 17KB | 83 | PASS | PASS | PASS | 1259 | 552 | 543 | 0.758 | 1.000 | 0.865 |
-| 15 | DevDocs | 8KB | 22 | PASS | PASS | PASS | 492 | 45 | 44 | 0.491 | 0.500 | 0.494 |
-| 16 | PyPI | 21KB | 26 | PASS | PASS | PASS | 491 | 328 | 310 | 0.945 | 1.000 | 0.927 |
-| 17 | pkg.go.dev | 32KB | 246 | PASS | PASS | PASS | 828 | 268 | 269 | 0.704 | 1.000 | 0.893 |
-| 18 | RubyGems | 18KB | 89 | PASS | PASS | PASS | 1124 | 336 | 329 | 0.616 | 1.000 | 0.857 |
-| 19 | NuGet | 16KB | 91 | PASS | PASS | PASS | 972 | 621 | 629 | 0.825 | 1.000 | 0.859 |
-| 20 | Docker Hub | 388KB | 100 | PASS | PASS | PASS | 950 | 523 | 527 | 0.600 | 1.000 | 0.932 |
-| 21 | Terraform | 120KB | 614 | PASS | PASS | PASS | 2546 | 889 | 792 | 0.960 | 1.000 | 0.988 |
-| 22 | GitHub Explore | 395KB | 797 | PASS | PASS | PASS | 1638 | 796 | 806 | 0.887 | 1.000 | 0.774 |
-| 23 | OpenStreetMap | 32KB | 122 | PASS | PASS | PASS | 1069 | 161 | 193 | 0.499 | 1.000 | 0.819 |
-| 24 | httpbin HTML | 3KB | 3 | PASS | PASS | PASS | 158 | 85 | 82 | 0.570 | 1.000 | 0.828 |
-| 25 | JSON Placeholder | 8KB | 91 | PASS | PASS | PASS | 1057 | 238 | 247 | 0.945 | 1.000 | 0.850 |
-| 26 | Haskell.org | 63KB | 453 | PASS | PASS | PASS | 1240 | 546 | 582 | 0.945 | 1.000 | 0.840 |
-| 27 | Elixir Lang | 26KB | 152 | PASS | PASS | PASS | 1731 | 540 | 529 | 0.872 | 1.000 | 0.845 |
-| 28 | Zig Lang | 12KB | 118 | PASS | PASS | PASS | 1361 | 537 | 562 | 0.825 | 1.000 | 0.920 |
-| 29 | Svelte | 87KB | 183 | PASS | PASS | PASS | 1035 | 562 | 558 | 0.825 | 1.000 | 0.951 |
-| 30 | Tailwind CSS | 912KB | 9000 | PASS | PASS | PASS | 3792 | 859 | 872 | 0.960 | 1.000 | 0.840 |
+| 1 | Hacker News | 34KB | 496 | PASS | PASS | PASS | 2550 | 922 | 883 | 0.238 | 1.000 | 0.851 |
+| 2 | HN Newest | 40KB | 521 | PASS | PASS | PASS | 722 | 153 | 144 | 0.453 | 1.000 | 0.859 |
+| 3 | Lobsters | 57KB | 484 | PASS | PASS | PASS | 1482 | 507 | 488 | 0.683 | 1.000 | 0.693 |
+| 4 | CNN Lite | 330KB | 208 | PASS | PASS | PASS | 1325 | 125 | 129 | 0.563 | 1.000 | 0.893 |
+| 5 | NPR Text | 5KB | 54 | PASS | PASS | PASS | 1198 | 153 | 150 | 0.794 | 1.000 | 0.939 |
+| 6 | Reuters | 0KB | 1 | PASS | PASS | PASS | 87 | 57 | 54 | 0.173 | 0.500 | 0.271 |
+| 7 | Rust Lang | 18KB | 79 | PASS | PASS | PASS | 1721 | 618 | 621 | 0.550 | 1.000 | 0.884 |
+| 8 | MDN HTML | 173KB | 1050 | PASS | PASS | PASS | 1756 | 737 | 712 | 0.825 | 1.000 | 0.880 |
+| 9 | Go Dev | 62KB | 245 | PASS | PASS | PASS | 1383 | 510 | 503 | 0.698 | 1.000 | 0.893 |
+| 10 | TypeScript | 253KB | 201 | PASS | PASS | PASS | 1544 | 649 | 667 | 0.681 | 1.000 | 0.850 |
+| 11 | Kotlin | 251KB | 1 | MISS | MISS | MISS | 125 | 59 | 53 | 0.182 | 0.500 | 0.278 |
+| 12 | Node.js | 454KB | 32 | PASS | PASS | PASS | 993 | 568 | 568 | 0.462 | 1.000 | 0.850 |
+| 13 | Ruby Lang | 88KB | 242 | PASS | PASS | PASS | 1290 | 493 | 486 | 0.712 | 1.000 | 0.869 |
+| 14 | docs.rs | 16KB | 83 | PASS | PASS | PASS | 1158 | 743 | 748 | 0.758 | 1.000 | 0.805 |
+| 15 | DevDocs | 8KB | 22 | PASS | PASS | PASS | 532 | 53 | 53 | 0.491 | 0.500 | 0.494 |
+| 16 | PyPI | 21KB | 26 | PASS | PASS | PASS | 521 | 355 | 346 | 0.945 | 1.000 | 0.927 |
+| 17 | pkg.go.dev | 32KB | 246 | PASS | PASS | PASS | 866 | 293 | 291 | 0.704 | 1.000 | 0.893 |
+| 18 | RubyGems | 18KB | 89 | PASS | PASS | PASS | 1208 | 371 | 365 | 0.616 | 1.000 | 0.836 |
+| 19 | NuGet | 16KB | 91 | PASS | PASS | PASS | 1060 | 734 | 701 | 0.825 | 1.000 | 0.859 |
+| 20 | Docker Hub | 388KB | 100 | PASS | PASS | PASS | 1008 | 608 | 581 | 0.600 | 1.000 | 0.932 |
+| 21 | Terraform | 120KB | 614 | PASS | PASS | PASS | 2683 | 877 | 876 | 0.960 | 1.000 | 0.988 |
+| 22 | GitHub Explore | 395KB | 804 | PASS | PASS | PASS | 1675 | 907 | 900 | 0.887 | 1.000 | 0.774 |
+| 23 | OpenStreetMap | 32KB | 122 | PASS | PASS | PASS | 1153 | 178 | 175 | 0.499 | 1.000 | 0.819 |
+| 24 | httpbin HTML | 3KB | 3 | PASS | PASS | PASS | 166 | 87 | 85 | 0.570 | 1.000 | 0.828 |
+| 25 | JSON Placeholder | 8KB | 91 | PASS | PASS | PASS | 1135 | 255 | 262 | 0.945 | 1.000 | 0.850 |
+| 26 | Haskell.org | 63KB | 453 | PASS | PASS | PASS | 1320 | 631 | 624 | 0.945 | 1.000 | 0.840 |
+| 27 | Elixir Lang | 26KB | 152 | PASS | PASS | PASS | 1777 | 589 | 558 | 0.872 | 1.000 | 0.845 |
+| 28 | Zig Lang | 12KB | 118 | PASS | PASS | PASS | 1376 | 586 | 595 | 0.825 | 1.000 | 0.920 |
+| 29 | Svelte | 87KB | 183 | PASS | PASS | PASS | 1015 | 586 | 597 | 0.825 | 1.000 | 0.951 |
+| 30 | Tailwind CSS | 915KB | 9013 | PASS | PASS | PASS | 3770 | 893 | 910 | 0.960 | 1.000 | 0.854 |
 
 ## Top-3 Node Quality Analysis
 
@@ -59,27 +59,27 @@ Side-by-side comparison of what each reranker picks as top-3 nodes.
 
 **MiniLM top-3:**
 1. `0.238` [generic] 10 points by jruohonen 2 hours ago | hide | discuss
-2. `0.216` [generic] 7 points by wazHFsRy 1 hour ago | hide | discuss
+2. `0.227` [generic] 9 points by wazHFsRy 1 hour ago | hide | discuss
 3. `0.214` [generic] Hacker News new | past | comments | ask | show | jobs | submit login
 
 **ColBERT top-3:**
 1. `1.000` [generic] Hacker News new | past | comments | ask | show | jobs | submit login 1. Claude Code Unpacked : A vis
 2. `1.000` [generic] Hacker News new | past | comments | ask | show | jobs | submit login 1. Claude Code Unpacked : A vis
-3. `1.000` [table] Hacker News new | past | comments | ask | show | jobs | submit login 1. Claude Code Unpacked : A vis
+3. `1.000` [generic] Hacker News new | past | comments | ask | show | jobs | submit login 1. Claude Code Unpacked : A vis
 
 ---
 
 ### HN Newest
 
 **MiniLM top-3:**
-1. `0.452` [text] Hacker News new | past | comments | ask | show | jobs | submit
+1. `0.453` [text] Hacker News new | past | comments | ask | show | jobs | submit
 2. `0.375` [text] new
-3. `0.075` [generic] New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | submit login 1. Atem
+3. `0.059` [generic] New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | submit login 1. Reme
 
 **ColBERT top-3:**
-1. `1.000` [generic] New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | submit login 1. Atem
-2. `0.990` [generic] Hacker News new | past | comments | ask | show | jobs | submit login 1. Atemis II Launch ( esa.int )
-3. `0.046` [text] Hacker News new | past | comments | ask | show | jobs | submit
+1. `1.000` [generic] New Links | Hacker News Hacker News new | past | comments | ask | show | jobs | submit login 1. Reme
+2. `0.882` [generic] Hacker News new | past | comments | ask | show | jobs | submit login 1. Remembering Magnetic Memorie
+3. `0.008` [text] Hacker News new | past | comments | ask | show | jobs | submit
 
 ---
 
@@ -92,8 +92,8 @@ Side-by-side comparison of what each reranker picks as top-3 nodes.
 
 **ColBERT top-3:**
 1. `1.000` [text] Your job isn't programming practices codeandcake.dev authored by nick4 39 hours ago | caches | 47 co
-2. `0.810` [text] 51 Your job isn't programming practices codeandcake.dev authored by nick4 39 hours ago | caches | 47
-3. `0.307` [text] 52 Why have supply chain attacks become a near daily occurrence ? ☶ ask programming authored by dhru
+2. `0.779` [text] 51 Your job isn't programming practices codeandcake.dev authored by nick4 39 hours ago | caches | 47
+3. `0.249` [text] Why have supply chain attacks become a near daily occurrence ? ☶ ask programming authored by dhruvp 
 
 ---
 
@@ -215,7 +215,7 @@ garbage collec
 **ColBERT top-3:**
 1. `1.000` [text] Run JavaScript Everywhere Node.js® is a free, open-source, cross-platform JavaScript runtime environ
 2. `1.000` [main] Run JavaScript Everywhere Node.js® is a free, open-source, cross-platform JavaScript runtime environ
-3. `0.890` [generic] Skip to content Learn About Download Blog Docs Contribute Courses Start typing... ⌘ K Run JavaScript
+3. `0.890` [text] Skip to content Learn About Download Blog Docs Contribute Courses Start typing... ⌘ K Run JavaScript
 
 ---
 
@@ -238,13 +238,13 @@ Its simplicity keeps me focused; its expressiveness lets me write
 
 **MiniLM top-3:**
 1. `0.758` [listitem] Rust Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Doc
-2. `0.678` [form] Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rustdoc JSON Build queu
+2. `0.700` [form] Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rustdoc JSON Build queu
 3. `0.650` [list] Rust website The Book Standard Library API Reference Rust by Example The Cargo Guide Clippy Document
 
 **ColBERT top-3:**
-1. `1.000` [generic] Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rustdoc JSON Build queu
-2. `0.991` [generic] Docs.rs Docs.rs docs.rs About docs.rs Badges Builds Metadata Shorthand URLs Download Rustdoc JSON Bu
-3. `0.427` [listitem] tako-rs-1.1.1 Multi-transport Rust framework for modern network services. 3 minutes ago
+1. `1.000` [list] rootcx-client-0.6.0 RootCX runtime client 3 seconds ago self_upgrade-1.0.0 Self upgrade for standalo
+2. `0.966` [text] Recent Releases rootcx-client-0.6.0 RootCX runtime client 3 seconds ago self_upgrade-1.0.0 Self upgr
+3. `0.966` [text] Recent Releases rootcx-client-0.6.0 RootCX runtime client 3 seconds ago self_upgrade-1.0.0 Self upgr
 
 ---
 
@@ -267,8 +267,8 @@ Its simplicity keeps me focused; its expressiveness lets me write
 
 **ColBERT top-3:**
 1. `1.000` [generic] PyPI · The Python Package Index Skip to main content Switch to mobile version Help Docs Sponsors Log
-2. `0.939` [main] Find, install and publish Python packages with the Python Package Index Search PyPI Search Or browse
-3. `0.843` [generic] Skip to main content Switch to mobile version Help Docs Sponsors Log in Register Menu Help Docs Spon
+2. `0.895` [main] Find, install and publish Python packages with the Python Package Index Search PyPI Search Or browse
+3. `0.890` [generic] Skip to main content Switch to mobile version Help Docs Sponsors Log in Register Menu Help Docs Spon
 
 ---
 
@@ -282,7 +282,7 @@ Its simplicity keeps me focused; its expressiveness lets me write
 **ColBERT top-3:**
 1. `1.000` [generic] Go Packages - Go Packages Skip to Main Content Why Go Case Studies Common problems companies solve w
 2. `0.991` [text] Why Go Case Studies Common problems companies solve with Go Use Cases Stories about how and why comp
-3. `0.955` [generic] Skip to Main Content Why Go Case Studies Common problems companies solve with Go Use Cases Stories a
+3. `0.955` [text] Skip to Main Content Why Go Case Studies Common problems companies solve with Go Use Cases Stories a
 
 ---
 
@@ -295,8 +295,8 @@ Its simplicity keeps me focused; its expressiveness lets me write
 
 **ColBERT top-3:**
 1. `1.000` [text] The RubyGems.org website and service are maintained and operated by Ruby Central’s Open Source Progr
-2. `0.980` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
-3. `0.980` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+2. `0.895` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
+3. `0.895` [text] RubyGems.org is the Ruby community’s gem hosting service. Instantly publish your gems and then insta
 
 ---
 
@@ -459,14 +459,14 @@ and when it comes to programmi
 ### Tailwind CSS
 
 **MiniLM top-3:**
-1. `0.960` [data] _rsc_332[3][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
-2. `0.960` [data] _rsc_332[1][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
-3. `0.960` [data] _rsc_332[10][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern w
+1. `0.960` [data] _rsc_333[1][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+2. `0.960` [data] _rsc_333[3][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern we
+3. `0.960` [data] _rsc_333[10][3].content: Tailwind CSS is a utility-first CSS framework for rapidly building modern w
 
 **ColBERT top-3:**
-1. `1.000` [data] _rsc_10[3].children[3].children[0][3].children[0][3].children[0][3].children[1][3].children[1][3].ch
-2. `0.869` [data] _rsc_212[3].children[3].children[0][3].children[1]: button
-3. `0.846` [data] _rsc_191[3].children[1][3].children[0][3].children[1][3].children[1][0]: $
+1. `1.000` [data] _rsc_200[3].children[3].children[1][3].children[2][3].children[0][3].children[1][1]: div
+2. `0.993` [data] _rsc_10[3].children[3].children[0][3].children[0][3].children[0][3].children[1][3].children[1][3].ch
+3. `0.880` [data] _rsc_10[3].children[3].children[0][3].children[0][3].children[0][3].children[1][3].children[2][3].ch
 
 ---
 
