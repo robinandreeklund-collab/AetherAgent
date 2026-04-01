@@ -87,14 +87,28 @@ The parse speed comes from systematic Rust-level optimization (documented in det
 | Cow<'static, str> for DOM mutations | 0 heap allocations for common ops |
 | Index-based arena iteration (no Vec::clone) | Eliminates clone per child traversal |
 
-### JavaScript — QuickJS Sandbox
+### JavaScript — QuickJS Sandbox (8-step optimization, 215× speedup)
 
-For JS-heavy pages, AetherAgent embeds QuickJS (via `rquickjs`) as a sandboxed evaluator:
-- Thread-local Runtime+Context pooling: **2µs per eval** (was 431µs before pooling, 215× faster)
-- Full ES2023 compliance (async/await, generators, optional chaining)
-- Dangerous APIs blocked: `fetch`, `document.cookie`, `eval`, `setTimeout`
-- DOM bridge with 55+ methods for getElementById/querySelector patterns
-- Selective execution: detect JS → extract DOM targets → evaluate in sandbox → apply to tree
+For JS-heavy pages, AetherAgent embeds QuickJS (via `rquickjs`) with 8 systematic optimizations (documented in `dev/quickjs-perf-optimering-2026-03-24.md`):
+
+| Step | Optimization | eval_js latency | Speedup |
+|------|-------------|----------------|---------|
+| 0 | Baseline | 431µs | — |
+| 1 | `opt-level 3` + thin LTO | 355µs | 1.2× |
+| 2 | Eliminate thread::spawn per eval | 294µs | 1.5× |
+| 3 | Reduce heap 64→16 MB | 290µs | 1.5× |
+| 5 | Thread-local Runtime+Context pool | 122µs | 3.5× |
+| 6 | Skip cleanup for single eval | 3µs | 144× |
+| 7 | Instant-based deadline | 2µs | 215× |
+| 8 | Optimized cleanup (early-return) | batch: 64µs | 8.5× |
+
+**Final: eval_js 431µs → 2µs (215×), parse_with_js 798µs → 53µs (15×).**
+
+Key architectural decisions:
+- `thread_local!` pooling: Runtime+Context created once per thread, reused across all eval calls. Eliminates 280µs/call initialization cost.
+- Allowlist security: Only safe APIs exposed. `fetch`, `document.cookie`, `eval`, `setTimeout` blocked at runtime level.
+- DOM bridge with 55+ methods for getElementById/querySelector patterns.
+- Selective execution: detect JS → extract DOM targets → evaluate in sandbox → apply to tree.
 
 ## 1. Retrieval Pipeline Architecture
 
