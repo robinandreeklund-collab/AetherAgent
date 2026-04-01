@@ -374,6 +374,7 @@ impl ScoringPipeline {
 /// MiniLM: befintlig bottom-up bi-encoder (default).
 /// ColBERT: MaxSim late interaction (kräver `colbert` feature).
 /// Hybrid: viktad kombination av ColBERT + MiniLM.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_stage3(
     reranker: &Stage3Reranker,
     survivors: &[(u32, f32)],
@@ -386,7 +387,7 @@ fn dispatch_stage3(
 ) -> Vec<ScoredNode> {
     match reranker {
         Stage3Reranker::MiniLM => {
-            let _ = hdc_text_sims; // MiniLM använder inte HDC aspect
+            let _ = (hdc_text_sims, config); // MiniLM använder inte HDC/ablation
             embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
         }
         #[cfg(feature = "colbert")]
