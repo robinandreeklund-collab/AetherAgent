@@ -164,6 +164,126 @@ fn maxsim_quantized(q: &QuantizedTokens, d: &QuantizedTokens) -> f32 {
     total as f32
 }
 
+// ── Nod-filtrering och scoring-justeringar ───────────────────────────────────
+
+/// Avgör om en nod ska filtreras bort helt (score=0).
+/// Matchar logiken i embed_score.rs is_template_artifact + is_numeric_artifact.
+#[cfg(feature = "colbert")]
+fn should_filter_node(label: &str, role: &str) -> bool {
+    if label.is_empty() {
+        return true;
+    }
+
+    // M2b: i18n-template artefakter — hela commonI18nResources namespace
+    let lower = label.to_ascii_lowercase();
+    if lower.starts_with("commoni18nresources.")
+        || lower.starts_with("translations.")
+        || lower.starts_with("i18n.")
+        || lower.starts_with("locale.")
+        || lower.starts_with("messages.")
+        || label.contains("{{")
+    {
+        return true;
+    }
+
+    // L3: jsonLd array image/url/src — bildlänkar och metadata
+    if (lower.starts_with("jsonld.") || lower.starts_with("props.initialstate."))
+        && (lower.contains(".image")
+            || lower.contains(".url:")
+            || lower.contains(".src")
+            || lower.contains(".href")
+            || lower.contains(".width")
+            || lower.contains(".height")
+            || lower.contains(".@type")
+            || lower.contains(".@context")
+            || lower.contains(".robots")
+            || lower.contains(".canonical")
+            || lower.contains(".og.")
+            || lower.contains(".twitter."))
+    {
+        return true;
+    }
+
+    // JS-twin: data-noder med props.initialState-prefix (louvre.fr etc.)
+    if role == "data" && lower.starts_with("props.") {
+        return true;
+    }
+
+    // Dot-path programmatiska nycklar (samma som embed_score.rs)
+    if !label.contains(' ')
+        && label.matches('.').count() >= 2
+        && label.len() < 200
+        && !label.contains("://")
+        && !label.starts_with(|c: char| c.is_ascii_digit())
+    {
+        let has_camel = label.chars().any(|c| c.is_ascii_uppercase());
+        let has_bracket = label.contains('[');
+        if has_camel || has_bracket {
+            return true;
+        }
+    }
+
+    // Numeriska artefakter (badge-räknare, etc.)
+    let trimmed = label.trim();
+    if !trimmed.is_empty()
+        && trimmed.len() <= 20
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == ',' || c == '.')
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Role-baserad score-multiplikator.
+#[cfg(feature = "colbert")]
+fn role_multiplier(role: &str, label: &str) -> f32 {
+    match role {
+        // Text-noder med faktiskt innehåll — boost
+        "text" if label.len() > 50 => 1.15,
+        "text" => 1.05,
+        // Strukturerad data — boost
+        "row" | "cell" | "definition" => 1.10,
+        "data" => 1.15,
+        // Headings — mild penalty (ofta bara labels, inte svar)
+        "heading" => 0.95,
+        // K-nav: step-by-step navigation (GOV.UK)
+        "listitem"
+            if label.starts_with("Step ")
+                || label.contains("step by step")
+                || label.contains("You are currently viewing:") =>
+        {
+            0.3
+        }
+        "listitem" => 1.10,
+        // Korta nav-länkar — penalty
+        "link" if label.len() < 30 => 0.7,
+        // Referens-fotnot-länkar
+        "link" if label.starts_with('[') || label.starts_with('^') || label.starts_with('"') => 0.3,
+        "link" => 0.9,
+        // Navigation, sidebar — penalty
+        "navigation" => 0.6,
+        "complementary" => 0.5,
+        _ => 1.0,
+    }
+}
+
+/// PODCAST-fix: Length-penalty för mycket långa noder.
+/// Noder >500 chars straffas — de innehåller ofta brus (transkript, footers)
+/// som råkar matcha enstaka query-tokens via MaxSim.
+#[cfg(feature = "colbert")]
+fn length_penalty(label_len: usize) -> f32 {
+    if label_len > 1000 {
+        0.7
+    } else if label_len > 500 {
+        0.85
+    } else {
+        1.0
+    }
+}
+
 // ── ColBERT score cache ──────────────────────────────────────────────────────
 
 /// Cache för MaxSim-scores: (goal_hash, survivors_hash) → ScoredNode-lista.
@@ -301,27 +421,20 @@ pub fn score_colbert(
         .filter_map(|(&id, &score)| {
             let info = all_nodes.get(&id)?;
 
-            // Role-baserad boost/penalty (matchar embed_score.rs logik)
-            let role_mult = match info.role.as_str() {
-                // Text-noder med faktiskt innehåll — boost
-                "text" if info.label.len() > 50 => 1.15,
-                "text" => 1.05,
-                // Strukturerad data — boost
-                "row" | "cell" | "definition" | "listitem" => 1.10,
-                "data" => 1.15,
-                // Headings — neutral (inte penalty, men ingen boost)
-                "heading" => 0.95,
-                // Korta nav-länkar — penalty
-                "link" if info.label.len() < 30 => 0.7,
-                "link" => 0.9,
-                // Navigation — penalty
-                "navigation" => 0.6,
-                _ => 1.0,
-            };
+            // Filtrera artefakter (samma logik som embed_score.rs)
+            if should_filter_node(&info.label, &info.role) {
+                return None;
+            }
+
+            // Role-baserad boost/penalty
+            let role_mult = role_multiplier(&info.role, &info.label);
+
+            // Length-penalty: mycket långa noder med svag goal-täckning
+            let len_penalty = length_penalty(info.label.len());
 
             Some(ScoredNode {
                 id,
-                relevance: (score * role_mult).min(1.0),
+                relevance: (score * role_mult * len_penalty).min(1.0),
                 role: info.role.clone(),
                 label: info.label.clone(),
             })
