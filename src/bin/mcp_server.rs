@@ -67,7 +67,7 @@ struct ParseHybridParams {
     /// Max number of nodes to return (default: 100 — intentionally high so YOU can pick the best 5-10)
     #[serde(default = "default_hybrid_top_n")]
     top_n: u32,
-    /// Stage 3 reranker: "minilm" (default bi-encoder), "colbert" (MaxSim late interaction, 2.8x faster + 41% better quality), "hybrid" (adaptive blend)
+    /// Stage 3 reranker: "colbert" (default, 2.8x faster + 41% better quality), "minilm" (legacy bi-encoder), "hybrid" (adaptive blend)
     #[serde(default)]
     reranker: Option<String>,
 }

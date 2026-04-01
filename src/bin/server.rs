@@ -3342,7 +3342,7 @@ fn mcp_tool_definitions_legacy() -> serde_json::Value {
                     "goal": {"type": "string", "description": "The agent's current goal"},
                     "url": {"type": "string", "description": "The page URL"},
                     "top_n": {"type": "integer", "description": "Max nodes to return (default: 100)", "default": 100},
-                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker: 'minilm' (default), 'colbert' (recommended: faster + better), 'hybrid'", "default": "minilm"}
+                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker: 'colbert' (default), 'colbert' (recommended: faster + better), 'hybrid'", "default": "colbert"}
                 },
                 "required": ["html", "goal", "url"]
             }
@@ -3789,7 +3789,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
                     "format": {"type": "string", "enum": ["tree", "markdown"], "description": "Output format (default: tree)", "default": "tree"},
                     "js": {"type": "boolean", "description": "Force JS evaluation (true/false/omit for auto)"},
                     "hybrid": {"type": "boolean", "description": "Use hybrid BM25+HDC+Neural scoring pipeline (default: false). Recommended when using top_n.", "default": false},
-                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker when hybrid=true: 'colbert' (recommended, 2.8x faster + 41% better), 'minilm' (default), 'hybrid' (blend)", "default": "minilm"}
+                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker when hybrid=true: 'colbert' (recommended, 2.8x faster + 41% better), 'colbert' (default), 'hybrid' (blend)", "default": "colbert"}
                 },
                 "required": ["goal"]
             }
@@ -3804,7 +3804,7 @@ fn mcp_tool_definitions() -> serde_json::Value {
                     "html": {"type": "string", "description": "Raw HTML to parse directly"},
                     "goal": {"type": "string", "description": "Agent goal for relevance scoring"},
                     "top_n": {"type": "integer", "description": "Max nodes to return (default: 100)", "default": 100},
-                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker: 'colbert' recommended (faster + better quality)", "default": "minilm"}
+                    "reranker": {"type": "string", "enum": ["minilm", "colbert", "hybrid"], "description": "Stage 3 reranker: 'colbert' recommended (faster + better quality)", "default": "colbert"}
                 },
                 "required": ["goal"]
             }
