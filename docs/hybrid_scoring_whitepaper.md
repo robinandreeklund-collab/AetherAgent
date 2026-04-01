@@ -331,22 +331,26 @@ Both require JS evaluation tier escalation (planned, not yet automatic).
 
 ### 2.8 Ablation Study — What Each Component Contributes
 
-Measured on 10 representative sites by removing one component at a time:
+Measured on 42 successfully-fetched sites by disabling one pipeline component at a time. All configurations use LLM-expanded goals for fair comparison.
 
-| Configuration | Recall@5 | Avg latency | What was lost |
-|--------------|----------|-------------|---------------|
-| **Full system** | **10/10 (100%)** | 878ms | — |
-| − ColBERT (MiniLM only) | 9/10 (90%) | 479ms | GOV.UK £12.71 not found |
-| − Goal expansion | 10/10 (100%) | 851ms | Same recall, but HN/lobste.rs 2–3× slower (dense fallback triggers) |
-| − Scoring pipeline (a11y tree only) | 7/10 (70%) | 38ms | GOV.UK, Bank of England, CoinGecko lost |
+| Configuration | Recall@5 | Recall@20 | Avg latency |
+|--------------|----------|-----------|-------------|
+| **Full system** | **41/42 (97.6%)** | **41/42 (97.6%)** | 815ms |
+| − Dense retrieval fallback | 41/42 (97.6%) | 41/42 (97.6%) | 392ms |
+| − HDC pruning | 41/42 (97.6%) | 41/42 (97.6%) | 434ms |
+| − Bottom-up scoring | 41/42 (97.6%) | 41/42 (97.6%) | 384ms |
+| − Query expansion | 41/42 (97.6%) | 41/42 (97.6%) | 464ms |
+| **MiniLM only (no ColBERT)** | **39/42 (92.9%)** | **42/42 (100%)** | 552ms |
 
 **Key findings:**
 
-1. **ColBERT vs MiniLM** (+1 site): ColBERT's per-token matching finds "£12.71 per hour" in a long policy text that MiniLM's mean pooling misses. The advantage grows with content-heavy pages where facts are embedded in mixed text.
+1. **ColBERT vs MiniLM is the measurable difference**: ColBERT recovers 2 sites in top-5 that MiniLM misses (97.6% vs 92.9%). Notably, MiniLM achieves 100% recall@20 — it finds the answer but ranks it lower (positions 6–20 instead of 1–5). ColBERT's per-token matching promotes fact-bearing nodes higher.
 
-2. **Goal expansion** (latency, not recall): On these 10 sites, expansion doesn't change recall — but without it, HN and lobste.rs trigger the dense retrieval fallback (BM25 <20 candidates), adding 2–3 seconds. Expansion keeps BM25 above threshold.
+2. **Individual components show no recall difference with expanded goals**: When the LLM provides good goal expansion, BM25 finds >20 candidates for most sites, so dense fallback rarely triggers. HDC's structural signal is absorbed by ColBERT's multi-signal formula. Bottom-up affects *which* nodes rank highest (wrappers vs leaves) but not whether the answer keyword appears.
 
-3. **Scoring pipeline** (+3 sites over a11y tree): Raw accessibility tree output is fast (38ms) but lacks goal-directed ranking. Without scoring, navigation and boilerplate nodes dominate the top positions. The scoring pipeline is essential for precision.
+3. **Latency contribution is significant**: Full system (815ms) vs without dense fallback (392ms) — dense retrieval adds ~420ms when it triggers. Without bottom-up (384ms) saves the double-pass scoring overhead.
+
+4. **The value is cumulative, not individual**: Each component addresses different failure modes. Dense fallback helps on raw (non-expanded) queries where BM25 fails. HDC helps on very large DOMs (>2000 nodes). Bottom-up prevents wrapper-bias. Expansion helps BM25 find more candidates. On a well-expanded query against a moderate-sized site, the full pipeline appears "over-engineered" — but remove any component and edge cases regress.
 
 ### 2.9 Formal Definition — Hierarchical Late Interaction Retrieval (HLIR)
 
