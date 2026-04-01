@@ -37,6 +37,7 @@ fn default_top_n() -> u32 {
 
 /// Bygg PipelineConfig baserat på reranker-parameter
 pub fn build_config(reranker: Option<&str>) -> crate::scoring::PipelineConfig {
+    #[allow(unused_mut)]
     let mut config = crate::scoring::PipelineConfig::default();
     #[cfg(feature = "colbert")]
     {
