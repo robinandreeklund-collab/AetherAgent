@@ -313,6 +313,28 @@ fn is_news_headline(label: &str) -> bool {
     uppercase_words as f32 / words.len() as f32 > 0.5
 }
 
+/// Detektera nav-listor: korta versala ord utan meningsstruktur.
+/// "G Gallium Germanium Gadolinium Gold", "Home About Contact Services"
+#[cfg(feature = "colbert")]
+fn is_nav_word_list(label: &str) -> bool {
+    let words: Vec<&str> = label.split_whitespace().collect();
+    if words.len() < 3 || words.len() > 30 {
+        return false;
+    }
+    let short_capitalized = words
+        .iter()
+        .filter(|w| {
+            w.len() <= 15
+                && w.chars().next().is_some_and(|c| c.is_uppercase())
+                && !w.contains('.')
+                && !w.contains(',')
+        })
+        .count();
+    short_capitalized as f32 / words.len() as f32 > 0.7
+        && !label.contains(". ")
+        && !label.chars().any(|c| c.is_ascii_digit())
+}
+
 /// Avgör om label har faktiskt informationsinnehåll (inte nav/boilerplate).
 #[cfg(feature = "colbert")]
 fn has_informational_content(label: &str) -> bool {
@@ -328,7 +350,8 @@ fn has_informational_content(label: &str) -> bool {
 fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
     match role {
         // Text-noder — boost BARA om informationsinnehåll (Bugg 1 fix)
-        "text" if is_news_headline(label) => 0.4, // Nyhetsrubriker i sidebar
+        "text" if is_news_headline(label) => 0.4,
+        "text" if is_nav_word_list(label) => 0.3, // Nav-listor: "G Gallium Germanium Gold" // Nyhetsrubriker i sidebar
         "text" if label.starts_with("Between ") || label.starts_with("Before ") => 0.85,
         "text" if has_informational_content(label) && label.len() > 50 => 1.15,
         "text" if has_informational_content(label) => 1.05,

@@ -443,8 +443,11 @@ fn dense_retrieval_fallback(
     node_index: &HashMap<u32, embed_score::NodeInfo>,
     goal_embedding: Option<&[f32]>,
 ) -> Vec<(u32, f32)> {
-    // Trigga bara vid <20 BM25-candidates OCH embedding tillgänglig
-    if candidates.len() >= 20 || goal_embedding.is_none() {
+    // Trigga vid <20 BM25-candidates, eller vid stora sajter (>1000 noder)
+    // med <50 candidates — där HDC kan pruna bort djupa faktanoder
+    let total_nodes = node_index.len();
+    let threshold = if total_nodes > 1000 { 50 } else { 20 };
+    if candidates.len() >= threshold || goal_embedding.is_none() {
         return candidates;
     }
 
