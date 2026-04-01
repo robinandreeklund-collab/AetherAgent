@@ -60,10 +60,10 @@ fn normalize_scores(scores: &[f32]) -> Vec<f32> {
 /// ColBERT och Hybrid kräver `colbert` feature flag.
 #[derive(Debug, Clone, Default)]
 pub enum Stage3Reranker {
-    /// Befintlig bi-encoder (all-MiniLM-L6-v2) — default
+    /// Befintlig bi-encoder (all-MiniLM-L6-v2, FP32) — default
     #[default]
     MiniLM,
-    /// ColBERT MaxSim late interaction (via ONNX, samma modell som bi-encoder)
+    /// ColBERT MaxSim late interaction (int8, per-token matching)
     #[cfg(feature = "colbert")]
     ColBert,
     /// Hybrid: alpha × ColBERT + (1 - alpha) × MiniLM

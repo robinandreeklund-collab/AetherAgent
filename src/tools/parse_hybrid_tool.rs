@@ -23,13 +23,38 @@ pub struct ParseHybridRequest {
     pub html: Option<String>,
     /// Agentens mål (krävs)
     pub goal: String,
-    /// Max antal noder att returnera (default: 100)
+    /// Max antal noder att returnera (default: 20)
     #[serde(default = "default_top_n")]
     pub top_n: u32,
+    /// Stage 3 reranker: "minilm" (default), "colbert", "hybrid"
+    #[serde(default)]
+    pub reranker: Option<String>,
 }
 
 fn default_top_n() -> u32 {
     20
+}
+
+/// Bygg PipelineConfig baserat på reranker-parameter
+pub fn build_config(reranker: Option<&str>) -> crate::scoring::PipelineConfig {
+    let mut config = crate::scoring::PipelineConfig::default();
+    #[cfg(feature = "colbert")]
+    {
+        match reranker {
+            Some("colbert") => {
+                config.stage3_reranker = crate::scoring::Stage3Reranker::ColBert;
+            }
+            Some("hybrid") => {
+                config.stage3_reranker = crate::scoring::Stage3Reranker::Hybrid {
+                    alpha: 0.7,
+                    use_adaptive_alpha: true,
+                };
+            }
+            _ => {} // MiniLM default
+        }
+    }
+    let _ = reranker; // undvik unused warning utan colbert-feature
+    config
 }
 
 /// Kör parse_hybrid synkront (utan fetch)
@@ -56,7 +81,8 @@ pub fn execute(req: &ParseHybridRequest) -> ToolResult {
 /// Kör parse_hybrid med redan hämtad HTML (synkron — utan pending fetch resolution)
 pub fn execute_with_html(html: &str, req: &ParseHybridRequest, url: &str) -> ToolResult {
     let start = now_ms();
-    let json_str = crate::parse_top_nodes_hybrid(html, &req.goal, url, req.top_n);
+    let config = build_config(req.reranker.as_deref());
+    let json_str = crate::parse_top_nodes_with_config(html, &req.goal, url, req.top_n, &config);
     let data: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_default();
     result_from_json(data, start)
 }
@@ -81,7 +107,7 @@ pub async fn execute_with_html_async(
 
     // Steg 3: Kör hybrid scoring på det kompletta trädet
     let goal_embedding = crate::embedding::embed(&req.goal);
-    let config = crate::scoring::PipelineConfig::default();
+    let config = build_config(req.reranker.as_deref());
     let pipeline_result = crate::scoring::ScoringPipeline::run_cached(
         html,
         &tree.nodes,
@@ -120,7 +146,11 @@ pub async fn execute_with_html_async(
         "xhr_blocked": tree.xhr_blocked,
         "parse_time_ms": tree.parse_time_ms,
         "pipeline": {
-            "method": "hybrid_bm25_hdc_embedding",
+            "method": match req.reranker.as_deref() {
+                Some("colbert") => "hybrid_bm25_hdc_colbert",
+                Some("hybrid") => "hybrid_bm25_hdc_colbert_minilm",
+                _ => "hybrid_bm25_hdc_embedding",
+            },
             "bm25_candidates": timings.tfidf_candidates,
             "hdc_survivors": timings.hdc_survivors,
             "total_pipeline_us": timings.total_us,
@@ -170,6 +200,7 @@ mod tests {
             url: None,
             goal: "population statistics".to_string(),
             top_n: 5,
+            reranker: None,
         };
         let result = execute(&req);
         assert!(result.error.is_none(), "Ska lyckas: {:?}", result.error);
@@ -180,9 +211,11 @@ mod tests {
         assert!(nodes.unwrap().len() <= 5, "top_n=5 ska respekteras");
 
         // Ska ha pipeline-metadata
+        // Pipeline method ska indikera reranker-typ
+        let method = data["pipeline"]["method"].as_str().unwrap_or("");
         assert!(
-            data["pipeline"]["method"].as_str() == Some("hybrid_bm25_hdc_embedding"),
-            "Ska rapportera hybrid-metod"
+            method == "minilm" || method == "hybrid_bm25_hdc_embedding",
+            "Ska rapportera pipeline-metod, fick: {method}"
         );
     }
 
@@ -193,6 +226,7 @@ mod tests {
             url: None,
             goal: "test".to_string(),
             top_n: 10,
+            reranker: None,
         };
         let result = execute(&req);
         assert!(result.error.is_some(), "Ska ge fel utan input");

@@ -55,6 +55,9 @@ struct ParseTopRequest {
     goal: String,
     url: String,
     top_n: u32,
+    /// Stage 3 reranker: "minilm", "colbert", "hybrid"
+    #[serde(default)]
+    reranker: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -910,10 +913,10 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     let goal2 = req.goal.clone();
     let url2 = req.url.clone();
     let html2 = req.html.clone();
+    let reranker = req.reranker.clone();
     let result_json = tokio::task::spawn_blocking(move || {
-        // Bygg hybrid-score manuellt
         let goal_embedding = aether_agent::embedding::embed(&goal2);
-        let config = aether_agent::scoring::PipelineConfig::default();
+        let config = aether_agent::tools::parse_hybrid_tool::build_config(reranker.as_deref());
         let pipeline = aether_agent::scoring::ScoringPipeline::run_cached(
             &html2,
             &tree.nodes,
@@ -1940,8 +1943,12 @@ async fn ws_api_dispatch(
             let goal = params["goal"].as_str().unwrap_or("").to_string();
             let url = params["url"].as_str().unwrap_or("").to_string();
             let top_n = params["top_n"].as_u64().unwrap_or(100) as u32;
+            let reranker = params["reranker"].as_str().map(|s| s.to_string());
             tokio::task::spawn_blocking(move || {
-                let r = aether_agent::parse_top_nodes_hybrid(&html, &goal, &url, top_n);
+                let config =
+                    aether_agent::tools::parse_hybrid_tool::build_config(reranker.as_deref());
+                let r =
+                    aether_agent::parse_top_nodes_with_config(&html, &goal, &url, top_n, &config);
                 serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
             })
             .await
@@ -5887,6 +5894,38 @@ async fn main() {
             }
         } else {
             eprintln!("[Embedding] Ingen embedding-modell konfigurerad (AETHER_EMBEDDING_MODEL/AETHER_EMBEDDING_VOCAB ej satta)");
+        }
+    }
+
+    // ColBERT-modell (int8-kvantiserad, för MaxSim late interaction) — optional
+    #[cfg(feature = "colbert")]
+    {
+        let colbert_model = std::env::var("AETHER_COLBERT_MODEL")
+            .unwrap_or_else(|_| "models/all-MiniLM-L6-v2-int8.onnx".to_string());
+        let colbert_vocab = std::env::var("AETHER_COLBERT_VOCAB").unwrap_or_else(|_| {
+            std::env::var("AETHER_EMBEDDING_VOCAB")
+                .unwrap_or_else(|_| "models/vocab.txt".to_string())
+        });
+        match (
+            std::fs::read(&colbert_model),
+            std::fs::read_to_string(&colbert_vocab),
+        ) {
+            (Ok(model_bytes), Ok(vocab_text)) => {
+                eprintln!(
+                    "[ColBERT] Laddar modell: {} ({:.1} MB)",
+                    colbert_model,
+                    model_bytes.len() as f64 / 1_048_576.0,
+                );
+                match aether_agent::embedding::init_colbert(&model_bytes, &vocab_text) {
+                    Ok(()) => eprintln!("[ColBERT] Modell redo (MaxSim late interaction)"),
+                    Err(e) => eprintln!("[ColBERT] WARN: Kunde inte ladda: {e}"),
+                }
+            }
+            (Err(_), _) => eprintln!(
+                "[ColBERT] Ingen ColBERT-modell hittad: {} (Stage 3 faller tillbaka på MiniLM)",
+                colbert_model
+            ),
+            (_, Err(e)) => eprintln!("[ColBERT] WARN: Kan inte läsa vocab: {e}"),
         }
     }
 
