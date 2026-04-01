@@ -124,7 +124,11 @@ impl ScoringPipeline {
         let survivor_cap = if config.max_survivors > 0 {
             config.max_survivors
         } else {
-            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+            adaptive_survivor_cap(
+                candidates.len(),
+                flat_nodes.len(),
+                !matches!(config.stage3_reranker, Stage3Reranker::MiniLM),
+            )
         };
 
         let survivors = if !candidates.is_empty() {
@@ -238,7 +242,11 @@ impl ScoringPipeline {
         let survivor_cap = if config.max_survivors > 0 {
             config.max_survivors
         } else {
-            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+            adaptive_survivor_cap(
+                candidates.len(),
+                flat_nodes.len(),
+                !matches!(config.stage3_reranker, Stage3Reranker::MiniLM),
+            )
         };
 
         let survivors = if !candidates.is_empty() {
@@ -358,35 +366,50 @@ fn dispatch_stage3(
     }
 }
 
-/// Adaptiv survivor-cap baserat på BM25-confidence och DOM-storlek.
+/// Adaptiv survivor-cap baserat på BM25-confidence, DOM-storlek och reranker.
 ///
-/// Fler BM25-kandidater = högre confidence → tillåt fler survivors.
-/// Större DOM = behöver mer aggressiv pruning.
-///
-/// Returnerar max antal noder som skickas till embedding-steget.
-fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize) -> usize {
-    // Bas: 30-80 survivors beroende på DOM-storlek
-    let base = if total_nodes < 50 {
-        total_nodes // Liten sida — behåll allt
-    } else if total_nodes < 200 {
-        60
-    } else if total_nodes < 500 {
-        80
+/// ColBERT:s bättre score-separation klarar sig med färre survivors (25-35)
+/// medan MiniLM bi-encoder behöver fler (60-100) för att inte missa noder.
+fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize, is_colbert: bool) -> usize {
+    if is_colbert {
+        // ColBERT: token-level matching behöver färre survivors
+        let base = if total_nodes < 50 {
+            total_nodes
+        } else if total_nodes < 200 {
+            25
+        } else if total_nodes < 500 {
+            30
+        } else {
+            35
+        };
+        let confidence_factor = if bm25_candidates > 100 {
+            0.7
+        } else if bm25_candidates > 30 {
+            0.85
+        } else {
+            1.0
+        };
+        ((base as f32 * confidence_factor) as usize).max(10)
     } else {
-        100
-    };
-
-    // BM25-confidence boost: om BM25 hittade många → bra keyword-overlap → vi kan
-    // vara striktare (behöver inte HDC-fallback för att kompensera)
-    let confidence_factor = if bm25_candidates > 100 {
-        0.6 // Högt antal kandidater — var strikt
-    } else if bm25_candidates > 30 {
-        0.8
-    } else {
-        1.0 // Få kandidater — behåll fler
-    };
-
-    ((base as f32 * confidence_factor) as usize).max(20) // Minimum 20
+        // MiniLM: behöver fler survivors pga mean pooling
+        let base = if total_nodes < 50 {
+            total_nodes
+        } else if total_nodes < 200 {
+            60
+        } else if total_nodes < 500 {
+            80
+        } else {
+            100
+        };
+        let confidence_factor = if bm25_candidates > 100 {
+            0.6
+        } else if bm25_candidates > 30 {
+            0.8
+        } else {
+            1.0
+        };
+        ((base as f32 * confidence_factor) as usize).max(20)
+    }
 }
 
 /// Applicera pipeline-scores tillbaka på SemanticNodes i trädet
