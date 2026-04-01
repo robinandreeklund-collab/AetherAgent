@@ -1,87 +1,87 @@
 {
   "ae_campfire": {
-    "total": 108.2958179954403,
-    "median": 1.0492620003788034,
-    "p99": 1.4809299996159098
+    "total": 112.27062899865814,
+    "median": 1.139866999892547,
+    "p99": 1.410070000019914
   },
   "lp_campfire": {
-    "total": 14.600582997900347,
-    "median": 0.13661999992109486,
-    "p99": 0.2216869997937465
+    "total": 15.70509300086087,
+    "median": 0.11591399993449159,
+    "p99": 0.5482629999278288
   },
   "ae_amiibo": {
-    "total": 629.7408129985342,
-    "median": 6.160155999623385
+    "total": 616.0622110010081,
+    "median": 6.107346000135294
   },
   "lp_amiibo": {
-    "total": 14.048030001049483,
-    "median": 0.13214399996286375
+    "total": 12.052552998738975,
+    "median": 0.11051699993913644
   },
   "parallel_1": {
-    "wall_ms": 2.4852060000739584,
-    "avg_lat": 2.035000999967451,
-    "throughput": 402.38113056633557
+    "wall_ms": 2.813174000038998,
+    "avg_lat": 2.249932000040644,
+    "throughput": 355.4703690515188
   },
   "parallel_10": {
-    "wall_ms": 11.847880999994231,
-    "avg_lat": 5.461906799973804,
-    "throughput": 844.032785272309
+    "wall_ms": 13.071838000087155,
+    "avg_lat": 5.034637399967323,
+    "throughput": 765.0033606546629
   },
   "parallel_25": {
-    "wall_ms": 28.870313999959762,
-    "avg_lat": 10.079173880039889,
-    "throughput": 865.9413957200065
+    "wall_ms": 30.989415999783887,
+    "avg_lat": 10.541942960026063,
+    "throughput": 806.7270451361311
   },
   "parallel_50": {
-    "wall_ms": 44.837008000286005,
-    "avg_lat": 8.284298580010727,
-    "throughput": 1115.1502348167626
+    "wall_ms": 56.704808999938905,
+    "avg_lat": 10.585237400023289,
+    "throughput": 881.7594289058247
   },
   "parallel_100": {
-    "wall_ms": 86.75086600032955,
-    "avg_lat": 14.44087705999209,
-    "throughput": 1152.7262448264219
+    "wall_ms": 115.1055999998789,
+    "avg_lat": 19.468769660011276,
+    "throughput": 868.7674622269047
   },
   "ae_live": [
     {
       "name": "apple.com",
       "html_tok": 30567,
-      "extract_tok": 586,
-      "savings": 98.08289985932541,
+      "extract_tok": 580,
+      "savings": 98.10252887100468,
       "items": 20,
       "total_nodes": 39,
       "tier": "hydration",
-      "ms": 1318.5760299998037
+      "ms": 300.3650430000562
     },
     {
       "name": "Hacker News",
-      "html_tok": 8679,
-      "extract_tok": 540,
-      "savings": 93.7780850328379,
+      "html_tok": 8624,
+      "extract_tok": 528,
+      "savings": 93.87755102040816,
       "items": 20,
-      "total_nodes": 494,
-      "tier": "static",
-      "ms": 674.346685999808
+      "total_nodes": 490,
+      "tier": "static_fallback",
+      "ms": 509.28984899996976
     },
     {
       "name": "lobste.rs",
-      "html_tok": 14668,
-      "extract_tok": 579,
-      "savings": 96.05263157894737,
+      "html_tok": 14686,
+      "extract_tok": 567,
+      "savings": 96.139180171592,
       "items": 20,
-      "total_nodes": 443,
-      "tier": "static_fallback",
-      "ms": 639.3556740003987
+      "total_nodes": 441,
+      "tier": "static",
+      "ms": 441.6216130000521
     },
     {
       "name": "rust-lang.org",
       "html_tok": 4614,
-      "extract_tok": 913,
-      "savings": 80.21239705244906,
+      "extract_tok": 935,
+      "savings": 79.73558734286954,
       "items": 20,
       "total_nodes": 85,
       "tier": "static_fallback",
-      "ms": 1935.1797560002524
+      "ms": 754.9499289998494
     }
   ]
 }
