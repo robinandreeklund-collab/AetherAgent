@@ -300,9 +300,28 @@ pub fn score_colbert(
         .zip(normed.iter())
         .filter_map(|(&id, &score)| {
             let info = all_nodes.get(&id)?;
+
+            // Role-baserad boost/penalty (matchar embed_score.rs logik)
+            let role_mult = match info.role.as_str() {
+                // Text-noder med faktiskt innehåll — boost
+                "text" if info.label.len() > 50 => 1.15,
+                "text" => 1.05,
+                // Strukturerad data — boost
+                "row" | "cell" | "definition" | "listitem" => 1.10,
+                "data" => 1.15,
+                // Headings — neutral (inte penalty, men ingen boost)
+                "heading" => 0.95,
+                // Korta nav-länkar — penalty
+                "link" if info.label.len() < 30 => 0.7,
+                "link" => 0.9,
+                // Navigation — penalty
+                "navigation" => 0.6,
+                _ => 1.0,
+            };
+
             Some(ScoredNode {
                 id,
-                relevance: score.min(1.0),
+                relevance: (score * role_mult).min(1.0),
                 role: info.role.clone(),
                 label: info.label.clone(),
             })
@@ -310,6 +329,24 @@ pub fn score_colbert(
         .collect();
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    // Dedup: identiska labels → behåll bara högst-scorade
+    {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        result.retain(|node| {
+            let key: String = node
+                .label
+                .chars()
+                .take(80)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            if key.is_empty() {
+                return true;
+            }
+            seen.insert(key)
+        });
+    }
 
     // Spara i cache
     if let Ok(mut c) = cache.lock() {
@@ -365,6 +402,25 @@ pub fn score_hybrid(
         .collect();
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    // Dedup
+    {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        result.retain(|node| {
+            let key: String = node
+                .label
+                .chars()
+                .take(80)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            if key.is_empty() {
+                return true;
+            }
+            seen.insert(key)
+        });
+    }
+
     result
 }
 
