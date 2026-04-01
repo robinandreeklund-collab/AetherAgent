@@ -191,24 +191,37 @@ impl Hypervector {
     }
 }
 
-/// HDC-träd med en hypervector per nod-ID
+/// HDC-träd med en hypervector per nod-ID.
+/// Sparar även separata text- och roll-HVs för multi-aspect scoring (C-optimering).
 pub struct HdcTree {
     nodes: HashMap<u32, Hypervector>,
+    /// Separata text-HVs (utan roll/position-binding) — för content-likhet
+    text_hvs: HashMap<u32, Hypervector>,
+    /// Separata roll-HVs — för strukturell filtrering
+    role_hvs: HashMap<u32, Hypervector>,
 }
 
 impl HdcTree {
     /// Bygg HDC-träd från ett semantiskt träd
     pub fn build(tree_nodes: &[SemanticNode]) -> Self {
         let mut nodes = HashMap::new();
+        let mut text_hvs = HashMap::new();
+        let mut role_hvs = HashMap::new();
         for node in tree_nodes {
-            Self::build_recursive(node, &mut nodes, 0);
+            Self::build_recursive(node, &mut nodes, &mut text_hvs, &mut role_hvs, 0);
         }
-        HdcTree { nodes }
+        HdcTree {
+            nodes,
+            text_hvs,
+            role_hvs,
+        }
     }
 
     fn build_recursive(
         node: &SemanticNode,
         out: &mut HashMap<u32, Hypervector>,
+        text_hvs: &mut HashMap<u32, Hypervector>,
+        role_hvs: &mut HashMap<u32, Hypervector>,
         depth: usize,
     ) -> Hypervector {
         // Text-HV: n-gram-baserad för ordningskänslig representation
@@ -217,17 +230,21 @@ impl HdcTree {
         // Tag/Role-HV: genereras från nodens roll
         let role_hv = Hypervector::from_seed(&format!("__role_{}", node.role));
 
+        // Spara separata aspekt-HVs (C-optimering)
+        text_hvs.insert(node.id, text_hv.clone());
+        role_hvs.insert(node.id, role_hv.clone());
+
         // Bind text ⊗ roll
         let mut local_hv = text_hv.bind(&role_hv);
 
         // Positionskodning via permutation
-        local_hv = local_hv.permute(depth * 7); // 7 bits shift per djupnivå
+        local_hv = local_hv.permute(depth * 7);
 
         // Bundle med barn (majority vote)
         if !node.children.is_empty() {
             let mut child_hvs: Vec<Hypervector> = Vec::with_capacity(node.children.len());
             for child in &node.children {
-                let child_hv = Self::build_recursive(child, out, depth + 1);
+                let child_hv = Self::build_recursive(child, out, text_hvs, role_hvs, depth + 1);
                 child_hvs.push(child_hv);
             }
 
@@ -268,6 +285,18 @@ impl HdcTree {
     /// Hämta HV-likhet för en specifik nod mot goal
     pub fn node_similarity(&self, node_id: u32, goal_hv: &Hypervector) -> Option<f32> {
         self.nodes.get(&node_id).map(|hv| hv.similarity(goal_hv))
+    }
+
+    /// Text-aspekt likhet: hur väl matchar nodens textinnehåll (utan roll/position)
+    /// mot goal? Används av ColBERT multi-aspect scoring (C-optimering).
+    pub fn text_similarity(&self, node_id: u32, goal_hv: &Hypervector) -> Option<f32> {
+        self.text_hvs.get(&node_id).map(|hv| hv.similarity(goal_hv))
+    }
+
+    /// Roll-aspekt likhet: hur väl matchar nodens roll mot en förväntad roll-HV?
+    /// Används för att skilja content-roller (text, data) från strukturella (nav, footer).
+    pub fn role_similarity(&self, node_id: u32, role_hv: &Hypervector) -> Option<f32> {
+        self.role_hvs.get(&node_id).map(|hv| hv.similarity(role_hv))
     }
 
     /// Ren strukturell HDC-pruning: rankar ALLA noder efter HV-likhet med goal.

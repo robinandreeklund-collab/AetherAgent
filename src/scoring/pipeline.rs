@@ -120,6 +120,12 @@ impl ScoringPipeline {
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
 
+        // C-optimering: Beräkna HDC text-aspect similarity per nod
+        let hdc_text_sims: std::collections::HashMap<u32, f32> = node_index
+            .keys()
+            .map(|&id| (id, hdc_tree.text_similarity(id, &goal_hv).unwrap_or(0.0)))
+            .collect();
+
         // Beräkna adaptiv survivor-cap baserat på BM25-confidence + DOM-storlek
         let survivor_cap = if config.max_survivors > 0 {
             config.max_survivors
@@ -186,6 +192,7 @@ impl ScoringPipeline {
             goal,
             &goal_words,
             goal_embedding,
+            &hdc_text_sims,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -237,6 +244,12 @@ impl ScoringPipeline {
         // Steg 2: Två-stegs HDC pruning (samma logik som run())
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
+
+        // C-optimering: Beräkna HDC text-aspect similarity per nod
+        let hdc_text_sims: std::collections::HashMap<u32, f32> = node_index
+            .keys()
+            .map(|&id| (id, hdc_tree.text_similarity(id, &goal_hv).unwrap_or(0.0)))
+            .collect();
         let flat_nodes = tfidf::flatten_tree(tree_nodes);
 
         let survivor_cap = if config.max_survivors > 0 {
@@ -300,6 +313,7 @@ impl ScoringPipeline {
             goal,
             &goal_words,
             goal_embedding,
+            &hdc_text_sims,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -333,14 +347,16 @@ fn dispatch_stage3(
     goal: &str,
     goal_words: &[String],
     goal_embedding: Option<&[f32]>,
+    hdc_text_sims: &std::collections::HashMap<u32, f32>,
 ) -> Vec<ScoredNode> {
     match reranker {
         Stage3Reranker::MiniLM => {
+            let _ = hdc_text_sims; // MiniLM använder inte HDC aspect
             embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
         }
         #[cfg(feature = "colbert")]
         Stage3Reranker::ColBert => {
-            super::colbert_reranker::score_colbert(survivors, node_index, goal)
+            super::colbert_reranker::score_colbert(survivors, node_index, goal, hdc_text_sims)
         }
         #[cfg(feature = "colbert")]
         Stage3Reranker::Hybrid {

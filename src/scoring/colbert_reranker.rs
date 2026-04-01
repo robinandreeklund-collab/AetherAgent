@@ -563,6 +563,7 @@ pub fn score_colbert(
     survivors: &[(u32, f32)],
     all_nodes: &HashMap<u32, NodeInfo>,
     goal: &str,
+    hdc_text_sims: &HashMap<u32, f32>,
 ) -> Vec<ScoredNode> {
     // Kolla cache
     let key = cache_key(goal, survivors, all_nodes);
@@ -600,16 +601,20 @@ pub fn score_colbert(
                 return None;
             }
 
-            // Multi-signal scoring (matchar embed_score.rs formel):
-            // semantic × 0.50 + role_priority × 0.20 + bm25 × 0.30 - wrapper_penalty
+            // Multi-signal scoring med HDC aspekt-brygga (C-optimering):
+            // colbert × 0.40 + hdc_text × 0.15 + role_priority × 0.15 + bm25 × 0.30
+            // HDC text-sim ger strukturell content-relevans utan neural overhead.
             let bm25_score = bm25_map.get(&id).copied().unwrap_or(0.0);
             let bm25_norm = (bm25_score / 3.0).min(1.0);
             let role_score = crate::types::SemanticNode::role_priority(&info.role);
+            let hdc_raw = hdc_text_sims.get(&id).copied().unwrap_or(0.0);
+            let hdc_text = (hdc_raw + 1.0) / 2.0; // [-1,1] → [0,1]
             let w_penalty = wrapper_penalty(&info.role, info.label.len());
             let len_pen = length_penalty(info.label.len(), info.is_leaf);
             let role_mult = role_multiplier(&info.role, &info.label, info.is_leaf);
 
-            let raw = (score * 0.50 + role_score * 0.20 + bm25_norm * 0.30 - w_penalty)
+            let raw = (score * 0.40 + hdc_text * 0.15 + role_score * 0.15 + bm25_norm * 0.30
+                - w_penalty)
                 * role_mult
                 * len_pen;
 
