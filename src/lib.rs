@@ -701,10 +701,23 @@ pub fn parse_extract(html: &str, goal: &str, url: &str, max_items: u32) -> Strin
         .unwrap_or("unknown")
         .to_string();
 
-    let tree: types::SemanticTree = match adaptive.get("tree") {
+    let mut tree: types::SemanticTree = match adaptive.get("tree") {
         Some(t) => serde_json::from_value(t.clone()).unwrap_or_default(),
         None => return "{\"error\":\"parse failed\"}".to_string(),
     };
+
+    // Kör hybrid scoring (BM25 → HDC → ColBERT/MiniLM) för bättre relevance
+    let config = crate::tools::parse_hybrid_tool::build_config(None);
+    let goal_embedding = crate::embedding::embed(goal);
+    let pipeline_result = scoring::ScoringPipeline::run_cached(
+        html,
+        &tree.nodes,
+        goal,
+        goal_embedding.as_deref(),
+        &config,
+    );
+    let score_map = scoring::pipeline::scores_to_map(&pipeline_result.scored_nodes);
+    scoring::pipeline::apply_scores_to_tree(&mut tree.nodes, &score_map);
 
     // Flatten alla noder
     let mut flat: Vec<&types::SemanticNode> = Vec::new();

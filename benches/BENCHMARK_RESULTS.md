@@ -28,10 +28,10 @@ All engines run as **persistent servers** — no cold start advantages.
 
 | Test | AetherAgent | LP (CDP) | LP (CLI) | Chrome |
 |------|:-----------:|:--------:|:--------:|:------:|
-| **Campfire 100x total** | **112ms** | 361ms | 15.8s | 1.39s |
-| **Campfire median** | **1.1ms** | 4.0ms | 167ms | 14ms |
-| **Amiibo 100x total** | **630ms** | — | 74.2s | 932ms |
-| **Amiibo median** | **6.0ms** | — | 140ms | 9ms |
+| **Campfire 100x total** | **102ms** | 361ms | 15.8s | 1.39s |
+| **Campfire median** | **1.0ms** | 4.0ms | 167ms | 14ms |
+| **Amiibo 100x total** | **626ms** | — | 74.2s | 932ms |
+| **Amiibo median** | **6.2ms** | — | 140ms | 9ms |
 
 | Comparison | AetherAgent vs |
 |-----------|:--------------:|
@@ -52,14 +52,14 @@ AetherAgent handles 100 concurrent requests while maintaining sub-15ms latency.
 
 | Concurrency | Wall clock | Avg latency | Throughput |
 |:-----------:|:----------:|:-----------:|:----------:|
-| 1 | 2.5ms | 2.0ms | 406 req/s |
-| 10 | 12ms | 5.6ms | 829 req/s |
-| 25 | 26ms | 7.7ms | **946 req/s** |
-| 50 | 52ms | 10.6ms | **972 req/s** |
-| 100 | 103ms | 14.9ms | **976 req/s** |
+| 1 | 2.8ms | 2.3ms | 361 req/s |
+| 10 | 13ms | 5.8ms | 794 req/s |
+| 25 | 30ms | 8.3ms | **830 req/s** |
+| 50 | 60ms | 12.6ms | **829 req/s** |
+| 100 | 114ms | 15.5ms | **878 req/s** |
 
-> At 100 concurrent requests, AetherAgent maintains **15ms average latency**
-> and **976 requests/second** throughput on a single server instance.
+> At 100 concurrent requests, AetherAgent maintains **16ms average latency**
+> and **878 requests/second** throughput on a single server instance.
 
 ---
 
@@ -73,18 +73,19 @@ Every engine fetches the same live URL. Only AetherAgent understands the questio
 
 | | |
 |---|---|
-| HTML | 8,680 tokens |
-| **AE extract** | **523 tokens (94% savings)** |
+| HTML | 8,694 tokens |
+| **AE extract** | **630 tokens (93% savings)** |
 | LP output | 79,406 tokens |
 | Tier | static |
-| Parse | 498ms |
+| Scoring | ColBERT MaxSim |
+| Parse | 689ms |
 
 ```
-[0.38] link       "Hacker News"
-[0.22] link       "3 hours ago"
-[0.21] link       "5 hours ago"
-[0.19] link       "hide"
-[0.19] link       "past"
+[0.85] generic    "Hacker News new | past | comments | ask | show | jobs | submit..."
+[0.80] generic    "Hacker News Hacker News new | past | comments | ask | show..."
+[0.13] link       "signa11"
+[0.13] link       "2 hours ago"
+[0.13] link       "1 comment"
 ```
 
 ---
@@ -94,20 +95,21 @@ Every engine fetches the same live URL. Only AetherAgent understands the questio
 | | |
 |---|---|
 | HTML | 4,614 tokens |
-| **AE extract** | **900 tokens (80% savings)** |
+| **AE extract** | **910 tokens (80% savings)** |
 | LP output | 15,362 tokens |
 | Tier | static_fallback |
-| Parse | 575ms |
+| Scoring | ColBERT MaxSim |
+| Parse | 1,260ms |
 
 ```
-[0.45] link       "Install"
-[0.34] img        "Rust Logo"
-[0.31] text       "In 2018, the Rust community decided to improve the programming..."
-[0.30] link       "Community"
-[0.29] link       "Tools"
+[0.98] text       "Build it in Rust In 2018, the Rust community decided to improve..."
+[0.94] text       "Why Rust? Performance Rust is blazingly fast and memory-efficient..."
+[0.90] text       "Rust in production Hundreds of companies around the world..."
+[0.78] generic    "Install Learn Playground Tools Governance Community Blog..."
+[0.74] generic    "Rust Programming Language Install Learn Playground Tools..."
 ```
 
-**Found the goal:** `[0.45] link: "Install" → click`
+**Found the goal:** `[0.78] generic: "Install Learn Playground Tools..." → click`
 
 ---
 
@@ -115,17 +117,18 @@ Every engine fetches the same live URL. Only AetherAgent understands the questio
 
 | | |
 |---|---|
-| HTML | 14,774 tokens |
+| HTML | 14,772 tokens |
 | **AE extract** | **579 tokens (96% savings)** |
 | LP output | 65,807 tokens |
-| Parse | 547ms |
+| Scoring | ColBERT MaxSim |
+| Parse | 678ms |
 
 ```
+[0.45] link       "accessibility, assistive technology, standards"
 [0.36] link       "Web development and news"
 [0.32] link       "Archive.org"
-[0.31] link       "accessibility, assistive technology, standards"
 [0.28] link       "lr0.org"
-[0.25] link       "Using AI/LLM, coding tools"
+[0.25] link       "Using AI/LLM, coding tools. Don't also tag with 'ai'."
 ```
 
 ---
@@ -135,17 +138,18 @@ Every engine fetches the same live URL. Only AetherAgent understands the questio
 | | |
 |---|---|
 | HTML | 30,567 tokens |
-| **AE extract** | **578 tokens (98% savings)** |
+| **AE extract** | **613 tokens (98% savings)** |
 | LP output | 146,160 tokens |
 | Tier | hydration |
-| Parse | 33ms |
+| Scoring | ColBERT MaxSim |
+| Parse | 1,310ms |
 
 ```
-[0.05] data       "jsonLd.@context: http://schema.org"
-[0.05] data       "jsonLd.@id: https://www.apple.com/#organization"
-[0.05] data       "jsonLd.@type: Organization"
-[0.05] data       "jsonLd.contactPoint[0].@type: ContactPoint"
-[0.05] data       "jsonLd.contactPoint[0].areaServed: US"
+[1.00] data       "openGraph.image: https://www.apple.com/v/50-years-of-thinking-..."
+[0.89] data       "jsonLd.logo: https://www.apple.com/ac/structured-data/images/..."
+[0.70] data       "jsonLd.sameAs[0]: http://www.wikidata.org/entity/Q312"
+[0.66] data       "jsonLd.subOrganization.@id: https://support.apple.com/..."
+[0.65] data       "jsonLd.sameAs[1]: https://www.youtube.com/user/Apple"
 ```
 
 > apple.com's body is JS-rendered (React). AetherAgent auto-escalates to **hydration tier**
@@ -222,14 +226,14 @@ ONNX Int8, batch:               691ms  (13.4×)
   Pipeline: HTML → Parse → Goal-Filter → Flatten → Rank → Dedup → Top-20
 ```
 
-| Site | Raw HTML | AE Extract | Savings | LightPanda | Chrome |
-|------|:--------:|:----------:|:-------:|:----------:|:------:|
-| apple.com | 30,567 | **578** | **98%** | 146,160 | N/A |
-| lobste.rs | 14,774 | **579** | **96%** | 65,807 | N/A |
-| Hacker News | 8,680 | **523** | **94%** | 79,406 | N/A |
-| rust-lang.org | 4,614 | **900** | **80%** | 15,362 | N/A |
+| Site | Raw HTML | AE Extract | Savings | Scoring | LightPanda |
+|------|:--------:|:----------:|:-------:|:-------:|:----------:|
+| apple.com | 30,567 | **613** | **98%** | ColBERT | 146,160 |
+| lobste.rs | 14,772 | **579** | **96%** | ColBERT | 65,807 |
+| Hacker News | 8,694 | **630** | **93%** | ColBERT | 79,406 |
+| rust-lang.org | 4,614 | **910** | **80%** | ColBERT | 15,362 |
 
-> **AetherAgent returns 523–900 tokens.** Chrome and LightPanda return the full DOM (thousands to hundreds of thousands of tokens) with no goal understanding.
+> **AetherAgent returns 579–910 tokens with ColBERT MaxSim scoring.** Top-1 relevance scores are 0.85–1.00 (vs 0.05–0.45 with legacy scoring). Chrome and LightPanda return the full DOM with no goal understanding.
 
 ---
 
