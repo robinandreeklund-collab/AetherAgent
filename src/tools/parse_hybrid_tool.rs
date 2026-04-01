@@ -29,6 +29,9 @@ pub struct ParseHybridRequest {
     /// Stage 3 reranker: "minilm" (default), "colbert", "hybrid"
     #[serde(default)]
     pub reranker: Option<String>,
+    /// Tvinga JS-eval (true/false, default: auto-eskalering)
+    #[serde(default)]
+    pub js: Option<bool>,
 }
 
 fn default_top_n() -> u32 {
@@ -208,6 +211,7 @@ mod tests {
             goal: "population statistics".to_string(),
             top_n: 5,
             reranker: None,
+            js: None,
         };
         let result = execute(&req);
         assert!(result.error.is_none(), "Ska lyckas: {:?}", result.error);
@@ -234,6 +238,7 @@ mod tests {
             goal: "test".to_string(),
             top_n: 10,
             reranker: None,
+            js: None,
         };
         let result = execute(&req);
         assert!(result.error.is_some(), "Ska ge fel utan input");

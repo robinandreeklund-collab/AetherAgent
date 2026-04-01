@@ -396,8 +396,10 @@ fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize, is_colbert:
             50
         } else if total_nodes < 500 {
             60
-        } else {
+        } else if total_nodes < 2000 {
             80
+        } else {
+            100 // Bugg 6: Wikipedia/xe.com med >2000 noder behöver fler survivors
         };
         let confidence_factor = if bm25_candidates > 100 {
             0.7

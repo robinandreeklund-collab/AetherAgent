@@ -200,6 +200,8 @@ fn should_filter_node(label: &str, role: &str) -> bool {
         || lower.starts_with("i18n.")
         || lower.starts_with("locale.")
         || lower.starts_with("messages.")
+        || lower.starts_with("fields.sections[") // Bugg 5: xe.com converter fields
+        || lower.starts_with("dynamicids[") // Bugg 2: Louvre dynamicIds
         || label.contains("{{")
     {
         return true;
@@ -219,6 +221,16 @@ fn should_filter_node(label: &str, role: &str) -> bool {
             || lower.contains(".canonical")
             || lower.contains(".og.")
             || lower.contains(".twitter."))
+    {
+        return true;
+    }
+
+    // Bugg 8: Generellt array-index media-filter
+    // jsonLd.recipeInstructions[N].image, review[N].url, etc.
+    if lower.contains("].image")
+        || lower.contains("].photo")
+        || lower.contains("].thumbnail")
+        || (lower.contains("].url") && role == "data" && lower.contains("://"))
     {
         return true;
     }
@@ -275,14 +287,27 @@ fn should_filter_node(label: &str, role: &str) -> bool {
     false
 }
 
+/// Avgör om label har faktiskt informationsinnehåll (inte nav/boilerplate).
+#[cfg(feature = "colbert")]
+fn has_informational_content(label: &str) -> bool {
+    label.len() > 60
+        || label.chars().any(|c| c.is_ascii_digit())
+        || label.contains(". ")
+        || label.contains(", ")
+}
+
 /// Role-baserad score-multiplikator med is_leaf-medvetenhet.
 /// Wrapper-noder (is_leaf=false) straffas hårdare — de aggregerar barntext.
 #[cfg(feature = "colbert")]
 fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
     match role {
-        // Text-noder med faktiskt innehåll — boost
-        "text" if label.len() > 50 => 1.15,
-        "text" => 1.05,
+        // Text-noder — boost BARA om informationsinnehåll (Bugg 1 fix)
+        "text" if has_informational_content(label) && label.len() > 50 => 1.15,
+        "text" if has_informational_content(label) => 1.05,
+        "text" => 0.95, // Kort text utan siffror/meningar = trolig nav-aggregat
+        // Tabeller = text i boost-hierarkin (Bugg 1 fix: table parity)
+        "table" if has_informational_content(label) => 1.15,
+        "table" => 1.0,
         // Strukturerad data — boost
         "row" | "cell" | "definition" => 1.10,
         "data" => 1.15,
@@ -297,11 +322,15 @@ fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
             0.3
         }
         "listitem" => 1.10,
-        // Korta nav-länkar
-        "link" if label.len() < 30 => 0.7,
-        // Referens-fotnot-länkar
-        "link" if label.starts_with('[') || label.starts_with('^') || label.starts_with('"') => 0.3,
-        "link" => 0.9,
+        // Links: aldrig boost, alltid penalty (Bugg 1 fix)
+        // Links är referenser/navigation, inte svar. Artikeltitlar boostas
+        // separat via leaf-link boost (30-200 chars) i scoring-blocket.
+        "link" if label.starts_with('[') || label.starts_with('^') || label.starts_with('"') => 0.2,
+        "link" if label.len() < 30 => 0.5,
+        "link" if label.contains("disambiguation") || label.contains("(page does not exist)") => {
+            0.2
+        }
+        "link" => 0.7, // Neutrala links — aldrig över 0.7
         // Navigation — AGGRESSIV penalty, speciellt wrappers
         "navigation" => {
             if is_leaf {
@@ -640,9 +669,10 @@ pub fn score_colbert(
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    // Dedup: identiska labels → behåll bara högst-scorade
+    // Dedup: identiska/substring labels → behåll bara högst-scorade (Bugg 4 fix)
+    // Substring-check: om en labels text finns i en redan sedd labels → dup
     {
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen_labels: Vec<String> = Vec::new();
         result.retain(|node| {
             let key: String = node
                 .label
@@ -651,10 +681,18 @@ pub fn score_colbert(
                 .collect::<String>()
                 .trim()
                 .to_string();
-            if key.is_empty() {
+            if key.is_empty() || key.len() < 4 {
                 return true;
             }
-            seen.insert(key)
+            // Exakt match eller substring av redan sedd label
+            let is_dup = seen_labels
+                .iter()
+                .any(|prev| prev.contains(&key) || key.contains(prev.as_str()));
+            if is_dup {
+                return false;
+            }
+            seen_labels.push(key);
+            true
         });
     }
 
@@ -713,9 +751,9 @@ pub fn score_hybrid(
 
     result.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
 
-    // Dedup
+    // Dedup med substring-check (Bugg 4 fix)
     {
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen_labels: Vec<String> = Vec::new();
         result.retain(|node| {
             let key: String = node
                 .label
@@ -724,10 +762,17 @@ pub fn score_hybrid(
                 .collect::<String>()
                 .trim()
                 .to_string();
-            if key.is_empty() {
+            if key.is_empty() || key.len() < 4 {
                 return true;
             }
-            seen.insert(key)
+            let is_dup = seen_labels
+                .iter()
+                .any(|prev| prev.contains(&key) || key.contains(prev.as_str()));
+            if is_dup {
+                return false;
+            }
+            seen_labels.push(key);
+            true
         });
     }
 
