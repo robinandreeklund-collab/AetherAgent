@@ -5863,72 +5863,79 @@ async fn main() {
     #[cfg(not(feature = "vision"))]
     let vision_model: Option<()> = None;
 
-    // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+    // Embedding + ColBERT modell-laddning
+    //
+    // Laddningsordning:
+    // 1. Om AETHER_EMBEDDING_MODEL finns → ladda som bi-encoder
+    // 2. Om AETHER_COLBERT_MODEL finns → ladda som ColBERT
+    // 3. Om bi-encoder INTE laddades → använd ColBERT-modellen som bi-encoder också
+    //    (samma ONNX-modell fungerar för båda — bi-encoder gör mean pooling,
+    //     ColBERT skippar det och använder per-token embeddings)
     #[cfg(feature = "embeddings")]
     {
-        if let (Ok(model_path), Ok(vocab_path)) = (
-            std::env::var("AETHER_EMBEDDING_MODEL"),
-            std::env::var("AETHER_EMBEDDING_VOCAB"),
-        ) {
-            match (
-                std::fs::read(&model_path),
-                std::fs::read_to_string(&vocab_path),
-            ) {
-                (Ok(model_bytes), Ok(vocab_text)) => {
-                    eprintln!(
-                        "[Embedding] Laddar modell: {} ({:.1} MB) + vocab: {}",
-                        model_path,
-                        model_bytes.len() as f64 / 1_048_576.0,
-                        vocab_path
-                    );
-                    match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
-                        Ok(()) => eprintln!("[Embedding] Modell redo"),
-                        Err(e) => eprintln!("[Embedding] WARN: Kunde inte ladda: {e}"),
-                    }
-                }
-                (Err(e), _) => eprintln!(
-                    "[Embedding] WARN: Kan inte läsa modell '{}': {e}",
-                    model_path
-                ),
-                (_, Err(e)) => eprintln!(
-                    "[Embedding] WARN: Kan inte läsa vocab '{}': {e}",
-                    vocab_path
-                ),
-            }
-        } else {
-            eprintln!("[Embedding] Ingen embedding-modell konfigurerad (AETHER_EMBEDDING_MODEL/AETHER_EMBEDDING_VOCAB ej satta)");
+        // Vocab (delas av bi-encoder och ColBERT)
+        let vocab_path = std::env::var("AETHER_EMBEDDING_VOCAB")
+            .unwrap_or_else(|_| "models/vocab.txt".to_string());
+        let vocab_text = std::fs::read_to_string(&vocab_path).ok();
+        if vocab_text.is_none() {
+            eprintln!("[Embedding] WARN: Kan inte läsa vocab '{vocab_path}'");
         }
-    }
 
-    // ColBERT-modell (int8-kvantiserad, för MaxSim late interaction) — optional
-    #[cfg(feature = "colbert")]
-    {
-        let colbert_model = std::env::var("AETHER_COLBERT_MODEL")
-            .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
-        let colbert_vocab = std::env::var("AETHER_COLBERT_VOCAB").unwrap_or_else(|_| {
-            std::env::var("AETHER_EMBEDDING_VOCAB")
-                .unwrap_or_else(|_| "models/vocab.txt".to_string())
-        });
-        match (
-            std::fs::read(&colbert_model),
-            std::fs::read_to_string(&colbert_vocab),
-        ) {
-            (Ok(model_bytes), Ok(vocab_text)) => {
+        // Bi-encoder (FP32, optional)
+        let mut embedding_loaded = false;
+        if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
+            if let (Ok(model_bytes), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
+                eprintln!(
+                    "[Embedding] Laddar bi-encoder: {} ({:.1} MB)",
+                    model_path,
+                    model_bytes.len() as f64 / 1_048_576.0,
+                );
+                match aether_agent::embedding::init_global(&model_bytes, vt) {
+                    Ok(()) => {
+                        eprintln!("[Embedding] Bi-encoder redo");
+                        embedding_loaded = true;
+                    }
+                    Err(e) => eprintln!("[Embedding] WARN: {e}"),
+                }
+            } else {
+                eprintln!("[Embedding] WARN: Kan inte läsa '{model_path}'");
+            }
+        }
+
+        // ColBERT (int8, default: models/colbert-small-int8.onnx)
+        #[cfg(feature = "colbert")]
+        {
+            let colbert_model = std::env::var("AETHER_COLBERT_MODEL")
+                .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
+            if let (Ok(model_bytes), Some(ref vt)) = (std::fs::read(&colbert_model), &vocab_text) {
                 eprintln!(
                     "[ColBERT] Laddar modell: {} ({:.1} MB)",
                     colbert_model,
                     model_bytes.len() as f64 / 1_048_576.0,
                 );
-                match aether_agent::embedding::init_colbert(&model_bytes, &vocab_text) {
+
+                // Ladda som ColBERT
+                match aether_agent::embedding::init_colbert(&model_bytes, vt) {
                     Ok(()) => eprintln!("[ColBERT] Modell redo (MaxSim late interaction)"),
-                    Err(e) => eprintln!("[ColBERT] WARN: Kunde inte ladda: {e}"),
+                    Err(e) => eprintln!("[ColBERT] WARN: {e}"),
                 }
+
+                // Om bi-encoder INTE laddades → använd samma modell som fallback
+                if !embedding_loaded {
+                    eprintln!("[Embedding] Använder ColBERT-modellen som bi-encoder-fallback");
+                    match aether_agent::embedding::init_global(&model_bytes, vt) {
+                        Ok(()) => {
+                            eprintln!("[Embedding] Bi-encoder redo (via ColBERT-modell)");
+                        }
+                        Err(e) => eprintln!("[Embedding] WARN: {e}"),
+                    }
+                }
+            } else {
+                eprintln!(
+                    "[ColBERT] Modell saknas: {} (kör utan ColBERT, Stage 3 = MiniLM)",
+                    colbert_model
+                );
             }
-            (Err(_), _) => eprintln!(
-                "[ColBERT] Ingen ColBERT-modell hittad: {} (Stage 3 faller tillbaka på MiniLM)",
-                colbert_model
-            ),
-            (_, Err(e)) => eprintln!("[ColBERT] WARN: Kan inte läsa vocab: {e}"),
         }
     }
 

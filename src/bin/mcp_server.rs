@@ -462,64 +462,57 @@ impl AetherMcpServer {
                     None
                 }
             });
-        // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+        // Embedding + ColBERT modell-laddning (samma logik som HTTP-servern)
         #[cfg(feature = "embeddings")]
         {
-            if let (Ok(model_path), Ok(vocab_path)) = (
-                std::env::var("AETHER_EMBEDDING_MODEL"),
-                std::env::var("AETHER_EMBEDDING_VOCAB"),
-            ) {
-                match (
-                    std::fs::read(&model_path),
-                    std::fs::read_to_string(&vocab_path),
-                ) {
-                    (Ok(model_bytes), Ok(vocab_text)) => {
-                        eprintln!(
-                            "[MCP] Embedding model loading: {} ({:.1} MB)",
-                            model_path,
-                            model_bytes.len() as f64 / 1_048_576.0
-                        );
-                        match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
-                            Ok(()) => eprintln!("[MCP] Embedding model ready"),
-                            Err(e) => eprintln!("[MCP] WARN: Embedding load failed: {e}"),
+            let vocab_path = std::env::var("AETHER_EMBEDDING_VOCAB")
+                .unwrap_or_else(|_| "models/vocab.txt".to_string());
+            let vocab_text = std::fs::read_to_string(&vocab_path).ok();
+            if vocab_text.is_none() {
+                eprintln!("[MCP] WARN: Cannot read vocab '{vocab_path}'");
+            }
+
+            let mut embedding_loaded = false;
+            if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
+                if let (Ok(mb), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
+                    eprintln!(
+                        "[MCP] Bi-encoder loading: {} ({:.1} MB)",
+                        model_path,
+                        mb.len() as f64 / 1_048_576.0
+                    );
+                    match aether_agent::embedding::init_global(&mb, vt) {
+                        Ok(()) => {
+                            eprintln!("[MCP] Bi-encoder ready");
+                            embedding_loaded = true;
                         }
+                        Err(e) => eprintln!("[MCP] WARN: Bi-encoder load failed: {e}"),
                     }
-                    (Err(e), _) => eprintln!(
-                        "[MCP] WARN: Cannot read embedding model '{}': {e}",
-                        model_path
-                    ),
-                    (_, Err(e)) => eprintln!(
-                        "[MCP] WARN: Cannot read embedding vocab '{}': {e}",
-                        vocab_path
-                    ),
                 }
             }
-        }
 
-        // ColBERT-modell (int8, MaxSim late interaction) — optional
-        #[cfg(feature = "colbert")]
-        {
-            let colbert_model = std::env::var("AETHER_COLBERT_MODEL")
-                .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
-            let colbert_vocab = std::env::var("AETHER_COLBERT_VOCAB").unwrap_or_else(|_| {
-                std::env::var("AETHER_EMBEDDING_VOCAB")
-                    .unwrap_or_else(|_| "models/vocab.txt".to_string())
-            });
-            if let (Ok(mb), Ok(vt)) = (
-                std::fs::read(&colbert_model),
-                std::fs::read_to_string(&colbert_vocab),
-            ) {
-                eprintln!(
-                    "[MCP] ColBERT model loading: {} ({:.1} MB)",
-                    colbert_model,
-                    mb.len() as f64 / 1_048_576.0
-                );
-                match aether_agent::embedding::init_colbert(&mb, &vt) {
-                    Ok(()) => eprintln!("[MCP] ColBERT model ready"),
-                    Err(e) => eprintln!("[MCP] WARN: ColBERT load failed: {e}"),
+            #[cfg(feature = "colbert")]
+            {
+                let cm = std::env::var("AETHER_COLBERT_MODEL")
+                    .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
+                if let (Ok(mb), Some(ref vt)) = (std::fs::read(&cm), &vocab_text) {
+                    eprintln!(
+                        "[MCP] ColBERT loading: {} ({:.1} MB)",
+                        cm,
+                        mb.len() as f64 / 1_048_576.0
+                    );
+                    match aether_agent::embedding::init_colbert(&mb, vt) {
+                        Ok(()) => eprintln!("[MCP] ColBERT ready"),
+                        Err(e) => eprintln!("[MCP] WARN: ColBERT load failed: {e}"),
+                    }
+                    if !embedding_loaded {
+                        eprintln!("[MCP] Using ColBERT model as bi-encoder fallback");
+                        if let Ok(()) = aether_agent::embedding::init_global(&mb, vt) {
+                            eprintln!("[MCP] Bi-encoder ready (via ColBERT model)");
+                        }
+                    }
+                } else {
+                    eprintln!("[MCP] ColBERT model not found: {cm}");
                 }
-            } else {
-                eprintln!("[MCP] ColBERT model not found, falling back to MiniLM");
             }
         }
 
