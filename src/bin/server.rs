@@ -944,7 +944,13 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
             "injection_warnings": tree.injection_warnings.len(),
             "xhr_intercepted": tree.xhr_intercepted,
             "pipeline": {
-                "method": "hybrid_bm25_hdc_embedding",
+                "method": match config.stage3_reranker {
+                    aether_agent::scoring::Stage3Reranker::MiniLM => "hybrid_bm25_hdc_minilm",
+                    #[cfg(feature = "colbert")]
+                    aether_agent::scoring::Stage3Reranker::ColBert => "hybrid_bm25_hdc_colbert",
+                    #[cfg(feature = "colbert")]
+                    aether_agent::scoring::Stage3Reranker::Hybrid { .. } => "hybrid_bm25_hdc_colbert_minilm",
+                },
                 "bm25_candidates": pipeline.timings.tfidf_candidates,
                 "hdc_survivors": pipeline.timings.hdc_survivors,
                 "total_pipeline_us": pipeline.timings.total_us,
