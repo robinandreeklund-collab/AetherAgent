@@ -37,19 +37,36 @@ pub fn adaptive_alpha(node_token_len: usize) -> f32 {
     }
 }
 
-/// Normalisera scores till [0, 1]
+/// Sigmoid-normalisering: bevarar absolut signal istället för min-max.
+///
+/// Min-max förstör information: om alla survivors är lika dåliga sprider den
+/// dem artificiellt till [0, 1]. Sigmoid centrerar kring median och separerar
+/// genuint bättre noder utan att förstöra absolutskalan.
 #[cfg(any(feature = "colbert", test))]
 fn normalize_scores(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return vec![];
     }
-    let min = scores.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let range = max - min;
-    if range < 1e-9 {
-        return vec![0.5; scores.len()];
+    if scores.len() == 1 {
+        return vec![0.5];
     }
-    scores.iter().map(|&s| (s - min) / range).collect()
+
+    // Median och IQR för robust centrering
+    let mut sorted = scores.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let median = sorted[sorted.len() / 2];
+    let q1 = sorted[sorted.len() / 4];
+    let q3 = sorted[sorted.len() * 3 / 4];
+    let iqr = q3 - q1;
+    let scale = if iqr > 1e-9 { iqr } else { 1.0 };
+
+    scores
+        .iter()
+        .map(|&s| {
+            let z = (s - median) / scale;
+            1.0 / (1.0 + (-z * 2.0).exp()) // sigmoid med lite skärpa
+        })
+        .collect()
 }
 
 // ── Stage3Reranker enum (alltid tillgänglig) ─────────────────────────────────
@@ -161,7 +178,9 @@ fn maxsim_quantized(q: &QuantizedTokens, d: &QuantizedTokens) -> f32 {
         }
         total += best as u64;
     }
-    total as f32
+    // Normalisera per query-token: avg similarity istället för summa.
+    // Förhindrar att långa noder med fler matchnings-targets dominerar.
+    total as f32 / q.num_tokens as f32
 }
 
 // ── Nod-filtrering och scoring-justeringar ───────────────────────────────────
@@ -204,6 +223,25 @@ fn should_filter_node(label: &str, role: &str) -> bool {
         return true;
     }
 
+    // Fix 5: OpenGraph/Twitter metadata URLs oavsett prefix
+    if lower.contains("og:image")
+        || lower.contains("og:url")
+        || lower.contains("twitter:image")
+        || lower.starts_with("opengraph.")
+    {
+        return true;
+    }
+    // Data-noder med bild-URLer
+    if role == "data"
+        && lower.contains("://")
+        && (lower.contains(".png")
+            || lower.contains(".jpg")
+            || lower.contains(".svg")
+            || lower.contains(".webp"))
+    {
+        return true;
+    }
+
     // JS-twin: data-noder med props.initialState-prefix (louvre.fr etc.)
     if role == "data" && lower.starts_with("props.") {
         return true;
@@ -237,9 +275,10 @@ fn should_filter_node(label: &str, role: &str) -> bool {
     false
 }
 
-/// Role-baserad score-multiplikator.
+/// Role-baserad score-multiplikator med is_leaf-medvetenhet.
+/// Wrapper-noder (is_leaf=false) straffas hårdare — de aggregerar barntext.
 #[cfg(feature = "colbert")]
-fn role_multiplier(role: &str, label: &str) -> f32 {
+fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
     match role {
         // Text-noder med faktiskt innehåll — boost
         "text" if label.len() > 50 => 1.15,
@@ -247,7 +286,7 @@ fn role_multiplier(role: &str, label: &str) -> f32 {
         // Strukturerad data — boost
         "row" | "cell" | "definition" => 1.10,
         "data" => 1.15,
-        // Headings — mild penalty (ofta bara labels, inte svar)
+        // Headings — mild penalty
         "heading" => 0.95,
         // K-nav: step-by-step navigation (GOV.UK)
         "listitem"
@@ -258,29 +297,79 @@ fn role_multiplier(role: &str, label: &str) -> f32 {
             0.3
         }
         "listitem" => 1.10,
-        // Korta nav-länkar — penalty
+        // Korta nav-länkar
         "link" if label.len() < 30 => 0.7,
         // Referens-fotnot-länkar
         "link" if label.starts_with('[') || label.starts_with('^') || label.starts_with('"') => 0.3,
         "link" => 0.9,
-        // Navigation, sidebar — penalty
-        "navigation" => 0.6,
-        "complementary" => 0.5,
+        // Navigation — AGGRESSIV penalty, speciellt wrappers
+        "navigation" => {
+            if is_leaf {
+                0.5
+            } else {
+                0.20 // Wrapper-nav (aggregerar alla child-links) — kraftig penalty
+            }
+        }
+        // Sidebar
+        "complementary" => {
+            if is_leaf {
+                0.4
+            } else {
+                0.20
+            }
+        }
+        // Generic wrappers — penalty om inte löv
+        "generic" if !is_leaf && label.len() > 100 => 0.6,
+        "main" | "banner" if !is_leaf => 0.7,
         _ => 1.0,
     }
 }
 
-/// PODCAST-fix: Length-penalty för mycket långa noder.
-/// Noder >500 chars straffas — de innehåller ofta brus (transkript, footers)
-/// som råkar matcha enstaka query-tokens via MaxSim.
+/// Wrapper-penalty: strukturella noder med aggregerad barntext straffas.
+/// Port av embed_score.rs logik (rad 193-209).
 #[cfg(feature = "colbert")]
-fn length_penalty(label_len: usize) -> f32 {
-    if label_len > 1000 {
-        0.7
+fn wrapper_penalty(role: &str, label_len: usize) -> f32 {
+    let is_structural = matches!(
+        role,
+        "generic" | "table" | "main" | "banner" | "complementary" | "navigation"
+    );
+    if is_structural && label_len > 200 {
+        0.20
     } else if label_len > 500 {
-        0.85
+        0.15
+    } else if is_structural && label_len > 100 {
+        0.10
+    } else if label_len > 300 {
+        0.08
     } else {
-        1.0
+        0.0
+    }
+}
+
+/// Length-penalty med is_leaf-medvetenhet.
+/// Icke-löv-noder (wrappers) straffas hårdare vid kortare längder
+/// eftersom deras text är aggregerad från barn.
+#[cfg(feature = "colbert")]
+fn length_penalty(label_len: usize, is_leaf: bool) -> f32 {
+    if is_leaf {
+        if label_len > 1000 {
+            0.7
+        } else if label_len > 500 {
+            0.85
+        } else {
+            1.0
+        }
+    } else {
+        // Icke-löv: aggregerad text, straffas tidigare
+        if label_len > 500 {
+            0.5
+        } else if label_len > 200 {
+            0.65
+        } else if label_len > 100 {
+            0.80
+        } else {
+            1.0
+        }
     }
 }
 
@@ -415,26 +504,47 @@ pub fn score_colbert(
     let (ids, raw_scores) = batch_colbert_scores(&q_embs, survivors, all_nodes);
     let normed = normalize_scores(&raw_scores);
 
+    // Bygg BM25-lookup för multi-signal scoring
+    let bm25_map: HashMap<u32, f32> = survivors.iter().copied().collect();
+
     let mut result: Vec<ScoredNode> = ids
         .iter()
         .zip(normed.iter())
         .filter_map(|(&id, &score)| {
             let info = all_nodes.get(&id)?;
 
-            // Filtrera artefakter (samma logik som embed_score.rs)
+            // Filtrera artefakter
             if should_filter_node(&info.label, &info.role) {
                 return None;
             }
 
-            // Role-baserad boost/penalty
-            let role_mult = role_multiplier(&info.role, &info.label);
+            // Multi-signal scoring (matchar embed_score.rs formel):
+            // semantic × 0.50 + role_priority × 0.20 + bm25 × 0.30 - wrapper_penalty
+            let bm25_score = bm25_map.get(&id).copied().unwrap_or(0.0);
+            let bm25_norm = (bm25_score / 3.0).min(1.0);
+            let role_score = crate::types::SemanticNode::role_priority(&info.role);
+            let w_penalty = wrapper_penalty(&info.role, info.label.len());
+            let len_pen = length_penalty(info.label.len(), info.is_leaf);
+            let role_mult = role_multiplier(&info.role, &info.label, info.is_leaf);
 
-            // Length-penalty: mycket långa noder med svag goal-täckning
-            let len_penalty = length_penalty(info.label.len());
+            let raw = (score * 0.50 + role_score * 0.20 + bm25_norm * 0.30 - w_penalty)
+                * role_mult
+                * len_pen;
+
+            // Leaf-link boost: artikeltitlar, produktnamn (30-200 chars)
+            let boosted = if info.is_leaf
+                && info.role == "link"
+                && info.label.len() >= 30
+                && info.label.len() <= 200
+            {
+                raw * 1.15
+            } else {
+                raw
+            };
 
             Some(ScoredNode {
                 id,
-                relevance: (score * role_mult * len_penalty).min(1.0),
+                relevance: boosted.clamp(0.0, 1.0),
                 role: info.role.clone(),
                 label: info.label.clone(),
             })
@@ -567,20 +677,24 @@ mod tests {
     fn test_normalize_scores_basic() {
         let scores = vec![1.0, 3.0, 2.0, 5.0];
         let normed = normalize_scores(&scores);
+        // Sigmoid: min < median < max, men inte exakt 0/1
         assert!(
-            (normed[0] - 0.0).abs() < 1e-6,
-            "Min borde vara 0.0, fick {}",
-            normed[0]
-        );
-        assert!(
-            (normed[3] - 1.0).abs() < 1e-6,
-            "Max borde vara 1.0, fick {}",
-            normed[3]
-        );
-        assert!(
-            (normed[2] - 0.25).abs() < 1e-6,
-            "Mellannod borde vara 0.25, fick {}",
+            normed[0] < normed[2],
+            "Min borde vara lägst, fick min={}, mellan={}",
+            normed[0],
             normed[2]
+        );
+        assert!(
+            normed[3] > normed[2],
+            "Max borde vara högst, fick max={}, mellan={}",
+            normed[3],
+            normed[2]
+        );
+        // Alla borde vara i (0, 1) — sigmoid ger aldrig exakt 0 eller 1
+        assert!(
+            normed.iter().all(|&s| s > 0.0 && s < 1.0),
+            "Alla borde vara i (0,1), fick {:?}",
+            normed
         );
     }
 
@@ -606,13 +720,16 @@ mod tests {
         let scores = vec![0.0, 10.0];
         let normed = normalize_scores(&scores);
         assert!(
-            (normed[0] - 0.0).abs() < 1e-6,
-            "Min borde normaliseras till 0.0"
+            normed[0] < 0.5,
+            "Min borde vara under 0.5, fick {}",
+            normed[0]
         );
         assert!(
-            (normed[1] - 1.0).abs() < 1e-6,
-            "Max borde normaliseras till 1.0"
+            normed[1] >= 0.5,
+            "Max borde vara >= 0.5, fick {}",
+            normed[1]
         );
+        assert!(normed[1] > normed[0], "Max borde vara högre än min");
     }
 
     #[test]

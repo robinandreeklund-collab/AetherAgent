@@ -372,15 +372,16 @@ fn dispatch_stage3(
 /// medan MiniLM bi-encoder behöver fler (60-100) för att inte missa noder.
 fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize, is_colbert: bool) -> usize {
     if is_colbert {
-        // ColBERT: token-level matching behöver färre survivors
+        // ColBERT behöver fler survivors än initialt trott — tight cap
+        // klipper bort artiklar/content-noder på content-heavy sajter (HN, lobste.rs)
         let base = if total_nodes < 50 {
             total_nodes
         } else if total_nodes < 200 {
-            25
+            50
         } else if total_nodes < 500 {
-            30
+            60
         } else {
-            35
+            80
         };
         let confidence_factor = if bm25_candidates > 100 {
             0.7
