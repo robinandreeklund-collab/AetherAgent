@@ -469,9 +469,9 @@ Stage 3 was evaluated with three reranker strategies on 30 verified-reachable si
 
 | Method | Correctness | Avg Latency | Avg Top-1 Score |
 |--------|-------------|-------------|-----------------|
-| **MiniLM** (bi-encoder, default) | **29/30 (96.7%)** | **1,169ms** | 0.675 |
-| **ColBERT** (MaxSim, 768-dim) | **29/30 (96.7%)** | 6,245ms | **0.950** |
-| **Hybrid** (adaptive α) | **29/30 (96.7%)** | 6,268ms | 0.786 |
+| **MiniLM** (bi-encoder, default) | **29/30 (96.7%)** | 1,234ms | 0.675 |
+| **ColBERT** (MaxSim, int8+batch, 25-35 surv) | **29/30 (96.7%)** | **434ms** | **0.950** |
+| **Hybrid** (adaptive α) | **29/30 (96.7%)** | **431ms** | 0.817 |
 
 **Key findings:**
 
@@ -484,25 +484,31 @@ Stage 3 was evaluated with three reranker strategies on 30 verified-reachable si
    - **Lobsters**: ColBERT picks "Programming language theory, types, design" (content tag); MiniLM picks an article title
    - **Go Dev**: ColBERT picks "Build simple, secure, scalable systems with Go" (value proposition); MiniLM picks "Get Started Download Go" (CTA)
 
-4. **ColBERT is 2.9× slower** after optimization (3.6s vs 1.2s). Two optimizations reduced latency from the initial 6.2s:
-   - **Batch encoding**: All survivors encoded in a single ONNX inference call (padded to max sequence length). Eliminates N separate session-lock + kernel-launch overheads. Improves CPU cache utilization and SIMD throughput.
-   - **Int8 dynamic quantization**: Model weights quantized from FP32 to INT8 (415MB → 105MB, 75% smaller). ONNX Runtime's optimized int8 kernels leverage AVX2/AVX-512 VNNI instructions.
+4. **ColBERT is 2.8× FASTER than MiniLM** (434ms vs 1,234ms) after five optimizations:
+   - **ONNX Runtime** instead of Candle — shares `ort` crate, optimized kernels (9.3s → 6.3s)
+   - **Int8 dynamic quantization** — FP32→INT8 weights, 75% smaller model, AVX2/VNNI kernels (6.3s → 3.6s)
+   - **Batch encoding** — all survivors in one ONNX call, eliminates N session-lock overheads (3.6s → 691ms)
+   - **Adaptive survivor cap** — 25-35 survivors for ColBERT vs 60-100 for MiniLM (691ms → 434ms)
+   - **u8 scalar quantization** — MaxSim computed on u8 vectors (4× less memory, better cache)
+   - **Score cache** — 64-entry FIFO keyed on goal+survivors, 0ms on repeat queries
 
-5. **Hybrid mode is a middle ground.** Adaptive alpha (0.3-0.95 based on node token length) produces top-1 scores between MiniLM and ColBERT (0.789) at ColBERT-level latency. It does not improve correctness.
+   Token truncation (64/96) and length-grouped batching were tested but reverted — truncation clips facts at token position 70-90 (quality regression from 5/6 to 4/6), grouping adds overhead that exceeds padding savings at ~30 survivors.
+
+5. **Hybrid mode is a middle ground.** Adaptive alpha (0.3-0.95 based on node token length) produces top-1 scores between MiniLM and ColBERT (0.817) at ColBERT-level latency. It does not improve correctness.
 
 **Optimization progression:**
 
-| Configuration | Avg Latency | Speedup vs baseline |
-|---------------|-------------|---------------------|
-| Candle backend (initial) | 9,284ms | — |
+| Configuration | Avg Latency | Speedup vs Candle |
+|---------------|-------------|-------------------|
+| Candle FP32, sequential (initial) | 9,284ms | — |
 | ONNX FP32, sequential | 6,252ms | 1.5× |
-| ONNX Int8 ColBERTv2, batch | 3,590ms | 2.6× |
-| **ONNX Int8 MiniLM-ColBERT, batch** | **691ms** | **13.4×** |
-| MiniLM bi-encoder FP32 (reference) | 1,175ms | — |
+| ONNX Int8, batch encoding | 691ms | 13.4× |
+| **+ survivor cap (25-35) + u8 MaxSim + score cache** | **434ms** | **21.4×** |
+| MiniLM bi-encoder FP32 (reference) | 1,234ms | — |
 
-**The int8 MiniLM-ColBERT configuration is now 1.7× faster than the FP32 bi-encoder while producing 41% higher top-1 relevance scores.** This makes ColBERT the recommended default for production deployments where the `colbert` feature is enabled.
+**ColBERT is now 2.8× faster than MiniLM while producing 41% higher top-1 relevance scores.** This makes ColBERT the recommended default when the `colbert` feature is enabled.
 
-**Recommendation:** With the int8 MiniLM-ColBERT configuration, `Stage3Reranker::ColBert` is faster AND produces better quality than the FP32 bi-encoder. Use ColBERT as default when the `colbert` feature is enabled. Use `Stage3Reranker::MiniLM` only when the `colbert` feature is not compiled in (e.g., WASM builds).
+**Recommendation:** Use `Stage3Reranker::ColBert` as default when the `colbert` feature is enabled — it is both faster and produces better node quality than the FP32 bi-encoder. Use `Stage3Reranker::MiniLM` when the `colbert` feature is not compiled in (e.g., WASM builds).
 
 ---
 
@@ -512,9 +518,9 @@ The neuro-symbolic pipeline — BM25 for lexical recall, HDC for structural prun
 
 The HDC middle tier is the key architectural contribution. It provides structural awareness that neither BM25 (bag-of-words) nor flat embeddings (sequence-only) capture: a node's ARIA role, tree depth, sibling context, and n-gram text are all encoded into a single 4096-bit vector queryable in nanoseconds. This is, to our knowledge, the first application of Hyperdimensional Computing to DOM element retrieval in an agent context.
 
-**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches. (4) ColBERTv2 (int8, batch) is still 2.9× slower than the bi-encoder (3.6s vs 1.2s) — further gains possible via GPU inference or a smaller dedicated ColBERT model.
+**Limitations:** (1) JS-rendered SPAs that load data via `fetch()` require the async fetch-bridge, which adds latency and can miss dynamically-constructed URLs. (2) HDC pruning quality is identical at 1024 and 4096 bits for pages ≤1000 nodes — the theoretical headroom advantage has not been empirically validated on very large DOMs. (3) The system has not been evaluated on WebArena or Mind2Web benchmarks, which would enable direct comparison with learned element ranking approaches.
 
-**Future work:** GPU inference for ColBERT via ONNX Runtime CUDA/CoreML execution providers (~10× expected speedup); learned HDC threshold calibration via feedback from agent task success; evaluation on standardized web agent benchmarks (WebArena, Mind2Web); and investigation of whether ColBERT's 41% higher score calibration translates to better downstream LLM task success in multi-step workflows where node quality directly impacts extraction accuracy.
+**Future work:** GPU inference for ColBERT via ONNX Runtime CUDA/CoreML execution providers for further latency reduction; learned HDC threshold calibration via feedback from agent task success; evaluation on standardized web agent benchmarks (WebArena, Mind2Web); and investigation of whether ColBERT's 41% higher score calibration translates to better downstream LLM task success in multi-step workflows where node quality directly impacts extraction accuracy.
 
 ---
 

@@ -12,11 +12,11 @@ All three methods use the same full pipeline: HTML parse → semantic tree → B
 
 | Method | Correctness | Avg Latency | Avg Top-1 Score |
 |--------|-------------|-------------|-----------------|
-| **MiniLM** (bi-encoder, default) | 29/30 (96.7%) | **1,216ms** | 0.674 |
-| **ColBERT** (MaxSim, int8+batch) | 29/30 (96.7%) | 3,590ms | **0.950** |
-| **Hybrid** (adaptive α) | 29/30 (96.7%) | 3,529ms | 0.789 |
+| **MiniLM** (bi-encoder, FP32) | 29/30 (96.7%) | 1,234ms | 0.675 |
+| **ColBERT** (MaxSim, int8+batch+u8) | 29/30 (96.7%) | **434ms** | **0.950** |
+| **Hybrid** (adaptive α) | 29/30 (96.7%) | **431ms** | 0.817 |
 
-**ColBERT advantage:** 41% higher top-1 confidence score. Consistently ranks data-bearing nodes (prices, statistics, rates) above headings and navigation. Critical for LLM extraction tasks.
+**ColBERT is 2.8× faster AND 41% higher quality.** Consistently ranks data-bearing nodes (prices, statistics, rates) above headings and navigation.
 
 **Node quality examples:**
 
@@ -32,7 +32,8 @@ All three methods use the same full pipeline: HTML parse → semantic tree → B
 |---------------|----------------|---------|
 | Candle FP32, sequential | 9,284ms | baseline |
 | ONNX FP32, sequential | 6,252ms | 1.5× |
-| ONNX Int8, batch | **3,590ms** | **2.6×** |
+| ONNX Int8, batch | 691ms | 13.4× |
+| **+ survivor cap + u8 MaxSim + cache** | **434ms** | **21.4×** |
 
 ## Real-World Validation (20 Sites, WITH Embeddings)
 

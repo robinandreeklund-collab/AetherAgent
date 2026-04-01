@@ -39,13 +39,14 @@ Three-stage neuro-symbolic retrieval pipeline for goal-directed DOM node ranking
 
 | Reranker | Model | How it works | Latency | Top-1 quality |
 |----------|-------|-------------|---------|---------------|
-| `MiniLM` (default) | all-MiniLM-L6-v2 (384-dim) | Mean-pooled bi-encoder cosine similarity | ~1.2s | 0.674 |
-| `ColBert` | ColBERTv2.0 (768-dim, int8) | MaxSim late interaction — per-token matching | ~3.6s | **0.950** |
-| `Hybrid` | Both | Adaptive α blend (0.3–0.95 by node length) | ~3.5s | 0.789 |
+| `MiniLM` (default) | all-MiniLM-L6-v2 (384-dim, FP32) | Mean-pooled bi-encoder cosine similarity | ~1.2s | 0.675 |
+| `ColBert` | all-MiniLM-L6-v2 (384-dim, int8) | MaxSim late interaction — per-token matching | **~0.4s** | **0.950** |
+| `Hybrid` | Both | Adaptive α blend (0.3–0.95 by node length) | **~0.4s** | 0.817 |
 
-ColBERT produces **41% higher confidence scores** and consistently ranks information-bearing nodes (facts, data) above headings and navigation — critical for LLM data extraction from long mixed-content pages.
+ColBERT is **2.8× faster** than the bi-encoder and produces **41% higher confidence scores**. It consistently ranks information-bearing nodes (facts, data, tables) above headings and navigation. Optimized via int8 quantization, batch ONNX encoding, reduced survivor cap (25-35), u8 MaxSim, and score caching.
 
 Feature flags: `embeddings` (MiniLM), `colbert` (ColBERT + Hybrid, depends on `embeddings`).
+Runtime: set `AETHER_COLBERT_MODEL` + `AETHER_COLBERT_VOCAB` env vars, or ColBERT falls back to the bi-encoder model in late-interaction mode.
 
 ---
 

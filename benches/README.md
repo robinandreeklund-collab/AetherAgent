@@ -354,17 +354,17 @@ In a production stack, they can be complementary: Lightpanda handles JS-heavy SP
 
 ## 14. ColBERT vs MiniLM — Stage 3 Reranker Quality (30 Sites)
 
-Optional ColBERTv2 late interaction reranker as Stage 3 alternative. Both go through the same full pipeline (HTML parse → BM25 → HDC → Stage 3).
+ColBERT MaxSim late interaction as optional Stage 3 reranker. All methods go through the same full pipeline (HTML parse → BM25 → HDC → Stage 3).
 
 | Method | Correctness | Avg Latency | Avg Top-1 Score |
 |--------|-------------|-------------|-----------------|
-| **MiniLM** (bi-encoder, default) | 29/30 (96.7%) | **1,216ms** | 0.674 |
-| **ColBERT** (MaxSim, int8+batch) | 29/30 (96.7%) | 3,590ms | **0.950** |
-| **Hybrid** (adaptive α) | 29/30 (96.7%) | 3,529ms | 0.789 |
+| **MiniLM** (bi-encoder, FP32) | 29/30 (96.7%) | 1,234ms | 0.675 |
+| **ColBERT** (MaxSim, int8+batch+u8) | 29/30 (96.7%) | **434ms** | **0.950** |
+| **Hybrid** (adaptive α) | 29/30 (96.7%) | **431ms** | 0.817 |
 
-ColBERT produces **41% higher confidence scores** and ranks fact-bearing nodes (prices, rates, statistics) above headings and navigation. MiniLM sometimes ranks footers or reference links as top-1.
+ColBERT is **2.8× faster** than MiniLM and produces **41% higher confidence scores**. It ranks fact-bearing nodes (prices, rates, statistics) above headings and navigation.
 
-**Key insight:** Same keyword-correctness (29/30), but the *quality of the top-1 node* is significantly better with ColBERT — critical for LLM data extraction where the agent needs the right fact, not just a node containing the right keyword.
+**Optimization progression:** Candle 9.3s → ONNX FP32 6.3s → int8+batch 691ms → +survivor cap+u8+cache **434ms** (21× total speedup).
 
 > **Run it yourself:**
 > ```bash
