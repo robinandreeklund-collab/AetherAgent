@@ -329,6 +329,49 @@ Two sites failed (both JS-rendered SPAs returning 0–1 content nodes):
 
 Both require JS evaluation tier escalation (planned, not yet automatic).
 
+### 2.8 Ablation Study — What Each Component Contributes
+
+Measured on 10 representative sites by removing one component at a time:
+
+| Configuration | Recall@5 | Avg latency | What was lost |
+|--------------|----------|-------------|---------------|
+| **Full system** | **10/10 (100%)** | 878ms | — |
+| − ColBERT (MiniLM only) | 9/10 (90%) | 479ms | GOV.UK £12.71 not found |
+| − Goal expansion | 10/10 (100%) | 851ms | Same recall, but HN/lobste.rs 2–3× slower (dense fallback triggers) |
+| − Scoring pipeline (a11y tree only) | 7/10 (70%) | 38ms | GOV.UK, Bank of England, CoinGecko lost |
+
+**Key findings:**
+
+1. **ColBERT vs MiniLM** (+1 site): ColBERT's per-token matching finds "£12.71 per hour" in a long policy text that MiniLM's mean pooling misses. The advantage grows with content-heavy pages where facts are embedded in mixed text.
+
+2. **Goal expansion** (latency, not recall): On these 10 sites, expansion doesn't change recall — but without it, HN and lobste.rs trigger the dense retrieval fallback (BM25 <20 candidates), adding 2–3 seconds. Expansion keeps BM25 above threshold.
+
+3. **Scoring pipeline** (+3 sites over a11y tree): Raw accessibility tree output is fast (38ms) but lacks goal-directed ranking. Without scoring, navigation and boilerplate nodes dominate the top positions. The scoring pipeline is essential for precision.
+
+### 2.9 Formal Definition — Hierarchical Late Interaction Retrieval (HLIR)
+
+The bottom-up ColBERT scoring can be formalized as a general operator for tree-structured retrieval:
+
+**Definition.** Given a query *q* with tokens *q₁...qₘ*, a document tree *T* with nodes *N*, and a late interaction function *MaxSim*, the HLIR score of a node *n* is:
+
+```
+S_self(n) = Σᵢ maxⱼ cos(qᵢ, dⱼ) / m        where dⱼ ∈ tokens(n)
+
+S(n) = max( f(S_self(n), signals(n)),  λ · max_{c ∈ children(n)} S(c) )
+```
+
+Where:
+- `f(S_self, signals)` = multi-signal fusion: `0.40·S_self + 0.15·HDC + 0.15·role + 0.30·BM25 − penalties`
+- `λ = 0.75` (parent decay — wrappers inherit at most 75% of best child)
+- `signals(n)` = (BM25 score, HDC text similarity, role priority, wrapper penalty, length penalty)
+
+This is equivalent to:
+- **Max pooling** over the document tree (as in hierarchical attention)
+- With **decay** (λ < 1) to penalize structural aggregation
+- And **multi-signal fusion** combining lexical, structural, and neural signals
+
+The formulation is general: it applies to any tree-structured document (HTML DOM, JSON, XML, document outlines) with a late interaction scoring function.
+
 ### 2.5 Optimization Progression
 
 | Configuration | Avg latency | Speedup |
