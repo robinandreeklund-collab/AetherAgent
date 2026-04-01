@@ -287,6 +287,32 @@ fn should_filter_node(label: &str, role: &str) -> bool {
     false
 }
 
+/// Avgör om label ser ut som en nyhetsrubrik (title-case, inga siffror/valuta).
+/// Nyhetsrubriker i sidofält matchar ekonomitermer men är inte faktasvar.
+#[cfg(feature = "colbert")]
+fn is_news_headline(label: &str) -> bool {
+    // Krav: >20 chars, inga siffror, inga %/$£€, title-case
+    if label.len() < 20 || label.len() > 200 {
+        return false;
+    }
+    let has_digits = label.chars().any(|c| c.is_ascii_digit());
+    let has_currency =
+        label.contains('%') || label.contains('$') || label.contains('£') || label.contains('€');
+    if has_digits || has_currency {
+        return false; // Siffror/valuta = trolig data, inte rubrik
+    }
+    // Title-case: >50% av orden börjar med versal
+    let words: Vec<&str> = label.split_whitespace().collect();
+    if words.len() < 4 {
+        return false;
+    }
+    let uppercase_words = words
+        .iter()
+        .filter(|w| w.chars().next().is_some_and(|c| c.is_uppercase()))
+        .count();
+    uppercase_words as f32 / words.len() as f32 > 0.5
+}
+
 /// Avgör om label har faktiskt informationsinnehåll (inte nav/boilerplate).
 #[cfg(feature = "colbert")]
 fn has_informational_content(label: &str) -> bool {
@@ -302,16 +328,11 @@ fn has_informational_content(label: &str) -> bool {
 fn role_multiplier(role: &str, label: &str, is_leaf: bool) -> f32 {
     match role {
         // Text-noder — boost BARA om informationsinnehåll (Bugg 1 fix)
-        "text" if has_informational_content(label) && label.len() > 50 => {
-            // Ytterligare check: historisk datum-text straffas
-            if label.starts_with("Between ") || label.starts_with("Before ") {
-                0.85 // Lägre boost för historik-kontext
-            } else {
-                1.15
-            }
-        }
+        "text" if is_news_headline(label) => 0.4, // Nyhetsrubriker i sidebar
+        "text" if label.starts_with("Between ") || label.starts_with("Before ") => 0.85,
+        "text" if has_informational_content(label) && label.len() > 50 => 1.15,
         "text" if has_informational_content(label) => 1.05,
-        "text" => 0.95, // Kort text utan siffror/meningar = trolig nav-aggregat
+        "text" => 0.95,
         // Tabeller = text i boost-hierarkin (Bugg 1 fix: table parity)
         "table" if has_informational_content(label) => 1.15,
         "table" => 1.0,
@@ -683,7 +704,7 @@ pub fn score_colbert(
             let key: String = node
                 .label
                 .chars()
-                .take(80)
+                .take(120)
                 .collect::<String>()
                 .trim()
                 .to_string();
@@ -776,7 +797,7 @@ pub fn score_hybrid(
             let key: String = node
                 .label
                 .chars()
-                .take(80)
+                .take(120)
                 .collect::<String>()
                 .trim()
                 .to_string();
