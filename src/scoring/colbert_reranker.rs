@@ -588,6 +588,34 @@ fn cache_key(goal: &str, survivors: &[(u32, f32)], all_nodes: &HashMap<u32, Node
     hash
 }
 
+/// Beräkna ColBERT multi-signal score för en enskild nod.
+/// Används av bottom-up scoringen för både löv- och icke-löv-noder.
+#[cfg(feature = "colbert")]
+fn compute_colbert_node_score(
+    id: u32,
+    info: &NodeInfo,
+    colbert_map: &HashMap<u32, f32>,
+    bm25_map: &HashMap<u32, f32>,
+    hdc_text_sims: &HashMap<u32, f32>,
+) -> f32 {
+    let colbert_score = colbert_map.get(&id).copied().unwrap_or(0.0);
+    let bm25_score = bm25_map.get(&id).copied().unwrap_or(0.0);
+    let bm25_norm = (bm25_score / 3.0).min(1.0);
+    let role_score = crate::types::SemanticNode::role_priority(&info.role);
+    let hdc_raw = hdc_text_sims.get(&id).copied().unwrap_or(0.0);
+    let hdc_text = (hdc_raw + 1.0) / 2.0;
+    let w_penalty = wrapper_penalty(&info.role, info.label.len());
+    let len_pen = length_penalty(info.label.len(), info.is_leaf);
+    let role_mult = role_multiplier(&info.role, &info.label, info.is_leaf);
+
+    let raw = (colbert_score * 0.40 + hdc_text * 0.15 + role_score * 0.15 + bm25_norm * 0.30
+        - w_penalty)
+        * role_mult
+        * len_pen;
+
+    raw.clamp(0.0, 1.0)
+}
+
 // ── ColBERT scoring (feature-gatad) ──────────────────────────────────────────
 
 /// Batch-encode alla survivors och beräkna kvantiserad MaxSim mot query.
@@ -667,36 +695,69 @@ pub fn score_colbert(
     let (ids, raw_scores) = batch_colbert_scores(&q_embs, survivors, all_nodes);
     let normed = normalize_scores(&raw_scores);
 
-    // Bygg BM25-lookup för multi-signal scoring
+    // Bygg lookups
     let bm25_map: HashMap<u32, f32> = survivors.iter().copied().collect();
-
-    let mut result: Vec<ScoredNode> = ids
+    let colbert_map: HashMap<u32, f32> = ids
         .iter()
         .zip(normed.iter())
-        .filter_map(|(&id, &score)| {
-            let info = all_nodes.get(&id)?;
+        .map(|(&id, &s)| (id, s))
+        .collect();
 
-            // Filtrera artefakter
+    // ── Bottom-up scoring (samma design som embed_score.rs) ──
+    // Steg 1: Scorea löv-noder direkt med ColBERT multi-signal
+    let mut scores: HashMap<u32, f32> = HashMap::new();
+    const PARENT_DECAY: f32 = 0.75;
+
+    for &(node_id, _) in survivors {
+        if let Some(info) = all_nodes.get(&node_id) {
+            if !info.is_leaf {
+                continue; // Icke-löv väntar
+            }
             if should_filter_node(&info.label, &info.role) {
+                continue;
+            }
+            let score =
+                compute_colbert_node_score(node_id, info, &colbert_map, &bm25_map, hdc_text_sims);
+            scores.insert(node_id, score);
+        }
+    }
+
+    // Steg 2: Icke-löv ärver max(barn) × PARENT_DECAY, men minst egen score
+    for &(node_id, _) in survivors {
+        if scores.contains_key(&node_id) {
+            continue; // Redan scoread (löv)
+        }
+        if let Some(info) = all_nodes.get(&node_id) {
+            if should_filter_node(&info.label, &info.role) {
+                continue;
+            }
+            // Max barn-score
+            let max_child = info
+                .child_ids
+                .iter()
+                .filter_map(|cid| scores.get(cid))
+                .copied()
+                .fold(0.0f32, f32::max);
+
+            // Egen score
+            let own_score =
+                compute_colbert_node_score(node_id, info, &colbert_map, &bm25_map, hdc_text_sims);
+
+            // Ta max av (barn-arv, egen score)
+            let inherited = max_child * PARENT_DECAY;
+            scores.insert(node_id, own_score.max(inherited));
+        }
+    }
+
+    // Steg 3: Samla resultat
+    let mut result: Vec<ScoredNode> = survivors
+        .iter()
+        .filter_map(|&(id, _)| {
+            let info = all_nodes.get(&id)?;
+            let relevance = scores.get(&id).copied().unwrap_or(0.0);
+            if relevance <= 0.0 {
                 return None;
             }
-
-            // Multi-signal scoring med HDC aspekt-brygga (C-optimering):
-            // colbert × 0.40 + hdc_text × 0.15 + role_priority × 0.15 + bm25 × 0.30
-            // HDC text-sim ger strukturell content-relevans utan neural overhead.
-            let bm25_score = bm25_map.get(&id).copied().unwrap_or(0.0);
-            let bm25_norm = (bm25_score / 3.0).min(1.0);
-            let role_score = crate::types::SemanticNode::role_priority(&info.role);
-            let hdc_raw = hdc_text_sims.get(&id).copied().unwrap_or(0.0);
-            let hdc_text = (hdc_raw + 1.0) / 2.0; // [-1,1] → [0,1]
-            let w_penalty = wrapper_penalty(&info.role, info.label.len());
-            let len_pen = length_penalty(info.label.len(), info.is_leaf);
-            let role_mult = role_multiplier(&info.role, &info.label, info.is_leaf);
-
-            let raw = (score * 0.40 + hdc_text * 0.15 + role_score * 0.15 + bm25_norm * 0.30
-                - w_penalty)
-                * role_mult
-                * len_pen;
 
             // Leaf-link boost: artikeltitlar, produktnamn (30-200 chars)
             let boosted = if info.is_leaf
@@ -704,9 +765,9 @@ pub fn score_colbert(
                 && info.label.len() >= 30
                 && info.label.len() <= 200
             {
-                raw * 1.15
+                relevance * 1.15
             } else {
-                raw
+                relevance
             };
 
             Some(ScoredNode {
