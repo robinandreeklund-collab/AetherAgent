@@ -32,6 +32,9 @@ pub struct ParseHybridRequest {
     /// Tvinga JS-eval (true/false, default: auto-eskalering)
     #[serde(default)]
     pub js: Option<bool>,
+    /// Ablation: "no_dense", "no_hdc", "no_bottomup", "no_expansion" (intern, ej för produktion)
+    #[serde(default)]
+    pub ablation: Option<String>,
 }
 
 fn default_top_n() -> u32 {
@@ -42,6 +45,22 @@ fn default_top_n() -> u32 {
 ///
 /// Med `colbert` feature: default är ColBERT (snabbare + bättre kvalitet).
 /// Utan `colbert` feature: alltid MiniLM.
+pub fn build_config_with_ablation(
+    reranker: Option<&str>,
+    ablation: Option<&str>,
+) -> crate::scoring::PipelineConfig {
+    let mut config = build_config(reranker);
+    // Ablation: stäng av enskild komponent för vetenskaplig utvärdering
+    match ablation {
+        Some("no_dense") => config.disable_dense_fallback = true,
+        Some("no_hdc") => config.disable_hdc = true,
+        Some("no_bottomup") => config.disable_bottom_up = true,
+        Some("no_expansion") => config.disable_expansion = true,
+        _ => {}
+    }
+    config
+}
+
 pub fn build_config(reranker: Option<&str>) -> crate::scoring::PipelineConfig {
     #[allow(unused_mut)]
     let mut config = crate::scoring::PipelineConfig::default();
@@ -94,7 +113,7 @@ pub fn execute(req: &ParseHybridRequest) -> ToolResult {
 /// Kör parse_hybrid med redan hämtad HTML (synkron — utan pending fetch resolution)
 pub fn execute_with_html(html: &str, req: &ParseHybridRequest, url: &str) -> ToolResult {
     let start = now_ms();
-    let config = build_config(req.reranker.as_deref());
+    let config = build_config_with_ablation(req.reranker.as_deref(), req.ablation.as_deref());
     let json_str = crate::parse_top_nodes_with_config(html, &req.goal, url, req.top_n, &config);
     let data: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_default();
     result_from_json(data, start)
@@ -120,7 +139,7 @@ pub async fn execute_with_html_async(
 
     // Steg 3: Kör hybrid scoring på det kompletta trädet
     let goal_embedding = crate::embedding::embed(&req.goal);
-    let config = build_config(req.reranker.as_deref());
+    let config = build_config_with_ablation(req.reranker.as_deref(), req.ablation.as_deref());
     let pipeline_result = crate::scoring::ScoringPipeline::run_cached(
         html,
         &tree.nodes,
@@ -215,6 +234,7 @@ mod tests {
             top_n: 5,
             reranker: None,
             js: None,
+            ablation: None,
         };
         let result = execute(&req);
         assert!(result.error.is_none(), "Ska lyckas: {:?}", result.error);
@@ -242,6 +262,7 @@ mod tests {
             top_n: 10,
             reranker: None,
             js: None,
+            ablation: None,
         };
         let result = execute(&req);
         assert!(result.error.is_some(), "Ska ge fel utan input");

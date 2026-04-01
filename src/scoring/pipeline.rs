@@ -31,6 +31,15 @@ pub struct PipelineConfig {
     pub min_output: usize,
     /// Stage 3 reranker: MiniLM (default), ColBERT, eller Hybrid
     pub stage3_reranker: Stage3Reranker,
+    // ── Ablation flags (för vetenskaplig utvärdering) ──
+    /// Stäng av dense retrieval fallback (steg 1b)
+    pub disable_dense_fallback: bool,
+    /// Stäng av HDC pruning (steg 2) — skicka alla BM25-kandidater direkt till steg 3
+    pub disable_hdc: bool,
+    /// Stäng av bottom-up scoring — scorea alla noder platt istället
+    pub disable_bottom_up: bool,
+    /// Stäng av query expansion i ColBERT
+    pub disable_expansion: bool,
 }
 
 impl Default for PipelineConfig {
@@ -42,6 +51,10 @@ impl Default for PipelineConfig {
             max_survivors: 0, // 0 = adaptivt baserat på BM25-confidence + DOM-storlek
             min_output: 100,  // Returnera alltid minst 100 noder till LLM
             stage3_reranker: Stage3Reranker::default(),
+            disable_dense_fallback: false,
+            disable_hdc: false,
+            disable_bottom_up: false,
+            disable_expansion: false,
         }
     }
 }
@@ -113,7 +126,11 @@ impl ScoringPipeline {
         // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
         let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
-        let candidates = dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding);
+        let candidates = if config.disable_dense_fallback {
+            bm25_candidates
+        } else {
+            dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding)
+        };
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
@@ -138,7 +155,12 @@ impl ScoringPipeline {
             )
         };
 
-        let survivors = if !candidates.is_empty() {
+        let survivors = if config.disable_hdc {
+            // Ablation: skippa HDC, skicka BM25-kandidater direkt till steg 3
+            let mut direct = candidates.clone();
+            direct.truncate(survivor_cap);
+            direct
+        } else if !candidates.is_empty() {
             // Steg 2a: Bred HDC-pruning (låg threshold, behåll de flesta)
             let broad = if config.adaptive_hdc {
                 candidates
@@ -194,6 +216,7 @@ impl ScoringPipeline {
             &goal_words,
             goal_embedding,
             &hdc_text_sims,
+            config,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -239,7 +262,11 @@ impl ScoringPipeline {
         // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
         let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
-        let candidates = dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding);
+        let candidates = if config.disable_dense_fallback {
+            bm25_candidates
+        } else {
+            dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding)
+        };
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
@@ -264,7 +291,11 @@ impl ScoringPipeline {
             )
         };
 
-        let survivors = if !candidates.is_empty() {
+        let survivors = if config.disable_hdc {
+            let mut direct = candidates.clone();
+            direct.truncate(survivor_cap);
+            direct
+        } else if !candidates.is_empty() {
             let broad = if config.adaptive_hdc {
                 candidates
                     .iter()
@@ -316,6 +347,7 @@ impl ScoringPipeline {
             &goal_words,
             goal_embedding,
             &hdc_text_sims,
+            config,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -350,6 +382,7 @@ fn dispatch_stage3(
     goal_words: &[String],
     goal_embedding: Option<&[f32]>,
     hdc_text_sims: &std::collections::HashMap<u32, f32>,
+    config: &PipelineConfig,
 ) -> Vec<ScoredNode> {
     match reranker {
         Stage3Reranker::MiniLM => {
@@ -357,9 +390,14 @@ fn dispatch_stage3(
             embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
         }
         #[cfg(feature = "colbert")]
-        Stage3Reranker::ColBert => {
-            super::colbert_reranker::score_colbert(survivors, node_index, goal, hdc_text_sims)
-        }
+        Stage3Reranker::ColBert => super::colbert_reranker::score_colbert(
+            survivors,
+            node_index,
+            goal,
+            hdc_text_sims,
+            config.disable_bottom_up,
+            config.disable_expansion,
+        ),
         #[cfg(feature = "colbert")]
         Stage3Reranker::Hybrid {
             alpha,

@@ -672,6 +672,8 @@ pub fn score_colbert(
     all_nodes: &HashMap<u32, NodeInfo>,
     goal: &str,
     hdc_text_sims: &HashMap<u32, f32>,
+    disable_bottom_up: bool,
+    disable_expansion: bool,
 ) -> Vec<ScoredNode> {
     // Kolla cache
     let key = cache_key(goal, survivors, all_nodes);
@@ -685,7 +687,11 @@ pub fn score_colbert(
     // Query expansion: lägg till hög-IDF termer från top-BM25-survivors.
     // Bron mellan BM25 (lexical recall) och ColBERT (semantic precision).
     // Ex: goal "population stockholm" + expansion "inhabitants" → bättre recall.
-    let expanded_goal = expand_query(goal, survivors, all_nodes);
+    let expanded_goal = if disable_expansion {
+        goal.to_string()
+    } else {
+        expand_query(goal, survivors, all_nodes)
+    };
 
     let q_embs = match crate::embedding::encode_tokens(&expanded_goal) {
         Some(e) if !e.is_empty() => e,
@@ -703,49 +709,74 @@ pub fn score_colbert(
         .map(|(&id, &s)| (id, s))
         .collect();
 
-    // ── Bottom-up scoring (samma design som embed_score.rs) ──
-    // Steg 1: Scorea löv-noder direkt med ColBERT multi-signal
     let mut scores: HashMap<u32, f32> = HashMap::new();
-    const PARENT_DECAY: f32 = 0.75;
 
-    for &(node_id, _) in survivors {
-        if let Some(info) = all_nodes.get(&node_id) {
-            if !info.is_leaf {
-                continue; // Icke-löv väntar
+    if disable_bottom_up {
+        // Ablation: platt scoring utan bottom-up (alla noder scoreas likadant)
+        for &(node_id, _) in survivors {
+            if let Some(info) = all_nodes.get(&node_id) {
+                if should_filter_node(&info.label, &info.role) {
+                    continue;
+                }
+                let score = compute_colbert_node_score(
+                    node_id,
+                    info,
+                    &colbert_map,
+                    &bm25_map,
+                    hdc_text_sims,
+                );
+                scores.insert(node_id, score);
             }
-            if should_filter_node(&info.label, &info.role) {
+        }
+    } else {
+        // ── Bottom-up scoring (samma design som embed_score.rs) ──
+        const PARENT_DECAY: f32 = 0.75;
+
+        // Steg 1: Scorea löv-noder direkt
+        for &(node_id, _) in survivors {
+            if let Some(info) = all_nodes.get(&node_id) {
+                if !info.is_leaf {
+                    continue;
+                }
+                if should_filter_node(&info.label, &info.role) {
+                    continue;
+                }
+                let score = compute_colbert_node_score(
+                    node_id,
+                    info,
+                    &colbert_map,
+                    &bm25_map,
+                    hdc_text_sims,
+                );
+                scores.insert(node_id, score);
+            }
+        }
+
+        // Steg 2: Icke-löv ärver max(barn) × PARENT_DECAY
+        for &(node_id, _) in survivors {
+            if scores.contains_key(&node_id) {
                 continue;
             }
-            let score =
-                compute_colbert_node_score(node_id, info, &colbert_map, &bm25_map, hdc_text_sims);
-            scores.insert(node_id, score);
-        }
-    }
-
-    // Steg 2: Icke-löv ärver max(barn) × PARENT_DECAY, men minst egen score
-    for &(node_id, _) in survivors {
-        if scores.contains_key(&node_id) {
-            continue; // Redan scoread (löv)
-        }
-        if let Some(info) = all_nodes.get(&node_id) {
-            if should_filter_node(&info.label, &info.role) {
-                continue;
+            if let Some(info) = all_nodes.get(&node_id) {
+                if should_filter_node(&info.label, &info.role) {
+                    continue;
+                }
+                let max_child = info
+                    .child_ids
+                    .iter()
+                    .filter_map(|cid| scores.get(cid))
+                    .copied()
+                    .fold(0.0f32, f32::max);
+                let own_score = compute_colbert_node_score(
+                    node_id,
+                    info,
+                    &colbert_map,
+                    &bm25_map,
+                    hdc_text_sims,
+                );
+                let inherited = max_child * PARENT_DECAY;
+                scores.insert(node_id, own_score.max(inherited));
             }
-            // Max barn-score
-            let max_child = info
-                .child_ids
-                .iter()
-                .filter_map(|cid| scores.get(cid))
-                .copied()
-                .fold(0.0f32, f32::max);
-
-            // Egen score
-            let own_score =
-                compute_colbert_node_score(node_id, info, &colbert_map, &bm25_map, hdc_text_sims);
-
-            // Ta max av (barn-arv, egen score)
-            let inherited = max_child * PARENT_DECAY;
-            scores.insert(node_id, own_score.max(inherited));
         }
     }
 
