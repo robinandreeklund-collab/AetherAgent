@@ -110,9 +110,10 @@ impl ScoringPipeline {
 
         let node_index = build_node_index(tree_nodes);
 
-        // Steg 1: BM25 kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
-        let candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let candidates = dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding);
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
@@ -235,9 +236,10 @@ impl ScoringPipeline {
         let hdc_tree = build_result.hdc_tree;
         let node_index = build_result.node_index;
 
-        // Steg 1: BM25 kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
-        let candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let candidates = dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding);
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
@@ -429,6 +431,70 @@ fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize, is_colbert:
         };
         ((base as f32 * confidence_factor) as usize).max(20)
     }
+}
+
+/// Dense retrieval fallback: om BM25 hittar <20 kandidater, komplettera
+/// med embedding-baserad semantisk sökning. Fångar noder som matchar
+/// semantiskt utan keyword-overlap (t.ex. "bor" → "invånare").
+///
+/// Returnerar utökad kandidatlista (BM25 ∪ embedding top-50).
+fn dense_retrieval_fallback(
+    candidates: Vec<(u32, f32)>,
+    node_index: &HashMap<u32, embed_score::NodeInfo>,
+    goal_embedding: Option<&[f32]>,
+) -> Vec<(u32, f32)> {
+    // Trigga bara vid <20 BM25-candidates OCH embedding tillgänglig
+    if candidates.len() >= 20 || goal_embedding.is_none() {
+        return candidates;
+    }
+
+    let goal_vec = goal_embedding.unwrap();
+    let existing_ids: std::collections::HashSet<u32> =
+        candidates.iter().map(|&(id, _)| id).collect();
+
+    // Scanna noder med embedding cosine similarity (max 200 för latens-budget)
+    // Prioritera löv-noder och text/heading-roller — de innehåller oftast svar
+    let mut scannable: Vec<(&u32, &embed_score::NodeInfo)> = node_index
+        .iter()
+        .filter(|(id, info)| {
+            !existing_ids.contains(id)
+                && info.label.len() >= 10
+                && !matches!(
+                    info.role.as_str(),
+                    "navigation" | "complementary" | "generic"
+                )
+        })
+        .collect();
+    // Sortera: löv-noder och text/heading först
+    scannable.sort_by_key(|(_, info)| {
+        if info.is_leaf && matches!(info.role.as_str(), "text" | "heading" | "data") {
+            0
+        } else if info.is_leaf {
+            1
+        } else {
+            2
+        }
+    });
+    scannable.truncate(200); // Max 200 noder → ~100ms
+
+    let mut semantic_candidates: Vec<(u32, f32)> = scannable
+        .iter()
+        .filter_map(|(&id, info)| {
+            let sim = crate::embedding::similarity_with_vec(goal_vec, &info.label)?;
+            if sim > 0.15 {
+                Some((id, sim * 2.0))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    semantic_candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+    semantic_candidates.truncate(50);
+
+    let mut merged = candidates;
+    merged.extend(semantic_candidates);
+    merged
 }
 
 /// Applicera pipeline-scores tillbaka på SemanticNodes i trädet
