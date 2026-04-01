@@ -5904,7 +5904,7 @@ async fn main() {
     #[cfg(feature = "colbert")]
     {
         let colbert_model = std::env::var("AETHER_COLBERT_MODEL")
-            .unwrap_or_else(|_| "models/all-MiniLM-L6-v2-int8.onnx".to_string());
+            .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
         let colbert_vocab = std::env::var("AETHER_COLBERT_VOCAB").unwrap_or_else(|_| {
             std::env::var("AETHER_EMBEDDING_VOCAB")
                 .unwrap_or_else(|_| "models/vocab.txt".to_string())

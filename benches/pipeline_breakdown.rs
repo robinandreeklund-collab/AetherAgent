@@ -3,7 +3,7 @@
 /// Run:
 ///   AETHER_EMBEDDING_MODEL=models/all-MiniLM-L6-v2.onnx \
 ///   AETHER_EMBEDDING_VOCAB=models/vocab.txt \
-///   AETHER_COLBERT_MODEL=models/all-MiniLM-L6-v2-int8.onnx \
+///   AETHER_COLBERT_MODEL=models/colbert-small-int8.onnx \
 ///   AETHER_COLBERT_VOCAB=models/vocab.txt \
 ///   cargo run --release --bin aether-pipeline-breakdown --features colbert
 use aether_agent::scoring::colbert_reranker::Stage3Reranker;
@@ -20,7 +20,7 @@ fn main() {
             let _ = aether_agent::embedding::init_global(&mb, &vt);
         }
         let cm = std::env::var("AETHER_COLBERT_MODEL")
-            .unwrap_or_else(|_| "models/all-MiniLM-L6-v2-int8.onnx".into());
+            .unwrap_or_else(|_| "models/colbert-small-int8.onnx".into());
         let cv =
             std::env::var("AETHER_COLBERT_VOCAB").unwrap_or_else(|_| "models/vocab.txt".into());
         if let (Ok(cmb), Ok(cvt)) = (std::fs::read(&cm), std::fs::read_to_string(&cv)) {

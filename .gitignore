@@ -16,7 +16,7 @@ runs/
 dataset/
 models/
 # Behåll int8-kvantiserad ColBERT-modell (22MB, under GitHub-gräns)
-!models/all-MiniLM-L6-v2-int8.onnx
+!models/colbert-small-int8.onnx
 wpt-suite/
 # Benchmark: ignorera symlink och lightpanda
 testsuite/benchmark/aether_latest
