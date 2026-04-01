@@ -4295,7 +4295,11 @@ async fn mcp_dispatch_tool_legacy(
             let goal = args["goal"].as_str().unwrap_or("");
             let url = args["url"].as_str().unwrap_or("");
             let top_n = args["top_n"].as_u64().unwrap_or(100) as u32;
-            text_ok(aether_agent::parse_top_nodes_hybrid(html, goal, url, top_n))
+            let reranker = args["reranker"].as_str();
+            let config = aether_agent::tools::parse_hybrid_tool::build_config(reranker);
+            text_ok(aether_agent::parse_top_nodes_with_config(
+                html, goal, url, top_n, &config,
+            ))
         }
         "fetch_parse" => {
             let url = args["url"].as_str().unwrap_or("");
