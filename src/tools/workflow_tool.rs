@@ -53,7 +53,7 @@ pub fn execute(req: &WorkflowRequest) -> ToolResult {
         "status" => execute_status(req, start),
         other => ToolResult::err(
             format!("Okänd action: '{other}'. Använd: create, page, report, complete, rollback, status."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -63,20 +63,37 @@ fn parse_orchestrator(
     start: u64,
 ) -> Result<crate::orchestrator::WorkflowOrchestrator, ToolResult> {
     match json {
-        Some(j) => crate::orchestrator::WorkflowOrchestrator::from_json(j)
-            .map_err(|e| ToolResult::err(format!("Ogiltig workflow_json: {e}"), now_ms() - start)),
-        None => Err(ToolResult::err("'workflow_json' krävs", now_ms() - start)),
+        Some(j) => crate::orchestrator::WorkflowOrchestrator::from_json(j).map_err(|e| {
+            ToolResult::err(
+                format!("Ogiltig workflow_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }),
+        None => Err(ToolResult::err(
+            "'workflow_json' krävs",
+            now_ms().saturating_sub(start),
+        )),
     }
 }
 
 fn execute_create(req: &WorkflowRequest, start: u64) -> ToolResult {
     let goal = match &req.goal {
         Some(g) => g.as_str(),
-        None => return ToolResult::err("'goal' krävs för action=create", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'goal' krävs för action=create",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let start_url = match &req.start_url {
         Some(u) => u.as_str(),
-        None => return ToolResult::err("'start_url' krävs för action=create", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'start_url' krävs för action=create",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let config = match &req.config_json {
@@ -91,7 +108,7 @@ fn execute_create(req: &WorkflowRequest, start: u64) -> ToolResult {
         "workflow_json": orchestrator.to_json(),
         "step_result": serde_json::to_value(&step_result).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_page(req: &WorkflowRequest, start: u64) -> ToolResult {
@@ -101,11 +118,21 @@ fn execute_page(req: &WorkflowRequest, start: u64) -> ToolResult {
     };
     let html = match &req.html {
         Some(h) => h.as_str(),
-        None => return ToolResult::err("'html' krävs för action=page", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'html' krävs för action=page",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let url = match &req.url {
         Some(u) => u.as_str(),
-        None => return ToolResult::err("'url' krävs för action=page", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'url' krävs för action=page",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let step_result = orchestrator.provide_page(html, url, now_ms());
@@ -114,7 +141,7 @@ fn execute_page(req: &WorkflowRequest, start: u64) -> ToolResult {
         "workflow_json": orchestrator.to_json(),
         "step_result": serde_json::to_value(&step_result).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
@@ -124,11 +151,21 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
     };
     let result_json = match &req.result_json {
         Some(r) => r.as_str(),
-        None => return ToolResult::err("'result_json' krävs för action=report", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'result_json' krävs för action=report",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let report_type = match &req.report_type {
         Some(t) => t.as_str(),
-        None => return ToolResult::err("'report_type' krävs för action=report", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'report_type' krävs för action=report",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let step_result = match report_type {
@@ -138,7 +175,7 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
                 Err(e) => {
                     return ToolResult::err(
                         format!("Ogiltig click result_json: {e}"),
-                        now_ms() - start,
+                        now_ms().saturating_sub(start),
                     )
                 }
             };
@@ -150,7 +187,7 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
                 Err(e) => {
                     return ToolResult::err(
                         format!("Ogiltig fill result_json: {e}"),
-                        now_ms() - start,
+                        now_ms().saturating_sub(start),
                     )
                 }
             };
@@ -162,7 +199,7 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
                 Err(e) => {
                     return ToolResult::err(
                         format!("Ogiltig extract result_json: {e}"),
-                        now_ms() - start,
+                        now_ms().saturating_sub(start),
                     )
                 }
             };
@@ -171,7 +208,7 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
         other => {
             return ToolResult::err(
                 format!("Okänd report_type: '{other}'. Använd 'click', 'fill', eller 'extract'."),
-                now_ms() - start,
+                now_ms().saturating_sub(start),
             )
         }
     };
@@ -180,7 +217,7 @@ fn execute_report(req: &WorkflowRequest, start: u64) -> ToolResult {
         "workflow_json": orchestrator.to_json(),
         "step_result": serde_json::to_value(&step_result).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_complete(req: &WorkflowRequest, start: u64) -> ToolResult {
@@ -190,7 +227,12 @@ fn execute_complete(req: &WorkflowRequest, start: u64) -> ToolResult {
     };
     let step_index = match req.step_index {
         Some(i) => i,
-        None => return ToolResult::err("'step_index' krävs för action=complete", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'step_index' krävs för action=complete",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let step_result = orchestrator.report_step_completed(step_index, now_ms());
@@ -199,7 +241,7 @@ fn execute_complete(req: &WorkflowRequest, start: u64) -> ToolResult {
         "workflow_json": orchestrator.to_json(),
         "step_result": serde_json::to_value(&step_result).unwrap_or_default(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_rollback(req: &WorkflowRequest, start: u64) -> ToolResult {
@@ -209,7 +251,12 @@ fn execute_rollback(req: &WorkflowRequest, start: u64) -> ToolResult {
     };
     let step_index = match req.step_index {
         Some(i) => i,
-        None => return ToolResult::err("'step_index' krävs för action=rollback", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'step_index' krävs för action=rollback",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     orchestrator.rollback_step(step_index);
@@ -218,7 +265,7 @@ fn execute_rollback(req: &WorkflowRequest, start: u64) -> ToolResult {
         "workflow_json": orchestrator.to_json(),
         "rolled_back": step_index,
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_status(req: &WorkflowRequest, start: u64) -> ToolResult {
@@ -231,7 +278,7 @@ fn execute_status(req: &WorkflowRequest, start: u64) -> ToolResult {
     let status: serde_json::Value =
         serde_json::from_str(&status_json).unwrap_or(serde_json::json!({}));
 
-    ToolResult::ok(status, now_ms() - start)
+    ToolResult::ok(status, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

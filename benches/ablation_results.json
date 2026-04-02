@@ -1,0 +1,22 @@
+{
+  "full": {
+    "recall5": 10,
+    "total": 10,
+    "avg_ms": 877.9114727999995
+  },
+  "minilm": {
+    "recall5": 9,
+    "total": 10,
+    "avg_ms": 478.9767882000007
+  },
+  "no_expansion": {
+    "recall5": 10,
+    "total": 10,
+    "avg_ms": 850.5818021999972
+  },
+  "a11y_tree": {
+    "recall5": 7,
+    "total": 10,
+    "avg_ms": 38.032547300008446
+  }
+}

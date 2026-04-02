@@ -1,0 +1,38 @@
+{
+  "Full system": {
+    "recall5": 41,
+    "recall20": 41,
+    "total": 42,
+    "avg_ms": 815
+  },
+  "\u2212 Dense fallback": {
+    "recall5": 41,
+    "recall20": 41,
+    "total": 42,
+    "avg_ms": 392
+  },
+  "\u2212 HDC pruning": {
+    "recall5": 41,
+    "recall20": 41,
+    "total": 42,
+    "avg_ms": 434
+  },
+  "\u2212 Bottom-up scoring": {
+    "recall5": 41,
+    "recall20": 41,
+    "total": 42,
+    "avg_ms": 384
+  },
+  "\u2212 Query expansion": {
+    "recall5": 41,
+    "recall20": 41,
+    "total": 42,
+    "avg_ms": 464
+  },
+  "MiniLM only (no ColBERT)": {
+    "recall5": 39,
+    "recall20": 42,
+    "total": 42,
+    "avg_ms": 552
+  }
+}

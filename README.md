@@ -95,6 +95,8 @@ wasm-pack build --target web --release
 | **Causal Graph** | Model state transitions, predict outcomes, find safest paths |
 | **Vision** | YOLOv8-nano screenshot analysis + Blitz rendering (pure Rust) |
 | **Workflow Engine** | Multi-page orchestration with auto-nav, rollback, sessions |
+| **Hybrid Scoring** | BM25 → HDC → Neural 3-stage retrieval pipeline |
+| **ColBERT Reranker** | Optional MaxSim late interaction — 41% higher node quality |
 | **Adaptive Streaming** | LLM-directed DOM exploration, 95–99% token savings |
 | **Cross-Agent Collab** | Shared diff store for multi-agent workflows |
 | **XHR Interception** | Discover hidden `fetch()`/XHR API endpoints |

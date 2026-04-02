@@ -37,10 +37,13 @@ pub struct ParseRequest {
     /// Tvinga JS-eval (true/false/auto)
     #[serde(default)]
     pub js: Option<bool>,
-    /// Använd hybrid BM25+HDC+Embedding pipeline (default: false).
+    /// Använd hybrid BM25+HDC+Neural pipeline (default: false).
     /// Sätt till true för bättre relevans-ranking vid top_n-filtrering.
     #[serde(default)]
     pub hybrid: bool,
+    /// Stage 3 reranker: "minilm", "colbert" (recommended), "hybrid"
+    #[serde(default)]
+    pub reranker: Option<String>,
     /// Streaming-läge (default: true)
     #[serde(default = "default_true")]
     pub stream: bool,
@@ -84,7 +87,7 @@ pub fn execute(req: &ParseRequest) -> ToolResult {
         req.screenshot_b64.as_deref(),
     ) {
         Ok(i) => i,
-        Err(e) => return ToolResult::err(e, now_ms() - start),
+        Err(e) => return ToolResult::err(e, now_ms().saturating_sub(start)),
     };
 
     match input {
@@ -94,7 +97,7 @@ pub fn execute(req: &ParseRequest) -> ToolResult {
             // I MCP/HTTP-servern hanteras fetch asynkront innan detta anropas
             ToolResult::err(
                 "URL-input kräver asynkron fetch. Använd HTTP/MCP-endpointen.",
-                now_ms() - start,
+                now_ms().saturating_sub(start),
             )
         }
         InputKind::Html(html) => execute_html(&html, req, start),
@@ -111,6 +114,7 @@ pub fn execute_with_html(html: &str, req: &ParseRequest, url: &str) -> ToolResul
         req.format.as_deref(),
         req.js,
         req.hybrid,
+        req.reranker.as_deref(),
         url,
         start,
     )
@@ -138,7 +142,7 @@ pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) 
     } else {
         build_tree(html, &req.goal, url)
     };
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Resolve pending fetch-URLs (async)
     super::resolve_pending_fetches(&mut tree, &req.goal).await;
@@ -148,7 +152,7 @@ pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) 
     // Scoring
     if req.hybrid {
         let goal_embedding = crate::embedding::embed(&req.goal);
-        let config = crate::scoring::PipelineConfig::default();
+        let config = crate::tools::parse_hybrid_tool::build_config(req.reranker.as_deref());
         let result = crate::scoring::ScoringPipeline::run_cached(
             html,
             &tree.nodes,
@@ -178,7 +182,7 @@ pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) 
             tree: None,
             markdown: Some(tree_to_markdown(&tree)),
             vision: None,
-            parse_time_ms: now_ms() - start,
+            parse_time_ms: now_ms().saturating_sub(start),
         },
         _ => super::parse_tool::ParseResponse {
             format: "tree".to_string(),
@@ -188,12 +192,12 @@ pub async fn execute_with_html_async(html: &str, req: &ParseRequest, url: &str) 
             tree: Some(tree),
             markdown: None,
             vision: None,
-            parse_time_ms: now_ms() - start,
+            parse_time_ms: now_ms().saturating_sub(start),
         },
     };
 
     let data = serde_json::to_value(&response).unwrap_or_default();
-    ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+    ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
 }
 
 /// Intern parse av HTML
@@ -206,6 +210,7 @@ fn execute_html(html: &str, req: &ParseRequest, start: u64) -> ToolResult {
         req.format.as_deref(),
         req.js,
         req.hybrid,
+        req.reranker.as_deref(),
         url,
         start,
     )
@@ -219,6 +224,7 @@ fn execute_html_with_options(
     format: Option<&str>,
     js: Option<bool>,
     hybrid: bool,
+    reranker: Option<&str>,
     url: &str,
     start: u64,
 ) -> ToolResult {
@@ -246,13 +252,13 @@ fn execute_html_with_options(
         build_tree(html, goal, url)
     };
 
-    tree.parse_time_ms = now_ms() - start;
+    tree.parse_time_ms = now_ms().saturating_sub(start);
     let total_nodes = count_all_nodes(&tree.nodes);
 
     // Scoring: hybrid BM25+HDC+Embedding eller legacy sort
     if hybrid {
         let goal_embedding = crate::embedding::embed(goal);
-        let config = crate::scoring::PipelineConfig::default();
+        let config = crate::tools::parse_hybrid_tool::build_config(reranker);
         let result = crate::scoring::ScoringPipeline::run_cached(
             html,
             &tree.nodes,
@@ -284,7 +290,7 @@ fn execute_html_with_options(
                 tree: None,
                 markdown: Some(md),
                 vision: None,
-                parse_time_ms: now_ms() - start,
+                parse_time_ms: now_ms().saturating_sub(start),
             }
         }
         _ => ParseResponse {
@@ -295,14 +301,14 @@ fn execute_html_with_options(
             tree: Some(tree),
             markdown: None,
             vision: None,
-            parse_time_ms: now_ms() - start,
+            parse_time_ms: now_ms().saturating_sub(start),
         },
     };
 
     let data = serde_json::to_value(&response)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+    ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
 }
 
 /// Parse screenshot via YOLO pipeline
@@ -312,7 +318,12 @@ fn execute_screenshot(b64: &str, goal: &str, start: u64) -> ToolResult {
         use base64::Engine;
         let png_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
             Ok(b) => b,
-            Err(e) => return ToolResult::err(format!("Invalid base64: {e}"), now_ms() - start),
+            Err(e) => {
+                return ToolResult::err(
+                    format!("Invalid base64: {e}"),
+                    now_ms().saturating_sub(start),
+                )
+            }
         };
 
         // Ladda modell från env
@@ -324,7 +335,7 @@ fn execute_screenshot(b64: &str, goal: &str, start: u64) -> ToolResult {
             Err(e) => {
                 return ToolResult::err(
                     format!("Kunde inte ladda vision-modell från {model_path}: {e}"),
-                    now_ms() - start,
+                    now_ms().saturating_sub(start),
                 )
             }
         };
@@ -342,13 +353,16 @@ fn execute_screenshot(b64: &str, goal: &str, start: u64) -> ToolResult {
                     tree: Some(result.tree),
                     markdown: None,
                     vision: vision_json,
-                    parse_time_ms: now_ms() - start,
+                    parse_time_ms: now_ms().saturating_sub(start),
                 })
                 .unwrap_or_default();
 
-                ToolResult::ok(data, now_ms() - start)
+                ToolResult::ok(data, now_ms().saturating_sub(start))
             }
-            Err(e) => ToolResult::err(format!("Vision-analys misslyckades: {e}"), now_ms() - start),
+            Err(e) => ToolResult::err(
+                format!("Vision-analys misslyckades: {e}"),
+                now_ms().saturating_sub(start),
+            ),
         }
     }
 
@@ -357,7 +371,7 @@ fn execute_screenshot(b64: &str, goal: &str, start: u64) -> ToolResult {
         let _ = (b64, goal);
         ToolResult::err(
             "Vision-stöd ej kompilerat. Bygg med --features vision".to_string(),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         )
     }
 }
@@ -389,6 +403,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -419,6 +434,7 @@ mod tests {
             format: Some("markdown".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -445,6 +461,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -473,6 +490,7 @@ mod tests {
             format: None,
             js: None,
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -490,6 +508,7 @@ mod tests {
             format: None,
             js: None,
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -514,6 +533,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -539,6 +559,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(true),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -561,6 +582,7 @@ mod tests {
             format: Some("tree".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute(&req);
@@ -578,6 +600,7 @@ mod tests {
             format: Some("markdown".to_string()),
             js: Some(false),
             hybrid: false,
+            reranker: None,
             stream: false,
         };
         let result = execute_with_html(simple_html(), &req, "https://example.com");

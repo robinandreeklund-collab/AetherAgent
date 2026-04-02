@@ -71,7 +71,7 @@ pub fn execute(req: &VisionRequest) -> ToolResult {
             format!(
                 "Okänt mode: '{other}'. Använd 'detect', 'screenshot', 'ground', eller 'match'."
             ),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -85,7 +85,7 @@ fn execute_screenshot(req: &VisionRequest, start: u64) -> ToolResult {
             None => {
                 return ToolResult::err(
                     "html krävs för mode=screenshot (synkront). Använd url via HTTP-endpoint.",
-                    now_ms() - start,
+                    now_ms().saturating_sub(start),
                 )
             }
         };
@@ -116,16 +116,22 @@ fn execute_screenshot(req: &VisionRequest, start: u64) -> ToolResult {
                     "width": req.width,
                     "height": req.height,
                 });
-                ToolResult::ok(data, now_ms() - start)
+                ToolResult::ok(data, now_ms().saturating_sub(start))
             }
-            Err(e) => ToolResult::err(format!("Screenshot misslyckades: {e}"), now_ms() - start),
+            Err(e) => ToolResult::err(
+                format!("Screenshot misslyckades: {e}"),
+                now_ms().saturating_sub(start),
+            ),
         }
     }
 
     #[cfg(not(feature = "blitz"))]
     {
         let _ = req;
-        ToolResult::err("Screenshot kräver --features blitz", now_ms() - start)
+        ToolResult::err(
+            "Screenshot kräver --features blitz",
+            now_ms().saturating_sub(start),
+        )
     }
 }
 
@@ -146,7 +152,7 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
                 None => {
                     return ToolResult::err(
                         "html eller screenshot_b64 krävs för mode=detect",
-                        now_ms() - start,
+                        now_ms().saturating_sub(start),
                     )
                 }
             };
@@ -164,7 +170,7 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
                         Err(e) => {
                             return ToolResult::err(
                                 format!("Kunde inte ladda modell: {e}"),
-                                now_ms() - start,
+                                now_ms().saturating_sub(start),
                             )
                         }
                     };
@@ -175,15 +181,18 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
                         Ok(result) => {
                             let data = serde_json::to_value(&result)
                                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-                            ToolResult::ok(data, now_ms() - start)
+                            ToolResult::ok(data, now_ms().saturating_sub(start))
                         }
                         Err(e) => ToolResult::err(
                             format!("Vision-detektion misslyckades: {e}"),
-                            now_ms() - start,
+                            now_ms().saturating_sub(start),
                         ),
                     }
                 }
-                Err(e) => ToolResult::err(format!("Rendering misslyckades: {e}"), now_ms() - start),
+                Err(e) => ToolResult::err(
+                    format!("Rendering misslyckades: {e}"),
+                    now_ms().saturating_sub(start),
+                ),
             }
         }
 
@@ -191,7 +200,7 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
         {
             ToolResult::err(
                 "Rendering kräver --features blitz. Skicka screenshot_b64 istället.",
-                now_ms() - start,
+                now_ms().saturating_sub(start),
             )
         }
     }
@@ -201,7 +210,7 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
         let _ = req;
         ToolResult::err(
             "Vision-detektion kräver --features vision",
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         )
     }
 }
@@ -210,14 +219,21 @@ fn execute_detect(req: &VisionRequest, start: u64) -> ToolResult {
 fn execute_ground(req: &VisionRequest, start: u64) -> ToolResult {
     let html = match &req.html {
         Some(h) => h.as_str(),
-        None => return ToolResult::err("html krävs för mode=ground", now_ms() - start),
+        None => {
+            return ToolResult::err("html krävs för mode=ground", now_ms().saturating_sub(start))
+        }
     };
     let goal = req.goal.as_deref().unwrap_or("");
     let url = req.url.as_deref().unwrap_or("");
 
     let annotations = match &req.annotations {
         Some(a) => a.clone(),
-        None => return ToolResult::err("annotations krävs för mode=ground", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "annotations krävs för mode=ground",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let tree = build_tree(html, goal, url);
@@ -225,24 +241,36 @@ fn execute_ground(req: &VisionRequest, start: u64) -> ToolResult {
     let data = serde_json::to_value(&result)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 /// Match bbox mot noder i träd via IoU
 fn execute_match(req: &VisionRequest, start: u64) -> ToolResult {
     let tree_json = match &req.tree_json {
         Some(t) => t.as_str(),
-        None => return ToolResult::err("tree_json krävs för mode=match", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "tree_json krävs för mode=match",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let bbox = match &req.bbox {
         Some(b) => b.clone(),
-        None => return ToolResult::err("bbox krävs för mode=match", now_ms() - start),
+        None => {
+            return ToolResult::err("bbox krävs för mode=match", now_ms().saturating_sub(start))
+        }
     };
 
     let tree: crate::types::SemanticTree = match serde_json::from_str(tree_json) {
         Ok(t) => t,
-        Err(e) => return ToolResult::err(format!("Ogiltig tree_json: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig tree_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let all_nodes = collect_all_nodes_flat(&tree.nodes);
@@ -250,7 +278,7 @@ fn execute_match(req: &VisionRequest, start: u64) -> ToolResult {
     let data = serde_json::to_value(&matches)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 /// Kör YOLO på base64-screenshot
@@ -259,7 +287,12 @@ fn run_yolo_on_b64(b64: &str, goal: &str, start: u64) -> ToolResult {
     use base64::Engine;
     let png_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
         Ok(b) => b,
-        Err(e) => return ToolResult::err(format!("Invalid base64: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Invalid base64: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let model_path =
@@ -267,7 +300,10 @@ fn run_yolo_on_b64(b64: &str, goal: &str, start: u64) -> ToolResult {
     let model_bytes = match std::fs::read(&model_path) {
         Ok(b) => b,
         Err(e) => {
-            return ToolResult::err(format!("Kunde inte ladda modell: {e}"), now_ms() - start)
+            return ToolResult::err(
+                format!("Kunde inte ladda modell: {e}"),
+                now_ms().saturating_sub(start),
+            )
         }
     };
 
@@ -276,9 +312,12 @@ fn run_yolo_on_b64(b64: &str, goal: &str, start: u64) -> ToolResult {
         Ok(result) => {
             let data = serde_json::to_value(&result)
                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
-        Err(e) => ToolResult::err(format!("Vision misslyckades: {e}"), now_ms() - start),
+        Err(e) => ToolResult::err(
+            format!("Vision misslyckades: {e}"),
+            now_ms().saturating_sub(start),
+        ),
     }
 }
 

@@ -60,13 +60,16 @@ struct ParseTopParams {
 struct ParseHybridParams {
     /// Raw HTML string
     html: String,
-    /// The agent's current goal
+    /// EXPAND THIS: Include the user's question PLUS 5-10 synonyms, translations, and related terms. Example: "population Malmö invånare befolkning inhabitants kommun antal" — NOT just "population Malmö". The pipeline matches keywords literally in stage 1.
     goal: String,
     /// The page URL
     url: String,
     /// Max number of nodes to return (default: 100 — intentionally high so YOU can pick the best 5-10)
     #[serde(default = "default_hybrid_top_n")]
     top_n: u32,
+    /// Stage 3 reranker: "colbert" (default, 2.8x faster + 41% better quality), "minilm" (legacy bi-encoder), "hybrid" (adaptive blend)
+    #[serde(default)]
+    reranker: Option<String>,
 }
 
 fn default_hybrid_top_n() -> u32 {
@@ -366,7 +369,7 @@ struct SearchParams {
     query: String,
     /// Number of results to return (1-10, default: 3)
     top_n: Option<usize>,
-    /// Agent goal for relevance scoring (default: same as query)
+    /// EXPAND THIS with synonyms/translations for better page scoring. Example: "population Sweden invånare befolkning inhabitants antal" — NOT just the search query. Used by ColBERT to rank nodes on fetched pages.
     goal: Option<String>,
 }
 
@@ -459,36 +462,56 @@ impl AetherMcpServer {
                     None
                 }
             });
-        // Embedding-modell (all-MiniLM-L6-v2 eller liknande) — optional
+        // Embedding + ColBERT modell-laddning (samma logik som HTTP-servern)
         #[cfg(feature = "embeddings")]
         {
-            if let (Ok(model_path), Ok(vocab_path)) = (
-                std::env::var("AETHER_EMBEDDING_MODEL"),
-                std::env::var("AETHER_EMBEDDING_VOCAB"),
-            ) {
-                match (
-                    std::fs::read(&model_path),
-                    std::fs::read_to_string(&vocab_path),
-                ) {
-                    (Ok(model_bytes), Ok(vocab_text)) => {
-                        eprintln!(
-                            "[MCP] Embedding model loading: {} ({:.1} MB)",
-                            model_path,
-                            model_bytes.len() as f64 / 1_048_576.0
-                        );
-                        match aether_agent::embedding::init_global(&model_bytes, &vocab_text) {
-                            Ok(()) => eprintln!("[MCP] Embedding model ready"),
-                            Err(e) => eprintln!("[MCP] WARN: Embedding load failed: {e}"),
+            let vocab_path = std::env::var("AETHER_EMBEDDING_VOCAB")
+                .unwrap_or_else(|_| "models/vocab.txt".to_string());
+            let vocab_text = std::fs::read_to_string(&vocab_path).ok();
+            if vocab_text.is_none() {
+                eprintln!("[MCP] WARN: Cannot read vocab '{vocab_path}'");
+            }
+
+            let mut embedding_loaded = false;
+            if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
+                if let (Ok(mb), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
+                    eprintln!(
+                        "[MCP] Bi-encoder loading: {} ({:.1} MB)",
+                        model_path,
+                        mb.len() as f64 / 1_048_576.0
+                    );
+                    match aether_agent::embedding::init_global(&mb, vt) {
+                        Ok(()) => {
+                            eprintln!("[MCP] Bi-encoder ready");
+                            embedding_loaded = true;
+                        }
+                        Err(e) => eprintln!("[MCP] WARN: Bi-encoder load failed: {e}"),
+                    }
+                }
+            }
+
+            #[cfg(feature = "colbert")]
+            {
+                let cm = std::env::var("AETHER_COLBERT_MODEL")
+                    .unwrap_or_else(|_| "models/colbert-small-int8.onnx".to_string());
+                if let (Ok(mb), Some(ref vt)) = (std::fs::read(&cm), &vocab_text) {
+                    eprintln!(
+                        "[MCP] ColBERT loading: {} ({:.1} MB)",
+                        cm,
+                        mb.len() as f64 / 1_048_576.0
+                    );
+                    match aether_agent::embedding::init_colbert(&mb, vt) {
+                        Ok(()) => eprintln!("[MCP] ColBERT ready"),
+                        Err(e) => eprintln!("[MCP] WARN: ColBERT load failed: {e}"),
+                    }
+                    if !embedding_loaded {
+                        eprintln!("[MCP] Using ColBERT model as bi-encoder fallback");
+                        if let Ok(()) = aether_agent::embedding::init_global(&mb, vt) {
+                            eprintln!("[MCP] Bi-encoder ready (via ColBERT model)");
                         }
                     }
-                    (Err(e), _) => eprintln!(
-                        "[MCP] WARN: Cannot read embedding model '{}': {e}",
-                        model_path
-                    ),
-                    (_, Err(e)) => eprintln!(
-                        "[MCP] WARN: Cannot read embedding vocab '{}': {e}",
-                        vocab_path
-                    ),
+                } else {
+                    eprintln!("[MCP] ColBERT model not found: {cm}");
                 }
             }
         }
@@ -520,10 +543,18 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_hybrid",
-        description = "RECOMMENDED: Parse HTML using the hybrid BM25 + HDC + Embedding pipeline. Returns the most goal-relevant nodes ranked by a three-stage scoring system:\n\n1. BM25 keyword retrieval — finds candidate nodes matching goal terms (with prefix fallback)\n2. HDC (Hyperdimensional Computing) pruning — eliminates structurally irrelevant subtrees using 2048-bit bitvector similarity in nanoseconds\n3. Bottom-up embedding scoring — runs neural embedding (all-MiniLM-L6-v2) only on survivors, scoring leaf nodes first so wrapper nodes can't steal relevance from children\n\nAdvantages over parse_top:\n- 2.5x faster on average (embedding runs on 30-100 survivors, not all 300 nodes)\n- Better quality: leaf content nodes rank above wrapper divs (fixes wrapper-bias)\n- Includes pipeline timing metadata (build_tfidf_us, build_hdc_us, query_tfidf_us, prune_hdc_us, score_embed_us)\n- top_n defaults to 100 — intentionally high so YOU (the LLM agent) can pick the best 5-10 nodes from a pre-ranked list\n\nUSE THIS TOOL WHEN: you want the highest quality relevance ranking with minimal tokens. Set top_n to 100 (default) and pick what you need from the ranked results. The response includes a 'pipeline' object with detailed timing for each stage."
+        description = "RECOMMENDED: Parse HTML using the hybrid BM25 + HDC + Neural scoring pipeline.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking stages. Before calling this tool, YOU (the LLM) MUST expand the goal with SPECIFIC terms — numbers, units, proper nouns, and domain-specific synonyms. Do NOT add generic words like 'information', 'service', 'data' — they match boilerplate.\n\nExample: User asks 'hur många bor i Hjo?'\n  BAD:  'hur många bor i Hjo information service kommun'\n  GOOD: 'hur många bor i Hjo invånare befolkning folkmängd 14000 population inhabitants Hjo kommun'\n\nExample: User asks 'what is the minimum wage?'\n  BAD:  'minimum wage workers employment pay information'\n  GOOD: 'minimum wage £12.21 £12.71 hourly rate per hour April 2025 National Living Wage'\n\nRules: Include original query + 5-8 specific synonyms/translations + expected values (numbers, currencies, dates). Never add vague terms.\n\nThree-stage ranking:\n1. BM25 keyword retrieval — matches goal terms against node text\n2. HDC 4096-bit structural pruning\n3. ColBERT MaxSim neural scoring\n\nThe response includes a 'pipeline' object with timing for each stage."
     )]
     fn parse_hybrid(&self, Parameters(params): Parameters<ParseHybridParams>) -> String {
-        aether_agent::parse_top_nodes_hybrid(&params.html, &params.goal, &params.url, params.top_n)
+        let config =
+            aether_agent::tools::parse_hybrid_tool::build_config(params.reranker.as_deref());
+        aether_agent::parse_top_nodes_with_config(
+            &params.html,
+            &params.goal,
+            &params.url,
+            params.top_n,
+            &config,
+        )
     }
 
     #[tool(
@@ -826,7 +857,7 @@ impl AetherMcpServer {
 
     #[tool(
         name = "search",
-        description = "Search the web via DuckDuckGo and return structured results with title, URL, snippet, domain, and optional direct answer. USE THIS TOOL WHEN: the agent has a free-text question but no URL — e.g. 'how many people live in Sweden?', 'what is the capital of France?', 'latest news about AI'. This is the entry point for web research: it searches DDG, parses results, and returns ranked hits. If a direct factual answer is found in snippets (numbers, dates), it is extracted as direct_answer. Use top_n=1 for quick lookups, top_n=5 for research. NOTE: This tool requires the server to fetch from DuckDuckGo — use fetch_search for the full pipeline, or provide pre-fetched DDG HTML. REAL-TIME: Also available via WebSocket at /ws/api — send {\"method\":\"search\", ...} for streaming progress updates and results."
+        description = "Search the web via DuckDuckGo and return structured results. USE THIS TOOL WHEN: the agent has a question but no URL.\n\nIMPORTANT: Set the 'goal' parameter with an EXPANDED version of the query — include 5-10 synonyms, translations, and related terms. This drives the ColBERT scoring of fetched pages.\n\nExample: query='hur många bor i Hjo', goal='hur många bor i Hjo invånare befolkning folkmängd population inhabitants Hjo kommun antal personer'\n\nThe goal expansion ensures that when pages are fetched and parsed, the ranking system finds nodes containing synonyms like 'invånare' even if the original query only says 'bor'."
     )]
     fn search(&self, Parameters(params): Parameters<SearchParams>) -> String {
         // Returnera DDG-URL som klienten ska hämta — search_from_html behöver HTML
@@ -2020,12 +2051,17 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
         "parse_top" => {
             aether_agent::parse_top_nodes(s("html"), s("goal"), s("url"), u32_or("top_n", 10))
         }
-        "parse_hybrid" => aether_agent::parse_top_nodes_hybrid(
-            s("html"),
-            s("goal"),
-            s("url"),
-            u32_or("top_n", 100),
-        ),
+        "parse_hybrid" => {
+            let reranker = args.get("reranker").and_then(|v| v.as_str());
+            let config = aether_agent::tools::parse_hybrid_tool::build_config(reranker);
+            aether_agent::parse_top_nodes_with_config(
+                s("html"),
+                s("goal"),
+                s("url"),
+                u32_or("top_n", 100),
+                &config,
+            )
+        }
         "find_and_click" => {
             aether_agent::find_and_click(s("html"), s("goal"), s("url"), s("target_label"))
         }

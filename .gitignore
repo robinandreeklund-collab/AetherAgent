@@ -15,6 +15,9 @@ dist/
 runs/
 dataset/
 models/
+# Behåll ColBERT-modell och vocab (små nog att checka in)
+!models/colbert-small-int8.onnx
+!models/vocab.txt
 wpt-suite/
 # Benchmark: ignorera symlink och lightpanda
 testsuite/benchmark/aether_latest

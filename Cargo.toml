@@ -96,6 +96,7 @@ mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fet
 # [RTEN-ROLLBACK-ID:vision-feature] Gamla: vision = ["rten", "rten-imageproc", "rten-tensor", "image"]
 vision = ["ort", "ndarray", "image"]
 embeddings = ["ort", "ndarray"]
+colbert = ["embeddings"]
 blitz = ["blitz-html", "blitz-dom", "blitz-paint", "blitz-net", "blitz-traits", "style_traits", "anyrender", "anyrender_vello_cpu", "peniko", "png", "base64", "css-inline", "lightningcss", "taffy", "parley", "fontique", "skrifa", "vello_cpu"]
 cdp = ["headless_chrome"]
 
@@ -137,6 +138,25 @@ required-features = ["embeddings"]
 name = "aether-quality-bench"
 path = "benches/bench_quality.rs"
 required-features = ["embeddings"]
+
+[[bin]]
+name = "aether-pipeline-breakdown"
+path = "benches/pipeline_breakdown.rs"
+required-features = ["colbert"]
+
+[[bin]]
+name = "aether-quality-analysis"
+path = "benches/colbert_quality_analysis.rs"
+required-features = ["colbert"]
+
+[[bin]]
+name = "aether-colbert-validation"
+path = "benches/colbert_validation.rs"
+required-features = ["embeddings", "colbert"]
+
+[[bin]]
+name = "aether-colbert-bench"
+path = "benches/colbert_bench.rs"
 
 [[bin]]
 name = "aether-hybrid-bench"

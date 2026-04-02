@@ -64,7 +64,7 @@ pub fn execute(req: &SessionRequest) -> ToolResult {
                 "session_json": session.to_json(),
                 "status": "created",
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "status" => {
             let session = match parse_session(&req.session_json, start) {
@@ -78,7 +78,7 @@ pub fn execute(req: &SessionRequest) -> ToolResult {
                 "needs_refresh": session.needs_token_refresh(now),
                 "cookie_count": session.cookie_count(),
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "cookies" => execute_cookies(req, start),
         "token" => execute_token(req, start),
@@ -94,7 +94,7 @@ pub fn execute(req: &SessionRequest) -> ToolResult {
                 "session_json": session.to_json(),
                 "cookie_count": session.cookie_count(),
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "mark_logged_in" => {
             let mut session = match parse_session(&req.session_json, start) {
@@ -106,12 +106,12 @@ pub fn execute(req: &SessionRequest) -> ToolResult {
                 "session_json": session.to_json(),
                 "authenticated": true,
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "refresh" => execute_refresh(req, start),
         other => ToolResult::err(
             format!("Okänd action: '{other}'. Använd: create, status, cookies, token, oauth, detect_login, evict, mark_logged_in, refresh."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -121,9 +121,16 @@ fn parse_session(
     start: u64,
 ) -> Result<crate::session::SessionManager, ToolResult> {
     match json {
-        Some(j) => crate::session::SessionManager::from_json(j)
-            .map_err(|e| ToolResult::err(format!("Ogiltig session_json: {e}"), now_ms() - start)),
-        None => Err(ToolResult::err("'session_json' krävs", now_ms() - start)),
+        Some(j) => crate::session::SessionManager::from_json(j).map_err(|e| {
+            ToolResult::err(
+                format!("Ogiltig session_json: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }),
+        None => Err(ToolResult::err(
+            "'session_json' krävs",
+            now_ms().saturating_sub(start),
+        )),
     }
 }
 
@@ -135,7 +142,12 @@ fn execute_cookies(req: &SessionRequest, start: u64) -> ToolResult {
 
     let domain = match &req.domain {
         Some(d) => d.as_str(),
-        None => return ToolResult::err("'domain' krävs för action=cookies", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'domain' krävs för action=cookies",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     // Om cookies skickas → lägg till, annars → hämta
@@ -145,14 +157,14 @@ fn execute_cookies(req: &SessionRequest, start: u64) -> ToolResult {
             "session_json": session.to_json(),
             "cookies_added": cookie_headers.len(),
         });
-        ToolResult::ok(data, now_ms() - start)
+        ToolResult::ok(data, now_ms().saturating_sub(start))
     } else {
         let path = req.path.as_deref().unwrap_or("/");
         let header = session.get_cookie_header(domain, path, now_ms());
         let data = serde_json::json!({
             "cookie_header": header,
         });
-        ToolResult::ok(data, now_ms() - start)
+        ToolResult::ok(data, now_ms().saturating_sub(start))
     }
 }
 
@@ -164,7 +176,12 @@ fn execute_token(req: &SessionRequest, start: u64) -> ToolResult {
 
     let access_token = match &req.access_token {
         Some(t) => t.as_str(),
-        None => return ToolResult::err("'access_token' krävs för action=token", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'access_token' krävs för action=token",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let now = now_ms();
@@ -184,7 +201,7 @@ fn execute_token(req: &SessionRequest, start: u64) -> ToolResult {
         "token_set": true,
         "expires_in_secs": expires_in,
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_oauth(req: &SessionRequest, start: u64) -> ToolResult {
@@ -195,12 +212,22 @@ fn execute_oauth(req: &SessionRequest, start: u64) -> ToolResult {
 
     let config_json = match &req.oauth_config {
         Some(c) => c.as_str(),
-        None => return ToolResult::err("'oauth_config' krävs för action=oauth", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'oauth_config' krävs för action=oauth",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let config: crate::session::OAuthConfig = match serde_json::from_str(config_json) {
         Ok(c) => c,
-        Err(e) => return ToolResult::err(format!("Ogiltig oauth_config: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig oauth_config: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     // Om code finns → token exchange, annars → authorize URL
@@ -210,7 +237,7 @@ fn execute_oauth(req: &SessionRequest, start: u64) -> ToolResult {
             "session_json": session.to_json(),
             "exchange_params": params,
         });
-        ToolResult::ok(data, now_ms() - start)
+        ToolResult::ok(data, now_ms().saturating_sub(start))
     } else {
         let auth_result = session.build_authorize_url(&config);
         let data = serde_json::json!({
@@ -218,14 +245,19 @@ fn execute_oauth(req: &SessionRequest, start: u64) -> ToolResult {
             "authorize_url": auth_result.authorize_url,
             "state": auth_result.state,
         });
-        ToolResult::ok(data, now_ms() - start)
+        ToolResult::ok(data, now_ms().saturating_sub(start))
     }
 }
 
 fn execute_detect_login(req: &SessionRequest, start: u64) -> ToolResult {
     let html = match &req.html {
         Some(h) => h.as_str(),
-        None => return ToolResult::err("'html' krävs för action=detect_login", now_ms() - start),
+        None => {
+            return ToolResult::err(
+                "'html' krävs för action=detect_login",
+                now_ms().saturating_sub(start),
+            )
+        }
     };
     let goal = req.goal.as_deref().unwrap_or("logga in");
     let url = req.url.as_deref().unwrap_or("");
@@ -245,7 +277,7 @@ fn execute_detect_login(req: &SessionRequest, start: u64) -> ToolResult {
         }),
     };
 
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 fn execute_refresh(req: &SessionRequest, start: u64) -> ToolResult {
@@ -257,13 +289,21 @@ fn execute_refresh(req: &SessionRequest, start: u64) -> ToolResult {
     let config_json = match &req.oauth_config {
         Some(c) => c.as_str(),
         None => {
-            return ToolResult::err("'oauth_config' krävs för action=refresh", now_ms() - start)
+            return ToolResult::err(
+                "'oauth_config' krävs för action=refresh",
+                now_ms().saturating_sub(start),
+            )
         }
     };
 
     let config: crate::session::OAuthConfig = match serde_json::from_str(config_json) {
         Ok(c) => c,
-        Err(e) => return ToolResult::err(format!("Ogiltig oauth_config: {e}"), now_ms() - start),
+        Err(e) => {
+            return ToolResult::err(
+                format!("Ogiltig oauth_config: {e}"),
+                now_ms().saturating_sub(start),
+            )
+        }
     };
 
     let params = session.prepare_token_refresh(&config);
@@ -271,7 +311,7 @@ fn execute_refresh(req: &SessionRequest, start: u64) -> ToolResult {
         "refresh_params": params,
         "has_refresh_token": params.is_some(),
     });
-    ToolResult::ok(data, now_ms() - start)
+    ToolResult::ok(data, now_ms().saturating_sub(start))
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use crate::types::SemanticNode;
 
+use super::colbert_reranker::Stage3Reranker;
 use super::embed_score::{self, build_node_index, ScoredNode};
 use super::hdc::{self, HdcTree};
 use super::tfidf::{self, TfIdfIndex};
@@ -28,6 +29,19 @@ pub struct PipelineConfig {
     pub max_survivors: usize,
     /// Returnera alltid minst detta antal scorade noder till downstream
     pub min_output: usize,
+    /// Stage 3 reranker: MiniLM (default), ColBERT, eller Hybrid
+    pub stage3_reranker: Stage3Reranker,
+    // ── Ablation flags (för vetenskaplig utvärdering) ──
+    /// Stäng av dense retrieval fallback (steg 1b)
+    pub disable_dense_fallback: bool,
+    /// Stäng av HDC pruning (steg 2) — skicka alla BM25-kandidater direkt till steg 3
+    pub disable_hdc: bool,
+    /// Stäng av bottom-up scoring — scorea alla noder platt istället
+    pub disable_bottom_up: bool,
+    /// Stäng av query expansion i ColBERT
+    pub disable_expansion: bool,
+    /// Stäng av role multipliers + wrapper/length penalties (ablation)
+    pub disable_role_penalties: bool,
 }
 
 impl Default for PipelineConfig {
@@ -38,6 +52,12 @@ impl Default for PipelineConfig {
             adaptive_hdc: true,
             max_survivors: 0, // 0 = adaptivt baserat på BM25-confidence + DOM-storlek
             min_output: 100,  // Returnera alltid minst 100 noder till LLM
+            stage3_reranker: Stage3Reranker::default(),
+            disable_dense_fallback: false,
+            disable_hdc: false,
+            disable_bottom_up: false,
+            disable_expansion: false,
+            disable_role_penalties: false,
         }
     }
 }
@@ -106,9 +126,14 @@ impl ScoringPipeline {
 
         let node_index = build_node_index(tree_nodes);
 
-        // Steg 1: BM25 kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
-        let candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let candidates = if config.disable_dense_fallback {
+            bm25_candidates
+        } else {
+            dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding)
+        };
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
@@ -116,14 +141,29 @@ impl ScoringPipeline {
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
 
+        // C-optimering: Beräkna HDC text-aspect similarity per nod
+        let hdc_text_sims: std::collections::HashMap<u32, f32> = node_index
+            .keys()
+            .map(|&id| (id, hdc_tree.text_similarity(id, &goal_hv).unwrap_or(0.0)))
+            .collect();
+
         // Beräkna adaptiv survivor-cap baserat på BM25-confidence + DOM-storlek
         let survivor_cap = if config.max_survivors > 0 {
             config.max_survivors
         } else {
-            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+            adaptive_survivor_cap(
+                candidates.len(),
+                flat_nodes.len(),
+                !matches!(config.stage3_reranker, Stage3Reranker::MiniLM),
+            )
         };
 
-        let survivors = if !candidates.is_empty() {
+        let survivors = if config.disable_hdc {
+            // Ablation: skippa HDC, skicka BM25-kandidater direkt till steg 3
+            let mut direct = candidates.clone();
+            direct.truncate(survivor_cap);
+            direct
+        } else if !candidates.is_empty() {
             // Steg 2a: Bred HDC-pruning (låg threshold, behåll de flesta)
             let broad = if config.adaptive_hdc {
                 candidates
@@ -169,14 +209,17 @@ impl ScoringPipeline {
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
 
-        // Steg 3: Bottom-up embedding scoring
+        // Steg 3: Scoring — dispatcha till rätt reranker
         let t4 = Instant::now();
-        let scored = embed_score::score_bottom_up(
+        let scored = dispatch_stage3(
+            &config.stage3_reranker,
             &survivors,
             &node_index,
             goal,
             &goal_words,
             goal_embedding,
+            &hdc_text_sims,
+            config,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -219,24 +262,43 @@ impl ScoringPipeline {
         let hdc_tree = build_result.hdc_tree;
         let node_index = build_result.node_index;
 
-        // Steg 1: BM25 kandidatretrieval
+        // Steg 1: BM25 kandidatretrieval + dense retrieval fallback
         let t2 = Instant::now();
-        let candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let bm25_candidates = tfidf_index.query(goal, config.tfidf_top_k);
+        let candidates = if config.disable_dense_fallback {
+            bm25_candidates
+        } else {
+            dense_retrieval_fallback(bm25_candidates, &node_index, goal_embedding)
+        };
         timings.query_tfidf_us = t2.elapsed().as_micros() as u64;
         timings.tfidf_candidates = candidates.len();
 
         // Steg 2: Två-stegs HDC pruning (samma logik som run())
         let t3 = Instant::now();
         let goal_hv = HdcTree::project_goal(goal);
+
+        // C-optimering: Beräkna HDC text-aspect similarity per nod
+        let hdc_text_sims: std::collections::HashMap<u32, f32> = node_index
+            .keys()
+            .map(|&id| (id, hdc_tree.text_similarity(id, &goal_hv).unwrap_or(0.0)))
+            .collect();
         let flat_nodes = tfidf::flatten_tree(tree_nodes);
 
         let survivor_cap = if config.max_survivors > 0 {
             config.max_survivors
         } else {
-            adaptive_survivor_cap(candidates.len(), flat_nodes.len())
+            adaptive_survivor_cap(
+                candidates.len(),
+                flat_nodes.len(),
+                !matches!(config.stage3_reranker, Stage3Reranker::MiniLM),
+            )
         };
 
-        let survivors = if !candidates.is_empty() {
+        let survivors = if config.disable_hdc {
+            let mut direct = candidates.clone();
+            direct.truncate(survivor_cap);
+            direct
+        } else if !candidates.is_empty() {
             let broad = if config.adaptive_hdc {
                 candidates
                     .iter()
@@ -278,14 +340,17 @@ impl ScoringPipeline {
         timings.prune_hdc_us = t3.elapsed().as_micros() as u64;
         timings.hdc_survivors = survivors.len();
 
-        // Steg 3: Bottom-up embedding scoring
+        // Steg 3: Scoring — dispatcha till rätt reranker
         let t4 = Instant::now();
-        let scored = embed_score::score_bottom_up(
+        let scored = dispatch_stage3(
+            &config.stage3_reranker,
             &survivors,
             &node_index,
             goal,
             &goal_words,
             goal_embedding,
+            &hdc_text_sims,
+            config,
         );
         timings.score_embed_us = t4.elapsed().as_micros() as u64;
         timings.final_scored = scored.len();
@@ -307,35 +372,175 @@ impl ScoringPipeline {
     }
 }
 
-/// Adaptiv survivor-cap baserat på BM25-confidence och DOM-storlek.
+/// Dispatcha Stage 3 scoring till rätt reranker.
 ///
-/// Fler BM25-kandidater = högre confidence → tillåt fler survivors.
-/// Större DOM = behöver mer aggressiv pruning.
+/// MiniLM: befintlig bottom-up bi-encoder (default).
+/// ColBERT: MaxSim late interaction (kräver `colbert` feature).
+/// Hybrid: viktad kombination av ColBERT + MiniLM.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_stage3(
+    reranker: &Stage3Reranker,
+    survivors: &[(u32, f32)],
+    node_index: &std::collections::HashMap<u32, embed_score::NodeInfo>,
+    goal: &str,
+    goal_words: &[String],
+    goal_embedding: Option<&[f32]>,
+    hdc_text_sims: &std::collections::HashMap<u32, f32>,
+    config: &PipelineConfig,
+) -> Vec<ScoredNode> {
+    match reranker {
+        Stage3Reranker::MiniLM => {
+            let _ = (hdc_text_sims, config); // MiniLM använder inte HDC/ablation
+            embed_score::score_bottom_up(survivors, node_index, goal, goal_words, goal_embedding)
+        }
+        #[cfg(feature = "colbert")]
+        Stage3Reranker::ColBert => super::colbert_reranker::score_colbert(
+            survivors,
+            node_index,
+            goal,
+            hdc_text_sims,
+            config.disable_bottom_up,
+            config.disable_expansion,
+            config.disable_role_penalties,
+        ),
+        #[cfg(feature = "colbert")]
+        Stage3Reranker::Hybrid {
+            alpha,
+            use_adaptive_alpha,
+        } => {
+            let minilm_scores = embed_score::score_bottom_up(
+                survivors,
+                node_index,
+                goal,
+                goal_words,
+                goal_embedding,
+            );
+            super::colbert_reranker::score_hybrid(
+                survivors,
+                node_index,
+                goal,
+                &minilm_scores,
+                *alpha,
+                *use_adaptive_alpha,
+            )
+        }
+    }
+}
+
+/// Adaptiv survivor-cap baserat på BM25-confidence, DOM-storlek och reranker.
 ///
-/// Returnerar max antal noder som skickas till embedding-steget.
-fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize) -> usize {
-    // Bas: 30-80 survivors beroende på DOM-storlek
-    let base = if total_nodes < 50 {
-        total_nodes // Liten sida — behåll allt
-    } else if total_nodes < 200 {
-        60
-    } else if total_nodes < 500 {
-        80
+/// ColBERT:s bättre score-separation klarar sig med färre survivors (25-35)
+/// medan MiniLM bi-encoder behöver fler (60-100) för att inte missa noder.
+fn adaptive_survivor_cap(bm25_candidates: usize, total_nodes: usize, is_colbert: bool) -> usize {
+    if is_colbert {
+        // ColBERT behöver fler survivors än initialt trott — tight cap
+        // klipper bort artiklar/content-noder på content-heavy sajter (HN, lobste.rs)
+        let base = if total_nodes < 50 {
+            total_nodes
+        } else if total_nodes < 200 {
+            50
+        } else if total_nodes < 500 {
+            60
+        } else if total_nodes < 2000 {
+            80
+        } else {
+            100 // Bugg 6: Wikipedia/xe.com med >2000 noder behöver fler survivors
+        };
+        let confidence_factor = if bm25_candidates > 100 {
+            0.7
+        } else if bm25_candidates > 30 {
+            0.85
+        } else {
+            1.0
+        };
+        ((base as f32 * confidence_factor) as usize).max(10)
     } else {
-        100
-    };
+        // MiniLM: behöver fler survivors pga mean pooling
+        let base = if total_nodes < 50 {
+            total_nodes
+        } else if total_nodes < 200 {
+            60
+        } else if total_nodes < 500 {
+            80
+        } else {
+            100
+        };
+        let confidence_factor = if bm25_candidates > 100 {
+            0.6
+        } else if bm25_candidates > 30 {
+            0.8
+        } else {
+            1.0
+        };
+        ((base as f32 * confidence_factor) as usize).max(20)
+    }
+}
 
-    // BM25-confidence boost: om BM25 hittade många → bra keyword-overlap → vi kan
-    // vara striktare (behöver inte HDC-fallback för att kompensera)
-    let confidence_factor = if bm25_candidates > 100 {
-        0.6 // Högt antal kandidater — var strikt
-    } else if bm25_candidates > 30 {
-        0.8
-    } else {
-        1.0 // Få kandidater — behåll fler
-    };
+/// Dense retrieval fallback: om BM25 hittar <20 kandidater, komplettera
+/// med embedding-baserad semantisk sökning. Fångar noder som matchar
+/// semantiskt utan keyword-overlap (t.ex. "bor" → "invånare").
+///
+/// Returnerar utökad kandidatlista (BM25 ∪ embedding top-50).
+fn dense_retrieval_fallback(
+    candidates: Vec<(u32, f32)>,
+    node_index: &HashMap<u32, embed_score::NodeInfo>,
+    goal_embedding: Option<&[f32]>,
+) -> Vec<(u32, f32)> {
+    // Trigga vid <20 BM25-candidates, eller vid stora sajter (>1000 noder)
+    // med <50 candidates — där HDC kan pruna bort djupa faktanoder
+    let total_nodes = node_index.len();
+    let threshold = if total_nodes > 1000 { 50 } else { 20 };
+    if candidates.len() >= threshold || goal_embedding.is_none() {
+        return candidates;
+    }
 
-    ((base as f32 * confidence_factor) as usize).max(20) // Minimum 20
+    let goal_vec = goal_embedding.unwrap();
+    let existing_ids: std::collections::HashSet<u32> =
+        candidates.iter().map(|&(id, _)| id).collect();
+
+    // Scanna noder med embedding cosine similarity (max 200 för latens-budget)
+    // Prioritera löv-noder och text/heading-roller — de innehåller oftast svar
+    let mut scannable: Vec<(&u32, &embed_score::NodeInfo)> = node_index
+        .iter()
+        .filter(|(id, info)| {
+            !existing_ids.contains(id)
+                && info.label.len() >= 10
+                && !matches!(
+                    info.role.as_str(),
+                    "navigation" | "complementary" | "generic"
+                )
+        })
+        .collect();
+    // Sortera: löv-noder och text/heading först
+    scannable.sort_by_key(|(_, info)| {
+        if info.is_leaf && matches!(info.role.as_str(), "text" | "heading" | "data") {
+            0
+        } else if info.is_leaf {
+            1
+        } else {
+            2
+        }
+    });
+    scannable.truncate(200); // Max 200 noder → ~100ms
+
+    let mut semantic_candidates: Vec<(u32, f32)> = scannable
+        .iter()
+        .filter_map(|(&id, info)| {
+            let sim = crate::embedding::similarity_with_vec(goal_vec, &info.label)?;
+            if sim > 0.15 {
+                Some((id, sim * 2.0))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    semantic_candidates.sort_by(|a, b| b.1.total_cmp(&a.1));
+    semantic_candidates.truncate(50);
+
+    let mut merged = candidates;
+    merged.extend(semantic_candidates);
+    merged
 }
 
 /// Applicera pipeline-scores tillbaka på SemanticNodes i trädet

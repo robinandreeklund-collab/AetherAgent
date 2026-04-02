@@ -45,18 +45,19 @@ pub fn execute(req: &StreamRequest) -> ToolResult {
 
     let input = match detect_input(req.html.as_deref(), req.url.as_deref(), None) {
         Ok(i) => i,
-        Err(e) => return ToolResult::err(e, now_ms() - start),
+        Err(e) => return ToolResult::err(e, now_ms().saturating_sub(start)),
     };
 
     match input {
         InputKind::Html(html) => execute_with_html(&html, req, req.url.as_deref().unwrap_or("")),
         InputKind::Url(_) => ToolResult::err(
             "URL-input kräver asynkron fetch. Använd HTTP/MCP-endpointen.",
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
-        InputKind::Screenshot(_) => {
-            ToolResult::err("stream stödjer inte screenshot-input.", now_ms() - start)
-        }
+        InputKind::Screenshot(_) => ToolResult::err(
+            "stream stödjer inte screenshot-input.",
+            now_ms().saturating_sub(start),
+        ),
     }
 }
 
@@ -83,7 +84,7 @@ pub fn execute_with_html(html: &str, req: &StreamRequest, url: &str) -> ToolResu
     let data = serde_json::to_value(&result)
         .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-    ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+    ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
 }
 
 /// Parsa directive-strängar till Directive-enum

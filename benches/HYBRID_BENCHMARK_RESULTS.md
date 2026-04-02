@@ -1,9 +1,39 @@
 # Hybrid Scoring Pipeline — Benchmark Results
 
-**Date:** 2026-03-30
+**Date:** 2026-03-31 (updated with ColBERT results)
 **Platform:** Linux x86_64, release build
-**Embedding model:** all-MiniLM-L6-v2 (384-dim, ONNX)
-**Scoring:** BM25 → HDC (2048-bit) → Bottom-up Embedding
+**Bi-encoder:** all-MiniLM-L6-v2 (384-dim, ONNX)
+**ColBERT:** ColBERTv2.0 (768-dim, ONNX, int8 quantized)
+**Scoring:** BM25 → HDC (4096-bit) → Stage 3 (MiniLM / ColBERT / Hybrid)
+
+## ColBERT vs MiniLM — Stage 3 Reranker Comparison (30 Sites)
+
+All three methods use the same full pipeline: HTML parse → semantic tree → BM25 → HDC → Stage 3.
+
+| Method | Correctness | Avg Latency | Avg Top-1 Score |
+|--------|-------------|-------------|-----------------|
+| **MiniLM** (bi-encoder, FP32) | 29/30 (96.7%) | 1,234ms | 0.675 |
+| **ColBERT** (MaxSim, int8+batch+u8) | 29/30 (96.7%) | **434ms** | **0.950** |
+| **Hybrid** (adaptive α) | 29/30 (96.7%) | **431ms** | 0.817 |
+
+**ColBERT is 2.8× faster AND 41% higher quality.** Consistently ranks data-bearing nodes (prices, statistics, rates) above headings and navigation.
+
+**Node quality examples:**
+
+| Site | MiniLM top-1 | ColBERT top-1 |
+|------|-------------|---------------|
+| Bank Rate test | Footer address (wrong!) | Rate table with 4.50% |
+| Bitcoin test | Heading (no data) | Price node with $66,825 |
+| Tim Cook test | Correct + ref link at #2 | All top-5 contain "2011" |
+
+**Optimization progression:**
+
+| Configuration | ColBERT Latency | Speedup |
+|---------------|----------------|---------|
+| Candle FP32, sequential | 9,284ms | baseline |
+| ONNX FP32, sequential | 6,252ms | 1.5× |
+| ONNX Int8, batch | 691ms | 13.4× |
+| **+ survivor cap + u8 MaxSim + cache** | **434ms** | **21.4×** |
 
 ## Real-World Validation (20 Sites, WITH Embeddings)
 

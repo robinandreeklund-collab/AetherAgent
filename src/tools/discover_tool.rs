@@ -30,18 +30,19 @@ pub fn execute(req: &DiscoverRequest) -> ToolResult {
 
     let input = match detect_input(req.html.as_deref(), req.url.as_deref(), None) {
         Ok(i) => i,
-        Err(e) => return ToolResult::err(e, now_ms() - start),
+        Err(e) => return ToolResult::err(e, now_ms().saturating_sub(start)),
     };
 
     match input {
         InputKind::Html(html) => execute_with_html(&html, req),
         InputKind::Url(_) => ToolResult::err(
             "URL-input kräver asynkron fetch. Använd HTTP/MCP-endpointen.",
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
-        InputKind::Screenshot(_) => {
-            ToolResult::err("discover stödjer inte screenshot-input.", now_ms() - start)
-        }
+        InputKind::Screenshot(_) => ToolResult::err(
+            "discover stödjer inte screenshot-input.",
+            now_ms().saturating_sub(start),
+        ),
     }
 }
 
@@ -67,13 +68,13 @@ pub fn execute_with_html(html: &str, req: &DiscoverRequest) -> ToolResult {
                     "count": xhr_captures.len(),
                 },
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "webmcp" => {
             let result = crate::webmcp::discover_webmcp_tools(html, url);
             let data = serde_json::to_value(&result)
                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         "xhr" => {
             let captures = crate::js_bridge::extract_xhr_from_snippets(html);
@@ -82,11 +83,11 @@ pub fn execute_with_html(html: &str, req: &DiscoverRequest) -> ToolResult {
                 "captures": captures,
                 "count": captures.len(),
             });
-            ToolResult::ok(data, now_ms() - start)
+            ToolResult::ok(data, now_ms().saturating_sub(start))
         }
         other => ToolResult::err(
             format!("Okänt mode: '{other}'. Använd 'all', 'webmcp', eller 'xhr'."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }

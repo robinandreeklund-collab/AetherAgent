@@ -44,18 +44,18 @@ pub fn execute(req: &ActRequest) -> ToolResult {
 
     let input = match detect_input(req.html.as_deref(), req.url.as_deref(), None) {
         Ok(i) => i,
-        Err(e) => return ToolResult::err(e, now_ms() - start),
+        Err(e) => return ToolResult::err(e, now_ms().saturating_sub(start)),
     };
 
     match input {
         InputKind::Html(html) => execute_with_html(&html, req, req.url.as_deref().unwrap_or("")),
         InputKind::Url(_) => ToolResult::err(
             "URL-input kräver asynkron fetch. Använd HTTP/MCP-endpointen.",
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
         InputKind::Screenshot(_) => ToolResult::err(
             "act stödjer inte screenshot-input. Använd parse eller vision istället.",
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }
@@ -72,39 +72,50 @@ pub fn execute_with_html(html: &str, req: &ActRequest, url: &str) -> ToolResult 
             let target = match &req.target {
                 Some(t) => t.as_str(),
                 None => {
-                    return ToolResult::err("'target' krävs för action=click", now_ms() - start)
+                    return ToolResult::err(
+                        "'target' krävs för action=click",
+                        now_ms().saturating_sub(start),
+                    )
                 }
             };
             let result = crate::intent::find_best_clickable(&tree, target);
             let data = serde_json::to_value(&result)
                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-            ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+            ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
         }
         "fill" => {
             let fields = match &req.fields {
                 Some(f) => f.clone(),
-                None => return ToolResult::err("'fields' krävs för action=fill", now_ms() - start),
+                None => {
+                    return ToolResult::err(
+                        "'fields' krävs för action=fill",
+                        now_ms().saturating_sub(start),
+                    )
+                }
             };
             let result = crate::intent::map_form_fields(&tree, &fields);
             let data = serde_json::to_value(&result)
                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-            ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+            ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
         }
         "extract" => {
             let keys = match &req.keys {
                 Some(k) => k.clone(),
                 None => {
-                    return ToolResult::err("'keys' krävs för action=extract", now_ms() - start)
+                    return ToolResult::err(
+                        "'keys' krävs för action=extract",
+                        now_ms().saturating_sub(start),
+                    )
                 }
             };
             let result = crate::intent::extract_by_keys(&tree, &keys);
             let data = serde_json::to_value(&result)
                 .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
-            ToolResult::ok(data, now_ms() - start).with_warnings(warnings)
+            ToolResult::ok(data, now_ms().saturating_sub(start)).with_warnings(warnings)
         }
         other => ToolResult::err(
             format!("Okänd action: '{other}'. Använd 'click', 'fill', eller 'extract'."),
-            now_ms() - start,
+            now_ms().saturating_sub(start),
         ),
     }
 }

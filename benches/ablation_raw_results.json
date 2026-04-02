@@ -1,0 +1,60 @@
+{
+  "Full system": {
+    "n": 20,
+    "f5": 19,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 845,
+    "fails": []
+  },
+  "Full (raw goals)": {
+    "n": 20,
+    "f5": 20,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 1077,
+    "fails": []
+  },
+  "Raw \u2212 dense fallback": {
+    "n": 20,
+    "f5": 20,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 246,
+    "fails": []
+  },
+  "Raw \u2212 HDC pruning": {
+    "n": 20,
+    "f5": 20,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 274,
+    "fails": []
+  },
+  "Raw \u2212 bottom-up": {
+    "n": 20,
+    "f5": 20,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 235,
+    "fails": []
+  },
+  "Raw \u2212 expansion": {
+    "n": 20,
+    "f5": 20,
+    "f10": 20,
+    "f20": 20,
+    "avg_ms": 230,
+    "fails": []
+  },
+  "Raw MiniLM only": {
+    "n": 20,
+    "f5": 17,
+    "f10": 17,
+    "f20": 19,
+    "avg_ms": 386,
+    "fails": [
+      "Hacker News"
+    ]
+  }
+}
