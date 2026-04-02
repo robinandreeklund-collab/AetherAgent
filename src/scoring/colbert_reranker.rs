@@ -597,6 +597,7 @@ fn compute_colbert_node_score(
     colbert_map: &HashMap<u32, f32>,
     bm25_map: &HashMap<u32, f32>,
     hdc_text_sims: &HashMap<u32, f32>,
+    disable_penalties: bool,
 ) -> f32 {
     let colbert_score = colbert_map.get(&id).copied().unwrap_or(0.0);
     let bm25_score = bm25_map.get(&id).copied().unwrap_or(0.0);
@@ -604,6 +605,13 @@ fn compute_colbert_node_score(
     let role_score = crate::types::SemanticNode::role_priority(&info.role);
     let hdc_raw = hdc_text_sims.get(&id).copied().unwrap_or(0.0);
     let hdc_text = (hdc_raw + 1.0) / 2.0;
+
+    if disable_penalties {
+        // Ablation: raw ColBERT utan role/wrapper/length penalties
+        let raw = colbert_score * 0.40 + hdc_text * 0.15 + role_score * 0.15 + bm25_norm * 0.30;
+        return raw.clamp(0.0, 1.0);
+    }
+
     let w_penalty = wrapper_penalty(&info.role, info.label.len());
     let len_pen = length_penalty(info.label.len(), info.is_leaf);
     let role_mult = role_multiplier(&info.role, &info.label, info.is_leaf);
@@ -674,6 +682,7 @@ pub fn score_colbert(
     hdc_text_sims: &HashMap<u32, f32>,
     disable_bottom_up: bool,
     disable_expansion: bool,
+    disable_role_penalties: bool,
 ) -> Vec<ScoredNode> {
     // Kolla cache
     let key = cache_key(goal, survivors, all_nodes);
@@ -724,6 +733,7 @@ pub fn score_colbert(
                     &colbert_map,
                     &bm25_map,
                     hdc_text_sims,
+                    disable_role_penalties,
                 );
                 scores.insert(node_id, score);
             }
@@ -747,6 +757,7 @@ pub fn score_colbert(
                     &colbert_map,
                     &bm25_map,
                     hdc_text_sims,
+                    disable_role_penalties,
                 );
                 scores.insert(node_id, score);
             }
@@ -773,6 +784,7 @@ pub fn score_colbert(
                     &colbert_map,
                     &bm25_map,
                     hdc_text_sims,
+                    disable_role_penalties,
                 );
                 let inherited = max_child * PARENT_DECAY;
                 scores.insert(node_id, own_score.max(inherited));

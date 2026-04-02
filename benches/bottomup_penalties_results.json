@@ -1,0 +1,22 @@
+{
+  "Full (bottom-up + penalties)": {
+    "fact": 28,
+    "heading": 2,
+    "total": 30
+  },
+  "No bottom-up (penalties ON)": {
+    "fact": 28,
+    "heading": 2,
+    "total": 30
+  },
+  "No bottom-up + no penalties": {
+    "fact": 28,
+    "heading": 2,
+    "total": 30
+  },
+  "MiniLM only": {
+    "fact": 19,
+    "heading": 11,
+    "total": 30
+  }
+}

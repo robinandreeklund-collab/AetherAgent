@@ -40,6 +40,8 @@ pub struct PipelineConfig {
     pub disable_bottom_up: bool,
     /// Stäng av query expansion i ColBERT
     pub disable_expansion: bool,
+    /// Stäng av role multipliers + wrapper/length penalties (ablation)
+    pub disable_role_penalties: bool,
 }
 
 impl Default for PipelineConfig {
@@ -55,6 +57,7 @@ impl Default for PipelineConfig {
             disable_hdc: false,
             disable_bottom_up: false,
             disable_expansion: false,
+            disable_role_penalties: false,
         }
     }
 }
@@ -398,6 +401,7 @@ fn dispatch_stage3(
             hdc_text_sims,
             config.disable_bottom_up,
             config.disable_expansion,
+            config.disable_role_penalties,
         ),
         #[cfg(feature = "colbert")]
         Stage3Reranker::Hybrid {

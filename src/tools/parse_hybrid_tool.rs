@@ -56,6 +56,10 @@ pub fn build_config_with_ablation(
         Some("no_hdc") => config.disable_hdc = true,
         Some("no_bottomup") => config.disable_bottom_up = true,
         Some("no_expansion") => config.disable_expansion = true,
+        Some("no_bottomup_no_penalties") => {
+            config.disable_bottom_up = true;
+            config.disable_role_penalties = true;
+        }
         _ => {}
     }
     config
