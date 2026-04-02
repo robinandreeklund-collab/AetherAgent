@@ -29,6 +29,7 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+pub mod resonance;
 pub mod scoring;
 pub mod search;
 pub(crate) mod semantic;

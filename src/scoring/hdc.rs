@@ -34,6 +34,16 @@ impl Hypervector {
         }
     }
 
+    /// Access the raw bit storage (for serialization)
+    pub fn bits_raw(&self) -> &[u64; WORDS] {
+        &self.bits
+    }
+
+    /// Construct from raw bit storage (for deserialization)
+    pub fn from_bits(bits: [u64; WORDS]) -> Self {
+        Hypervector { bits }
+    }
+
     /// Generera deterministisk HV från en seed-sträng (pseudo-random via FNV-liknande hash)
     pub fn from_seed(seed: &str) -> Self {
         let mut bits = [0u64; WORDS];

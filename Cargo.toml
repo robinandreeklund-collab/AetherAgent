@@ -167,6 +167,10 @@ name = "aether-real-world"
 path = "benches/real_world_validation.rs"
 
 [[bin]]
+name = "aether-crfr-bench"
+path = "src/bin/crfr_benchmark.rs"
+
+[[bin]]
 name = "aether-wpt"
 path = "wpt/runner.rs"
 required-features = ["js-eval", "blitz", "fetch"]
