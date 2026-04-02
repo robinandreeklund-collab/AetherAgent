@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use aether_agent::resonance::{ResonanceField, ResonanceResult};
+use aether_agent::resonance::ResonanceField;
 use aether_agent::types::{NodeState, SemanticNode, TrustLevel};
 
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
@@ -469,15 +469,15 @@ fn run_benchmark(scenario_name: &str, nodes: &[SemanticNode], goal: &str) -> Ben
 
     // Mät propagering
     let t1 = Instant::now();
-    let result: ResonanceResult = field.propagate(goal);
+    let results = field.propagate(goal);
     let propagation_ms = t1.elapsed().as_secs_f64() * 1000.0;
-    let resonant_count = result.nodes_resonant;
+    let resonant_count = results.len();
 
-    // Mät cache-träff
+    // Mät cache-träff (andra anropet)
     let t2 = Instant::now();
-    let cached_result = field.propagate(goal);
+    let cached_results = field.propagate(goal);
     let cache_hit_ms = t2.elapsed().as_secs_f64() * 1000.0;
-    let cache_resonant_count = cached_result.nodes_resonant;
+    let cache_resonant_count = cached_results.len();
 
     // Token-besparing
     let token_savings_pct = if total > 0 {
@@ -515,9 +515,9 @@ fn run_causal_learning_test(
     println!("  Causal learning ({iterations} iterations):");
 
     for i in 0..iterations {
-        let result = field.propagate(goal);
-        let count = result.nodes_resonant;
-        let top_score = result.hits.first().map(|h| h.amplitude).unwrap_or(0.0);
+        let results = field.propagate(goal);
+        let count = results.len();
+        let top_score = results.first().map(|h| h.amplitude).unwrap_or(0.0);
 
         println!(
             "    Iteration {}: {} resonant nodes, top score: {:.3}",
@@ -540,11 +540,11 @@ fn run_multi_goal_test(nodes: &[SemanticNode], goals: &[&str]) {
 
     for goal in goals {
         let t = Instant::now();
-        let result = field.propagate(goal);
+        let results = field.propagate(goal);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
 
         // Beräkna överlapp med föregående resultat
-        let current_ids: Vec<u32> = result.hits.iter().map(|h| h.node_id).collect();
+        let current_ids: Vec<u32> = results.iter().map(|h| h.node_id).collect();
         let overlap = if previous_ids.is_empty() {
             0
         } else {
@@ -556,7 +556,8 @@ fn run_multi_goal_test(nodes: &[SemanticNode], goals: &[&str]) {
 
         println!(
             "    Goal \"{goal}\": {} resonant ({:.3} ms), overlap with prev: {overlap}",
-            result.nodes_resonant, ms
+            results.len(),
+            ms
         );
 
         previous_ids = current_ids;

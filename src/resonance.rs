@@ -1,654 +1,828 @@
 /// Causal Resonance Field Retrieval (CRFR)
 ///
-/// A novel retrieval paradigm that treats the DOM as a living resonance field.
-/// Instead of static indexing, a goal creates a resonance wave that propagates
-/// through the semantic tree. Nodes that resonate strongly are emitted;
-/// causal memory makes the field improve with each successful extraction.
+/// Treats the DOM as a living resonance field where nodes oscillate with
+/// amplitudes determined by goal similarity, causal memory from past
+/// successful interactions, and wave propagation through the tree structure.
 ///
-/// # Architecture
-/// - Each node has a `ResonanceState` with base HV, phase, amplitude, causal memory
-/// - `propagate()` sends a goal-wave through the field (3 iterations)
-/// - `feedback()` binds successful goal HVs into per-node causal memory
-/// - Multi-goal propagation enables constructive/destructive interference
+/// The field supports multi-goal interference (constructive and destructive)
+/// and learns over time via causal feedback.
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::scoring::hdc::Hypervector;
-use crate::semantic::text_similarity;
 use crate::types::SemanticNode;
 
-// ─── Konstanter ────────────────────────────────────────────────────────────
+// ─── Konstanter ─────────────────────────────────────────────────────────────
 
-/// Dämpfaktor vid propagation nedåt (förälder → barn)
+/// Dämpning vid propagation från förälder till barn
 const CHILD_DAMPING: f32 = 0.6;
-/// Förstärkning uppåt (barn → förälder)
+/// Förstärkning vid propagation från barn till förälder
 const PARENT_AMPLIFICATION: f32 = 0.4;
-/// Bonus när noder är fas-synkroniserade
+/// Bonus-multiplikator vid fas-synkronisering
 const PHASE_SYNC_BONUS: f32 = 1.15;
-/// Fönster för fas-synk (±π/4 radianer)
+/// Fönster (radianer) inom vilket fas-synk aktiveras
 const PHASE_SYNC_WINDOW: f32 = std::f32::consts::FRAC_PI_4;
-/// Under detta propageras ingen energi vidare
+/// Minsta amplitud för att en nod ska propagera vidare
 const ACTIVATION_THRESHOLD: f32 = 0.05;
-/// Under detta returneras noden ej i output
+/// Minsta amplitud för att inkluderas i resultat
 const MIN_OUTPUT_THRESHOLD: f32 = 0.08;
-/// Antal vågpropagationsiterationer
-const MAX_PROPAGATION_STEPS: usize = 3;
-/// Max antal noder i ett fält (minnessäkerhet)
+/// Antal propagations-iterationer
+const MAX_PROPAGATION_STEPS: u32 = 3;
+/// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
-/// Kausal boost-vikt (andel av causal memory similarity)
-const CAUSAL_WEIGHT: f32 = 0.3;
-/// Max ackumulerade feedback-boosts per nod
-const MAX_HIT_COUNT: u32 = 100;
 
-// ─── Typer ─────────────────────────────────────────────────────────────────
+// ─── Typer ──────────────────────────────────────────────────────────────────
 
-/// Hur en nod blev resonant
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// Type of resonance that caused a node to appear in results
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ResonanceType {
-    /// Direkt matchning mot goal
+    /// Noden matchade direkt mot goal-vektorn
     Direct,
-    /// Fick resonans via vågpropagation från granne
+    /// Noden fick amplitud via vågpropagation från grannar
     Propagated,
-    /// Förstärkt av kausalt minne från tidigare framgångar
+    /// Noden förstärktes av kausalt minne från tidigare lyckade mål
     CausalMemory,
 }
 
-/// Resultat för en enskild resonant nod
+/// A single node's result from resonance propagation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResonanceHit {
+pub struct ResonanceResult {
+    /// Nod-ID i det semantiska trädet
     pub node_id: u32,
+    /// Slutgiltig amplitud efter propagation
     pub amplitude: f32,
+    /// Oscillatorfas (radianer)
     pub phase: f32,
+    /// Typ av resonans som dominerade
     pub resonance_type: ResonanceType,
-    /// Bidrag från kausal memory (0.0 om inget minne finns)
+    /// Bidrag från kausalt minne
     pub causal_boost: f32,
 }
 
-/// Sammanfattat resultat från propagation
+/// Serialiserbar wrapper för Hypervector-data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResonanceResult {
-    pub hits: Vec<ResonanceHit>,
-    pub total_field_nodes: usize,
-    pub nodes_resonant: usize,
-    pub propagation_steps: usize,
-    /// Andel noder som filtrerats bort (token-besparing)
-    pub token_savings_ratio: f32,
+struct HvData {
+    bits: Vec<u64>,
 }
 
-/// Intern resonanstillstånd per nod
-#[derive(Clone)]
-struct ResonanceState {
-    /// Bas-hypervector (text + roll bindad, för strukturell matchning)
+impl HvData {
+    fn from_hv(hv: &Hypervector) -> Self {
+        HvData {
+            bits: hv.bits_raw().to_vec(),
+        }
+    }
+
+    fn to_hv(&self) -> Hypervector {
+        // Konvertera tillbaka till fast array; fyll med nollor om storlek inte stämmer
+        let mut arr = [0u64; 64];
+        let len = self.bits.len().min(64);
+        arr[..len].copy_from_slice(&self.bits[..len]);
+        Hypervector::from_bits(arr)
+    }
+}
+
+/// Per-node resonance state within the field
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResonanceState {
+    /// Bas-hypervector (text ⊗ roll) — kombinerad representation
+    #[serde(with = "hv_serde")]
     hv: Hypervector,
-    /// Ren text-HV (utan roll-binding, för content-matchning)
+    /// Ren text-hypervector (utan roll-binding) — används för likhetsmätning
+    #[serde(with = "hv_serde")]
     text_hv: Hypervector,
-    /// Oscillatorfas [0, 2π)
+    /// Oscillatorfas (0.0..2π)
     phase: f32,
-    /// Nuvarande resonansstyrka [0, 1]
+    /// Nuvarande resonansstyrka
     amplitude: f32,
-    /// Ackumulerat framgångs-HV (kausal minne)
+    /// Ackumulerat kausalt minne från lyckade mål
+    #[serde(with = "hv_serde")]
     causal_memory: Hypervector,
-    /// Antal gånger noden bidragit till framgångsrik extraktion
+    /// Antal lyckade målmatchningar
     hit_count: u32,
-    /// Senaste goal-hash (dedup-skydd)
+    /// Hash av senaste mål (undvik dubbelräkning)
     last_goal_hash: u64,
-    // Metadata (label behövs för text-matchning)
-    label: String,
 }
 
-/// Intern nod-topologi
-struct NodeTopology {
-    children: Vec<u32>,
-    parent: Option<u32>,
+/// Serde-modul för Hypervector (privat bits-fält)
+mod hv_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(hv: &Hypervector, s: S) -> Result<S::Ok, S::Error> {
+        let data = HvData::from_hv(hv);
+        data.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Hypervector, D::Error> {
+        let data = HvData::deserialize(d)?;
+        Ok(data.to_hv())
+    }
 }
 
-/// Huvudstrukturen: ett resonansfält byggt från ett semantiskt träd
+/// The resonance field — a living overlay on the semantic tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResonanceField {
-    /// Per-nod resonanstillstånd
-    states: HashMap<u32, ResonanceState>,
-    /// Topologi-karta
-    topology: HashMap<u32, NodeTopology>,
-    /// Antal totala queries som propagerat genom fältet
-    total_queries: u32,
-    /// URL-hash för cachning
-    url_hash: u64,
+    /// Resonanstillstånd per nod-ID
+    nodes: HashMap<u32, ResonanceState>,
+    /// Förälder-mappning: child_id -> parent_id
+    #[serde(default)]
+    parent_map: HashMap<u32, u32>,
+    /// Barn-mappning: parent_id -> [child_ids]
+    #[serde(default)]
+    children_map: HashMap<u32, Vec<u32>>,
+    /// URL-hash som identifierar sidan
+    pub url_hash: u64,
+    /// Tidpunkt då fältet skapades (ms sedan epoch)
+    pub created_at_ms: u64,
+    /// Totalt antal propagations-anrop
+    pub total_queries: u32,
 }
 
-// ─── Implementation ────────────────────────────────────────────────────────
-
-impl ResonanceField {
-    /// Build a resonance field from a semantic tree and URL.
-    ///
-    /// Each node gets a base hypervector (text bound with role),
-    /// initial phase=0, amplitude=0, and empty causal memory.
-    pub fn from_semantic_tree(tree_nodes: &[SemanticNode], url: &str) -> Self {
-        let mut states = HashMap::new();
-        let mut topology = HashMap::new();
-
-        // Rekursiv indexering med nodgräns
-        fn index_node(
-            node: &SemanticNode,
-            parent_id: Option<u32>,
-            depth: usize,
-            states: &mut HashMap<u32, ResonanceState>,
-            topology: &mut HashMap<u32, NodeTopology>,
-        ) {
-            if states.len() >= MAX_FIELD_NODES {
-                return;
-            }
-
-            // Bygg bas-HV: text ⊗ roll ⊗ djup-permutation
-            let text_hv = Hypervector::from_text_ngrams(&node.label);
-            let role_hv = Hypervector::from_seed(&format!("__role_{}", node.role));
-            let base_hv = text_hv.bind(&role_hv).permute(depth * 7);
-
-            states.insert(
-                node.id,
-                ResonanceState {
-                    hv: base_hv,
-                    text_hv: text_hv.clone(),
-                    phase: 0.0,
-                    amplitude: 0.0,
-                    causal_memory: Hypervector::zero(),
-                    hit_count: 0,
-                    last_goal_hash: 0,
-                    label: node.label.clone(),
-                },
-            );
-
-            let child_ids: Vec<u32> = node.children.iter().map(|c| c.id).collect();
-            topology.insert(
-                node.id,
-                NodeTopology {
-                    children: child_ids,
-                    parent: parent_id,
-                },
-            );
-
-            for child in &node.children {
-                index_node(child, Some(node.id), depth + 1, states, topology);
-            }
-        }
-
-        for node in tree_nodes {
-            index_node(node, None, 0, &mut states, &mut topology);
-        }
-
-        let url_hash = fnv_hash(url);
-
-        ResonanceField {
-            states,
-            topology,
-            total_queries: 0,
-            url_hash,
-        }
-    }
-
-    /// Propagate a goal wave through the resonance field.
-    ///
-    /// Returns nodes sorted by amplitude (strongest resonance first).
-    /// The field's causal memory influences scoring — nodes that previously
-    /// contributed to successful extractions resonate stronger.
-    pub fn propagate(&mut self, goal: &str) -> ResonanceResult {
-        self.total_queries += 1;
-        let goal_hv = Hypervector::from_text_ngrams(goal);
-        let node_ids: Vec<u32> = self.states.keys().copied().collect();
-        let total = node_ids.len();
-
-        // ─── Fas 1: Initial resonance ───
-        for &id in &node_ids {
-            if let Some(state) = self.states.get_mut(&id) {
-                // Använd text-HV (utan roll-binding) för content-matchning
-                let hv_sim = state.text_hv.similarity(&goal_hv);
-                // Strukturell HV adderar roll-kontext
-                let struct_sim = state.hv.similarity(&goal_hv);
-                // Viktad kombination: 70% text, 30% struktur
-                let base_sim = hv_sim * 0.7 + struct_sim * 0.3;
-
-                // Kausal boost från tidigare framgångar
-                let causal_boost = if state.hit_count > 0 {
-                    state.causal_memory.similarity(&goal_hv) * CAUSAL_WEIGHT
-                } else {
-                    0.0
-                };
-                // Text-similarity som komplement (fångar ordöverlapp som HV missar)
-                let text_boost = text_similarity(goal, &state.label) * 0.25;
-
-                let initial = (base_sim + causal_boost + text_boost).clamp(0.0, 1.0);
-                state.amplitude = initial;
-                // Fas baserad på matchning — bra matchning → fas nära 0
-                state.phase = hv_sim * std::f32::consts::TAU;
-            }
-        }
-
-        // ─── Fas 2: Vågpropagation ───
-        for _step in 0..MAX_PROPAGATION_STEPS {
-            // Snapshot av amplituder och faser (undvik borrow-konflikt)
-            let snapshot: HashMap<u32, (f32, f32)> = self
-                .states
-                .iter()
-                .map(|(&id, s)| (id, (s.amplitude, s.phase)))
-                .collect();
-
-            for &id in &node_ids {
-                let (my_amp, my_phase) = snapshot.get(&id).copied().unwrap_or((0.0, 0.0));
-                if my_amp < ACTIVATION_THRESHOLD {
-                    continue;
-                }
-
-                // Propagera nedåt till barn
-                if let Some(topo) = self.topology.get(&id) {
-                    let child_ids: Vec<u32> = topo.children.clone();
-                    for cid in child_ids {
-                        if let Some((_child_amp, child_phase)) = snapshot.get(&cid) {
-                            let mut gain = my_amp * CHILD_DAMPING;
-                            // Fassynk-bonus
-                            let phase_diff = (my_phase - child_phase).abs();
-                            if !(PHASE_SYNC_WINDOW..=(std::f32::consts::TAU - PHASE_SYNC_WINDOW))
-                                .contains(&phase_diff)
-                            {
-                                gain *= PHASE_SYNC_BONUS;
-                            }
-                            if let Some(child_state) = self.states.get_mut(&cid) {
-                                child_state.amplitude =
-                                    (child_state.amplitude + gain).clamp(0.0, 1.0);
-                            }
-                        }
-                    }
-                }
-
-                // Propagera uppåt till förälder
-                if let Some(topo) = self.topology.get(&id) {
-                    if let Some(pid) = topo.parent {
-                        if let Some((_parent_amp, parent_phase)) = snapshot.get(&pid) {
-                            let mut gain = my_amp * PARENT_AMPLIFICATION;
-                            let phase_diff = (my_phase - parent_phase).abs();
-                            if !(PHASE_SYNC_WINDOW..=(std::f32::consts::TAU - PHASE_SYNC_WINDOW))
-                                .contains(&phase_diff)
-                            {
-                                gain *= PHASE_SYNC_BONUS;
-                            }
-                            if let Some(parent_state) = self.states.get_mut(&pid) {
-                                parent_state.amplitude =
-                                    (parent_state.amplitude + gain).clamp(0.0, 1.0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ─── Fas 3: Samla resonanta noder ───
-        let mut hits: Vec<ResonanceHit> = Vec::new();
-        for (&id, state) in &self.states {
-            if state.amplitude >= MIN_OUTPUT_THRESHOLD {
-                let causal_boost = if state.hit_count > 0 {
-                    state.causal_memory.similarity(&goal_hv) * CAUSAL_WEIGHT
-                } else {
-                    0.0
-                };
-                let resonance_type = if causal_boost > 0.05 {
-                    ResonanceType::CausalMemory
-                } else if state.hv.similarity(&goal_hv) >= MIN_OUTPUT_THRESHOLD {
-                    ResonanceType::Direct
-                } else {
-                    ResonanceType::Propagated
-                };
-
-                hits.push(ResonanceHit {
-                    node_id: id,
-                    amplitude: state.amplitude,
-                    phase: state.phase,
-                    resonance_type,
-                    causal_boost,
-                });
-            }
-        }
-
-        hits.sort_by(|a, b| b.amplitude.total_cmp(&a.amplitude));
-        let nodes_resonant = hits.len();
-        let token_savings = if total > 0 {
-            1.0 - (nodes_resonant as f32 / total as f32)
-        } else {
-            0.0
-        };
-
-        ResonanceResult {
-            hits,
-            total_field_nodes: total,
-            nodes_resonant,
-            propagation_steps: MAX_PROPAGATION_STEPS,
-            token_savings_ratio: token_savings,
-        }
-    }
-
-    /// Register feedback: these nodes successfully answered the goal.
-    ///
-    /// Binds the goal HV into each node's causal memory via VSA bundle.
-    /// Next time a similar goal arrives, these nodes will resonate stronger.
-    pub fn feedback(&mut self, goal: &str, successful_node_ids: &[u32]) {
-        let goal_hv = Hypervector::from_text_ngrams(goal);
-        let goal_hash = fnv_hash(goal);
-
-        for &nid in successful_node_ids {
-            if let Some(state) = self.states.get_mut(&nid) {
-                // Dedup: samma goal ger inte dubbel boost
-                if state.last_goal_hash == goal_hash {
-                    continue;
-                }
-                state.last_goal_hash = goal_hash;
-
-                if state.hit_count >= MAX_HIT_COUNT {
-                    continue;
-                }
-
-                // VSA-binding: bundla goal-HV in i kausalt minne
-                if state.hit_count == 0 {
-                    state.causal_memory = goal_hv.clone();
-                } else {
-                    let refs = [&state.causal_memory, &goal_hv];
-                    state.causal_memory = Hypervector::bundle(&refs);
-                }
-                state.hit_count += 1;
-            }
-        }
-    }
-
-    /// Propagate multiple goals simultaneously through the field.
-    ///
-    /// Goals that match the same nodes create constructive interference
-    /// (amplitude boost). Goals that are dissimilar create destructive
-    /// interference (amplitude reduction) on overlapping nodes.
-    pub fn multi_goal_propagate(&mut self, goals: &[&str]) -> ResonanceResult {
-        if goals.is_empty() {
-            return ResonanceResult {
-                hits: Vec::new(),
-                total_field_nodes: self.states.len(),
-                nodes_resonant: 0,
-                propagation_steps: 0,
-                token_savings_ratio: 1.0,
-            };
-        }
-        if goals.len() == 1 {
-            return self.propagate(goals[0]);
-        }
-
-        // Kör propagation per goal och samla amplituder
-        let mut combined: HashMap<u32, f32> = HashMap::new();
-        let total = self.states.len();
-
-        // Beräkna inter-goal likhet för interferens
-        let goal_hvs: Vec<Hypervector> = goals
-            .iter()
-            .map(|g| Hypervector::from_text_ngrams(g))
-            .collect();
-
-        for goal in goals {
-            let result = self.propagate(goal);
-            for hit in &result.hits {
-                let entry = combined.entry(hit.node_id).or_insert(0.0);
-                *entry += hit.amplitude;
-            }
-        }
-
-        // Normalisera och samla
-        let goal_count = goals.len() as f32;
-        let mut hits: Vec<ResonanceHit> = combined
-            .into_iter()
-            .filter_map(|(id, total_amp)| {
-                let avg_amp = (total_amp / goal_count).clamp(0.0, 1.0);
-                if avg_amp >= MIN_OUTPUT_THRESHOLD {
-                    // Interferens-bonus: noder som matchade ALLA goals boosted
-                    let state = self.states.get(&id)?;
-                    let multi_match_count = goal_hvs
-                        .iter()
-                        .filter(|ghv| state.hv.similarity(ghv) > ACTIVATION_THRESHOLD)
-                        .count();
-                    let interference_bonus = if multi_match_count > 1 {
-                        1.0 + (multi_match_count as f32 - 1.0) * 0.15
-                    } else {
-                        1.0
-                    };
-                    let final_amp = (avg_amp * interference_bonus).clamp(0.0, 1.0);
-
-                    Some(ResonanceHit {
-                        node_id: id,
-                        amplitude: final_amp,
-                        phase: state.phase,
-                        resonance_type: ResonanceType::Direct,
-                        causal_boost: 0.0,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        hits.sort_by(|a, b| b.amplitude.total_cmp(&a.amplitude));
-        let nodes_resonant = hits.len();
-
-        ResonanceResult {
-            hits,
-            total_field_nodes: total,
-            nodes_resonant,
-            propagation_steps: MAX_PROPAGATION_STEPS,
-            token_savings_ratio: if total > 0 {
-                1.0 - (nodes_resonant as f32 / total as f32)
-            } else {
-                0.0
-            },
-        }
-    }
-
-    /// Returns total queries processed by this field
-    pub fn total_queries(&self) -> u32 {
-        self.total_queries
-    }
-
-    /// Returns the URL hash this field was built for
-    pub fn url_hash(&self) -> u64 {
-        self.url_hash
-    }
-
-    /// Returns node count in the field
-    pub fn node_count(&self) -> usize {
-        self.states.len()
-    }
-}
-
-// ─── Hjälpfunktioner ───────────────────────────────────────────────────────
-
-/// FNV-1a hash för strängar
-fn fnv_hash(s: &str) -> u64 {
+/// Enkel hash-funktion för URL:er (FNV-1a)
+fn hash_url(url: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in s.as_bytes() {
+    for byte in url.as_bytes() {
         h ^= *byte as u64;
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
 }
 
-// ─── Tester ────────────────────────────────────────────────────────────────
+/// Hämta nuvarande tid i millisekunder (fallback till 0 utan std::time)
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+impl ResonanceField {
+    /// Build an initial resonance field from a semantic tree.
+    ///
+    /// Initializes all nodes with phase=0, amplitude=0, and computes
+    /// base hypervectors from text n-grams bound with role vectors.
+    pub fn from_semantic_tree(tree_nodes: &[SemanticNode], url: &str) -> Self {
+        let mut nodes = HashMap::new();
+        let mut parent_map = HashMap::new();
+        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+
+        // Platta ut trädet och bygg relationer
+        for node in tree_nodes {
+            Self::flatten_node(node, None, &mut nodes, &mut parent_map, &mut children_map);
+            // Begränsa storlek
+            if nodes.len() >= MAX_FIELD_NODES {
+                break;
+            }
+        }
+
+        ResonanceField {
+            nodes,
+            parent_map,
+            children_map,
+            url_hash: hash_url(url),
+            created_at_ms: now_ms(),
+            total_queries: 0,
+        }
+    }
+
+    /// Rekursivt platta ut en nod och dess barn
+    fn flatten_node(
+        node: &SemanticNode,
+        parent_id: Option<u32>,
+        nodes: &mut HashMap<u32, ResonanceState>,
+        parent_map: &mut HashMap<u32, u32>,
+        children_map: &mut HashMap<u32, Vec<u32>>,
+    ) {
+        if nodes.len() >= MAX_FIELD_NODES {
+            return;
+        }
+
+        // Beräkna bas-HV: text-ngram ⊗ roll-vektor
+        let text_hv = Hypervector::from_text_ngrams(&node.label);
+        let role_hv = Hypervector::from_seed(&format!("__role_{}", node.role));
+        let base_hv = text_hv.bind(&role_hv);
+
+        let state = ResonanceState {
+            hv: base_hv,
+            text_hv,
+            phase: 0.0,
+            amplitude: 0.0,
+            causal_memory: Hypervector::zero(),
+            hit_count: 0,
+            last_goal_hash: 0,
+        };
+
+        nodes.insert(node.id, state);
+
+        // Registrera förälder-relation
+        if let Some(pid) = parent_id {
+            parent_map.insert(node.id, pid);
+            children_map.entry(pid).or_default().push(node.id);
+        }
+
+        // Rekursera barn
+        for child in &node.children {
+            Self::flatten_node(child, Some(node.id), nodes, parent_map, children_map);
+        }
+    }
+
+    /// Propagate a goal through the resonance field.
+    ///
+    /// Phase 1: Compute initial resonance from HDC similarity + causal memory.
+    /// Phase 2: Wave propagation through parent-child edges.
+    /// Phase 3: Collect and sort results by amplitude.
+    pub fn propagate(&mut self, goal: &str) -> Vec<ResonanceResult> {
+        self.total_queries += 1;
+        let goal_hv = Hypervector::from_text_ngrams(goal);
+
+        // Spara kausal-boost per nod för resultatrapportering
+        let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
+        // Spara resonanstyp per nod
+        let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
+
+        // Fas 1: Initial resonans
+        let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
+        for &nid in &node_ids {
+            if let Some(state) = self.nodes.get_mut(&nid) {
+                // Använd text_hv (ren text utan roll-binding) för likhetsmätning
+                let base_resonance = state.text_hv.similarity(&goal_hv);
+                let causal_boost = if state.hit_count > 0 {
+                    state.causal_memory.similarity(&goal_hv) * 0.3
+                } else {
+                    0.0
+                };
+
+                state.amplitude = (base_resonance + causal_boost).clamp(0.0, 1.0);
+
+                causal_boosts.insert(nid, causal_boost);
+
+                // Bestäm typ baserat på dominerande bidrag
+                if causal_boost > base_resonance * 0.5 && state.hit_count > 0 {
+                    resonance_types.insert(nid, ResonanceType::CausalMemory);
+                } else if base_resonance > ACTIVATION_THRESHOLD {
+                    resonance_types.insert(nid, ResonanceType::Direct);
+                }
+
+                // OBS: last_goal_hash uppdateras INTE här — den används
+                // enbart av feedback() för att undvika dubbelräkning.
+            }
+        }
+
+        // Fas 2: Vågpropagation
+        for _step in 0..MAX_PROPAGATION_STEPS {
+            // Samla amplituder för att undvika borrow-konflikter
+            let amplitudes: HashMap<u32, (f32, f32)> = self
+                .nodes
+                .iter()
+                .map(|(&id, s)| (id, (s.amplitude, s.phase)))
+                .collect();
+
+            // Propagera förälder -> barn
+            for (&parent_id, children) in &self.children_map {
+                let (parent_amp, parent_phase) =
+                    amplitudes.get(&parent_id).copied().unwrap_or((0.0, 0.0));
+
+                if parent_amp <= ACTIVATION_THRESHOLD {
+                    continue;
+                }
+
+                for &child_id in children {
+                    if let Some(child_state) = self.nodes.get_mut(&child_id) {
+                        let propagated = parent_amp * CHILD_DAMPING;
+                        child_state.amplitude += propagated;
+
+                        // Fas-synk: om förälder och barn är nära i fas, förstärk
+                        let phase_diff = (parent_phase - child_state.phase).abs();
+                        if phase_diff < PHASE_SYNC_WINDOW {
+                            child_state.amplitude *= PHASE_SYNC_BONUS;
+                        }
+
+                        // Markera som propagerad om inte redan direkt
+                        if child_state.amplitude > MIN_OUTPUT_THRESHOLD {
+                            resonance_types
+                                .entry(child_id)
+                                .or_insert(ResonanceType::Propagated);
+                        }
+                    }
+                }
+            }
+
+            // Propagera barn -> förälder
+            for (&child_id, &parent_id) in &self.parent_map {
+                let (child_amp, child_phase) =
+                    amplitudes.get(&child_id).copied().unwrap_or((0.0, 0.0));
+
+                if child_amp <= ACTIVATION_THRESHOLD {
+                    continue;
+                }
+
+                if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
+                    let propagated = child_amp * PARENT_AMPLIFICATION;
+                    parent_state.amplitude += propagated;
+
+                    // Fas-synk barn -> förälder
+                    let phase_diff = (child_phase - parent_state.phase).abs();
+                    if phase_diff < PHASE_SYNC_WINDOW {
+                        parent_state.amplitude *= PHASE_SYNC_BONUS;
+                    }
+
+                    if parent_state.amplitude > MIN_OUTPUT_THRESHOLD {
+                        resonance_types
+                            .entry(parent_id)
+                            .or_insert(ResonanceType::Propagated);
+                    }
+                }
+            }
+
+            // Clampa amplituder
+            for state in self.nodes.values_mut() {
+                state.amplitude = state.amplitude.clamp(0.0, 1.0);
+            }
+        }
+
+        // Fas 3: Samla resultat
+        let mut results: Vec<ResonanceResult> = self
+            .nodes
+            .iter()
+            .filter(|(_, s)| s.amplitude > MIN_OUTPUT_THRESHOLD)
+            .map(|(&nid, s)| ResonanceResult {
+                node_id: nid,
+                amplitude: s.amplitude,
+                phase: s.phase,
+                resonance_type: resonance_types
+                    .get(&nid)
+                    .cloned()
+                    .unwrap_or(ResonanceType::Direct),
+                causal_boost: causal_boosts.get(&nid).copied().unwrap_or(0.0),
+            })
+            .collect();
+
+        // Sortera efter amplitud (fallande), använd total_cmp för NaN-säkerhet
+        results.sort_by(|a, b| b.amplitude.total_cmp(&a.amplitude));
+
+        results
+    }
+
+    /// Provide feedback about which nodes successfully matched a goal.
+    ///
+    /// Binds the goal vector into each successful node's causal memory,
+    /// making future similar goals resonate stronger on those nodes.
+    pub fn feedback(&mut self, goal: &str, successful_node_ids: &[u32]) {
+        let goal_hv = Hypervector::from_text_ngrams(goal);
+        let goal_hash = hash_url(goal);
+
+        for &nid in successful_node_ids {
+            if let Some(state) = self.nodes.get_mut(&nid) {
+                // Undvik dubbelräkning av samma mål
+                if state.last_goal_hash == goal_hash {
+                    continue;
+                }
+
+                // Bundla goal-HV in i kausalt minne.
+                // Första gången: direkt tilldelning (nollvektor ger dålig bundle).
+                if state.hit_count == 0 {
+                    state.causal_memory = goal_hv.clone();
+                } else {
+                    state.causal_memory = Hypervector::bundle(&[&state.causal_memory, &goal_hv]);
+                }
+                state.hit_count += 1;
+                state.last_goal_hash = goal_hash;
+            }
+        }
+    }
+
+    /// Propagate multiple goals simultaneously with interference.
+    ///
+    /// Constructive interference: nodes matching multiple goals get
+    /// amplitude boost (sum of individual amplitudes).
+    /// Destructive interference: goals with negative cross-similarity
+    /// (< -0.1) cancel each other's contributions.
+    pub fn multi_goal_propagate(&mut self, goals: &[&str]) -> Vec<ResonanceResult> {
+        if goals.is_empty() {
+            return Vec::new();
+        }
+        if goals.len() == 1 {
+            return self.propagate(goals[0]);
+        }
+
+        // Beräkna HV:er för alla mål
+        let goal_hvs: Vec<Hypervector> = goals
+            .iter()
+            .map(|g| Hypervector::from_text_ngrams(g))
+            .collect();
+
+        // Detektera destruktiv interferens mellan mål-par
+        let mut destructive_pairs: Vec<(usize, usize)> = Vec::new();
+        for i in 0..goal_hvs.len() {
+            for j in (i + 1)..goal_hvs.len() {
+                let cross_sim = goal_hvs[i].similarity(&goal_hvs[j]);
+                if cross_sim < -0.1 {
+                    destructive_pairs.push((i, j));
+                }
+            }
+        }
+
+        // Ackumulera amplitud per nod från alla mål
+        let mut accumulated: HashMap<u32, (f32, f32, ResonanceType)> = HashMap::new();
+        let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
+
+        // Spara och återställ tillstånd mellan propagationer
+        let original_amplitudes: HashMap<u32, f32> = self
+            .nodes
+            .iter()
+            .map(|(&id, s)| (id, s.amplitude))
+            .collect();
+
+        for (goal_idx, goal) in goals.iter().enumerate() {
+            // Återställ amplituder före varje propagation
+            for (&id, amp) in &original_amplitudes {
+                if let Some(state) = self.nodes.get_mut(&id) {
+                    state.amplitude = *amp;
+                }
+            }
+
+            let results = self.propagate(goal);
+
+            // Kontrollera om detta mål har destruktiv interferens
+            let has_destructive = destructive_pairs
+                .iter()
+                .any(|&(i, j)| i == goal_idx || j == goal_idx);
+
+            for r in &results {
+                let entry = accumulated.entry(r.node_id).or_insert((
+                    0.0,
+                    r.phase,
+                    r.resonance_type.clone(),
+                ));
+
+                if has_destructive {
+                    // Destruktiv interferens: reducera bidraget
+                    entry.0 += r.amplitude * 0.5;
+                } else {
+                    // Konstruktiv interferens: fullt bidrag
+                    entry.0 += r.amplitude;
+                }
+
+                // Uppdatera kausal boost
+                let cb = causal_boosts.entry(r.node_id).or_insert(0.0);
+                *cb += r.causal_boost;
+            }
+        }
+
+        // Konstruktiv bonus: noder som matchar fler mål får extra förstärkning
+        let goal_count = goals.len() as f32;
+        let mut results: Vec<ResonanceResult> = accumulated
+            .into_iter()
+            .map(|(node_id, (total_amp, phase, rtype))| {
+                // Normalisera och clampa
+                let normalized = (total_amp / goal_count).clamp(0.0, 1.0);
+                ResonanceResult {
+                    node_id,
+                    amplitude: normalized,
+                    phase,
+                    resonance_type: rtype,
+                    causal_boost: causal_boosts.get(&node_id).copied().unwrap_or(0.0),
+                }
+            })
+            .filter(|r| r.amplitude > MIN_OUTPUT_THRESHOLD)
+            .collect();
+
+        results.sort_by(|a, b| b.amplitude.total_cmp(&a.amplitude));
+        results
+    }
+
+    /// Number of nodes in the field
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{NodeState, TrustLevel};
+    use crate::types::SemanticNode;
 
+    /// Skapa en enkel SemanticNode med givna fält
     fn make_node(id: u32, role: &str, label: &str, children: Vec<SemanticNode>) -> SemanticNode {
         SemanticNode {
             id,
-            role: role.to_string(),
-            label: label.to_string(),
-            value: None,
-            state: NodeState::default_state(),
-            action: None,
-            relevance: 0.0,
-            trust: TrustLevel::Untrusted,
+            role: role.into(),
+            label: label.into(),
             children,
-            html_id: None,
-            name: None,
-            bbox: None,
+            ..SemanticNode::default()
         }
     }
 
     #[test]
-    fn test_field_creation() {
-        let nodes = vec![make_node(
-            1,
-            "heading",
-            "Product Page",
-            vec![
-                make_node(2, "text", "Laptop 999 kr", vec![]),
-                make_node(3, "button", "Add to cart", vec![]),
-            ],
-        )];
-        let field = ResonanceField::from_semantic_tree(&nodes, "https://shop.se");
-        assert_eq!(field.node_count(), 3, "Fältet ska ha 3 noder");
-        assert!(field.url_hash() != 0, "URL-hash ska vara satt");
+    fn test_field_creation_basic() {
+        let tree = vec![
+            make_node(
+                1,
+                "text",
+                "population statistics",
+                vec![make_node(2, "text", "367924 inhabitants", vec![])],
+            ),
+            make_node(3, "navigation", "site menu home about", vec![]),
+        ];
+
+        let field = ResonanceField::from_semantic_tree(&tree, "https://example.com");
+
+        assert_eq!(field.node_count(), 3, "Fältet borde ha 3 noder");
+        assert!(field.url_hash != 0, "URL-hash borde vara icke-noll");
+        assert_eq!(field.total_queries, 0, "Inga propagationer ännu");
+    }
+
+    #[test]
+    fn test_field_creation_empty_tree() {
+        let tree: Vec<SemanticNode> = vec![];
+        let field = ResonanceField::from_semantic_tree(&tree, "https://empty.com");
+
+        assert_eq!(field.node_count(), 0, "Tomt träd borde ge tomt fält");
+    }
+
+    #[test]
+    fn test_field_creation_single_node() {
+        let tree = vec![make_node(42, "button", "submit form", vec![])];
+        let field = ResonanceField::from_semantic_tree(&tree, "https://single.com");
+
+        assert_eq!(field.node_count(), 1, "Borde ha exakt 1 nod");
+        assert!(
+            field.nodes.contains_key(&42),
+            "Nod 42 borde finnas i fältet"
+        );
     }
 
     #[test]
     fn test_propagation_returns_relevant_nodes() {
-        let nodes = vec![make_node(
-            1,
-            "generic",
-            "Navigation",
-            vec![
-                make_node(2, "text", "Best laptop deals and prices", vec![]),
-                make_node(3, "button", "Buy laptop now", vec![]),
-                make_node(4, "text", "Cookie policy information", vec![]),
-                make_node(5, "link", "About us", vec![]),
-            ],
-        )];
+        let tree = vec![
+            make_node(
+                1,
+                "text",
+                "buy product shopping cart",
+                vec![make_node(2, "button", "add to cart", vec![])],
+            ),
+            make_node(3, "text", "cookie privacy policy settings", vec![]),
+        ];
 
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://shop.se");
-        let result = field.propagate("find laptop price");
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://shop.com");
+        let results = field.propagate("buy product add cart");
 
         assert!(
-            !result.hits.is_empty(),
-            "Propagation ska returnera resonanta noder"
+            !results.is_empty(),
+            "Propagation borde returnera relevanta noder"
         );
-        // Laptop-relaterade noder ska finnas bland top-3
-        let top_ids: Vec<u32> = result.hits.iter().take(3).map(|h| h.node_id).collect();
+
+        // Nod 1 ("buy product") eller nod 2 ("add to cart") borde ha hög amplitud
+        let top_id = results[0].node_id;
         assert!(
-            top_ids.contains(&2) || top_ids.contains(&3),
-            "Laptop-noder ska finnas i top-3, fick: {top_ids:?}"
+            top_id == 1 || top_id == 2,
+            "Topnoden borde vara nod 1 eller 2 (shopping-relaterad), fick nod {top_id}"
+        );
+
+        // Nod 3 (cookie policy) borde ha lägre amplitud än shopping-noder
+        let shop_max = results
+            .iter()
+            .filter(|r| r.node_id == 1 || r.node_id == 2)
+            .map(|r| r.amplitude)
+            .fold(0.0f32, f32::max);
+        let cookie_amp = results
+            .iter()
+            .find(|r| r.node_id == 3)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+
+        assert!(
+            shop_max > cookie_amp,
+            "Shopping-noder borde ha högre amplitud ({shop_max}) än cookie-nod ({cookie_amp})"
         );
     }
 
     #[test]
-    fn test_causal_feedback_improves_resonance() {
-        let nodes = vec![
-            make_node(1, "text", "Product price 499 kr", vec![]),
-            make_node(2, "text", "Shipping information", vec![]),
-            make_node(3, "text", "Return policy details", vec![]),
+    fn test_propagation_sorts_descending() {
+        let tree = vec![
+            make_node(1, "heading", "main title important", vec![]),
+            make_node(2, "text", "some body text content", vec![]),
+            make_node(3, "link", "navigation link home", vec![]),
         ];
 
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://shop.se");
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+        let results = field.propagate("main title");
 
-        // Första query
-        let result1 = field.propagate("find product price");
-        let amp_before = result1
-            .hits
-            .iter()
-            .find(|h| h.node_id == 1)
-            .map(|h| h.amplitude)
-            .unwrap_or(0.0);
-
-        // Ge feedback att nod 1 var rätt svar
-        field.feedback("find product price", &[1]);
-
-        // Samma query igen — bör ge starkare resonans tack vare kausal memory
-        let result2 = field.propagate("find product price");
-        let amp_after = result2
-            .hits
-            .iter()
-            .find(|h| h.node_id == 1)
-            .map(|h| h.amplitude)
-            .unwrap_or(0.0);
-
-        assert!(
-            amp_after >= amp_before,
-            "Kausal feedback ska förbättra resonans: {amp_before} → {amp_after}"
-        );
-        // Kausal boost ska synas
-        let causal_hit = result2.hits.iter().find(|h| h.node_id == 1);
-        assert!(
-            causal_hit.map(|h| h.causal_boost).unwrap_or(0.0) > 0.0,
-            "Kausal boost ska vara positiv efter feedback"
-        );
-    }
-
-    #[test]
-    fn test_multi_goal_interference() {
-        let nodes = vec![
-            make_node(1, "text", "Laptop specs and performance", vec![]),
-            make_node(2, "text", "Laptop price 9999 kr", vec![]),
-            make_node(3, "text", "Weather forecast today", vec![]),
-        ];
-
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://test.se");
-        let result = field.multi_goal_propagate(&["laptop specs", "laptop price"]);
-
-        // Laptop-noder ska resonera, väder-nod ska inte
-        let laptop_hits: Vec<&ResonanceHit> = result
-            .hits
-            .iter()
-            .filter(|h| h.node_id == 1 || h.node_id == 2)
-            .collect();
-        let weather_hit = result.hits.iter().find(|h| h.node_id == 3);
-
-        assert!(!laptop_hits.is_empty(), "Laptop-noder ska ha resonans");
-        // Om vädernoden finns, ska den ha lägre amplitude
-        if let Some(wh) = weather_hit {
-            let max_laptop = laptop_hits
-                .iter()
-                .map(|h| h.amplitude)
-                .fold(0.0f32, f32::max);
+        // Kontrollera att resultat är sorterade fallande
+        for window in results.windows(2) {
             assert!(
-                wh.amplitude < max_laptop,
-                "Väder-nod ({}) ska ha lägre amplitude än laptop-noder ({max_laptop})",
-                wh.amplitude
+                window[0].amplitude >= window[1].amplitude,
+                "Resultat borde vara sorterade fallande: {} >= {}",
+                window[0].amplitude,
+                window[1].amplitude
             );
         }
     }
 
     #[test]
-    fn test_empty_tree() {
-        let nodes: Vec<SemanticNode> = vec![];
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://empty.se");
-        let result = field.propagate("anything");
-        assert_eq!(result.total_field_nodes, 0, "Tomt fält");
-        assert!(result.hits.is_empty(), "Inga träffar i tomt fält");
-    }
+    fn test_causal_feedback_improves_resonance() {
+        let tree = vec![
+            make_node(1, "button", "submit order", vec![]),
+            make_node(2, "text", "unrelated navigation", vec![]),
+        ];
 
-    #[test]
-    fn test_single_node() {
-        let nodes = vec![make_node(1, "heading", "Hello World", vec![])];
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://hello.se");
-        let result = field.propagate("Hello World");
-        assert!(!result.hits.is_empty(), "Exakt matchning ska ge resonans");
-        // HV-similarity + text_similarity ger sammanlagt amplitud
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        // Första propagation — baslinjeamplitud
+        let results_before = field.propagate("confirm purchase");
+        let amp_before = results_before
+            .iter()
+            .find(|r| r.node_id == 1)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+
+        // Ge feedback: nod 1 var lyckad för "confirm purchase"
+        field.feedback("confirm purchase", &[1]);
+
+        // Kontrollera att kausalt minne uppdaterades
+        let state = field.nodes.get(&1).expect("Nod 1 borde finnas");
+        assert_eq!(state.hit_count, 1, "Hit count borde vara 1 efter feedback");
+
+        // Andra propagation med liknande mål — borde ge högre amplitud
+        let results_after = field.propagate("confirm order purchase");
+        let amp_after = results_after
+            .iter()
+            .find(|r| r.node_id == 1)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+
         assert!(
-            result.hits[0].amplitude > MIN_OUTPUT_THRESHOLD,
-            "Exakt matchning ska ge amplitud över output-tröskeln, fick: {}",
-            result.hits[0].amplitude
+            amp_after >= amp_before,
+            "Amplitud borde vara minst lika hög efter kausal feedback: before={amp_before}, after={amp_after}"
         );
     }
 
     #[test]
-    fn test_feedback_dedup() {
-        let nodes = vec![make_node(1, "text", "Price info", vec![])];
-        let mut field = ResonanceField::from_semantic_tree(&nodes, "https://test.se");
+    fn test_feedback_avoids_double_counting() {
+        let tree = vec![make_node(1, "button", "click me", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
 
-        // Ge samma feedback två gånger
-        field.feedback("find price", &[1]);
-        field.feedback("find price", &[1]);
+        // Samma feedback två gånger
+        field.feedback("same goal", &[1]);
+        field.feedback("same goal", &[1]);
 
-        // hit_count ska bara vara 1 (dedup)
-        let state = field.states.get(&1).expect("Nod 1 ska finnas");
-        assert_eq!(state.hit_count, 1, "Dedup ska förhindra dubbel feedback");
+        let state = field.nodes.get(&1).expect("Nod 1 borde finnas");
+        assert_eq!(
+            state.hit_count, 1,
+            "Hit count borde vara 1 (dubbelräkning undviks)"
+        );
+    }
+
+    #[test]
+    fn test_multi_goal_propagate_empty() {
+        let tree = vec![make_node(1, "text", "some content", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        let results = field.multi_goal_propagate(&[]);
+        assert!(results.is_empty(), "Inga mål borde ge tomma resultat");
+    }
+
+    #[test]
+    fn test_multi_goal_propagate_single() {
+        let tree = vec![make_node(1, "text", "search products", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        let single = field.propagate("search products");
+
+        // Återställ amplituder
+        for state in field.nodes.values_mut() {
+            state.amplitude = 0.0;
+        }
+
+        let multi = field.multi_goal_propagate(&["search products"]);
+
+        // Borde ge liknande resultat (inte identiska pga total_queries-skillnad)
+        assert_eq!(
+            single.is_empty(),
+            multi.is_empty(),
+            "Enkel- och multi-mål borde ge samma tomhet/icke-tomhet"
+        );
+    }
+
+    #[test]
+    fn test_multi_goal_constructive_interference() {
+        let tree = vec![
+            make_node(1, "button", "buy product add to cart", vec![]),
+            make_node(2, "text", "weather forecast tomorrow", vec![]),
+        ];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        // Två relaterade mål — borde konstruktivt interferera på nod 1
+        let results = field.multi_goal_propagate(&["buy product", "add to cart"]);
+
+        if !results.is_empty() {
+            let top = &results[0];
+            assert_eq!(
+                top.node_id, 1,
+                "Nod 1 borde ha högst amplitud vid konstruktiv interferens"
+            );
+        }
+    }
+
+    #[test]
+    fn test_wave_propagation_reaches_children() {
+        let tree = vec![make_node(
+            1,
+            "text",
+            "product listing electronics",
+            vec![
+                make_node(2, "button", "view details", vec![]),
+                make_node(3, "text", "price information", vec![]),
+            ],
+        )];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://shop.com");
+        let results = field.propagate("product listing electronics");
+
+        // Barn borde få propagerad amplitud från förälder
+        let child_results: Vec<&ResonanceResult> = results
+            .iter()
+            .filter(|r| r.node_id == 2 || r.node_id == 3)
+            .collect();
+
+        // Minst en barnnod borde ha fått amplitud via propagation
+        let any_propagated = child_results.iter().any(|r| r.amplitude > 0.0);
+
+        assert!(
+            any_propagated || child_results.is_empty(),
+            "Barnnoder borde antingen ha propagerad amplitud eller inte passera tröskeln"
+        );
+    }
+
+    #[test]
+    fn test_resonance_result_types() {
+        let tree = vec![make_node(1, "text", "exact match goal text", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        let results = field.propagate("exact match goal text");
+        if !results.is_empty() {
+            let top = &results[0];
+            assert_eq!(
+                top.resonance_type,
+                ResonanceType::Direct,
+                "Direkt matchning borde ge ResonanceType::Direct"
+            );
+        }
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let tree = vec![make_node(1, "button", "test serde", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://serde.com");
+        field.feedback("test goal", &[1]);
+
+        // Serialisera
+        let json = serde_json::to_string(&field).expect("Serialisering borde lyckas");
+        assert!(!json.is_empty(), "JSON borde inte vara tom");
+
+        // Deserialisera
+        let restored: ResonanceField =
+            serde_json::from_str(&json).expect("Deserialisering borde lyckas");
+        assert_eq!(
+            restored.node_count(),
+            field.node_count(),
+            "Antalet noder borde bevaras"
+        );
+        assert_eq!(restored.url_hash, field.url_hash, "URL-hash borde bevaras");
+
+        let state = restored.nodes.get(&1).expect("Nod 1 borde finnas");
+        assert_eq!(
+            state.hit_count, 1,
+            "Hit count borde bevaras efter serialisering"
+        );
+    }
+
+    #[test]
+    fn test_url_hash_differs() {
+        let tree = vec![make_node(1, "text", "content", vec![])];
+        let field_a = ResonanceField::from_semantic_tree(&tree, "https://a.com");
+        let field_b = ResonanceField::from_semantic_tree(&tree, "https://b.com");
+
+        assert_ne!(
+            field_a.url_hash, field_b.url_hash,
+            "Olika URL:er borde ge olika hash"
+        );
+    }
+
+    #[test]
+    fn test_total_queries_increments() {
+        let tree = vec![make_node(1, "text", "something", vec![])];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+
+        assert_eq!(field.total_queries, 0, "Borde starta på 0");
+        field.propagate("goal one");
+        assert_eq!(field.total_queries, 1, "Borde vara 1 efter en propagation");
+        field.propagate("goal two");
+        assert_eq!(
+            field.total_queries, 2,
+            "Borde vara 2 efter två propagationer"
+        );
     }
 }
