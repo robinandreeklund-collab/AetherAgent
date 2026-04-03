@@ -17,10 +17,10 @@ use crate::types::SemanticNode;
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
-/// Dämpning vid propagation från förälder till barn
-const CHILD_DAMPING: f32 = 0.35;
-/// Förstärkning vid propagation från barn till förälder
-const PARENT_AMPLIFICATION: f32 = 0.25;
+/// Bas-dämpning vid propagation från förälder till barn
+const BASE_CHILD_DAMPING: f32 = 0.35;
+/// Bas-förstärkning vid propagation från barn till förälder
+const BASE_PARENT_AMPLIFICATION: f32 = 0.25;
 /// Bonus-multiplikator vid fas-synkronisering
 const PHASE_SYNC_BONUS: f32 = 1.08;
 /// Fönster (radianer) inom vilket fas-synk aktiveras
@@ -34,11 +34,15 @@ const MAX_PROPAGATION_STEPS: u32 = 2;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
-const BM25_WEIGHT: f32 = 0.7;
-/// HDC-vikt i hybrid-scoring (strukturell signal)
-const HDC_WEIGHT: f32 = 0.3;
+const BM25_WEIGHT: f32 = 0.65;
+/// HDC text-vikt
+const HDC_TEXT_WEIGHT: f32 = 0.20;
+/// Roll-aspekt vikt (strukturell signal)
+const ROLE_WEIGHT: f32 = 0.15;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
+/// Temporal decay-faktor: halvering var 10:e minut (λ = ln2/600s ≈ 0.00115)
+const CAUSAL_DECAY_LAMBDA: f64 = 0.001_155;
 /// Minsta relativa amplitud-gap för att klippa output (30% drop)
 const GAP_RATIO_THRESHOLD: f32 = 0.30;
 /// Max antal fält i LRU-cachen
@@ -97,16 +101,22 @@ impl HvData {
 /// Per-node resonance state within the field
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResonanceState {
-    /// Bas-hypervector (text ⊗ roll) — kombinerad representation
-    #[serde(with = "hv_serde")]
-    hv: Hypervector,
-    /// Ren text-hypervector (utan roll-binding) — används för likhetsmätning
+    // ── Multi-field vektorer (aspekt 1: multi-field resonance) ──
+    /// Text-hypervector (ren text n-gram encoding, ingen roll-binding)
     #[serde(with = "hv_serde")]
     text_hv: Hypervector,
+    /// Roll-string (heading, button, price, etc.) — billigare än HV för roll-matchning
+    role: String,
+    /// Djup i DOM-trädet (0 = rot)
+    depth: u32,
+
+    // ── Oscillatortillstånd ──
     /// Oscillatorfas (0.0..2π)
     phase: f32,
     /// Nuvarande resonansstyrka
     amplitude: f32,
+
+    // ── Kausal inlärning ──
     /// Ackumulerat kausalt minne från lyckade mål
     #[serde(with = "hv_serde")]
     causal_memory: Hypervector,
@@ -114,6 +124,9 @@ pub struct ResonanceState {
     hit_count: u32,
     /// Hash av senaste mål (undvik dubbelräkning)
     last_goal_hash: u64,
+    /// Tidpunkt (ms) för senaste lyckade feedback (för temporal decay)
+    #[serde(default)]
+    last_hit_ms: u64,
 }
 
 /// Serde-modul för Hypervector (privat bits-fält)
@@ -152,6 +165,49 @@ pub struct ResonanceField {
     pub created_at_ms: u64,
     /// Totalt antal propagations-anrop
     pub total_queries: u32,
+}
+
+/// Roll-prioritet: hur sannolikt innehåller rollen relevant data (0.0-1.0)
+fn role_priority(role: &str) -> f32 {
+    match role {
+        "price" | "data" | "cell" => 1.0,
+        "heading" | "text" | "paragraph" => 0.9,
+        "button" | "cta" | "product_card" => 0.85,
+        "link" | "listitem" | "row" => 0.7,
+        "img" | "table" => 0.6,
+        "textbox" | "searchbox" | "select" => 0.5,
+        "navigation" | "complementary" => 0.2,
+        "generic" => 0.4,
+        _ => 0.5,
+    }
+}
+
+/// Aspekt 2: Learned downward propagation — roller som bör sprida till barn
+fn downward_propagation_weight(role: &str) -> f32 {
+    match role {
+        // Container-roller sprider bra nedåt (barn är ofta svaret)
+        "heading" | "table" | "row" | "list" => 1.3,
+        "generic" | "article" | "section" => 1.1,
+        // Leaf-roller sprider lite (de ÄR svaret, inte deras barn)
+        "price" | "text" | "button" | "link" => 0.6,
+        // Nav/footer sprider minimal energi nedåt
+        "navigation" | "complementary" | "contentinfo" => 0.3,
+        _ => 1.0,
+    }
+}
+
+/// Aspekt 2: Learned upward propagation — roller som bör bubbla upp
+fn upward_propagation_weight(role: &str) -> f32 {
+    match role {
+        // Data-roller bubblar starkt uppåt (förälder får context)
+        "price" | "data" | "cell" => 1.4,
+        "text" | "paragraph" | "heading" => 1.1,
+        // Interaktiva roller bubblar medium
+        "button" | "link" | "cta" => 0.9,
+        // Nav/boilerplate bubblar svagt
+        "navigation" | "complementary" => 0.3,
+        _ => 1.0,
+    }
 }
 
 /// Enkel hash-funktion för URL:er (FNV-1a)
@@ -223,19 +279,23 @@ impl ResonanceField {
             return;
         }
 
-        // Beräkna bas-HV: text-ngram ⊗ roll-vektor
+        // Multi-field: separata aspekter per nod
         let text_hv = Hypervector::from_text_ngrams(&node.label);
-        let role_hv = Hypervector::from_seed(&format!("__role_{}", node.role));
-        let base_hv = text_hv.bind(&role_hv);
+        // Beräkna djup från förälder-kedjan
+        let depth = parent_id
+            .and_then(|pid| nodes.get(&pid).map(|p| p.depth + 1))
+            .unwrap_or(0);
 
         let state = ResonanceState {
-            hv: base_hv,
             text_hv,
+            role: node.role.clone(),
+            depth,
             phase: 0.0,
             amplitude: 0.0,
             causal_memory: Hypervector::zero(),
             hit_count: 0,
             last_goal_hash: 0,
+            last_hit_ms: 0,
         };
 
         nodes.insert(node.id, state);
@@ -294,36 +354,46 @@ impl ResonanceField {
             .map(|(id, score)| (id, (score / bm25_max).clamp(0.0, 1.0)))
             .collect();
 
-        // Fas 1: Initial resonans — BM25 + HDC hybrid
-        // BM25 ger keyword-precision, HDC ger strukturell signal.
-        // Kombination: 0.7 * BM25 + 0.3 * HDC (BM25 dominerar cold-start)
+        // ── Aspekt 1: Multi-field initial resonans ──
+        // Tre separata signaler: BM25 (keyword), HDC (semantisk), Roll (strukturell)
+        let goal_role_hv = Hypervector::from_seed(&format!("__goal_{}", goal));
+        let now = now_ms();
         let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
-                // HDC text-similarity (normaliserad)
-                let raw_sim = state.text_hv.similarity(&goal_hv);
-                let hdc_norm = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
-                let hdc_score = hdc_norm * hdc_norm; // power-2 kontrast
-
-                // BM25-score (redan normaliserad 0-1)
+                // Signal 1: BM25 keyword-matchning (normaliserad 0-1)
                 let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
 
-                // Hybrid: BM25 dominerar för keyword-matchning
-                let base_resonance = BM25_WEIGHT * bm25_score + HDC_WEIGHT * hdc_score;
+                // Signal 2: HDC text-similarity (normaliserad, power-2 kontrast)
+                let raw_sim = state.text_hv.similarity(&goal_hv);
+                let hdc_norm = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                let hdc_score = hdc_norm * hdc_norm;
 
+                // Signal 3: Roll-aspekt — roll-prioritet baserat på goal-typ
+                let role_hv = Hypervector::from_seed(&format!("__role_{}", state.role));
+                let role_sim = ((role_hv.similarity(&goal_role_hv) + 1.0) / 2.0).clamp(0.0, 1.0);
+                let role_boost = role_priority(&state.role) * 0.5 + role_sim * 0.5;
+
+                // Multi-field kombination
+                let base_resonance = BM25_WEIGHT * bm25_score
+                    + HDC_TEXT_WEIGHT * hdc_score
+                    + ROLE_WEIGHT * role_boost;
+
+                // Aspekt 3: Temporal decay på kausalt minne
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
-                    norm_causal * norm_causal * CAUSAL_WEIGHT
+                    // Decay baserat på tid sedan senaste lyckade hit
+                    let elapsed_s = (now.saturating_sub(state.last_hit_ms) as f64) / 1000.0;
+                    let decay = (-CAUSAL_DECAY_LAMBDA * elapsed_s).exp() as f32;
+                    norm_causal * norm_causal * CAUSAL_WEIGHT * decay
                 } else {
                     0.0
                 };
 
                 state.amplitude = (base_resonance + causal_boost).clamp(0.0, 1.0);
-
                 causal_boosts.insert(nid, causal_boost);
 
-                // Bestäm typ baserat på dominerande bidrag
                 if causal_boost > base_resonance * 0.5 && state.hit_count > 0 {
                     resonance_types.insert(nid, ResonanceType::CausalMemory);
                 } else if base_resonance > ACTIVATION_THRESHOLD {
@@ -341,7 +411,15 @@ impl ResonanceField {
                 .map(|(&id, s)| (id, (s.amplitude, s.phase)))
                 .collect();
 
-            // Propagera förälder -> barn (max-operation, ej addition)
+            // ── Aspekt 5: Query-conditioned propagation ──
+            // Spridningsfaktor skalas av källnodens amplitude (confidence).
+            // Noder med stark goal-matchning sprider mer energi.
+
+            // ── Aspekt 2: Learned weights via roll + confidence ──
+            // Förälder → barn: content-roller (heading, text) sprider mer
+            // Barn → förälder: data-roller (price, cell) sprider mer uppåt
+
+            // Propagera förälder -> barn
             for (&parent_id, children) in &self.children_map {
                 let (parent_amp, parent_phase) =
                     amplitudes.get(&parent_id).copied().unwrap_or((0.0, 0.0));
@@ -350,17 +428,26 @@ impl ResonanceField {
                     continue;
                 }
 
+                // Query-conditioned: högre amplitude = mer spridning
+                let confidence_factor = parent_amp.sqrt(); // sqrt dämpar extremer
+                                                           // Learned: roll-baserad vikt
+                let parent_role = self
+                    .nodes
+                    .get(&parent_id)
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("");
+                let role_factor = downward_propagation_weight(parent_role);
+                let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
+
                 for &child_id in children {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
-                        let mut propagated = parent_amp * CHILD_DAMPING;
+                        let mut propagated = parent_amp * damping;
 
-                        // Fas-synk: om förälder och barn är nära i fas, förstärk
                         let phase_diff = (parent_phase - child_state.phase).abs();
                         if phase_diff < PHASE_SYNC_WINDOW {
                             propagated *= PHASE_SYNC_BONUS;
                         }
 
-                        // Max istf += — undviker amplitudsexplosion
                         if propagated > child_state.amplitude {
                             child_state.amplitude = propagated;
                             resonance_types
@@ -371,7 +458,7 @@ impl ResonanceField {
                 }
             }
 
-            // Propagera barn -> förälder (max-operation)
+            // Propagera barn -> förälder
             for (&child_id, &parent_id) in &self.parent_map {
                 let (child_amp, child_phase) =
                     amplitudes.get(&child_id).copied().unwrap_or((0.0, 0.0));
@@ -380,10 +467,19 @@ impl ResonanceField {
                     continue;
                 }
 
-                if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
-                    let mut propagated = child_amp * PARENT_AMPLIFICATION;
+                // Query-conditioned + learned
+                let confidence_factor = child_amp.sqrt();
+                let child_role = self
+                    .nodes
+                    .get(&child_id)
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("");
+                let role_factor = upward_propagation_weight(child_role);
+                let amplification = BASE_PARENT_AMPLIFICATION * confidence_factor * role_factor;
 
-                    // Fas-synk barn -> förälder
+                if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
+                    let mut propagated = child_amp * amplification;
+
                     let phase_diff = (child_phase - parent_state.phase).abs();
                     if phase_diff < PHASE_SYNC_WINDOW {
                         propagated *= PHASE_SYNC_BONUS;
@@ -484,6 +580,7 @@ impl ResonanceField {
                 }
                 state.hit_count += 1;
                 state.last_goal_hash = goal_hash;
+                state.last_hit_ms = now_ms(); // Temporal decay-referens
             }
         }
     }
