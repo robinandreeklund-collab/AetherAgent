@@ -9,7 +9,7 @@
 
 CRFR är ett nytt retrieval-paradigm som behandlar DOM-trädet som ett **levande resonansfält** istället för ett statiskt index. När en fråga (goal) kommer in skapas en resonansvåg som propagerar genom trädets förälder-barn-relationer. Noder som matchar frågan "lyser upp" — och deras grannar får en svagare glöd via vågpropagation.
 
-### Designprinciper (v3)
+### Designprinciper
 
 1. **Determinism > Intelligence** — samma input → samma output, alltid
 2. **Structure > Semantics** — DOM-struktur är signalen, inte språkförståelse
@@ -17,39 +17,48 @@ CRFR är ett nytt retrieval-paradigm som behandlar DOM-trädet som ett **levande
 4. **Local optimization > Global models** — ingen träning, ingen modell
 
 Det som gör CRFR unikt:
-- **Ingen ONNX-modell krävs** — fungerar med BM25 + HDC bitvektorer
-- **Sub-millisecond cache-hit** — 617µs vid återbesök (BM25-index cachad)
+- **Ingen ONNX-modell krävs** — BM25 + 2048-bit HDC bitvektorer
+- **Sub-millisecond** — 637µs cold (6-test), ~0.6ms cache-hit
 - **Value-aware** — matchar href, action, name — inte bara synlig text
-- **Convergent propagation** — styrt av signal, inte iteration count
+- **Second-order wave propagation** (GWN) — bevarar peaks, resists over-smoothing
+- **Answer-shape scoring** — noder som SER UT som svar rankas högre
+- **Bayesian learned weights** — Beta(α,β) med confidence-weighted + negative signal
+- **BTSP plasticity** — snabb feedback = starkare inlärning
+- **Field-level concept memory** — lär sig begrepp globalt utan LLM
+- **LSH pre-filter** — O(1) candidate lookup vid >100 noder
+- **Thompson Sampling** — controlled exploration i propagation weights
 - **Deterministic ranking** — stabil tie-break, ingen jitter
-- **Lär sig i realtid** — feedback = ranking refinement, inte semantik
-- **Temporal decay** — kausalt minne halveras var 10 min (ingen stale bias)
+- **Temporal decay** — kausalt minne + stats dämpas exponentiellt
 
 ---
 
 ## Hur fungerar det?
 
-### Steg 1: Bygg resonansfält (v3 multi-field + value-aware)
+### Steg 1: Bygg resonansfält
 
-Varje DOM-nod får ett **multi-aspekt resonanstillstånd**:
+Varje DOM-nod får ett **resonanstillstånd**:
 
 ```
 ResonanceState {
-    text_hv:        4096-bit Hypervector (text n-gram encoding)
+    text_hv:        2048-bit Hypervector (text n-gram encoding)
     role:           String (heading, price, button, etc.)
     depth:          u32 (djup i DOM-trädet)
-    phase:          0.0 (oscillatorfas)
-    amplitude:      0.0 (resonansstyrka)
-    causal_memory:  noll-vektor (ackumulerat lärande)
-    hit_count:      0
-    last_hit_ms:    0 (temporal decay-referens)
+    phase:          f32 (oscillatorfas)
+    amplitude:      f32 (resonansstyrka)
+    prev_amplitude: f32 (GWN second-order tracking)
+    causal_memory:  Hypervector (ackumulerat lärande)
+    hit_count:      u32
+    last_hit_ms:    u64 (temporal decay + BTSP plasticity)
 }
 ```
 
-**Fältet lagrar också** per nod:
-- `node_labels`: synlig text (BM25-indexerad)
-- `node_values`: href, action, name (value-aware, konkatenerad med label i BM25)
+**Fältet lagrar också:**
+- `node_labels` + `node_values`: BM25-indexerad text + href/action/name
 - `bm25_cache`: cachad BM25-index (byggs en gång, sub-ms vid cache-hit)
+- `eager_scores`: BM25S pre-computed scores per token (R1)
+- `lsh_index`: LSH hash-tabeller för snabb HDC-filtrering (R4)
+- `concept_memory`: globala begrepps-HV:er per goal-token (v7)
+- `propagation_stats`: Beta(α,β) per roll+riktning (v6 Bayesian)
 
 Fältet byggs en gång per URL och cachas (LRU, 64 entries).
 
@@ -59,41 +68,44 @@ Fältet byggs en gång per URL och cachas (LRU, 64 entries).
 propagate(goal):
 
   Fas 1 — Multi-field initial resonans:
-    BM25-index från cachad label+value per nod (sub-ms vid cache-hit)
-    Tre separata signaler:
-      Signal 1: BM25 keyword + value-matchning (75%)
-      Signal 2: HDC text n-gram similarity (20%)
-      Signal 3: Roll-prioritet (5%, ren tabell — ingen semantik)
-    amplitude = 0.75×BM25 + 0.20×HDC + 0.05×roll + kausal_boost
+    BM25 eager scores (BM25S, pre-computed per token) + HDC 2048-bit
+    Signaler:
+      BM25 keyword + value-matchning (75%)
+      HDC text n-gram similarity (20%)
+      Roll-prioritet (5%, ren tabell)
+      Concept memory boost (max 15%, v7 field-level learning)
+      DOM depth signal (depth 3-8: +0.05, R8)
+    amplitude = Σ signaler + kausal_boost + answer_shape_boost
 
-    Kausal boost (temporal decay):
+    Answer-shape scoring (v7):
+      +0.3 siffror | +0.2 kort text | +0.15 enheter | +0.15 strukturkontext
+
+    Kausal boost (temporal decay + BTSP plasticity):
       raw = causal_memory.similarity(goal_hv)
-      decay = exp(-λ × seconds_since_last_hit)   [halvering var 10 min]
+      decay = exp(-λ × seconds_since_last_hit)
       causal_boost = raw² × 0.3 × decay
 
-  Fas 2 — Convergent propagation (O(N)-garanterad, max 6, delta-styrt):
-    Fan-out cap: max 32 barn per nod (O(N) även vid <ul> med 200 <li>)
-    Komplexitet: O(K × min(E, N×32)) där K=2-3
+  Fas 2 — GWN convergent propagation (second-order, O(N)):
+    Adaptive fan-out: min(4 + ln(N)×8, N) per nod
+    GWN second-order: target = max(2×current - previous, propagated)
+    Förälder → barn: damping = 0.35 × √(amp) × learned_weight(role:down)
+    Barn → förälder: amp = 0.25 × √(amp) × learned_weight(role:up)
+    Fassynk: |Δphase| < π/4 → ×1.08
+    Konvergens: total_delta < 0.001 (typiskt 2-3 steg, max 6)
 
-    Förälder → barn:
-      damping = 0.35 × √(parent.amp) × learned_weight(role, "down")
-    Barn → förälder:
-      amplification = 0.25 × √(child.amp) × learned_weight(role, "up")
-    Fassynk: om |parent.phase - child.phase| < π/4 → ×1.08
-    Konvergens: stoppa om total_delta < 0.001 (typiskt 2-3 steg)
+    learned_weight() — Beta-distribution + Thompson Sampling:
+      stats = propagation_stats["heading:down"]  // Beta(α, β)
+      mean = α / (α + β)
+      variance = α×β / ((α+β)² × (α+β+1))
+      sample = mean ± √variance × 0.5 (deterministic via key hash)
+      weight = 0.2 + sample × 1.3
 
-    learned_weight() — Bayesian blend:
-      stats = propagation_stats["heading:down"]  // (successes, attempts)
-      observed = 0.3 + (successes/attempts) × 1.2
-      blend = min(attempts/20, 0.8)
-      weight = (1-blend) × heuristic + blend × observed
-      → 0 attempts: 100% heuristik (cold-start)
-      → 10 attempts: 50/50
-      → 20+ attempts: 80% data, 20% prior
+  Fas 2b — Multi-hop micro propagation (v7):
+    Value-match noder (amp > 0.3) → boost syskon 15% + 2-hop 8%
 
   Fas 3 — Deterministic amplitud-gap top-k:
-    Sortera efter amplitude DESC, tie-break node_id ASC (deterministic)
-    Klipp vid >30% relativ drop (naturlig klustergräns)
+    Sortera amplitude DESC, tie-break node_id ASC
+    Klipp vid >30% relativ drop
     Returnera max top_n noder
 ```
 
@@ -108,10 +120,14 @@ feedback(goal, successful_node_ids):
       beta *= 0.95
     → Nyare data väger mer, stale bias försvinner gradvis
 
-  Steg 1 — Kausalt minne (per nod):
+  Steg 1 — Kausalt minne med BTSP plasticity (per nod):
     goal_hv = Hypervector::from_text_ngrams(goal)
     for each node_id:
-      node.causal_memory = bundle(node.causal_memory, goal_hv)
+      plasticity = 1.5 if feedback < 1s, 1.0 if < 10s, 0.5 if delayed
+      if plasticity > 1.2:
+        node.causal_memory = bundle(memory, goal_hv, goal_hv)  // dubbel
+      else:
+        node.causal_memory = bundle(memory, goal_hv)
       node.hit_count += 1
 
   Steg 2 — Beta-distribution update (per roll):
@@ -219,17 +235,19 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 
 ```
   Metod                         @1     @3     @5    @10    @20   Avg ms
-  CRFR v6                    33/45  39/45  42/45  43/45  44/45     420
-  Pipeline (BM25+HDC+Embed)  36/45  42/45  43/45  44/45  44/45     541
+  CRFR v9                    32/45  40/45  43/45  44/45  44/45     395
+  Pipeline (BM25+HDC+Embed)  36/45  43/45  43/45  44/45  44/45     505
 
-  Paritet vid @20: båda 97.8% (44/45)
-  CRFR 1.3x snabbare (420ms vs 541ms inkl nätverksfetch)
-  Enda miss: IMDB (1 nod parsad — JS-renderad sida)
+  Paritet @20: 97.8% (44/45)
+  CRFR @3: 40/45 (89%) — upp från 39/45 i v6
+  CRFR 1.3x snabbare (395ms vs 505ms inkl nätverksfetch)
+  Gov: 5/5 @3 (perfekt! BoE rank 1)
+  Enda miss: IMDB (1 nod — JS-renderad)
 ```
 
 ### Nyckeltal
 
-| Dimension | CRFR v8 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+| Dimension | CRFR v9 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
 |-----------|:-------:|:-------------------------:|:----------------:|
 | **Recall@3 (20 offline)** | **80%** | 50% | — |
 | **Recall@20 (50 live)** | **97.8%** | **97.8%** | — |
@@ -324,18 +342,18 @@ Pipeline-metoden kör tre steg sekventiellt:
 2. HDC 4096-bit pruning (~0.5 ms)
 3. **ONNX embedding inference (~30-80 ms)** — flaskhalsen
 
-CRFR v3 eliminerar steg 3 och cachar steg 1:
+CRFR v9 eliminerar steg 3 och optimerar steg 1-2:
 
-**Cold (första besöket — ~22ms):**
-1. Bygg BM25-index (label+value) + HDC HV:er (~5 ms)
-2. BM25 query + HDC similarity (SIMD 4-wide) + roll-prioritet (~0.5 ms)
-3. Convergent propagation (O(N), fan-out cap=32, ~0.1 ms)
-4. Deterministic gap-filter (~0.01 ms)
+**Cold (första besöket — ~12ms):**
+1. Bygg BM25S eager scores + 2048-bit HDC HV:er + LSH index (~5 ms)
+2. BM25S token-lookup + HDC similarity (fused popcount) (~0.3 ms)
+3. GWN second-order propagation (adaptive fan-out, convergent) (~0.1 ms)
+4. Answer-shape scoring + gap-filter (~0.01 ms)
 
 **Cache-hit (återbesök — ~0.6ms):**
-1. BM25 query på cachad index (~0.3 ms)
-2. HDC similarity (SIMD-optimerad) (~0.2 ms)
-3. Propagation + filter (~0.1 ms)
+1. BM25S eager lookup (~0.2 ms)
+2. HDC similarity (2048-bit, fused XOR-popcount) (~0.15 ms)
+3. GWN propagation + multi-hop + filter (~0.1 ms)
 
 **Multi-query (N varianter — ~N×0.6ms):**
 1. `propagate_multi_variant(["price kr", "cost amount", "pris belopp"])`
@@ -353,15 +371,26 @@ Ingen neural network inference. SIMD-optimerade bitvektoroperationer.
 
 Om en tabellrubrik "National Living Wage" har hög amplitude sprider den energi nedåt till cellen "£12.21" — som inte matchar sökord "wage" men är det faktiska svaret. Pipeline scorar varje nod oberoende och missar detta.
 
-### 2. Learned role weights
+### 2. Answer-shape scoring (v7)
 
-En `price`-nod bubblar 1.4× uppåt — förälder-noden (raden) lyfts av datainnehållet. En `heading`-nod sprider 1.3× nedåt — barnen (stycketext) lyfts av rubriken. `navigation`-noder sprider bara 0.3× — dämpar brus naturligt.
+Noder som SER UT som svar rankas högre — utan semantik:
+- +0.3 om noden innehåller siffror (priser, datum, befolkning)
+- +0.2 om kort text (< 50 tecken — svar är koncisa)
+- +0.15 om enhetsmarkörer ($, £, %, kr, km)
+- +0.15 om strukturerad kontext (tabellcell med syskon)
 
-### 3. Query-conditioned: mer energi via starka matchningar
+### 3. Bayesian learned weights + Thompson Sampling
 
-`spread_factor = base × √(source_amplitude) × role_factor`
+Propagation-vikter lär sig per sajt via Beta(α,β):
+- `feedback()` uppdaterar stats: `α += confidence`, `β += 1-confidence`
+- `learned_weight()` = Beta mean + Thompson-noise (utforskar vid lite data)
+- Konvergerar mot sajtspecifika optimala vikter automatiskt
 
-En nod med amplitude 0.8 sprider `√0.8 = 0.89×` — nästan full energi. En nod med amplitude 0.1 sprider `√0.1 = 0.32×` — minimal. Relevanta noder skapar starka vågfronter, irrelevanta dör ut.
+### 4. Multi-hop + field-level concept memory (v7/v9)
+
+- Value-match noder boostar syskon (15%) och 2-hop grannar (8%)
+- `concept_memory`: aggregerar framgångsrika noders HV per goal-token
+- Systemet lär sig "vad price-frågor matchar" globalt — utan LLM
 
 ---
 
@@ -545,11 +574,12 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 | `src/bin/server.rs` | HTTP: endpoints + MCP dispatch (tools/list + tools/call) |
 | `src/stream_engine.rs` | I2: kontext-aware re-ranking (barn-grann boost +20%) |
 | `src/intent.rs` | I7: `extract_by_keys_multi()` — jämförande extraktion |
-| `src/scoring/hdc.rs` | SIMD: 4-wide unrolled bind/hamming/bundle, batch ops |
+| `src/scoring/hdc.rs` | 2048-bit HV, fused XOR-popcount, LshIndex, batch ops |
 | `src/scoring/tfidf.rs` | BM25 (cachad i CRFR, Clone-deriverad) |
 | `benches/crfr_vs_colbert.rs` | Kontrollerad benchmark (6 tester) |
 | `benches/crfr_final_benchmark.rs` | Offline benchmark (20 sajter, @1/@3/@10/@20) |
 | `benches/crfr_live_test.py` | Live-verifiering (20 sajter via HTTP-server) |
+| `benches/poc_50_crfr.py` | POC 50-sajt head-to-head (CRFR vs Pipeline) |
 
 ---
 
