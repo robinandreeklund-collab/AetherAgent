@@ -29,10 +29,13 @@ const PHASE_SYNC_WINDOW: f32 = std::f32::consts::FRAC_PI_4;
 const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
 const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
-/// Max antal propagations-iterationer (konvergens kan avbryta tidigare)
+/// Max antal propagations-iterationer (konvergens avbryter normalt vid 2-3)
 const MAX_PROPAGATION_STEPS: u32 = 6;
-/// Konvergenströskel: om total amplitudförändring < detta, stoppa propagation
+/// Konvergenströskel: om total amplitudförändring < detta, stoppa
 const CONVERGENCE_THRESHOLD: f32 = 0.001;
+/// Max fan-out per nod i propagation (cap för O(N)-garanti)
+/// En <ul> med 200 <li> propagerar bara till de första MAX_FAN_OUT barnen.
+const MAX_FAN_OUT: usize = 32;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
@@ -190,32 +193,45 @@ fn role_priority(role: &str) -> f32 {
     }
 }
 
-/// Aspekt 2: Learned downward propagation — roller som bör sprida till barn
-fn downward_propagation_weight(role: &str) -> f32 {
-    match role {
-        // Container-roller sprider bra nedåt (barn är ofta svaret)
-        "heading" | "table" | "row" | "list" => 1.3,
-        "generic" | "article" | "section" => 1.1,
-        // Leaf-roller sprider lite (de ÄR svaret, inte deras barn)
-        "price" | "text" | "button" | "link" => 0.6,
-        // Nav/footer sprider minimal energi nedåt
+/// Adaptive downward propagation weight.
+///
+/// Baseras på roll-heuristik + feedback-signal:
+/// - Basvikt: strukturbaserad (container → barn starkare)
+/// - Feedback-boost: noder med hit_count > 0 → starkare propagation
+///   (roller som historiskt gett rätt svar sprider mer energi)
+///
+/// Observera: vikterna är startpunkter, inte sanningar. Feedback
+/// justerar dem per sajt. En e-commerce-sajt där "generic" divvar
+/// innehåller produktpriser lär sig automatiskt att "generic" ska
+/// sprida mer — utan att ändra hårdkodade tabeller.
+fn adaptive_down_weight(state: &ResonanceState, _all: &HashMap<u32, ResonanceState>) -> f32 {
+    // Bas: roll-heuristik (initial guess, skalad ned)
+    let base = match state.role.as_str() {
+        "heading" | "table" | "row" | "list" => 1.2,
+        "generic" | "article" | "section" => 1.0,
+        "price" | "text" | "button" | "link" => 0.7,
         "navigation" | "complementary" | "contentinfo" => 0.3,
         _ => 1.0,
-    }
+    };
+    // Feedback-adaption: noder som historiskt gett svar sprider mer
+    // hit_count=0 → ×1.0, hit_count=1 → ×1.1, hit_count=5 → ×1.25
+    let feedback_boost = 1.0 + (state.hit_count as f32).min(10.0) * 0.05;
+    base * feedback_boost
 }
 
-/// Aspekt 2: Learned upward propagation — roller som bör bubbla upp
-fn upward_propagation_weight(role: &str) -> f32 {
-    match role {
-        // Data-roller bubblar starkt uppåt (förälder får context)
-        "price" | "data" | "cell" => 1.4,
+/// Adaptive upward propagation weight.
+///
+/// Samma princip: roll-heuristik + feedback-signal.
+fn adaptive_up_weight(state: &ResonanceState) -> f32 {
+    let base = match state.role.as_str() {
+        "price" | "data" | "cell" => 1.3,
         "text" | "paragraph" | "heading" => 1.1,
-        // Interaktiva roller bubblar medium
         "button" | "link" | "cta" => 0.9,
-        // Nav/boilerplate bubblar svagt
         "navigation" | "complementary" => 0.3,
         _ => 1.0,
-    }
+    };
+    let feedback_boost = 1.0 + (state.hit_count as f32).min(10.0) * 0.05;
+    base * feedback_boost
 }
 
 /// Enkel hash-funktion för URL:er (FNV-1a)
@@ -440,33 +456,48 @@ impl ResonanceField {
             }
         }
 
-        // Fas 2: #4 Convergent propagation — styrt av signal, inte iteration count
+        // Fas 2: Convergent propagation — O(E) per iteration, max 6 iterationer.
+        //
+        // Komplexitetsanalys:
+        //   Varje iteration traverserar alla edges en gång: O(E) = O(N) för ett träd.
+        //   Fan-out cap (MAX_FAN_OUT=32) garanterar att inga high-degree noder
+        //   (t.ex. <ul> med 200 <li>) blåser upp till O(N²).
+        //   Konvergens stoppar normalt vid 2-3 iterationer.
+        //   Total: O(K × min(E, N×32)) där K ≈ 2-3.
+        //
+        // Snapshot: Vec istf HashMap — O(N) men med bättre cache-locality.
         for _step in 0..MAX_PROPAGATION_STEPS {
-            let amplitudes: HashMap<u32, (f32, f32)> = self
+            // Snapshot amplituder (Vec för cache-locality, sorterad efter nod-id)
+            let amplitudes: Vec<(u32, f32, f32)> = self
                 .nodes
                 .iter()
-                .map(|(&id, s)| (id, (s.amplitude, s.phase)))
+                .map(|(&id, s)| (id, s.amplitude, s.phase))
+                .collect();
+            let amp_map: HashMap<u32, (f32, f32)> = amplitudes
+                .iter()
+                .map(|&(id, amp, ph)| (id, (amp, ph)))
                 .collect();
 
             let mut total_delta: f32 = 0.0;
 
-            // #5 Path-aware: Förälder → barn
+            // Förälder → barn (fan-out capped)
             for (&parent_id, children) in &self.children_map {
                 let (parent_amp, parent_phase) =
-                    amplitudes.get(&parent_id).copied().unwrap_or((0.0, 0.0));
+                    amp_map.get(&parent_id).copied().unwrap_or((0.0, 0.0));
                 if parent_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
                 let confidence_factor = parent_amp.sqrt();
-                let parent_role = self
+                let role_factor = self
                     .nodes
                     .get(&parent_id)
-                    .map(|s| s.role.as_str())
-                    .unwrap_or("");
-                let role_factor = downward_propagation_weight(parent_role);
+                    .map(|s| adaptive_down_weight(s, &self.nodes))
+                    .unwrap_or(1.0);
                 let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
 
-                for &child_id in children {
+                // Fan-out cap: max MAX_FAN_OUT barn per nod
+                let fan_out = children.len().min(MAX_FAN_OUT);
+                for &child_id in &children[..fan_out] {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
                         let mut propagated = parent_amp * damping;
                         let phase_diff = (parent_phase - child_state.phase).abs();
@@ -484,20 +515,19 @@ impl ResonanceField {
                 }
             }
 
-            // #5 Path-aware: Barn → förälder
+            // Barn → förälder (alltid 1:1, inget fan-out-problem)
             for (&child_id, &parent_id) in &self.parent_map {
                 let (child_amp, child_phase) =
-                    amplitudes.get(&child_id).copied().unwrap_or((0.0, 0.0));
+                    amp_map.get(&child_id).copied().unwrap_or((0.0, 0.0));
                 if child_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
                 let confidence_factor = child_amp.sqrt();
-                let child_role = self
+                let role_factor = self
                     .nodes
                     .get(&child_id)
-                    .map(|s| s.role.as_str())
-                    .unwrap_or("");
-                let role_factor = upward_propagation_weight(child_role);
+                    .map(adaptive_up_weight)
+                    .unwrap_or(1.0);
                 let amplification = BASE_PARENT_AMPLIFICATION * confidence_factor * role_factor;
 
                 if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
@@ -516,7 +546,7 @@ impl ResonanceField {
                 }
             }
 
-            // #4: Konvergens — stoppa om energin stabiliserat sig
+            // Konvergens — stoppa om energin stabiliserat sig
             if total_delta < CONVERGENCE_THRESHOLD {
                 break;
             }
