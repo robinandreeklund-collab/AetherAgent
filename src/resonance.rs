@@ -283,8 +283,8 @@ fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
 /// Based on HTML5 landmark roles — not semantics, pure structure.
 fn zone_penalty(role: &str, depth: u32) -> f32 {
     match role {
-        "navigation" | "complementary" | "contentinfo" | "banner" => 0.15,
-        "generic" if depth <= 1 => 0.3, // Top-level generic = likely wrapper
+        "navigation" | "complementary" | "contentinfo" | "banner" => 0.5,
+        "generic" if depth <= 1 => 0.7, // Top-level generic = likely wrapper
         _ => 1.0,                       // No penalty
     }
 }
@@ -588,7 +588,7 @@ impl ResonanceField {
                     1.0
                 };
 
-                state.amplitude = ((base_resonance + causal_boost) * combmnz).clamp(0.0, 2.0);
+                state.amplitude = ((base_resonance + causal_boost) * combmnz).clamp(0.0, 1.5);
 
                 // Answer-shape boost: noder som SER UT som svar rankas högre
                 let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
