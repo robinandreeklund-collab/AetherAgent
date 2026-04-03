@@ -9,10 +9,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 245,
+      "ms": 220,
       "rank": 1,
-      "nodes": 15,
-      "tokens": 1216
+      "nodes": 7,
+      "tokens": 329
     },
     "pipe": {
       "f1": true,
@@ -20,12 +20,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 15,
+      "ms": 11,
       "rank": 1,
       "nodes": 2,
       "tokens": 256
     },
-    "html_tokens": 8695
+    "html_tokens": 8813
   },
   {
     "name": "lobste.rs",
@@ -37,10 +37,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 479,
+      "ms": 419,
       "rank": 2,
       "nodes": 20,
-      "tokens": 295
+      "tokens": 235
     },
     "pipe": {
       "f1": true,
@@ -48,27 +48,27 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 780,
+      "ms": 660,
       "rank": 1,
       "nodes": 20,
-      "tokens": 328
+      "tokens": 401
     },
-    "html_tokens": 14693
+    "html_tokens": 14687
   },
   {
     "name": "CNN Lite",
     "cat": "news",
     "status": "OK",
     "crfr": {
-      "f1": true,
+      "f1": false,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 441,
-      "rank": 1,
-      "nodes": 20,
-      "tokens": 1038
+      "ms": 412,
+      "rank": 2,
+      "nodes": 13,
+      "tokens": 586
     },
     "pipe": {
       "f1": true,
@@ -76,12 +76,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 201,
+      "ms": 182,
       "rank": 1,
-      "nodes": 12,
-      "tokens": 568
+      "nodes": 11,
+      "tokens": 549
     },
-    "html_tokens": 84646
+    "html_tokens": 84692
   },
   {
     "name": "NPR Text",
@@ -93,10 +93,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 480,
+      "ms": 400,
       "rank": 1,
-      "nodes": 9,
-      "tokens": 531
+      "nodes": 6,
+      "tokens": 269
     },
     "pipe": {
       "f1": true,
@@ -104,12 +104,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 39,
+      "ms": 30,
       "rank": 1,
-      "nodes": 12,
-      "tokens": 498
+      "nodes": 16,
+      "tokens": 571
     },
-    "html_tokens": 1475
+    "html_tokens": 1487
   },
   {
     "name": "Reuters",
@@ -121,7 +121,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 38,
+      "ms": 33,
       "rank": 1,
       "nodes": 1,
       "tokens": 13
@@ -132,7 +132,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 35,
+      "ms": 31,
       "rank": 1,
       "nodes": 1,
       "tokens": 13
@@ -149,10 +149,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 517,
+      "ms": 414,
       "rank": 1,
       "nodes": 20,
-      "tokens": 830
+      "tokens": 611
     },
     "pipe": {
       "f1": true,
@@ -160,7 +160,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 663,
+      "ms": 539,
       "rank": 1,
       "nodes": 20,
       "tokens": 686
@@ -177,7 +177,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 422,
+      "ms": 390,
       "rank": 1,
       "nodes": 5,
       "tokens": 86
@@ -188,12 +188,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 443,
+      "ms": 391,
       "rank": 1,
       "nodes": 20,
-      "tokens": 617
+      "tokens": 613
     },
-    "html_tokens": 101420
+    "html_tokens": 101576
   },
   {
     "name": "The Guardian",
@@ -210,10 +210,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 427,
+      "ms": 365,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1049
+      "tokens": 784
     },
     "pipe": {
       "f1": false,
@@ -221,7 +221,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 517,
+      "ms": 446,
       "rank": 3,
       "nodes": 20,
       "tokens": 596
@@ -238,10 +238,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 400,
+      "ms": 345,
       "rank": 1,
       "nodes": 20,
-      "tokens": 505
+      "tokens": 737
     },
     "pipe": {
       "f1": false,
@@ -249,12 +249,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 610,
+      "ms": 523,
       "rank": 2,
       "nodes": 20,
       "tokens": 372
     },
-    "html_tokens": 22868
+    "html_tokens": 22867
   },
   {
     "name": "WHO",
@@ -266,10 +266,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 362,
+      "ms": 327,
       "rank": 1,
       "nodes": 20,
-      "tokens": 793
+      "tokens": 629
     },
     "pipe": {
       "f1": true,
@@ -277,12 +277,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 608,
+      "ms": 536,
       "rank": 1,
       "nodes": 20,
       "tokens": 413
     },
-    "html_tokens": 32871
+    "html_tokens": 32874
   },
   {
     "name": "EU Europa",
@@ -294,10 +294,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 310,
+      "ms": 266,
       "rank": 2,
       "nodes": 20,
-      "tokens": 697
+      "tokens": 604
     },
     "pipe": {
       "f1": true,
@@ -305,7 +305,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 499,
+      "ms": 439,
       "rank": 1,
       "nodes": 20,
       "tokens": 523
@@ -322,10 +322,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 387,
+      "ms": 336,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1280
+      "tokens": 957
     },
     "pipe": {
       "f1": true,
@@ -333,12 +333,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 631,
+      "ms": 512,
       "rank": 1,
       "nodes": 20,
-      "tokens": 832
+      "tokens": 730
     },
-    "html_tokens": 80408
+    "html_tokens": 80061
   },
   {
     "name": "rust-lang.org",
@@ -350,10 +350,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 401,
+      "ms": 381,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1512
+      "tokens": 1310
     },
     "pipe": {
       "f1": true,
@@ -361,7 +361,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 399,
+      "ms": 363,
       "rank": 1,
       "nodes": 20,
       "tokens": 1156
@@ -378,10 +378,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 383,
-      "rank": 5,
+      "ms": 339,
+      "rank": 4,
       "nodes": 20,
-      "tokens": 39
+      "tokens": 32
     },
     "pipe": {
       "f1": false,
@@ -389,7 +389,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 659,
+      "ms": 575,
       "rank": 2,
       "nodes": 20,
       "tokens": 885
@@ -406,10 +406,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 414,
+      "ms": 350,
       "rank": 1,
-      "nodes": 6,
-      "tokens": 583
+      "nodes": 3,
+      "tokens": 199
     },
     "pipe": {
       "f1": true,
@@ -417,7 +417,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 457,
+      "ms": 395,
       "rank": 1,
       "nodes": 19,
       "tokens": 1088
@@ -434,10 +434,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 364,
+      "ms": 327,
       "rank": 1,
-      "nodes": 20,
-      "tokens": 1068
+      "nodes": 19,
+      "tokens": 821
     },
     "pipe": {
       "f1": true,
@@ -445,12 +445,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 157,
+      "ms": 140,
       "rank": 1,
       "nodes": 14,
       "tokens": 462
     },
-    "html_tokens": 114735
+    "html_tokens": 114700
   },
   {
     "name": "Ruby Lang",
@@ -462,10 +462,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 309,
+      "ms": 275,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1417
+      "tokens": 1032
     },
     "pipe": {
       "f1": false,
@@ -473,7 +473,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 299,
+      "ms": 277,
       "rank": 2,
       "nodes": 20,
       "tokens": 894
@@ -490,10 +490,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 350,
+      "ms": 310,
       "rank": 2,
       "nodes": 20,
-      "tokens": 607
+      "tokens": 437
     },
     "pipe": {
       "f1": true,
@@ -501,12 +501,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 220,
+      "ms": 147,
       "rank": 1,
-      "nodes": 19,
-      "tokens": 469
+      "nodes": 15,
+      "tokens": 288
     },
-    "html_tokens": 4428
+    "html_tokens": 4364
   },
   {
     "name": "Kotlin",
@@ -518,10 +518,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 392,
+      "ms": 356,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1171
+      "tokens": 955
     },
     "pipe": {
       "f1": true,
@@ -529,7 +529,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 456,
+      "ms": 397,
       "rank": 1,
       "nodes": 20,
       "tokens": 755
@@ -546,10 +546,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 464,
+      "ms": 397,
       "rank": 2,
       "nodes": 20,
-      "tokens": 1711
+      "tokens": 1421
     },
     "pipe": {
       "f1": false,
@@ -557,7 +557,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 551,
+      "ms": 491,
       "rank": 2,
       "nodes": 20,
       "tokens": 1106
@@ -574,10 +574,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 275,
+      "ms": 253,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1461
+      "tokens": 1075
     },
     "pipe": {
       "f1": true,
@@ -585,7 +585,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 263,
+      "ms": 237,
       "rank": 1,
       "nodes": 18,
       "tokens": 919
@@ -602,10 +602,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 344,
+      "ms": 282,
       "rank": 1,
       "nodes": 20,
-      "tokens": 983
+      "tokens": 735
     },
     "pipe": {
       "f1": true,
@@ -613,7 +613,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 263,
+      "ms": 220,
       "rank": 1,
       "nodes": 20,
       "tokens": 717
@@ -630,10 +630,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 446,
+      "ms": 383,
       "rank": 1,
       "nodes": 20,
-      "tokens": 833
+      "tokens": 716
     },
     "pipe": {
       "f1": true,
@@ -641,7 +641,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 201,
+      "ms": 178,
       "rank": 1,
       "nodes": 16,
       "tokens": 469
@@ -654,14 +654,14 @@
     "status": "OK",
     "crfr": {
       "f1": false,
-      "f3": false,
+      "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 307,
-      "rank": 4,
+      "ms": 259,
+      "rank": 3,
       "nodes": 20,
-      "tokens": 212
+      "tokens": 278
     },
     "pipe": {
       "f1": true,
@@ -669,7 +669,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 328,
+      "ms": 266,
       "rank": 1,
       "nodes": 20,
       "tokens": 688
@@ -686,10 +686,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 197,
+      "ms": 161,
       "rank": 1,
-      "nodes": 3,
-      "tokens": 260
+      "nodes": 5,
+      "tokens": 282
     },
     "pipe": {
       "f1": true,
@@ -697,7 +697,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 58,
+      "ms": 48,
       "rank": 1,
       "nodes": 6,
       "tokens": 315
@@ -714,10 +714,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 403,
+      "ms": 331,
       "rank": 1,
       "nodes": 20,
-      "tokens": 964
+      "tokens": 872
     },
     "pipe": {
       "f1": true,
@@ -725,7 +725,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 236,
+      "ms": 204,
       "rank": 1,
       "nodes": 17,
       "tokens": 611
@@ -742,7 +742,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 56,
+      "ms": 49,
       "rank": 1,
       "nodes": 2,
       "tokens": 59
@@ -753,7 +753,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 21,
+      "ms": 17,
       "rank": 1,
       "nodes": 2,
       "tokens": 59
@@ -770,10 +770,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 334,
+      "ms": 274,
       "rank": 1,
       "nodes": 20,
-      "tokens": 629
+      "tokens": 827
     },
     "pipe": {
       "f1": true,
@@ -781,12 +781,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 411,
+      "ms": 335,
       "rank": 1,
       "nodes": 20,
       "tokens": 864
     },
-    "html_tokens": 99415
+    "html_tokens": 99387
   },
   {
     "name": "Terraform",
@@ -798,10 +798,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 377,
+      "ms": 325,
       "rank": 3,
       "nodes": 20,
-      "tokens": 708
+      "tokens": 564
     },
     "pipe": {
       "f1": true,
@@ -809,7 +809,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 979,
+      "ms": 845,
       "rank": 1,
       "nodes": 20,
       "tokens": 498
@@ -826,10 +826,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 323,
+      "ms": 276,
       "rank": 1,
       "nodes": 20,
-      "tokens": 552
+      "tokens": 527
     },
     "pipe": {
       "f1": true,
@@ -837,12 +837,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 608,
+      "ms": 508,
       "rank": 1,
       "nodes": 20,
-      "tokens": 433
+      "tokens": 423
     },
-    "html_tokens": 77233
+    "html_tokens": 76835
   },
   {
     "name": "Tailwind CSS",
@@ -854,7 +854,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 968,
+      "ms": 755,
       "rank": 1,
       "nodes": 3,
       "tokens": 103
@@ -865,12 +865,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 1602,
+      "ms": 1256,
       "rank": 1,
       "nodes": 20,
-      "tokens": 667
+      "tokens": 600
     },
-    "html_tokens": 234318
+    "html_tokens": 233654
   },
   {
     "name": "OpenStreetMap",
@@ -882,10 +882,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 456,
+      "ms": 396,
       "rank": 1,
-      "nodes": 14,
-      "tokens": 680
+      "nodes": 13,
+      "tokens": 677
     },
     "pipe": {
       "f1": true,
@@ -893,7 +893,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 354,
+      "ms": 307,
       "rank": 1,
       "nodes": 20,
       "tokens": 630
@@ -910,10 +910,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 69,
+      "ms": 57,
       "rank": 1,
-      "nodes": 3,
-      "tokens": 262
+      "nodes": 2,
+      "tokens": 134
     },
     "pipe": {
       "f1": true,
@@ -921,7 +921,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 21,
+      "ms": 19,
       "rank": 1,
       "nodes": 2,
       "tokens": 134
@@ -938,10 +938,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 418,
+      "ms": 359,
       "rank": 1,
-      "nodes": 20,
-      "tokens": 765
+      "nodes": 2,
+      "tokens": 50
     },
     "pipe": {
       "f1": true,
@@ -949,7 +949,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 303,
+      "ms": 262,
       "rank": 1,
       "nodes": 20,
       "tokens": 582
@@ -961,15 +961,15 @@
     "cat": "ref",
     "status": "OK",
     "crfr": {
-      "f1": false,
+      "f1": true,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 260,
-      "rank": 2,
+      "ms": 220,
+      "rank": 1,
       "nodes": 20,
-      "tokens": 1295
+      "tokens": 1214
     },
     "pipe": {
       "f1": true,
@@ -977,7 +977,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 476,
+      "ms": 386,
       "rank": 1,
       "nodes": 20,
       "tokens": 1135
@@ -994,10 +994,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 543,
+      "ms": 447,
       "rank": 1,
       "nodes": 20,
-      "tokens": 372
+      "tokens": 383
     },
     "pipe": {
       "f1": true,
@@ -1005,7 +1005,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 651,
+      "ms": 547,
       "rank": 1,
       "nodes": 20,
       "tokens": 142
@@ -1023,14 +1023,14 @@
     "status": "OK",
     "crfr": {
       "f1": false,
-      "f3": true,
+      "f3": false,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 577,
-      "rank": 3,
+      "ms": 498,
+      "rank": 4,
       "nodes": 20,
-      "tokens": 1045
+      "tokens": 875
     },
     "pipe": {
       "f1": false,
@@ -1038,27 +1038,27 @@
       "f5": false,
       "f10": true,
       "f20": true,
-      "ms": 1115,
-      "rank": 8,
+      "ms": 973,
+      "rank": 7,
       "nodes": 20,
-      "tokens": 920
+      "tokens": 706
     },
-    "html_tokens": 421630
+    "html_tokens": 423432
   },
   {
     "name": "ECB",
     "cat": "finance",
     "status": "OK",
     "crfr": {
-      "f1": false,
-      "f3": false,
-      "f5": false,
+      "f1": true,
+      "f3": true,
+      "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 591,
-      "rank": 6,
+      "ms": 482,
+      "rank": 1,
       "nodes": 20,
-      "tokens": 625
+      "tokens": 758
     },
     "pipe": {
       "f1": true,
@@ -1066,7 +1066,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 906,
+      "ms": 796,
       "rank": 1,
       "nodes": 20,
       "tokens": 416
@@ -1083,23 +1083,23 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 1365,
+      "ms": 1140,
       "rank": 2,
       "nodes": 20,
-      "tokens": 464
+      "tokens": 367
     },
     "pipe": {
       "f1": false,
-      "f3": true,
+      "f3": false,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 3059,
-      "rank": 2,
+      "ms": 2478,
+      "rank": 4,
       "nodes": 20,
-      "tokens": 359
+      "tokens": 360
     },
-    "html_tokens": 392876
+    "html_tokens": 390864
   },
   {
     "name": "XE Currency",
@@ -1111,10 +1111,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 684,
+      "ms": 574,
       "rank": 1,
       "nodes": 20,
-      "tokens": 569
+      "tokens": 588
     },
     "pipe": {
       "f1": false,
@@ -1122,7 +1122,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 542,
+      "ms": 442,
       "rank": 3,
       "nodes": 20,
       "tokens": 420
@@ -1139,7 +1139,7 @@
       "f5": false,
       "f10": false,
       "f20": false,
-      "ms": 26,
+      "ms": 18,
       "rank": null,
       "nodes": 1,
       "tokens": 0
@@ -1150,7 +1150,7 @@
       "f5": false,
       "f10": false,
       "f20": false,
-      "ms": 34,
+      "ms": 31,
       "rank": null,
       "nodes": 1,
       "tokens": 0
@@ -1167,10 +1167,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 358,
+      "ms": 329,
       "rank": 1,
       "nodes": 20,
-      "tokens": 690
+      "tokens": 638
     },
     "pipe": {
       "f1": true,
@@ -1178,12 +1178,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 528,
+      "ms": 483,
       "rank": 1,
       "nodes": 20,
       "tokens": 657
     },
-    "html_tokens": 14193
+    "html_tokens": 14283
   },
   {
     "name": "Weather.com",
@@ -1200,7 +1200,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 41,
+      "ms": 34,
       "rank": 1,
       "nodes": 3,
       "tokens": 28
@@ -1211,7 +1211,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 73,
+      "ms": 66,
       "rank": 1,
       "nodes": 2,
       "tokens": 12
@@ -1238,10 +1238,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 406,
+      "ms": 388,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1066
+      "tokens": 789
     },
     "pipe": {
       "f1": true,
@@ -1249,12 +1249,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 678,
+      "ms": 663,
       "rank": 1,
       "nodes": 20,
-      "tokens": 491
+      "tokens": 466
     },
-    "html_tokens": 333239
+    "html_tokens": 318837
   },
   {
     "name": "Hjo kommun",
@@ -1262,14 +1262,14 @@
     "status": "OK",
     "crfr": {
       "f1": false,
-      "f3": false,
+      "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 379,
-      "rank": 4,
+      "ms": 311,
+      "rank": 3,
       "nodes": 20,
-      "tokens": 217
+      "tokens": 663
     },
     "pipe": {
       "f1": true,
@@ -1277,7 +1277,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 802,
+      "ms": 714,
       "rank": 1,
       "nodes": 20,
       "tokens": 279
