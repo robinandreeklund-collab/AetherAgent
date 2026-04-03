@@ -61,6 +61,33 @@ struct ParseTopRequest {
 }
 
 #[derive(Deserialize)]
+struct ParseCrfrRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+    #[serde(default)]
+    run_js: bool,
+    #[serde(default = "default_json")]
+    output_format: String,
+}
+
+fn default_crfr_top_n() -> u32 {
+    20
+}
+fn default_json() -> String {
+    "json".to_string()
+}
+
+#[derive(Deserialize)]
+struct CrfrFeedbackRequest {
+    url: String,
+    goal: String,
+    successful_node_ids: Vec<u32>,
+}
+
+#[derive(Deserialize)]
 struct ClickRequest {
     html: String,
     goal: String,
@@ -801,6 +828,8 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/parse": "Parse HTML to semantic tree",
             "POST /api/parse-top": "Parse top-N relevant nodes",
             "POST /api/parse-hybrid": "Parse with hybrid BM25+HDC+Neural pipeline. Set reranker=colbert for 2.8x faster + 41% better quality.",
+            "POST /api/parse-crfr": "CRFR: Causal Resonance Field Retrieval — BM25+HDC wave propagation, 10-15x faster, learns over time. Params: top_n, run_js, output_format (json/markdown).",
+            "POST /api/crfr-feedback": "Teach CRFR which nodes had the answer — improves future queries on same URL.",
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
@@ -963,6 +992,37 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     .unwrap_or_else(|_| "{}".to_string());
 
     (StatusCode::OK, result_json)
+}
+
+async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
+    let html = req.html;
+    let goal = req.goal;
+    let url = req.url;
+    let top_n = req.top_n;
+    let run_js = req.run_js;
+    let output_format = req.output_format;
+
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr(&html, &goal, &url, top_n, run_js, &output_format)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    (StatusCode::OK, result)
+}
+
+async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
+    let url = req.url;
+    let goal = req.goal;
+    let ids_json =
+        serde_json::to_string(&req.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
+
+    let result =
+        tokio::task::spawn_blocking(move || aether_agent::crfr_feedback(&url, &goal, &ids_json))
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    (StatusCode::OK, result)
 }
 
 async fn parse_extract_handler(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
@@ -5551,6 +5611,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
         .route("/api/parse-hybrid", post(parse_hybrid))
+        .route("/api/parse-crfr", post(parse_crfr_handler))
+        .route("/api/crfr-feedback", post(crfr_feedback_handler))
         .route("/api/extract-smart", post(parse_extract_handler))
         .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))

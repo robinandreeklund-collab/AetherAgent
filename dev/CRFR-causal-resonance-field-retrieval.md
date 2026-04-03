@@ -1,6 +1,6 @@
 # Causal Resonance Field Retrieval (CRFR)
 
-**Status:** Implementerad grundmodul | **Modul:** `src/resonance.rs` | **Benchmark:** `src/bin/crfr_benchmark.rs`
+**Status:** Produktionsredo | **Modul:** `src/resonance.rs` | **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
 
 ---
 
@@ -249,13 +249,76 @@ cargo run --bin aether-crfr-bench -- --verbose
 
 ---
 
-## 10. Relaterade filer
+## 10. API-referens
+
+### MCP-verktyg
+
+**`parse_crfr`** — Huvudverktyg för CRFR-parsing
+```json
+{
+  "html": "<html>...",
+  "goal": "price pris cost £ $ kr amount total",
+  "url": "https://shop.com/product",
+  "top_n": 20,
+  "run_js": false,
+  "output_format": "json"
+}
+```
+- `top_n`: Max noder (default 20, gap-detection klipper ofta tidigare)
+- `run_js`: true → QuickJS sandbox för SPA/dynamiska sidor
+- `output_format`: "json" (strukturerat) eller "markdown" (token-effektivt)
+
+**`crfr_feedback`** — Lär systemet vilka noder som var rätt
+```json
+{
+  "url": "https://shop.com/product",
+  "goal": "price pris cost",
+  "successful_node_ids": [12, 45]
+}
+```
+
+### HTTP-endpoints
+
+| Metod | Endpoint | Beskrivning |
+|-------|----------|-------------|
+| POST | `/api/parse-crfr` | CRFR-parsing (samma params som MCP) |
+| POST | `/api/crfr-feedback` | Kausal feedback |
+
+### WASM API
+
+```rust
+parse_crfr(html, goal, url, top_n, run_js, output_format) -> String
+crfr_feedback(url, goal, node_ids_json) -> String
+```
+
+### Benchmark-resultat (20 riktiga sajter, ONNX)
+
+```
+Metod                            @1       @3      @10      @20     Avg µs
+CRFR (BM25+HDC+cache)         9/20    16/20    18/20    18/20     29 173
+Pipeline (BM25+HDC+Embed)     6/20    10/20    18/20    19/20    378 764
+
+Speedup: 13x | Token-reduktion: 99% (22K → 249 tokens)
+```
+
+---
+
+## 11. Kvarvarande optimeringar
+
+- **I2**: Kontext-aware re-ranking i `stream_engine.rs` — CRFR löser detta via vågpropagation, men stream_engine har inte uppdaterats
+- **I7**: Jämförande extraktion ("X vs Y") — kräver multi-match per nyckel i `extract_data`
+
+---
+
+## 12. Relaterade filer
 
 | Fil | Beskrivning |
 |-----|-------------|
-| `src/resonance.rs` | CRFR-implementation |
-| `src/bin/crfr_benchmark.rs` | Benchmark-binary |
+| `src/resonance.rs` | CRFR-implementation (field, propagation, cache) |
+| `src/lib.rs` | WASM API: `parse_crfr`, `crfr_feedback` |
+| `src/bin/mcp_server.rs` | MCP-verktyg: `parse_crfr`, `crfr_feedback` |
+| `src/bin/server.rs` | HTTP: `/api/parse-crfr`, `/api/crfr-feedback` |
+| `benches/crfr_vs_colbert.rs` | CRFR vs ColBERT quality benchmark (6 tester) |
+| `benches/crfr_final_benchmark.rs` | Final benchmark (20 sajter, @1/@3/@10/@20) |
 | `src/scoring/hdc.rs` | Befintlig HDC (bas för Hypervector) |
-| `src/scoring/pipeline.rs` | Befintlig scoring-pipeline (integrationspunkt) |
-| `src/temporal.rs` | Temporalt minne (inspirationskälla) |
-| `src/causal.rs` | Kausal graf (inspirationskälla) |
+| `src/scoring/tfidf.rs` | BM25 (integrerad i CRFR fas-1) |
