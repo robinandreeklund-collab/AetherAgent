@@ -170,6 +170,12 @@ pub struct ResonanceField {
     /// Cachad BM25-index (#2 sub-ms: byggs en gång, återanvänds vid cache-hit)
     #[serde(skip)]
     bm25_cache: Option<TfIdfIndex>,
+    /// Learned propagation weights: per-roll success tracking.
+    /// Key: "role:down" eller "role:up". Value: (successes, attempts).
+    /// Uppdateras av feedback() — spårar vilka roller som propagerade
+    /// signalen som ledde till att svaret hittades.
+    #[serde(default)]
+    propagation_stats: HashMap<String, (u32, u32)>,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -193,45 +199,65 @@ fn role_priority(role: &str) -> f32 {
     }
 }
 
-/// Adaptive downward propagation weight.
-///
-/// Baseras på roll-heuristik + feedback-signal:
-/// - Basvikt: strukturbaserad (container → barn starkare)
-/// - Feedback-boost: noder med hit_count > 0 → starkare propagation
-///   (roller som historiskt gett rätt svar sprider mer energi)
-///
-/// Observera: vikterna är startpunkter, inte sanningar. Feedback
-/// justerar dem per sajt. En e-commerce-sajt där "generic" divvar
-/// innehåller produktpriser lär sig automatiskt att "generic" ska
-/// sprida mer — utan att ändra hårdkodade tabeller.
-fn adaptive_down_weight(state: &ResonanceState, _all: &HashMap<u32, ResonanceState>) -> f32 {
-    // Bas: roll-heuristik (initial guess, skalad ned)
-    let base = match state.role.as_str() {
+/// Heuristisk bas-vikt nedåt (cold-start prior)
+fn heuristic_down_weight(role: &str) -> f32 {
+    match role {
         "heading" | "table" | "row" | "list" => 1.2,
         "generic" | "article" | "section" => 1.0,
         "price" | "text" | "button" | "link" => 0.7,
         "navigation" | "complementary" | "contentinfo" => 0.3,
         _ => 1.0,
-    };
-    // Feedback-adaption: noder som historiskt gett svar sprider mer
-    // hit_count=0 → ×1.0, hit_count=1 → ×1.1, hit_count=5 → ×1.25
-    let feedback_boost = 1.0 + (state.hit_count as f32).min(10.0) * 0.05;
-    base * feedback_boost
+    }
 }
 
-/// Adaptive upward propagation weight.
-///
-/// Samma princip: roll-heuristik + feedback-signal.
-fn adaptive_up_weight(state: &ResonanceState) -> f32 {
-    let base = match state.role.as_str() {
+/// Heuristisk bas-vikt uppåt (cold-start prior)
+fn heuristic_up_weight(role: &str) -> f32 {
+    match role {
         "price" | "data" | "cell" => 1.3,
         "text" | "paragraph" | "heading" => 1.1,
         "button" | "link" | "cta" => 0.9,
         "navigation" | "complementary" => 0.3,
         _ => 1.0,
-    };
-    let feedback_boost = 1.0 + (state.hit_count as f32).min(10.0) * 0.05;
-    base * feedback_boost
+    }
+}
+
+/// Truly learned propagation weight.
+///
+/// Kombinerar heuristisk prior med observerad success rate:
+///   weight = (1 - blend) × heuristic + blend × observed_rate
+///
+/// `blend` ökar med antal observationer (Bayesian-inspirerat):
+///   blend = min(attempts / 20, 0.8)
+///   → 0 attempts: 100% heuristik (cold-start)
+///   → 10 attempts: 50/50 heuristik/data
+///   → 20+ attempts: 80% data, 20% heuristik (prior bevarad)
+///
+/// `observed_rate` = successes / attempts (normaliserad till 0.3-1.5 range)
+///
+/// Effekt: en e-commerce-sajt där "generic" div ger svar lär sig
+/// att "generic:down" ska ha hög vikt — utan att ändra tabeller.
+fn learned_weight(
+    role: &str,
+    direction: &str,
+    heuristic: f32,
+    stats: &HashMap<String, (u32, u32)>,
+) -> f32 {
+    let key = format!("{}:{}", role, direction);
+    let (successes, attempts) = stats.get(&key).copied().unwrap_or((0, 0));
+
+    if attempts == 0 {
+        return heuristic; // Cold-start: ren heuristik
+    }
+
+    // Observerad success rate → skalad till propagation-vikt
+    let raw_rate = successes as f32 / attempts as f32;
+    // Mappa 0.0-1.0 → 0.3-1.5 (ingen roll får 0, max 1.5)
+    let observed = 0.3 + raw_rate * 1.2;
+
+    // Blend: ökar med antal observationer (max 80% data)
+    let blend = ((attempts as f32) / 20.0).min(0.8);
+
+    (1.0 - blend) * heuristic + blend * observed
 }
 
 /// Enkel hash-funktion för URL:er (FNV-1a)
@@ -290,6 +316,7 @@ impl ResonanceField {
             node_labels,
             node_values,
             bm25_cache: None,
+            propagation_stats: HashMap::new(),
             url_hash: hash_url(url),
             created_at_ms: now_ms(),
             total_queries: 0,
@@ -491,7 +518,14 @@ impl ResonanceField {
                 let role_factor = self
                     .nodes
                     .get(&parent_id)
-                    .map(|s| adaptive_down_weight(s, &self.nodes))
+                    .map(|s| {
+                        learned_weight(
+                            &s.role,
+                            "down",
+                            heuristic_down_weight(&s.role),
+                            &self.propagation_stats,
+                        )
+                    })
                     .unwrap_or(1.0);
                 let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
 
@@ -526,7 +560,14 @@ impl ResonanceField {
                 let role_factor = self
                     .nodes
                     .get(&child_id)
-                    .map(adaptive_up_weight)
+                    .map(|s| {
+                        learned_weight(
+                            &s.role,
+                            "up",
+                            heuristic_up_weight(&s.role),
+                            &self.propagation_stats,
+                        )
+                    })
                     .unwrap_or(1.0);
                 let amplification = BASE_PARENT_AMPLIFICATION * confidence_factor * role_factor;
 
@@ -679,15 +720,12 @@ impl ResonanceField {
         let goal_hv = Hypervector::from_text_ngrams(goal);
         let goal_hash = hash_url(goal);
 
+        // Steg 1: Uppdatera kausalt minne per nod
         for &nid in successful_node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
-                // Undvik dubbelräkning av samma mål
                 if state.last_goal_hash == goal_hash {
                     continue;
                 }
-
-                // Bundla goal-HV in i kausalt minne.
-                // Första gången: direkt tilldelning (nollvektor ger dålig bundle).
                 if state.hit_count == 0 {
                     state.causal_memory = goal_hv.clone();
                 } else {
@@ -695,7 +733,51 @@ impl ResonanceField {
                 }
                 state.hit_count += 1;
                 state.last_goal_hash = goal_hash;
-                state.last_hit_ms = now_ms(); // Temporal decay-referens
+                state.last_hit_ms = now_ms();
+            }
+        }
+
+        // Steg 2: Learned propagation weights — spåra vilka roller som
+        // propagerade signal till/från framgångsrika noder.
+        //
+        // För varje framgångsrik nod:
+        //   - Dess förälders roll → "parent_role:down" success++
+        //   - Nodens egen roll → "node_role:up" success++
+        // För alla noder med barn:
+        //   - "role:down" attempts++ (oavsett om barnet var framgångsrikt)
+        // Detta ger oss observerad success rate per roll+riktning.
+
+        // Räkna attempts: varje nod med barn räknas som ett "down"-försök
+        for (&parent_id, children) in &self.children_map {
+            if children.is_empty() {
+                continue;
+            }
+            if let Some(parent_state) = self.nodes.get(&parent_id) {
+                let key = format!("{}:down", parent_state.role);
+                self.propagation_stats.entry(key).or_insert((0, 0)).1 += 1;
+            }
+        }
+        // Varje barn räknas som ett "up"-försök
+        for &child_id in self.parent_map.keys() {
+            if let Some(child_state) = self.nodes.get(&child_id) {
+                let key = format!("{}:up", child_state.role);
+                self.propagation_stats.entry(key).or_insert((0, 0)).1 += 1;
+            }
+        }
+
+        // Räkna successes: noder vars barn/föräldrar var framgångsrika
+        for &nid in successful_node_ids {
+            // Nodens förälder propagerade nedåt → success
+            if let Some(&parent_id) = self.parent_map.get(&nid) {
+                if let Some(parent_state) = self.nodes.get(&parent_id) {
+                    let key = format!("{}:down", parent_state.role);
+                    self.propagation_stats.entry(key).or_insert((0, 0)).0 += 1;
+                }
+            }
+            // Noden bubblade uppåt → success
+            if let Some(state) = self.nodes.get(&nid) {
+                let key = format!("{}:up", state.role);
+                self.propagation_stats.entry(key).or_insert((0, 0)).0 += 1;
             }
         }
     }
