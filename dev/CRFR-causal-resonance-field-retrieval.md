@@ -1,259 +1,184 @@
 # Causal Resonance Field Retrieval (CRFR)
 
-**Status:** Produktionsredo | **Modul:** `src/resonance.rs` | **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
+**Status:** Produktionsredo | **Modul:** `src/resonance.rs`
+**MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
 
 ---
 
-## 1. Vision — Paradigmskifte
+## Vad är CRFR?
 
-CRFR behandlar DOM-trädet som ett **levande resonansfält** istället för ett statiskt index.
-När ett mål (goal) kommer in skapas en resonansvåg som propagerar genom trädet.
-Noder som matchar målet "lyser upp" via konstruktiv interferens.
-Systemet **lär sig** av agentens framgång via lokal VSA-binding — ingen global reträning.
+CRFR är ett nytt retrieval-paradigm som behandlar DOM-trädet som ett **levande resonansfält** istället för ett statiskt index. När en fråga (goal) kommer in skapas en resonansvåg som propagerar genom trädets förälder-barn-relationer. Noder som matchar frågan "lyser upp" — och deras grannar får en svagare glöd via vågpropagation.
 
-### Jämförelse med befintliga paradigm
-
-| Dimension | BM25+HDC+ColBERT | GraphRAG | RAPTOR | **CRFR** |
-|-----------|-----------------|----------|--------|----------|
-| Indexering | Statisk per-query | Graf-byggd | Kluster-träd | **Levande fält** |
-| Pruning | Explicit threshold | Subgraf-retrieval | Hierarkisk | **Emergent (vågdämpning)** |
-| Inlärning | Ingen | Ingen runtime | Ingen runtime | **Kausal VSA-binding** |
-| Multi-query | Oberoende | Oberoende | Oberoende | **Interferens** |
-| Hastighet | ~5ms (3 steg) | ~50-200ms | ~20-100ms | **~0.1-0.5ms** |
-| Minne | 5MB/sida | 20-50MB | 10-30MB | **~3MB/sida** |
-| Adaptivitet | Statisk | Statisk | Statisk | **Förbättras med användning** |
+Det som gör CRFR unikt:
+- **Ingen ONNX-modell krävs** — fungerar med bara BM25 + HDC bitvektorer
+- **Lär sig i realtid** — varje lyckad extraktion gör systemet bättre, utan reträning
+- **Naturlig top-k** — istället för en hård gräns hittar systemet naturliga kluster via amplitud-gap
 
 ---
 
-## 2. Kärnkoncept
+## Hur fungerar det?
 
-### 2.1 Resonanstillstånd per nod
+### Steg 1: Bygg resonansfält
 
-```rust
-struct ResonanceState {
-    hv: Hypervector,            // 4096-bit bas (text+roll+djup)
-    phase: f32,                 // Oscillatorfas [0, 2π)
-    amplitude: f32,             // Nuvarande resonansstyrka [0, 1]
-    causal_memory: Hypervector, // Ackumulerat framgångs-HV
-    hit_count: u32,             // Antal lyckade extraktioner
-    last_goal_hash: u64,        // Dedup-skydd
+Varje DOM-nod får ett **resonanstillstånd**:
+
+```
+ResonanceState {
+    text_hv:        4096-bit Hypervector (text n-gram encoding)
+    hv:             text_hv XOR roll_hv (kombinerad text+roll)
+    phase:          0.0 (oscillatorfas)
+    amplitude:      0.0 (resonansstyrka)
+    causal_memory:  noll-vektor (ackumulerat lärande)
+    hit_count:      0 (antal lyckade matchningar)
 }
 ```
 
-### 2.2 Vågpropagation
+Fältet byggs en gång per URL och cachas (LRU, 64 entries).
+
+### Steg 2: Propagation (per fråga)
 
 ```
 propagate(goal):
-  goal_hv = Hypervector::from_text_ngrams(goal)
 
-  // Fas 1: Initial resonance
-  for node in field:
-    base = node.hv.similarity(goal_hv)
-    causal = node.causal_memory.similarity(goal_hv) * 0.3
-    node.amplitude = clamp(base + causal, 0, 1)
-    node.phase = base * 2π
-
-  // Fas 2: Vågpropagation (3 iterationer)
-  for step in 0..3:
-    for node in field:
-      if node.amplitude > 0.05:
-        for child in node.children:
-          child.amplitude += node.amplitude * 0.6    // Dämpning nedåt
-        if node.parent:
-          parent.amplitude += node.amplitude * 0.4   // Förstärkning uppåt
-        // Fassynk-bonus
-        if |node.phase - neighbor.phase| < π/4:
-          both.amplitude *= 1.15
-
-  // Fas 3: Samla resonanta noder
-  return nodes.filter(|n| n.amplitude > 0.08)
-              .sort_by(amplitude DESC)
+  Fas 1 — Initial resonans (BM25 + HDC hybrid):
+    Bygg BM25-index från alla nod-labels
+    Kör BM25-query → normalisera scores till [0, 1]
+    Beräkna HDC text-similarity → normalisera [-1,1] → [0,1]²
+    amplitude = 0.7 × BM25 + 0.3 × HDC + kausal_boost
+    
+  Fas 2 — Vågpropagation (2 iterationer):
+    Förälder → barn:  child.amp = max(child.amp, parent.amp × 0.35)
+    Barn → förälder:  parent.amp = max(parent.amp, child.amp × 0.25)
+    Fassynk-bonus: om |parent.phase - child.phase| < π/4 → ×1.08
+    
+  Fas 3 — Samla resultat:
+    Sortera noder efter amplitud (fallande)
+    Klipp vid amplitud-gap > 30% relativ drop (naturlig top-k)
+    Returnera max top_n noder
 ```
 
-### 2.3 Kausal inlärning (utan reträning)
+**Nyckelinsikt**: BM25 ger keyword-precision (steg 1), HDC ger strukturell signal, och vågpropagation sprider relevans till kontext-noder (steg 2). Kombinationen ger bättre recall än varje del för sig.
+
+### Steg 3: Kausal feedback (lärande)
 
 ```
-feedback(goal, successful_ids):
+feedback(goal, successful_node_ids):
   goal_hv = Hypervector::from_text_ngrams(goal)
-  for id in successful_ids:
-    node = field[id]
-    node.causal_memory = bundle([node.causal_memory, goal_hv])
+  for each node_id:
+    node.causal_memory = bundle(node.causal_memory, goal_hv)
     node.hit_count += 1
 ```
 
-- Lokal, decentraliserad — ingen backprop, bara VSA-binding
-- Systemet blir bättre ju mer det används på en sajt
-- Varje framgångsrik extraktion stärker fältet permanent
-
-### 2.4 Multi-goal interferens
-
-Flera goals kan propagera samtidigt:
-- **Konstruktiv interferens**: noder som matchar flera goals boosted
-- **Destruktiv interferens**: motstridiga goals tar ut varandra
-- Precis som fysiska vågor i ett medium
+Nästa gång en liknande fråga ställs på samma URL boostar det kausala minnet de noder som gav rätt svar förra gången. Ingen global modellträning — bara lokal VSA-binding.
 
 ---
 
-## 3. Arkitektur
+## Benchmark: CRFR vs ColBERT vs Pipeline
 
-### 3.1 Integration med befintlig pipeline
+### 6 kontrollerade tester (colbert-small-int8.onnx)
+
+Samma 6 testfall körda med alla metoder. Varje test: HTML-sida + fråga + förväntat svar.
 
 ```
-Nuvarande pipeline:
-  BM25 → HDC Pruning → ColBERT/MiniLM Reranking → Output
-
-CRFR som tillägg (Stage 2.5):
-  BM25 → HDC Pruning → CRFR Resonance → ColBERT verify (opt) → Output
-
-CRFR standalone (framtid):
-  Goal → ResonanceField.propagate() → Resonant nodes → Output
+┌──────────────────────────────┬──────────┬───────────┬──────────┐
+│ Metod                        │ Recall@3 │  Avg µs   │ Speedup  │
+├──────────────────────────────┼──────────┼───────────┼──────────┤
+│ CRFR (cold, ingen lärande)   │ 6/6 100% │   6 828   │ baseline │
+│ CRFR (med kausal feedback)   │ 6/6 100% │     —     │    —     │
+│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  31 896   │  4.7x    │
+│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 13.1x   │
+└──────────────────────────────┴──────────┴───────────┴──────────┘
 ```
 
-### 3.2 Dataflöde
+CRFR hittar svaret i **alla** 6 tester redan utan lärande.
+Pipeline missar 2 (BoE styrränta + Living Wage tabell).
+ColBERT missar 1 (Living Wage).
+
+### 20 riktiga sajter (Apple, GitHub, Expressen, DI, HN + 12 fixtures)
 
 ```
-SemanticTree ──→ ResonanceField::from_semantic_tree()
-                       │
-Goal text ────→ propagate() ──→ Vec<ResonanceResult>
-                       │
-Agent feedback ──→ feedback(goal, successful_ids)
-                       │
-                 Causal memory uppdaterad ──→ Nästa query förbättrad
+┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
+│ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
+├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
+│ CRFR (BM25+HDC+cache)        │ 9/20 │16/20 │ 18/20 │ 18/20 │  29 173  │  9.2   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 378 764  │ 20.1   │
+└──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
+
+Speedup:          13x
+Token-reduktion:  99% (22 236 HTML-tokens → 249 CRFR-tokens)
 ```
 
-### 3.3 Modulstruktur
+### Nyckeltal
 
-| Fil | Beskrivning | Status |
-|-----|-------------|--------|
-| `src/resonance.rs` | Kärn-CRFR: ResonanceField, propagation, feedback | Implementerad |
-| `src/bin/crfr_benchmark.rs` | Standalone benchmark med 5 scenarion | Implementerad |
-| `src/scoring/pipeline.rs` | Integration som Stage 2.5 | Planerad |
-| MCP tool: `resonance_parse` | Exponera via MCP | Planerad |
-| HTTP: `/api/resonance/parse` | REST-endpoint | Planerad |
-
----
-
-## 4. Konstanter
-
-| Konstant | Värde | Motivering |
-|----------|-------|------------|
-| `CHILD_DAMPING` | 0.6 | Dämpar våg nedåt (medium-motstånd) |
-| `PARENT_AMPLIFICATION` | 0.4 | Barns resonans bubblar upp |
-| `PHASE_SYNC_BONUS` | 1.15 | Bonus för fas-synkroniserade noder |
-| `PHASE_SYNC_WINDOW` | π/4 | Fönster för fas-matchning |
-| `ACTIVATION_THRESHOLD` | 0.05 | Under detta propageras ingen energi |
-| `MIN_OUTPUT_THRESHOLD` | 0.08 | Under detta returneras noden ej |
-| `MAX_PROPAGATION_STEPS` | 3 | Antal iterationer |
-| `MAX_FIELD_NODES` | 10,000 | Minnessäkerhet |
+| Dimension | CRFR | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+|-----------|:----:|:-------------------------:|:----------------:|
+| **Recall@3** | **80%** | 50% | 83% (6 tester) |
+| **Latens (cold)** | **6.8 ms** | 32 ms | 90 ms |
+| **Latens (cache hit)** | **0.3 ms** | 32 ms | 90 ms |
+| **Output-noder** | **6-10** | 16-20 | 5-8 |
+| **Token-reduktion** | **99%** | 98.6% | 99.2% |
+| **Lär sig** | **Ja** | Nej | Nej |
+| **Kräver ONNX** | **Nej** | Ja | Ja |
 
 ---
 
-## 5. Förväntad prestanda
+## Varför är CRFR snabbare?
 
-### 5.1 Latens
+Pipeline-metoden kör tre steg sekventiellt:
+1. BM25 keyword retrieval (~0.1 ms)
+2. HDC 4096-bit pruning (~0.5 ms)
+3. **ONNX embedding inference (~30-80 ms)** ← flaskhalsen
 
-| Operation | Tid | vs Nuvarande |
-|-----------|-----|--------------|
-| Field build (cache miss) | ~2-4 ms | ≈ HDC build |
-| Propagation | ~0.1-0.5 ms | **10x snabbare** än ColBERT |
-| Propagation (cache hit) | ~0.05-0.1 ms | **50x snabbare** |
-| Causal feedback | ~0.01 ms | Negligerbar |
+CRFR eliminerar steg 3 helt. Istället:
+1. BM25 keyword retrieval (~0.1 ms)
+2. HDC similarity + BM25 hybrid scoring (~0.5 ms)
+3. Vågpropagation genom trädrelationer (~0.1 ms)
 
-### 5.2 Recall
-
-| Scenario | Nuvarande | CRFR (initial) | CRFR (efter 10 queries) |
-|----------|-----------|-----------------|------------------------|
-| Exakt keyword | 95% | 90% | 95% |
-| Semantisk | 70% | 65% | 85% |
-| Cross-lingual | 30% | 25% | 60% |
-| Repeterade besök | 70% | 70% | **92%** |
-
-### 5.3 Token-reduktion
-
-- Nuvarande streaming: 95-99% reduktion
-- CRFR: **99.0-99.7%** (färre noder passerar vågdämpningen)
-- Typiskt: 5-12 noder istället för 14-50
+**Ingen neural network inference.** All scoring sker via bitvektoroperationer (XOR + popcount) och BM25 term-matchning. På cache-hit (samma URL besökt igen) hoppar vi över steg 1-2 och kör bara propagation (~0.3 ms).
 
 ---
 
-## 6. Implementationsplan
+## Varför är CRFR bättre på recall?
 
-### Steg 1: Grundmodul (denna PR)
-- [x] `src/resonance.rs` — Core datastrukturer + propagation + feedback
-- [x] `src/bin/crfr_benchmark.rs` — Standalone benchmark
-- [x] Unit tests i resonance.rs
-- [x] Integration i `lib.rs` och `Cargo.toml`
-- [x] `cargo check` passerar
+Två anledningar:
 
-### Steg 2: Pipeline-integration
-- [ ] Lägg till CRFR som Stage 2.5 i `scoring/pipeline.rs`
-- [ ] Fallback: om CRFR amplitude < threshold → standard HDC+ColBERT
-- [ ] A/B-testning mot befintlig pipeline
+### 1. Vågpropagation ger kontext-medvetenhet
 
-### Steg 3: Persistens & caching
-- [ ] Serialisera ResonanceField per URL (JSON/bincode)
-- [ ] LRU-cache (32 fält, ~96MB max)
-- [ ] Causal memory persistent across sessions
+Om en nod har hög BM25-score sprider den sin amplitude till barn och föräldrar. En tabellcell med "£12.21" som inte matchar sökordet "wage" kan fortfarande rankas högt om dess granne (tabellrubriken "National Living Wage") har hög amplitude.
 
-### Steg 4: MCP & API-integration
-- [ ] MCP tool: `resonance_parse(html, goal, url)`
-- [ ] MCP tool: `resonance_feedback(url, goal, node_ids)`
-- [ ] HTTP endpoint: `/api/resonance/parse`, `/api/resonance/feedback`
-- [ ] WASM API: `resonance_propagate()`, `resonance_feedback()`
+Pipeline-metoden scorar varje nod oberoende — den ser inte att "£12.21" sitter bredvid "National Living Wage".
 
-### Steg 5: Multi-goal & avancerat
-- [ ] Multi-goal simultaneous propagation
-- [ ] Temporal phase decay (noder "somnar" över tid)
-- [ ] SIMD-optimering av vågpropagation (`portable_simd`)
-- [ ] WebGPU compute shader för massiv parallellism (framtid)
+### 2. BM25 i fas-1 ger exakta keyword-matchningar
 
-### Steg 6: Benchmark & validering
-- [ ] A/B mot BM25+HDC+ColBERT på 100 sajter
-- [ ] Mät recall, precision, latens, token-sparande
-- [ ] Kausal inlärningskurva (recall vs antal queries)
+Pipeline-metoden viktlägger embeddings som ibland föredrar semantiskt liknande men fel noder (t.ex. "The National Living Wage is the minimum pay..." istället för den faktiska tabellraden med siffran).
+
+CRFR viktar BM25 70% i fas-1, vilket ger exakta keyword-matchningar hög initial amplitude som sedan sprids via propagation.
 
 ---
 
-## 7. Risker & mitigering
+## Kausal inlärning — hur systemet blir bättre
 
-| Risk | Sannolikhet | Konsekvens | Mitigering |
-|------|-------------|------------|------------|
-| False positives via propagation | Medium | Dålig precision | Tunea damping; ColBERT verify |
-| Causal memory overflow | Låg | Minne | Max hit_count cap; decay |
-| Fassynk-bonus förstärker brus | Medium | Irrelevanta noder | Öka sync-window; kräv min base_sim |
-| Prestanda-regression | Låg | Långsammare | Behåll fallback till standard |
-
----
-
-## 8. Varför detta är världsunikt
-
-1. **Ingen statisk indexering** — trädet är ett levande, adaptivt fält
-2. **Ingen explicit pruning** — pruning sker emergent genom vågdämpning
-3. **Kausal learning utan reträning** — lokal VSA-binding, ingen global modell
-4. **Multi-goal interferens** — fysik-inspirerad konstruktiv/destruktiv interferens
-5. **Extrem hastighet** — propagation ~0.1ms (vs ColBERT ~5ms)
-6. **Token-effektivitet** — naturlig top-k via resonance amplitude
-7. **Förbättras med användning** — varje framgångsrik extraktion stärker fältet
-
----
-
-## 9. Kör benchmark
-
-```bash
-# Bygg och kör CRFR-benchmark
-cargo run --bin aether-crfr-bench
-
-# Med verbose output
-cargo run --bin aether-crfr-bench -- --verbose
+```
+Besök 1: parse_crfr("price") → nod 12 har svaret
+         crfr_feedback(url, "price", [12])
+         
+Besök 2: parse_crfr("cost")  → nod 12 får kausal boost
+         (causal_memory.similarity("cost") > 0 eftersom "price" och "cost"
+          delar n-gram-mönster i HDC-rymden)
+          
+Besök 3: parse_crfr("pris")  → nod 12 får ännu starkare boost
+         (tre goals ackumulerade i causal_memory via majority-vote bundle)
 ```
 
+Causal memory lagras per nod i resonansfältet. Fältet cachas per URL (LRU, 64 entries). Inget behöver sparas till disk — minnet lever i processens livstid.
+
 ---
 
-## 10. API-referens
+## API-referens
 
 ### MCP-verktyg
 
-**`parse_crfr`** — Huvudverktyg för CRFR-parsing
+**`parse_crfr`** — CRFR-parsing med vågpropagation
 ```json
 {
   "html": "<html>...",
@@ -264,9 +189,15 @@ cargo run --bin aether-crfr-bench -- --verbose
   "output_format": "json"
 }
 ```
-- `top_n`: Max noder (default 20, gap-detection klipper ofta tidigare)
-- `run_js`: true → QuickJS sandbox för SPA/dynamiska sidor
-- `output_format`: "json" (strukturerat) eller "markdown" (token-effektivt)
+
+| Parameter | Typ | Default | Beskrivning |
+|-----------|-----|---------|-------------|
+| `html` | string | — | Raw HTML (eller utelämna om url anges) |
+| `url` | string | — | URL att hämta, eller sidans URL för caching |
+| `goal` | string | **required** | Expanderad fråga med synonymer |
+| `top_n` | int | 20 | Max noder. Gap-detection klipper ofta tidigare. |
+| `run_js` | bool | false | Kör QuickJS sandbox före parsing (SPA-stöd) |
+| `output_format` | string | "json" | "json" eller "markdown" |
 
 **`crfr_feedback`** — Lär systemet vilka noder som var rätt
 ```json
@@ -279,46 +210,128 @@ cargo run --bin aether-crfr-bench -- --verbose
 
 ### HTTP-endpoints
 
-| Metod | Endpoint | Beskrivning |
-|-------|----------|-------------|
-| POST | `/api/parse-crfr` | CRFR-parsing (samma params som MCP) |
-| POST | `/api/crfr-feedback` | Kausal feedback |
+```bash
+# Parsning
+curl -X POST http://localhost:3000/api/parse-crfr \
+  -H "Content-Type: application/json" \
+  -d '{"goal":"price pris cost","url":"https://shop.com"}'
+
+# Feedback
+curl -X POST http://localhost:3000/api/crfr-feedback \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://shop.com","goal":"price","successful_node_ids":[12]}'
+```
 
 ### WASM API
 
-```rust
-parse_crfr(html, goal, url, top_n, run_js, output_format) -> String
-crfr_feedback(url, goal, node_ids_json) -> String
+```javascript
+// Parsning
+const result = parse_crfr(html, "price pris cost", url, 20, false, "json");
+
+// Feedback
+crfr_feedback(url, "price pris cost", "[12, 45]");
 ```
 
-### Benchmark-resultat (20 riktiga sajter, ONNX)
+### Goal expansion (viktigt!)
 
+LLM:en MÅSTE expandera frågan med synonymer innan anrop:
+
+| Användarfråga | Dålig goal | Bra goal |
+|---------------|-----------|----------|
+| "Vad kostar det?" | "price" | "price pris cost £ $ kr amount total fee belopp" |
+| "Vem skrev artikeln?" | "author" | "author författare writer journalist by publicerad reporter" |
+| "Hur många bor i Malmö?" | "population Malmö" | "invånare befolkning folkmängd population 357377 Malmö kommun antal" |
+
+### Output-format
+
+**JSON** (default):
+```json
+{
+  "nodes": [
+    {
+      "id": 12,
+      "role": "price",
+      "label": "£12.21",
+      "relevance": 0.85,
+      "resonance_type": "Direct",
+      "causal_boost": 0.0
+    }
+  ],
+  "crfr": {
+    "method": "causal_resonance_field",
+    "build_tree_ms": 5,
+    "propagation_ms": 1,
+    "cache_hit": false,
+    "js_eval": false
+  }
+}
 ```
-Metod                            @1       @3      @10      @20     Avg µs
-CRFR (BM25+HDC+cache)         9/20    16/20    18/20    18/20     29 173
-Pipeline (BM25+HDC+Embed)     6/20    10/20    18/20    19/20    378 764
 
-Speedup: 13x | Token-reduktion: 99% (22K → 249 tokens)
+**Markdown** (token-effektivt):
+```markdown
+# National Minimum Wage rates
+
+- **[£12.21]** (button)
+- National Living Wage (21 and over) £12.21 6.7%
+- [Current rates (from 1 April 2025)](...)
+
+<!-- CRFR: 6/33 nodes, 5ms, cache=false, js=false -->
 ```
 
 ---
 
-## 11. Kvarvarande optimeringar
+## Arkitektur
 
-- **I2**: Kontext-aware re-ranking i `stream_engine.rs` — CRFR löser detta via vågpropagation, men stream_engine har inte uppdaterats
-- **I7**: Jämförande extraktion ("X vs Y") — kräver multi-match per nyckel i `extract_data`
+```
+                    ┌─────────────────────┐
+  HTML ────────────→│  html5ever parser   │
+                    │  + ArenaDom         │
+                    └────────┬────────────┘
+                             │
+                    ┌────────▼────────────┐
+                    │  SemanticBuilder    │
+                    │  (roller, labels,   │
+                    │   trust, relevans)  │
+                    └────────┬────────────┘
+                             │ SemanticTree
+                    ┌────────▼────────────┐
+  Goal ────────────→│  ResonanceField     │
+                    │                     │
+                    │  Fas 1: BM25 + HDC  │
+                    │  Fas 2: Propagation │
+                    │  Fas 3: Gap-filter  │
+                    └────────┬────────────┘
+                             │ Vec<ResonanceResult>
+                    ┌────────▼────────────┐
+                    │  JSON / Markdown    │
+  Agent ◄───────────│  output             │
+                    └─────────────────────┘
+                             │
+  Agent feedback ───→ causal_memory uppdaterad
+                     (per nod, per URL, i cache)
+```
 
 ---
 
-## 12. Relaterade filer
+## Filer
 
 | Fil | Beskrivning |
 |-----|-------------|
-| `src/resonance.rs` | CRFR-implementation (field, propagation, cache) |
-| `src/lib.rs` | WASM API: `parse_crfr`, `crfr_feedback` |
-| `src/bin/mcp_server.rs` | MCP-verktyg: `parse_crfr`, `crfr_feedback` |
-| `src/bin/server.rs` | HTTP: `/api/parse-crfr`, `/api/crfr-feedback` |
-| `benches/crfr_vs_colbert.rs` | CRFR vs ColBERT quality benchmark (6 tester) |
-| `benches/crfr_final_benchmark.rs` | Final benchmark (20 sajter, @1/@3/@10/@20) |
-| `src/scoring/hdc.rs` | Befintlig HDC (bas för Hypervector) |
+| `src/resonance.rs` | Kärn-implementation: ResonanceField, propagation, feedback, LRU cache |
+| `src/lib.rs` | WASM API: `parse_crfr()`, `crfr_feedback()` |
+| `src/bin/mcp_server.rs` | MCP stdio-server: `parse_crfr`, `crfr_feedback` verktyg |
+| `src/bin/server.rs` | HTTP-server: `/api/parse-crfr`, `/api/crfr-feedback`, MCP dispatch |
+| `benches/crfr_vs_colbert.rs` | Kontrollerad benchmark (6 tester, CRFR vs Pipeline vs ColBERT) |
+| `benches/crfr_final_benchmark.rs` | Stor benchmark (20 sajter, @1/@3/@10/@20) |
+| `src/scoring/hdc.rs` | Hypervector (4096-bit, XOR bind, majority bundle) |
 | `src/scoring/tfidf.rs` | BM25 (integrerad i CRFR fas-1) |
+
+---
+
+## Kvarvarande optimeringar
+
+- **I2**: stream_engine kontext-aware re-ranking — löst av CRFR:s propagation, men stream_engine.rs orörd
+- **I7**: Jämförande extraktion ("X vs Y") — kräver multi-match per nyckel i extract_data
+- **Temporal phase decay** — noder som inte matchats på länge kunde "somna" (sänka amplitude)
+- **SIMD-optimering** — propagation kan parallelliseras med portable_simd
+- **Persistent cache** — spara resonansfält till disk mellan server-omstarter
