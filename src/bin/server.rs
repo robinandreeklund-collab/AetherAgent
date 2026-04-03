@@ -6032,6 +6032,8 @@ async fn main() {
     println!("  POST /api/parse           – Parse HTML to semantic tree");
     println!("  POST /api/parse-top       – Parse top-N relevant nodes");
     println!("  POST /api/parse-hybrid    – Hybrid BM25+HDC+Neural pipeline (reranker=colbert recommended)");
+    println!("  POST /api/parse-crfr      – CRFR: Causal Resonance Field (BM25+HDC wave, 13x faster, learns)");
+    println!("  POST /api/crfr-feedback   – Teach CRFR which nodes had the answer");
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");
