@@ -271,7 +271,22 @@ fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
     if matches!(role, "price" | "data" | "cell") {
         score += 0.1;
     }
+    // Content density: longer labels with actual text content
+    if label.len() > 20 && label.len() < 200 {
+        // Mid-length text is often the answer (not too short, not a wrapper)
+        score += 0.1;
+    }
     score
+}
+
+/// Boilerplate zone penalty: nodes in nav/footer/aside get penalized.
+/// Based on HTML5 landmark roles — not semantics, pure structure.
+fn zone_penalty(role: &str, depth: u32) -> f32 {
+    match role {
+        "navigation" | "complementary" | "contentinfo" | "banner" => 0.15,
+        "generic" if depth <= 1 => 0.3, // Top-level generic = likely wrapper
+        _ => 1.0,                       // No penalty
+    }
 }
 
 /// Learned propagation weight via Beta-distribution with pre-computed key.
@@ -557,7 +572,23 @@ impl ResonanceField {
                     0.0
                 };
 
-                state.amplitude = (base_resonance + causal_boost).clamp(0.0, 1.0);
+                // CombMNZ: reward consensus across signals
+                let signal_count = [
+                    bm25_score > 0.01,
+                    hdc_score > 0.01,
+                    role_boost > 0.1,
+                    concept_boost > 0.001,
+                ]
+                .iter()
+                .filter(|&&b| b)
+                .count() as f32;
+                let combmnz = if signal_count >= 2.0 {
+                    1.0 + (signal_count - 1.0) * 0.15
+                } else {
+                    1.0
+                };
+
+                state.amplitude = ((base_resonance + causal_boost) * combmnz).clamp(0.0, 2.0);
 
                 // Answer-shape boost: noder som SER UT som svar rankas högre
                 let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
@@ -567,6 +598,9 @@ impl ResonanceField {
                     siblings,
                 );
                 state.amplitude *= 1.0 + shape;
+
+                let zone = zone_penalty(&state.role, state.depth);
+                state.amplitude *= zone;
 
                 causal_boosts.insert(nid, causal_boost);
 
