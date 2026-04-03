@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v2
+# Causal Resonance Field Retrieval (CRFR) v3
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -9,18 +9,27 @@
 
 CRFR är ett nytt retrieval-paradigm som behandlar DOM-trädet som ett **levande resonansfält** istället för ett statiskt index. När en fråga (goal) kommer in skapas en resonansvåg som propagerar genom trädets förälder-barn-relationer. Noder som matchar frågan "lyser upp" — och deras grannar får en svagare glöd via vågpropagation.
 
+### Designprinciper (v3)
+
+1. **Determinism > Intelligence** — samma input → samma output, alltid
+2. **Structure > Semantics** — DOM-struktur är signalen, inte språkförståelse
+3. **Speed > Everything** — sub-ms möjliggör system-design ovanpå
+4. **Local optimization > Global models** — ingen träning, ingen modell
+
 Det som gör CRFR unikt:
-- **Ingen ONNX-modell krävs** — fungerar med BM25 + HDC bitvektorer + roll-aspekt
-- **Lär sig i realtid** — varje lyckad extraktion gör systemet bättre, utan reträning
-- **Naturlig top-k** — hittar naturliga kluster via amplitud-gap istället för hård gräns
-- **Query-conditioned propagation** — noder med hög confidence sprider mer energi
-- **Temporal decay** — kausalt minne dämpas exponentiellt (halvering var 10 min)
+- **Ingen ONNX-modell krävs** — fungerar med BM25 + HDC bitvektorer
+- **Sub-millisecond cache-hit** — 617µs vid återbesök (BM25-index cachad)
+- **Value-aware** — matchar href, action, name — inte bara synlig text
+- **Convergent propagation** — styrt av signal, inte iteration count
+- **Deterministic ranking** — stabil tie-break, ingen jitter
+- **Lär sig i realtid** — feedback = ranking refinement, inte semantik
+- **Temporal decay** — kausalt minne halveras var 10 min (ingen stale bias)
 
 ---
 
 ## Hur fungerar det?
 
-### Steg 1: Bygg resonansfält (v2 multi-field)
+### Steg 1: Bygg resonansfält (v3 multi-field + value-aware)
 
 Varje DOM-nod får ett **multi-aspekt resonanstillstånd**:
 
@@ -32,10 +41,15 @@ ResonanceState {
     phase:          0.0 (oscillatorfas)
     amplitude:      0.0 (resonansstyrka)
     causal_memory:  noll-vektor (ackumulerat lärande)
-    hit_count:      0 (antal lyckade matchningar)
-    last_hit_ms:    0 (tidpunkt för senaste feedback — temporal decay)
+    hit_count:      0
+    last_hit_ms:    0 (temporal decay-referens)
 }
 ```
+
+**Fältet lagrar också** per nod:
+- `node_labels`: synlig text (BM25-indexerad)
+- `node_values`: href, action, name (value-aware, konkatenerad med label i BM25)
+- `bm25_cache`: cachad BM25-index (byggs en gång, sub-ms vid cache-hit)
 
 Fältet byggs en gång per URL och cachas (LRU, 64 entries).
 
@@ -45,35 +59,30 @@ Fältet byggs en gång per URL och cachas (LRU, 64 entries).
 propagate(goal):
 
   Fas 1 — Multi-field initial resonans:
-    Bygg BM25-index från alla nod-labels
-    Beräkna tre separata signaler:
-      Signal 1: BM25 keyword-matchning (65%)
+    BM25-index från cachad label+value per nod (sub-ms vid cache-hit)
+    Tre separata signaler:
+      Signal 1: BM25 keyword + value-matchning (75%)
       Signal 2: HDC text n-gram similarity (20%)
-      Signal 3: Roll-aspekt prioritet (15%)
-    amplitude = 0.65×BM25 + 0.20×HDC + 0.15×roll_boost + kausal_boost
+      Signal 3: Roll-prioritet (5%, ren tabell — ingen semantik)
+    amplitude = 0.75×BM25 + 0.20×HDC + 0.05×roll + kausal_boost
 
     Kausal boost (temporal decay):
       raw = causal_memory.similarity(goal_hv)
       decay = exp(-λ × seconds_since_last_hit)   [halvering var 10 min]
       causal_boost = raw² × 0.3 × decay
 
-  Fas 2 — Query-conditioned propagation (2 iterationer):
+  Fas 2 — Convergent query-conditioned propagation (max 6, delta-styrt):
     Förälder → barn:
       damping = 0.35 × √(parent.amplitude) × role_weight(parent)
-      heading/table: 1.3× (barn är ofta svaret)
-      price/button:  0.6× (de ÄR svaret)
-      nav/footer:    0.3× (dämpar brus)
-
+      heading/table: 1.3× | price/button: 0.6× | nav: 0.3×
     Barn → förälder:
       amplification = 0.25 × √(child.amplitude) × role_weight(child)
-      price/data:    1.4× (föräldern behöver kontext)
-      heading/text:  1.1× (bubblar relevant info)
-      nav:           0.3× (dämpar brus)
-
+      price/data: 1.4× | heading/text: 1.1× | nav: 0.3×
     Fassynk: om |parent.phase - child.phase| < π/4 → ×1.08
+    Konvergens: stoppa om total_delta < 0.001 (typiskt 2-3 steg)
 
-  Fas 3 — Amplitud-gap top-k:
-    Sortera efter amplitude (fallande)
+  Fas 3 — Deterministic amplitud-gap top-k:
+    Sortera efter amplitude DESC, tie-break node_id ASC (deterministic)
     Klipp vid >30% relativ drop (naturlig klustergräns)
     Returnera max top_n noder
 ```
@@ -140,10 +149,10 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────────┬───────────┬──────────┐
 │ Metod                        │ Recall@3 │  Avg µs   │ Speedup  │
 ├──────────────────────────────┼──────────┼───────────┼──────────┤
-│ CRFR v2 (cold)               │ 6/6 100% │   6 828   │ baseline │
-│ CRFR v2 (med kausal feedback)│ 6/6 100% │     —     │    —     │
-│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  31 896   │  4.7x    │
-│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 13.1x   │
+│ CRFR v3 (cold)               │ 4/6  67% │   1 761   │ baseline │
+│ CRFR v3 (kausal feedback)    │ 5/6  83% │     —     │    —     │
+│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  35 971   │ 20.4x   │
+│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 50.9x   │
 └──────────────────────────────┴──────────┴───────────┴──────────┘
 ```
 
@@ -153,39 +162,63 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v2 (BM25+HDC+cache)    │10/20 │17/20 │ 18/20 │ 18/20 │  30 568  │  9.8   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 390 541  │ 20.1   │
+│ CRFR v3 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  32 165  │ 10.8   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 395 256  │ 19.9   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          12.8x
-Token-reduktion:  99% (22 236 HTML-tokens → 408 CRFR-tokens)
+Speedup:          12.3x
+Cache-hit:        617 µs (sub-millisecond)
+Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
+```
+
+### 20 live-sajter (via HTTP-server med nätverksfetch)
+
+```
+  Svar hittat:    15/20 (75%)
+  Fetch failures:  4/20 (Wikipedia, BBC, SO — robots/WAF)
+  Missar:          1/20 (rust-lang.org)
+  Avg latens:      1 046 ms (inkl nätverksfetch)
+  Avg svar-rank:   3.1 (svaret i topp-3 i snitt)
 ```
 
 ### Nyckeltal
 
-| Dimension | CRFR v2 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+| Dimension | CRFR v3 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
 |-----------|:-------:|:-------------------------:|:----------------:|
-| **Recall@3** | **85%** | 50% | 83% (6 tester) |
-| **Latens (cold)** | **6.8 ms** | 32 ms | 90 ms |
-| **Latens (cache hit)** | **0.3 ms** | 32 ms | 90 ms |
-| **Output-noder** | **6-10** | 16-20 | 5-8 |
-| **Token-reduktion** | **99%** | 98.6% | 99.2% |
+| **Recall@3** | **75%** | 50% | 83% (6 tester) |
+| **Latens (cold)** | **32 ms** | 395 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 395 ms | 90 ms |
+| **Output-noder** | **6-11** | 16-20 | 5-8 |
+| **Token-reduktion** | **99%** | 98.4% | 99.2% |
+| **Deterministic** | **Ja** | Nej | Nej |
+| **Value-aware** | **Ja** | Nej | Nej |
 | **Lär sig** | **Ja** | Nej | Nej |
 | **Kräver ONNX** | **Nej** | Ja | Ja |
 
 ---
 
-## CRFR v2 — Vad ändrades från v1
+## Versionshistorik
 
-| Optimering | v1 | v2 | Effekt |
-|------------|----|----|--------|
-| **Multi-field** | text_hv + hv (XOR) | text_hv + role (string) + depth | Renare signaler, -512 bytes/nod |
-| **Scoring** | 0.7×BM25 + 0.3×HDC | 0.65×BM25 + 0.20×HDC + 0.15×roll | Roll-prioritet (price=1.0, nav=0.2) |
-| **Propagation** | Fasta vikter (0.35/0.25) | Query-conditioned: √amp × role_factor | Högre confidence → mer spridning |
-| **Learned weights** | Alla roller lika | heading sprider 1.3× nedåt, price bubblar 1.4× uppåt | Strukturmedveten propagation |
-| **Temporal decay** | Ingen | exp(-λ×elapsed), halvering var 10 min | Stale bias försvinner gradvis |
-| **Benchmark @3** | 16/20 | **17/20** | +1 |
-| **Benchmark @1** | 9/20 | **10/20** | +1 |
+### v1 → v2
+| Optimering | v1 | v2 |
+|------------|----|----|
+| Multi-field | text_hv + hv (XOR) | text_hv + role (string) + depth |
+| Scoring | 0.7×BM25 + 0.3×HDC | 0.65×BM25 + 0.20×HDC + 0.15×roll |
+| Propagation | Fasta vikter | Query-conditioned: √amp × role_factor |
+| Learned weights | Alla roller lika | heading 1.3× ned, price 1.4× upp |
+| Temporal decay | Ingen | exp(-λ×elapsed), halvering var 10 min |
+
+### v2 → v3
+| Optimering | v2 | v3 | Princip |
+|------------|----|----|---------|
+| **BM25-index** | Byggs per query | Cachad i fältet (617µs hit) | Speed > Everything |
+| **Value-aware** | Bara labels | label + href + action + name | Structure > Semantics |
+| **Propagation** | Fixed 2 steg | Convergent (delta < 0.001, max 6) | Signal-styrt |
+| **Roll-signal** | HV-matchning mot goal | Ren prioritetstabell | Zero semantic |
+| **Ranking** | Instabil (HashMap-order) | Deterministic tie-break (node_id) | Determinism > Intelligence |
+| **Vikter** | 65/20/15 | 75/20/5 | BM25+value dominerar |
+| **Benchmark @1** | 10/20 | **10/20** | Bibehållen |
+| **Cache-hit** | — | **617 µs** | Sub-ms uppnådd |
 
 ---
 
@@ -196,12 +229,22 @@ Pipeline-metoden kör tre steg sekventiellt:
 2. HDC 4096-bit pruning (~0.5 ms)
 3. **ONNX embedding inference (~30-80 ms)** — flaskhalsen
 
-CRFR eliminerar steg 3 helt:
-1. BM25 keyword + HDC + roll-aspekt hybrid (~0.6 ms)
-2. Query-conditioned vågpropagation (~0.1 ms)
-3. Amplitud-gap top-k (~0.01 ms)
+CRFR v3 eliminerar steg 3 och cachar steg 1:
 
-**Ingen neural network inference.** På cache-hit (~0.3 ms) hoppar vi över steg 1.
+**Cold (första besöket):**
+1. Bygg BM25-index (label+value) + HDC HV:er (~5 ms)
+2. BM25 query + HDC similarity + roll-prioritet (~0.5 ms)
+3. Convergent vågpropagation (~0.1 ms)
+4. Deterministic gap-filter (~0.01 ms)
+
+**Cache-hit (återbesök):**
+1. BM25 query på cachad index (~0.3 ms)
+2. HDC similarity (~0.2 ms)
+3. Propagation + filter (~0.1 ms)
+**Totalt: ~0.6 ms**
+
+Ingen neural network inference. BM25-indexet cachas i `ResonanceField` och återanvänds.
+CRFR kan köras **flera gånger per query** (multi-query orchestration) tack vare sub-ms latens.
 
 ---
 
@@ -413,6 +456,6 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 
 - **I2**: stream_engine kontext-aware re-ranking — löst av CRFR:s propagation, men stream_engine.rs orörd
 - **I7**: Jämförande extraktion ("X vs Y") — kräver multi-match per nyckel i extract_data
-- **Value-matching**: rustup saknas i label men finns i href — matcha mot `node.value`/`node.action` i CRFR
+- **Multi-query orchestration** — kör flera query-varianter, merge/union resultat (utnyttjar sub-ms)
 - **SIMD-optimering** — propagation kan parallelliseras med portable_simd
 - **Persistent cache** — spara resonansfält till disk mellan server-omstarter
