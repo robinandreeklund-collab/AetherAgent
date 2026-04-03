@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v8
+# Causal Resonance Field Retrieval (CRFR) v9
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -183,10 +183,10 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────────┬───────────┬──────────┐
 │ Metod                        │ Recall@3 │  Avg µs   │ Speedup  │
 ├──────────────────────────────┼──────────┼───────────┼──────────┤
-│ CRFR v8 (cold)               │ 4/6  67% │     660   │ baseline │
-│ CRFR v8 (kausal feedback)    │ 5/6  83% │     —     │    —     │
-│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  30 576   │ 46.3x   │
-│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 135.7x  │
+│ CRFR v9 (cold)               │ 4/6  67% │     624   │ baseline │
+│ CRFR v9 (kausal feedback)    │ 6/6 100% │     —     │    —     │
+│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  30 368   │ 48.6x   │
+│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 143.5x  │
 └──────────────────────────────┴──────────┴───────────┴──────────┘
 ```
 
@@ -196,11 +196,11 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v8 (BM25+HDC+cache)    │ 9/20 │16/20 │ 17/20 │ 17/20 │  12 403  │  9.9   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 370 021  │ 19.6   │
+│ CRFR v9 (BM25+HDC+cache)    │ 9/20 │16/20 │ 17/20 │ 17/20 │  12 523  │  9.9   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 371 918  │ 19.6   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          29.8x
+Speedup:          29.7x
 Cache-hit:        617 µs (sub-millisecond)
 Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 ```
@@ -233,10 +233,10 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 |-----------|:-------:|:-------------------------:|:----------------:|
 | **Recall@3 (20 offline)** | **80%** | 50% | — |
 | **Recall@20 (50 live)** | **97.8%** | **97.8%** | — |
-| **Latens (cold)** | **12 ms** | 370 ms | 90 ms |
-| **Latens (cache hit)** | **0.6 ms** | 370 ms | 90 ms |
-| **Latens (6-test cold)** | **0.66 ms** | 30.6 ms | 89.5 ms |
-| **Speedup** | **30-46x** | baseline | 0.23x |
+| **Latens (cold)** | **12.5 ms** | 372 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 372 ms | 90 ms |
+| **Latens (6-test cold)** | **0.62 ms** | 30.4 ms | 89.5 ms |
+| **Speedup** | **30-49x** | baseline | 0.23x |
 | **HV dimension** | **2048-bit** | 4096-bit | 768-dim float |
 | **Output-noder** | **6-10** | 16-20 | 5-8 |
 | **Token-reduktion** | **99%** | 98.4% | 99.2% |
@@ -577,13 +577,25 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 | **6-test cold** | 1.3 ms | **0.66 ms** | -49% |
 | **Speedup** | 14x | **30x** | +114% |
 
+### v8 → v9 (Research-optimeringar)
+| Optimering | Källa | Implementation |
+|------------|-------|---------------|
+| **R1: Eager BM25S** | arXiv 2407.03618 | Pre-compute top-50 scores per token vid build |
+| **R2: GWN wave** | arXiv 2505.20034 | Second-order: target = max(2×cur-prev, propagated) |
+| **R3: Thompson Sampling** | Stanford | Deterministic pseudo-sample via key hash, variance shrinks |
+| **R4: LSH pre-filter** | Springer 2025 | 8 tables × 12 bits, O(1) candidate lookup (>100 noder) |
+| **R6: BTSP plasticity** | 2025 preprint | Quick feedback 1.5× imprint, delayed 0.5× |
+| **R8: DOM depth signal** | Yun & Masukawa | Depth 3-8: +0.05, depth 2-12: +0.02 |
+| **6-test cold** | — | **660→624 µs** |
+| **6-test causal** | — | 5/6 → **6/6** (BTSP förbättrar feedback) |
+| **6-test speedup** | — | 46x → **48.6x** |
+
 ## Kvarvarande optimeringar
 
-Alla v1-v7 buggar och features implementerade. Research-identifierade möjligheter:
+Alla identifierade buggar, features och research-optimeringar implementerade (v1→v9).
 
-- **BM25S eager scoring** — pre-compute all scores at build-time (arXiv 2407.03618)
-- **Second-order wave propagation** (GWN) — bevarar peaks bättre (arXiv 2505.20034)
-- **Thompson Sampling** — exploration/exploitation i learned weights (Stanford)
-- **LSH pre-filter** — 10-50x färre popcount ops vid >10K noder
-- **DOM path encoding** i HV — strukturell locality (Yun & Masukawa 2024)
-- **WebGPU compute** — massiv parallell propagation
+Framtida möjligheter:
+- **WebGPU compute** — massiv parallell propagation för >10K noder
+- **Automatic domain clustering** — auto-detektera liknande sajter för cross-URL transfer
+- **Online A/B** — automatiskt jämföra CRFR vs Pipeline per sajt
+- **Sibling template detection** — identifiera repetitiva DOM-mönster (produktrutor, listor)
