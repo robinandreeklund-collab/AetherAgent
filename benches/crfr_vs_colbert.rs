@@ -13,7 +13,7 @@
 ///   cargo run --release --bin aether-crfr-vs-colbert
 use std::time::Instant;
 
-use aether_agent::resonance::ResonanceField;
+use aether_agent::resonance;
 use aether_agent::scoring::pipeline::{PipelineConfig, ScoringPipeline};
 use aether_agent::types::SemanticNode;
 
@@ -302,11 +302,11 @@ fn main() {
         let dom_nodes = count_nodes(&tree);
         println!("  DOM: {} noder\n", dom_nodes);
 
-        // ─── CRFR (cold — inga kausal-minnen) ─────────────────────────
+        // ─── CRFR top-k (cold — inga kausal-minnen) ─────────────────
 
         let t0 = Instant::now();
-        let mut field = ResonanceField::from_semantic_tree(&tree, "test");
-        let crfr_results = field.propagate(test.goal);
+        let (mut field, cache_hit) = resonance::get_or_build_field(&tree, "test-cold");
+        let crfr_results = field.propagate_top_k(test.goal, 10);
         let crfr_us = t0.elapsed().as_micros() as u64;
         crfr_total_us += crfr_us;
 
@@ -330,8 +330,9 @@ fn main() {
         crfr_total_nodes += crfr_results.len();
 
         let crfr_marker = if crfr_hit { "FOUND" } else { "MISS" };
+        let cache_tag = if cache_hit { "cache" } else { "cold" };
         println!(
-            "  CRFR (cold) [{crfr_marker}] — {crfr_us} µs, {} noder i output:",
+            "  CRFR top-k [{crfr_marker}] ({cache_tag}) — {crfr_us} µs, {} noder i output:",
             crfr_results.len()
         );
         for (i, (_, amp, label)) in crfr_top.iter().enumerate() {
@@ -345,7 +346,7 @@ fn main() {
         }
         println!();
 
-        // ─── CRFR med kausal feedback (simulera lärande) ──────────────
+        // ─── CRFR med kausal feedback + cache ────────────────────────
 
         // Ge feedback på noder som innehöll svaret
         let success_ids: Vec<u32> = crfr_results
@@ -360,9 +361,11 @@ fn main() {
         if !success_ids.is_empty() {
             field.feedback(test.goal, &success_ids);
         }
+        // Spara fältet i cache (med kausalt minne)
+        resonance::save_field(&field);
 
-        // Kör igen med kausalt minne
-        let crfr_causal = field.propagate(test.goal);
+        // Kör igen med kausalt minne (simulerar andra besöket)
+        let crfr_causal = field.propagate_top_k(test.goal, 10);
         let crfr_causal_top: Vec<(u32, f32, String)> = crfr_causal
             .iter()
             .take(5)
@@ -381,7 +384,10 @@ fn main() {
         }
 
         let causal_marker = if causal_hit { "FOUND" } else { "MISS" };
-        println!("  CRFR (causal) [{causal_marker}]:");
+        println!(
+            "  CRFR causal [{causal_marker}] ({} noder):",
+            crfr_causal.len()
+        );
         for (i, (_, amp, label)) in crfr_causal_top.iter().enumerate() {
             let trunc: String = label.chars().take(100).collect();
             let hit = if label.contains(test.expected_answer) {
@@ -532,6 +538,9 @@ fn main() {
             (1.0 - crfr_avg_output / pipe_avg_output) * 100.0
         );
     }
+
+    let (cache_entries, cache_cap) = resonance::cache_stats();
+    println!("  Field cache: {cache_entries}/{cache_cap} entries");
 
     println!();
 }

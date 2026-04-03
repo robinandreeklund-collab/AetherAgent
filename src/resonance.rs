@@ -7,6 +7,7 @@
 /// The field supports multi-goal interference (constructive and destructive)
 /// and learns over time via causal feedback.
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +39,10 @@ const BM25_WEIGHT: f32 = 0.7;
 const HDC_WEIGHT: f32 = 0.3;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
+/// Minsta relativa amplitud-gap för att klippa output (30% drop)
+const GAP_RATIO_THRESHOLD: f32 = 0.30;
+/// Max antal fält i LRU-cachen
+const FIELD_CACHE_CAPACITY: usize = 64;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
@@ -417,6 +422,44 @@ impl ResonanceField {
         results
     }
 
+    /// Propagate and return only the most relevant nodes.
+    ///
+    /// Uses amplitude-gap detection: if there's a >30% relative drop between
+    /// consecutive nodes, cut there. Falls back to hard `top_k` limit.
+    /// This naturally selects the "resonant cluster" without a fixed threshold.
+    pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
+        let all = self.propagate(goal);
+        Self::apply_gap_filter(all, top_k)
+    }
+
+    /// Intelligent top-k med amplitud-gap detection.
+    ///
+    /// Hittar naturliga "klyftor" i sorterad amplitud-sekvens:
+    /// om nod[i+1].amplitude < nod[i].amplitude * (1 - GAP_RATIO_THRESHOLD)
+    /// klipps output vid position i+1 (men minst 3 noder, max top_k).
+    fn apply_gap_filter(results: Vec<ResonanceResult>, top_k: usize) -> Vec<ResonanceResult> {
+        if results.len() <= 3 {
+            return results;
+        }
+
+        let limit = results.len().min(top_k);
+        let mut cut_at = limit;
+
+        // Sök efter amplitud-gap (börja efter position 2 för att garantera minst 3)
+        for i in 2..limit {
+            let prev = results[i - 1].amplitude;
+            let curr = results[i].amplitude;
+
+            // Relativ drop: om current < prev * 0.7 → klipp här
+            if prev > 0.001 && curr < prev * (1.0 - GAP_RATIO_THRESHOLD) {
+                cut_at = i;
+                break;
+            }
+        }
+
+        results.into_iter().take(cut_at).collect()
+    }
+
     /// Provide feedback about which nodes successfully matched a goal.
     ///
     /// Binds the goal vector into each successful node's causal memory,
@@ -548,6 +591,88 @@ impl ResonanceField {
     /// Number of nodes in the field
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+}
+
+// ─── LRU Field Cache ────────────────────────────────────────────────────────
+
+/// Global LRU-cache för resonansfält per URL.
+///
+/// Sparar fältet (med kausalt minne) så att upprepade besök till samma
+/// sida drar nytta av tidigare lärande. FIFO-eviction vid kapacitetsgräns.
+struct FieldCacheInner {
+    /// (url_hash, field) — ordningen representerar ålder (nyast sist)
+    entries: Vec<(u64, ResonanceField)>,
+    capacity: usize,
+}
+
+impl FieldCacheInner {
+    fn new(capacity: usize) -> Self {
+        FieldCacheInner {
+            entries: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    /// Hämta ett fält (flyttar till slutet = nyast)
+    fn get(&mut self, url_hash: u64) -> Option<ResonanceField> {
+        if let Some(pos) = self.entries.iter().position(|(h, _)| *h == url_hash) {
+            let (_, field) = self.entries.remove(pos);
+            let cloned = field.clone();
+            self.entries.push((url_hash, field));
+            Some(cloned)
+        } else {
+            None
+        }
+    }
+
+    /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
+    fn put(&mut self, url_hash: u64, field: ResonanceField) {
+        // Ta bort existerande entry om den finns
+        self.entries.retain(|(h, _)| *h != url_hash);
+        // Evicta äldsta om fullt
+        if self.entries.len() >= self.capacity {
+            self.entries.remove(0);
+        }
+        self.entries.push((url_hash, field));
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
+    std::sync::LazyLock::new(|| Mutex::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
+
+/// Get a cached resonance field for a URL, or build a new one.
+///
+/// If a cached field exists, it retains all causal memory from previous
+/// interactions. The caller should call `save_field` after propagation
+/// to persist any new causal learning.
+pub fn get_or_build_field(tree_nodes: &[SemanticNode], url: &str) -> (ResonanceField, bool) {
+    let url_hash = hash_url(url);
+    if let Ok(mut cache) = FIELD_CACHE.lock() {
+        if let Some(field) = cache.get(url_hash) {
+            return (field, true);
+        }
+    }
+    (ResonanceField::from_semantic_tree(tree_nodes, url), false)
+}
+
+/// Save a resonance field back to the cache (preserves causal memory).
+pub fn save_field(field: &ResonanceField) {
+    if let Ok(mut cache) = FIELD_CACHE.lock() {
+        cache.put(field.url_hash, field.clone());
+    }
+}
+
+/// Get cache statistics (entries, capacity).
+pub fn cache_stats() -> (usize, usize) {
+    if let Ok(cache) = FIELD_CACHE.lock() {
+        (cache.len(), cache.capacity)
+    } else {
+        (0, FIELD_CACHE_CAPACITY)
     }
 }
 
