@@ -730,28 +730,31 @@ pub fn parse_crfr(
     run_js: bool,
     output_format: &str,
 ) -> String {
-    let start = now_ms();
+    let tree = build_tree_for_crfr(html, goal, url, run_js);
+    parse_crfr_from_tree(&tree, goal, url, top_n, output_format)
+}
 
-    // Steg 1: Bygg semantiskt träd (med eller utan JS)
-    let tree = if run_js {
-        #[cfg(feature = "js-eval")]
-        {
-            let base_tree = build_tree(html, goal, url);
-            let result = js_bridge::selective_exec(&base_tree, html);
-            result.tree
-        }
-        #[cfg(not(feature = "js-eval"))]
-        {
-            build_tree(html, goal, url)
-        }
+// Build semantic tree for CRFR (with optional JS eval).
+// Returns tree with pending_fetch_urls for async XHR resolution.
+pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> SemanticTree {
+    if run_js {
+        run_lifecycle_parse(html, goal, url)
     } else {
         build_tree(html, goal, url)
-    };
-    let build_ms = now_ms().saturating_sub(start);
+    }
+}
 
+/// Run CRFR propagation on an existing (potentially XHR-enriched) tree.
+pub fn parse_crfr_from_tree(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+) -> String {
+    let start = now_ms();
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
-    // Steg 2: CRFR resonans
     let field_start = now_ms();
     let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
     let field_ms = now_ms().saturating_sub(field_start);
@@ -761,7 +764,6 @@ pub fn parse_crfr(
     let prop_ms = now_ms().saturating_sub(prop_start);
     resonance::save_field(&field);
 
-    // Steg 3: Mappa resultat till SemanticNode:er
     let node_map: HashMap<u32, &types::SemanticNode> = {
         let mut m = HashMap::new();
         fn collect<'a>(
@@ -782,10 +784,7 @@ pub fn parse_crfr(
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
 
-    let (cache_entries, cache_capacity) = resonance::cache_stats();
     let total_ms = now_ms().saturating_sub(start);
-
-    // Steg 4: Output-format
     let is_md =
         output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
 
@@ -801,16 +800,15 @@ pub fn parse_crfr(
             node_to_markdown(&flat, &mut md, 0);
         }
         md.push_str(&format!(
-            "\n<!-- CRFR: {}/{} nodes, {}ms, cache={}, js={} -->\n",
+            "\n<!-- CRFR: {}/{} nodes, {}ms, cache={}, xhr={} -->\n",
             matched.len(),
             total_dom_nodes,
             total_ms,
             cache_hit,
-            run_js
+            tree.xhr_intercepted
         ));
         md
     } else {
-        // Confidence calibration: amplitude → kalibrerad probability
         let res_vec: Vec<resonance::ResonanceResult> =
             matched.iter().map(|(_, r)| (*r).clone()).collect();
         let calibrated = field.calibrate_results(&res_vec);
@@ -837,7 +835,9 @@ pub fn parse_crfr(
             })
             .collect();
 
-        let result = serde_json::json!({
+        let (cache_entries, cache_capacity) = resonance::cache_stats();
+
+        serde_json::json!({
             "url": tree.url,
             "title": tree.title,
             "goal": tree.goal,
@@ -845,22 +845,22 @@ pub fn parse_crfr(
             "node_count": top_nodes.len(),
             "total_nodes": total_dom_nodes,
             "injection_warnings": tree.injection_warnings,
-            "parse_time_ms": total_ms,
             "spa_detected": total_dom_nodes < 10,
+            "xhr_intercepted": tree.xhr_intercepted,
+            "parse_time_ms": total_ms,
             "crfr": {
                 "method": "causal_resonance_field",
-                "build_tree_ms": build_ms,
                 "field_build_ms": field_ms,
                 "propagation_ms": prop_ms,
                 "cache_hit": cache_hit,
-                "js_eval": run_js,
+                "js_eval": false,
+                "xhr_enriched": tree.xhr_intercepted > 0,
                 "field_queries": field.total_queries,
                 "cache_entries": cache_entries,
                 "cache_capacity": cache_capacity,
             }
-        });
-
-        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+        })
+        .to_string()
     }
 }
 

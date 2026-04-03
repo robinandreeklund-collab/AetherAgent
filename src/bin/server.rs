@@ -1002,8 +1002,29 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     let run_js = req.run_js;
     let output_format = req.output_format;
 
+    // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
+    let html_clone = html.clone();
+    let goal_clone = goal.clone();
+    let url_clone = url.clone();
+    let fmt_clone = output_format.clone();
+    let mut tree = tokio::task::spawn_blocking({
+        let g = goal.clone();
+        let u = url.clone();
+        let h = html.clone();
+        move || aether_agent::build_tree_for_crfr(&h, &g, &u, run_js)
+    })
+    .await
+    .unwrap_or_default();
+
+    // Pass 2: SPA-enrichment — om pending_fetch_urls finns, hämta och merge
+    #[cfg(feature = "fetch")]
+    if !tree.pending_fetch_urls.is_empty() {
+        aether_agent::tools::resolve_pending_fetches(&mut tree, &goal).await;
+    }
+
+    // Pass 3: Kör CRFR på (potentiellt berikad) tree
     let result = tokio::task::spawn_blocking(move || {
-        aether_agent::parse_crfr(&html, &goal, &url, top_n, run_js, &output_format)
+        aether_agent::parse_crfr_from_tree(&tree, &goal_clone, &url_clone, top_n, &fmt_clone)
     })
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
@@ -5080,11 +5101,28 @@ async fn mcp_dispatch_tool(
                 return Err("Provide either 'html' or 'url'".to_string());
             };
 
-            let page_url = url.to_string();
+            // 2-pass: build tree → XHR enrich → CRFR propagation
             let goal_str = goal.to_string();
+            let page_url = url.to_string();
             let fmt = output_format.to_string();
+
+            let mut tree = tokio::task::spawn_blocking({
+                let h = html.clone();
+                let g = goal_str.clone();
+                let u = page_url.clone();
+                move || aether_agent::build_tree_for_crfr(&h, &g, &u, run_js)
+            })
+            .await
+            .unwrap_or_default();
+
+            // SPA enrichment: fetch detected XHR URLs
+            #[cfg(feature = "fetch")]
+            if !tree.pending_fetch_urls.is_empty() {
+                aether_agent::tools::resolve_pending_fetches(&mut tree, &goal_str).await;
+            }
+
             let result = tokio::task::spawn_blocking(move || {
-                aether_agent::parse_crfr(&html, &goal_str, &page_url, top_n, run_js, &fmt)
+                aether_agent::parse_crfr_from_tree(&tree, &goal_str, &page_url, top_n, &fmt)
             })
             .await
             .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
