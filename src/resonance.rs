@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::scoring::hdc::Hypervector;
+use crate::scoring::hdc::{Hypervector, WORDS};
 use crate::scoring::tfidf::TfIdfIndex;
 use crate::types::SemanticNode;
 
@@ -72,6 +72,7 @@ pub struct ResonanceResult {
     /// Slutgiltig amplitud efter propagation
     pub amplitude: f32,
     /// Oscillatorfas (radianer)
+    #[serde(skip_serializing)]
     pub phase: f32,
     /// Typ av resonans som dominerade
     pub resonance_type: ResonanceType,
@@ -94,8 +95,8 @@ impl HvData {
 
     fn to_hv(&self) -> Hypervector {
         // Konvertera tillbaka till fast array; fyll med nollor om storlek inte stämmer
-        let mut arr = [0u64; 64];
-        let len = self.bits.len().min(64);
+        let mut arr = [0u64; WORDS];
+        let len = self.bits.len().min(WORDS);
         arr[..len].copy_from_slice(&self.bits[..len]);
         Hypervector::from_bits(arr)
     }
@@ -270,7 +271,7 @@ fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
     score
 }
 
-/// Truly learned propagation weight via Beta-distribution.
+/// Learned propagation weight via Beta-distribution with pre-computed key.
 ///
 /// Propagation stats lagrar (alpha, beta) per roll+riktning:
 ///   alpha = confidence-weighted successes + heuristisk prior
@@ -283,27 +284,19 @@ fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
 ///
 /// Ingen manuell blend-faktor — Beta-distributionen hanterar
 /// prior → posterior automatiskt med mer data.
-fn learned_weight(
-    role: &str,
-    direction: &str,
+///
+/// Takes a pre-computed key (e.g. "heading:down") to avoid format!() in hot loop.
+fn learned_weight_precomputed(
+    key: &str,
     heuristic: f32,
     stats: &HashMap<String, (f32, f32)>,
 ) -> f32 {
-    let key = format!("{}:{}", role, direction);
-    // Cold-start prior: heuristiken som alpha, 1.0 som beta
-    let (alpha, beta) = stats.get(&key).copied().unwrap_or((heuristic, 1.0));
-
-    // Beta-distribution mean: natural Bayesian estimate
+    let (alpha, beta) = stats.get(key).copied().unwrap_or((heuristic, 1.0));
     let total = alpha + beta;
     if total < 0.01 {
         return heuristic;
     }
     let mean = alpha / total;
-
-    // Mappa mean (0-1) → propagation-vikt (0.2-1.5)
-    // mean=0.0 → 0.2 (minimal men aldrig noll)
-    // mean=0.5 → 0.85 (neutral)
-    // mean=1.0 → 1.5 (maximal)
     0.2 + mean * 1.3
 }
 
@@ -586,6 +579,18 @@ impl ResonanceField {
         //   Konvergens stoppar normalt vid 2-3 iterationer.
         //   Total: O(K × min(E, N×32)) där K ≈ 2-3.
         //
+        // Pre-compute role keys to avoid format!() in hot loop
+        let down_keys: HashMap<u32, String> = self
+            .nodes
+            .iter()
+            .map(|(&id, s)| (id, format!("{}:down", s.role)))
+            .collect();
+        let up_keys: HashMap<u32, String> = self
+            .nodes
+            .iter()
+            .map(|(&id, s)| (id, format!("{}:up", s.role)))
+            .collect();
+
         // Snapshot: Vec istf HashMap — O(N) men med bättre cache-locality.
         for _step in 0..MAX_PROPAGATION_STEPS {
             // Snapshot amplituder (Vec för cache-locality, sorterad efter nod-id)
@@ -609,18 +614,16 @@ impl ResonanceField {
                     continue;
                 }
                 let confidence_factor = parent_amp.sqrt();
-                let role_factor = self
+                let parent_role = self
                     .nodes
                     .get(&parent_id)
-                    .map(|s| {
-                        learned_weight(
-                            &s.role,
-                            "down",
-                            heuristic_down_weight(&s.role),
-                            &self.propagation_stats,
-                        )
-                    })
-                    .unwrap_or(1.0);
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("");
+                let role_factor = learned_weight_precomputed(
+                    down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or(""),
+                    heuristic_down_weight(parent_role),
+                    &self.propagation_stats,
+                );
                 let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
 
                 let fan_out = adaptive_fan_out(children.len());
@@ -650,18 +653,16 @@ impl ResonanceField {
                     continue;
                 }
                 let confidence_factor = child_amp.sqrt();
-                let role_factor = self
+                let child_role = self
                     .nodes
                     .get(&child_id)
-                    .map(|s| {
-                        learned_weight(
-                            &s.role,
-                            "up",
-                            heuristic_up_weight(&s.role),
-                            &self.propagation_stats,
-                        )
-                    })
-                    .unwrap_or(1.0);
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("");
+                let role_factor = learned_weight_precomputed(
+                    up_keys.get(&child_id).map(|s| s.as_str()).unwrap_or(""),
+                    heuristic_up_weight(child_role),
+                    &self.propagation_stats,
+                );
                 let amplification = BASE_PARENT_AMPLIFICATION * confidence_factor * role_factor;
 
                 if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
@@ -1189,32 +1190,32 @@ impl ResonanceField {
     pub fn transfer_from(&mut self, donor: &ResonanceField, min_similarity: f32) -> u32 {
         let mut transferred = 0u32;
 
-        // Samla donor-noder med kausalt minne
-        let donor_learned: Vec<(&u32, &ResonanceState)> = donor
-            .nodes
-            .iter()
-            .filter(|(_, s)| s.hit_count > 0)
-            .collect();
+        // Pre-bucket donors by role for O(N) lookup instead of O(N²)
+        let mut donor_by_role: HashMap<&str, Vec<&ResonanceState>> = HashMap::new();
+        for (_, state) in donor.nodes.iter().filter(|(_, s)| s.hit_count > 0) {
+            donor_by_role
+                .entry(state.role.as_str())
+                .or_default()
+                .push(state);
+        }
 
-        if donor_learned.is_empty() {
+        if donor_by_role.is_empty() {
             return 0;
         }
 
-        for (recipient_id, recipient) in self.nodes.iter_mut() {
-            // Skippa noder som redan har eget kausalt minne
+        for (_recipient_id, recipient) in self.nodes.iter_mut() {
             if recipient.hit_count > 0 {
                 continue;
             }
 
-            // Hitta bäst matchande donor-nod (samma roll + liknande text)
-            let mut best_donor: Option<&ResonanceState> = None;
-            let mut best_sim: f32 = min_similarity;
+            let Some(donors) = donor_by_role.get(recipient.role.as_str()) else {
+                continue;
+            };
 
-            for (_, donor_state) in &donor_learned {
-                // Roll måste matcha (strukturell likhet)
-                if donor_state.role != recipient.role {
-                    continue;
-                }
+            let mut best_sim: f32 = min_similarity;
+            let mut best_donor: Option<&ResonanceState> = None;
+
+            for donor_state in donors {
                 let sim = recipient.text_hv.similarity(&donor_state.text_hv);
                 let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
                 if norm > best_sim {
@@ -1224,16 +1225,12 @@ impl ResonanceField {
             }
 
             if let Some(donor) = best_donor {
-                // Överför kausalt minne (skalat ned med similarity)
-                // Undvik att blåsa upp minne — max 50% av donors styrka
                 let transfer_strength = best_sim * 0.5;
                 if transfer_strength > 0.1 {
-                    // Bundla donors minne in i recipients (additiv)
                     recipient.causal_memory =
                         Hypervector::bundle(&[&recipient.causal_memory, &donor.causal_memory]);
-                    recipient.hit_count = 1; // Markera som "har minne"
+                    recipient.hit_count = 1;
                     recipient.last_hit_ms = now_ms();
-                    let _ = recipient_id; // Undvik unused warning
                     transferred += 1;
                 }
             }

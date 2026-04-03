@@ -16,9 +16,9 @@ use crate::types::SemanticNode;
 /// Dimensionalitet för hypervektorer (antal bits)
 /// Benchmarkad: 1024/2048/4096 ger identisk korrekthet (18/20).
 /// 4096 vald för headroom vid stora DOM:ar, marginell merkostnad.
-pub const HDC_DIM: usize = 4096;
+pub const HDC_DIM: usize = 2048;
 /// Antal u64-ord per hypervector
-const WORDS: usize = HDC_DIM / 64;
+pub const WORDS: usize = HDC_DIM / 64; // 32
 
 /// En hypervector representerad som bitvector av u64-ord
 #[derive(Clone, Debug)]
@@ -219,16 +219,13 @@ impl Hypervector {
     }
 
     /// Hamming-avstånd (antal bits som skiljer sig) via XOR + popcount.
-    /// 4-wide unrolled: LLVM emittar POPCNT + SIMD-pipeline.
+    /// Fused XOR+popcount — LLVM emits POPCNT instruction.
+    /// Simpler loop lets LLVM auto-vectorize better for 32-word size.
     fn hamming_distance(&self, other: &Hypervector) -> u32 {
         let mut total: u32 = 0;
-        let chunks = WORDS / 4;
-        for c in 0..chunks {
-            let base = c * 4;
-            total += (self.bits[base] ^ other.bits[base]).count_ones();
-            total += (self.bits[base + 1] ^ other.bits[base + 1]).count_ones();
-            total += (self.bits[base + 2] ^ other.bits[base + 2]).count_ones();
-            total += (self.bits[base + 3] ^ other.bits[base + 3]).count_ones();
+        // Fused XOR+popcount — LLVM emits POPCNT instruction
+        for i in 0..WORDS {
+            total += (self.bits[i] ^ other.bits[i]).count_ones();
         }
         total
     }
