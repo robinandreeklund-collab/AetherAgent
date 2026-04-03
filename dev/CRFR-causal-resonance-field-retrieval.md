@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v9
+# Causal Resonance Field Retrieval (CRFR) v10
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -199,10 +199,10 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────────┬───────────┬──────────┐
 │ Metod                        │ Recall@3 │  Avg µs   │ Speedup  │
 ├──────────────────────────────┼──────────┼───────────┼──────────┤
-│ CRFR v9 (cold)               │ 4/6  67% │     637   │ baseline │
-│ CRFR v9 (kausal feedback)    │ 6/6 100% │     —     │    —     │
-│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  29 254   │ 45.9x   │
-│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 140.6x  │
+│ CRFR v10 (cold)              │ 3/6  50% │     669   │ baseline │
+│ CRFR v10 (kausal feedback)   │ 5/6  83% │     —     │    —     │
+│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  33 147   │ 49.5x   │
+│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 133.9x  │
 └──────────────────────────────┴──────────┴───────────┴──────────┘
 ```
 
@@ -212,11 +212,11 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v9 (BM25+HDC+cache)    │ 9/20 │16/20 │ 17/20 │ 17/20 │  12 469  │  9.9   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 369 625  │ 19.7   │
+│ CRFR v10 (BM25+HDC+cache)   │10/20 │16/20 │ 17/20 │ 17/20 │  14 007  │ 11.7   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 407 445  │ 19.8   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          29.7x
+Speedup:          29.1x
 Cache-hit:        617 µs (sub-millisecond)
 Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 ```
@@ -247,14 +247,15 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 
 ### Nyckeltal
 
-| Dimension | CRFR v9 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
-|-----------|:-------:|:-------------------------:|:----------------:|
+| Dimension | CRFR v10 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+|-----------|:--------:|:-------------------------:|:----------------:|
+| **Recall@1 (20 offline)** | **50%** | 30% | — |
 | **Recall@3 (20 offline)** | **80%** | 50% | — |
 | **Recall@20 (50 live)** | **97.8%** | **97.8%** | — |
-| **Latens (cold)** | **12.5 ms** | 370 ms | 90 ms |
-| **Latens (cache hit)** | **0.6 ms** | 370 ms | 90 ms |
-| **Latens (6-test cold)** | **0.64 ms** | 29.3 ms | 89.5 ms |
-| **Speedup** | **30-46x** | baseline | 0.23x |
+| **Latens (cold)** | **14 ms** | 407 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 407 ms | 90 ms |
+| **Latens (6-test cold)** | **0.67 ms** | 33.1 ms | 89.5 ms |
+| **Speedup** | **29-50x** | baseline | 0.23x |
 | **HV dimension** | **2048-bit** | 4096-bit | 768-dim float |
 | **Output-noder** | **6-10** | 16-20 | 5-8 |
 | **Token-reduktion** | **99%** | 98.4% | 99.2% |
@@ -620,12 +621,33 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 | **6-test causal** | — | 5/6 → **6/6** (BTSP förbättrar feedback) |
 | **6-test speedup** | — | 46x → **45.9x** |
 
+### v9 → v10 (Research SOTA integration)
+| Optimering | Källa | Implementation | Effekt |
+|------------|-------|---------------|--------|
+| **CombMNZ fusion** | Cormack 2009 | Multiplicera amp med antal samstämmiga signaler | Reward consensus |
+| **Boilerplate zone** | Readability-inspired | nav/footer → ×0.5, wrapper → ×0.7 | Dämpar brus |
+| **CMR signal** | DOM extraction 2024 | Mid-length text (20-200 chars) → +0.1 | Svar är mellanlånga |
+| **Answer-type detection** | Query classification | price→currency, rate→%, population→large num | **@1: 9→10** |
+| **Sibling pattern** | Template detection | Syskongrupp 3+ → boost identiska syskon 10% | Listor/grids |
+| **BM25F field-weight** | Robertson 2004 | Value-text dubbel TF-vikt | URL-matchning starkare |
+| **PPR restart** | Andersen 2006 | BM25 seed-noder 10% restart i propagation | Anti-over-smoothing |
+| **20-test @1** | — | **9→10/20** | +11% precision |
+
 ## Kvarvarande optimeringar
 
 Alla identifierade buggar, features och research-optimeringar implementerade (v1→v9).
 
-Framtida möjligheter:
-- **WebGPU compute** — massiv parallell propagation för >10K noder
-- **Automatic domain clustering** — auto-detektera liknande sajter för cross-URL transfer
-- **Online A/B** — automatiskt jämföra CRFR vs Pipeline per sajt
-- **Sibling template detection** — identifiera repetitiva DOM-mönster (produktrutor, listor)
+Implementerade research items (12/20):
+✅ #1 CombMNZ | ✅ #2 BM25F | ✅ #3 Zone penalty | ✅ #4 Score norm (min-max)
+✅ #6 D-TS (decay) | ✅ #7 Answer-type | ✅ #8 Table-aware | ✅ #9 Sibling pattern
+✅ #10 PPR restart | ✅ #11 HDC weighting (concept) | ✅ #13 CMR | ✅ #14 Query expansion (concept)
+
+Deferred (medium complexity, arkitekturella):
+- **#5 Cascade architecture** — 3-stage filter (BM25→HDC→shape) för -50% latens
+- **#12 WASM SIMD** — i64x2 Hamming för -60% HDC latens
+- **#15 LinUCB contextual bandits** — per-sida feature-vektor
+- **#16 Chebyshev spectral filter** — ersätt wave med polynomial filter
+- **#17 Hierarchical HDC** — subtree-encodade HV:er
+- **#18 Learned RMI** — O(1) concept memory lookup
+- **#19 Template detection** — Zhang-Shasha tree edit distance
+- **#20 Sparse block codes** — 2048-bit med blockstruktur
