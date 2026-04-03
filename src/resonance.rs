@@ -170,12 +170,15 @@ pub struct ResonanceField {
     /// Cachad BM25-index (#2 sub-ms: byggs en gång, återanvänds vid cache-hit)
     #[serde(skip)]
     bm25_cache: Option<TfIdfIndex>,
-    /// Learned propagation weights: per-roll success tracking.
-    /// Key: "role:down" eller "role:up". Value: (successes, attempts).
-    /// Uppdateras av feedback() — spårar vilka roller som propagerade
-    /// signalen som ledde till att svaret hittades.
+    /// Learned propagation weights: per-roll Bayesian success tracking.
+    /// Key: "role:down" eller "role:up".
+    /// Value: (alpha, beta) — Beta-distribution parametrar.
+    ///   alpha ≈ confidence-weighted successes + prior
+    ///   beta ≈ confidence-weighted failures + prior
+    ///   mean = alpha / (alpha + beta)
+    /// Uppdateras av feedback() med confidence-weighted signal + decay.
     #[serde(default)]
-    propagation_stats: HashMap<String, (u32, u32)>,
+    propagation_stats: HashMap<String, (f32, f32)>,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -221,43 +224,41 @@ fn heuristic_up_weight(role: &str) -> f32 {
     }
 }
 
-/// Truly learned propagation weight.
+/// Truly learned propagation weight via Beta-distribution.
 ///
-/// Kombinerar heuristisk prior med observerad success rate:
-///   weight = (1 - blend) × heuristic + blend × observed_rate
+/// Propagation stats lagrar (alpha, beta) per roll+riktning:
+///   alpha = confidence-weighted successes + heuristisk prior
+///   beta = confidence-weighted failures + heuristisk prior
+///   mean = alpha / (alpha + beta)
 ///
-/// `blend` ökar med antal observationer (Bayesian-inspirerat):
-///   blend = min(attempts / 20, 0.8)
-///   → 0 attempts: 100% heuristik (cold-start)
-///   → 10 attempts: 50/50 heuristik/data
-///   → 20+ attempts: 80% data, 20% heuristik (prior bevarad)
+/// Heuristisk prior kodas som initial (alpha, beta):
+///   heuristic=1.2 → prior alpha=1.2, beta=1.0 (svag bias mot success)
+///   heuristic=0.3 → prior alpha=0.3, beta=1.0 (svag bias mot failure)
 ///
-/// `observed_rate` = successes / attempts (normaliserad till 0.3-1.5 range)
-///
-/// Effekt: en e-commerce-sajt där "generic" div ger svar lär sig
-/// att "generic:down" ska ha hög vikt — utan att ändra tabeller.
+/// Ingen manuell blend-faktor — Beta-distributionen hanterar
+/// prior → posterior automatiskt med mer data.
 fn learned_weight(
     role: &str,
     direction: &str,
     heuristic: f32,
-    stats: &HashMap<String, (u32, u32)>,
+    stats: &HashMap<String, (f32, f32)>,
 ) -> f32 {
     let key = format!("{}:{}", role, direction);
-    let (successes, attempts) = stats.get(&key).copied().unwrap_or((0, 0));
+    // Cold-start prior: heuristiken som alpha, 1.0 som beta
+    let (alpha, beta) = stats.get(&key).copied().unwrap_or((heuristic, 1.0));
 
-    if attempts == 0 {
-        return heuristic; // Cold-start: ren heuristik
+    // Beta-distribution mean: natural Bayesian estimate
+    let total = alpha + beta;
+    if total < 0.01 {
+        return heuristic;
     }
+    let mean = alpha / total;
 
-    // Observerad success rate → skalad till propagation-vikt
-    let raw_rate = successes as f32 / attempts as f32;
-    // Mappa 0.0-1.0 → 0.3-1.5 (ingen roll får 0, max 1.5)
-    let observed = 0.3 + raw_rate * 1.2;
-
-    // Blend: ökar med antal observationer (max 80% data)
-    let blend = ((attempts as f32) / 20.0).min(0.8);
-
-    (1.0 - blend) * heuristic + blend * observed
+    // Mappa mean (0-1) → propagation-vikt (0.2-1.5)
+    // mean=0.0 → 0.2 (minimal men aldrig noll)
+    // mean=0.5 → 0.85 (neutral)
+    // mean=1.0 → 1.5 (maximal)
+    0.2 + mean * 1.3
 }
 
 /// Enkel hash-funktion för URL:er (FNV-1a)
@@ -714,13 +715,28 @@ impl ResonanceField {
 
     /// Provide feedback about which nodes successfully matched a goal.
     ///
-    /// Binds the goal vector into each successful node's causal memory,
-    /// making future similar goals resonate stronger on those nodes.
+    /// Provide feedback with confidence-weighted learning.
+    ///
+    /// Three improvements over v4:
+    /// 1. Confidence-weighted: alpha += confidence (not +1)
+    /// 2. Negative signal: beta += (1 - confidence) for non-successful edges
+    /// 3. Temporal decay: all stats decay before update (prevents stale bias)
     pub fn feedback(&mut self, goal: &str, successful_node_ids: &[u32]) {
         let goal_hv = Hypervector::from_text_ngrams(goal);
         let goal_hash = hash_url(goal);
+        let successful_set: std::collections::HashSet<u32> =
+            successful_node_ids.iter().copied().collect();
 
-        // Steg 1: Uppdatera kausalt minne per nod
+        // Steg 0: Temporal decay på propagation_stats (Fix 3)
+        // Alla stats krymper exponentiellt — förhindrar stale bias.
+        // decay = 0.95 per feedback-anrop (nyare data väger mer)
+        const STATS_DECAY: f32 = 0.95;
+        for (alpha, beta) in self.propagation_stats.values_mut() {
+            *alpha *= STATS_DECAY;
+            *beta *= STATS_DECAY;
+        }
+
+        // Steg 1: Kausalt minne per nod
         for &nid in successful_node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
                 if state.last_goal_hash == goal_hash {
@@ -737,47 +753,81 @@ impl ResonanceField {
             }
         }
 
-        // Steg 2: Learned propagation weights — spåra vilka roller som
-        // propagerade signal till/från framgångsrika noder.
-        //
-        // För varje framgångsrik nod:
-        //   - Dess förälders roll → "parent_role:down" success++
-        //   - Nodens egen roll → "node_role:up" success++
-        // För alla noder med barn:
-        //   - "role:down" attempts++ (oavsett om barnet var framgångsrikt)
-        // Detta ger oss observerad success rate per roll+riktning.
+        // Steg 2: Confidence-weighted Beta-distribution update
+        // Beräkna confidence per nod (från senaste propagation)
+        let confidences: HashMap<u32, f32> = self
+            .nodes
+            .iter()
+            .map(|(&id, s)| (id, s.amplitude.clamp(0.0, 1.0)))
+            .collect();
 
-        // Räkna attempts: varje nod med barn räknas som ett "down"-försök
-        for (&parent_id, children) in &self.children_map {
-            if children.is_empty() {
-                continue;
-            }
-            if let Some(parent_state) = self.nodes.get(&parent_id) {
-                let key = format!("{}:down", parent_state.role);
-                self.propagation_stats.entry(key).or_insert((0, 0)).1 += 1;
-            }
-        }
-        // Varje barn räknas som ett "up"-försök
-        for &child_id in self.parent_map.keys() {
-            if let Some(child_state) = self.nodes.get(&child_id) {
-                let key = format!("{}:up", child_state.role);
-                self.propagation_stats.entry(key).or_insert((0, 0)).1 += 1;
-            }
-        }
+        // Förälder → barn edges
+        let edges_down: Vec<(String, Vec<u32>)> = self
+            .children_map
+            .iter()
+            .filter_map(|(&pid, children)| {
+                self.nodes.get(&pid).map(|s| {
+                    let key = format!("{}:down", s.role);
+                    (key, children.clone())
+                })
+            })
+            .collect();
 
-        // Räkna successes: noder vars barn/föräldrar var framgångsrika
-        for &nid in successful_node_ids {
-            // Nodens förälder propagerade nedåt → success
-            if let Some(&parent_id) = self.parent_map.get(&nid) {
-                if let Some(parent_state) = self.nodes.get(&parent_id) {
-                    let key = format!("{}:down", parent_state.role);
-                    self.propagation_stats.entry(key).or_insert((0, 0)).0 += 1;
+        for (key, children) in &edges_down {
+            let entry = self
+                .propagation_stats
+                .entry(key.clone())
+                .or_insert_with(|| {
+                    // Initial prior från heuristik
+                    let role = key.split(':').next().unwrap_or("");
+                    (heuristic_down_weight(role), 1.0)
+                });
+
+            for &child_id in children {
+                let conf = confidences.get(&child_id).copied().unwrap_or(0.0);
+                if successful_set.contains(&child_id) {
+                    // Fix 1: confidence-weighted success
+                    entry.0 += conf;
+                } else {
+                    // Fix 2: negative signal — failure weighted by (1 - confidence)
+                    entry.1 += 1.0 - conf;
                 }
             }
-            // Noden bubblade uppåt → success
-            if let Some(state) = self.nodes.get(&nid) {
-                let key = format!("{}:up", state.role);
-                self.propagation_stats.entry(key).or_insert((0, 0)).0 += 1;
+        }
+
+        // Barn → förälder edges
+        let edges_up: Vec<(String, u32)> = self
+            .parent_map
+            .iter()
+            .filter_map(|(&cid, &pid)| {
+                self.nodes
+                    .get(&cid)
+                    .map(|s| (format!("{}:up", s.role), pid))
+            })
+            .collect();
+
+        for (key, _parent_id) in &edges_up {
+            let entry = self
+                .propagation_stats
+                .entry(key.clone())
+                .or_insert_with(|| {
+                    let role = key.split(':').next().unwrap_or("");
+                    (heuristic_up_weight(role), 1.0)
+                });
+
+            let child_role_key = key.clone();
+            // Hitta alla barn med denna roll
+            let child_id_opt = edges_up
+                .iter()
+                .find(|(k, _)| *k == child_role_key)
+                .map(|(_, pid)| *pid);
+            if let Some(cid) = child_id_opt {
+                let conf = confidences.get(&cid).copied().unwrap_or(0.0);
+                if successful_set.contains(&cid) {
+                    entry.0 += conf;
+                } else {
+                    entry.1 += 1.0 - conf;
+                }
             }
         }
     }
