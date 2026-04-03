@@ -33,9 +33,7 @@ const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
 const MAX_PROPAGATION_STEPS: u32 = 6;
 /// Konvergenströskel: om total amplitudförändring < detta, stoppa
 const CONVERGENCE_THRESHOLD: f32 = 0.001;
-/// Max fan-out per nod i propagation (cap för O(N)-garanti)
-/// En <ul> med 200 <li> propagerar bara till de första MAX_FAN_OUT barnen.
-const MAX_FAN_OUT: usize = 32;
+// Fan-out är nu adaptivt — se adaptive_fan_out()
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
@@ -179,6 +177,10 @@ pub struct ResonanceField {
     /// Uppdateras av feedback() med confidence-weighted signal + decay.
     #[serde(default)]
     propagation_stats: HashMap<String, (f32, f32)>,
+    /// Field-level memory: aggregerade HV per goal-koncept.
+    /// Lär sig "vad price-frågor matchar" globalt, inte per nod.
+    #[serde(default)]
+    concept_memory: HashMap<String, HvData>,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -222,6 +224,50 @@ fn heuristic_up_weight(role: &str) -> f32 {
         "navigation" | "complementary" => 0.3,
         _ => 1.0,
     }
+}
+
+/// Adaptive fan-out: scales with DOM complexity
+fn adaptive_fan_out(children_count: usize) -> usize {
+    if children_count <= 8 {
+        children_count
+    } else {
+        ((4.0 + (children_count as f32).ln() * 8.0) as usize).min(children_count)
+    }
+}
+
+/// Answer-shape scoring: how much does this node look like an answer?
+/// Pure structure + statistics — no semantics.
+fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
+    let mut score: f32 = 0.0;
+    // Contains numbers (prices, dates, populations, percentages)
+    if label.bytes().any(|b| b.is_ascii_digit()) {
+        score += 0.3;
+    }
+    // Short text (< 50 chars) — answers are concise
+    if !label.is_empty() && label.len() < 50 {
+        score += 0.2;
+    }
+    // Has unit markers (currency, percentage, measurement)
+    let lower = label.to_lowercase();
+    if lower.contains('$')
+        || lower.contains('£')
+        || lower.contains('€')
+        || lower.contains('%')
+        || lower.contains("kr")
+        || lower.contains("km")
+        || lower.contains("kg")
+    {
+        score += 0.15;
+    }
+    // In a structured context (table row, list item with siblings)
+    if siblings_count >= 2 && matches!(role, "cell" | "data" | "row" | "listitem") {
+        score += 0.15;
+    }
+    // Data-oriented roles get a small boost
+    if matches!(role, "price" | "data" | "cell") {
+        score += 0.1;
+    }
+    score
 }
 
 /// Truly learned propagation weight via Beta-distribution.
@@ -318,6 +364,7 @@ impl ResonanceField {
             node_values,
             bm25_cache: None,
             propagation_stats: HashMap::new(),
+            concept_memory: HashMap::new(),
             url_hash: hash_url(url),
             created_at_ms: now_ms(),
             total_queries: 0,
@@ -448,6 +495,21 @@ impl ResonanceField {
         // #9: Zero semantic — roll-signal = ren prioritetstabell, ingen HV-matchning
         let now = now_ms();
         let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
+
+        // Pre-compute siblings count per nod (för answer-shape scoring)
+        let siblings_map: HashMap<u32, usize> = node_ids
+            .iter()
+            .map(|&nid| {
+                let siblings = self
+                    .children_map
+                    .get(&self.parent_map.get(&nid).copied().unwrap_or(0))
+                    .map(|c| c.len())
+                    .unwrap_or(0);
+                (nid, siblings)
+            })
+            .collect();
+        // Snapshot labels (för answer-shape scoring utan borrow-konflikt)
+        let labels_ref: HashMap<u32, String> = self.node_labels.clone();
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
                 let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
@@ -456,12 +518,33 @@ impl ResonanceField {
                 let hdc_norm = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
                 let hdc_score = hdc_norm * hdc_norm;
 
+                // Field-level concept boost
+                let concept_boost: f32 = if !self.concept_memory.is_empty() {
+                    let goal_tokens: Vec<&str> = goal
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|s| s.len() > 2)
+                        .collect();
+                    let mut max_boost: f32 = 0.0;
+                    for token in &goal_tokens {
+                        if let Some(hv_data) = self.concept_memory.get(*token) {
+                            let concept_hv = hv_data.to_hv();
+                            let sim = state.text_hv.similarity(&concept_hv);
+                            let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                            max_boost = max_boost.max(norm * norm * 0.15);
+                        }
+                    }
+                    max_boost
+                } else {
+                    0.0
+                };
+
                 // #9: Ren roll-prioritet — ingen semantisk HV-matchning
                 let role_boost = role_priority(&state.role);
 
                 let base_resonance = BM25_WEIGHT * bm25_score
                     + HDC_TEXT_WEIGHT * hdc_score
-                    + ROLE_WEIGHT * role_boost;
+                    + ROLE_WEIGHT * role_boost
+                    + concept_boost;
 
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
@@ -474,6 +557,16 @@ impl ResonanceField {
                 };
 
                 state.amplitude = (base_resonance + causal_boost).clamp(0.0, 1.0);
+
+                // Answer-shape boost: noder som SER UT som svar rankas högre
+                let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
+                let shape = answer_shape_score(
+                    labels_ref.get(&nid).map(|s| s.as_str()).unwrap_or(""),
+                    &state.role,
+                    siblings,
+                );
+                state.amplitude *= 1.0 + shape;
+
                 causal_boosts.insert(nid, causal_boost);
 
                 if causal_boost > base_resonance * 0.5 && state.hit_count > 0 {
@@ -488,7 +581,7 @@ impl ResonanceField {
         //
         // Komplexitetsanalys:
         //   Varje iteration traverserar alla edges en gång: O(E) = O(N) för ett träd.
-        //   Fan-out cap (MAX_FAN_OUT=32) garanterar att inga high-degree noder
+        //   Adaptive fan-out garanterar att inga high-degree noder
         //   (t.ex. <ul> med 200 <li>) blåser upp till O(N²).
         //   Konvergens stoppar normalt vid 2-3 iterationer.
         //   Total: O(K × min(E, N×32)) där K ≈ 2-3.
@@ -530,8 +623,7 @@ impl ResonanceField {
                     .unwrap_or(1.0);
                 let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
 
-                // Fan-out cap: max MAX_FAN_OUT barn per nod
-                let fan_out = children.len().min(MAX_FAN_OUT);
+                let fan_out = adaptive_fan_out(children.len());
                 for &child_id in &children[..fan_out] {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
                         let mut propagated = parent_amp * damping;
@@ -594,6 +686,58 @@ impl ResonanceField {
             }
         }
 
+        // Multi-hop micro propagation: om en nod har stark value-match,
+        // boost syskon och förälders syskon (2-hop expansion)
+        let value_matched: Vec<u32> = self
+            .node_values
+            .iter()
+            .filter(|(id, _)| {
+                self.nodes
+                    .get(id)
+                    .map(|s| s.amplitude > 0.3)
+                    .unwrap_or(false)
+            })
+            .map(|(&id, _)| id)
+            .collect();
+
+        for nid in value_matched {
+            // Boost siblings
+            if let Some(&pid) = self.parent_map.get(&nid) {
+                if let Some(siblings) = self.children_map.get(&pid) {
+                    let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
+                    let boost = amp * 0.15; // 15% av nodens amplitude
+                    for &sib_id in siblings {
+                        if sib_id != nid {
+                            if let Some(sib) = self.nodes.get_mut(&sib_id) {
+                                if boost > sib.amplitude {
+                                    sib.amplitude = boost;
+                                    resonance_types
+                                        .entry(sib_id)
+                                        .or_insert(ResonanceType::Propagated);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Boost parent's siblings (2-hop)
+                if let Some(&grandparent) = self.parent_map.get(&pid) {
+                    if let Some(uncles) = self.children_map.get(&grandparent) {
+                        let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
+                        let boost = amp * 0.08; // 8% för 2-hop
+                        for &uncle_id in uncles {
+                            if uncle_id != pid {
+                                if let Some(uncle) = self.nodes.get_mut(&uncle_id) {
+                                    if boost > uncle.amplitude {
+                                        uncle.amplitude = boost;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Fas 3: Samla resultat
         // #6: Deterministic ranking — stabil tie-break på node_id
         let mut results: Vec<ResonanceResult> = self
@@ -630,6 +774,24 @@ impl ResonanceField {
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
         let all = self.propagate(goal);
         Self::apply_gap_filter(all, top_k)
+    }
+
+    /// Query decomposition: split goal into token clusters, propagate each,
+    /// merge via max amplitude per node. No LLM needed.
+    pub fn propagate_decomposed(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
+        let tokens: Vec<&str> = goal.split_whitespace().collect();
+        if tokens.len() <= 3 {
+            return self.propagate_top_k(goal, top_k);
+        }
+        // Split into overlapping 3-token clusters
+        let mut clusters: Vec<String> = Vec::new();
+        for chunk in tokens.windows(3) {
+            clusters.push(chunk.join(" "));
+        }
+        // Also include full goal as one variant
+        clusters.push(goal.to_string());
+        let refs: Vec<&str> = clusters.iter().map(|s| s.as_str()).collect();
+        self.propagate_multi_variant(&refs, top_k)
     }
 
     /// Run multiple goal variants and merge results (union with max amplitude).
@@ -800,6 +962,28 @@ impl ResonanceField {
                 ue.1 += 1.0 - conf;
             }
         }
+
+        // Steg 3: Field-level concept memory
+        // Aggregera framgångsrika noders text-HV:er per goal-token
+        let goal_tokens: Vec<String> = goal
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 2)
+            .map(String::from)
+            .collect();
+        for &nid in successful_node_ids {
+            if let Some(state) = self.nodes.get(&nid) {
+                for token in &goal_tokens {
+                    let entry = self
+                        .concept_memory
+                        .entry(token.clone())
+                        .or_insert_with(|| HvData::from_hv(&Hypervector::zero()));
+                    let existing = entry.to_hv();
+                    let merged = Hypervector::bundle(&[&existing, &state.text_hv]);
+                    *entry = HvData::from_hv(&merged);
+                }
+            }
+        }
     }
 
     /// Propagate multiple goals simultaneously with interference.
@@ -860,11 +1044,10 @@ impl ResonanceField {
                 .any(|&(i, j)| i == goal_idx || j == goal_idx);
 
             for r in &results {
-                let entry = accumulated.entry(r.node_id).or_insert((
-                    0.0,
-                    r.phase,
-                    r.resonance_type,
-                ));
+                let entry =
+                    accumulated
+                        .entry(r.node_id)
+                        .or_insert((0.0, r.phase, r.resonance_type));
 
                 if has_destructive {
                     // Destruktiv interferens: reducera bidraget
