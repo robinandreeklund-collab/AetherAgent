@@ -279,6 +279,65 @@ fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
     score
 }
 
+/// Answer-type detection: classify goal by expected answer type,
+/// then boost nodes whose content matches that type.
+/// Returns bonus score (0.0-0.3).
+fn answer_type_boost(goal: &str, label: &str) -> f32 {
+    let goal_lower = goal.to_lowercase();
+    let label_lower = label.to_lowercase();
+
+    // Price/cost query → boost nodes with currency
+    if (goal_lower.contains("price")
+        || goal_lower.contains("cost")
+        || goal_lower.contains("pris")
+        || goal_lower.contains("kr")
+        || goal_lower.contains("fee"))
+        && (label_lower.contains('$')
+            || label_lower.contains('£')
+            || label_lower.contains('€')
+            || label_lower.contains("kr"))
+    {
+        return 0.25;
+    }
+
+    // Population/count query → boost nodes with large numbers
+    if goal_lower.contains("population")
+        || goal_lower.contains("invånare")
+        || goal_lower.contains("antal")
+        || goal_lower.contains("many")
+    {
+        // Check for numbers > 1000
+        let has_large_number = label
+            .split(|c: char| !c.is_ascii_digit() && c != ' ' && c != ',')
+            .any(|s| s.replace([' ', ','], "").len() >= 4);
+        if has_large_number {
+            return 0.2;
+        }
+    }
+
+    // Date/time query → boost nodes with date patterns
+    if (goal_lower.contains("date")
+        || goal_lower.contains("when")
+        || goal_lower.contains("datum")
+        || goal_lower.contains("year")
+        || goal_lower.contains("år"))
+        && (label.contains("202") || label.contains("201") || label.contains("200"))
+    {
+        return 0.15;
+    }
+
+    // Rate/percentage query → boost nodes with %
+    if (goal_lower.contains("rate")
+        || goal_lower.contains("percent")
+        || goal_lower.contains("ränta"))
+        && label_lower.contains('%')
+    {
+        return 0.25;
+    }
+
+    0.0
+}
+
 /// Boilerplate zone penalty: nodes in nav/footer/aside get penalized.
 /// Based on HTML5 landmark roles — not semantics, pure structure.
 fn zone_penalty(role: &str, depth: u32) -> f32 {
@@ -483,7 +542,8 @@ impl ResonanceField {
                     if val.is_empty() {
                         (id, label.clone())
                     } else {
-                        (id, format!("{} {}", label, val))
+                        // BM25F approximation: value appears twice = higher TF weight
+                        (id, format!("{} {} {}", label, val, val))
                     }
                 })
                 .collect();
@@ -588,7 +648,12 @@ impl ResonanceField {
                     1.0
                 };
 
-                state.amplitude = ((base_resonance + causal_boost) * combmnz).clamp(0.0, 1.5);
+                let answer_type = answer_type_boost(
+                    goal,
+                    self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""),
+                );
+                state.amplitude =
+                    ((base_resonance + causal_boost + answer_type) * combmnz).clamp(0.0, 1.5);
 
                 // Answer-shape boost: noder som SER UT som svar rankas högre
                 let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
@@ -761,6 +826,47 @@ impl ResonanceField {
                                     if boost > uncle.amplitude {
                                         uncle.amplitude = boost;
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sibling pattern recognition: if one node in a sibling group matches,
+        // give a small boost to structurally identical siblings.
+        // Handles product grids, article lists, table rows.
+        let high_amp_nodes: Vec<(u32, u32, f32)> = self
+            .parent_map
+            .iter()
+            .filter_map(|(&child_id, &parent_id)| {
+                self.nodes
+                    .get(&child_id)
+                    .filter(|s| s.amplitude > 0.4)
+                    .map(|s| (child_id, parent_id, s.amplitude))
+            })
+            .collect();
+
+        for (matched_id, parent_id, amp) in &high_amp_nodes {
+            if let Some(siblings) = self.children_map.get(parent_id) {
+                if siblings.len() >= 3 {
+                    // Only for groups of 3+ siblings
+                    let matched_role = self
+                        .nodes
+                        .get(matched_id)
+                        .map(|s| s.role.clone())
+                        .unwrap_or_default();
+                    let boost = amp * 0.1; // 10% of matched node
+                    for &sib_id in siblings {
+                        if sib_id != *matched_id {
+                            if let Some(sib) = self.nodes.get_mut(&sib_id) {
+                                // Only boost structurally identical siblings (same role)
+                                if sib.role == matched_role && boost > sib.amplitude {
+                                    sib.amplitude = boost;
+                                    resonance_types
+                                        .entry(sib_id)
+                                        .or_insert(ResonanceType::Propagated);
                                 }
                             }
                         }
