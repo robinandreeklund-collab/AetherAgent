@@ -36,11 +36,11 @@ const CONVERGENCE_THRESHOLD: f32 = 0.001;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
-const BM25_WEIGHT: f32 = 0.70;
-/// HDC text-vikt
-const HDC_TEXT_WEIGHT: f32 = 0.15;
-/// Roll-aspekt vikt (strukturell signal, ren prioritetstabell — ingen semantik)
-const ROLE_WEIGHT: f32 = 0.15;
+const BM25_WEIGHT: f32 = 0.75;
+/// HDC text-vikt (n-gram strukturell likhet)
+const HDC_TEXT_WEIGHT: f32 = 0.20;
+/// Roll-aspekt vikt (ren prioritetstabell — låg vikt pga ej goal-beroende)
+const ROLE_WEIGHT: f32 = 0.05;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
 /// Temporal decay-faktor: halvering var 10:e minut (λ = ln2/600s ≈ 0.00115)
@@ -367,16 +367,22 @@ impl ResonanceField {
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
 
         // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
-        // #3: Inkluderar node_values (href, action, name)
+        // #3: Label + values konkateneras per nod (ett dokument per nod)
         if self.bm25_cache.is_none() {
-            let mut pairs: Vec<(u32, &str)> = self
+            let combined: Vec<(u32, String)> = self
                 .node_labels
                 .iter()
-                .map(|(&id, label)| (id, label.as_str()))
+                .map(|(&id, label)| {
+                    let val = self.node_values.get(&id).map(|v| v.as_str()).unwrap_or("");
+                    if val.is_empty() {
+                        (id, label.clone())
+                    } else {
+                        (id, format!("{} {}", label, val))
+                    }
+                })
                 .collect();
-            for (&id, val) in &self.node_values {
-                pairs.push((id, val.as_str()));
-            }
+            let pairs: Vec<(u32, &str)> =
+                combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
             self.bm25_cache = Some(TfIdfIndex::build(&pairs));
         }
         let bm25_results = self
