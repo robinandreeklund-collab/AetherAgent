@@ -20,6 +20,7 @@ const BM25_K1: f32 = 1.2;
 const BM25_B: f32 = 0.75;
 
 /// BM25-index över semantiska noder (drop-in ersättning för TfIdfIndex)
+#[derive(Debug, Clone)]
 pub struct TfIdfIndex {
     /// term → lista av (node_id, raw_tf) — BM25-score beräknas vid query-tid
     postings: HashMap<String, Vec<(u32, f32)>>,

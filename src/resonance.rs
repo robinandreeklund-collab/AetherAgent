@@ -29,15 +29,17 @@ const PHASE_SYNC_WINDOW: f32 = std::f32::consts::FRAC_PI_4;
 const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
 const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
-/// Antal propagations-iterationer
-const MAX_PROPAGATION_STEPS: u32 = 2;
+/// Max antal propagations-iterationer (konvergens kan avbryta tidigare)
+const MAX_PROPAGATION_STEPS: u32 = 6;
+/// Konvergenströskel: om total amplitudförändring < detta, stoppa propagation
+const CONVERGENCE_THRESHOLD: f32 = 0.001;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
-const BM25_WEIGHT: f32 = 0.65;
+const BM25_WEIGHT: f32 = 0.70;
 /// HDC text-vikt
-const HDC_TEXT_WEIGHT: f32 = 0.20;
-/// Roll-aspekt vikt (strukturell signal)
+const HDC_TEXT_WEIGHT: f32 = 0.15;
+/// Roll-aspekt vikt (strukturell signal, ren prioritetstabell — ingen semantik)
 const ROLE_WEIGHT: f32 = 0.15;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
@@ -156,9 +158,15 @@ pub struct ResonanceField {
     /// Barn-mappning: parent_id -> [child_ids]
     #[serde(default)]
     children_map: HashMap<u32, Vec<u32>>,
-    /// Nod-labels (för BM25-indexering vid propagation)
+    /// Nod-labels (för BM25-indexering)
     #[serde(default)]
     node_labels: HashMap<u32, String>,
+    /// Nod-values: action/href/value/data-attribut (#3 value-aware retrieval)
+    #[serde(default)]
+    node_values: HashMap<u32, String>,
+    /// Cachad BM25-index (#2 sub-ms: byggs en gång, återanvänds vid cache-hit)
+    #[serde(skip)]
+    bm25_cache: Option<TfIdfIndex>,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -255,14 +263,40 @@ impl ResonanceField {
             }
         }
 
+        // #3: Samla värde-data (action/href/value) per nod
+        let mut node_values: HashMap<u32, String> = HashMap::new();
+        Self::collect_values(tree_nodes, &mut node_values);
+
         ResonanceField {
             nodes,
             parent_map,
             children_map,
             node_labels,
+            node_values,
+            bm25_cache: None,
             url_hash: hash_url(url),
             created_at_ms: now_ms(),
             total_queries: 0,
+        }
+    }
+
+    /// #3 Value-aware: samla action/href/value från noder
+    fn collect_values(nodes: &[SemanticNode], out: &mut HashMap<u32, String>) {
+        for node in nodes {
+            let mut parts: Vec<&str> = Vec::new();
+            if let Some(ref action) = node.action {
+                parts.push(action);
+            }
+            if let Some(ref value) = node.value {
+                parts.push(value);
+            }
+            if let Some(ref name) = node.name {
+                parts.push(name);
+            }
+            if !parts.is_empty() {
+                out.insert(node.id, parts.join(" "));
+            }
+            Self::collect_values(&node.children, out);
         }
     }
 
@@ -329,21 +363,27 @@ impl ResonanceField {
         self.total_queries += 1;
         let goal_hv = Hypervector::from_text_ngrams(goal);
 
-        // Spara kausal-boost per nod för resultatrapportering
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
-        // Spara resonanstyp per nod
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
 
-        // ── BM25-index: bygg snabbt per-propagation ──
-        // BM25 ger starka keyword-signaler som HDC saknar.
-        let bm25_pairs: Vec<(u32, &str)> = self
-            .node_labels
-            .iter()
-            .map(|(&id, label)| (id, label.as_str()))
-            .collect();
-        let bm25_index = TfIdfIndex::build(&bm25_pairs);
-        let bm25_results = bm25_index.query(goal, self.nodes.len());
-        // Normalisera BM25-scores till [0, 1]
+        // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
+        // #3: Inkluderar node_values (href, action, name)
+        if self.bm25_cache.is_none() {
+            let mut pairs: Vec<(u32, &str)> = self
+                .node_labels
+                .iter()
+                .map(|(&id, label)| (id, label.as_str()))
+                .collect();
+            for (&id, val) in &self.node_values {
+                pairs.push((id, val.as_str()));
+            }
+            self.bm25_cache = Some(TfIdfIndex::build(&pairs));
+        }
+        let bm25_results = self
+            .bm25_cache
+            .as_ref()
+            .map(|idx| idx.query(goal, self.nodes.len()))
+            .unwrap_or_default();
         let bm25_max = bm25_results
             .first()
             .map(|(_, s)| *s)
@@ -354,36 +394,28 @@ impl ResonanceField {
             .map(|(id, score)| (id, (score / bm25_max).clamp(0.0, 1.0)))
             .collect();
 
-        // ── Aspekt 1: Multi-field initial resonans ──
-        // Tre separata signaler: BM25 (keyword), HDC (semantisk), Roll (strukturell)
-        let goal_role_hv = Hypervector::from_seed(&format!("__goal_{}", goal));
+        // Fas 1: Multi-field initial resonans
+        // #9: Zero semantic — roll-signal = ren prioritetstabell, ingen HV-matchning
         let now = now_ms();
         let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
-                // Signal 1: BM25 keyword-matchning (normaliserad 0-1)
                 let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
 
-                // Signal 2: HDC text-similarity (normaliserad, power-2 kontrast)
                 let raw_sim = state.text_hv.similarity(&goal_hv);
                 let hdc_norm = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
                 let hdc_score = hdc_norm * hdc_norm;
 
-                // Signal 3: Roll-aspekt — roll-prioritet baserat på goal-typ
-                let role_hv = Hypervector::from_seed(&format!("__role_{}", state.role));
-                let role_sim = ((role_hv.similarity(&goal_role_hv) + 1.0) / 2.0).clamp(0.0, 1.0);
-                let role_boost = role_priority(&state.role) * 0.5 + role_sim * 0.5;
+                // #9: Ren roll-prioritet — ingen semantisk HV-matchning
+                let role_boost = role_priority(&state.role);
 
-                // Multi-field kombination
                 let base_resonance = BM25_WEIGHT * bm25_score
                     + HDC_TEXT_WEIGHT * hdc_score
                     + ROLE_WEIGHT * role_boost;
 
-                // Aspekt 3: Temporal decay på kausalt minne
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
-                    // Decay baserat på tid sedan senaste lyckade hit
                     let elapsed_s = (now.saturating_sub(state.last_hit_ms) as f64) / 1000.0;
                     let decay = (-CAUSAL_DECAY_LAMBDA * elapsed_s).exp() as f32;
                     norm_causal * norm_causal * CAUSAL_WEIGHT * decay
@@ -402,35 +434,24 @@ impl ResonanceField {
             }
         }
 
-        // Fas 2: Vågpropagation
+        // Fas 2: #4 Convergent propagation — styrt av signal, inte iteration count
         for _step in 0..MAX_PROPAGATION_STEPS {
-            // Samla amplituder för att undvika borrow-konflikter
             let amplitudes: HashMap<u32, (f32, f32)> = self
                 .nodes
                 .iter()
                 .map(|(&id, s)| (id, (s.amplitude, s.phase)))
                 .collect();
 
-            // ── Aspekt 5: Query-conditioned propagation ──
-            // Spridningsfaktor skalas av källnodens amplitude (confidence).
-            // Noder med stark goal-matchning sprider mer energi.
+            let mut total_delta: f32 = 0.0;
 
-            // ── Aspekt 2: Learned weights via roll + confidence ──
-            // Förälder → barn: content-roller (heading, text) sprider mer
-            // Barn → förälder: data-roller (price, cell) sprider mer uppåt
-
-            // Propagera förälder -> barn
+            // #5 Path-aware: Förälder → barn
             for (&parent_id, children) in &self.children_map {
                 let (parent_amp, parent_phase) =
                     amplitudes.get(&parent_id).copied().unwrap_or((0.0, 0.0));
-
                 if parent_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
-
-                // Query-conditioned: högre amplitude = mer spridning
-                let confidence_factor = parent_amp.sqrt(); // sqrt dämpar extremer
-                                                           // Learned: roll-baserad vikt
+                let confidence_factor = parent_amp.sqrt();
                 let parent_role = self
                     .nodes
                     .get(&parent_id)
@@ -442,13 +463,12 @@ impl ResonanceField {
                 for &child_id in children {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
                         let mut propagated = parent_amp * damping;
-
                         let phase_diff = (parent_phase - child_state.phase).abs();
                         if phase_diff < PHASE_SYNC_WINDOW {
                             propagated *= PHASE_SYNC_BONUS;
                         }
-
                         if propagated > child_state.amplitude {
+                            total_delta += propagated - child_state.amplitude;
                             child_state.amplitude = propagated;
                             resonance_types
                                 .entry(child_id)
@@ -458,16 +478,13 @@ impl ResonanceField {
                 }
             }
 
-            // Propagera barn -> förälder
+            // #5 Path-aware: Barn → förälder
             for (&child_id, &parent_id) in &self.parent_map {
                 let (child_amp, child_phase) =
                     amplitudes.get(&child_id).copied().unwrap_or((0.0, 0.0));
-
                 if child_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
-
-                // Query-conditioned + learned
                 let confidence_factor = child_amp.sqrt();
                 let child_role = self
                     .nodes
@@ -479,13 +496,12 @@ impl ResonanceField {
 
                 if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
                     let mut propagated = child_amp * amplification;
-
                     let phase_diff = (child_phase - parent_state.phase).abs();
                     if phase_diff < PHASE_SYNC_WINDOW {
                         propagated *= PHASE_SYNC_BONUS;
                     }
-
                     if propagated > parent_state.amplitude {
+                        total_delta += propagated - parent_state.amplitude;
                         parent_state.amplitude = propagated;
                         resonance_types
                             .entry(parent_id)
@@ -493,9 +509,15 @@ impl ResonanceField {
                     }
                 }
             }
+
+            // #4: Konvergens — stoppa om energin stabiliserat sig
+            if total_delta < CONVERGENCE_THRESHOLD {
+                break;
+            }
         }
 
         // Fas 3: Samla resultat
+        // #6: Deterministic ranking — stabil tie-break på node_id
         let mut results: Vec<ResonanceResult> = self
             .nodes
             .iter()
@@ -512,8 +534,12 @@ impl ResonanceField {
             })
             .collect();
 
-        // Sortera efter amplitud (fallande), använd total_cmp för NaN-säkerhet
-        results.sort_by(|a, b| b.amplitude.total_cmp(&a.amplitude));
+        // #6: Deterministic sort — amplitude DESC, then node_id ASC
+        results.sort_by(|a, b| {
+            b.amplitude
+                .total_cmp(&a.amplitude)
+                .then_with(|| a.node_id.cmp(&b.node_id))
+        });
 
         results
     }
