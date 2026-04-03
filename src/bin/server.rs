@@ -3870,6 +3870,35 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "parse_crfr",
+            "description": "CRFR (Causal Resonance Field Retrieval) — next-gen DOM parsing that treats the page as a living resonance field. 10-15x faster than parse_hybrid (no ONNX inference). LEARNS from feedback: call crfr_feedback after finding answers to improve future queries on the same URL.\n\nIMPORTANT — GOAL EXPANSION: Expand the 'goal' with synonyms, translations, and expected values before calling.\nExample: 'what is the price?' → goal: 'price pris cost £ $ kr amount total fee belopp'\nExample: 'who wrote this?' → goal: 'author författare writer journalist by name publicerad'\n\nOutput includes resonance_type per node: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past queries).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch, or page URL for caching (same URL reuses causal memory)"},
+                    "html": {"type": "string", "description": "Raw HTML to parse directly (if omitted, fetches from url)"},
+                    "goal": {"type": "string", "description": "EXPAND THIS: Include user's question + 5-10 synonyms, translations, expected values. NO generic words."},
+                    "top_n": {"type": "integer", "description": "Max nodes to return (default: 20). Gap-detection often returns fewer.", "default": 20},
+                    "run_js": {"type": "boolean", "description": "Evaluate inline JavaScript via QuickJS sandbox before parsing. Use for SPA/dynamic pages.", "default": false},
+                    "output_format": {"type": "string", "enum": ["json", "markdown"], "description": "Output format: 'json' (structured nodes) or 'markdown' (token-efficient text for LLM consumption)", "default": "json"}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "crfr_feedback",
+            "description": "Teach CRFR which nodes contained the correct answer. Call AFTER parse_crfr when you find useful information. This builds causal memory so future similar queries on the same URL rank those nodes higher.\n\nWorkflow:\n1. parse_crfr(goal='price pris cost') → nodes [id:5, id:12, id:23]\n2. Node 12 has the answer → crfr_feedback(url, goal, [12])\n3. Next query: node 12 gets causal boost → ranked higher automatically",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Page URL (must match a previous parse_crfr call)"},
+                    "goal": {"type": "string", "description": "The goal that was used when parsing"},
+                    "successful_node_ids": {"type": "array", "items": {"type": "integer"}, "description": "Array of node IDs that contained the correct answer"}
+                },
+                "required": ["url", "goal", "successful_node_ids"]
+            }
+        },
+        {
             "name": "act",
             "description": "Interact with page elements: click buttons, fill forms, or extract data. Provide HTML or URL + an action type. Security (injection scan + firewall) runs automatically. Replaces: find_and_click, fill_form, extract_data, fetch_click, fetch_extract.",
             "inputSchema": {
@@ -5020,8 +5049,78 @@ async fn mcp_dispatch_tool(
             text_ok(result.to_json())
         }
 
+        // ─── Tool: parse_crfr ──────────────────────────────────
+        "parse_crfr" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            let run_js = args["run_js"].as_bool().unwrap_or(false);
+            let output_format = args["output_format"].as_str().unwrap_or("json");
+
+            // Hämta HTML: antingen direkt eller via URL
+            let html = if let Some(h) = args["html"].as_str() {
+                h.to_string()
+            } else if !url.is_empty() {
+                #[cfg(feature = "fetch")]
+                {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    fetched.body
+                }
+                #[cfg(not(feature = "fetch"))]
+                {
+                    return Err("fetch feature not enabled — provide html directly".to_string());
+                }
+            } else {
+                return Err("Provide either 'html' or 'url'".to_string());
+            };
+
+            let page_url = url.to_string();
+            let goal_str = goal.to_string();
+            let fmt = output_format.to_string();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::parse_crfr(&html, &goal_str, &page_url, top_n, run_js, &fmt)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_feedback ───────────────────────────────
+        "crfr_feedback" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let ids: Vec<u32> = args["successful_node_ids"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let ids_json = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string());
+            let url_str = url.to_string();
+            let goal_str = goal.to_string();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_feedback(&url_str, &goal_str, &ids_json)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+            text_ok(result)
+        }
+
         _ => Err(format!(
-            "Unknown tool: '{name}'. Available: parse, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
+            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
         )),
     }
 }
