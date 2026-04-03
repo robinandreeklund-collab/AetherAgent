@@ -776,6 +776,19 @@ impl ResonanceField {
                 }
             }
 
+            // PPR-inspired restart: re-inject energy at BM25 seed nodes
+            // Prevents over-smoothing by anchoring signal to original matches
+            for (&nid, &bm25_score) in &bm25_scores {
+                if bm25_score > 0.5 {
+                    if let Some(state) = self.nodes.get_mut(&nid) {
+                        let restart = bm25_score * 0.1; // 10% restart probability
+                        if restart > state.amplitude * 0.5 {
+                            state.amplitude = state.amplitude.max(restart);
+                        }
+                    }
+                }
+            }
+
             // Konvergens — stoppa om energin stabiliserat sig
             if total_delta < CONVERGENCE_THRESHOLD {
                 break;
