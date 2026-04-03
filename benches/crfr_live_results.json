@@ -1,0 +1,146 @@
+[
+  {
+    "name": "Wikipedia — Malmö invånare",
+    "status": "FAIL"
+  },
+  {
+    "name": "Wikipedia — Sveriges huvudstad",
+    "status": "FAIL"
+  },
+  {
+    "name": "Hacker News — toppnyheter",
+    "status": "OK",
+    "ms": 637,
+    "nodes": 20,
+    "total_nodes": 490,
+    "found_rank": 10
+  },
+  {
+    "name": "rust-lang.org — installation",
+    "status": "MISS",
+    "ms": 1210,
+    "nodes": 10,
+    "total_nodes": 22,
+    "found_rank": null
+  },
+  {
+    "name": "python.org — version",
+    "status": "OK",
+    "ms": 766,
+    "nodes": 20,
+    "total_nodes": 137,
+    "found_rank": 1
+  },
+  {
+    "name": "MDN — HTML element",
+    "status": "OK",
+    "ms": 932,
+    "nodes": 20,
+    "total_nodes": 1050,
+    "found_rank": 1
+  },
+  {
+    "name": "GitHub — trending",
+    "status": "OK",
+    "ms": 1093,
+    "nodes": 20,
+    "total_nodes": 412,
+    "found_rank": 1
+  },
+  {
+    "name": "lobste.rs — tekniknyheter",
+    "status": "OK",
+    "ms": 1085,
+    "nodes": 20,
+    "total_nodes": 450,
+    "found_rank": 13
+  },
+  {
+    "name": "PyPI — paketindex",
+    "status": "OK",
+    "ms": 477,
+    "nodes": 12,
+    "total_nodes": 62,
+    "found_rank": 1
+  },
+  {
+    "name": "crates.io — Rust paket",
+    "status": "OK",
+    "ms": 85,
+    "nodes": 1,
+    "total_nodes": 1,
+    "found_rank": 1
+  },
+  {
+    "name": "BBC News — senaste",
+    "status": "FAIL"
+  },
+  {
+    "name": "SVT Nyheter — Sverige",
+    "status": "OK",
+    "ms": 2211,
+    "nodes": 20,
+    "total_nodes": 828,
+    "found_rank": 1
+  },
+  {
+    "name": "Stack Overflow — frågor",
+    "status": "FAIL"
+  },
+  {
+    "name": "Expressen — nyheter",
+    "status": "OK",
+    "ms": 1117,
+    "nodes": 20,
+    "total_nodes": 51,
+    "found_rank": 2
+  },
+  {
+    "name": "DN — nyheter",
+    "status": "OK",
+    "ms": 1639,
+    "nodes": 20,
+    "total_nodes": 765,
+    "found_rank": 1
+  },
+  {
+    "name": "Arch Wiki — pacman",
+    "status": "OK",
+    "ms": 1887,
+    "nodes": 20,
+    "total_nodes": 693,
+    "found_rank": 9
+  },
+  {
+    "name": "Docker Docs — vad är Docker",
+    "status": "OK",
+    "ms": 994,
+    "nodes": 20,
+    "total_nodes": 303,
+    "found_rank": 1
+  },
+  {
+    "name": "Node.js — version",
+    "status": "OK",
+    "ms": 703,
+    "nodes": 20,
+    "total_nodes": 48,
+    "found_rank": 1
+  },
+  {
+    "name": "Go.dev — paketsök",
+    "status": "OK",
+    "ms": 557,
+    "nodes": 20,
+    "total_nodes": 248,
+    "found_rank": 1
+  },
+  {
+    "name": "Aftonbladet — nyheter",
+    "status": "OK",
+    "ms": 1511,
+    "nodes": 20,
+    "total_nodes": 354,
+    "found_rank": 2
+  }
+]
