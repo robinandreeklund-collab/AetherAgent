@@ -16,19 +16,19 @@ use crate::types::SemanticNode;
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
 /// Dämpning vid propagation från förälder till barn
-const CHILD_DAMPING: f32 = 0.6;
+const CHILD_DAMPING: f32 = 0.35;
 /// Förstärkning vid propagation från barn till förälder
-const PARENT_AMPLIFICATION: f32 = 0.4;
+const PARENT_AMPLIFICATION: f32 = 0.25;
 /// Bonus-multiplikator vid fas-synkronisering
-const PHASE_SYNC_BONUS: f32 = 1.15;
+const PHASE_SYNC_BONUS: f32 = 1.08;
 /// Fönster (radianer) inom vilket fas-synk aktiveras
 const PHASE_SYNC_WINDOW: f32 = std::f32::consts::FRAC_PI_4;
 /// Minsta amplitud för att en nod ska propagera vidare
-const ACTIVATION_THRESHOLD: f32 = 0.05;
+const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
-const MIN_OUTPUT_THRESHOLD: f32 = 0.08;
+const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
 /// Antal propagations-iterationer
-const MAX_PROPAGATION_STEPS: u32 = 3;
+const MAX_PROPAGATION_STEPS: u32 = 2;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 
@@ -242,13 +242,22 @@ impl ResonanceField {
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
 
         // Fas 1: Initial resonans
+        // HDC cosine similarity ger [-1, 1] men de flesta noder hamnar nära 0.
+        // Vi skalar om till [0, 1]: raw_sim ∈ [-1,1] → (raw+1)/2 ∈ [0,1]
+        // och höjer sedan kontrasten med en power-funktion.
         let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
                 // Använd text_hv (ren text utan roll-binding) för likhetsmätning
-                let base_resonance = state.text_hv.similarity(&goal_hv);
+                let raw_sim = state.text_hv.similarity(&goal_hv);
+                // Skala [-1,1] → [0,1] och höj kontrast (power=3 sprider top-noder)
+                let normalized = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                let base_resonance = normalized * normalized * normalized; // power-3 kontrast
+
                 let causal_boost = if state.hit_count > 0 {
-                    state.causal_memory.similarity(&goal_hv) * 0.3
+                    let raw_causal = state.causal_memory.similarity(&goal_hv);
+                    let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
+                    norm_causal * norm_causal * 0.3
                 } else {
                     0.0
                 };
@@ -278,7 +287,7 @@ impl ResonanceField {
                 .map(|(&id, s)| (id, (s.amplitude, s.phase)))
                 .collect();
 
-            // Propagera förälder -> barn
+            // Propagera förälder -> barn (max-operation, ej addition)
             for (&parent_id, children) in &self.children_map {
                 let (parent_amp, parent_phase) =
                     amplitudes.get(&parent_id).copied().unwrap_or((0.0, 0.0));
@@ -289,17 +298,17 @@ impl ResonanceField {
 
                 for &child_id in children {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
-                        let propagated = parent_amp * CHILD_DAMPING;
-                        child_state.amplitude += propagated;
+                        let mut propagated = parent_amp * CHILD_DAMPING;
 
                         // Fas-synk: om förälder och barn är nära i fas, förstärk
                         let phase_diff = (parent_phase - child_state.phase).abs();
                         if phase_diff < PHASE_SYNC_WINDOW {
-                            child_state.amplitude *= PHASE_SYNC_BONUS;
+                            propagated *= PHASE_SYNC_BONUS;
                         }
 
-                        // Markera som propagerad om inte redan direkt
-                        if child_state.amplitude > MIN_OUTPUT_THRESHOLD {
+                        // Max istf += — undviker amplitudsexplosion
+                        if propagated > child_state.amplitude {
+                            child_state.amplitude = propagated;
                             resonance_types
                                 .entry(child_id)
                                 .or_insert(ResonanceType::Propagated);
@@ -308,7 +317,7 @@ impl ResonanceField {
                 }
             }
 
-            // Propagera barn -> förälder
+            // Propagera barn -> förälder (max-operation)
             for (&child_id, &parent_id) in &self.parent_map {
                 let (child_amp, child_phase) =
                     amplitudes.get(&child_id).copied().unwrap_or((0.0, 0.0));
@@ -318,26 +327,21 @@ impl ResonanceField {
                 }
 
                 if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
-                    let propagated = child_amp * PARENT_AMPLIFICATION;
-                    parent_state.amplitude += propagated;
+                    let mut propagated = child_amp * PARENT_AMPLIFICATION;
 
                     // Fas-synk barn -> förälder
                     let phase_diff = (child_phase - parent_state.phase).abs();
                     if phase_diff < PHASE_SYNC_WINDOW {
-                        parent_state.amplitude *= PHASE_SYNC_BONUS;
+                        propagated *= PHASE_SYNC_BONUS;
                     }
 
-                    if parent_state.amplitude > MIN_OUTPUT_THRESHOLD {
+                    if propagated > parent_state.amplitude {
+                        parent_state.amplitude = propagated;
                         resonance_types
                             .entry(parent_id)
                             .or_insert(ResonanceType::Propagated);
                     }
                 }
-            }
-
-            // Clampa amplituder
-            for state in self.nodes.values_mut() {
-                state.amplitude = state.amplitude.clamp(0.0, 1.0);
             }
         }
 
