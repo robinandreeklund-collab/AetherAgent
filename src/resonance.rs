@@ -56,7 +56,7 @@ const FIELD_CACHE_CAPACITY: usize = 64;
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
 /// Type of resonance that caused a node to appear in results
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ResonanceType {
     /// Noden matchade direkt mot goal-vektorn
     Direct,
@@ -663,7 +663,7 @@ impl ResonanceField {
                     node_id: r.node_id,
                     amplitude: 0.0,
                     phase: r.phase,
-                    resonance_type: r.resonance_type.clone(),
+                    resonance_type: r.resonance_type,
                     causal_boost: 0.0,
                 });
                 // Union: behåll högsta amplitude per nod
@@ -753,81 +753,51 @@ impl ResonanceField {
             }
         }
 
-        // Steg 2: Confidence-weighted Beta-distribution update
-        // Beräkna confidence per nod (från senaste propagation)
+        // Steg 2: Confidence-weighted Beta-distribution update.
+        // Itererar alla parent→child edges EN gång. Uppdaterar BOTH directions.
         let confidences: HashMap<u32, f32> = self
             .nodes
             .iter()
             .map(|(&id, s)| (id, s.amplitude.clamp(0.0, 1.0)))
             .collect();
 
-        // Förälder → barn edges
-        let edges_down: Vec<(String, Vec<u32>)> = self
-            .children_map
-            .iter()
-            .filter_map(|(&pid, children)| {
-                self.nodes.get(&pid).map(|s| {
-                    let key = format!("{}:down", s.role);
-                    (key, children.clone())
-                })
-            })
-            .collect();
-
-        for (key, children) in &edges_down {
-            let entry = self
-                .propagation_stats
-                .entry(key.clone())
-                .or_insert_with(|| {
-                    // Initial prior från heuristik
-                    let role = key.split(':').next().unwrap_or("");
-                    (heuristic_down_weight(role), 1.0)
-                });
-
-            for &child_id in children {
-                let conf = confidences.get(&child_id).copied().unwrap_or(0.0);
-                if successful_set.contains(&child_id) {
-                    // Fix 1: confidence-weighted success
-                    entry.0 += conf;
-                } else {
-                    // Fix 2: negative signal — failure weighted by (1 - confidence)
-                    entry.1 += 1.0 - conf;
-                }
-            }
-        }
-
-        // Barn → förälder edges
-        let edges_up: Vec<(String, u32)> = self
+        // Snapshot edges med roller (undvik borrow-konflikter)
+        let edges: Vec<(u32, u32, String, String)> = self
             .parent_map
             .iter()
-            .filter_map(|(&cid, &pid)| {
-                self.nodes
-                    .get(&cid)
-                    .map(|s| (format!("{}:up", s.role), pid))
+            .filter_map(|(&child_id, &parent_id)| {
+                let cr = self.nodes.get(&child_id).map(|s| s.role.clone())?;
+                let pr = self.nodes.get(&parent_id).map(|s| s.role.clone())?;
+                Some((child_id, parent_id, cr, pr))
             })
             .collect();
 
-        for (key, _parent_id) in &edges_up {
-            let entry = self
-                .propagation_stats
-                .entry(key.clone())
-                .or_insert_with(|| {
-                    let role = key.split(':').next().unwrap_or("");
-                    (heuristic_up_weight(role), 1.0)
-                });
+        for (child_id, _parent_id, child_role, parent_role) in &edges {
+            let conf = confidences.get(child_id).copied().unwrap_or(0.0);
+            let is_success = successful_set.contains(child_id);
 
-            let child_role_key = key.clone();
-            // Hitta alla barn med denna roll
-            let child_id_opt = edges_up
-                .iter()
-                .find(|(k, _)| *k == child_role_key)
-                .map(|(_, pid)| *pid);
-            if let Some(cid) = child_id_opt {
-                let conf = confidences.get(&cid).copied().unwrap_or(0.0);
-                if successful_set.contains(&cid) {
-                    entry.0 += conf;
-                } else {
-                    entry.1 += 1.0 - conf;
-                }
+            // Downward: förälderns roll → barn
+            let dk = format!("{}:down", parent_role);
+            let de = self
+                .propagation_stats
+                .entry(dk)
+                .or_insert_with(|| (heuristic_down_weight(parent_role), 1.0));
+            if is_success {
+                de.0 += conf;
+            } else {
+                de.1 += 1.0 - conf;
+            }
+
+            // Upward: barnets roll → förälder
+            let uk = format!("{}:up", child_role);
+            let ue = self
+                .propagation_stats
+                .entry(uk)
+                .or_insert_with(|| (heuristic_up_weight(child_role), 1.0));
+            if is_success {
+                ue.0 += conf;
+            } else {
+                ue.1 += 1.0 - conf;
             }
         }
     }
@@ -893,7 +863,7 @@ impl ResonanceField {
                 let entry = accumulated.entry(r.node_id).or_insert((
                     0.0,
                     r.phase,
-                    r.resonance_type.clone(),
+                    r.resonance_type,
                 ));
 
                 if has_destructive {
