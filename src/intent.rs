@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::semantic::text_similarity;
+#[allow(unused_imports)]
 use crate::types::{
     ClickResult, ExtractDataResult, ExtractedEntry, FillFormResult, FormFieldMapping, SemanticNode,
     SemanticTree,
@@ -264,6 +265,108 @@ fn looks_like_script_content(text: &str) -> bool {
     matches >= 2
 }
 
+/// Expandera en extract_data-nyckel med synonymer.
+/// Returnerar originalnyckeln + alla synonymer (för max-scoring).
+fn expand_key_synonyms(key: &str) -> Vec<&'static str> {
+    let k = key.to_lowercase();
+    // Mappa varje nyckel till relaterade termer (EN + SV)
+    match k.as_str() {
+        "price" | "pris" | "cost" | "kostnad" => {
+            vec![
+                "price", "pris", "cost", "fee", "amount", "belopp", "total", "kr", "usd",
+            ]
+        }
+        "title" | "rubrik" | "headline" => {
+            vec!["title", "rubrik", "headline", "heading", "name", "namn"]
+        }
+        "author" | "författare" | "writer" => {
+            vec![
+                "author",
+                "författare",
+                "writer",
+                "by",
+                "journalist",
+                "publicerad",
+            ]
+        }
+        "date" | "datum" | "published" | "publicerad" => {
+            vec![
+                "date",
+                "datum",
+                "published",
+                "publicerad",
+                "posted",
+                "updated",
+            ]
+        }
+        "description" | "beskrivning" | "summary" => {
+            vec![
+                "description",
+                "beskrivning",
+                "summary",
+                "abstract",
+                "overview",
+                "sammanfattning",
+            ]
+        }
+        "address" | "adress" | "location" => {
+            vec![
+                "address", "adress", "location", "plats", "street", "gata", "city", "stad",
+            ]
+        }
+        "phone" | "telefon" | "tel" => {
+            vec!["phone", "telefon", "tel", "mobile", "mobil", "call", "ring"]
+        }
+        "email" | "epost" | "e-post" => {
+            vec!["email", "epost", "e-post", "mail", "contact"]
+        }
+        "salary" | "lön" | "pay" | "compensation" => {
+            vec![
+                "salary",
+                "lön",
+                "pay",
+                "compensation",
+                "wage",
+                "income",
+                "ersättning",
+            ]
+        }
+        "rating" | "betyg" | "score" | "review" => {
+            vec![
+                "rating",
+                "betyg",
+                "score",
+                "review",
+                "stars",
+                "stjärnor",
+                "omdöme",
+            ]
+        }
+        "availability" | "stock" | "lager" => {
+            vec![
+                "availability",
+                "stock",
+                "lager",
+                "in stock",
+                "tillgänglig",
+                "available",
+            ]
+        }
+        "hours" | "öppettider" | "schedule" => {
+            vec![
+                "hours",
+                "öppettider",
+                "schedule",
+                "open",
+                "öppet",
+                "close",
+                "stänger",
+            ]
+        }
+        _ => vec![],
+    }
+}
+
 fn role_boost_for_key(key: &str) -> Option<(&'static str, f32)> {
     let key_lower = key.to_lowercase();
     let key_parts: Vec<&str> = key_lower
@@ -315,8 +418,15 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 continue;
             }
 
-            // Matcha nyckel mot nodens label
+            // Matcha nyckel mot nodens label (+ synonymer)
             let label_score = text_similarity(key, &node.label);
+
+            // Synonym-boost: kör alla synonymer mot label och ta max
+            let synonyms = expand_key_synonyms(key);
+            let synonym_score = synonyms
+                .iter()
+                .map(|syn| text_similarity(syn, &node.label))
+                .fold(0.0f32, f32::max);
 
             // Matcha även mot name/html_id
             let name_score = node
@@ -338,7 +448,11 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 .map(|v| text_similarity(key, v))
                 .unwrap_or(0.0);
 
-            let mut score = label_score.max(name_score).max(id_score).max(value_score);
+            let mut score = label_score
+                .max(synonym_score)
+                .max(name_score)
+                .max(id_score)
+                .max(value_score);
 
             // Roll-boost: om nyckeln antyder en viss roll, ge bonus till matchande noder
             if let Some((preferred_role, boost)) = &role_boost {

@@ -100,8 +100,8 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     );
     request = request.header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8");
-    // Accept-Encoding hanteras automatiskt av reqwest (.gzip(true).brotli(true))
-    // Manuell header kolliderar med automatisk dekompression — BUGG N fix
+    // Accept-Encoding: hanteras automatiskt av reqwest (.gzip(true).brotli(true))
+    // Ingen manuell header — reqwest sätter rätt encoding baserat på aktiverade features
     request = request.header("DNT", "1");
     request = request.header("Sec-Fetch-Dest", "document");
     request = request.header("Sec-Fetch-Mode", "navigate");
@@ -120,6 +120,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
 
     let status_code = response.status().as_u16();
     let final_url = response.url().to_string();
+
+    // Redirect-domänvalidering: varna om vi hamnade på en annan domän
+    // (kan indikera OAuth-redirect, tracking, eller phishing)
+    let original_domain = extract_domain(url).unwrap_or_default();
+    let final_domain = extract_domain(&final_url).unwrap_or_default();
+    let cross_domain_redirect =
+        !original_domain.is_empty() && !final_domain.is_empty() && original_domain != final_domain;
+
     let content_type = response
         .headers()
         .get("content-type")
@@ -183,6 +191,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         redirect_chain,
         fetch_time_ms,
         body_size_bytes,
+        cross_domain_redirect,
     })
 }
 
@@ -197,34 +206,45 @@ pub async fn check_robots_txt_google(url: &str, user_agent: &str) -> Result<(), 
         parsed.host_str().unwrap_or("")
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("robots.txt klient-fel: {e}"))?;
+    // Isolerad timeout: robots.txt-check får aldrig blockera mer än 3s totalt,
+    // oavsett om servern hänger, DNS är långsam, eller body tar tid.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .map_err(|e| format!("robots.txt klient-fel: {e}"))?;
 
-    let resp = client.get(&robots_url).send().await;
+        let resp = client.get(&robots_url).send().await;
 
-    // Om robots.txt inte finns eller inte nås, tillåt (RFC 9309)
-    let Ok(resp) = resp else {
-        return Ok(());
-    };
+        // Om robots.txt inte finns eller inte nås, tillåt (RFC 9309)
+        let Ok(resp) = resp else {
+            return Ok(());
+        };
 
-    if !resp.status().is_success() {
-        return Ok(());
+        if !resp.status().is_success() {
+            return Ok(());
+        }
+
+        let body = resp.text().await.unwrap_or_default();
+        let path = parsed.path();
+
+        // Använd Googles officiella parser
+        let mut matcher = robotstxt::DefaultMatcher::default();
+        if !matcher.one_agent_allowed_by_robots(&body, user_agent, path) {
+            return Err(format!(
+                "Blockerad av robots.txt för '{user_agent}' på '{path}'"
+            ));
+        }
+
+        Ok(())
+    })
+    .await;
+
+    // Vid timeout: tillåt (bättre att fortsätta än att blockera)
+    match result {
+        Ok(inner) => inner,
+        Err(_timeout) => Ok(()),
     }
-
-    let body = resp.text().await.unwrap_or_default();
-    let path = parsed.path();
-
-    // Använd Googles officiella parser
-    let mut matcher = robotstxt::DefaultMatcher::default();
-    if !matcher.one_agent_allowed_by_robots(&body, user_agent, path) {
-        return Err(format!(
-            "Blockerad av robots.txt för '{user_agent}' på '{path}'"
-        ));
-    }
-
-    Ok(())
 }
 
 // ─── URL-validering (SSRF-skydd) ────────────────────────────────────────────
