@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v4
+# Causal Resonance Field Retrieval (CRFR) v5
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -76,15 +76,20 @@ propagate(goal):
     Komplexitet: O(K × min(E, N×32)) där K=2-3
 
     Förälder → barn:
-      damping = 0.35 × √(parent.amp) × adaptive_down(parent)
-      adaptive_down = base_heuristic × (1 + hit_count×0.05)
-        heading/table: bas 1.2× | nav: bas 0.3× | allt adapteras via feedback
+      damping = 0.35 × √(parent.amp) × learned_weight(role, "down")
     Barn → förälder:
-      amplification = 0.25 × √(child.amp) × adaptive_up(child)
-      adaptive_up = base_heuristic × (1 + hit_count×0.05)
-        price/data: bas 1.3× | nav: bas 0.3× | allt adapteras via feedback
+      amplification = 0.25 × √(child.amp) × learned_weight(role, "up")
     Fassynk: om |parent.phase - child.phase| < π/4 → ×1.08
     Konvergens: stoppa om total_delta < 0.001 (typiskt 2-3 steg)
+
+    learned_weight() — Bayesian blend:
+      stats = propagation_stats["heading:down"]  // (successes, attempts)
+      observed = 0.3 + (successes/attempts) × 1.2
+      blend = min(attempts/20, 0.8)
+      weight = (1-blend) × heuristic + blend × observed
+      → 0 attempts: 100% heuristik (cold-start)
+      → 10 attempts: 50/50
+      → 20+ attempts: 80% data, 20% prior
 
   Fas 3 — Deterministic amplitud-gap top-k:
     Sortera efter amplitude DESC, tie-break node_id ASC (deterministic)
@@ -96,14 +101,29 @@ propagate(goal):
 
 ```
 feedback(goal, successful_node_ids):
-  goal_hv = Hypervector::from_text_ngrams(goal)
-  for each node_id:
-    node.causal_memory = bundle(node.causal_memory, goal_hv)
-    node.hit_count += 1
-    node.last_hit_ms = now()   ← temporal decay-referens
+
+  Steg 1 — Kausalt minne (per nod):
+    goal_hv = Hypervector::from_text_ngrams(goal)
+    for each node_id:
+      node.causal_memory = bundle(node.causal_memory, goal_hv)
+      node.hit_count += 1
+      node.last_hit_ms = now()
+
+  Steg 2 — Learned propagation weights (per roll):
+    For each parent→child edge:
+      propagation_stats["parent_role:down"].attempts += 1
+    For each child→parent edge:
+      propagation_stats["child_role:up"].attempts += 1
+    For each successful node:
+      propagation_stats["parent_role:down"].successes += 1
+      propagation_stats["node_role:up"].successes += 1
 ```
 
-Nästa gång en liknande fråga ställs boostar det kausala minnet de noder som gav rätt svar. Ingen global modellträning — bara lokal VSA-binding.
+Dubbelt lärande:
+- **Kausalt minne**: vilka noder som hade svaret (VSA-binding)
+- **Propagation weights**: vilka roller som sprider signal effektivt (success rate)
+
+Båda sparas per fält, persistent via `to_json()`, transfererbar via `transfer_from()`.
 
 ---
 
@@ -167,11 +187,11 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v4 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  22 667  │ 10.8   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 384 230  │ 19.9   │
+│ CRFR v5 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  27 971  │ 10.8   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 387 089  │ 20.1   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          17.0x
+Speedup:          13.8x
 Cache-hit:        617 µs (sub-millisecond)
 Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 ```
@@ -188,19 +208,21 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 
 ### Nyckeltal
 
-| Dimension | CRFR v4 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+| Dimension | CRFR v5 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
 |-----------|:-------:|:-------------------------:|:----------------:|
 | **Recall@3** | **75%** | 50% | 83% (6 tester) |
-| **Latens (cold)** | **22 ms** | 384 ms | 90 ms |
-| **Latens (cache hit)** | **0.6 ms** | 384 ms | 90 ms |
-| **Speedup** | **17x** | baseline | 0.23x |
+| **Latens (cold)** | **28 ms** | 387 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 387 ms | 90 ms |
+| **Speedup** | **13.8x** | baseline | 0.23x |
 | **Output-noder** | **6-11** | 16-20 | 5-8 |
 | **Token-reduktion** | **99%** | 98.4% | 99.2% |
 | **O(N)-garanterad** | **Ja (fan-out cap)** | Ja | Ja |
-| **Adaptiva vikter** | **Ja (feedback)** | Nej | Nej |
+| **Learned weights** | **Bayesian (success rate)** | Nej | Nej |
+| **Confidence output** | **Platt-kalibrerad** | Nej | Nej |
+| **Incremental update** | **Ja** | Nej | Nej |
+| **Cross-URL transfer** | **Ja** | Nej | Nej |
 | **Deterministic** | **Ja** | Nej | Nej |
 | **Value-aware** | **Ja** | Nej | Nej |
-| **Lär sig** | **Ja** | Nej | Nej |
 | **Kräver ONNX** | **Nej** | Ja | Ja |
 
 ---
@@ -241,6 +263,18 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 | **I7 jämförande** | 1 match per nyckel | extract_by_keys_multi (N per nyckel) | Flexibilitet |
 | **Latens cold** | 32 ms | **22 ms** | -30% |
 | **Speedup** | 12.3x | **17.0x** | SIMD + optimering |
+
+### v4 → v5
+| Optimering | v4 | v5 | Princip |
+|------------|----|----|---------|
+| **Propagation weights** | `base × (1 + hit×0.05)` (linjär) | Bayesian blend: `(1-b)×heuristic + b×observed` | Local optimization > Global models |
+| **Weight tracking** | Per-nod hit_count | Per-roll success/attempts stats | Äkta inlärning, inte heuristik |
+| **Blend factor** | Linjär boost | `min(attempts/20, 0.8)` (Bayesian) | Data → dominerar med tid |
+| **Stats persistens** | Enbart i minne | Sparas i to_json, överförs via transfer_from | Bevarar lärande mellan sessioner |
+| **Incremental update** | Full rebuild | update_node/add_node/remove_node | DOM-mutation utan rebuild |
+| **Cross-URL transfer** | — | transfer_from(donor, recipient, min_sim) | Lärande mellan liknande sajter |
+| **Confidence calibration** | Raw amplitude | Platt scaling → probability (0-1) | Kalibrerad output |
+| **parse_crfr output** | relevance (amplitude) | + confidence (kalibrerad probability) | LLM-vänlig signal |
 
 ---
 
@@ -466,8 +500,8 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 
 | Fil | Beskrivning |
 |-----|-------------|
-| `src/resonance.rs` | Kärna: ResonanceField, adaptiv propagation, feedback, LRU cache, multi-query, persistent serialization |
-| `src/lib.rs` | WASM: `parse_crfr`, `crfr_feedback`, `parse_crfr_multi`, `crfr_save_field`, `crfr_load_field`, `extract_data_multi` |
+| `src/resonance.rs` | Kärna: ResonanceField, learned propagation, Bayesian weights, confidence calibration, incremental update, cross-URL transfer, multi-query, persistent cache |
+| `src/lib.rs` | WASM: `parse_crfr`, `crfr_feedback`, `parse_crfr_multi`, `crfr_save_field`, `crfr_load_field`, `crfr_update_node`, `crfr_transfer`, `extract_data_multi` |
 | `src/bin/mcp_server.rs` | MCP stdio: `parse_crfr`, `crfr_feedback` verktyg |
 | `src/bin/server.rs` | HTTP: endpoints + MCP dispatch (tools/list + tools/call) |
 | `src/stream_engine.rs` | I2: kontext-aware re-ranking (barn-grann boost +20%) |
@@ -482,9 +516,9 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 
 ## Kvarvarande optimeringar
 
-Alla ursprungliga v3-punkter är implementerade. Framtida möjligheter:
+Alla v1-v4 punkter är implementerade. Framtida möjligheter:
 
 - **WebGPU compute** — massiv parallell propagation för >10K noder
-- **Incremental field update** — uppdatera fält vid DOM-mutation (utan full rebuild)
-- **Cross-URL transfer** — överför kausalt minne mellan liknande sajter (t.ex. alla nyhetssajter)
-- **Confidence calibration** — kalibrera amplitude mot faktisk recall (probability output)
+- **Automatic domain clustering** — auto-detektera liknande sajter för cross-URL transfer
+- **Online A/B** — automatiskt jämföra CRFR vs Pipeline per sajt och välja bäst
+- **Weight export** — exportera learned weights som "sajtprofiler" (nyheter, e-commerce, docs)
