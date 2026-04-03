@@ -1308,13 +1308,12 @@ impl FieldCacheInner {
         }
     }
 
-    /// Hämta ett fält (flyttar till slutet = nyast)
-    fn get(&mut self, url_hash: u64) -> Option<ResonanceField> {
+    /// Hämta ett fält via move (tar bort ur cache, noll-klon).
+    /// Anroparen äger fältet och sparar tillbaka via put() efter användning.
+    fn take(&mut self, url_hash: u64) -> Option<ResonanceField> {
         if let Some(pos) = self.entries.iter().position(|(h, _)| *h == url_hash) {
             let (_, field) = self.entries.remove(pos);
-            let cloned = field.clone();
-            self.entries.push((url_hash, field));
-            Some(cloned)
+            Some(field)
         } else {
             None
         }
@@ -1347,7 +1346,7 @@ static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
 pub fn get_or_build_field(tree_nodes: &[SemanticNode], url: &str) -> (ResonanceField, bool) {
     let url_hash = hash_url(url);
     if let Ok(mut cache) = FIELD_CACHE.lock() {
-        if let Some(field) = cache.get(url_hash) {
+        if let Some(field) = cache.take(url_hash) {
             return (field, true);
         }
     }
