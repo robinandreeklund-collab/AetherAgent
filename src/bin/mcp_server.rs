@@ -84,13 +84,23 @@ struct ParseCrfrParams {
     goal: String,
     /// The page URL (used for caching — same URL reuses causal memory)
     url: String,
-    /// Max nodes to return (default: 10). CRFR uses amplitude-gap detection to find natural clusters, often returning fewer.
-    #[serde(default = "default_crfr_top_k")]
-    top_k: u32,
+    /// Max nodes to return (default: 20). CRFR uses amplitude-gap detection to find natural clusters, often returning fewer.
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+    /// Run JavaScript evaluation before parsing (requires js-eval feature). Use for SPA/dynamic pages.
+    #[serde(default)]
+    run_js: bool,
+    /// Output format: "json" (default, structured nodes) or "markdown" (readable text, token-efficient)
+    #[serde(default = "default_json_format")]
+    output_format: String,
 }
 
-fn default_crfr_top_k() -> u32 {
-    10
+fn default_crfr_top_n() -> u32 {
+    20
+}
+
+fn default_json_format() -> String {
+    "json".to_string()
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -586,10 +596,17 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_crfr",
-        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nCRFR combines BM25 keyword matching with HDC hyperdimensional wave propagation. Key advantages over parse_hybrid:\n- 10-15x FASTER (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions to teach the field\n- Natural top-k via amplitude-gap detection (no fixed threshold)\n- Per-URL caching: revisiting the same page is near-instant (~300µs)\n\nBest for: repeated visits to same sites, multi-page workflows, latency-sensitive tasks.\n\nThe response includes resonance_type per node: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
+        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nCRFR combines BM25 keyword matching with HDC hyperdimensional wave propagation. Key advantages over parse_hybrid:\n- 10-15x FASTER (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions to teach the field\n- Natural top-k via amplitude-gap detection (no fixed threshold)\n- Per-URL caching: revisiting the same page is near-instant (~300µs)\n\nParameters:\n- top_n: Max nodes (default 20, gap-detection often returns fewer)\n- run_js: Set true for SPA/dynamic pages — evaluates inline JS via QuickJS sandbox before parsing\n- output_format: 'json' (default, structured) or 'markdown' (readable, token-efficient for LLM consumption)\n\nThe response includes resonance_type per node: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
     )]
     fn parse_crfr(&self, Parameters(params): Parameters<ParseCrfrParams>) -> String {
-        aether_agent::parse_crfr(&params.html, &params.goal, &params.url, params.top_k)
+        aether_agent::parse_crfr(
+            &params.html,
+            &params.goal,
+            &params.url,
+            params.top_n,
+            params.run_js,
+            &params.output_format,
+        )
     }
 
     #[tool(

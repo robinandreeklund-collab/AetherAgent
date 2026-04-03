@@ -603,26 +603,51 @@ pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> 
 /// Supports causal learning: fields are cached per URL and improve
 /// with feedback from successful extractions.
 ///
-/// Returns JSON with top resonating nodes, timing, and cache status.
+/// # Arguments
+/// * `html` - Raw HTML
+/// * `goal` - Search goal / query
+/// * `url` - Page URL (used for caching)
+/// * `top_n` - Max nodes (default 20, gap-detection may return fewer)
+/// * `run_js` - Evaluate inline JS before building tree (requires js-eval feature)
+/// * `output_format` - "json" (default) or "markdown"
 #[wasm_bindgen]
-pub fn parse_crfr(html: &str, goal: &str, url: &str, top_k: u32) -> String {
+pub fn parse_crfr(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+    output_format: &str,
+) -> String {
     let start = now_ms();
-    let tree = build_tree(html, goal, url);
+
+    // Steg 1: Bygg semantiskt träd (med eller utan JS)
+    let tree = if run_js {
+        #[cfg(feature = "js-eval")]
+        {
+            let base_tree = build_tree(html, goal, url);
+            let result = js_bridge::selective_exec(&base_tree, html);
+            result.tree
+        }
+        #[cfg(not(feature = "js-eval"))]
+        {
+            build_tree(html, goal, url)
+        }
+    } else {
+        build_tree(html, goal, url)
+    };
     let build_ms = now_ms().saturating_sub(start);
 
-    let all_nodes = collect_all_nodes(&tree.nodes);
-    let total_dom_nodes = all_nodes.len();
+    let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
-    // CRFR: hämta cacheat fält eller bygg nytt
+    // Steg 2: CRFR resonans
     let prop_start = now_ms();
     let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
-    let results = field.propagate_top_k(goal, top_k as usize);
-
-    // Spara fältet (med eventuellt kausalt minne) i cache
+    let results = field.propagate_top_k(goal, top_n as usize);
     resonance::save_field(&field);
     let prop_ms = now_ms().saturating_sub(prop_start);
 
-    // Mappa resonans-resultat till SemanticNode:er
+    // Steg 3: Mappa resultat till SemanticNode:er
     let node_map: HashMap<u32, &types::SemanticNode> = {
         let mut m = HashMap::new();
         fn collect<'a>(
@@ -638,10 +663,42 @@ pub fn parse_crfr(html: &str, goal: &str, url: &str, top_k: u32) -> String {
         m
     };
 
-    let top_nodes: Vec<serde_json::Value> = results
+    let matched: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> = results
         .iter()
-        .filter_map(|r| {
-            node_map.get(&r.node_id).map(|node| {
+        .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
+        .collect();
+
+    let (cache_entries, cache_capacity) = resonance::cache_stats();
+    let total_ms = now_ms().saturating_sub(start);
+
+    // Steg 4: Output-format
+    let is_md =
+        output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+
+    if is_md {
+        let mut md = String::with_capacity(matched.len() * 120);
+        if !tree.title.is_empty() {
+            md.push_str(&format!("# {}\n\n", tree.title));
+        }
+        for (node, res) in &matched {
+            let mut flat = (*node).clone();
+            flat.relevance = res.amplitude;
+            flat.children.clear();
+            node_to_markdown(&flat, &mut md, 0);
+        }
+        md.push_str(&format!(
+            "\n<!-- CRFR: {}/{} nodes, {}ms, cache={}, js={} -->\n",
+            matched.len(),
+            total_dom_nodes,
+            total_ms,
+            cache_hit,
+            run_js
+        ));
+        md
+    } else {
+        let top_nodes: Vec<serde_json::Value> = matched
+            .iter()
+            .map(|(node, r)| {
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
@@ -655,33 +712,31 @@ pub fn parse_crfr(html: &str, goal: &str, url: &str, top_k: u32) -> String {
                     "trust": node.trust,
                 })
             })
-        })
-        .collect();
+            .collect();
 
-    let (cache_entries, cache_capacity) = resonance::cache_stats();
-    let total_ms = now_ms().saturating_sub(start);
+        let result = serde_json::json!({
+            "url": tree.url,
+            "title": tree.title,
+            "goal": tree.goal,
+            "nodes": top_nodes,
+            "node_count": top_nodes.len(),
+            "total_nodes": total_dom_nodes,
+            "injection_warnings": tree.injection_warnings,
+            "parse_time_ms": total_ms,
+            "crfr": {
+                "method": "causal_resonance_field",
+                "build_tree_ms": build_ms,
+                "propagation_ms": prop_ms,
+                "cache_hit": cache_hit,
+                "js_eval": run_js,
+                "field_queries": field.total_queries,
+                "cache_entries": cache_entries,
+                "cache_capacity": cache_capacity,
+            }
+        });
 
-    let result = serde_json::json!({
-        "url": tree.url,
-        "title": tree.title,
-        "goal": tree.goal,
-        "nodes": top_nodes,
-        "node_count": top_nodes.len(),
-        "total_nodes": total_dom_nodes,
-        "injection_warnings": tree.injection_warnings,
-        "parse_time_ms": total_ms,
-        "crfr": {
-            "method": "causal_resonance_field",
-            "build_tree_ms": build_ms,
-            "propagation_ms": prop_ms,
-            "cache_hit": cache_hit,
-            "field_queries": field.total_queries,
-            "cache_entries": cache_entries,
-            "cache_capacity": cache_capacity,
-        }
-    });
-
-    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+    }
 }
 
 /// Provide causal feedback to CRFR field for a URL.
