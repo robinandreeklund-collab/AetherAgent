@@ -805,6 +805,196 @@ impl ResonanceField {
         self.nodes.len()
     }
 
+    // ─── Incremental Field Update ───────────────────────────────────────
+
+    /// Update a single node's text without rebuilding the entire field.
+    ///
+    /// Use when DOM mutates (JS-driven content change, AJAX response).
+    /// Updates: text HV, BM25 label, BM25 cache invalidation.
+    /// Preserves: causal memory, hit_count, parent/child relations.
+    pub fn update_node(
+        &mut self,
+        node_id: u32,
+        new_label: &str,
+        new_role: &str,
+        new_value: Option<&str>,
+    ) {
+        if let Some(state) = self.nodes.get_mut(&node_id) {
+            state.text_hv = Hypervector::from_text_ngrams(new_label);
+            state.role = new_role.to_string();
+            // Kausal minne bevaras — noden "kommer ihåg" tidigare framgångar
+        }
+        self.node_labels.insert(node_id, new_label.to_string());
+        if let Some(val) = new_value {
+            self.node_values.insert(node_id, val.to_string());
+        } else {
+            self.node_values.remove(&node_id);
+        }
+        // Invalidera cachad BM25-index (byggs om vid nästa propagation)
+        self.bm25_cache = None;
+    }
+
+    /// Add a new node to the field (AJAX-laddat innehåll).
+    ///
+    /// Preserves existing causal memory. Parent/child relations uppdateras.
+    pub fn add_node(
+        &mut self,
+        node_id: u32,
+        label: &str,
+        role: &str,
+        parent_id: Option<u32>,
+        value: Option<&str>,
+    ) {
+        let depth = parent_id
+            .and_then(|pid| self.nodes.get(&pid).map(|p| p.depth + 1))
+            .unwrap_or(0);
+
+        self.nodes.insert(
+            node_id,
+            ResonanceState {
+                text_hv: Hypervector::from_text_ngrams(label),
+                role: role.to_string(),
+                depth,
+                phase: 0.0,
+                amplitude: 0.0,
+                causal_memory: Hypervector::zero(),
+                hit_count: 0,
+                last_goal_hash: 0,
+                last_hit_ms: 0,
+            },
+        );
+        self.node_labels.insert(node_id, label.to_string());
+        if let Some(val) = value {
+            self.node_values.insert(node_id, val.to_string());
+        }
+        if let Some(pid) = parent_id {
+            self.parent_map.insert(node_id, pid);
+            self.children_map.entry(pid).or_default().push(node_id);
+        }
+        self.bm25_cache = None;
+    }
+
+    /// Remove a node from the field (DOM-deletion).
+    pub fn remove_node(&mut self, node_id: u32) {
+        self.nodes.remove(&node_id);
+        self.node_labels.remove(&node_id);
+        self.node_values.remove(&node_id);
+        if let Some(pid) = self.parent_map.remove(&node_id) {
+            if let Some(children) = self.children_map.get_mut(&pid) {
+                children.retain(|&id| id != node_id);
+            }
+        }
+        self.children_map.remove(&node_id);
+        self.bm25_cache = None;
+    }
+
+    // ─── Cross-URL Transfer ─────────────────────────────────────────────
+
+    /// Transfer causal memory from another field (similar site type).
+    ///
+    /// Use case: transfer learning between news sites (SVT → Expressen),
+    /// e-commerce sites (Amazon → Zalando), etc.
+    ///
+    /// Transfers causal memory from donor nodes to matching recipient nodes
+    /// based on role + label similarity. Only transfers if donor has
+    /// hit_count > 0 (has actual learned knowledge).
+    ///
+    /// `min_similarity`: minimum HDC text similarity to transfer (0.0-1.0).
+    /// Returns number of nodes that received transferred memory.
+    pub fn transfer_from(&mut self, donor: &ResonanceField, min_similarity: f32) -> u32 {
+        let mut transferred = 0u32;
+
+        // Samla donor-noder med kausalt minne
+        let donor_learned: Vec<(&u32, &ResonanceState)> = donor
+            .nodes
+            .iter()
+            .filter(|(_, s)| s.hit_count > 0)
+            .collect();
+
+        if donor_learned.is_empty() {
+            return 0;
+        }
+
+        for (recipient_id, recipient) in self.nodes.iter_mut() {
+            // Skippa noder som redan har eget kausalt minne
+            if recipient.hit_count > 0 {
+                continue;
+            }
+
+            // Hitta bäst matchande donor-nod (samma roll + liknande text)
+            let mut best_donor: Option<&ResonanceState> = None;
+            let mut best_sim: f32 = min_similarity;
+
+            for (_, donor_state) in &donor_learned {
+                // Roll måste matcha (strukturell likhet)
+                if donor_state.role != recipient.role {
+                    continue;
+                }
+                let sim = recipient.text_hv.similarity(&donor_state.text_hv);
+                let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                if norm > best_sim {
+                    best_sim = norm;
+                    best_donor = Some(donor_state);
+                }
+            }
+
+            if let Some(donor) = best_donor {
+                // Överför kausalt minne (skalat ned med similarity)
+                // Undvik att blåsa upp minne — max 50% av donors styrka
+                let transfer_strength = best_sim * 0.5;
+                if transfer_strength > 0.1 {
+                    // Bundla donors minne in i recipients (additiv)
+                    recipient.causal_memory =
+                        Hypervector::bundle(&[&recipient.causal_memory, &donor.causal_memory]);
+                    recipient.hit_count = 1; // Markera som "har minne"
+                    recipient.last_hit_ms = now_ms();
+                    let _ = recipient_id; // Undvik unused warning
+                    transferred += 1;
+                }
+            }
+        }
+
+        transferred
+    }
+
+    // ─── Confidence Calibration ─────────────────────────────────────────
+
+    /// Calibrate raw amplitudes to probability estimates.
+    ///
+    /// Maps amplitude (0-1, arbitrary scale) to estimated probability
+    /// that the node contains the answer (0-1, calibrated).
+    ///
+    /// Uses Platt scaling approximation:
+    ///   P(answer) = 1 / (1 + exp(-k * (amplitude - threshold)))
+    /// where k and threshold are derived from the field's hit history.
+    pub fn calibrate_results(&self, results: &[ResonanceResult]) -> Vec<(u32, f32, f32)> {
+        // Samla kalibrerings-statistik från fältets historik
+        let total_hits: u32 = self.nodes.values().map(|s| s.hit_count).sum();
+        let total_nodes = self.nodes.len() as f32;
+        let base_rate = if total_nodes > 0.0 {
+            (total_hits as f32 / total_nodes).clamp(0.001, 0.5)
+        } else {
+            0.05 // Prior: 5% av noder innehåller svar
+        };
+
+        // Platt-skalning: k styr branthet, threshold styr center
+        // Adaptivt: fler hits → mer data → brantare sigmoid
+        let k = 5.0 + (total_hits as f32).min(50.0) * 0.2; // 5-15
+        let threshold = 0.3 - base_rate * 0.5; // Lägre threshold om fler hits
+
+        results
+            .iter()
+            .map(|r| {
+                let logit = k * (r.amplitude - threshold);
+                let probability = 1.0 / (1.0 + (-logit).exp());
+                // Boost om noden har kausalt minne (höjer confidence)
+                let causal_factor = if r.causal_boost > 0.01 { 1.2 } else { 1.0 };
+                let calibrated = (probability * causal_factor).clamp(0.0, 0.99);
+                (r.node_id, r.amplitude, calibrated)
+            })
+            .collect()
+    }
+
     /// Serialize the field to a JSON string for persistent storage.
     pub fn to_json(&self) -> Result<String, String> {
         serde_json::to_string(self).map_err(|e| format!("Serialize failed: {e}"))

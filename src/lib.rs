@@ -696,14 +696,23 @@ pub fn parse_crfr(
         ));
         md
     } else {
+        // Confidence calibration: amplitude → kalibrerad probability
+        let res_vec: Vec<resonance::ResonanceResult> =
+            matched.iter().map(|(_, r)| (*r).clone()).collect();
+        let calibrated = field.calibrate_results(&res_vec);
+        let cal_map: HashMap<u32, f32> =
+            calibrated.iter().map(|&(id, _, prob)| (id, prob)).collect();
+
         let top_nodes: Vec<serde_json::Value> = matched
             .iter()
             .map(|(node, r)| {
+                let confidence = cal_map.get(&r.node_id).copied().unwrap_or(0.0);
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
                     "label": node.label,
                     "relevance": r.amplitude,
+                    "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
                     "causal_boost": r.causal_boost,
                     "html_id": node.html_id,
@@ -845,6 +854,57 @@ pub fn crfr_load_field(json: &str) -> String {
         }
         Err(e) => format!(r#"{{"error":"{e}"}}"#),
     }
+}
+
+/// Update a node in a cached CRFR field (incremental DOM mutation).
+///
+/// Preserves causal memory — the node "remembers" past successes.
+#[wasm_bindgen]
+pub fn crfr_update_node(
+    url: &str,
+    node_id: u32,
+    new_label: &str,
+    new_role: &str,
+    new_value: &str,
+) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"error":"no cached field for this URL"}"#.to_string();
+    }
+    let val = if new_value.is_empty() {
+        None
+    } else {
+        Some(new_value)
+    };
+    field.update_node(node_id, new_label, new_role, val);
+    resonance::save_field(&field);
+    r#"{"status":"ok"}"#.to_string()
+}
+
+/// Transfer causal memory from one URL's field to another.
+///
+/// Use for cross-site learning (e.g., SVT → Expressen, Amazon → Zalando).
+#[wasm_bindgen]
+pub fn crfr_transfer(donor_url: &str, recipient_url: &str, min_similarity: f32) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (donor, donor_found) = resonance::get_or_build_field(&dummy, donor_url);
+    if !donor_found {
+        return r#"{"error":"no cached donor field"}"#.to_string();
+    }
+    let (mut recipient, recipient_found) = resonance::get_or_build_field(&dummy, recipient_url);
+    if !recipient_found {
+        return r#"{"error":"no cached recipient field"}"#.to_string();
+    }
+    let transferred = recipient.transfer_from(&donor, min_similarity);
+    resonance::save_field(&recipient);
+    serde_json::json!({
+        "status": "ok",
+        "transferred_nodes": transferred,
+        "donor_url_hash": donor.url_hash,
+        "recipient_url_hash": recipient.url_hash,
+    })
+    .to_string()
 }
 
 /// Parse HTML med hybrid pipeline och valfri Stage 3 reranker.
