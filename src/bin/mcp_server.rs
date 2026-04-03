@@ -77,6 +77,33 @@ fn default_hybrid_top_n() -> u32 {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ParseCrfrParams {
+    /// Raw HTML string
+    html: String,
+    /// Goal / query — what are you looking for? Include specific keywords.
+    goal: String,
+    /// The page URL (used for caching — same URL reuses causal memory)
+    url: String,
+    /// Max nodes to return (default: 10). CRFR uses amplitude-gap detection to find natural clusters, often returning fewer.
+    #[serde(default = "default_crfr_top_k")]
+    top_k: u32,
+}
+
+fn default_crfr_top_k() -> u32 {
+    10
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CrfrFeedbackParams {
+    /// The page URL (must match a previous parse_crfr call)
+    url: String,
+    /// The goal that was used when parsing
+    goal: String,
+    /// Array of node IDs that contained the correct answer
+    successful_node_ids: Vec<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct ClickParams {
     /// Raw HTML string
     html: String,
@@ -555,6 +582,24 @@ impl AetherMcpServer {
             params.top_n,
             &config,
         )
+    }
+
+    #[tool(
+        name = "parse_crfr",
+        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nCRFR combines BM25 keyword matching with HDC hyperdimensional wave propagation. Key advantages over parse_hybrid:\n- 10-15x FASTER (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions to teach the field\n- Natural top-k via amplitude-gap detection (no fixed threshold)\n- Per-URL caching: revisiting the same page is near-instant (~300µs)\n\nBest for: repeated visits to same sites, multi-page workflows, latency-sensitive tasks.\n\nThe response includes resonance_type per node: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
+    )]
+    fn parse_crfr(&self, Parameters(params): Parameters<ParseCrfrParams>) -> String {
+        aether_agent::parse_crfr(&params.html, &params.goal, &params.url, params.top_k)
+    }
+
+    #[tool(
+        name = "crfr_feedback",
+        description = "Provide feedback to CRFR about which nodes contained the correct answer. Call this AFTER parse_crfr when you find the answer in the returned nodes. Pass the node IDs that were useful. This teaches the resonance field so future similar queries on this URL rank those nodes higher.\n\nExample workflow:\n1. parse_crfr(html, 'find price', url) → nodes with IDs [5, 12, 23]\n2. Node 12 has the price → crfr_feedback(url, 'find price', [12])\n3. Next query on same URL: node 12 gets causal boost"
+    )]
+    fn crfr_feedback(&self, Parameters(params): Parameters<CrfrFeedbackParams>) -> String {
+        let ids_json =
+            serde_json::to_string(&params.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
+        aether_agent::crfr_feedback(&params.url, &params.goal, &ids_json)
     }
 
     #[tool(

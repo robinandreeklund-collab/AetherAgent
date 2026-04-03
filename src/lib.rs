@@ -597,6 +597,123 @@ pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Parse HTML using Causal Resonance Field Retrieval (CRFR).
+///
+/// BM25+HDC hybrid scoring with wave propagation through DOM tree.
+/// Supports causal learning: fields are cached per URL and improve
+/// with feedback from successful extractions.
+///
+/// Returns JSON with top resonating nodes, timing, and cache status.
+#[wasm_bindgen]
+pub fn parse_crfr(html: &str, goal: &str, url: &str, top_k: u32) -> String {
+    let start = now_ms();
+    let tree = build_tree(html, goal, url);
+    let build_ms = now_ms().saturating_sub(start);
+
+    let all_nodes = collect_all_nodes(&tree.nodes);
+    let total_dom_nodes = all_nodes.len();
+
+    // CRFR: hämta cacheat fält eller bygg nytt
+    let prop_start = now_ms();
+    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let results = field.propagate_top_k(goal, top_k as usize);
+
+    // Spara fältet (med eventuellt kausalt minne) i cache
+    resonance::save_field(&field);
+    let prop_ms = now_ms().saturating_sub(prop_start);
+
+    // Mappa resonans-resultat till SemanticNode:er
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let top_nodes: Vec<serde_json::Value> = results
+        .iter()
+        .filter_map(|r| {
+            node_map.get(&r.node_id).map(|node| {
+                serde_json::json!({
+                    "id": node.id,
+                    "role": node.role,
+                    "label": node.label,
+                    "relevance": r.amplitude,
+                    "resonance_type": format!("{:?}", r.resonance_type),
+                    "causal_boost": r.causal_boost,
+                    "html_id": node.html_id,
+                    "name": node.name,
+                    "action": node.action,
+                    "trust": node.trust,
+                })
+            })
+        })
+        .collect();
+
+    let (cache_entries, cache_capacity) = resonance::cache_stats();
+    let total_ms = now_ms().saturating_sub(start);
+
+    let result = serde_json::json!({
+        "url": tree.url,
+        "title": tree.title,
+        "goal": tree.goal,
+        "nodes": top_nodes,
+        "node_count": top_nodes.len(),
+        "total_nodes": total_dom_nodes,
+        "injection_warnings": tree.injection_warnings,
+        "parse_time_ms": total_ms,
+        "crfr": {
+            "method": "causal_resonance_field",
+            "build_tree_ms": build_ms,
+            "propagation_ms": prop_ms,
+            "cache_hit": cache_hit,
+            "field_queries": field.total_queries,
+            "cache_entries": cache_entries,
+            "cache_capacity": cache_capacity,
+        }
+    });
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Provide causal feedback to CRFR field for a URL.
+///
+/// Call this after successfully using nodes from `parse_crfr` to teach
+/// the resonance field which nodes were useful. Future queries for
+/// similar goals will rank those nodes higher.
+#[wasm_bindgen]
+pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> String {
+    let ids: Vec<u32> = serde_json::from_str(successful_node_ids_json).unwrap_or_default();
+    if ids.is_empty() {
+        return r#"{"status":"no_ids"}"#.to_string();
+    }
+
+    // Hämta cacheat fält — om det inte finns, kan vi inte ge feedback
+    let dummy_nodes: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
+    if !found {
+        return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+    }
+
+    field.feedback(goal, &ids);
+    resonance::save_field(&field);
+
+    serde_json::json!({
+        "status": "ok",
+        "nodes_updated": ids.len(),
+        "field_queries": field.total_queries,
+    })
+    .to_string()
+}
+
 /// Parse HTML med hybrid pipeline och valfri Stage 3 reranker.
 ///
 /// Samma pipeline som `parse_top_nodes_hybrid` men med konfigurerbar
