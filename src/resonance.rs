@@ -23,8 +23,6 @@ const BASE_CHILD_DAMPING: f32 = 0.35;
 const BASE_PARENT_AMPLIFICATION: f32 = 0.25;
 /// Bonus-multiplikator vid fas-synkronisering
 const PHASE_SYNC_BONUS: f32 = 1.08;
-/// Fönster (radianer) inom vilket fas-synk aktiveras
-const PHASE_SYNC_WINDOW: f32 = std::f32::consts::FRAC_PI_4;
 /// Minsta amplitud för att en nod ska propagera vidare
 const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
@@ -403,7 +401,11 @@ impl ResonanceField {
         }
 
         // Multi-field: separata aspekter per nod
-        let text_hv = Hypervector::from_text_ngrams(&node.label);
+        let text_hv = if node.label.is_empty() {
+            Hypervector::from_seed(&format!("__empty_{}", node.id))
+        } else {
+            Hypervector::from_text_ngrams(&node.label)
+        };
         // Beräkna djup från förälder-kedjan
         let depth = parent_id
             .and_then(|pid| nodes.get(&pid).map(|p| p.depth + 1))
@@ -600,22 +602,17 @@ impl ResonanceField {
         // Snapshot: Vec istf HashMap — O(N) men med bättre cache-locality.
         for _step in 0..MAX_PROPAGATION_STEPS {
             // Snapshot amplituder (Vec för cache-locality, sorterad efter nod-id)
-            let amplitudes: Vec<(u32, f32, f32)> = self
+            let amp_map: HashMap<u32, f32> = self
                 .nodes
                 .iter()
-                .map(|(&id, s)| (id, s.amplitude, s.phase))
-                .collect();
-            let amp_map: HashMap<u32, (f32, f32)> = amplitudes
-                .iter()
-                .map(|&(id, amp, ph)| (id, (amp, ph)))
+                .map(|(&id, s)| (id, s.amplitude))
                 .collect();
 
             let mut total_delta: f32 = 0.0;
 
             // Förälder → barn (fan-out capped)
             for (&parent_id, children) in &self.children_map {
-                let (parent_amp, parent_phase) =
-                    amp_map.get(&parent_id).copied().unwrap_or((0.0, 0.0));
+                let parent_amp = amp_map.get(&parent_id).copied().unwrap_or(0.0);
                 if parent_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
@@ -650,8 +647,7 @@ impl ResonanceField {
 
             // Barn → förälder (alltid 1:1, inget fan-out-problem)
             for (&child_id, &parent_id) in &self.parent_map {
-                let (child_amp, child_phase) =
-                    amp_map.get(&child_id).copied().unwrap_or((0.0, 0.0));
+                let child_amp = amp_map.get(&child_id).copied().unwrap_or(0.0);
                 if child_amp <= ACTIVATION_THRESHOLD {
                     continue;
                 }
