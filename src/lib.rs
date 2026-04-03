@@ -80,13 +80,124 @@ use types::{SemanticTree, WorkflowMemory};
 
 // ─── Intern hjälpfunktion ────────────────────────────────────────────────────
 
+// BUG-03: RSS/Atom pre-processing
+
+/// Detektera om input är RSS/Atom XML
+fn is_rss_or_atom(html: &str) -> bool {
+    let trimmed = html.trim_start();
+    trimmed.starts_with("<?xml")
+        && (trimmed.contains("<rss") || trimmed.contains("<feed") || trimmed.contains("<channel>"))
+}
+
+/// BUG-03: Konvertera RSS/Atom XML till pseudo-HTML så html5ever kan parsa
+fn rss_to_html(xml: &str) -> String {
+    let mut html = String::with_capacity(xml.len());
+    html.push_str("<html><body><h1>RSS Feed</h1><ul>\n");
+
+    // Extrahera <item> eller <entry> med <title> och <link>
+    let item_tag = if xml.contains("<entry") {
+        "entry"
+    } else {
+        "item"
+    };
+
+    for item in xml.split(&format!("<{item_tag}")).skip(1) {
+        let end = item.find(&format!("</{item_tag}")).unwrap_or(item.len());
+        let item_content = &item[..end];
+
+        // Extrahera title (med eller utan CDATA)
+        let title = extract_xml_field(item_content, "title");
+        // Extrahera link
+        let link = extract_xml_field(item_content, "link")
+            .or_else(|| {
+                // Atom: <link href="..."/>
+                item_content.find("href=\"").map(|i| {
+                    let start = i + 6;
+                    let end = item_content[start..].find('"').unwrap_or(0) + start;
+                    item_content[start..end].to_string()
+                })
+            })
+            .unwrap_or_default();
+        // Extrahera description/summary (kort)
+        let desc = extract_xml_field(item_content, "description")
+            .or_else(|| extract_xml_field(item_content, "summary"))
+            .unwrap_or_default();
+        let desc_short: String = desc.chars().take(200).collect();
+
+        if let Some(title) = title {
+            html.push_str(&format!(
+                "<li><a href=\"{}\">{}</a> <span>{}</span></li>\n",
+                link,
+                html_escape(&title),
+                html_escape(&desc_short)
+            ));
+        }
+    }
+
+    html.push_str("</ul></body></html>");
+    html
+}
+
+fn extract_xml_field(content: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let start_pos = content.find(&open)?;
+    let after_tag = content[start_pos..].find('>')? + start_pos + 1;
+    let end_pos = content[after_tag..].find(&close)? + after_tag;
+    let mut text = content[after_tag..end_pos].to_string();
+    // Strip CDATA wrapper
+    if text.starts_with("<![CDATA[") {
+        text = text
+            .trim_start_matches("<![CDATA[")
+            .trim_end_matches("]]>")
+            .to_string();
+    }
+    // Strip HTML tags from description
+    let text = text
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    let cleaned: String = {
+        let mut in_tag = false;
+        text.chars()
+            .filter(|c| {
+                if *c == '<' {
+                    in_tag = true;
+                    false
+                } else if *c == '>' {
+                    in_tag = false;
+                    false
+                } else {
+                    !in_tag
+                }
+            })
+            .collect()
+    };
+    let trimmed = cleaned.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Gemensam parse-pipeline: HTML -> ArenaDom -> SemanticTree
-///
-/// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
-/// ~5-10x snabbare traversering och cache-friendly minnesallokering.
+/// Fas 17.2: ArenaDom (SlotMap) för ~5-10x snabbare traversering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    // Direkt html5ever → ArenaDom via custom TreeSink (skippar RcDom-mellansteget)
-    let mut arena = arena_dom_sink::parse_html_to_arena(html);
+    // BUG-03: RSS/Atom pre-processing — konvertera XML-feeds till parsbar HTML
+    let effective_html: std::borrow::Cow<'_, str> = if is_rss_or_atom(html) {
+        std::borrow::Cow::Owned(rss_to_html(html))
+    } else {
+        std::borrow::Cow::Borrowed(html)
+    };
+    let mut arena = arena_dom_sink::parse_html_to_arena(&effective_html);
     // Resolva lazy-loaded bilder (data-src → src) innan semantisk analys
     arena.resolve_lazy_images();
     let title = arena.extract_title();

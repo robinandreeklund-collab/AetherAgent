@@ -1554,13 +1554,16 @@ impl ResonanceField {
 
 // ─── LRU Field Cache ────────────────────────────────────────────────────────
 
+/// Default cache TTL (3 minuter)
+const DEFAULT_CACHE_TTL_MS: u64 = 180_000;
+
 /// Global LRU-cache för resonansfält per URL.
 ///
 /// Sparar fältet (med kausalt minne) så att upprepade besök till samma
-/// sida drar nytta av tidigare lärande. FIFO-eviction vid kapacitetsgräns.
+/// sida drar nytta av tidigare lärande. TTL-baserad eviction.
 struct FieldCacheInner {
-    /// (url_hash, field) — ordningen representerar ålder (nyast sist)
-    entries: Vec<(u64, ResonanceField)>,
+    /// (url_hash, insert_ms, field)
+    entries: Vec<(u64, u64, ResonanceField)>,
     capacity: usize,
 }
 
@@ -1573,10 +1576,17 @@ impl FieldCacheInner {
     }
 
     /// Hämta ett fält via move (tar bort ur cache, noll-klon).
-    /// Anroparen äger fältet och sparar tillbaka via put() efter användning.
+    /// Returnerar None om TTL expired.
     fn take(&mut self, url_hash: u64) -> Option<ResonanceField> {
-        if let Some(pos) = self.entries.iter().position(|(h, _)| *h == url_hash) {
-            let (_, field) = self.entries.remove(pos);
+        let now = now_ms();
+        if let Some(pos) = self.entries.iter().position(|(h, _, _)| *h == url_hash) {
+            let (_, insert_ms, _) = &self.entries[pos];
+            if now.saturating_sub(*insert_ms) > DEFAULT_CACHE_TTL_MS {
+                // TTL expired — evicta, returnera None (tvingar rebuild)
+                self.entries.remove(pos);
+                return None;
+            }
+            let (_, _, field) = self.entries.remove(pos);
             Some(field)
         } else {
             None
@@ -1585,13 +1595,16 @@ impl FieldCacheInner {
 
     /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
     fn put(&mut self, url_hash: u64, field: ResonanceField) {
-        // Ta bort existerande entry om den finns
-        self.entries.retain(|(h, _)| *h != url_hash);
+        self.entries.retain(|(h, _, _)| *h != url_hash);
+        // Evicta expired entries
+        let now = now_ms();
+        self.entries
+            .retain(|(_, insert_ms, _)| now.saturating_sub(*insert_ms) <= DEFAULT_CACHE_TTL_MS);
         // Evicta äldsta om fullt
         if self.entries.len() >= self.capacity {
             self.entries.remove(0);
         }
-        self.entries.push((url_hash, field));
+        self.entries.push((url_hash, now, field));
     }
 
     fn len(&self) -> usize {
