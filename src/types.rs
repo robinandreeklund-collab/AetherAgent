@@ -487,7 +487,21 @@ impl SemanticNode {
             GoalCategory::Extract => {
                 matches!(
                     role,
-                    "text" | "paragraph" | "price" | "product_card" | "link" | "data" | "img"
+                    "text"
+                        | "paragraph"
+                        | "price"
+                        | "product_card"
+                        | "link"
+                        | "data"
+                        | "img"
+                        | "heading"
+                        | "button"
+                        | "cta"
+                        | "table"
+                        | "row"
+                        | "cell"
+                        | "listitem"
+                        | "generic"
                 )
             }
             GoalCategory::Form => matches!(
