@@ -414,6 +414,97 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
     }
 }
 
+/// Extract multiple matches per key (for comparative queries like "X vs Y").
+/// Returns up to `max_per_key` entries per key, sorted by confidence DESC.
+pub fn extract_by_keys_multi(
+    tree: &SemanticTree,
+    keys: &[String],
+    max_per_key: usize,
+) -> ExtractDataResult {
+    let all_nodes = flatten_nodes(&tree.nodes);
+    let mut entries = Vec::new();
+    let mut found_keys: Vec<String> = Vec::new();
+
+    for key in keys {
+        let role_boost = role_boost_for_key(key);
+        let mut scored: Vec<(&SemanticNode, f32)> = Vec::new();
+
+        for node in &all_nodes {
+            if node.label.is_empty() && node.value.is_none() {
+                continue;
+            }
+            if looks_like_script_content(&node.label) {
+                continue;
+            }
+
+            let label_score = text_similarity(key, &node.label);
+            let name_score = node
+                .name
+                .as_deref()
+                .map(|n| text_similarity(key, n))
+                .unwrap_or(0.0);
+            let id_score = node
+                .html_id
+                .as_deref()
+                .map(|id| text_similarity(key, id))
+                .unwrap_or(0.0);
+            let value_score = node
+                .value
+                .as_deref()
+                .map(|v| text_similarity(key, v))
+                .unwrap_or(0.0);
+
+            let mut score = label_score.max(name_score).max(id_score).max(value_score);
+            if let Some((preferred_role, boost)) = &role_boost {
+                if node.role == *preferred_role {
+                    score += boost;
+                }
+            }
+            score += node.relevance * 0.1;
+
+            if score > 0.1 {
+                scored.push((node, score));
+            }
+        }
+
+        // Sortera och ta top-N per nyckel
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        scored.truncate(max_per_key);
+
+        if !scored.is_empty() {
+            found_keys.push(key.clone());
+        }
+
+        for (node, raw_score) in scored {
+            let calibrated = raw_score * (0.4 + 0.6 * node.relevance);
+            let value = if !node.label.is_empty() {
+                node.label.clone()
+            } else {
+                node.value.clone().unwrap_or_default()
+            };
+            entries.push(ExtractedEntry {
+                key: key.clone(),
+                value,
+                confidence: calibrated.clamp(0.0, 1.0),
+                source_node_id: node.id,
+            });
+        }
+    }
+
+    let missing_keys: Vec<String> = keys
+        .iter()
+        .filter(|k| !found_keys.contains(k))
+        .cloned()
+        .collect();
+
+    ExtractDataResult {
+        entries,
+        missing_keys,
+        injection_warnings: tree.injection_warnings.clone(),
+        parse_time_ms: tree.parse_time_ms,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

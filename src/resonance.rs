@@ -560,6 +560,59 @@ impl ResonanceField {
         Self::apply_gap_filter(all, top_k)
     }
 
+    /// Run multiple goal variants and merge results (union with max amplitude).
+    ///
+    /// Exploits sub-ms cache-hit: runs N variants for ~N×0.6ms total.
+    /// Returns union of all results, keeping highest amplitude per node.
+    pub fn propagate_multi_variant(
+        &mut self,
+        goals: &[&str],
+        top_k: usize,
+    ) -> Vec<ResonanceResult> {
+        if goals.is_empty() {
+            return Vec::new();
+        }
+        if goals.len() == 1 {
+            return self.propagate_top_k(goals[0], top_k);
+        }
+
+        // Kör varje variant och samla resultat
+        let mut best: HashMap<u32, ResonanceResult> = HashMap::new();
+
+        for goal in goals {
+            // Nollställ amplituder mellan varianter
+            for state in self.nodes.values_mut() {
+                state.amplitude = 0.0;
+            }
+
+            let results = self.propagate(goal);
+            for r in results {
+                let entry = best.entry(r.node_id).or_insert_with(|| ResonanceResult {
+                    node_id: r.node_id,
+                    amplitude: 0.0,
+                    phase: r.phase,
+                    resonance_type: r.resonance_type.clone(),
+                    causal_boost: 0.0,
+                });
+                // Union: behåll högsta amplitude per nod
+                if r.amplitude > entry.amplitude {
+                    entry.amplitude = r.amplitude;
+                    entry.resonance_type = r.resonance_type;
+                    entry.causal_boost = r.causal_boost;
+                }
+            }
+        }
+
+        let mut merged: Vec<ResonanceResult> = best.into_values().collect();
+        merged.sort_by(|a, b| {
+            b.amplitude
+                .total_cmp(&a.amplitude)
+                .then_with(|| a.node_id.cmp(&b.node_id))
+        });
+
+        Self::apply_gap_filter(merged, top_k)
+    }
+
     /// Intelligent top-k med amplitud-gap detection.
     ///
     /// Hittar naturliga "klyftor" i sorterad amplitud-sekvens:
@@ -720,6 +773,16 @@ impl ResonanceField {
     /// Number of nodes in the field
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Serialize the field to a JSON string for persistent storage.
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| format!("Serialize failed: {e}"))
+    }
+
+    /// Deserialize a field from a JSON string (restores causal memory).
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        serde_json::from_str(json).map_err(|e| format!("Deserialize failed: {e}"))
     }
 }
 

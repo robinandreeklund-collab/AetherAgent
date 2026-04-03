@@ -769,6 +769,84 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
     .to_string()
 }
 
+/// Run multiple goal variants through CRFR and merge results.
+/// Goals should be JSON array of strings: ["variant1", "variant2", ...]
+#[wasm_bindgen]
+pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> String {
+    let goals: Vec<String> = serde_json::from_str(goals_json).unwrap_or_default();
+    let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+    if goal_refs.is_empty() {
+        return r#"{"error":"no goals"}"#.to_string();
+    }
+
+    let start = now_ms();
+    let tree = build_tree(html, goal_refs[0], url);
+    let total_dom = collect_all_nodes(&tree.nodes).len();
+
+    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let results = field.propagate_multi_variant(&goal_refs, top_n as usize);
+    resonance::save_field(&field);
+
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let nodes: Vec<serde_json::Value> = results
+        .iter()
+        .filter_map(|r| {
+            node_map.get(&r.node_id).map(|node| {
+                serde_json::json!({
+                    "id": node.id, "role": node.role, "label": node.label,
+                    "relevance": r.amplitude, "resonance_type": format!("{:?}", r.resonance_type),
+                })
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "nodes": nodes, "node_count": nodes.len(), "total_nodes": total_dom,
+        "goals_count": goal_refs.len(), "cache_hit": cache_hit,
+        "parse_time_ms": now_ms().saturating_sub(start),
+    })
+    .to_string()
+}
+
+/// Save CRFR field for a URL to a JSON string (for persistent storage).
+#[wasm_bindgen]
+pub fn crfr_save_field(url: &str) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"error":"no cached field for this URL"}"#.to_string();
+    }
+    field
+        .to_json()
+        .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
+}
+
+/// Load a previously saved CRFR field back into the cache.
+#[wasm_bindgen]
+pub fn crfr_load_field(json: &str) -> String {
+    match resonance::ResonanceField::from_json(json) {
+        Ok(field) => {
+            resonance::save_field(&field);
+            serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
+        }
+        Err(e) => format!(r#"{{"error":"{e}"}}"#),
+    }
+}
+
 /// Parse HTML med hybrid pipeline och valfri Stage 3 reranker.
 ///
 /// Samma pipeline som `parse_top_nodes_hybrid` men med konfigurerbar
@@ -1193,6 +1271,21 @@ pub fn extract_data(html: &str, goal: &str, url: &str, data_keys_json: &str) -> 
     };
 
     let result = intent::extract_by_keys(&tree, &keys);
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Extract multiple matches per key (comparative "X vs Y" queries)
+#[wasm_bindgen]
+pub fn extract_data_multi(
+    html: &str,
+    goal: &str,
+    url: &str,
+    keys_json: &str,
+    max_per_key: u32,
+) -> String {
+    let keys: Vec<String> = serde_json::from_str(keys_json).unwrap_or_default();
+    let tree = build_tree(html, goal, url);
+    let result = intent::extract_by_keys_multi(&tree, &keys, max_per_key as usize);
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
