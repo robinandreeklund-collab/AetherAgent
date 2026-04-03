@@ -238,21 +238,27 @@ fn main() {
     let tests = test_cases();
     let total = tests.len();
 
-    // Ackumulatorer
-    let mut crfr_found_3 = 0u32;
-    let mut crfr_found_5 = 0u32;
-    let mut crfr_total_us = 0u64;
-    let mut crfr_total_output = 0usize;
+    // Per-test resultat
+    struct TestResult {
+        _name: String,
+        dom_nodes: usize,
+        html_tokens: usize,
+        // CRFR
+        crfr_hits: [bool; 4], // @1, @3, @10, @20
+        crfr_us: u64,
+        crfr_output: usize,
+        crfr_output_tokens: usize,
+        crfr_cache: bool,
+        // Pipeline
+        pipe_hits: [bool; 4],
+        pipe_us: u64,
+        pipe_output: usize,
+        pipe_output_tokens: usize,
+    }
 
-    let mut pipe_found_3 = 0u32;
-    let mut pipe_found_5 = 0u32;
-    let mut pipe_total_us = 0u64;
-    let mut pipe_total_output = 0usize;
-
-    let mut tests_run = 0u32;
+    let mut results: Vec<TestResult> = Vec::new();
 
     for (i, tc) in tests.iter().enumerate() {
-        // Läs HTML-fil
         let html = match std::fs::read_to_string(tc.html_path) {
             Ok(h) => h,
             Err(e) => {
@@ -260,6 +266,8 @@ fn main() {
                 continue;
             }
         };
+
+        let html_tokens = html.len() / 4; // ~4 chars per token
 
         let tree = match extract_tree(&html, tc.goal) {
             Some(t) => t,
@@ -275,17 +283,14 @@ fn main() {
         };
 
         let dom_nodes = count_nodes(&tree);
-        tests_run += 1;
 
-        // ─── CRFR ──────────────────────────────────────────────────
+        // ─── CRFR (top_k=20 för att mäta @1/@3/@10/@20) ──────────
 
         let t0 = Instant::now();
         let (mut field, cache_hit) = resonance::get_or_build_field(&tree, tc.html_path);
-        let crfr_results = field.propagate_top_k(tc.goal, 10);
+        let crfr_results = field.propagate_top_k(tc.goal, 20);
         let crfr_us = t0.elapsed().as_micros() as u64;
-        crfr_total_us += crfr_us;
 
-        // Ge feedback och spara i cache
         let crfr_labels: Vec<(u32, String)> = crfr_results
             .iter()
             .map(|r| {
@@ -296,30 +301,21 @@ fn main() {
             })
             .collect();
 
-        let crfr_text_3: String = crfr_labels
-            .iter()
-            .take(3)
-            .map(|(_, l)| l.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let crfr_text_5: String = crfr_labels
-            .iter()
-            .take(5)
-            .map(|(_, l)| l.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        // Mät recall vid varje cutoff
+        let crfr_check = |k: usize| -> bool {
+            let text: String = crfr_labels
+                .iter()
+                .take(k)
+                .map(|(_, l)| l.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            check_answer(&text, tc.must_contain)
+        };
+        let crfr_hits = [crfr_check(1), crfr_check(3), crfr_check(10), crfr_check(20)];
 
-        let crfr_hit_3 = check_answer(&crfr_text_3, tc.must_contain);
-        let crfr_hit_5 = check_answer(&crfr_text_5, tc.must_contain);
-        if crfr_hit_3 {
-            crfr_found_3 += 1;
-        }
-        if crfr_hit_5 {
-            crfr_found_5 += 1;
-        }
-        crfr_total_output += crfr_results.len();
+        let crfr_output_tokens: usize = crfr_labels.iter().take(20).map(|(_, l)| l.len() / 4).sum();
 
-        // Feedback: noder som innehöll svaret
+        // Feedback + cache
         let success_ids: Vec<u32> = crfr_labels
             .iter()
             .filter(|(_, label)| check_answer(label, tc.must_contain))
@@ -341,119 +337,166 @@ fn main() {
         let t1 = Instant::now();
         let pipe_result = ScoringPipeline::run(&tree, tc.goal, goal_emb.as_deref(), &config);
         let pipe_us = t1.elapsed().as_micros() as u64;
-        pipe_total_us += pipe_us;
 
-        let pipe_text_3: String = pipe_result
+        let pipe_check = |k: usize| -> bool {
+            let text: String = pipe_result
+                .scored_nodes
+                .iter()
+                .take(k)
+                .map(|n| n.label.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            check_answer(&text, tc.must_contain)
+        };
+        let pipe_hits = [pipe_check(1), pipe_check(3), pipe_check(10), pipe_check(20)];
+
+        let pipe_output_tokens: usize = pipe_result
             .scored_nodes
             .iter()
-            .take(3)
-            .map(|n| n.label.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let pipe_text_5: String = pipe_result
-            .scored_nodes
-            .iter()
-            .take(5)
-            .map(|n| n.label.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+            .take(20)
+            .map(|n| n.label.len() / 4)
+            .sum();
 
-        let pipe_hit_3 = check_answer(&pipe_text_3, tc.must_contain);
-        let pipe_hit_5 = check_answer(&pipe_text_5, tc.must_contain);
-        if pipe_hit_3 {
-            pipe_found_3 += 1;
-        }
-        if pipe_hit_5 {
-            pipe_found_5 += 1;
-        }
-        pipe_total_output += pipe_result.scored_nodes.len();
+        // ─── Visa rad ──────────────────────────────────────────────
 
-        // ─── Visa resultat ─────────────────────────────────────────
-
-        let crfr_m3 = if crfr_hit_3 { "OK" } else { "MISS" };
-        let crfr_m5 = if crfr_hit_5 { "OK" } else { "MISS" };
-        let pipe_m3 = if pipe_hit_3 { "OK" } else { "MISS" };
-        let pipe_m5 = if pipe_hit_5 { "OK" } else { "MISS" };
-        let cache_tag = if cache_hit { "C" } else { " " };
+        let c = if cache_hit { "C" } else { " " };
+        let mk = |b: bool| if b { "OK" } else { "--" };
 
         println!(
-            "  [{:>2}/{}] {:<35} DOM:{:>5}  CRFR[{}]: @3={:<4} @5={:<4} {:>6}µs {:>2}n | Pipe: @3={:<4} @5={:<4} {:>7}µs {:>2}n",
-            i + 1,
-            total,
-            tc.name,
-            dom_nodes,
-            cache_tag,
-            crfr_m3,
-            crfr_m5,
-            crfr_us,
-            crfr_results.len(),
-            pipe_m3,
-            pipe_m5,
-            pipe_us,
-            pipe_result.scored_nodes.len(),
+            "  [{:>2}/{}] {:<30} {:>5} nod  CRFR[{}] @1={} @3={} @10={} @20={} {:>7}µs {:>2}n | Pipe @1={} @3={} @10={} @20={} {:>8}µs {:>2}n",
+            i + 1, total, tc.name, dom_nodes, c,
+            mk(crfr_hits[0]), mk(crfr_hits[1]), mk(crfr_hits[2]), mk(crfr_hits[3]),
+            crfr_us, crfr_results.len(),
+            mk(pipe_hits[0]), mk(pipe_hits[1]), mk(pipe_hits[2]), mk(pipe_hits[3]),
+            pipe_us, pipe_result.scored_nodes.len(),
         );
 
-        // Visa var svaret hittades (eller top-1 om miss)
-        if !crfr_hit_5 {
+        // Visa top-1 vid miss@20
+        if !crfr_hits[3] {
             if let Some((_, label)) = crfr_labels.first() {
                 let trunc: String = label.chars().take(80).collect();
                 println!("         CRFR top-1: {}", trunc);
             }
         }
-        if !pipe_hit_5 {
+        if !pipe_hits[3] {
             if let Some(n) = pipe_result.scored_nodes.first() {
                 let trunc: String = n.label.chars().take(80).collect();
                 println!("         Pipe top-1: {}", trunc);
             }
         }
+
+        results.push(TestResult {
+            _name: tc.name.to_string(),
+            dom_nodes,
+            html_tokens,
+            crfr_hits,
+            crfr_us,
+            crfr_output: crfr_results.len(),
+            crfr_output_tokens,
+            crfr_cache: cache_hit,
+            pipe_hits,
+            pipe_us,
+            pipe_output: pipe_result.scored_nodes.len(),
+            pipe_output_tokens,
+        });
     }
 
     // ─── Sammanfattning ─────────────────────────────────────────────────────
 
-    let n = tests_run;
-    println!("\n{}", "=".repeat(90));
-    println!("  SAMMANFATTNING ({n} tester körda av {total})\n");
+    let n = results.len();
+    if n == 0 {
+        println!("\n  Inga tester körda.");
+        return;
+    }
 
+    println!("\n{}", "=".repeat(100));
+    println!("  SAMMANFATTNING ({n} tester av {total})\n");
+
+    // Recall-tabell
+    let cutoffs = [("@1", 0), ("@3", 1), ("@10", 2), ("@20", 3)];
     println!(
-        "  {:<30} {:>10} {:>10} {:>12} {:>10}",
-        "Metod", "Recall@3", "Recall@5", "Avg µs", "Avg output"
+        "  {:<30} {:>8} {:>8} {:>8} {:>8} {:>10} {:>8}",
+        "Metod", "@1", "@3", "@10", "@20", "Avg µs", "Avg nod"
     );
-    println!("  {}", "-".repeat(75));
+    println!("  {}", "-".repeat(85));
+
+    // CRFR rad
+    let crfr_counts: Vec<usize> = cutoffs
+        .iter()
+        .map(|(_, idx)| results.iter().filter(|r| r.crfr_hits[*idx]).count())
+        .collect();
+    let crfr_avg_us = results.iter().map(|r| r.crfr_us).sum::<u64>() / n as u64;
+    let crfr_avg_n = results.iter().map(|r| r.crfr_output).sum::<usize>() as f64 / n as f64;
     println!(
-        "  {:<30} {:>5}/{:<4} {:>5}/{:<4} {:>8} µs {:>6}",
+        "  {:<30} {:>4}/{:<3} {:>4}/{:<3} {:>4}/{:<3} {:>4}/{:<3} {:>8} {:>8.1}",
         "CRFR (BM25+HDC+cache)",
-        crfr_found_3,
+        crfr_counts[0],
         n,
-        crfr_found_5,
+        crfr_counts[1],
         n,
-        crfr_total_us / n as u64,
-        format!("{:.1}", crfr_total_output as f64 / n as f64),
-    );
-    println!(
-        "  {:<30} {:>5}/{:<4} {:>5}/{:<4} {:>8} µs {:>6}",
-        "Pipeline (BM25+HDC+Embed)",
-        pipe_found_3,
+        crfr_counts[2],
         n,
-        pipe_found_5,
+        crfr_counts[3],
         n,
-        pipe_total_us / n as u64,
-        format!("{:.1}", pipe_total_output as f64 / n as f64),
+        crfr_avg_us,
+        crfr_avg_n,
     );
 
-    if crfr_total_us > 0 {
-        println!(
-            "\n  Speedup: {:.1}x",
-            pipe_total_us as f64 / crfr_total_us as f64
-        );
-    }
-    let crfr_avg = crfr_total_output as f64 / n as f64;
-    let pipe_avg = pipe_total_output as f64 / n as f64;
-    if pipe_avg > 0.0 {
-        println!(
-            "  Token-reduktion: {:.0}% färre noder",
-            (1.0 - crfr_avg / pipe_avg) * 100.0
-        );
-    }
+    // Pipeline rad
+    let pipe_counts: Vec<usize> = cutoffs
+        .iter()
+        .map(|(_, idx)| results.iter().filter(|r| r.pipe_hits[*idx]).count())
+        .collect();
+    let pipe_avg_us = results.iter().map(|r| r.pipe_us).sum::<u64>() / n as u64;
+    let pipe_avg_n = results.iter().map(|r| r.pipe_output).sum::<usize>() as f64 / n as f64;
+    println!(
+        "  {:<30} {:>4}/{:<3} {:>4}/{:<3} {:>4}/{:<3} {:>4}/{:<3} {:>8} {:>8.1}",
+        "Pipeline (BM25+HDC+Embed)",
+        pipe_counts[0],
+        n,
+        pipe_counts[1],
+        n,
+        pipe_counts[2],
+        n,
+        pipe_counts[3],
+        n,
+        pipe_avg_us,
+        pipe_avg_n,
+    );
+
+    // Token-besparingar
+    println!("\n  TOKEN-EFFEKTIVITET:");
+    let total_html_tokens: usize = results.iter().map(|r| r.html_tokens).sum();
+    let total_crfr_tokens: usize = results.iter().map(|r| r.crfr_output_tokens).sum();
+    let total_pipe_tokens: usize = results.iter().map(|r| r.pipe_output_tokens).sum();
+    let avg_dom: usize = results.iter().map(|r| r.dom_nodes).sum::<usize>() / n;
+
+    println!(
+        "  Avg HTML:       {:>8} tokens ({} noder avg)",
+        total_html_tokens / n,
+        avg_dom
+    );
+    println!(
+        "  CRFR output:    {:>8} tokens ({:.1} noder avg) — {:.1}% av HTML",
+        total_crfr_tokens / n,
+        crfr_avg_n,
+        total_crfr_tokens as f64 / total_html_tokens as f64 * 100.0,
+    );
+    println!(
+        "  Pipeline output: {:>7} tokens ({:.1} noder avg) — {:.1}% av HTML",
+        total_pipe_tokens / n,
+        pipe_avg_n,
+        total_pipe_tokens as f64 / total_html_tokens as f64 * 100.0,
+    );
+
+    // Speedup
+    println!("\n  PRESTANDA:");
+    println!(
+        "  Speedup CRFR vs Pipeline: {:.1}x",
+        pipe_avg_us as f64 / crfr_avg_us.max(1) as f64
+    );
+    let cache_hits = results.iter().filter(|r| r.crfr_cache).count();
+    println!("  Cache hits: {cache_hits}/{n}");
     let (ce, cc) = resonance::cache_stats();
     println!("  Field cache: {ce}/{cc} entries");
     println!();
