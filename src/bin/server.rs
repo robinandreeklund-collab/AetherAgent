@@ -1765,18 +1765,11 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
                 .await
                 {
                     Ok(Ok(result)) => {
-                        // Hämta fler noder med låg tröskel — re-ranking i
-                        // deep_extract_page_nodes prioriterar text-innehåll
-                        let fetch_limit = (mnpr * 8).max(30);
-                        let stream_json = aether_agent::stream_parse_adaptive(
-                            &result.body,
-                            &g,
-                            &url,
-                            fetch_limit as u32,
-                            0.0,
-                            fetch_limit as u32,
-                        );
-                        let nodes = deep_extract_page_nodes(&stream_json, mnpr);
+                        // CRFR deep-parse: använd resonansfält istf stream_parse
+                        let top_n = (mnpr * 4).max(20) as u32;
+                        let crfr_json =
+                            aether_agent::parse_crfr(&result.body, &g, &url, top_n, false, "json");
+                        let nodes = deep_extract_crfr_nodes(&crfr_json, mnpr);
                         (idx, nodes, fetch_start.elapsed().as_millis() as u64)
                     }
                     _ => (idx, Vec::new(), 0),
@@ -1827,6 +1820,11 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
     let final_json = serde_json::to_string(&search_result)
         .unwrap_or_else(|e| format!(r#"{{"error": "serialize: {e}"}}"#));
     (StatusCode::OK, final_json)
+}
+
+/// Extract page nodes from CRFR or stream_parse JSON (same nodes array format)
+fn deep_extract_crfr_nodes(json: &str, max: usize) -> Vec<aether_agent::search::PageNode> {
+    deep_extract_page_nodes(json, max)
 }
 
 /// Extrahera PageNode:er från stream_parse JSON

@@ -641,11 +641,14 @@ pub fn parse_crfr(
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
     // Steg 2: CRFR resonans
-    let prop_start = now_ms();
+    let field_start = now_ms();
     let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let field_ms = now_ms().saturating_sub(field_start);
+
+    let prop_start = now_ms();
     let results = field.propagate_top_k(goal, top_n as usize);
-    resonance::save_field(&field);
     let prop_ms = now_ms().saturating_sub(prop_start);
+    resonance::save_field(&field);
 
     // Steg 3: Mappa resultat till SemanticNode:er
     let node_map: HashMap<u32, &types::SemanticNode> = {
@@ -732,9 +735,11 @@ pub fn parse_crfr(
             "total_nodes": total_dom_nodes,
             "injection_warnings": tree.injection_warnings,
             "parse_time_ms": total_ms,
+            "spa_detected": total_dom_nodes < 10,
             "crfr": {
                 "method": "causal_resonance_field",
                 "build_tree_ms": build_ms,
+                "field_build_ms": field_ms,
                 "propagation_ms": prop_ms,
                 "cache_hit": cache_hit,
                 "js_eval": run_js,

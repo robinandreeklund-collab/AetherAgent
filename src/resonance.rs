@@ -395,6 +395,25 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// BUG-02: Penalize metadata-pattern nodes (HN .subtext, Reddit score lines, etc.)
+/// Matches: "N points by X N hours ago | hide | N comments"
+fn metadata_penalty(label: &str) -> f32 {
+    let lower = label.to_lowercase();
+    // HN/Reddit/Lobsters metadata pattern
+    if (lower.contains("points by") || lower.contains("hours ago") || lower.contains("minutes ago"))
+        && (lower.contains("comments") || lower.contains("hide"))
+    {
+        return 0.4; // Strong penalty — this is metadata, not content
+    }
+    // Generic timestamp-heavy metadata
+    if lower.contains("ago")
+        && (lower.contains("point") || lower.contains("vote") || lower.contains("score"))
+    {
+        return 0.5;
+    }
+    1.0 // No penalty
+}
+
 impl ResonanceField {
     /// Build an initial resonance field from a semantic tree.
     ///
@@ -586,6 +605,22 @@ impl ResonanceField {
             .collect();
         // Snapshot labels (för answer-shape scoring utan borrow-konflikt)
         let labels_ref: HashMap<u32, String> = self.node_labels.clone();
+
+        // BUG-05: Extract site name for nav-artifact penalization
+        let site_words: Vec<String> = self
+            .node_labels
+            .values()
+            .take(3) // First few nodes often contain site name
+            .flat_map(|label| {
+                label
+                    .split_whitespace()
+                    .take(5)
+                    .map(|w| w.to_lowercase())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|w| w.len() > 3)
+            .collect();
+
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
                 let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
@@ -652,8 +687,10 @@ impl ResonanceField {
                     goal,
                     self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""),
                 );
+                // BUG-04: Soft boost — preserve relative ranking
                 state.amplitude =
-                    ((base_resonance + causal_boost + answer_type) * combmnz).clamp(0.0, 1.5);
+                    base_resonance + causal_boost * (1.0 - base_resonance.min(0.95)) + answer_type;
+                state.amplitude *= combmnz;
 
                 // Answer-shape boost: noder som SER UT som svar rankas högre
                 let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
@@ -666,6 +703,28 @@ impl ResonanceField {
 
                 let zone = zone_penalty(&state.role, state.depth);
                 state.amplitude *= zone;
+
+                // BUG-02: Penalize metadata patterns (points/votes/ago)
+                let meta_pen =
+                    metadata_penalty(self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""));
+                state.amplitude *= meta_pen;
+
+                // BUG-05: Site-name penalization
+                if !site_words.is_empty() {
+                    let label_lower = self
+                        .node_labels
+                        .get(&nid)
+                        .map(|s| s.to_lowercase())
+                        .unwrap_or_default();
+                    let site_word_ratio = site_words
+                        .iter()
+                        .filter(|w| label_lower.contains(w.as_str()))
+                        .count() as f32
+                        / site_words.len().max(1) as f32;
+                    if site_word_ratio > 0.6 && state.role != "heading" {
+                        state.amplitude *= 0.7; // 30% penalty for nav artifacts
+                    }
+                }
 
                 causal_boosts.insert(nid, causal_boost);
 
@@ -912,6 +971,34 @@ impl ResonanceField {
                 .total_cmp(&a.amplitude)
                 .then_with(|| a.node_id.cmp(&b.node_id))
         });
+
+        // BUG-01: Label-hash deduplication — remove duplicates that waste top_n budget.
+        // Keep lowest DOM depth + highest causal_boost on collision.
+        {
+            let mut seen_labels: HashMap<u64, usize> = HashMap::new(); // hash → index
+            let mut deduped: Vec<ResonanceResult> = Vec::with_capacity(results.len());
+            for r in results {
+                let label = self
+                    .node_labels
+                    .get(&r.node_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let label_hash = hash_url(&label.trim().to_lowercase());
+                if label.len() < 10 {
+                    // Short labels (buttons, numbers) — don't dedup
+                    deduped.push(r);
+                } else if let Some(&existing_idx) = seen_labels.get(&label_hash) {
+                    // Duplicate: keep if this one has higher causal_boost
+                    if r.causal_boost > deduped[existing_idx].causal_boost {
+                        deduped[existing_idx] = r;
+                    }
+                } else {
+                    seen_labels.insert(label_hash, deduped.len());
+                    deduped.push(r);
+                }
+            }
+            results = deduped;
+        }
 
         results
     }
