@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v3
+# Causal Resonance Field Retrieval (CRFR) v4
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -71,13 +71,18 @@ propagate(goal):
       decay = exp(-λ × seconds_since_last_hit)   [halvering var 10 min]
       causal_boost = raw² × 0.3 × decay
 
-  Fas 2 — Convergent query-conditioned propagation (max 6, delta-styrt):
+  Fas 2 — Convergent propagation (O(N)-garanterad, max 6, delta-styrt):
+    Fan-out cap: max 32 barn per nod (O(N) även vid <ul> med 200 <li>)
+    Komplexitet: O(K × min(E, N×32)) där K=2-3
+
     Förälder → barn:
-      damping = 0.35 × √(parent.amplitude) × role_weight(parent)
-      heading/table: 1.3× | price/button: 0.6× | nav: 0.3×
+      damping = 0.35 × √(parent.amp) × adaptive_down(parent)
+      adaptive_down = base_heuristic × (1 + hit_count×0.05)
+        heading/table: bas 1.2× | nav: bas 0.3× | allt adapteras via feedback
     Barn → förälder:
-      amplification = 0.25 × √(child.amplitude) × role_weight(child)
-      price/data: 1.4× | heading/text: 1.1× | nav: 0.3×
+      amplification = 0.25 × √(child.amp) × adaptive_up(child)
+      adaptive_up = base_heuristic × (1 + hit_count×0.05)
+        price/data: bas 1.3× | nav: bas 0.3× | allt adapteras via feedback
     Fassynk: om |parent.phase - child.phase| < π/4 → ×1.08
     Konvergens: stoppa om total_delta < 0.001 (typiskt 2-3 steg)
 
@@ -162,11 +167,11 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v3 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  32 165  │ 10.8   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 395 256  │ 19.9   │
+│ CRFR v4 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  22 667  │ 10.8   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 384 230  │ 19.9   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          12.3x
+Speedup:          17.0x
 Cache-hit:        617 µs (sub-millisecond)
 Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 ```
@@ -183,13 +188,16 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 
 ### Nyckeltal
 
-| Dimension | CRFR v3 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+| Dimension | CRFR v4 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
 |-----------|:-------:|:-------------------------:|:----------------:|
 | **Recall@3** | **75%** | 50% | 83% (6 tester) |
-| **Latens (cold)** | **32 ms** | 395 ms | 90 ms |
-| **Latens (cache hit)** | **0.6 ms** | 395 ms | 90 ms |
+| **Latens (cold)** | **22 ms** | 384 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 384 ms | 90 ms |
+| **Speedup** | **17x** | baseline | 0.23x |
 | **Output-noder** | **6-11** | 16-20 | 5-8 |
 | **Token-reduktion** | **99%** | 98.4% | 99.2% |
+| **O(N)-garanterad** | **Ja (fan-out cap)** | Ja | Ja |
+| **Adaptiva vikter** | **Ja (feedback)** | Nej | Nej |
 | **Deterministic** | **Ja** | Nej | Nej |
 | **Value-aware** | **Ja** | Nej | Nej |
 | **Lär sig** | **Ja** | Nej | Nej |
@@ -217,8 +225,22 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 | **Roll-signal** | HV-matchning mot goal | Ren prioritetstabell | Zero semantic |
 | **Ranking** | Instabil (HashMap-order) | Deterministic tie-break (node_id) | Determinism > Intelligence |
 | **Vikter** | 65/20/15 | 75/20/5 | BM25+value dominerar |
-| **Benchmark @1** | 10/20 | **10/20** | Bibehållen |
 | **Cache-hit** | — | **617 µs** | Sub-ms uppnådd |
+
+### v3 → v4
+| Optimering | v3 | v4 | Princip |
+|------------|----|----|---------|
+| **Propagation O(N)** | O(E×K) men obegränsad fan-out | Fan-out cap (MAX_FAN_OUT=32) | Determinism > Intelligence |
+| **Vikter** | Hårdkodade (heading 1.3×, price 1.4×) | Adaptiva: `base × (1 + hit_count×0.05)` | Local optimization > Global models |
+| **SIMD** | Standard loops | 4-wide unrolled bind/hamming/bundle | Speed > Everything |
+| **Bundle(N)** | Bit-för-bit O(4096×N) | Word-level O(64×N) | Speed > Everything |
+| **Batch-ops** | — | similarity_batch(), hamming_batch() | Infrastruktur |
+| **Multi-query** | — | propagate_multi_variant() (union merge) | Utnyttjar sub-ms |
+| **Persistent cache** | Enbart in-memory LRU | to_json()/from_json() + WASM save/load | Bevarar lärande |
+| **I2 stream_engine** | Oberoende scoring | Kontext-boost (barn-grannar +20%) | Structure > Semantics |
+| **I7 jämförande** | 1 match per nyckel | extract_by_keys_multi (N per nyckel) | Flexibilitet |
+| **Latens cold** | 32 ms | **22 ms** | -30% |
+| **Speedup** | 12.3x | **17.0x** | SIMD + optimering |
 
 ---
 
@@ -231,20 +253,24 @@ Pipeline-metoden kör tre steg sekventiellt:
 
 CRFR v3 eliminerar steg 3 och cachar steg 1:
 
-**Cold (första besöket):**
+**Cold (första besöket — ~22ms):**
 1. Bygg BM25-index (label+value) + HDC HV:er (~5 ms)
-2. BM25 query + HDC similarity + roll-prioritet (~0.5 ms)
-3. Convergent vågpropagation (~0.1 ms)
+2. BM25 query + HDC similarity (SIMD 4-wide) + roll-prioritet (~0.5 ms)
+3. Convergent propagation (O(N), fan-out cap=32, ~0.1 ms)
 4. Deterministic gap-filter (~0.01 ms)
 
-**Cache-hit (återbesök):**
+**Cache-hit (återbesök — ~0.6ms):**
 1. BM25 query på cachad index (~0.3 ms)
-2. HDC similarity (~0.2 ms)
+2. HDC similarity (SIMD-optimerad) (~0.2 ms)
 3. Propagation + filter (~0.1 ms)
-**Totalt: ~0.6 ms**
 
-Ingen neural network inference. BM25-indexet cachas i `ResonanceField` och återanvänds.
-CRFR kan köras **flera gånger per query** (multi-query orchestration) tack vare sub-ms latens.
+**Multi-query (N varianter — ~N×0.6ms):**
+1. `propagate_multi_variant(["price kr", "cost amount", "pris belopp"])`
+2. Union merge: max amplitude per nod
+3. 3 varianter ≈ 1.8ms
+
+Ingen neural network inference. SIMD-optimerade bitvektoroperationer.
+`propagate_multi_variant()` utnyttjar sub-ms cache-hit för högre recall.
 
 ---
 
@@ -440,22 +466,25 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
 
 | Fil | Beskrivning |
 |-----|-------------|
-| `src/resonance.rs` | Kärn-implementation: ResonanceField, multi-field propagation, feedback, LRU cache |
-| `src/lib.rs` | WASM API: `parse_crfr()`, `crfr_feedback()` |
-| `src/bin/mcp_server.rs` | MCP stdio-server: `parse_crfr`, `crfr_feedback` verktyg |
-| `src/bin/server.rs` | HTTP-server: endpoints + MCP dispatch (tools/list + tools/call) |
-| `benches/crfr_vs_colbert.rs` | Kontrollerad benchmark (6 tester, CRFR vs Pipeline vs ColBERT) |
+| `src/resonance.rs` | Kärna: ResonanceField, adaptiv propagation, feedback, LRU cache, multi-query, persistent serialization |
+| `src/lib.rs` | WASM: `parse_crfr`, `crfr_feedback`, `parse_crfr_multi`, `crfr_save_field`, `crfr_load_field`, `extract_data_multi` |
+| `src/bin/mcp_server.rs` | MCP stdio: `parse_crfr`, `crfr_feedback` verktyg |
+| `src/bin/server.rs` | HTTP: endpoints + MCP dispatch (tools/list + tools/call) |
+| `src/stream_engine.rs` | I2: kontext-aware re-ranking (barn-grann boost +20%) |
+| `src/intent.rs` | I7: `extract_by_keys_multi()` — jämförande extraktion |
+| `src/scoring/hdc.rs` | SIMD: 4-wide unrolled bind/hamming/bundle, batch ops |
+| `src/scoring/tfidf.rs` | BM25 (cachad i CRFR, Clone-deriverad) |
+| `benches/crfr_vs_colbert.rs` | Kontrollerad benchmark (6 tester) |
 | `benches/crfr_final_benchmark.rs` | Offline benchmark (20 sajter, @1/@3/@10/@20) |
 | `benches/crfr_live_test.py` | Live-verifiering (20 sajter via HTTP-server) |
-| `src/scoring/hdc.rs` | Hypervector (4096-bit, XOR bind, majority bundle) |
-| `src/scoring/tfidf.rs` | BM25 (integrerad i CRFR fas-1) |
 
 ---
 
 ## Kvarvarande optimeringar
 
-- **I2**: stream_engine kontext-aware re-ranking — löst av CRFR:s propagation, men stream_engine.rs orörd
-- **I7**: Jämförande extraktion ("X vs Y") — kräver multi-match per nyckel i extract_data
-- **Multi-query orchestration** — kör flera query-varianter, merge/union resultat (utnyttjar sub-ms)
-- **SIMD-optimering** — propagation kan parallelliseras med portable_simd
-- **Persistent cache** — spara resonansfält till disk mellan server-omstarter
+Alla ursprungliga v3-punkter är implementerade. Framtida möjligheter:
+
+- **WebGPU compute** — massiv parallell propagation för >10K noder
+- **Incremental field update** — uppdatera fält vid DOM-mutation (utan full rebuild)
+- **Cross-URL transfer** — överför kausalt minne mellan liknande sajter (t.ex. alla nyhetssajter)
+- **Confidence calibration** — kalibrera amplitude mot faktisk recall (probability output)
