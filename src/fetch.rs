@@ -42,25 +42,28 @@ static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock
 // Minnesgräns: max antal domäner i rate limiter cache
 const MAX_RATE_LIMITER_DOMAINS: usize = 1_000;
 
-/// Hämta eller skapa en rate limiter för en domän (default 2 req/s)
+/// Hämta eller skapa en rate limiter för en domän (default 2 req/s).
+/// LRU-eviction: äldst använda domänen tas bort vid kapacitetsgräns.
 fn get_rate_limiter(domain: &str, requests_per_second: u32) -> Arc<DomainLimiter> {
     let mut limiters = RATE_LIMITERS.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Evicta slumpmässig domän om vi når gränsen (billig operation)
-    if !limiters.contains_key(domain) && limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
-        // Ta bort en godtycklig entry (HashMap iteration order)
-        if let Some(old_key) = limiters.keys().next().cloned() {
-            limiters.remove(&old_key);
+    // LRU: flytta befintlig entry till "nyast" genom remove + re-insert
+    if let Some(existing) = limiters.remove(domain) {
+        limiters.insert(domain.to_string(), existing.clone());
+        return existing;
+    }
+
+    // Ny domän: evicta äldsta (först insatta) om kapacitetsgräns nådd
+    if limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
+        if let Some(oldest_key) = limiters.keys().next().cloned() {
+            limiters.remove(&oldest_key);
         }
     }
 
-    limiters
-        .entry(domain.to_string())
-        .or_insert_with(|| {
-            let rps = NonZeroU32::new(requests_per_second.max(1)).unwrap_or(NonZeroU32::MIN);
-            Arc::new(RateLimiter::direct(governor::Quota::per_second(rps)))
-        })
-        .clone()
+    let rps = NonZeroU32::new(requests_per_second.max(1)).unwrap_or(NonZeroU32::MIN);
+    let limiter = Arc::new(RateLimiter::direct(governor::Quota::per_second(rps)));
+    limiters.insert(domain.to_string(), limiter.clone());
+    limiter
 }
 
 /// Vänta tills rate limiter tillåter request
@@ -334,7 +337,7 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
     const MAX_CSS_LINKS: usize = 50;
     css_links.truncate(MAX_CSS_LINKS);
 
-    const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
+    const MAX_CSS_BYTES: usize = 4 * 1024 * 1024; // 4MB per CSS-fil
 
     // Parallell CSS-hämtning med tokio tasks — nu med felrapportering
     let mut handles = Vec::with_capacity(css_links.len());
@@ -391,7 +394,7 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
 
     // Begränsa total CSS-budget: HTML + inlinad CSS får ej överstiga 2MB
     // (github: 569KB HTML + 842KB CSS = 1.4MB OK, men 569KB + 2MB CSS = OOM)
-    const MAX_TOTAL_CSS_BUDGET: usize = 1500 * 1024; // 1.5MB total CSS
+    const MAX_TOTAL_CSS_BUDGET: usize = 3 * 1024 * 1024; // 3MB total CSS
 
     for (i, css_result) in results.iter().enumerate() {
         match css_result {
@@ -513,11 +516,11 @@ pub async fn fetch_and_inline_external_scripts(html: &str, base_url: &str) -> Js
     {
         use crate::js_eval::{extract_all_scripts, ScriptEntry};
 
-        const MAX_SCRIPTS: usize = 10;
-        const MAX_SCRIPT_SIZE: usize = 512 * 1024; // 512KB per fil
-        const MAX_TOTAL_SIZE: usize = 1024 * 1024; // 1MB totalt
-                                                   // Skippa JS-inlining för redan stora sidor — Blitz klarar inte >2MB HTML
-        const MAX_HTML_FOR_JS_INLINE: usize = 500 * 1024;
+        const MAX_SCRIPTS: usize = 20;
+        const MAX_SCRIPT_SIZE: usize = 1024 * 1024; // 1MB per fil
+        const MAX_TOTAL_SIZE: usize = 3 * 1024 * 1024; // 3MB totalt
+                                                       // Skippa JS-inlining för redan stora sidor
+        const MAX_HTML_FOR_JS_INLINE: usize = 1024 * 1024; // 1MB
 
         if html.len() > MAX_HTML_FOR_JS_INLINE {
             return JsInlineResult {
