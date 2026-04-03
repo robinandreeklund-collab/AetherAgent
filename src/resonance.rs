@@ -887,6 +887,7 @@ impl ResonanceField {
     pub fn feedback(&mut self, goal: &str, successful_node_ids: &[u32]) {
         let goal_hv = Hypervector::from_text_ngrams(goal);
         let goal_hash = hash_url(goal);
+        let now = now_ms();
         let successful_set: std::collections::HashSet<u32> =
             successful_node_ids.iter().copied().collect();
 
@@ -911,8 +912,25 @@ impl ResonanceField {
                     state.causal_memory = Hypervector::bundle(&[&state.causal_memory, &goal_hv]);
                 }
                 state.hit_count += 1;
+
+                // R6: BTSP plasticity — faster feedback = stronger imprint
+                let time_since_query = now.saturating_sub(state.last_hit_ms);
+                let plasticity = if time_since_query < 1000 {
+                    1.5 // Quick feedback: strong imprint
+                } else if time_since_query < 10_000 {
+                    1.0 // Normal feedback
+                } else {
+                    0.5 // Delayed feedback: weak imprint
+                };
+
+                if plasticity > 1.2 {
+                    // Strong plasticity: double-bundle for stronger imprint
+                    state.causal_memory =
+                        Hypervector::bundle(&[&state.causal_memory, &goal_hv, &goal_hv]);
+                }
+
                 state.last_goal_hash = goal_hash;
-                state.last_hit_ms = now_ms();
+                state.last_hit_ms = now;
             }
         }
 

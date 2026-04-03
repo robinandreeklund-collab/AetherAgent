@@ -468,7 +468,7 @@ mod tests {
         assert!(result.error.is_none(), "Top-N parse ska lyckas");
 
         let data = result.data.unwrap();
-        let node_count = data["node_count"].as_u64().unwrap_or(0);
+        let _node_count = data["node_count"].as_u64().unwrap_or(0);
         // node_count räknar alla noder (inkl barn), top_n begränsar rotnoder
         // Rotnoder <= 2 men totalt kan vara fler pga barn
         let tree = &data["tree"];
