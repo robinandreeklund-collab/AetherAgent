@@ -1,4 +1,4 @@
-# Causal Resonance Field Retrieval (CRFR) v5
+# Causal Resonance Field Retrieval (CRFR) v6
 
 **Status:** Produktionsredo, live-verifierad | **Modul:** `src/resonance.rs`
 **MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
@@ -102,28 +102,37 @@ propagate(goal):
 ```
 feedback(goal, successful_node_ids):
 
+  Steg 0 — Temporal decay på all propagation_stats:
+    for each (alpha, beta) in stats:
+      alpha *= 0.95
+      beta *= 0.95
+    → Nyare data väger mer, stale bias försvinner gradvis
+
   Steg 1 — Kausalt minne (per nod):
     goal_hv = Hypervector::from_text_ngrams(goal)
     for each node_id:
       node.causal_memory = bundle(node.causal_memory, goal_hv)
       node.hit_count += 1
-      node.last_hit_ms = now()
 
-  Steg 2 — Learned propagation weights (per roll):
+  Steg 2 — Beta-distribution update (per roll):
     For each parent→child edge:
-      propagation_stats["parent_role:down"].attempts += 1
+      confidence = child.amplitude (0-1)
+      if child was successful:
+        stats["parent_role:down"].alpha += confidence      ← Fix 1
+      else:
+        stats["parent_role:down"].beta += (1 - confidence) ← Fix 2
     For each child→parent edge:
-      propagation_stats["child_role:up"].attempts += 1
-    For each successful node:
-      propagation_stats["parent_role:down"].successes += 1
-      propagation_stats["node_role:up"].successes += 1
+      (samma logik uppåt)
 ```
 
-Dubbelt lärande:
+Tredelat lärande:
 - **Kausalt minne**: vilka noder som hade svaret (VSA-binding)
-- **Propagation weights**: vilka roller som sprider signal effektivt (success rate)
+- **Propagation weights**: Beta(α,β) per roll — confidence-weighted + negative signal
+- **Temporal decay**: stats × 0.95 per feedback → nyare data dominerar
 
-Båda sparas per fält, persistent via `to_json()`, transfererbar via `transfer_from()`.
+`learned_weight()` = Beta mean: `α/(α+β)` → mappas till vikt 0.2-1.5.
+Heuristik = initial prior `(h, 1.0)`. Med mer data tar observationer över automatiskt.
+Ingen manuell blend-faktor kvar.
 
 ---
 
@@ -174,10 +183,10 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────────┬───────────┬──────────┐
 │ Metod                        │ Recall@3 │  Avg µs   │ Speedup  │
 ├──────────────────────────────┼──────────┼───────────┼──────────┤
-│ CRFR v3 (cold)               │ 4/6  67% │   1 761   │ baseline │
-│ CRFR v3 (kausal feedback)    │ 5/6  83% │     —     │    —     │
-│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  35 971   │ 20.4x   │
-│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 50.9x   │
+│ CRFR v6 (cold)               │ 4/6  67% │   1 310   │ baseline │
+│ CRFR v6 (kausal feedback)    │ 6/6 100% │     —     │    —     │
+│ Pipeline (BM25+HDC+Embed)    │ 4/6  67% │  33 734   │ 25.7x   │
+│ ColBERT (MaxSim)             │ 5/6  83% │  89 550   │ 68.4x   │
 └──────────────────────────────┴──────────┴───────────┴──────────┘
 ```
 
@@ -187,11 +196,11 @@ Kört via lokal HTTP-server (`/api/fetch` → `/api/parse-crfr`):
 ┌──────────────────────────────┬──────┬──────┬───────┬───────┬──────────┬────────┐
 │ Metod                        │  @1  │  @3  │  @10  │  @20  │  Avg µs  │ Output │
 ├──────────────────────────────┼──────┼──────┼───────┼───────┼──────────┼────────┤
-│ CRFR v5 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  27 971  │ 10.8   │
-│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 387 089  │ 20.1   │
+│ CRFR v6 (BM25+HDC+cache)    │10/20 │15/20 │ 17/20 │ 17/20 │  27 767  │ 10.2   │
+│ Pipeline (BM25+HDC+Embed)    │ 6/20 │10/20 │ 18/20 │ 19/20 │ 388 970  │ 19.9   │
 └──────────────────────────────┴──────┴──────┴───────┴───────┴──────────┴────────┘
 
-Speedup:          13.8x
+Speedup:          14.0x
 Cache-hit:        617 µs (sub-millisecond)
 Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 ```
@@ -206,18 +215,34 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
   Avg svar-rank:   3.1 (svaret i topp-3 i snitt)
 ```
 
+### 50 live-sajter — CRFR vs Pipeline head-to-head
+
+```
+  Metod                         @1     @3     @5    @10    @20   Avg ms
+  CRFR v6                    33/45  39/45  42/45  43/45  44/45     420
+  Pipeline (BM25+HDC+Embed)  36/45  42/45  43/45  44/45  44/45     541
+
+  Paritet vid @20: båda 97.8% (44/45)
+  CRFR 1.3x snabbare (420ms vs 541ms inkl nätverksfetch)
+  Enda miss: IMDB (1 nod parsad — JS-renderad sida)
+```
+
 ### Nyckeltal
 
-| Dimension | CRFR v5 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
+| Dimension | CRFR v6 | Pipeline (BM25+HDC+Embed) | ColBERT (MaxSim) |
 |-----------|:-------:|:-------------------------:|:----------------:|
-| **Recall@3** | **75%** | 50% | 83% (6 tester) |
-| **Latens (cold)** | **28 ms** | 387 ms | 90 ms |
-| **Latens (cache hit)** | **0.6 ms** | 387 ms | 90 ms |
-| **Speedup** | **13.8x** | baseline | 0.23x |
-| **Output-noder** | **6-11** | 16-20 | 5-8 |
+| **Recall@3 (20 offline)** | **75%** | 50% | — |
+| **Recall@20 (50 live)** | **97.8%** | **97.8%** | — |
+| **Latens (cold)** | **28 ms** | 389 ms | 90 ms |
+| **Latens (cache hit)** | **0.6 ms** | 389 ms | 90 ms |
+| **Latens (6-test cold)** | **1.3 ms** | 33.7 ms | 89.5 ms |
+| **Speedup** | **14-26x** | baseline | 0.23x |
+| **Output-noder** | **6-10** | 16-20 | 5-8 |
 | **Token-reduktion** | **99%** | 98.4% | 99.2% |
 | **O(N)-garanterad** | **Ja (fan-out cap)** | Ja | Ja |
-| **Learned weights** | **Bayesian (success rate)** | Nej | Nej |
+| **Learned weights** | **Beta-distribution** | Nej | Nej |
+| **Negative signal** | **Ja (beta += 1-conf)** | Nej | Nej |
+| **Stats decay** | **Ja (×0.95/feedback)** | Nej | Nej |
 | **Confidence output** | **Platt-kalibrerad** | Nej | Nej |
 | **Incremental update** | **Ja** | Nej | Nej |
 | **Cross-URL transfer** | **Ja** | Nej | Nej |
@@ -275,6 +300,19 @@ Token-reduktion:  99% (22 236 HTML-tokens → 273 CRFR-tokens)
 | **Cross-URL transfer** | — | transfer_from(donor, recipient, min_sim) | Lärande mellan liknande sajter |
 | **Confidence calibration** | Raw amplitude | Platt scaling → probability (0-1) | Kalibrerad output |
 | **parse_crfr output** | relevance (amplitude) | + confidence (kalibrerad probability) | LLM-vänlig signal |
+
+### v5 → v6
+| Optimering | v5 | v6 | Princip |
+|------------|----|----|---------|
+| **Stats-typ** | `(u32, u32)` räknare | `(f32, f32)` Beta-distribution | Äkta Bayesian |
+| **Success signal** | `alpha += 1` | `alpha += confidence` | Confidence-weighted |
+| **Negative signal** | Ingen | `beta += (1 - confidence)` | Lär vad som INTE funkar |
+| **Stats decay** | Ingen | `(α, β) × 0.95` per feedback | Motverkar stale bias |
+| **Blend-faktor** | `min(attempts/20, 0.8)` manuell | Beta mean: `α/(α+β)` automatisk | Ingen manuell konstant |
+| **Heuristik-roll** | Prior + linjär boost | Enbart initial prior `(h, 1.0)` | Data tar över naturligt |
+| **6-test speedup** | 20.4x | **25.7x** | Snabbare cold-start |
+| **6-test causal** | 5/6 | **6/6** | Bättre lärande |
+| **50-sajt @20** | — | **44/45 (97.8%)** | PoC-validated |
 
 ---
 
