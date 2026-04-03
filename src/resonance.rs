@@ -48,6 +48,8 @@ const CAUSAL_WEIGHT: f32 = 0.3;
 const CAUSAL_DECAY_LAMBDA: f64 = 0.001_155;
 /// Minsta relativa amplitud-gap för att klippa output (30% drop)
 const GAP_RATIO_THRESHOLD: f32 = 0.30;
+/// Max antal concept entries i field-level concept memory
+const MAX_CONCEPT_ENTRIES: usize = 256;
 /// Max antal fält i LRU-cachen
 const FIELD_CACHE_CAPACITY: usize = 64;
 
@@ -229,6 +231,9 @@ fn heuristic_up_weight(role: &str) -> f32 {
 
 /// Adaptive fan-out: scales with DOM complexity
 fn adaptive_fan_out(children_count: usize) -> usize {
+    if children_count == 0 {
+        return 0;
+    }
     if children_count <= 8 {
         children_count
     } else {
@@ -293,10 +298,10 @@ fn learned_weight_precomputed(
 ) -> f32 {
     let (alpha, beta) = stats.get(key).copied().unwrap_or((heuristic, 1.0));
     let total = alpha + beta;
-    if total < 0.01 {
+    if total < 0.001 {
         return heuristic;
     }
-    let mean = alpha / total;
+    let mean = alpha / total.max(0.001);
     0.2 + mean * 1.3
 }
 
@@ -487,7 +492,8 @@ impl ResonanceField {
         // Fas 1: Multi-field initial resonans
         // #9: Zero semantic — roll-signal = ren prioritetstabell, ingen HV-matchning
         let now = now_ms();
-        let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
+        let mut node_ids: Vec<u32> = self.nodes.keys().copied().collect();
+        node_ids.sort_unstable();
 
         // Pre-compute siblings count per nod (för answer-shape scoring)
         let siblings_map: HashMap<u32, usize> = node_ids
@@ -630,10 +636,7 @@ impl ResonanceField {
                 for &child_id in &children[..fan_out] {
                     if let Some(child_state) = self.nodes.get_mut(&child_id) {
                         let mut propagated = parent_amp * damping;
-                        let phase_diff = (parent_phase - child_state.phase).abs();
-                        if phase_diff < PHASE_SYNC_WINDOW {
-                            propagated *= PHASE_SYNC_BONUS;
-                        }
+                        propagated *= PHASE_SYNC_BONUS; // Phase always 0 → always synced
                         if propagated > child_state.amplitude {
                             total_delta += propagated - child_state.amplitude;
                             child_state.amplitude = propagated;
@@ -667,10 +670,7 @@ impl ResonanceField {
 
                 if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
                     let mut propagated = child_amp * amplification;
-                    let phase_diff = (child_phase - parent_state.phase).abs();
-                    if phase_diff < PHASE_SYNC_WINDOW {
-                        propagated *= PHASE_SYNC_BONUS;
-                    }
+                    propagated *= PHASE_SYNC_BONUS; // Phase always 0 → always synced
                     if propagated > parent_state.amplitude {
                         total_delta += propagated - parent_state.amplitude;
                         parent_state.amplitude = propagated;
@@ -1001,6 +1001,16 @@ impl ResonanceField {
                     let merged = Hypervector::bundle(&[&existing, &state.text_hv]);
                     *entry = HvData::from_hv(&merged);
                 }
+            }
+        }
+
+        // Evicta äldsta concept entries om cap nådd
+        while self.concept_memory.len() > MAX_CONCEPT_ENTRIES {
+            // Ta bort första (arbitrary men deterministisk)
+            if let Some(key) = self.concept_memory.keys().next().cloned() {
+                self.concept_memory.remove(&key);
+            } else {
+                break;
             }
         }
     }
@@ -1363,28 +1373,33 @@ static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
 /// to persist any new causal learning.
 pub fn get_or_build_field(tree_nodes: &[SemanticNode], url: &str) -> (ResonanceField, bool) {
     let url_hash = hash_url(url);
-    if let Ok(mut cache) = FIELD_CACHE.lock() {
-        if let Some(field) = cache.take(url_hash) {
-            return (field, true);
-        }
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.take(url_hash) {
+        return (field, true);
     }
+    drop(cache);
     (ResonanceField::from_semantic_tree(tree_nodes, url), false)
 }
 
 /// Save a resonance field back to the cache (preserves causal memory).
 pub fn save_field(field: &ResonanceField) {
-    if let Ok(mut cache) = FIELD_CACHE.lock() {
-        cache.put(field.url_hash, field.clone());
-    }
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.put(field.url_hash, field.clone());
 }
 
 /// Get cache statistics (entries, capacity).
 pub fn cache_stats() -> (usize, usize) {
-    if let Ok(cache) = FIELD_CACHE.lock() {
-        (cache.len(), cache.capacity)
-    } else {
-        (0, FIELD_CACHE_CAPACITY)
-    }
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    (cache.len(), cache.capacity)
 }
 
 #[cfg(test)]
