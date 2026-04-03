@@ -9,7 +9,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 248,
+      "ms": 245,
       "rank": 1,
       "nodes": 15,
       "tokens": 1216
@@ -20,12 +20,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 18,
+      "ms": 15,
       "rank": 1,
       "nodes": 2,
       "tokens": 256
     },
-    "html_tokens": 8647
+    "html_tokens": 8695
   },
   {
     "name": "lobste.rs",
@@ -37,10 +37,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 496,
+      "ms": 479,
       "rank": 2,
       "nodes": 20,
-      "tokens": 243
+      "tokens": 295
     },
     "pipe": {
       "f1": true,
@@ -48,12 +48,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 747,
+      "ms": 780,
       "rank": 1,
       "nodes": 20,
-      "tokens": 307
+      "tokens": 328
     },
-    "html_tokens": 14792
+    "html_tokens": 14693
   },
   {
     "name": "CNN Lite",
@@ -65,10 +65,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 443,
+      "ms": 441,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1045
+      "tokens": 1038
     },
     "pipe": {
       "f1": true,
@@ -76,12 +76,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 193,
+      "ms": 201,
       "rank": 1,
-      "nodes": 11,
-      "tokens": 550
+      "nodes": 12,
+      "tokens": 568
     },
-    "html_tokens": 84638
+    "html_tokens": 84646
   },
   {
     "name": "NPR Text",
@@ -93,10 +93,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 468,
+      "ms": 480,
       "rank": 1,
-      "nodes": 11,
-      "tokens": 571
+      "nodes": 9,
+      "tokens": 531
     },
     "pipe": {
       "f1": true,
@@ -104,12 +104,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 42,
+      "ms": 39,
       "rank": 1,
       "nodes": 12,
-      "tokens": 521
+      "tokens": 498
     },
-    "html_tokens": 1507
+    "html_tokens": 1475
   },
   {
     "name": "Reuters",
@@ -132,7 +132,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 34,
+      "ms": 35,
       "rank": 1,
       "nodes": 1,
       "tokens": 13
@@ -149,10 +149,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 532,
+      "ms": 517,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1171
+      "tokens": 830
     },
     "pipe": {
       "f1": true,
@@ -160,7 +160,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 648,
+      "ms": 663,
       "rank": 1,
       "nodes": 20,
       "tokens": 686
@@ -177,7 +177,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 445,
+      "ms": 422,
       "rank": 1,
       "nodes": 5,
       "tokens": 86
@@ -188,12 +188,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 478,
+      "ms": 443,
       "rank": 1,
       "nodes": 20,
-      "tokens": 435
+      "tokens": 617
     },
-    "html_tokens": 101317
+    "html_tokens": 101420
   },
   {
     "name": "The Guardian",
@@ -205,15 +205,15 @@
     "cat": "gov",
     "status": "OK",
     "crfr": {
-      "f1": false,
+      "f1": true,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 450,
-      "rank": 2,
+      "ms": 427,
+      "rank": 1,
       "nodes": 20,
-      "tokens": 1028
+      "tokens": 1049
     },
     "pipe": {
       "f1": false,
@@ -221,10 +221,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 535,
+      "ms": 517,
       "rank": 3,
       "nodes": 20,
-      "tokens": 481
+      "tokens": 596
     },
     "html_tokens": 22258
   },
@@ -233,15 +233,15 @@
     "cat": "gov",
     "status": "OK",
     "crfr": {
-      "f1": false,
-      "f3": false,
-      "f5": false,
+      "f1": true,
+      "f3": true,
+      "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 442,
-      "rank": 6,
+      "ms": 400,
+      "rank": 1,
       "nodes": 20,
-      "tokens": 595
+      "tokens": 505
     },
     "pipe": {
       "f1": false,
@@ -249,10 +249,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 629,
+      "ms": 610,
       "rank": 2,
       "nodes": 20,
-      "tokens": 364
+      "tokens": 372
     },
     "html_tokens": 22868
   },
@@ -266,10 +266,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 391,
+      "ms": 362,
       "rank": 1,
       "nodes": 20,
-      "tokens": 279
+      "tokens": 793
     },
     "pipe": {
       "f1": true,
@@ -277,7 +277,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 639,
+      "ms": 608,
       "rank": 1,
       "nodes": 20,
       "tokens": 413
@@ -294,10 +294,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 326,
+      "ms": 310,
       "rank": 2,
       "nodes": 20,
-      "tokens": 700
+      "tokens": 697
     },
     "pipe": {
       "f1": true,
@@ -305,7 +305,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 520,
+      "ms": 499,
       "rank": 1,
       "nodes": 20,
       "tokens": 523
@@ -322,10 +322,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 405,
+      "ms": 387,
       "rank": 1,
       "nodes": 20,
-      "tokens": 939
+      "tokens": 1280
     },
     "pipe": {
       "f1": true,
@@ -333,7 +333,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 624,
+      "ms": 631,
       "rank": 1,
       "nodes": 20,
       "tokens": 832
@@ -350,10 +350,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 421,
+      "ms": 401,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1384
+      "tokens": 1512
     },
     "pipe": {
       "f1": true,
@@ -361,7 +361,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 418,
+      "ms": 399,
       "rank": 1,
       "nodes": 20,
       "tokens": 1156
@@ -378,10 +378,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 413,
+      "ms": 383,
       "rank": 5,
       "nodes": 20,
-      "tokens": 140
+      "tokens": 39
     },
     "pipe": {
       "f1": false,
@@ -389,10 +389,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 699,
+      "ms": 659,
       "rank": 2,
       "nodes": 20,
-      "tokens": 881
+      "tokens": 885
     },
     "html_tokens": 44309
   },
@@ -406,10 +406,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 412,
+      "ms": 414,
       "rank": 1,
-      "nodes": 20,
-      "tokens": 839
+      "nodes": 6,
+      "tokens": 583
     },
     "pipe": {
       "f1": true,
@@ -417,7 +417,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 474,
+      "ms": 457,
       "rank": 1,
       "nodes": 19,
       "tokens": 1088
@@ -434,10 +434,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 368,
+      "ms": 364,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1098
+      "tokens": 1068
     },
     "pipe": {
       "f1": true,
@@ -445,12 +445,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 159,
+      "ms": 157,
       "rank": 1,
       "nodes": 14,
       "tokens": 462
     },
-    "html_tokens": 114288
+    "html_tokens": 114735
   },
   {
     "name": "Ruby Lang",
@@ -462,10 +462,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 311,
+      "ms": 309,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1409
+      "tokens": 1417
     },
     "pipe": {
       "f1": false,
@@ -473,7 +473,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 291,
+      "ms": 299,
       "rank": 2,
       "nodes": 20,
       "tokens": 894
@@ -485,15 +485,15 @@
     "cat": "dev",
     "status": "OK",
     "crfr": {
-      "f1": true,
+      "f1": false,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 337,
-      "rank": 1,
+      "ms": 350,
+      "rank": 2,
       "nodes": 20,
-      "tokens": 566
+      "tokens": 607
     },
     "pipe": {
       "f1": true,
@@ -501,12 +501,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 163,
+      "ms": 220,
       "rank": 1,
-      "nodes": 15,
-      "tokens": 395
+      "nodes": 19,
+      "tokens": 469
     },
-    "html_tokens": 4373
+    "html_tokens": 4428
   },
   {
     "name": "Kotlin",
@@ -518,10 +518,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 406,
+      "ms": 392,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1247
+      "tokens": 1171
     },
     "pipe": {
       "f1": true,
@@ -529,10 +529,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 462,
+      "ms": 456,
       "rank": 1,
       "nodes": 20,
-      "tokens": 758
+      "tokens": 755
     },
     "html_tokens": 64405
   },
@@ -541,13 +541,13 @@
     "cat": "dev",
     "status": "OK",
     "crfr": {
-      "f1": true,
+      "f1": false,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 442,
-      "rank": 1,
+      "ms": 464,
+      "rank": 2,
       "nodes": 20,
       "tokens": 1711
     },
@@ -557,10 +557,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 564,
+      "ms": 551,
       "rank": 2,
       "nodes": 20,
-      "tokens": 1108
+      "tokens": 1106
     },
     "html_tokens": 6753
   },
@@ -574,7 +574,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 257,
+      "ms": 275,
       "rank": 1,
       "nodes": 20,
       "tokens": 1461
@@ -585,7 +585,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 250,
+      "ms": 263,
       "rank": 1,
       "nodes": 18,
       "tokens": 919
@@ -602,7 +602,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 318,
+      "ms": 344,
       "rank": 1,
       "nodes": 20,
       "tokens": 983
@@ -613,7 +613,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 253,
+      "ms": 263,
       "rank": 1,
       "nodes": 20,
       "tokens": 717
@@ -630,10 +630,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 436,
+      "ms": 446,
       "rank": 1,
       "nodes": 20,
-      "tokens": 867
+      "tokens": 833
     },
     "pipe": {
       "f1": true,
@@ -641,7 +641,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 197,
+      "ms": 201,
       "rank": 1,
       "nodes": 16,
       "tokens": 469
@@ -658,10 +658,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 299,
+      "ms": 307,
       "rank": 4,
       "nodes": 20,
-      "tokens": 401
+      "tokens": 212
     },
     "pipe": {
       "f1": true,
@@ -669,7 +669,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 311,
+      "ms": 328,
       "rank": 1,
       "nodes": 20,
       "tokens": 688
@@ -686,7 +686,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 185,
+      "ms": 197,
       "rank": 1,
       "nodes": 3,
       "tokens": 260
@@ -697,7 +697,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 59,
+      "ms": 58,
       "rank": 1,
       "nodes": 6,
       "tokens": 315
@@ -714,10 +714,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 381,
+      "ms": 403,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1010
+      "tokens": 964
     },
     "pipe": {
       "f1": true,
@@ -770,10 +770,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 330,
+      "ms": 334,
       "rank": 1,
       "nodes": 20,
-      "tokens": 746
+      "tokens": 629
     },
     "pipe": {
       "f1": true,
@@ -781,12 +781,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 405,
+      "ms": 411,
       "rank": 1,
       "nodes": 20,
       "tokens": 864
     },
-    "html_tokens": 99385
+    "html_tokens": 99415
   },
   {
     "name": "Terraform",
@@ -798,10 +798,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 383,
+      "ms": 377,
       "rank": 3,
       "nodes": 20,
-      "tokens": 821
+      "tokens": 708
     },
     "pipe": {
       "f1": true,
@@ -809,7 +809,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 947,
+      "ms": 979,
       "rank": 1,
       "nodes": 20,
       "tokens": 498
@@ -826,10 +826,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 332,
+      "ms": 323,
       "rank": 1,
       "nodes": 20,
-      "tokens": 572
+      "tokens": 552
     },
     "pipe": {
       "f1": true,
@@ -837,12 +837,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 662,
+      "ms": 608,
       "rank": 1,
       "nodes": 20,
       "tokens": 433
     },
-    "html_tokens": 65930
+    "html_tokens": 77233
   },
   {
     "name": "Tailwind CSS",
@@ -854,7 +854,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 1197,
+      "ms": 968,
       "rank": 1,
       "nodes": 3,
       "tokens": 103
@@ -865,12 +865,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 1746,
+      "ms": 1602,
       "rank": 1,
       "nodes": 20,
-      "tokens": 722
+      "tokens": 667
     },
-    "html_tokens": 233644
+    "html_tokens": 234318
   },
   {
     "name": "OpenStreetMap",
@@ -882,7 +882,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 448,
+      "ms": 456,
       "rank": 1,
       "nodes": 14,
       "tokens": 680
@@ -893,7 +893,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 336,
+      "ms": 354,
       "rank": 1,
       "nodes": 20,
       "tokens": 630
@@ -910,7 +910,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 62,
+      "ms": 69,
       "rank": 1,
       "nodes": 3,
       "tokens": 262
@@ -938,10 +938,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 414,
+      "ms": 418,
       "rank": 1,
-      "nodes": 3,
-      "tokens": 87
+      "nodes": 20,
+      "tokens": 765
     },
     "pipe": {
       "f1": true,
@@ -949,10 +949,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 255,
+      "ms": 303,
       "rank": 1,
       "nodes": 20,
-      "tokens": 609
+      "tokens": 582
     },
     "html_tokens": 2240
   },
@@ -961,15 +961,15 @@
     "cat": "ref",
     "status": "OK",
     "crfr": {
-      "f1": true,
+      "f1": false,
       "f3": true,
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 272,
-      "rank": 1,
+      "ms": 260,
+      "rank": 2,
       "nodes": 20,
-      "tokens": 1399
+      "tokens": 1295
     },
     "pipe": {
       "f1": true,
@@ -977,7 +977,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 471,
+      "ms": 476,
       "rank": 1,
       "nodes": 20,
       "tokens": 1135
@@ -994,10 +994,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 552,
+      "ms": 543,
       "rank": 1,
       "nodes": 20,
-      "tokens": 200
+      "tokens": 372
     },
     "pipe": {
       "f1": true,
@@ -1005,7 +1005,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 649,
+      "ms": 651,
       "rank": 1,
       "nodes": 20,
       "tokens": 142
@@ -1027,23 +1027,23 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 585,
-      "rank": 4,
+      "ms": 577,
+      "rank": 3,
       "nodes": 20,
-      "tokens": 1115
+      "tokens": 1045
     },
     "pipe": {
       "f1": false,
       "f3": false,
-      "f5": true,
+      "f5": false,
       "f10": true,
       "f20": true,
-      "ms": 1059,
-      "rank": 5,
+      "ms": 1115,
+      "rank": 8,
       "nodes": 20,
-      "tokens": 1021
+      "tokens": 920
     },
-    "html_tokens": 406905
+    "html_tokens": 421630
   },
   {
     "name": "ECB",
@@ -1053,12 +1053,12 @@
       "f1": false,
       "f3": false,
       "f5": false,
-      "f10": false,
+      "f10": true,
       "f20": true,
-      "ms": 626,
-      "rank": 14,
+      "ms": 591,
+      "rank": 6,
       "nodes": 20,
-      "tokens": 383
+      "tokens": 625
     },
     "pipe": {
       "f1": true,
@@ -1066,10 +1066,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 953,
+      "ms": 906,
       "rank": 1,
       "nodes": 20,
-      "tokens": 411
+      "tokens": 416
     },
     "html_tokens": 48499
   },
@@ -1083,23 +1083,23 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 1818,
+      "ms": 1365,
       "rank": 2,
-      "nodes": 2,
-      "tokens": 37
+      "nodes": 20,
+      "tokens": 464
     },
     "pipe": {
       "f1": false,
-      "f3": false,
-      "f5": false,
+      "f3": true,
+      "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 4212,
-      "rank": 7,
+      "ms": 3059,
+      "rank": 2,
       "nodes": 20,
-      "tokens": 388
+      "tokens": 359
     },
-    "html_tokens": 388745
+    "html_tokens": 392876
   },
   {
     "name": "XE Currency",
@@ -1111,7 +1111,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 860,
+      "ms": 684,
       "rank": 1,
       "nodes": 20,
       "tokens": 569
@@ -1122,7 +1122,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 716,
+      "ms": 542,
       "rank": 3,
       "nodes": 20,
       "tokens": 420
@@ -1139,7 +1139,7 @@
       "f5": false,
       "f10": false,
       "f20": false,
-      "ms": 19,
+      "ms": 26,
       "rank": null,
       "nodes": 1,
       "tokens": 0
@@ -1150,7 +1150,7 @@
       "f5": false,
       "f10": false,
       "f20": false,
-      "ms": 33,
+      "ms": 34,
       "rank": null,
       "nodes": 1,
       "tokens": 0
@@ -1167,10 +1167,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 367,
+      "ms": 358,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1117
+      "tokens": 690
     },
     "pipe": {
       "f1": true,
@@ -1178,12 +1178,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 571,
+      "ms": 528,
       "rank": 1,
       "nodes": 20,
-      "tokens": 658
+      "tokens": 657
     },
-    "html_tokens": 13800
+    "html_tokens": 14193
   },
   {
     "name": "Weather.com",
@@ -1200,7 +1200,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 39,
+      "ms": 41,
       "rank": 1,
       "nodes": 3,
       "tokens": 28
@@ -1211,7 +1211,7 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 72,
+      "ms": 73,
       "rank": 1,
       "nodes": 2,
       "tokens": 12
@@ -1238,10 +1238,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 467,
+      "ms": 406,
       "rank": 1,
       "nodes": 20,
-      "tokens": 1099
+      "tokens": 1066
     },
     "pipe": {
       "f1": true,
@@ -1249,12 +1249,12 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 701,
+      "ms": 678,
       "rank": 1,
       "nodes": 20,
-      "tokens": 501
+      "tokens": 491
     },
-    "html_tokens": 334178
+    "html_tokens": 333239
   },
   {
     "name": "Hjo kommun",
@@ -1266,10 +1266,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 426,
+      "ms": 379,
       "rank": 4,
       "nodes": 20,
-      "tokens": 90
+      "tokens": 217
     },
     "pipe": {
       "f1": true,
@@ -1277,10 +1277,10 @@
       "f5": true,
       "f10": true,
       "f20": true,
-      "ms": 879,
+      "ms": 802,
       "rank": 1,
       "nodes": 20,
-      "tokens": 281
+      "tokens": 279
     },
     "html_tokens": 49050
   }
