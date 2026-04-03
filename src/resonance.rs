@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::scoring::hdc::Hypervector;
+use crate::scoring::tfidf::TfIdfIndex;
 use crate::types::SemanticNode;
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
@@ -31,6 +32,12 @@ const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
 const MAX_PROPAGATION_STEPS: u32 = 2;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
+/// BM25-vikt i hybrid-scoring (keyword-precision)
+const BM25_WEIGHT: f32 = 0.7;
+/// HDC-vikt i hybrid-scoring (strukturell signal)
+const HDC_WEIGHT: f32 = 0.3;
+/// Kausal-boost vikt
+const CAUSAL_WEIGHT: f32 = 0.3;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
@@ -131,6 +138,9 @@ pub struct ResonanceField {
     /// Barn-mappning: parent_id -> [child_ids]
     #[serde(default)]
     children_map: HashMap<u32, Vec<u32>>,
+    /// Nod-labels (för BM25-indexering vid propagation)
+    #[serde(default)]
+    node_labels: HashMap<u32, String>,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -166,10 +176,18 @@ impl ResonanceField {
         let mut nodes = HashMap::new();
         let mut parent_map = HashMap::new();
         let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut node_labels: HashMap<u32, String> = HashMap::new();
 
         // Platta ut trädet och bygg relationer
         for node in tree_nodes {
-            Self::flatten_node(node, None, &mut nodes, &mut parent_map, &mut children_map);
+            Self::flatten_node(
+                node,
+                None,
+                &mut nodes,
+                &mut parent_map,
+                &mut children_map,
+                &mut node_labels,
+            );
             // Begränsa storlek
             if nodes.len() >= MAX_FIELD_NODES {
                 break;
@@ -180,6 +198,7 @@ impl ResonanceField {
             nodes,
             parent_map,
             children_map,
+            node_labels,
             url_hash: hash_url(url),
             created_at_ms: now_ms(),
             total_queries: 0,
@@ -193,6 +212,7 @@ impl ResonanceField {
         nodes: &mut HashMap<u32, ResonanceState>,
         parent_map: &mut HashMap<u32, u32>,
         children_map: &mut HashMap<u32, Vec<u32>>,
+        node_labels: &mut HashMap<u32, String>,
     ) {
         if nodes.len() >= MAX_FIELD_NODES {
             return;
@@ -214,6 +234,7 @@ impl ResonanceField {
         };
 
         nodes.insert(node.id, state);
+        node_labels.insert(node.id, node.label.clone());
 
         // Registrera förälder-relation
         if let Some(pid) = parent_id {
@@ -223,7 +244,14 @@ impl ResonanceField {
 
         // Rekursera barn
         for child in &node.children {
-            Self::flatten_node(child, Some(node.id), nodes, parent_map, children_map);
+            Self::flatten_node(
+                child,
+                Some(node.id),
+                nodes,
+                parent_map,
+                children_map,
+                node_labels,
+            );
         }
     }
 
@@ -241,23 +269,47 @@ impl ResonanceField {
         // Spara resonanstyp per nod
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
 
-        // Fas 1: Initial resonans
-        // HDC cosine similarity ger [-1, 1] men de flesta noder hamnar nära 0.
-        // Vi skalar om till [0, 1]: raw_sim ∈ [-1,1] → (raw+1)/2 ∈ [0,1]
-        // och höjer sedan kontrasten med en power-funktion.
+        // ── BM25-index: bygg snabbt per-propagation ──
+        // BM25 ger starka keyword-signaler som HDC saknar.
+        let bm25_pairs: Vec<(u32, &str)> = self
+            .node_labels
+            .iter()
+            .map(|(&id, label)| (id, label.as_str()))
+            .collect();
+        let bm25_index = TfIdfIndex::build(&bm25_pairs);
+        let bm25_results = bm25_index.query(goal, self.nodes.len());
+        // Normalisera BM25-scores till [0, 1]
+        let bm25_max = bm25_results
+            .first()
+            .map(|(_, s)| *s)
+            .unwrap_or(1.0)
+            .max(0.001);
+        let bm25_scores: HashMap<u32, f32> = bm25_results
+            .into_iter()
+            .map(|(id, score)| (id, (score / bm25_max).clamp(0.0, 1.0)))
+            .collect();
+
+        // Fas 1: Initial resonans — BM25 + HDC hybrid
+        // BM25 ger keyword-precision, HDC ger strukturell signal.
+        // Kombination: 0.7 * BM25 + 0.3 * HDC (BM25 dominerar cold-start)
         let node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         for &nid in &node_ids {
             if let Some(state) = self.nodes.get_mut(&nid) {
-                // Använd text_hv (ren text utan roll-binding) för likhetsmätning
+                // HDC text-similarity (normaliserad)
                 let raw_sim = state.text_hv.similarity(&goal_hv);
-                // Skala [-1,1] → [0,1] och höj kontrast (power=3 sprider top-noder)
-                let normalized = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
-                let base_resonance = normalized * normalized * normalized; // power-3 kontrast
+                let hdc_norm = ((raw_sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                let hdc_score = hdc_norm * hdc_norm; // power-2 kontrast
+
+                // BM25-score (redan normaliserad 0-1)
+                let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
+
+                // Hybrid: BM25 dominerar för keyword-matchning
+                let base_resonance = BM25_WEIGHT * bm25_score + HDC_WEIGHT * hdc_score;
 
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
-                    norm_causal * norm_causal * 0.3
+                    norm_causal * norm_causal * CAUSAL_WEIGHT
                 } else {
                     0.0
                 };
@@ -272,9 +324,6 @@ impl ResonanceField {
                 } else if base_resonance > ACTIVATION_THRESHOLD {
                     resonance_types.insert(nid, ResonanceType::Direct);
                 }
-
-                // OBS: last_goal_hash uppdateras INTE här — den används
-                // enbart av feedback() för att undvika dubbelräkning.
             }
         }
 
