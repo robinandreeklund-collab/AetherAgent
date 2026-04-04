@@ -582,6 +582,389 @@ impl JsHandler for CssEscapeHandler {
     }
 }
 
+// ─── Rust-native Base64 (btoa/atob) ─────────────────────────────────────────
+
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct BtoaHandler;
+impl JsHandler for BtoaHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let input = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Validera Latin1-range
+        for ch in input.chars() {
+            if ch as u32 > 255 {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError: The string to be encoded contains characters outside of the Latin1 range.")?.into(),
+                ));
+            }
+        }
+        let bytes: Vec<u8> = input.chars().map(|c| c as u8).collect();
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let a = chunk[0] as u32;
+            let b = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+            let c = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+            let n = (a << 16) | (b << 8) | c;
+            out.push(B64_CHARS[((n >> 18) & 63) as usize] as char);
+            out.push(B64_CHARS[((n >> 12) & 63) as usize] as char);
+            out.push(if chunk.len() > 1 {
+                B64_CHARS[((n >> 6) & 63) as usize] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                B64_CHARS[(n & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+        Ok(rquickjs::String::from_str(ctx.clone(), &out)?.into_value())
+    }
+}
+
+struct AtobHandler;
+impl JsHandler for AtobHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let input = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Strip whitespace
+        let cleaned: String = input
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' '))
+            .collect();
+        if cleaned.len() % 4 == 1 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "InvalidCharacterError: The string to be decoded is not correctly encoded.",
+                )?
+                .into(),
+            ));
+        }
+        let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::with_capacity(cleaned.len() * 3 / 4);
+        let bytes = cleaned.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let a = table.iter().position(|&x| x == bytes[i]).unwrap_or(0) as u32;
+            let b = if i + 1 < bytes.len() {
+                table.iter().position(|&x| x == bytes[i + 1]).unwrap_or(0) as u32
+            } else {
+                0
+            };
+            let c_byte = if i + 2 < bytes.len() {
+                bytes[i + 2]
+            } else {
+                b'='
+            };
+            let d_byte = if i + 3 < bytes.len() {
+                bytes[i + 3]
+            } else {
+                b'='
+            };
+            let c = if c_byte == b'=' {
+                64u32
+            } else {
+                table.iter().position(|&x| x == c_byte).unwrap_or(0) as u32
+            };
+            let d = if d_byte == b'=' {
+                64u32
+            } else {
+                table.iter().position(|&x| x == d_byte).unwrap_or(0) as u32
+            };
+            out.push(((a << 2) | (b >> 4)) as u8);
+            if c != 64 {
+                out.push((((b & 15) << 4) | (c >> 2)) as u8);
+            }
+            if d != 64 {
+                out.push((((c & 3) << 6) | d) as u8);
+            }
+            i += 4;
+        }
+        // Latin1 output
+        let result: String = out.iter().map(|&b| b as char).collect();
+        Ok(rquickjs::String::from_str(ctx.clone(), &result)?.into_value())
+    }
+}
+
+// ─── Rust-native Scroll State ───────────────────────────────────────────────
+
+struct ScrollToHandler {
+    state: SharedState,
+}
+impl JsHandler for ScrollToHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        if let Some(first) = args.first() {
+            if let Some(obj) = first.as_object() {
+                // scrollTo({left, top})
+                let cur = s.scroll_positions.get(&0).copied().unwrap_or((0.0, 0.0));
+                let top = obj.get::<_, f64>("top").unwrap_or(cur.0);
+                let left = obj.get::<_, f64>("left").unwrap_or(cur.1);
+                s.scroll_positions.insert(0, (top, left));
+            } else if let Some(x) = first.as_number() {
+                let y = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0);
+                s.scroll_positions.insert(0, (y, x));
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ScrollByHandler {
+    state: SharedState,
+}
+impl JsHandler for ScrollByHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let (cur_top, cur_left) = s.scroll_positions.get(&0).copied().unwrap_or((0.0, 0.0));
+        if let Some(first) = args.first() {
+            if let Some(obj) = first.as_object() {
+                let dx = obj.get::<_, f64>("left").unwrap_or(0.0);
+                let dy = obj.get::<_, f64>("top").unwrap_or(0.0);
+                s.scroll_positions.insert(0, (cur_top + dy, cur_left + dx));
+            } else if let Some(x) = first.as_number() {
+                let y = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0);
+                s.scroll_positions.insert(0, (cur_top + y, cur_left + x));
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ScrollXGetter {
+    state: SharedState,
+}
+impl JsHandler for ScrollXGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let x = s.scroll_positions.get(&0).map_or(0.0, |p| p.1);
+        Ok(Value::new_float(ctx.clone(), x))
+    }
+}
+
+struct ScrollYGetter {
+    state: SharedState,
+}
+impl JsHandler for ScrollYGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let y = s.scroll_positions.get(&0).map_or(0.0, |p| p.0);
+        Ok(Value::new_float(ctx.clone(), y))
+    }
+}
+
+// ─── Rust-native structuredClone ────────────────────────────────────────────
+
+struct StructuredCloneHandler;
+impl JsHandler for StructuredCloneHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .cloned()
+            .unwrap_or(Value::new_undefined(ctx.clone()));
+        if val.is_undefined() {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "DataCloneError: The value could not be cloned.",
+                )?
+                .into(),
+            ));
+        }
+        // Serialisera till JSON och tillbaka — enklaste djupa kloningen
+        let json: String = ctx
+            .json_stringify(val)?
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_else(|| "null".to_string());
+        ctx.json_parse(json)
+    }
+}
+
+// ─── Rust-native Intl.NumberFormat ──────────────────────────────────────────
+
+struct IntlNumberFormatHandler;
+impl JsHandler for IntlNumberFormatHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let locale = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_else(|| "sv-SE".to_string());
+        let options = args.get(1).and_then(|v| v.as_object().cloned());
+
+        let style = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("style").ok())
+            .unwrap_or_else(|| "decimal".to_string());
+        let currency = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("currency").ok());
+        let currency_display = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("currencyDisplay").ok())
+            .unwrap_or_else(|| "symbol".to_string());
+        let min_frac: i32 = options
+            .as_ref()
+            .and_then(|o| o.get::<_, i32>("minimumFractionDigits").ok())
+            .unwrap_or(if style == "currency" { 2 } else { 0 });
+        let max_frac: i32 = options
+            .as_ref()
+            .and_then(|o| o.get::<_, i32>("maximumFractionDigits").ok())
+            .unwrap_or(if style == "currency" { 2 } else { 3 });
+
+        let is_sv = locale.starts_with("sv");
+
+        let formatter = Object::new(ctx.clone())?;
+        let locale_c = locale.clone();
+        let style_c = style.clone();
+        let currency_c = currency.clone();
+        let currency_display_c = currency_display.clone();
+
+        // format(number) metod
+        #[allow(dead_code)]
+        struct FormatFn {
+            locale: String,
+            style: String,
+            currency: Option<String>,
+            currency_display: String,
+            min_frac: i32,
+            max_frac: i32,
+            is_sv: bool,
+        }
+        impl JsHandler for FormatFn {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let num = args.first().and_then(|v| v.as_number()).unwrap_or(0.0);
+                let formatted = format_number(num, self.max_frac, self.is_sv);
+                let result = if self.style == "currency" {
+                    let sym = match self.currency.as_deref() {
+                        Some(c) => {
+                            if self.currency_display == "code" {
+                                c.to_uppercase()
+                            } else {
+                                match c.to_uppercase().as_str() {
+                                    "SEK" | "NOK" | "DKK" => "kr".to_string(),
+                                    "USD" => "$".to_string(),
+                                    "EUR" => "€".to_string(),
+                                    "GBP" => "£".to_string(),
+                                    "JPY" => "¥".to_string(),
+                                    "CHF" => "CHF".to_string(),
+                                    other => other.to_string(),
+                                }
+                            }
+                        }
+                        None => String::new(),
+                    };
+                    if self.is_sv {
+                        format!("{}\u{a0}{}", formatted, sym)
+                    } else {
+                        format!("{}{}", sym, formatted)
+                    }
+                } else if self.style == "percent" {
+                    format!("{}%", formatted)
+                } else {
+                    formatted
+                };
+                Ok(rquickjs::String::from_str(ctx.clone(), &result)?.into_value())
+            }
+        }
+
+        formatter.set(
+            "format",
+            Function::new(
+                ctx.clone(),
+                JsFn(FormatFn {
+                    locale: locale_c.clone(),
+                    style: style_c.clone(),
+                    currency: currency_c.clone(),
+                    currency_display: currency_display_c,
+                    min_frac,
+                    max_frac,
+                    is_sv,
+                }),
+            )?,
+        )?;
+
+        // resolvedOptions
+        let resolved = Object::new(ctx.clone())?;
+        resolved.set("locale", rquickjs::String::from_str(ctx.clone(), &locale)?)?;
+        resolved.set("numberingSystem", "latn")?;
+        resolved.set("style", rquickjs::String::from_str(ctx.clone(), &style)?)?;
+        if let Some(ref c) = currency {
+            resolved.set("currency", rquickjs::String::from_str(ctx.clone(), c)?)?;
+        }
+        resolved.set("minimumFractionDigits", min_frac)?;
+        resolved.set("maximumFractionDigits", max_frac)?;
+        formatter.set(
+            "resolvedOptions",
+            Function::new(ctx.clone(), {
+                struct ResolvedOpts {
+                    opts: rquickjs::Persistent<Object<'static>>,
+                }
+                impl JsHandler for ResolvedOpts {
+                    fn handle<'js>(
+                        &self,
+                        ctx: &Ctx<'js>,
+                        _args: &[Value<'js>],
+                    ) -> rquickjs::Result<Value<'js>> {
+                        Ok(self.opts.clone().restore(ctx)?.into_value())
+                    }
+                }
+                JsFn(ResolvedOpts {
+                    opts: rquickjs::Persistent::save(ctx, resolved),
+                })
+            })?,
+        )?;
+
+        Ok(formatter.into_value())
+    }
+}
+
+/// Formatera nummer med locale-anpassad separator
+fn format_number(num: f64, max_frac: i32, is_sv: bool) -> String {
+    let fixed = format!("{:.prec$}", num, prec = max_frac as usize);
+    let (int_part, dec_part) = if let Some(dot) = fixed.find('.') {
+        (&fixed[..dot], &fixed[dot + 1..])
+    } else {
+        (fixed.as_str(), "")
+    };
+
+    // Tusentals-separator
+    let group_sep = if is_sv { '\u{a0}' } else { ',' };
+    let dec_sep = if is_sv { ',' } else { '.' };
+
+    let mut grouped = String::new();
+    let digits: Vec<char> = int_part.chars().collect();
+    let start = if digits.first() == Some(&'-') { 1 } else { 0 };
+    if start == 1 {
+        grouped.push('-');
+    }
+    let num_digits = digits.len() - start;
+    for (i, &ch) in digits[start..].iter().enumerate() {
+        if i > 0 && (num_digits - i).is_multiple_of(3) {
+            grouped.push(group_sep);
+        }
+        grouped.push(ch);
+    }
+
+    if dec_part.is_empty() {
+        grouped
+    } else {
+        format!("{}{}{}", grouped, dec_sep, dec_part)
+    }
+}
+
 pub(super) fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
     register_window_with_viewport(ctx, state, 1280, 900)
 }
@@ -619,10 +1002,35 @@ pub(super) fn register_window_with_viewport<'js>(
     win.set("outerHeight", viewport_height)?;
     win.set("devicePixelRatio", 1.0)?;
 
-    // Scroll — spårar scrollX/scrollY via JS-getters
-    // Sätts upp via JS eval efter att window placerats på globalThis (se nedan)
-    win.set("_scrollX", 0.0f64)?;
-    win.set("_scrollY", 0.0f64)?;
+    // Scroll — Rust-native state tracking via BridgeState.scroll_positions[0]
+    win.set(
+        "scrollTo",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollToHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    win.set(
+        "scrollBy",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollByHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    win.set(
+        "scroll",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollToHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    // scrollX/scrollY registreras som getters i JS efter window sätts (se nedan)
     // getSelection — delegerar till document.getSelection
     win.set(
         "getSelection",
@@ -863,45 +1271,52 @@ pub(super) fn register_window_with_viewport<'js>(
     // Kopiera till globalThis
     ctx.globals().set("window", win)?;
 
-    // Registrera atob/btoa, encodeURI/decodeURI via JS + Event/CustomEvent constructors
+    // ─── Rust-native global-funktioner ──────────────────────────────────────
+    {
+        let globals: Object = ctx.globals();
+        globals.set("btoa", Function::new(ctx.clone(), JsFn(BtoaHandler))?)?;
+        globals.set("atob", Function::new(ctx.clone(), JsFn(AtobHandler))?)?;
+        globals.set(
+            "structuredClone",
+            Function::new(ctx.clone(), JsFn(StructuredCloneHandler))?,
+        )?;
+        // Synka till window
+        let w: Object = globals.get("window")?;
+        w.set("btoa", Function::new(ctx.clone(), JsFn(BtoaHandler))?)?;
+        w.set("atob", Function::new(ctx.clone(), JsFn(AtobHandler))?)?;
+        w.set(
+            "structuredClone",
+            Function::new(ctx.clone(), JsFn(StructuredCloneHandler))?,
+        )?;
+        // Scroll getters (native handlers redan registrerade på win)
+        w.set(
+            "__scrollXGetter",
+            Function::new(
+                ctx.clone(),
+                JsFn(ScrollXGetter {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+        w.set(
+            "__scrollYGetter",
+            Function::new(
+                ctx.clone(),
+                JsFn(ScrollYGetter {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+        // Intl.NumberFormat — Rust-native constructor
+        globals.set(
+            "__intlNumberFormat",
+            Function::new(ctx.clone(), JsFn(IntlNumberFormatHandler))?,
+        )?;
+    }
+
+    // JS glue-kod som INTE kan vara ren Rust (behöver Object.defineProperty, prototype chains, etc)
     ctx.eval::<(), _>(
         r#"
-        // btoa — RFC 4648 base64-encoding
-        globalThis.btoa = function(str) {
-            str = String(str);
-            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-            var out = '';
-            for (var i = 0; i < str.length; i += 3) {
-                var a = str.charCodeAt(i);
-                var b = i + 1 < str.length ? str.charCodeAt(i+1) : 0;
-                var c = i + 2 < str.length ? str.charCodeAt(i+2) : 0;
-                if (a > 255 || b > 255 || c > 255) throw new DOMException('The string to be encoded contains characters outside of the Latin1 range.', 'InvalidCharacterError');
-                var n = (a << 16) | (b << 8) | c;
-                out += chars[(n >> 18) & 63];
-                out += chars[(n >> 12) & 63];
-                out += (i + 1 < str.length) ? chars[(n >> 6) & 63] : '=';
-                out += (i + 2 < str.length) ? chars[n & 63] : '=';
-            }
-            return out;
-        };
-        // atob — RFC 4648 base64-decoding
-        globalThis.atob = function(encoded) {
-            encoded = String(encoded).replace(/[\t\n\f\r ]/g, '');
-            if (encoded.length % 4 === 1) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
-            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-            var out = '';
-            for (var i = 0; i < encoded.length; i += 4) {
-                var a = chars.indexOf(encoded[i]);
-                var b = chars.indexOf(encoded[i+1]);
-                var c = chars.indexOf(encoded[i+2]);
-                var d = chars.indexOf(encoded[i+3]);
-                if (a < 0 || b < 0) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
-                out += String.fromCharCode((a << 2) | (b >> 4));
-                if (c !== 64 && c >= 0) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-                if (d !== 64 && d >= 0) out += String.fromCharCode(((c & 3) << 6) | d);
-            }
-            return out;
-        };
         globalThis.self = globalThis.window;
         globalThis.frames = globalThis.window;
         globalThis.parent = globalThis.window;
@@ -933,55 +1348,18 @@ pub(super) fn register_window_with_viewport<'js>(
             }
         }
 
-        // ─── Scroll state tracking ──────────────────────────────────────
+        // ─── Scroll getters (Rust-native handlers) ────────────────────
         if (globalThis.window) {
-            Object.defineProperty(window, 'scrollX', {
-                get: function() { return window._scrollX || 0; },
-                enumerable: true, configurable: true
-            });
-            Object.defineProperty(window, 'pageXOffset', {
-                get: function() { return window._scrollX || 0; },
-                enumerable: true, configurable: true
-            });
-            Object.defineProperty(window, 'scrollY', {
-                get: function() { return window._scrollY || 0; },
-                enumerable: true, configurable: true
-            });
-            Object.defineProperty(window, 'pageYOffset', {
-                get: function() { return window._scrollY || 0; },
-                enumerable: true, configurable: true
-            });
-            window.scrollTo = function(xOrOpts, y) {
-                if (typeof xOrOpts === 'object' && xOrOpts !== null) {
-                    window._scrollX = xOrOpts.left || 0;
-                    window._scrollY = xOrOpts.top || 0;
-                } else {
-                    window._scrollX = xOrOpts || 0;
-                    window._scrollY = y || 0;
-                }
-            };
-            window.scroll = window.scrollTo;
-            window.scrollBy = function(xOrOpts, y) {
-                if (typeof xOrOpts === 'object' && xOrOpts !== null) {
-                    window._scrollX = (window._scrollX || 0) + (xOrOpts.left || 0);
-                    window._scrollY = (window._scrollY || 0) + (xOrOpts.top || 0);
-                } else {
-                    window._scrollX = (window._scrollX || 0) + (xOrOpts || 0);
-                    window._scrollY = (window._scrollY || 0) + (y || 0);
-                }
-            };
+            Object.defineProperty(window, 'scrollX', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'pageXOffset', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'scrollY', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'pageYOffset', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            // scrollTo/scrollBy/scroll redan satta som Rust-native på win-objektet
             globalThis.scrollTo = window.scrollTo;
             globalThis.scroll = window.scroll;
             globalThis.scrollBy = window.scrollBy;
         }
-
-        // ─── structuredClone ────────────────────────────────────────────
-        if (typeof globalThis.structuredClone === 'undefined') {
-            globalThis.structuredClone = function(obj) {
-                if (obj === undefined) throw new DOMException('The value could not be cloned.', 'DataCloneError');
-                return JSON.parse(JSON.stringify(obj));
-            };
-        }
+        // structuredClone redan registrerad som Rust-native
 
         // ─── customElements registry ────────────────────────────────────
         (function() {
@@ -1147,57 +1525,14 @@ pub(super) fn register_window_with_viewport<'js>(
             };
         };
 
-        // ─── Intl.NumberFormat (valutaformatering, prisvisning) ─────────
+        // Intl.NumberFormat — Rust-native (registreras via __intlNumberFormat)
         if (typeof Intl === 'undefined') globalThis.Intl = {};
         if (!Intl.NumberFormat) {
-            Intl.NumberFormat = function NumberFormat(locale, options) {
-                this._locale = locale || 'sv-SE';
-                this._options = options || {};
-            };
-            Intl.NumberFormat.prototype.format = function(num) {
-                num = Number(num);
-                var opts = this._options;
-                var style = opts.style || 'decimal';
-                var minFrac = opts.minimumFractionDigits;
-                var maxFrac = opts.maximumFractionDigits;
-                if (minFrac === undefined && maxFrac === undefined) {
-                    if (style === 'currency') { minFrac = 2; maxFrac = 2; }
-                    else { minFrac = 0; maxFrac = 3; }
-                }
-                if (minFrac === undefined) minFrac = 0;
-                if (maxFrac === undefined) maxFrac = minFrac;
-                var str = num.toFixed(maxFrac);
-                // Decimal → locale separator
-                var locale = this._locale || 'en';
-                var sep = locale.indexOf('sv') === 0 ? ',' : '.';
-                var groupSep = locale.indexOf('sv') === 0 ? '\u00a0' : ',';
-                str = str.replace('.', sep);
-                // Tusentals-separator
-                var parts = str.split(sep);
-                var intPart = parts[0];
-                var decPart = parts[1] || '';
-                intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, groupSep);
-                str = decPart ? (intPart + sep + decPart) : intPart;
-                // Currency prefix/suffix
-                if (style === 'currency' && opts.currency) {
-                    var curr = opts.currency.toUpperCase();
-                    var display = opts.currencyDisplay || 'symbol';
-                    var symbols = {SEK:'kr',USD:'$',EUR:'€',GBP:'£',NOK:'kr',DKK:'kr',JPY:'¥',CHF:'CHF'};
-                    var sym = (display === 'code') ? curr : (symbols[curr] || curr);
-                    if (locale.indexOf('sv') === 0) str = str + '\u00a0' + sym;
-                    else str = sym + str;
-                }
-                if (style === 'percent') str = str + '%';
-                return str;
-            };
-            Intl.NumberFormat.prototype.resolvedOptions = function() {
-                return Object.assign({ locale: this._locale, numberingSystem: 'latn' }, this._options);
-            };
-            Intl.NumberFormat.prototype.formatToParts = function(num) {
-                var str = this.format(num);
-                return [{ type: 'literal', value: str }];
+            Intl.NumberFormat = function NumberFormat(loc, opts) {
+                return __intlNumberFormat(loc || 'sv-SE', opts || {});
             };
         }
+        // Intl.DateTimeFormat — minimal JS-wrapper (kan inte vara pure Rust utan icu4x)
         if (!Intl.DateTimeFormat) {
             Intl.DateTimeFormat = function DateTimeFormat(locale, options) {
                 this._locale = locale || 'sv-SE';
@@ -1212,26 +1547,22 @@ pub(super) fn register_window_with_viewport<'js>(
             };
         }
 
-        // ─── PerformanceObserver ─────────────────────────────────────────
+        // ─── PerformanceObserver / ReportingObserver ─────────────────────
+        // Dessa kräver JS prototype chains som inte kan vara pure Rust JsHandler
         if (typeof PerformanceObserver === 'undefined') {
             globalThis.PerformanceObserver = function PerformanceObserver(callback) {
-                this._callback = callback;
-                this._types = [];
+                this._callback = callback; this._types = [];
             };
-            PerformanceObserver.prototype.observe = function(options) {
-                if (options && options.entryTypes) this._types = options.entryTypes;
-                if (options && options.type) this._types = [options.type];
+            PerformanceObserver.prototype.observe = function(opts) {
+                if (opts && opts.entryTypes) this._types = opts.entryTypes;
+                if (opts && opts.type) this._types = [opts.type];
             };
             PerformanceObserver.prototype.disconnect = function() { this._types = []; };
             PerformanceObserver.prototype.takeRecords = function() { return []; };
             PerformanceObserver.supportedEntryTypes = ['mark', 'measure', 'navigation', 'resource', 'paint', 'longtask'];
         }
-
-        // ─── ReportingObserver ──────────────────────────────────────────
         if (typeof ReportingObserver === 'undefined') {
-            globalThis.ReportingObserver = function ReportingObserver(callback, options) {
-                this._callback = callback;
-            };
+            globalThis.ReportingObserver = function ReportingObserver(cb) { this._callback = cb; };
             ReportingObserver.prototype.observe = function() {};
             ReportingObserver.prototype.disconnect = function() {};
             ReportingObserver.prototype.takeRecords = function() { return []; };
