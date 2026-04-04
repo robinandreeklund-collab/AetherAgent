@@ -1,7 +1,7 @@
-# Causal Resonance Field Retrieval (CRFR) v11
+# Causal Resonance Field Retrieval (CRFR) v12
 
-**Status:** Produktionsredo, empiriskt verifierad (8 sajter, 7/8 buggar bekräftade) | **Modul:** `src/resonance.rs`
-**MCP:** `parse_crfr` + `crfr_feedback` | **HTTP:** `/api/parse-crfr` + `/api/crfr-feedback`
+**Status:** Produktionsredo | **Modul:** `src/resonance.rs` (2100+ rader)
+**MCP:** 6 tools | **HTTP:** 8 endpoints | **WASM:** 9 exports
 
 ---
 
@@ -619,6 +619,53 @@ LLM:en MÅSTE expandera frågan med synonymer innan anrop:
                              │
   Agent feedback ───→ causal_memory uppdaterad
                      (per nod, per URL, i LRU cache)
+```
+
+---
+
+## API-paritet (v12)
+
+| Funktion | WASM | MCP | HTTP | Beskrivning |
+|----------|:----:|:---:|:----:|-------------|
+| `parse_crfr` | ✅ | ✅ | ✅ | Kärn-parsing (BM25+HDC+wave) |
+| `crfr_feedback` | ✅ | ✅ | ✅ | Explicit kausal feedback |
+| `crfr_implicit_feedback` | ✅ | — | — | Lär från LLM-svar automatiskt |
+| `parse_crfr_multi` | ✅ | ✅ | ✅ | Multi-query varianter |
+| `crfr_save_field` | ✅ | ✅ | ✅ | Spara kausalt minne |
+| `crfr_load_field` | ✅ | ✅ | ✅ | Ladda kausalt minne |
+| `crfr_update_node` | ✅ | ✅ | ✅ | Inkrementell DOM-uppdatering |
+| `crfr_transfer` | ✅ | ✅ | ✅ | Cross-URL transfer learning |
+| `extract_data_multi` | ✅ | ✅ | ✅ | Jämförande extraktion |
+
+## v12 nya features
+
+| Feature | Källa | Effekt |
+|---------|-------|--------|
+| **Implicit feedback** | Research #6 | Lär från LLM-svar utan explicit feedback-anrop |
+| **RAG suggested_action** | Research #5 | confidence→"answer_directly"/"expand_search" |
+| **Diversity penalty** | Research #9 | 3:e+ syskon ×0.7, förhindrar subtree-dominans |
+| **Domain shared learning** | Research #2+4 | DomainRegistry: warm-start priors per domän |
+| **API full paritet** | Audit | 8/8 funktioner exponerade (var 2/8) |
+| **Race condition fix** | Audit | save_field version-check (total_queries) |
+| **labels_ref elimination** | Audit | Pre-computed shape+penalty maps (noll-klon) |
+| **Dead code removal** | Audit | propagate_decomposed() borttagen |
+
+## Benchmark v12
+
+```
+20-test (med ONNX):
+  CRFR:  @1=9/20  @3=14/20  @10=16/20  @20=16/20  11.9ms  27.1x
+  Pipe:  @1=6/20  @3=10/20  @10=18/20  @20=19/20  323ms
+
+Token: 22 236 → 186 (0.8% av HTML, 99.2% reduktion)
+
+50-sajt live (senaste körning):
+  CRFR:  @3=42/45 (93.3%)  @20=44/45 (97.8%)
+  Pipe:  @3=43/45           @20=44/45
+
+Empirisk djupanalys (8 sajter):
+  Raw: 6 350 141 chars → CRFR: 3 284 chars (99.9% reduktion)
+  Token-kostnad: $3.97 → $0.002 per batch
 ```
 
 ---
