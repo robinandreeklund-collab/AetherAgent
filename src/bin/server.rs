@@ -1422,11 +1422,30 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
     };
     let fetch_ms = fetch_result.fetch_time_ms;
 
-    // Adaptiv parse: väljer automatiskt rätt pipeline-tier
-    // Tier 0 (Hydration) → Tier 1 (Static) → Tier 2 (QuickJS+DOM) → fallback
+    // Pre-fetcha API-URLs från inline scripts (SPA-stöd)
+    let prefetch_start = std::time::Instant::now();
+    let api_responses = aether_agent::prefetch_api_urls(
+        &fetch_result.body,
+        &fetch_result.final_url,
+        10,   // max 10 API-anrop
+        3000, // 3s timeout per anrop
+    )
+    .await;
+    let prefetch_ms = prefetch_start.elapsed().as_millis() as u64;
+    let prefetched_count = api_responses.len();
+
+    // Adaptiv parse med pre-fetched API-data injicerad i JS-sandlådan
     let parse_start = std::time::Instant::now();
-    let adaptive_json =
-        aether_agent::parse_adaptive(&fetch_result.body, &req.goal, &fetch_result.final_url);
+    let adaptive_json = if api_responses.is_empty() {
+        aether_agent::parse_adaptive(&fetch_result.body, &req.goal, &fetch_result.final_url)
+    } else {
+        aether_agent::parse_adaptive_with_fetch(
+            &fetch_result.body,
+            &req.goal,
+            &fetch_result.final_url,
+            api_responses,
+        )
+    };
     let parse_ms = parse_start.elapsed().as_millis() as u64;
 
     // Fas C.13: Inline XHR-URLs i svaret (om de finns i HTML:en)
@@ -1449,8 +1468,10 @@ async fn fetch_parse(Json(req): Json<FetchParseRequest>) -> impl IntoResponse {
         "tree": adaptive_value.get("tree").cloned().unwrap_or_default(),
         "tier_used": adaptive_value.get("tier_used").cloned().unwrap_or_default(),
         "total_time_ms": total_time_ms,
+        "prefetched_api_count": prefetched_count,
         "timing": {
             "fetch_ms": fetch_ms,
+            "prefetch_api_ms": prefetch_ms,
             "parse_ms": parse_ms,
             "total_ms": total_time_ms,
         }

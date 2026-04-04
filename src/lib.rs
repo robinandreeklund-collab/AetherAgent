@@ -259,37 +259,48 @@ fn build_tree_hybrid_with_config(
 /// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
 /// och används för att bygga det semantiska trädet.
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
-    #[cfg(all(feature = "js-eval", feature = "blitz"))]
+    run_lifecycle_parse_with_fetch(html, goal, url, std::collections::HashMap::new())
+}
+
+/// Kör lifecycle-parse med pre-populated fetch-responses.
+/// Används av fetch_parse-pipelinen för att ge JS-sandbox tillgång till API-data.
+fn run_lifecycle_parse_with_fetch(
+    html: &str,
+    goal: &str,
+    url: &str,
+    fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
+) -> SemanticTree {
+    #[cfg(feature = "js-eval")]
     {
         let scripts = js_eval::extract_ordered_scripts(html);
         if !scripts.is_empty() {
-            let rcdom = parser::parse_html(html);
-            let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
-            let eval_with_arena = dom_bridge::eval_js_with_lifecycle_and_arena(&scripts, arena);
+            let arena = arena_dom_sink::parse_html_to_arena(html);
+            let config = dom_bridge::SpaConfig {
+                fetch_responses,
+                base_url: url.to_string(),
+                ..Default::default()
+            };
+            let (eval_result, eval_arena) = dom_bridge::eval_spa(&scripts, arena, config);
 
-            // Samla fetch-URLs från JS runtime (BUGG J)
-            let runtime_urls = eval_with_arena.result.fetched_urls.clone();
+            // Samla fetch-URLs från JS runtime
+            let runtime_urls = eval_result.fetched_urls.clone();
 
-            // Logga JS-fel (FIX-SPA-001)
-            if let Some(ref err) = eval_with_arena.result.error {
+            // Logga JS-fel
+            if let Some(ref err) = eval_result.error {
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
             }
 
             // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
-            if !eval_with_arena.result.mutations.is_empty() {
-                let modified_html = eval_with_arena
-                    .arena
-                    .serialize_html(eval_with_arena.arena.document);
+            if !eval_result.mutations.is_empty() {
+                let modified_html = eval_arena.serialize_html(eval_arena.document);
                 let mut tree = build_tree(&modified_html, goal, url);
                 attach_pending_urls(&mut tree, html, &runtime_urls);
                 return tree;
             }
 
             // Om JS körde utan fel — prova arena-HTML (kan ha ändrats utan mutation-record)
-            if eval_with_arena.result.error.is_none() {
-                let arena_html = eval_with_arena
-                    .arena
-                    .serialize_html(eval_with_arena.arena.document);
+            if eval_result.error.is_none() {
+                let arena_html = eval_arena.serialize_html(eval_arena.document);
                 if arena_html.len() > 10 && arena_html != html {
                     let mut tree = build_tree(&arena_html, goal, url);
                     attach_pending_urls(&mut tree, html, &runtime_urls);
@@ -418,7 +429,8 @@ pub fn profile_parse_stages(html: &str, goal: &str, url: &str) -> String {
 #[wasm_bindgen]
 pub fn parse_to_semantic_tree(html: &str, goal: &str, url: &str) -> String {
     let start = now_ms();
-    let mut tree = build_tree(html, goal, url);
+    // Auto-detect SPA: om sidan har inline scripts, kör lifecycle-parse
+    let mut tree = run_lifecycle_parse(html, goal, url);
     tree.parse_time_ms = now_ms().saturating_sub(start);
 
     // Sortera noder efter relevance (högst först) för LLM-effektivitet
@@ -742,6 +754,17 @@ pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> S
     } else {
         build_tree(html, goal, url)
     }
+}
+
+/// Build semantic tree for CRFR with pre-populated fetch responses.
+/// Used by fetch_parse pipeline: hämta sida → pre-fetch API URLs → eval JS med data.
+pub fn build_tree_for_crfr_with_fetch(
+    html: &str,
+    goal: &str,
+    url: &str,
+    fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
+) -> SemanticTree {
+    run_lifecycle_parse_with_fetch(html, goal, url, fetch_responses)
 }
 
 fn is_error_page(title: &str, total_nodes: usize) -> bool {
@@ -1782,6 +1805,147 @@ pub fn detect_xhr_urls(html: &str) -> String {
     match serde_json::to_string(&captures) {
         Ok(json) => json,
         Err(e) => format!(r#"{{"error": "Serialization failed: {}"}}"#, e),
+    }
+}
+
+/// Pre-fetcha API-URLs som inline scripts refererar till.
+/// Returnerar HashMap<URL, FetchResponse> som kan injiceras i eval_spa.
+#[cfg(feature = "fetch")]
+pub async fn prefetch_api_urls(
+    html: &str,
+    base_url: &str,
+    max_urls: usize,
+    timeout_ms: u64,
+) -> std::collections::HashMap<String, dom_bridge::FetchResponse> {
+    let mut responses = std::collections::HashMap::new();
+
+    // Extrahera API-URLs från inline scripts
+    let captures = js_bridge::extract_xhr_from_snippets(html);
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return responses,
+    };
+
+    for capture in captures.iter().take(max_urls) {
+        let url = &capture.url;
+        // Resolve relativa URLs mot base_url
+        let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+            url.clone()
+        } else if url.starts_with('/') {
+            // Absolut path — resolve mot base origin
+            if let Some(idx) = base_url.find("://") {
+                if let Some(slash) = base_url[idx + 3..].find('/') {
+                    format!("{}{}", &base_url[..idx + 3 + slash], url)
+                } else {
+                    format!("{}{}", base_url.trim_end_matches('/'), url)
+                }
+            } else {
+                continue;
+            }
+        } else {
+            continue; // Skippa oklara URLs
+        };
+
+        // Validera URL mot SSRF-skydd
+        if fetch::validate_url(&full_url).is_err() {
+            continue;
+        }
+
+        // Hämta
+        let resp = match client.get(&full_url).send().await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let status = resp.status().as_u16();
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let mut headers = std::collections::HashMap::new();
+        for (k, v) in resp.headers() {
+            if let Ok(vs) = v.to_str() {
+                headers.insert(k.as_str().to_string(), vs.to_string());
+            }
+        }
+        let body = match resp.text().await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        responses.insert(
+            full_url,
+            dom_bridge::FetchResponse {
+                status,
+                content_type,
+                body,
+                headers,
+            },
+        );
+    }
+
+    responses
+}
+
+/// Adaptive parse med pre-fetched API-responses.
+/// Samma som parse_adaptive men injicerar API-data i JS-sandlådan.
+#[cfg(feature = "fetch")]
+pub fn parse_adaptive_with_fetch(
+    html: &str,
+    goal: &str,
+    url: &str,
+    fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
+) -> String {
+    let start = now_ms();
+    let decision = escalation::select_tier(html, url);
+
+    let (mut tree, tier_used) = match &decision.tier {
+        escalation::ParseTier::Hydration { .. } => {
+            let t = build_tree(html, goal, url);
+            (t, "hydration")
+        }
+        escalation::ParseTier::StaticParse => {
+            let t = build_tree(html, goal, url);
+            (t, "static")
+        }
+        escalation::ParseTier::QuickJsDom { .. }
+        | escalation::ParseTier::QuickJsLifecycle { .. } => {
+            // Använd lifecycle-parse med pre-fetched responses
+            let t = run_lifecycle_parse_with_fetch(html, goal, url, fetch_responses);
+            (t, "quickjs_lifecycle_spa")
+        }
+        escalation::ParseTier::BlitzRender | escalation::ParseTier::ChromeCdp { .. } => {
+            // Även för Tier 3/4: kör lifecycle med fetch istället för bara static
+            let t = run_lifecycle_parse_with_fetch(html, goal, url, fetch_responses);
+            (t, "quickjs_lifecycle_spa_fallback")
+        }
+    };
+
+    tree.parse_time_ms = now_ms().saturating_sub(start);
+    tree.nodes
+        .sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+
+    #[derive(serde::Serialize)]
+    struct AdaptiveResult {
+        tree: SemanticTree,
+        tier_used: String,
+        tier_decision: escalation::TierDecision,
+    }
+
+    let output = AdaptiveResult {
+        tier_used: tier_used.to_string(),
+        tier_decision: decision,
+        tree,
+    };
+
+    match serialize_json(&output, output.tree.nodes.len()) {
+        Ok(json) => json,
+        Err(e) => e,
     }
 }
 

@@ -1354,10 +1354,27 @@ async fn handle_fetch_parse(
     };
 
     let fetch_ms = start.elapsed().as_millis() as u64;
+
+    // Pre-fetcha API-URLs från inline scripts (SPA-stöd)
+    let api_responses =
+        aether_agent::prefetch_api_urls(&fetch_result.body, &fetch_result.final_url, 10, 3000)
+            .await;
+    let prefetched_count = api_responses.len();
+
     let parse_start = std::time::Instant::now();
 
-    let tree_json =
-        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url);
+    // Använd adaptive parse med pre-fetched API-data om tillgängligt
+    let tree_json = if api_responses.is_empty() {
+        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url)
+    } else {
+        let tree = aether_agent::build_tree_for_crfr_with_fetch(
+            &fetch_result.body,
+            goal,
+            &fetch_result.final_url,
+            api_responses,
+        );
+        serde_json::to_string(&tree).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
+    };
     let xhr_json = aether_agent::detect_xhr_urls(&fetch_result.body);
 
     let parse_ms = parse_start.elapsed().as_millis() as u64;
