@@ -1248,15 +1248,26 @@ impl ResonanceField {
             return self.propagate_top_k(goals[0], top_k);
         }
 
-        // Kör varje variant och samla resultat
-        let mut best: HashMap<u32, ResonanceResult> = HashMap::new();
+        // #1 Batch optimization: ensure BM25 cache is built once, shared across all variants
+        if self.bm25_cache.is_none() {
+            let combined: Vec<(u32, String)> = self
+                .node_labels
+                .iter()
+                .map(|(&id, label)| match self.node_values.get(&id) {
+                    Some(val) => (id, format!("{} {} {}", label, val, val)),
+                    None => (id, label.clone()),
+                })
+                .collect();
+            let refs: Vec<(u32, &str)> = combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
+            self.bm25_cache = Some(TfIdfIndex::build(&refs));
+        }
 
+        // Run variants — BM25 cache is warm, each propagate() skips rebuild
+        let mut best: HashMap<u32, ResonanceResult> = HashMap::new();
         for goal in goals {
-            // Nollställ amplituder mellan varianter
             for state in self.nodes.values_mut() {
                 state.amplitude = 0.0;
             }
-
             let results = self.propagate(goal);
             for r in results {
                 let entry = best.entry(r.node_id).or_insert_with(|| ResonanceResult {
@@ -1266,7 +1277,6 @@ impl ResonanceField {
                     resonance_type: r.resonance_type,
                     causal_boost: 0.0,
                 });
-                // Union: behåll högsta amplitude per nod
                 if r.amplitude > entry.amplitude {
                     entry.amplitude = r.amplitude;
                     entry.resonance_type = r.resonance_type;
@@ -1626,10 +1636,23 @@ impl ResonanceField {
         new_role: &str,
         new_value: Option<&str>,
     ) {
+        // Read old combined label BEFORE updating (for incremental BM25)
+        let old_combined =
+            self.node_labels
+                .get(&node_id)
+                .map(|old_label| match self.node_values.get(&node_id) {
+                    Some(val) => format!("{} {} {}", old_label, val, val),
+                    None => old_label.clone(),
+                });
+
+        // Update node state
         if let Some(state) = self.nodes.get_mut(&node_id) {
-            state.text_hv = Hypervector::from_text_ngrams(new_label);
+            state.text_hv = if new_label.is_empty() {
+                Hypervector::from_seed(&format!("__empty_{}", node_id))
+            } else {
+                Hypervector::from_text_ngrams(new_label)
+            };
             state.role = new_role.to_string();
-            // Kausal minne bevaras — noden "kommer ihåg" tidigare framgångar
         }
         self.node_labels.insert(node_id, new_label.to_string());
         if let Some(val) = new_value {
@@ -1637,8 +1660,17 @@ impl ResonanceField {
         } else {
             self.node_values.remove(&node_id);
         }
-        // Invalidera cachad BM25-index (byggs om vid nästa propagation)
-        self.bm25_cache = None;
+
+        // Incremental BM25 update (not full invalidation)
+        let new_combined = match new_value {
+            Some(val) => format!("{} {} {}", new_label, val, val),
+            None => new_label.to_string(),
+        };
+        if let Some(ref mut idx) = self.bm25_cache {
+            if let Some(old) = old_combined {
+                idx.update_node(node_id, &old, &new_combined);
+            }
+        }
     }
 
     /// Add a new node to the field (AJAX-laddat innehåll).
@@ -1678,7 +1710,14 @@ impl ResonanceField {
             self.parent_map.insert(node_id, pid);
             self.children_map.entry(pid).or_default().push(node_id);
         }
-        self.bm25_cache = None;
+        // Incremental BM25: add new node to existing index
+        if let Some(ref mut idx) = self.bm25_cache {
+            let combined = match value {
+                Some(val) => format!("{} {} {}", label, val, val),
+                None => label.to_string(),
+            };
+            idx.update_node(node_id, "", &combined); // Empty old_label = pure add
+        }
     }
 
     /// Remove a node from the field (DOM-deletion).
@@ -1692,7 +1731,10 @@ impl ResonanceField {
             }
         }
         self.children_map.remove(&node_id);
-        self.bm25_cache = None;
+        // Incremental BM25: remove from existing index
+        if let Some(ref mut idx) = self.bm25_cache {
+            idx.remove_node(node_id);
+        }
     }
 
     // ─── Cross-URL Transfer ─────────────────────────────────────────────
