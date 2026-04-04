@@ -4299,3 +4299,502 @@ fn test_dom_performance_benchmark() {
     assert!(t10 < 100_000, "SPA < 100ms (debug): {}us", t10);
     assert!(t11 < 500_000, "200 noder < 500ms (debug): {}us", t11);
 }
+
+// ─── SPA Integration Tests ──────────────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+mod spa_tests {
+    use aether_agent::arena_dom_sink::parse_html_to_arena;
+    use aether_agent::dom_bridge::{eval_spa, FetchResponse, SpaConfig, WebSocketMessages};
+    use std::collections::HashMap;
+
+    // ─── Test 1: React-liknande SPA med fetch → DOM render ──────────────
+
+    #[test]
+    fn test_spa_react_fetch_render() {
+        let html = r##"<html><body><div id="root">Loading...</div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let mut fetch_responses = HashMap::new();
+        fetch_responses.insert(
+            "https://api.example.com/products".to_string(),
+            FetchResponse {
+                status: 200,
+                content_type: "application/json".to_string(),
+                body: r#"[{"name":"Laptop","price":9999},{"name":"Phone","price":4999}]"#
+                    .to_string(),
+                headers: HashMap::new(),
+            },
+        );
+
+        let script = r#"
+            // Simulera React-liknande SPA: fetch data → render till DOM
+            var root = document.getElementById('root');
+            root.innerHTML = '<p>Fetching...</p>';
+
+            fetch('https://api.example.com/products')
+                .then(function(r) { return r.json(); })
+                .then(function(products) {
+                    var html = '<h1>Produkter</h1><ul>';
+                    for (var i = 0; i < products.length; i++) {
+                        html += '<li class="product">' + products[i].name + ' - ' + products[i].price + ' kr</li>';
+                    }
+                    html += '</ul>';
+                    root.innerHTML = html;
+                });
+        "#
+        .to_string();
+
+        let config = SpaConfig {
+            fetch_responses,
+            ..Default::default()
+        };
+
+        let (result, arena) = eval_spa(&[script], arena, config);
+        assert!(result.error.is_none(), "SPA eval error: {:?}", result.error);
+        assert!(
+            !result.fetched_urls.is_empty(),
+            "Borde ha fångat fetch-URLs"
+        );
+        assert_eq!(
+            result.fetched_urls[0], "https://api.example.com/products",
+            "Borde fånga rätt URL"
+        );
+
+        // Verifiera att DOM:en innehåller renderat innehåll
+        let root_key = arena.document;
+        let rendered = arena.serialize_inner_html(root_key);
+        assert!(
+            rendered.contains("Laptop"),
+            "DOM borde innehålla 'Laptop' efter fetch+render: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("9999"),
+            "DOM borde innehålla priset '9999': {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("Phone"),
+            "DOM borde innehålla 'Phone': {}",
+            rendered
+        );
+    }
+
+    // ─── Test 2: SPA-routing med History API ────────────────────────────
+
+    #[test]
+    fn test_spa_client_side_routing() {
+        let html = r##"<html><body>
+            <nav id="nav"></nav>
+            <div id="content">Home</div>
+        </body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            // Enkel SPA-router
+            function navigate(path) {
+                history.pushState({page: path}, '', path);
+                var content = document.getElementById('content');
+                if (path === '/about') {
+                    content.textContent = 'About Page';
+                } else if (path === '/contact') {
+                    content.textContent = 'Contact Page';
+                } else {
+                    content.textContent = 'Home Page';
+                }
+            }
+
+            // Navigera genom appen
+            navigate('/about');
+            var aboutText = document.getElementById('content').textContent;
+            navigate('/contact');
+            var contactText = document.getElementById('content').textContent;
+
+            // Testa back
+            history.back();
+            var afterBack = location.pathname;
+
+            aboutText + '|' + contactText + '|' + afterBack;
+        "#
+        .to_string();
+
+        let (result, _arena) = eval_spa(&[script], arena, SpaConfig::default());
+        assert!(result.error.is_none(), "Router error: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("About Page|Contact Page|/about"),
+            "SPA-routing borde fungera korrekt"
+        );
+    }
+
+    // ─── Test 3: localStorage + sessionStorage persistens ───────────────
+
+    #[test]
+    fn test_spa_storage_persistence() {
+        let html = r##"<html><body><div id="app"></div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            // Spara användarpreferenser
+            localStorage.setItem('theme', 'dark');
+            localStorage.setItem('lang', 'sv');
+            sessionStorage.setItem('token', 'abc123');
+
+            // Läs tillbaka
+            var theme = localStorage.getItem('theme');
+            var lang = localStorage.getItem('lang');
+            var token = sessionStorage.getItem('token');
+            var missing = localStorage.getItem('nonexistent');
+
+            // Rendera
+            var app = document.getElementById('app');
+            app.innerHTML = '<p>Theme: ' + theme + '</p><p>Lang: ' + lang + '</p>';
+
+            theme + '|' + lang + '|' + token + '|' + (missing === null ? 'null' : missing);
+        "#
+        .to_string();
+
+        let (result, arena) = eval_spa(&[script], arena, SpaConfig::default());
+        assert!(result.error.is_none(), "Storage error: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("dark|sv|abc123|null"),
+            "Storage borde fungera korrekt"
+        );
+        let rendered = arena.serialize_inner_html(arena.document);
+        assert!(
+            rendered.contains("Theme: dark"),
+            "DOM borde visa theme: {}",
+            rendered
+        );
+    }
+
+    // ─── Test 4: WebSocket real-time data ───────────────────────────────
+
+    #[test]
+    fn test_spa_websocket_realtime() {
+        let html = r##"<html><body><div id="ticker">Connecting...</div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let mut ws_messages = HashMap::new();
+        ws_messages.insert(
+            "wss://stream.avanza.se/quotes".to_string(),
+            WebSocketMessages {
+                messages: vec![
+                    r#"{"symbol":"AAPL","price":178.50}"#.to_string(),
+                    r#"{"symbol":"TSLA","price":242.10}"#.to_string(),
+                ],
+            },
+        );
+
+        let script = r#"
+            var ticker = document.getElementById('ticker');
+            var prices = [];
+
+            var ws = new WebSocket('wss://stream.avanza.se/quotes');
+            ws.onopen = function() {
+                ticker.textContent = 'Connected';
+            };
+            ws.onmessage = function(e) {
+                var data = JSON.parse(e.data);
+                prices.push(data.symbol + ':' + data.price);
+                ticker.textContent = prices.join(', ');
+            };
+        "#
+        .to_string();
+
+        let config = SpaConfig {
+            websocket_messages: ws_messages,
+            ..Default::default()
+        };
+
+        let (result, arena) = eval_spa(&[script], arena, config);
+        assert!(
+            result.error.is_none(),
+            "WebSocket error: {:?}",
+            result.error
+        );
+
+        let rendered = arena.serialize_inner_html(arena.document);
+        assert!(
+            rendered.contains("AAPL") && rendered.contains("178.5"),
+            "DOM borde visa AAPL-kurs efter WebSocket-meddelanden: {}",
+            rendered
+        );
+    }
+
+    // ─── Test 5: Komplett SPA-scenario (Avanza-liknande) ────────────────
+
+    #[test]
+    fn test_spa_avanza_like_full_scenario() {
+        let html = r##"<html><head><title>Min Portfölj</title></head><body>
+            <header><h1 id="title">Avanza</h1></header>
+            <nav id="nav"><a href="/portfolio">Portfölj</a><a href="/market">Marknad</a></nav>
+            <main id="app">Loading...</main>
+            <footer>© 2026</footer>
+        </body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let mut fetch_responses = HashMap::new();
+        // API: portföljdata
+        fetch_responses.insert(
+            "https://api.avanza.se/portfolio".to_string(),
+            FetchResponse {
+                status: 200,
+                content_type: "application/json".to_string(),
+                body: r#"{"holdings":[{"name":"Volvo B","shares":100,"value":23400},{"name":"Ericsson B","shares":200,"value":18600}],"total":42000}"#.to_string(),
+                headers: HashMap::new(),
+            },
+        );
+        // API: marknad
+        fetch_responses.insert(
+            "https://api.avanza.se/market/index".to_string(),
+            FetchResponse {
+                status: 200,
+                content_type: "application/json".to_string(),
+                body: r#"{"indices":[{"name":"OMXS30","value":2456.78,"change":"+1.2%"},{"name":"S&P 500","value":5234.12,"change":"-0.3%"}]}"#.to_string(),
+                headers: HashMap::new(),
+            },
+        );
+
+        // WebSocket: realtidskurser
+        let mut ws_messages = HashMap::new();
+        ws_messages.insert(
+            "wss://stream.avanza.se/realtime".to_string(),
+            WebSocketMessages {
+                messages: vec![r#"{"type":"quote","name":"Volvo B","price":234.50}"#.to_string()],
+            },
+        );
+
+        let script = r#"
+            var app = document.getElementById('app');
+
+            // Fas 1: Hämta portföljdata
+            fetch('https://api.avanza.se/portfolio')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var html = '<section id="portfolio"><h2>Min Portfölj</h2>';
+                    html += '<p class="total">Totalt: ' + data.total + ' kr</p>';
+                    html += '<table><thead><tr><th>Aktie</th><th>Antal</th><th>Värde</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.holdings.length; i++) {
+                        var h = data.holdings[i];
+                        html += '<tr><td>' + h.name + '</td><td>' + h.shares + '</td><td>' + h.value + ' kr</td></tr>';
+                    }
+                    html += '</tbody></table></section>';
+                    app.innerHTML = html;
+
+                    // Fas 2: Navigera till marknadssidan
+                    history.pushState({page: 'portfolio'}, '', '/portfolio');
+                });
+
+            // Fas 3: WebSocket för realtidsdata
+            var ws = new WebSocket('wss://stream.avanza.se/realtime');
+            ws.onmessage = function(e) {
+                var data = JSON.parse(e.data);
+                // Uppdatera localStorage med senaste kurs
+                localStorage.setItem('last_' + data.name, String(data.price));
+            };
+
+            // Kontrollera att localStorage fick kursen
+            setTimeout(function() {
+                var volvoPrice = localStorage.getItem('last_Volvo B');
+            }, 10);
+        "#
+        .to_string();
+
+        let config = SpaConfig {
+            fetch_responses,
+            websocket_messages: ws_messages,
+            base_url: "https://www.avanza.se/".to_string(),
+        };
+
+        let (result, arena) = eval_spa(&[script], arena, config);
+        assert!(
+            result.error.is_none(),
+            "Avanza SPA error: {:?}",
+            result.error
+        );
+
+        // Verifiera DOM
+        let rendered = arena.serialize_inner_html(arena.document);
+        assert!(
+            rendered.contains("Min Portfölj"),
+            "Borde visa portföljrubrik: {}",
+            &rendered[..500.min(rendered.len())]
+        );
+        assert!(
+            rendered.contains("Volvo B"),
+            "Borde visa Volvo-aktie: {}",
+            &rendered[..500.min(rendered.len())]
+        );
+        assert!(
+            rendered.contains("42000"),
+            "Borde visa totalvärde: {}",
+            &rendered[..500.min(rendered.len())]
+        );
+        assert!(
+            rendered.contains("Ericsson"),
+            "Borde visa Ericsson: {}",
+            &rendered[..500.min(rendered.len())]
+        );
+
+        // Verifiera fetch-URLs
+        assert!(
+            result
+                .fetched_urls
+                .contains(&"https://api.avanza.se/portfolio".to_string()),
+            "Borde ha hämtat portfölj-API"
+        );
+
+        // Verifiera History
+        assert!(result.mutations.len() > 0, "Borde ha DOM-mutationer");
+
+        // Verifiera event-loop körde (timers + WS)
+        assert!(
+            result.event_loop_ticks > 0,
+            "Event-loopen borde ha tickat: {}",
+            result.event_loop_ticks
+        );
+    }
+
+    // ─── Test 6: XHR-baserad SPA (legacy) ───────────────────────────────
+
+    #[test]
+    fn test_spa_xhr_legacy() {
+        let html = r##"<html><body><div id="data">No data</div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let mut fetch_responses = HashMap::new();
+        fetch_responses.insert(
+            "https://api.example.com/users".to_string(),
+            FetchResponse {
+                status: 200,
+                content_type: "application/json".to_string(),
+                body: r#"[{"name":"Alice"},{"name":"Bob"}]"#.to_string(),
+                headers: HashMap::new(),
+            },
+        );
+
+        let script = r#"
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'https://api.example.com/users');
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    var users = JSON.parse(xhr.responseText);
+                    var div = document.getElementById('data');
+                    div.innerHTML = '<ul>' + users.map(function(u) {
+                        return '<li>' + u.name + '</li>';
+                    }).join('') + '</ul>';
+                }
+            };
+            xhr.send();
+        "#
+        .to_string();
+
+        let config = SpaConfig {
+            fetch_responses,
+            ..Default::default()
+        };
+
+        let (result, arena) = eval_spa(&[script], arena, config);
+        assert!(result.error.is_none(), "XHR error: {:?}", result.error);
+
+        let rendered = arena.serialize_inner_html(arena.document);
+        assert!(
+            rendered.contains("Alice"),
+            "XHR-response borde renderas i DOM: {}",
+            rendered
+        );
+        assert!(rendered.contains("Bob"), "Borde visa Bob: {}", rendered);
+    }
+
+    // ─── Test 7: DOMContentLoaded + load events ─────────────────────────
+
+    #[test]
+    fn test_spa_lifecycle_events() {
+        let html = r##"<html><body><div id="status">init</div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            var status = document.getElementById('status');
+            var events = [];
+
+            document.addEventListener('DOMContentLoaded', function() {
+                events.push('dcl:' + document.readyState);
+            });
+            window.addEventListener('load', function() {
+                events.push('load:' + document.readyState);
+                status.textContent = events.join(',');
+            });
+        "#
+        .to_string();
+
+        let (result, arena) = eval_spa(&[script], arena, SpaConfig::default());
+        assert!(
+            result.error.is_none(),
+            "Lifecycle error: {:?}",
+            result.error
+        );
+
+        let rendered = arena.serialize_inner_html(arena.document);
+        // DOMContentLoaded borde avfyras vid "interactive", load vid "complete"
+        assert!(
+            rendered.contains("dcl:interactive"),
+            "DOMContentLoaded borde avfyras: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("load:complete"),
+            "load borde avfyras: {}",
+            rendered
+        );
+    }
+
+    // ─── Test 8: base64 btoa/atob roundtrip ─────────────────────────────
+
+    #[test]
+    fn test_spa_base64_roundtrip() {
+        let html = r##"<html><body></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            var original = 'Hello, World!';
+            var encoded = btoa(original);
+            var decoded = atob(encoded);
+            encoded + '|' + decoded + '|' + (original === decoded ? 'match' : 'mismatch');
+        "#
+        .to_string();
+
+        let (result, _) = eval_spa(&[script], arena, SpaConfig::default());
+        assert!(result.error.is_none(), "base64 error: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("SGVsbG8sIFdvcmxkIQ==|Hello, World!|match"),
+            "btoa/atob roundtrip borde fungera"
+        );
+    }
+
+    // ─── Test 9: Intl.NumberFormat ───────────────────────────────────────
+
+    #[test]
+    fn test_spa_intl_number_format() {
+        let html = r##"<html><body></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            var fmt = new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' });
+            fmt.format(12345.67);
+        "#
+        .to_string();
+
+        let (result, _) = eval_spa(&[script], arena, SpaConfig::default());
+        assert!(result.error.is_none(), "Intl error: {:?}", result.error);
+        let val = result.value.unwrap_or_default();
+        assert!(
+            val.contains("12") && val.contains("345") && val.contains("kr"),
+            "Intl.NumberFormat borde formatera korrekt: {}",
+            val
+        );
+    }
+}

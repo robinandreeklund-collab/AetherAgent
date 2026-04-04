@@ -42,6 +42,7 @@ mod html_properties;
 mod node_ops;
 mod selectors;
 mod state;
+pub use state::{FetchResponse, WebSocketMessages};
 mod style;
 mod utils;
 mod window;
@@ -729,6 +730,159 @@ fn eval_js_with_lifecycle_internal(
             timers_fired: timers,
             fetched_urls: vec![],
         }
+    });
+
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
+    result
+}
+
+/// Konfiguration för SPA-evaluering
+pub struct SpaConfig {
+    /// Pre-populated fetch responses (URL → response)
+    pub fetch_responses: std::collections::HashMap<String, state::FetchResponse>,
+    /// Pre-populated WebSocket messages (URL → messages)
+    pub websocket_messages: std::collections::HashMap<String, state::WebSocketMessages>,
+    /// Start-URL (default: "https://example.com/")
+    pub base_url: String,
+}
+
+impl Default for SpaConfig {
+    fn default() -> Self {
+        Self {
+            fetch_responses: std::collections::HashMap::new(),
+            websocket_messages: std::collections::HashMap::new(),
+            base_url: "https://example.com/".to_string(),
+        }
+    }
+}
+
+/// SPA-evaluering: kör scripts med pre-populated fetch/WS, returnera DOM + resultat.
+///
+/// Designad för riktiga SPA-scenarier: React, Vue, Avanza etc.
+/// Till skillnad från `eval_js_with_dom` har denna INGEN blocklist — scripts
+/// kan använda fetch(), XMLHttpRequest, WebSocket fritt.
+pub fn eval_spa(
+    scripts: &[String],
+    arena: ArenaDom,
+    config: SpaConfig,
+) -> (DomEvalResult, ArenaDom) {
+    let start = std::time::Instant::now();
+
+    if scripts.is_empty() {
+        return (
+            DomEvalResult {
+                value: None,
+                error: None,
+                mutations: vec![],
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: 0,
+                timers_fired: 0,
+                fetched_urls: vec![],
+            },
+            arena,
+        );
+    }
+
+    let state: SharedState = Rc::new(RefCell::new(BridgeState {
+        arena,
+        mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
+        css_context: None,
+        local_storage: std::collections::HashMap::new(),
+        session_storage: std::collections::HashMap::new(),
+        console_output: Vec::new(),
+        ready_state: "loading".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: None,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
+        next_callback_id: 0,
+        history_stack: vec![(config.base_url.clone(), None)],
+        history_index: 0,
+        current_url: config.base_url,
+        fetch_responses: config.fetch_responses,
+        pending_fetches: Vec::new(),
+        websocket_messages: config.websocket_messages,
+        websocket_urls: Vec::new(),
+    }));
+
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+
+    let result = context.with(|ctx| {
+        let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+        let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
+        let _ = register_document(&ctx, Rc::clone(&state));
+        let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_dom_exception(&ctx);
+        let _ = register_console(&ctx, Rc::clone(&state));
+
+        let mut last_value: Option<String> = None;
+        let mut first_error: Option<String> = None;
+
+        // Fas 1: readyState = "loading" — kör alla scripts
+        for script in scripts {
+            match ctx.eval::<Value, _>(script.as_str()) {
+                Ok(r) => {
+                    let v = crate::js_eval::quickjs_value_to_string(&ctx, &r);
+                    if v != "undefined" {
+                        last_value = Some(v);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(crate::js_eval::quickjs_error_string(&ctx, &e));
+                    }
+                }
+            }
+        }
+
+        // Fas 2: DOMContentLoaded
+        state.borrow_mut().ready_state = "interactive".to_string();
+        let _ = ctx.eval::<Value, _>(
+            "if(typeof document!=='undefined'&&document.dispatchEvent){document.dispatchEvent(new Event('DOMContentLoaded'));}",
+        );
+
+        // Fas 3: load
+        state.borrow_mut().ready_state = "complete".to_string();
+        let _ = ctx.eval::<Value, _>(
+            "if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(new Event('load'));}",
+        );
+
+        // Dränera event loop
+        let loop_stats = event_loop::run_event_loop(&ctx, &el);
+        let (ticks, timers) = match &loop_stats {
+            Ok(s) => (s.ticks, s.timers_fired),
+            Err(_) => (0, 0),
+        };
+
+        let fetched_urls = extract_fetched_urls(&ctx);
+        let mutations = state.borrow().mutations.clone();
+        // Klona arena INNAN context/runtime droppas (undvik GC-assertion)
+        let arena_clone = state.borrow().arena.clone();
+
+        state.borrow_mut().event_listeners.clear();
+        el.borrow_mut().clear_persistent();
+
+        (
+            DomEvalResult {
+                value: last_value,
+                error: first_error.or_else(|| loop_stats.err()),
+                mutations,
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: ticks,
+                timers_fired: timers,
+                fetched_urls,
+            },
+            arena_clone,
+        )
     });
 
     crate::js_eval::free_interrupt_state(interrupt_ptr);

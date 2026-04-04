@@ -110,7 +110,7 @@ pub(crate) struct BridgeState {
 
 /// Pre-populerat fetch-response för JS-sandlådan
 #[derive(Debug, Clone)]
-pub(crate) struct FetchResponse {
+pub struct FetchResponse {
     pub status: u16,
     pub content_type: String,
     pub body: String,
@@ -129,7 +129,7 @@ pub(crate) struct PendingFetch {
 
 /// Pre-populerade WebSocket-meddelanden för JS-sandlådan
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WebSocketMessages {
+pub struct WebSocketMessages {
     /// Meddelanden att leverera till JS i ordning
     pub messages: Vec<String>,
 }

@@ -896,35 +896,50 @@ impl JsHandler for IntlNumberFormatHandler {
             )?,
         )?;
 
-        // resolvedOptions
-        let resolved = Object::new(ctx.clone())?;
-        resolved.set("locale", rquickjs::String::from_str(ctx.clone(), &locale)?)?;
-        resolved.set("numberingSystem", "latn")?;
-        resolved.set("style", rquickjs::String::from_str(ctx.clone(), &style)?)?;
-        if let Some(ref c) = currency {
-            resolved.set("currency", rquickjs::String::from_str(ctx.clone(), c)?)?;
+        // resolvedOptions — Rust-struct istället för Persistent (undviker GC-assertion)
+        struct ResolvedOpts {
+            locale: String,
+            style: String,
+            currency: Option<String>,
+            min_frac: i32,
+            max_frac: i32,
         }
-        resolved.set("minimumFractionDigits", min_frac)?;
-        resolved.set("maximumFractionDigits", max_frac)?;
+        impl JsHandler for ResolvedOpts {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let obj = Object::new(ctx.clone())?;
+                obj.set(
+                    "locale",
+                    rquickjs::String::from_str(ctx.clone(), &self.locale)?,
+                )?;
+                obj.set("numberingSystem", "latn")?;
+                obj.set(
+                    "style",
+                    rquickjs::String::from_str(ctx.clone(), &self.style)?,
+                )?;
+                if let Some(ref c) = self.currency {
+                    obj.set("currency", rquickjs::String::from_str(ctx.clone(), c)?)?;
+                }
+                obj.set("minimumFractionDigits", self.min_frac)?;
+                obj.set("maximumFractionDigits", self.max_frac)?;
+                Ok(obj.into_value())
+            }
+        }
         formatter.set(
             "resolvedOptions",
-            Function::new(ctx.clone(), {
-                struct ResolvedOpts {
-                    opts: rquickjs::Persistent<Object<'static>>,
-                }
-                impl JsHandler for ResolvedOpts {
-                    fn handle<'js>(
-                        &self,
-                        ctx: &Ctx<'js>,
-                        _args: &[Value<'js>],
-                    ) -> rquickjs::Result<Value<'js>> {
-                        Ok(self.opts.clone().restore(ctx)?.into_value())
-                    }
-                }
+            Function::new(
+                ctx.clone(),
                 JsFn(ResolvedOpts {
-                    opts: rquickjs::Persistent::save(ctx, resolved),
-                })
-            })?,
+                    locale: locale_c,
+                    style: style_c,
+                    currency: currency_c,
+                    min_frac,
+                    max_frac,
+                }),
+            )?,
         )?;
 
         Ok(formatter.into_value())
