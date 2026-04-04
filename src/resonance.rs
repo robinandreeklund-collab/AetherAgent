@@ -446,10 +446,13 @@ fn state_injection_penalty(label: &str) -> f32 {
         || label.starts_with("window.__")
         || label.starts_with("contentApiData.")
         || label.starts_with("layoutData.")
+        || label.starts_with("localeData.")
         || label.starts_with("commonI18nResources.")
         || label.starts_with("dataManifest.")
+        || label.starts_with("currentUrlString")
+        || label.starts_with("pageProps.")
     {
-        return 0.3; // Strong penalty — this is serialized state, not content
+        return 0.15; // Very strong penalty — serialized state, not content
     }
     1.0
 }
