@@ -4373,7 +4373,12 @@ fn test_crfr_cache_separates_js_variants() {
     let v1: serde_json::Value = serde_json::from_str(&r1).unwrap();
     let l1 = v1["nodes"][0]["label"].as_str().unwrap_or("");
     let ch1 = v1["crfr"]["cache_hit"].as_bool().unwrap_or(false);
-    eprintln!("run_js=true:  label={:?}, cache_hit={}", l1, ch1);
+    let je1 = v1["crfr"]["js_eval"].as_bool().unwrap_or(false);
+    eprintln!(
+        "run_js=true:  label={:?}, cache_hit={}, js_eval={}",
+        l1, ch1, je1
+    );
+    assert!(je1, "run_js=true borde ge js_eval=true i metadata");
 
     // Andra anropet: run_js=false SAMMA URL → borde ge "STATIC_V"
     let r2 = aether_agent::parse_crfr(
@@ -4387,7 +4392,12 @@ fn test_crfr_cache_separates_js_variants() {
     let v2: serde_json::Value = serde_json::from_str(&r2).unwrap();
     let l2 = v2["nodes"][0]["label"].as_str().unwrap_or("");
     let ch2 = v2["crfr"]["cache_hit"].as_bool().unwrap_or(false);
-    eprintln!("run_js=false: label={:?}, cache_hit={}", l2, ch2);
+    let je2 = v2["crfr"]["js_eval"].as_bool().unwrap_or(true);
+    eprintln!(
+        "run_js=false: label={:?}, cache_hit={}, js_eval={}",
+        l2, ch2, je2
+    );
+    assert!(!je2, "run_js=false borde ge js_eval=false i metadata");
 
     assert!(
         l1.contains("JSRENDERED"),
