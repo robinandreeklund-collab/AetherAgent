@@ -1,0 +1,1287 @@
+[
+  {
+    "name": "Hacker News",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 235,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 389
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 13,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 256
+    },
+    "html_tokens": 8650
+  },
+  {
+    "name": "lobste.rs",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 475,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 203
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 719,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 329
+    },
+    "html_tokens": 14877
+  },
+  {
+    "name": "CNN Lite",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 477,
+      "rank": 2,
+      "nodes": 12,
+      "tokens": 570
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 1376,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 746
+    },
+    "html_tokens": 84703
+  },
+  {
+    "name": "NPR Text",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 458,
+      "rank": 1,
+      "nodes": 7,
+      "tokens": 397
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 37,
+      "rank": 1,
+      "nodes": 14,
+      "tokens": 541
+    },
+    "html_tokens": 1487
+  },
+  {
+    "name": "Reuters",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 38,
+      "rank": 1,
+      "nodes": 1,
+      "tokens": 13
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 34,
+      "rank": 1,
+      "nodes": 1,
+      "tokens": 13
+    },
+    "html_tokens": 192
+  },
+  {
+    "name": "Tibro kommun",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 454,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 611
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 606,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 686
+    },
+    "html_tokens": 54311
+  },
+  {
+    "name": "Al Jazeera",
+    "cat": "news",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 408,
+      "rank": 1,
+      "nodes": 5,
+      "tokens": 86
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 466,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 636
+    },
+    "html_tokens": 99850
+  },
+  {
+    "name": "The Guardian",
+    "cat": "news",
+    "status": "FAIL"
+  },
+  {
+    "name": "GOV.UK Wage",
+    "cat": "gov",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 414,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 784
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 499,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 596
+    },
+    "html_tokens": 22258
+  },
+  {
+    "name": "Bank of England",
+    "cat": "gov",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 391,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 737
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 592,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 372
+    },
+    "html_tokens": 22868
+  },
+  {
+    "name": "WHO",
+    "cat": "gov",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 354,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 629
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 601,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 413
+    },
+    "html_tokens": 32874
+  },
+  {
+    "name": "EU Europa",
+    "cat": "gov",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 298,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 695
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 485,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 523
+    },
+    "html_tokens": 24641
+  },
+  {
+    "name": "NASA",
+    "cat": "gov",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 376,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 952
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 594,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 732
+    },
+    "html_tokens": 79472
+  },
+  {
+    "name": "rust-lang.org",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 403,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1310
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 392,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1156
+    },
+    "html_tokens": 4614
+  },
+  {
+    "name": "MDN HTML",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": false,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 378,
+      "rank": 4,
+      "nodes": 20,
+      "tokens": 32
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 671,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 885
+    },
+    "html_tokens": 44309
+  },
+  {
+    "name": "Go Dev",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 382,
+      "rank": 1,
+      "nodes": 3,
+      "tokens": 199
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 435,
+      "rank": 1,
+      "nodes": 19,
+      "tokens": 1088
+    },
+    "html_tokens": 15998
+  },
+  {
+    "name": "Node.js",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 367,
+      "rank": 1,
+      "nodes": 19,
+      "tokens": 821
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 156,
+      "rank": 1,
+      "nodes": 14,
+      "tokens": 462
+    },
+    "html_tokens": 113836
+  },
+  {
+    "name": "Ruby Lang",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 297,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1070
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 285,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 894
+    },
+    "html_tokens": 22660
+  },
+  {
+    "name": "docs.rs",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 337,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 420
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 172,
+      "rank": 1,
+      "nodes": 16,
+      "tokens": 434
+    },
+    "html_tokens": 4388
+  },
+  {
+    "name": "Kotlin",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 391,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 955
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 452,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 755
+    },
+    "html_tokens": 64405
+  },
+  {
+    "name": "Elixir Lang",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 433,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 1421
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 531,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 1106
+    },
+    "html_tokens": 6753
+  },
+  {
+    "name": "Zig Lang",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 292,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1075
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 244,
+      "rank": 1,
+      "nodes": 18,
+      "tokens": 919
+    },
+    "html_tokens": 3214
+  },
+  {
+    "name": "Svelte",
+    "cat": "dev",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 315,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 735
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 242,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 717
+    },
+    "html_tokens": 22388
+  },
+  {
+    "name": "PyPI",
+    "cat": "pkg",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 434,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 716
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 191,
+      "rank": 1,
+      "nodes": 16,
+      "tokens": 469
+    },
+    "html_tokens": 5613
+  },
+  {
+    "name": "pkg.go.dev",
+    "cat": "pkg",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 289,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 278
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 297,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 688
+    },
+    "html_tokens": 8361
+  },
+  {
+    "name": "RubyGems",
+    "cat": "pkg",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 182,
+      "rank": 1,
+      "nodes": 5,
+      "tokens": 282
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 55,
+      "rank": 1,
+      "nodes": 6,
+      "tokens": 315
+    },
+    "html_tokens": 4745
+  },
+  {
+    "name": "NuGet",
+    "cat": "pkg",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 383,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 799
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 237,
+      "rank": 1,
+      "nodes": 17,
+      "tokens": 611
+    },
+    "html_tokens": 4194
+  },
+  {
+    "name": "DevDocs",
+    "cat": "pkg",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 68,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 59
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 24,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 59
+    },
+    "html_tokens": 2085
+  },
+  {
+    "name": "Docker Hub",
+    "cat": "infra",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 318,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 827
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 376,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 865
+    },
+    "html_tokens": 99385
+  },
+  {
+    "name": "Terraform",
+    "cat": "infra",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 355,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 532
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 914,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 498
+    },
+    "html_tokens": 30861
+  },
+  {
+    "name": "GitHub Explore",
+    "cat": "infra",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 308,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 534
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 606,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 377
+    },
+    "html_tokens": 76668
+  },
+  {
+    "name": "Tailwind CSS",
+    "cat": "infra",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 847,
+      "rank": 1,
+      "nodes": 3,
+      "tokens": 103
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 1450,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 673
+    },
+    "html_tokens": 234058
+  },
+  {
+    "name": "OpenStreetMap",
+    "cat": "ref",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 435,
+      "rank": 1,
+      "nodes": 11,
+      "tokens": 421
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 340,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 630
+    },
+    "html_tokens": 8174
+  },
+  {
+    "name": "httpbin HTML",
+    "cat": "ref",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 64,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 134
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 20,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 134
+    },
+    "html_tokens": 934
+  },
+  {
+    "name": "JSON Placeholder",
+    "cat": "ref",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 426,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 50
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 286,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 582
+    },
+    "html_tokens": 2240
+  },
+  {
+    "name": "Haskell.org",
+    "cat": "ref",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 277,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1275
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 444,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 1135
+    },
+    "html_tokens": 16217
+  },
+  {
+    "name": "W3Schools HTML",
+    "cat": "ref",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 515,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 383
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 602,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 142
+    },
+    "html_tokens": 97753
+  },
+  {
+    "name": "Stack Overflow",
+    "cat": "ref",
+    "status": "FAIL"
+  },
+  {
+    "name": "CoinGecko",
+    "cat": "finance",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": false,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 546,
+      "rank": 4,
+      "nodes": 20,
+      "tokens": 861
+    },
+    "pipe": {
+      "f1": false,
+      "f3": false,
+      "f5": false,
+      "f10": true,
+      "f20": true,
+      "ms": 998,
+      "rank": 7,
+      "nodes": 20,
+      "tokens": 730
+    },
+    "html_tokens": 407792
+  },
+  {
+    "name": "ECB",
+    "cat": "finance",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 564,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 758
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 905,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 416
+    },
+    "html_tokens": 48501
+  },
+  {
+    "name": "Investing.com",
+    "cat": "finance",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 1224,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 365
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 2650,
+      "rank": 2,
+      "nodes": 20,
+      "tokens": 343
+    },
+    "html_tokens": 371092
+  },
+  {
+    "name": "XE Currency",
+    "cat": "finance",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 646,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 515
+    },
+    "pipe": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 489,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 420
+    },
+    "html_tokens": 71277
+  },
+  {
+    "name": "IMDB Top",
+    "cat": "other",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": false,
+      "f5": false,
+      "f10": false,
+      "f20": false,
+      "ms": 21,
+      "rank": null,
+      "nodes": 0,
+      "tokens": 0
+    },
+    "pipe": {
+      "f1": false,
+      "f3": false,
+      "f5": false,
+      "f10": false,
+      "f20": false,
+      "ms": 35,
+      "rank": null,
+      "nodes": 1,
+      "tokens": 0
+    },
+    "html_tokens": 497
+  },
+  {
+    "name": "Goodreads",
+    "cat": "other",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 360,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 669
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 558,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 657
+    },
+    "html_tokens": 14020
+  },
+  {
+    "name": "Weather.com",
+    "cat": "other",
+    "status": "FAIL"
+  },
+  {
+    "name": "Spotify Web",
+    "cat": "other",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 44,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 12
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 74,
+      "rank": 1,
+      "nodes": 2,
+      "tokens": 12
+    },
+    "html_tokens": 1536
+  },
+  {
+    "name": "Reddit",
+    "cat": "other",
+    "status": "FAIL"
+  },
+  {
+    "name": "Archive.org",
+    "cat": "other",
+    "status": "FAIL"
+  },
+  {
+    "name": "Product Hunt",
+    "cat": "other",
+    "status": "OK",
+    "crfr": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 420,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 740
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 666,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 434
+    },
+    "html_tokens": 318334
+  },
+  {
+    "name": "Hjo kommun",
+    "cat": "other",
+    "status": "OK",
+    "crfr": {
+      "f1": false,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 358,
+      "rank": 3,
+      "nodes": 20,
+      "tokens": 410
+    },
+    "pipe": {
+      "f1": true,
+      "f3": true,
+      "f5": true,
+      "f10": true,
+      "f20": true,
+      "ms": 828,
+      "rank": 1,
+      "nodes": 20,
+      "tokens": 279
+    },
+    "html_tokens": 49050
+  }
+]

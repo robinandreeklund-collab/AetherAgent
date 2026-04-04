@@ -16,9 +16,9 @@ use crate::types::SemanticNode;
 /// Dimensionalitet för hypervektorer (antal bits)
 /// Benchmarkad: 1024/2048/4096 ger identisk korrekthet (18/20).
 /// 4096 vald för headroom vid stora DOM:ar, marginell merkostnad.
-pub const HDC_DIM: usize = 4096;
+pub const HDC_DIM: usize = 2048;
 /// Antal u64-ord per hypervector
-const WORDS: usize = HDC_DIM / 64;
+pub const WORDS: usize = HDC_DIM / 64; // 32
 
 /// En hypervector representerad som bitvector av u64-ord
 #[derive(Clone, Debug)]
@@ -32,6 +32,16 @@ impl Hypervector {
         Hypervector {
             bits: [0u64; WORDS],
         }
+    }
+
+    /// Access the raw bit storage (for serialization)
+    pub fn bits_raw(&self) -> &[u64; WORDS] {
+        &self.bits
+    }
+
+    /// Construct from raw bit storage (for deserialization)
+    pub fn from_bits(bits: [u64; WORDS]) -> Self {
+        Hypervector { bits }
     }
 
     /// Generera deterministisk HV från en seed-sträng (pseudo-random via FNV-liknande hash)
@@ -53,10 +63,17 @@ impl Hypervector {
     }
 
     /// XOR-bind: kombinera två HV:er (representerar "bundling" i HDC)
+    /// SIMD-vänlig: 4-wide unrolled loop för bättre auto-vektorisering.
     pub fn bind(&self, other: &Hypervector) -> Hypervector {
         let mut result = [0u64; WORDS];
-        for (i, r) in result.iter_mut().enumerate() {
-            *r = self.bits[i] ^ other.bits[i];
+        // 4-wide unrolling: LLVM auto-vektoriserar till SIMD (SSE2/AVX2)
+        let chunks = WORDS / 4;
+        for c in 0..chunks {
+            let base = c * 4;
+            result[base] = self.bits[base] ^ other.bits[base];
+            result[base + 1] = self.bits[base + 1] ^ other.bits[base + 1];
+            result[base + 2] = self.bits[base + 2] ^ other.bits[base + 2];
+            result[base + 3] = self.bits[base + 3] ^ other.bits[base + 3];
         }
         Hypervector { bits: result }
     }
@@ -98,31 +115,51 @@ impl Hypervector {
 
         match hvs.len() {
             2 => {
-                for (i, r) in result.iter_mut().enumerate() {
-                    *r = hvs[0].bits[i] & hvs[1].bits[i];
+                // 4-wide unrolled AND
+                let chunks = WORDS / 4;
+                for c in 0..chunks {
+                    let b = c * 4;
+                    result[b] = hvs[0].bits[b] & hvs[1].bits[b];
+                    result[b + 1] = hvs[0].bits[b + 1] & hvs[1].bits[b + 1];
+                    result[b + 2] = hvs[0].bits[b + 2] & hvs[1].bits[b + 2];
+                    result[b + 3] = hvs[0].bits[b + 3] & hvs[1].bits[b + 3];
                 }
             }
             3 => {
-                for (i, r) in result.iter_mut().enumerate() {
-                    let (a, b, c) = (hvs[0].bits[i], hvs[1].bits[i], hvs[2].bits[i]);
-                    *r = (a & b) | (a & c) | (b & c);
+                // 4-wide unrolled majority
+                let chunks = WORDS / 4;
+                for c in 0..chunks {
+                    let b = c * 4;
+                    for off in 0..4 {
+                        let (a, x, y) = (
+                            hvs[0].bits[b + off],
+                            hvs[1].bits[b + off],
+                            hvs[2].bits[b + off],
+                        );
+                        result[b + off] = (a & x) | (a & y) | (x & y);
+                    }
                 }
             }
             _ => {
+                // SIMD-vänlig majority-vote: word-level istf bit-level.
+                // Räknar bits per position via addition av partial popcount.
                 let threshold = hvs.len() / 2;
-                for bit_idx in 0..HDC_DIM {
-                    let word_idx = bit_idx / 64;
-                    let bit_pos = bit_idx % 64;
-                    let mask = 1u64 << bit_pos;
-
-                    let ones: usize = hvs
-                        .iter()
-                        .filter(|hv| hv.bits[word_idx] & mask != 0)
-                        .count();
-
-                    if ones > threshold {
-                        result[word_idx] |= mask;
+                // Processera per u64-ord (64 bits åt gången)
+                for (word_idx, result_word) in result.iter_mut().enumerate() {
+                    let mut counts = [0u8; 64];
+                    for hv in hvs {
+                        let w = hv.bits[word_idx];
+                        for (bit_pos, count) in counts.iter_mut().enumerate() {
+                            *count += ((w >> bit_pos) & 1) as u8;
+                        }
                     }
+                    let mut word: u64 = 0;
+                    for (bit_pos, &count) in counts.iter().enumerate() {
+                        if count as usize > threshold {
+                            word |= 1u64 << bit_pos;
+                        }
+                    }
+                    *result_word = word;
                 }
             }
         }
@@ -181,13 +218,38 @@ impl Hypervector {
         1.0 - 2.0 * (hamming as f32) / (HDC_DIM as f32)
     }
 
-    /// Hamming-avstånd (antal bits som skiljer sig) via XOR + popcount
+    /// Hamming-avstånd (antal bits som skiljer sig) via XOR + popcount.
+    /// Fused XOR+popcount — LLVM emits POPCNT instruction.
+    /// Simpler loop lets LLVM auto-vectorize better for 32-word size.
     fn hamming_distance(&self, other: &Hypervector) -> u32 {
-        self.bits
+        let mut total: u32 = 0;
+        // Fused XOR+popcount — LLVM emits POPCNT instruction
+        for i in 0..WORDS {
+            total += (self.bits[i] ^ other.bits[i]).count_ones();
+        }
+        total
+    }
+
+    /// Batch similarity: beräkna likhet mot N vektorer i ett svep.
+    /// Bättre cache-locality än N separata similarity()-anrop.
+    /// Returnerar (index, similarity) sorterat fallande.
+    pub fn similarity_batch(&self, others: &[&Hypervector]) -> Vec<(usize, f32)> {
+        let mut results: Vec<(usize, f32)> = others
             .iter()
-            .zip(other.bits.iter())
-            .map(|(a, b)| (a ^ b).count_ones())
-            .sum()
+            .enumerate()
+            .map(|(i, other)| (i, self.similarity(other)))
+            .collect();
+        results.sort_by(|a, b| b.1.total_cmp(&a.1));
+        results
+    }
+
+    /// Batch hamming: beräkna hamming-avstånd mot N vektorer.
+    /// Returnerar raw hamming distances (inte normaliserade).
+    pub fn hamming_batch(&self, others: &[&Hypervector]) -> Vec<u32> {
+        others
+            .iter()
+            .map(|other| self.hamming_distance(other))
+            .collect()
     }
 }
 

@@ -42,25 +42,28 @@ static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock
 // Minnesgräns: max antal domäner i rate limiter cache
 const MAX_RATE_LIMITER_DOMAINS: usize = 1_000;
 
-/// Hämta eller skapa en rate limiter för en domän (default 2 req/s)
+/// Hämta eller skapa en rate limiter för en domän (default 2 req/s).
+/// LRU-eviction: äldst använda domänen tas bort vid kapacitetsgräns.
 fn get_rate_limiter(domain: &str, requests_per_second: u32) -> Arc<DomainLimiter> {
     let mut limiters = RATE_LIMITERS.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Evicta slumpmässig domän om vi når gränsen (billig operation)
-    if !limiters.contains_key(domain) && limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
-        // Ta bort en godtycklig entry (HashMap iteration order)
-        if let Some(old_key) = limiters.keys().next().cloned() {
-            limiters.remove(&old_key);
+    // LRU: flytta befintlig entry till "nyast" genom remove + re-insert
+    if let Some(existing) = limiters.remove(domain) {
+        limiters.insert(domain.to_string(), existing.clone());
+        return existing;
+    }
+
+    // Ny domän: evicta äldsta (först insatta) om kapacitetsgräns nådd
+    if limiters.len() >= MAX_RATE_LIMITER_DOMAINS {
+        if let Some(oldest_key) = limiters.keys().next().cloned() {
+            limiters.remove(&oldest_key);
         }
     }
 
-    limiters
-        .entry(domain.to_string())
-        .or_insert_with(|| {
-            let rps = NonZeroU32::new(requests_per_second.max(1)).unwrap_or(NonZeroU32::MIN);
-            Arc::new(RateLimiter::direct(governor::Quota::per_second(rps)))
-        })
-        .clone()
+    let rps = NonZeroU32::new(requests_per_second.max(1)).unwrap_or(NonZeroU32::MIN);
+    let limiter = Arc::new(RateLimiter::direct(governor::Quota::per_second(rps)));
+    limiters.insert(domain.to_string(), limiter.clone());
+    limiter
 }
 
 /// Vänta tills rate limiter tillåter request
@@ -97,8 +100,8 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     );
     request = request.header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8");
-    // Accept-Encoding hanteras automatiskt av reqwest (.gzip(true).brotli(true))
-    // Manuell header kolliderar med automatisk dekompression — BUGG N fix
+    // Accept-Encoding: hanteras automatiskt av reqwest (.gzip(true).brotli(true))
+    // Ingen manuell header — reqwest sätter rätt encoding baserat på aktiverade features
     request = request.header("DNT", "1");
     request = request.header("Sec-Fetch-Dest", "document");
     request = request.header("Sec-Fetch-Mode", "navigate");
@@ -117,6 +120,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
 
     let status_code = response.status().as_u16();
     let final_url = response.url().to_string();
+
+    // Redirect-domänvalidering: varna om vi hamnade på en annan domän
+    // (kan indikera OAuth-redirect, tracking, eller phishing)
+    let original_domain = extract_domain(url).unwrap_or_default();
+    let final_domain = extract_domain(&final_url).unwrap_or_default();
+    let cross_domain_redirect =
+        !original_domain.is_empty() && !final_domain.is_empty() && original_domain != final_domain;
+
     let content_type = response
         .headers()
         .get("content-type")
@@ -180,6 +191,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         redirect_chain,
         fetch_time_ms,
         body_size_bytes,
+        cross_domain_redirect,
     })
 }
 
@@ -194,34 +206,45 @@ pub async fn check_robots_txt_google(url: &str, user_agent: &str) -> Result<(), 
         parsed.host_str().unwrap_or("")
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("robots.txt klient-fel: {e}"))?;
+    // Isolerad timeout: robots.txt-check får aldrig blockera mer än 3s totalt,
+    // oavsett om servern hänger, DNS är långsam, eller body tar tid.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .map_err(|e| format!("robots.txt klient-fel: {e}"))?;
 
-    let resp = client.get(&robots_url).send().await;
+        let resp = client.get(&robots_url).send().await;
 
-    // Om robots.txt inte finns eller inte nås, tillåt (RFC 9309)
-    let Ok(resp) = resp else {
-        return Ok(());
-    };
+        // Om robots.txt inte finns eller inte nås, tillåt (RFC 9309)
+        let Ok(resp) = resp else {
+            return Ok(());
+        };
 
-    if !resp.status().is_success() {
-        return Ok(());
+        if !resp.status().is_success() {
+            return Ok(());
+        }
+
+        let body = resp.text().await.unwrap_or_default();
+        let path = parsed.path();
+
+        // Använd Googles officiella parser
+        let mut matcher = robotstxt::DefaultMatcher::default();
+        if !matcher.one_agent_allowed_by_robots(&body, user_agent, path) {
+            return Err(format!(
+                "Blockerad av robots.txt för '{user_agent}' på '{path}'"
+            ));
+        }
+
+        Ok(())
+    })
+    .await;
+
+    // Vid timeout: tillåt (bättre att fortsätta än att blockera)
+    match result {
+        Ok(inner) => inner,
+        Err(_timeout) => Ok(()),
     }
-
-    let body = resp.text().await.unwrap_or_default();
-    let path = parsed.path();
-
-    // Använd Googles officiella parser
-    let mut matcher = robotstxt::DefaultMatcher::default();
-    if !matcher.one_agent_allowed_by_robots(&body, user_agent, path) {
-        return Err(format!(
-            "Blockerad av robots.txt för '{user_agent}' på '{path}'"
-        ));
-    }
-
-    Ok(())
 }
 
 // ─── URL-validering (SSRF-skydd) ────────────────────────────────────────────
@@ -334,7 +357,7 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
     const MAX_CSS_LINKS: usize = 50;
     css_links.truncate(MAX_CSS_LINKS);
 
-    const MAX_CSS_BYTES: usize = 2 * 1024 * 1024;
+    const MAX_CSS_BYTES: usize = 4 * 1024 * 1024; // 4MB per CSS-fil
 
     // Parallell CSS-hämtning med tokio tasks — nu med felrapportering
     let mut handles = Vec::with_capacity(css_links.len());
@@ -391,7 +414,7 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
 
     // Begränsa total CSS-budget: HTML + inlinad CSS får ej överstiga 2MB
     // (github: 569KB HTML + 842KB CSS = 1.4MB OK, men 569KB + 2MB CSS = OOM)
-    const MAX_TOTAL_CSS_BUDGET: usize = 1500 * 1024; // 1.5MB total CSS
+    const MAX_TOTAL_CSS_BUDGET: usize = 3 * 1024 * 1024; // 3MB total CSS
 
     for (i, css_result) in results.iter().enumerate() {
         match css_result {
@@ -513,11 +536,11 @@ pub async fn fetch_and_inline_external_scripts(html: &str, base_url: &str) -> Js
     {
         use crate::js_eval::{extract_all_scripts, ScriptEntry};
 
-        const MAX_SCRIPTS: usize = 10;
-        const MAX_SCRIPT_SIZE: usize = 512 * 1024; // 512KB per fil
-        const MAX_TOTAL_SIZE: usize = 1024 * 1024; // 1MB totalt
-                                                   // Skippa JS-inlining för redan stora sidor — Blitz klarar inte >2MB HTML
-        const MAX_HTML_FOR_JS_INLINE: usize = 500 * 1024;
+        const MAX_SCRIPTS: usize = 20;
+        const MAX_SCRIPT_SIZE: usize = 1024 * 1024; // 1MB per fil
+        const MAX_TOTAL_SIZE: usize = 3 * 1024 * 1024; // 3MB totalt
+                                                       // Skippa JS-inlining för redan stora sidor
+        const MAX_HTML_FOR_JS_INLINE: usize = 1024 * 1024; // 1MB
 
         if html.len() > MAX_HTML_FOR_JS_INLINE {
             return JsInlineResult {

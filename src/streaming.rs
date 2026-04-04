@@ -43,7 +43,7 @@ impl Default for StreamingConfig {
         StreamingConfig {
             max_nodes: 300,
             min_relevance: 0.0,
-            max_depth: 20,
+            max_depth: 30,
         }
     }
 }
@@ -407,6 +407,6 @@ mod tests {
             (config.min_relevance - 0.0).abs() < 0.001,
             "Default min_relevance borde vara 0.0"
         );
-        assert_eq!(config.max_depth, 20, "Default max_depth borde vara 20");
+        assert_eq!(config.max_depth, 30, "Default max_depth borde vara 30");
     }
 }

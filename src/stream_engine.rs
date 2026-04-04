@@ -169,6 +169,28 @@ impl StreamEngine {
             .collect();
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
 
+        // Steg 3b: CRFR kontext-aware re-ranking (om fältet är cacheat)
+        // Boostar noder vars grannar också har hög relevans
+        if scored.len() > 3 {
+            let node_scores: std::collections::HashMap<u32, f32> = scored
+                .iter()
+                .map(|&(idx, score)| (self.all_nodes[idx].id, score))
+                .collect();
+
+            for (idx, score) in scored.iter_mut() {
+                let node = &self.all_nodes[*idx];
+                // Kontext-boost: om nodens förälder eller syskon har hög score, boosta
+                let neighbor_boost = node
+                    .children
+                    .iter()
+                    .filter_map(|child| node_scores.get(&child.id))
+                    .fold(0.0f32, |acc, &s| acc.max(s));
+                // Max 20% boost från kontext
+                *score += neighbor_boost * 0.2;
+            }
+            scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        }
+
         // Steg 4: Emittera chunks
         let mut emitted_nodes: Vec<SemanticNode> = Vec::new();
         let mut chunks: Vec<ChunkSummary> = Vec::new();

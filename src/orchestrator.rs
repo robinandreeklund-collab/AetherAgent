@@ -42,7 +42,7 @@ fn default_max_retries() -> u32 {
     3
 }
 fn default_max_pages() -> u32 {
-    20
+    100
 }
 fn default_true() -> bool {
     true
@@ -1091,7 +1091,7 @@ mod tests {
     fn test_orchestrator_config_defaults() {
         let config = OrchestratorConfig::default();
         assert_eq!(config.max_retries, 3);
-        assert_eq!(config.max_pages, 20);
+        assert_eq!(config.max_pages, 100);
         assert!(config.enable_temporal_tracking);
         assert!(config.auto_navigate);
     }

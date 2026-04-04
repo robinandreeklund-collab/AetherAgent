@@ -148,16 +148,16 @@ impl SessionManager {
     ///
     /// Parsar Set-Cookie-strängar och lagrar per domän.
     pub fn add_cookies_from_headers(&mut self, domain: &str, set_cookie_headers: &[String]) {
-        // Begränsa antal domäner
-        if !self.cookies.contains_key(domain) && self.cookies.len() >= MAX_COOKIE_DOMAINS {
-            // Evicta domänen med färst cookies
-            if let Some(smallest_domain) = self
-                .cookies
-                .iter()
-                .min_by_key(|(_, v)| v.len())
-                .map(|(k, _)| k.clone())
-            {
-                self.cookies.remove(&smallest_domain);
+        // LRU-eviction: ta bort och återinsätt vid access (äldsta först vid kapacitet)
+        if self.cookies.contains_key(domain) {
+            // Flytta till "nyast" — remove + re-insert
+            if let Some(existing) = self.cookies.remove(domain) {
+                self.cookies.insert(domain.to_string(), existing);
+            }
+        } else if self.cookies.len() >= MAX_COOKIE_DOMAINS {
+            // Evicta äldsta domänen (först insatta i HashMap iteration order)
+            if let Some(oldest) = self.cookies.keys().next().cloned() {
+                self.cookies.remove(&oldest);
             }
         }
 

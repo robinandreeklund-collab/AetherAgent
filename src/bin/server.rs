@@ -61,6 +61,88 @@ struct ParseTopRequest {
 }
 
 #[derive(Deserialize)]
+struct ParseCrfrRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+    #[serde(default)]
+    run_js: bool,
+    #[serde(default = "default_json")]
+    output_format: String,
+}
+
+fn default_crfr_top_n() -> u32 {
+    20
+}
+fn default_json() -> String {
+    "json".to_string()
+}
+
+#[derive(Deserialize)]
+struct CrfrFeedbackRequest {
+    url: String,
+    goal: String,
+    successful_node_ids: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct ParseCrfrMultiRequest {
+    goals: Vec<String>,
+    html: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
+#[derive(Deserialize)]
+struct CrfrSaveRequest {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrLoadRequest {
+    json: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrUpdateRequest {
+    url: String,
+    node_id: u32,
+    new_label: String,
+    new_role: String,
+    #[serde(default)]
+    new_value: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrTransferRequest {
+    donor_url: String,
+    recipient_url: String,
+    #[serde(default = "default_min_similarity")]
+    min_similarity: f32,
+}
+
+fn default_min_similarity() -> f32 {
+    0.3
+}
+
+#[derive(Deserialize)]
+struct ExtractMultiRequest {
+    html: String,
+    goal: String,
+    url: String,
+    keys: Vec<String>,
+    #[serde(default = "default_max_per_key")]
+    max_per_key: u32,
+}
+
+fn default_max_per_key() -> u32 {
+    5
+}
+
+#[derive(Deserialize)]
 struct ClickRequest {
     html: String,
     goal: String,
@@ -801,6 +883,14 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/parse": "Parse HTML to semantic tree",
             "POST /api/parse-top": "Parse top-N relevant nodes",
             "POST /api/parse-hybrid": "Parse with hybrid BM25+HDC+Neural pipeline. Set reranker=colbert for 2.8x faster + 41% better quality.",
+            "POST /api/parse-crfr": "CRFR: Causal Resonance Field Retrieval — BM25+HDC wave propagation, 10-15x faster, learns over time. Params: top_n, run_js, output_format (json/markdown).",
+            "POST /api/crfr-feedback": "Teach CRFR which nodes had the answer — improves future queries on same URL.",
+            "POST /api/parse-crfr-multi": "Run multiple goal variants through CRFR and merge results.",
+            "POST /api/crfr-save": "Save CRFR field (causal memory) for a URL to JSON.",
+            "POST /api/crfr-load": "Load a previously saved CRFR field from JSON.",
+            "POST /api/crfr-update": "Update a specific node in the CRFR field by ID.",
+            "POST /api/crfr-transfer": "Transfer causal learning from one URL to another.",
+            "POST /api/extract-multi": "Extract structured data for multiple keys with per-key limits.",
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
@@ -963,6 +1053,125 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     .unwrap_or_else(|_| "{}".to_string());
 
     (StatusCode::OK, result_json)
+}
+
+async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
+    let html = req.html;
+    let goal = req.goal;
+    let url = req.url;
+    let top_n = req.top_n;
+    let run_js = req.run_js;
+    let output_format = req.output_format;
+
+    // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
+    let goal_clone = goal.clone();
+    let url_clone = url.clone();
+    let fmt_clone = output_format.clone();
+    let mut tree = tokio::task::spawn_blocking({
+        let g = goal.clone();
+        let u = url.clone();
+        let h = html.clone();
+        move || aether_agent::build_tree_for_crfr(&h, &g, &u, run_js)
+    })
+    .await
+    .unwrap_or_default();
+
+    // Pass 2: SPA-enrichment — om pending_fetch_urls finns, hämta och merge
+    #[cfg(feature = "fetch")]
+    if !tree.pending_fetch_urls.is_empty() {
+        aether_agent::tools::resolve_pending_fetches(&mut tree, &goal).await;
+    }
+
+    // Pass 3: Kör CRFR på (potentiellt berikad) tree
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr_from_tree(&tree, &goal_clone, &url_clone, top_n, &fmt_clone)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    (StatusCode::OK, result)
+}
+
+async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
+    let url = req.url;
+    let goal = req.goal;
+    let ids_json =
+        serde_json::to_string(&req.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
+
+    let result =
+        tokio::task::spawn_blocking(move || aether_agent::crfr_feedback(&url, &goal, &ids_json))
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    (StatusCode::OK, result)
+}
+
+async fn parse_crfr_multi_handler(Json(req): Json<ParseCrfrMultiRequest>) -> impl IntoResponse {
+    let goals_json = serde_json::to_string(&req.goals).unwrap_or_else(|_| "[]".to_string());
+    let html = req.html;
+    let url = req.url;
+    let top_n = req.top_n;
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_save_handler(Json(req): Json<CrfrSaveRequest>) -> impl IntoResponse {
+    let url = req.url;
+    let result = tokio::task::spawn_blocking(move || aether_agent::crfr_save_field(&url))
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_load_handler(Json(req): Json<CrfrLoadRequest>) -> impl IntoResponse {
+    let json = req.json;
+    let result = tokio::task::spawn_blocking(move || aether_agent::crfr_load_field(&json))
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_update_handler(Json(req): Json<CrfrUpdateRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::crfr_update_node(
+            &req.url,
+            req.node_id,
+            &req.new_label,
+            &req.new_role,
+            &req.new_value,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_transfer_handler(Json(req): Json<CrfrTransferRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::crfr_transfer(&req.donor_url, &req.recipient_url, req.min_similarity)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn extract_multi_handler(Json(req): Json<ExtractMultiRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::extract_data_multi(
+            &req.html,
+            &req.goal,
+            &req.url,
+            &serde_json::to_string(&req.keys).unwrap_or_else(|_| "[]".to_string()),
+            req.max_per_key,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
 }
 
 async fn parse_extract_handler(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
@@ -1705,18 +1914,11 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
                 .await
                 {
                     Ok(Ok(result)) => {
-                        // Hämta fler noder med låg tröskel — re-ranking i
-                        // deep_extract_page_nodes prioriterar text-innehåll
-                        let fetch_limit = (mnpr * 8).max(30);
-                        let stream_json = aether_agent::stream_parse_adaptive(
-                            &result.body,
-                            &g,
-                            &url,
-                            fetch_limit as u32,
-                            0.0,
-                            fetch_limit as u32,
-                        );
-                        let nodes = deep_extract_page_nodes(&stream_json, mnpr);
+                        // CRFR deep-parse: använd resonansfält istf stream_parse
+                        let top_n = (mnpr * 4).max(20) as u32;
+                        let crfr_json =
+                            aether_agent::parse_crfr(&result.body, &g, &url, top_n, false, "json");
+                        let nodes = deep_extract_crfr_nodes(&crfr_json, mnpr);
                         (idx, nodes, fetch_start.elapsed().as_millis() as u64)
                     }
                     _ => (idx, Vec::new(), 0),
@@ -1767,6 +1969,11 @@ async fn fetch_search_handler(Json(req): Json<FetchSearchRequest>) -> impl IntoR
     let final_json = serde_json::to_string(&search_result)
         .unwrap_or_else(|e| format!(r#"{{"error": "serialize: {e}"}}"#));
     (StatusCode::OK, final_json)
+}
+
+/// Extract page nodes from CRFR or stream_parse JSON (same nodes array format)
+fn deep_extract_crfr_nodes(json: &str, max: usize) -> Vec<aether_agent::search::PageNode> {
+    deep_extract_page_nodes(json, max)
 }
 
 /// Extrahera PageNode:er från stream_parse JSON
@@ -3810,6 +4017,114 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "parse_crfr",
+            "description": "CRFR (Causal Resonance Field Retrieval) — next-gen DOM parsing that treats the page as a living resonance field. 10-15x faster than parse_hybrid (no ONNX inference). LEARNS from feedback: call crfr_feedback after finding answers to improve future queries on the same URL.\n\nIMPORTANT — GOAL EXPANSION: Expand the 'goal' with synonyms, translations, and expected values before calling.\nExample: 'what is the price?' → goal: 'price pris cost £ $ kr amount total fee belopp'\nExample: 'who wrote this?' → goal: 'author författare writer journalist by name publicerad'\n\nOutput includes resonance_type per node: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past queries).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch, or page URL for caching (same URL reuses causal memory)"},
+                    "html": {"type": "string", "description": "Raw HTML to parse directly (if omitted, fetches from url)"},
+                    "goal": {"type": "string", "description": "EXPAND THIS: Include user's question + 5-10 synonyms, translations, expected values. NO generic words."},
+                    "top_n": {"type": "integer", "description": "Max nodes to return (default: 20). Gap-detection often returns fewer.", "default": 20},
+                    "run_js": {"type": "boolean", "description": "Evaluate inline JavaScript via QuickJS sandbox before parsing. Use for SPA/dynamic pages.", "default": false},
+                    "output_format": {"type": "string", "enum": ["json", "markdown"], "description": "Output format: 'json' (structured nodes) or 'markdown' (token-efficient text for LLM consumption)", "default": "json"}
+                },
+                "required": ["goal"]
+            }
+        },
+        {
+            "name": "crfr_feedback",
+            "description": "Teach CRFR which nodes contained the correct answer. Call AFTER parse_crfr when you find useful information. This builds causal memory so future similar queries on the same URL rank those nodes higher.\n\nWorkflow:\n1. parse_crfr(goal='price pris cost') → nodes [id:5, id:12, id:23]\n2. Node 12 has the answer → crfr_feedback(url, goal, [12])\n3. Next query: node 12 gets causal boost → ranked higher automatically",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Page URL (must match a previous parse_crfr call)"},
+                    "goal": {"type": "string", "description": "The goal that was used when parsing"},
+                    "successful_node_ids": {"type": "array", "items": {"type": "integer"}, "description": "Array of node IDs that contained the correct answer"}
+                },
+                "required": ["url", "goal", "successful_node_ids"]
+            }
+        },
+        {
+            "name": "parse_crfr_multi",
+            "description": "Run multiple goal variants through CRFR and merge results. Exploits sub-ms cache to try synonyms/translations. Pass goals as array.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "url": {"type": "string", "description": "Source URL"},
+                    "goals": {"type": "array", "items": {"type": "string"}, "description": "Array of goal variant strings"},
+                    "top_n": {"type": "integer", "default": 20, "description": "Max nodes to return"}
+                },
+                "required": ["goals"]
+            }
+        },
+        {
+            "name": "crfr_save",
+            "description": "Save CRFR field (causal memory) for a URL to JSON. Use for persistent learning across sessions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL whose CRFR field to save"}
+                },
+                "required": ["url"]
+            }
+        },
+        {
+            "name": "crfr_load",
+            "description": "Load a previously saved CRFR field from JSON. Restores causal memory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "json": {"type": "string", "description": "JSON string from a previous crfr_save call"}
+                },
+                "required": ["json"]
+            }
+        },
+        {
+            "name": "crfr_transfer",
+            "description": "Transfer causal learning from one URL to another (cross-site learning). Use when visiting similar sites.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "donor_url": {"type": "string", "description": "URL to copy causal memory from"},
+                    "recipient_url": {"type": "string", "description": "URL to apply causal memory to"},
+                    "min_similarity": {"type": "number", "default": 0.3, "description": "Minimum similarity threshold for transfer"}
+                },
+                "required": ["donor_url", "recipient_url"]
+            }
+        },
+        {
+            "name": "crfr_update",
+            "description": "Update a specific node in the CRFR field. Change label, role, or value for a cached node by ID.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL whose CRFR field contains the node"},
+                    "node_id": {"type": "integer", "description": "Node ID to update"},
+                    "new_label": {"type": "string", "description": "New label for the node"},
+                    "new_role": {"type": "string", "description": "New role for the node"},
+                    "new_value": {"type": "string", "default": "", "description": "New value for the node"}
+                },
+                "required": ["url", "node_id", "new_label", "new_role"]
+            }
+        },
+        {
+            "name": "extract_multi",
+            "description": "Extract structured data for multiple keys with per-key limits. Returns up to max_per_key results per key.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "HTML content to extract from"},
+                    "goal": {"type": "string", "description": "Agent goal context"},
+                    "url": {"type": "string", "description": "Page URL"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Data keys to extract"},
+                    "max_per_key": {"type": "integer", "default": 5, "description": "Maximum results per key"}
+                },
+                "required": ["html", "goal", "url", "keys"]
+            }
+        },
+        {
             "name": "act",
             "description": "Interact with page elements: click buttons, fill forms, or extract data. Provide HTML or URL + an action type. Security (injection scan + firewall) runs automatically. Replaces: find_and_click, fill_form, extract_data, fetch_click, fetch_extract.",
             "inputSchema": {
@@ -4960,8 +5275,182 @@ async fn mcp_dispatch_tool(
             text_ok(result.to_json())
         }
 
+        // ─── Tool: parse_crfr ──────────────────────────────────
+        "parse_crfr" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            let run_js = args["run_js"].as_bool().unwrap_or(false);
+            let output_format = args["output_format"].as_str().unwrap_or("json");
+
+            // Hämta HTML: antingen direkt eller via URL
+            let html = if let Some(h) = args["html"].as_str() {
+                h.to_string()
+            } else if !url.is_empty() {
+                #[cfg(feature = "fetch")]
+                {
+                    if let Some(reason) = aether_agent::tools::firewall_check(url, goal) {
+                        return text_ok(
+                            serde_json::json!({"error": "Firewall blocked", "reason": reason})
+                                .to_string(),
+                        );
+                    }
+                    aether_agent::fetch::validate_url(url)?;
+                    let config = aether_agent::types::FetchConfig::default();
+                    let fetched = aether_agent::fetch::fetch_page(url, &config).await?;
+                    fetched.body
+                }
+                #[cfg(not(feature = "fetch"))]
+                {
+                    return Err("fetch feature not enabled — provide html directly".to_string());
+                }
+            } else {
+                return Err("Provide either 'html' or 'url'".to_string());
+            };
+
+            // 2-pass: build tree → XHR enrich → CRFR propagation
+            let goal_str = goal.to_string();
+            let page_url = url.to_string();
+            let fmt = output_format.to_string();
+
+            let mut tree = tokio::task::spawn_blocking({
+                let h = html.clone();
+                let g = goal_str.clone();
+                let u = page_url.clone();
+                move || aether_agent::build_tree_for_crfr(&h, &g, &u, run_js)
+            })
+            .await
+            .unwrap_or_default();
+
+            // SPA enrichment: fetch detected XHR URLs
+            #[cfg(feature = "fetch")]
+            if !tree.pending_fetch_urls.is_empty() {
+                aether_agent::tools::resolve_pending_fetches(&mut tree, &goal_str).await;
+            }
+
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::parse_crfr_from_tree(&tree, &goal_str, &page_url, top_n, &fmt)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_feedback ───────────────────────────────
+        "crfr_feedback" => {
+            let url = args["url"].as_str().unwrap_or("");
+            let goal = args["goal"].as_str().unwrap_or("");
+            let ids: Vec<u32> = args["successful_node_ids"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let ids_json = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string());
+            let url_str = url.to_string();
+            let goal_str = goal.to_string();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_feedback(&url_str, &goal_str, &ids_json)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+            text_ok(result)
+        }
+
+        // ─── Tool: parse_crfr_multi ──────────────────────────────
+        "parse_crfr_multi" => {
+            let goals: Vec<String> = args["goals"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
+            let html = args["html"].as_str().unwrap_or("").to_string();
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_save ─────────────────────────────────────
+        "crfr_save" => {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || aether_agent::crfr_save_field(&url))
+                .await
+                .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_load ─────────────────────────────────────
+        "crfr_load" => {
+            let json = args["json"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || aether_agent::crfr_load_field(&json))
+                .await
+                .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_transfer ─────────────────────────────────
+        "crfr_transfer" => {
+            let donor = args["donor_url"].as_str().unwrap_or("").to_string();
+            let recipient = args["recipient_url"].as_str().unwrap_or("").to_string();
+            let min_sim = args["min_similarity"].as_f64().unwrap_or(0.3) as f32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_transfer(&donor, &recipient, min_sim)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_update ──────────────────────────────────
+        "crfr_update" => {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let node_id = args["node_id"].as_u64().unwrap_or(0) as u32;
+            let new_label = args["new_label"].as_str().unwrap_or("").to_string();
+            let new_role = args["new_role"].as_str().unwrap_or("").to_string();
+            let new_value = args["new_value"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_update_node(&url, node_id, &new_label, &new_role, &new_value)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: extract_multi ────────────────────────────────
+        "extract_multi" => {
+            let html = args["html"].as_str().unwrap_or("").to_string();
+            let goal = args["goal"].as_str().unwrap_or("").to_string();
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let keys: Vec<String> = args["keys"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let keys_json = serde_json::to_string(&keys).unwrap_or_else(|_| "[]".to_string());
+            let max_per_key = args["max_per_key"].as_u64().unwrap_or(5) as u32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::extract_data_multi(&html, &goal, &url, &keys_json, max_per_key)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
         _ => Err(format!(
-            "Unknown tool: '{name}'. Available: parse, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
+            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, parse_crfr_multi, crfr_save, crfr_load, crfr_transfer, crfr_update, extract_multi, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
         )),
     }
 }
@@ -5551,6 +6040,14 @@ fn build_router(state: AppState) -> Router {
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
         .route("/api/parse-hybrid", post(parse_hybrid))
+        .route("/api/parse-crfr", post(parse_crfr_handler))
+        .route("/api/crfr-feedback", post(crfr_feedback_handler))
+        .route("/api/parse-crfr-multi", post(parse_crfr_multi_handler))
+        .route("/api/crfr-save", post(crfr_save_handler))
+        .route("/api/crfr-load", post(crfr_load_handler))
+        .route("/api/crfr-update", post(crfr_update_handler))
+        .route("/api/crfr-transfer", post(crfr_transfer_handler))
+        .route("/api/extract-multi", post(extract_multi_handler))
         .route("/api/extract-smart", post(parse_extract_handler))
         .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))
@@ -5892,7 +6389,7 @@ async fn main() {
         }
 
         // Bi-encoder (FP32, optional)
-        let mut embedding_loaded = false;
+        let mut _embedding_loaded = false;
         if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
             if let (Ok(model_bytes), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
                 eprintln!(
@@ -5903,7 +6400,7 @@ async fn main() {
                 match aether_agent::embedding::init_global(&model_bytes, vt) {
                     Ok(()) => {
                         eprintln!("[Embedding] Bi-encoder redo");
-                        embedding_loaded = true;
+                        _embedding_loaded = true;
                     }
                     Err(e) => eprintln!("[Embedding] WARN: {e}"),
                 }
@@ -5970,6 +6467,14 @@ async fn main() {
     println!("  POST /api/parse           – Parse HTML to semantic tree");
     println!("  POST /api/parse-top       – Parse top-N relevant nodes");
     println!("  POST /api/parse-hybrid    – Hybrid BM25+HDC+Neural pipeline (reranker=colbert recommended)");
+    println!("  POST /api/parse-crfr      – CRFR: Causal Resonance Field (BM25+HDC wave, 13x faster, learns)");
+    println!("  POST /api/crfr-feedback   – Teach CRFR which nodes had the answer");
+    println!("  POST /api/parse-crfr-multi – Multi-goal CRFR (synonyms/translations)");
+    println!("  POST /api/crfr-save       – Save CRFR field to JSON");
+    println!("  POST /api/crfr-load       – Load CRFR field from JSON");
+    println!("  POST /api/crfr-update     – Update node in CRFR field");
+    println!("  POST /api/crfr-transfer   – Transfer causal learning across URLs");
+    println!("  POST /api/extract-multi   – Extract structured data (multi-key)");
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");

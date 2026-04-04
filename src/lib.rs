@@ -29,6 +29,7 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+pub mod resonance;
 pub mod scoring;
 pub mod search;
 pub(crate) mod semantic;
@@ -79,13 +80,124 @@ use types::{SemanticTree, WorkflowMemory};
 
 // ─── Intern hjälpfunktion ────────────────────────────────────────────────────
 
+// BUG-03: RSS/Atom pre-processing
+
+/// Detektera om input är RSS/Atom XML
+fn is_rss_or_atom(html: &str) -> bool {
+    let trimmed = html.trim_start();
+    trimmed.starts_with("<?xml")
+        && (trimmed.contains("<rss") || trimmed.contains("<feed") || trimmed.contains("<channel>"))
+}
+
+/// BUG-03: Konvertera RSS/Atom XML till pseudo-HTML så html5ever kan parsa
+fn rss_to_html(xml: &str) -> String {
+    let mut html = String::with_capacity(xml.len());
+    html.push_str("<html><body><h1>RSS Feed</h1><ul>\n");
+
+    // Extrahera <item> eller <entry> med <title> och <link>
+    let item_tag = if xml.contains("<entry") {
+        "entry"
+    } else {
+        "item"
+    };
+
+    for item in xml.split(&format!("<{item_tag}")).skip(1) {
+        let end = item.find(&format!("</{item_tag}")).unwrap_or(item.len());
+        let item_content = &item[..end];
+
+        // Extrahera title (med eller utan CDATA)
+        let title = extract_xml_field(item_content, "title");
+        // Extrahera link
+        let link = extract_xml_field(item_content, "link")
+            .or_else(|| {
+                // Atom: <link href="..."/>
+                item_content.find("href=\"").map(|i| {
+                    let start = i + 6;
+                    let end = item_content[start..].find('"').unwrap_or(0) + start;
+                    item_content[start..end].to_string()
+                })
+            })
+            .unwrap_or_default();
+        // Extrahera description/summary (kort)
+        let desc = extract_xml_field(item_content, "description")
+            .or_else(|| extract_xml_field(item_content, "summary"))
+            .unwrap_or_default();
+        let desc_short: String = desc.chars().take(200).collect();
+
+        if let Some(title) = title {
+            html.push_str(&format!(
+                "<li><a href=\"{}\">{}</a> <span>{}</span></li>\n",
+                link,
+                html_escape(&title),
+                html_escape(&desc_short)
+            ));
+        }
+    }
+
+    html.push_str("</ul></body></html>");
+    html
+}
+
+fn extract_xml_field(content: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let start_pos = content.find(&open)?;
+    let after_tag = content[start_pos..].find('>')? + start_pos + 1;
+    let end_pos = content[after_tag..].find(&close)? + after_tag;
+    let mut text = content[after_tag..end_pos].to_string();
+    // Strip CDATA wrapper
+    if text.starts_with("<![CDATA[") {
+        text = text
+            .trim_start_matches("<![CDATA[")
+            .trim_end_matches("]]>")
+            .to_string();
+    }
+    // Strip HTML tags from description
+    let text = text
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    let cleaned: String = {
+        let mut in_tag = false;
+        text.chars()
+            .filter(|c| {
+                if *c == '<' {
+                    in_tag = true;
+                    false
+                } else if *c == '>' {
+                    in_tag = false;
+                    false
+                } else {
+                    !in_tag
+                }
+            })
+            .collect()
+    };
+    let trimmed = cleaned.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Gemensam parse-pipeline: HTML -> ArenaDom -> SemanticTree
-///
-/// Fas 17.2: Använder ArenaDom (SlotMap) istället för RcDom för
-/// ~5-10x snabbare traversering och cache-friendly minnesallokering.
+/// Fas 17.2: ArenaDom (SlotMap) för ~5-10x snabbare traversering.
 fn build_tree(html: &str, goal: &str, url: &str) -> SemanticTree {
-    // Direkt html5ever → ArenaDom via custom TreeSink (skippar RcDom-mellansteget)
-    let mut arena = arena_dom_sink::parse_html_to_arena(html);
+    // BUG-03: RSS/Atom pre-processing — konvertera XML-feeds till parsbar HTML
+    let effective_html: std::borrow::Cow<'_, str> = if is_rss_or_atom(html) {
+        std::borrow::Cow::Owned(rss_to_html(html))
+    } else {
+        std::borrow::Cow::Borrowed(html)
+    };
+    let mut arena = arena_dom_sink::parse_html_to_arena(&effective_html);
     // Resolva lazy-loaded bilder (data-src → src) innan semantisk analys
     arena.resolve_lazy_images();
     let title = arena.extract_title();
@@ -596,6 +708,426 @@ pub fn parse_top_nodes_hybrid(html: &str, goal: &str, url: &str, top_n: u32) -> 
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Parse HTML using Causal Resonance Field Retrieval (CRFR).
+///
+/// BM25+HDC hybrid scoring with wave propagation through DOM tree.
+/// Supports causal learning: fields are cached per URL and improve
+/// with feedback from successful extractions.
+///
+/// # Arguments
+/// * `html` - Raw HTML
+/// * `goal` - Search goal / query
+/// * `url` - Page URL (used for caching)
+/// * `top_n` - Max nodes (default 20, gap-detection may return fewer)
+/// * `run_js` - Evaluate inline JS before building tree (requires js-eval feature)
+/// * `output_format` - "json" (default) or "markdown"
+#[wasm_bindgen]
+pub fn parse_crfr(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+    output_format: &str,
+) -> String {
+    let tree = build_tree_for_crfr(html, goal, url, run_js);
+    parse_crfr_from_tree(&tree, goal, url, top_n, output_format)
+}
+
+// Build semantic tree for CRFR (with optional JS eval).
+// Returns tree with pending_fetch_urls for async XHR resolution.
+pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> SemanticTree {
+    if run_js {
+        run_lifecycle_parse(html, goal, url)
+    } else {
+        build_tree(html, goal, url)
+    }
+}
+
+fn is_error_page(title: &str, total_nodes: usize) -> bool {
+    let t = title.to_lowercase();
+    if t.contains("404")
+        || t.contains("not found")
+        || t.contains("hittades inte")
+        || t.contains("kunde inte hittas")
+        || t.contains("finns inte")
+        || t.contains("error")
+        || t.contains("page not found")
+        || t.contains("sidan finns inte")
+        || t.contains("access denied")
+        || t.contains("403")
+        || t.contains("500")
+        || t.contains("forbidden")
+        || t.contains("unauthorized")
+    {
+        return true;
+    }
+    // Very few nodes + generic error-like title
+    if total_nodes < 20 && (t.contains("oops") || t.contains("sorry") || t.is_empty()) {
+        return true;
+    }
+    false
+}
+
+fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResult)]) -> bool {
+    if matched.is_empty() {
+        return false;
+    }
+    let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
+    data_count as f32 / matched.len() as f32 > 0.7
+}
+
+fn goal_title_overlap(goal: &str, title: &str) -> f32 {
+    if goal.is_empty() || title.is_empty() {
+        return 0.0;
+    }
+    let goal_lower = goal.to_lowercase();
+    let title_lower = title.to_lowercase();
+    let goal_words: Vec<&str> = goal_lower
+        .split_whitespace()
+        .filter(|w| w.len() > 2)
+        .collect();
+    if goal_words.is_empty() {
+        return 0.0;
+    }
+    let matches = goal_words
+        .iter()
+        .filter(|w| title_lower.contains(*w))
+        .count();
+    matches as f32 / goal_words.len() as f32
+}
+
+/// Run CRFR propagation on an existing (potentially XHR-enriched) tree.
+pub fn parse_crfr_from_tree(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+) -> String {
+    let start = now_ms();
+    let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
+
+    let field_start = now_ms();
+    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let field_ms = now_ms().saturating_sub(field_start);
+
+    let prop_start = now_ms();
+    let results = field.propagate_top_k(goal, top_n as usize);
+    let prop_ms = now_ms().saturating_sub(prop_start);
+    resonance::save_field(&field);
+
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let matched: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> = results
+        .iter()
+        .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
+        .collect();
+
+    let total_ms = now_ms().saturating_sub(start);
+    let is_md =
+        output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+
+    if is_md {
+        let mut md = String::with_capacity(matched.len() * 120);
+        if !tree.title.is_empty() {
+            md.push_str(&format!("# {}\n\n", tree.title));
+        }
+        for (node, res) in &matched {
+            let mut flat = (*node).clone();
+            flat.relevance = res.amplitude;
+            flat.children.clear();
+            node_to_markdown(&flat, &mut md, 0);
+        }
+        md.push_str(&format!(
+            "\n<!-- CRFR: {}/{} nodes, {}ms, cache={}, xhr={} -->\n",
+            matched.len(),
+            total_dom_nodes,
+            total_ms,
+            cache_hit,
+            tree.xhr_intercepted
+        ));
+        md
+    } else {
+        let res_vec: Vec<resonance::ResonanceResult> =
+            matched.iter().map(|(_, r)| (*r).clone()).collect();
+        let calibrated = field.calibrate_results(&res_vec);
+        let cal_map: HashMap<u32, f32> =
+            calibrated.iter().map(|&(id, _, prob)| (id, prob)).collect();
+
+        let top_nodes: Vec<serde_json::Value> = matched
+            .iter()
+            .map(|(node, r)| {
+                let confidence = cal_map.get(&r.node_id).copied().unwrap_or(0.0);
+                serde_json::json!({
+                    "id": node.id,
+                    "role": node.role,
+                    "label": node.label,
+                    "relevance": r.amplitude,
+                    "confidence": confidence,
+                    "resonance_type": format!("{:?}", r.resonance_type),
+                    "causal_boost": r.causal_boost,
+                    "html_id": node.html_id,
+                    "name": node.name,
+                    "action": node.action,
+                    "trust": node.trust,
+                })
+            })
+            .collect();
+
+        let (cache_entries, cache_capacity) = resonance::cache_stats();
+
+        // BUG-F: Beräkna suggested_action INNAN json!-macro (let-bindings fungerar ej inuti)
+        let error_flag = is_error_page(&tree.title, total_dom_nodes);
+        let ssr_json_flag = is_ssr_json_only(&matched);
+        let spa_flag = total_dom_nodes < 10;
+        let overlap = goal_title_overlap(goal, &tree.title);
+        let low_rel_warning = overlap < 0.15 && !tree.title.is_empty();
+
+        let action = if error_flag {
+            "retry_url"
+        } else if spa_flag {
+            "fetch_api"
+        } else if ssr_json_flag {
+            "run_js"
+        } else if low_rel_warning {
+            "verify_url"
+        } else if top_nodes.is_empty() {
+            "expand_search"
+        } else {
+            let max_conf = top_nodes
+                .iter()
+                .filter_map(|n| n.get("confidence").and_then(|c| c.as_f64()))
+                .fold(0.0f64, f64::max);
+            if max_conf > 0.8 {
+                "answer_directly"
+            } else if max_conf > 0.5 {
+                "verify_with_context"
+            } else if max_conf > 0.2 {
+                "expand_search"
+            } else {
+                "try_different_goal"
+            }
+        };
+
+        serde_json::json!({
+            "url": tree.url,
+            "title": tree.title,
+            "goal": tree.goal,
+            "nodes": top_nodes,
+            "node_count": top_nodes.len(),
+            "total_nodes": total_dom_nodes,
+            "injection_warnings": tree.injection_warnings,
+            "spa_detected": spa_flag,
+            "error_detected": error_flag,
+            "ssr_json_only": ssr_json_flag,
+            "goal_title_overlap": overlap,
+            "xhr_intercepted": tree.xhr_intercepted,
+            "parse_time_ms": total_ms,
+            "low_relevance_warning": low_rel_warning,
+            "suggested_action": action,
+            "crfr": {
+                "method": "causal_resonance_field",
+                "field_build_ms": field_ms,
+                "propagation_ms": prop_ms,
+                "cache_hit": cache_hit,
+                "js_eval": false,
+                "xhr_enriched": tree.xhr_intercepted > 0,
+                "field_queries": field.total_queries,
+                "cache_entries": cache_entries,
+                "cache_capacity": cache_capacity,
+            }
+        })
+        .to_string()
+    }
+}
+
+/// Provide causal feedback to CRFR field for a URL.
+///
+/// Call this after successfully using nodes from `parse_crfr` to teach
+/// the resonance field which nodes were useful. Future queries for
+/// similar goals will rank those nodes higher.
+#[wasm_bindgen]
+pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> String {
+    let ids: Vec<u32> = serde_json::from_str(successful_node_ids_json).unwrap_or_default();
+    if ids.is_empty() {
+        return r#"{"status":"no_ids"}"#.to_string();
+    }
+
+    // Hämta cacheat fält — om det inte finns, kan vi inte ge feedback
+    let dummy_nodes: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
+    if !found {
+        return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+    }
+
+    field.feedback(goal, &ids);
+    resonance::save_field(&field);
+
+    serde_json::json!({
+        "status": "ok",
+        "nodes_updated": ids.len(),
+        "field_queries": field.total_queries,
+    })
+    .to_string()
+}
+
+/// Implicit feedback: infer useful nodes from LLM response text.
+/// Closes the learning loop without explicit node ID tracking.
+#[wasm_bindgen]
+pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"status":"no_field"}"#.to_string();
+    }
+    field.implicit_feedback(goal, response_text);
+    resonance::save_field(&field);
+    serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
+}
+
+/// Run multiple goal variants through CRFR and merge results.
+/// Goals should be JSON array of strings: ["variant1", "variant2", ...]
+#[wasm_bindgen]
+pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> String {
+    let goals: Vec<String> = serde_json::from_str(goals_json).unwrap_or_default();
+    let goal_refs: Vec<&str> = goals.iter().map(|s| s.as_str()).collect();
+    if goal_refs.is_empty() {
+        return r#"{"error":"no goals"}"#.to_string();
+    }
+
+    let start = now_ms();
+    let tree = build_tree(html, goal_refs[0], url);
+    let total_dom = collect_all_nodes(&tree.nodes).len();
+
+    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let results = field.propagate_multi_variant(&goal_refs, top_n as usize);
+    resonance::save_field(&field);
+
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let nodes: Vec<serde_json::Value> = results
+        .iter()
+        .filter_map(|r| {
+            node_map.get(&r.node_id).map(|node| {
+                serde_json::json!({
+                    "id": node.id, "role": node.role, "label": node.label,
+                    "relevance": r.amplitude, "resonance_type": format!("{:?}", r.resonance_type),
+                })
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "nodes": nodes, "node_count": nodes.len(), "total_nodes": total_dom,
+        "goals_count": goal_refs.len(), "cache_hit": cache_hit,
+        "parse_time_ms": now_ms().saturating_sub(start),
+    })
+    .to_string()
+}
+
+/// Save CRFR field for a URL to a JSON string (for persistent storage).
+#[wasm_bindgen]
+pub fn crfr_save_field(url: &str) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"error":"no cached field for this URL"}"#.to_string();
+    }
+    field
+        .to_json()
+        .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
+}
+
+/// Load a previously saved CRFR field back into the cache.
+#[wasm_bindgen]
+pub fn crfr_load_field(json: &str) -> String {
+    match resonance::ResonanceField::from_json(json) {
+        Ok(field) => {
+            resonance::save_field(&field);
+            serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
+        }
+        Err(e) => format!(r#"{{"error":"{e}"}}"#),
+    }
+}
+
+/// Update a node in a cached CRFR field (incremental DOM mutation).
+///
+/// Preserves causal memory — the node "remembers" past successes.
+#[wasm_bindgen]
+pub fn crfr_update_node(
+    url: &str,
+    node_id: u32,
+    new_label: &str,
+    new_role: &str,
+    new_value: &str,
+) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"error":"no cached field for this URL"}"#.to_string();
+    }
+    let val = if new_value.is_empty() {
+        None
+    } else {
+        Some(new_value)
+    };
+    field.update_node(node_id, new_label, new_role, val);
+    resonance::save_field(&field);
+    r#"{"status":"ok"}"#.to_string()
+}
+
+/// Transfer causal memory from one URL's field to another.
+///
+/// Use for cross-site learning (e.g., SVT → Expressen, Amazon → Zalando).
+#[wasm_bindgen]
+pub fn crfr_transfer(donor_url: &str, recipient_url: &str, min_similarity: f32) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (donor, donor_found) = resonance::get_or_build_field(&dummy, donor_url);
+    if !donor_found {
+        return r#"{"error":"no cached donor field"}"#.to_string();
+    }
+    let (mut recipient, recipient_found) = resonance::get_or_build_field(&dummy, recipient_url);
+    if !recipient_found {
+        return r#"{"error":"no cached recipient field"}"#.to_string();
+    }
+    let transferred = recipient.transfer_from(&donor, min_similarity);
+    resonance::save_field(&recipient);
+    serde_json::json!({
+        "status": "ok",
+        "transferred_nodes": transferred,
+        "donor_url_hash": donor.url_hash,
+        "recipient_url_hash": recipient.url_hash,
+    })
+    .to_string()
+}
+
 /// Parse HTML med hybrid pipeline och valfri Stage 3 reranker.
 ///
 /// Samma pipeline som `parse_top_nodes_hybrid` men med konfigurerbar
@@ -1020,6 +1552,21 @@ pub fn extract_data(html: &str, goal: &str, url: &str, data_keys_json: &str) -> 
     };
 
     let result = intent::extract_by_keys(&tree, &keys);
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Extract multiple matches per key (comparative "X vs Y" queries)
+#[wasm_bindgen]
+pub fn extract_data_multi(
+    html: &str,
+    goal: &str,
+    url: &str,
+    keys_json: &str,
+    max_per_key: u32,
+) -> String {
+    let keys: Vec<String> = serde_json::from_str(keys_json).unwrap_or_default();
+    let tree = build_tree(html, goal, url);
+    let result = intent::extract_by_keys_multi(&tree, &keys, max_per_key as usize);
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 

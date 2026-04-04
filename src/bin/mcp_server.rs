@@ -77,6 +77,43 @@ fn default_hybrid_top_n() -> u32 {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ParseCrfrParams {
+    /// Raw HTML string
+    html: String,
+    /// Goal / query — what are you looking for? Include specific keywords.
+    goal: String,
+    /// The page URL (used for caching — same URL reuses causal memory)
+    url: String,
+    /// Max nodes to return (default: 20). CRFR uses amplitude-gap detection to find natural clusters, often returning fewer.
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+    /// Run JavaScript evaluation before parsing (requires js-eval feature). Use for SPA/dynamic pages.
+    #[serde(default)]
+    run_js: bool,
+    /// Output format: "json" (default, structured nodes) or "markdown" (readable text, token-efficient)
+    #[serde(default = "default_json_format")]
+    output_format: String,
+}
+
+fn default_crfr_top_n() -> u32 {
+    20
+}
+
+fn default_json_format() -> String {
+    "json".to_string()
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CrfrFeedbackParams {
+    /// The page URL (must match a previous parse_crfr call)
+    url: String,
+    /// The goal that was used when parsing
+    goal: String,
+    /// Array of node IDs that contained the correct answer
+    successful_node_ids: Vec<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct ClickParams {
     /// Raw HTML string
     html: String,
@@ -555,6 +592,31 @@ impl AetherMcpServer {
             params.top_n,
             &config,
         )
+    }
+
+    #[tool(
+        name = "parse_crfr",
+        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking. Before calling this tool, YOU (the LLM) MUST expand the goal with SPECIFIC synonyms, translations, and expected values. Do NOT add generic words.\n\nExample: User asks 'what is the price?'\n  BAD:  'price information product'\n  GOOD: 'price pris cost £ $ kr amount total fee belopp checkout'\n\nExample: User asks 'vem skrev artikeln?'\n  BAD:  'author article'\n  GOOD: 'author författare writer journalist publicerad by name namn reporter'\n\nCRFR combines BM25 keyword matching with HDC wave propagation. Key advantages:\n- 10-15x FASTER than parse_hybrid (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions\n- Per-URL caching: revisiting same page is near-instant (~300µs)\n- Natural top-k via amplitude-gap detection\n\nParameters:\n- top_n: Max nodes (default 20, gap-detection often returns fewer)\n- run_js: Set true for SPA/dynamic pages — evaluates inline JS via QuickJS sandbox\n- output_format: 'json' (default, structured) or 'markdown' (readable, token-efficient)\n\nEach node includes resonance_type: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
+    )]
+    fn parse_crfr(&self, Parameters(params): Parameters<ParseCrfrParams>) -> String {
+        aether_agent::parse_crfr(
+            &params.html,
+            &params.goal,
+            &params.url,
+            params.top_n,
+            params.run_js,
+            &params.output_format,
+        )
+    }
+
+    #[tool(
+        name = "crfr_feedback",
+        description = "Provide feedback to CRFR about which nodes contained the correct answer. Call this AFTER parse_crfr when you find the answer in the returned nodes. Pass the node IDs that were useful. This teaches the resonance field so future similar queries on this URL rank those nodes higher.\n\nExample workflow:\n1. parse_crfr(html, 'find price', url) → nodes with IDs [5, 12, 23]\n2. Node 12 has the price → crfr_feedback(url, 'find price', [12])\n3. Next query on same URL: node 12 gets causal boost"
+    )]
+    fn crfr_feedback(&self, Parameters(params): Parameters<CrfrFeedbackParams>) -> String {
+        let ids_json =
+            serde_json::to_string(&params.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
+        aether_agent::crfr_feedback(&params.url, &params.goal, &ids_json)
     }
 
     #[tool(

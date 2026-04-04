@@ -143,17 +143,17 @@ pub async fn execute_with_html_async(ddg_html: &str, req: &SearchRequest) -> Too
                     relevance: 1.0,
                 }]
             } else {
-                // Hybrid scoring — top-N rankade noder (ColBERT default)
-                let config = super::parse_hybrid_tool::build_config(None);
-                let json = crate::parse_top_nodes_with_config(
+                // CRFR scoring — resonansfält med BM25+HDC+wave (snabbare, inget ONNX)
+                let json = crate::parse_crfr(
                     &html,
                     &goal_clone,
                     &url_clone,
                     effective_top_n as u32,
-                    &config,
+                    false,
+                    "json",
                 );
                 let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-                parsed["top_nodes"]
+                parsed["nodes"]
                     .as_array()
                     .map(|arr| {
                         arr.iter()

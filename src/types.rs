@@ -310,6 +310,9 @@ pub struct FetchResult {
     pub fetch_time_ms: u64,
     /// Responsens storlek i bytes
     pub body_size_bytes: usize,
+    /// Om redirects gick till en annan domän (potentiell OAuth/tracking)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cross_domain_redirect: bool,
 }
 
 /// Kombinerat fetch + parse-resultat
@@ -487,7 +490,21 @@ impl SemanticNode {
             GoalCategory::Extract => {
                 matches!(
                     role,
-                    "text" | "paragraph" | "price" | "product_card" | "link" | "data" | "img"
+                    "text"
+                        | "paragraph"
+                        | "price"
+                        | "product_card"
+                        | "link"
+                        | "data"
+                        | "img"
+                        | "heading"
+                        | "button"
+                        | "cta"
+                        | "table"
+                        | "row"
+                        | "cell"
+                        | "listitem"
+                        | "generic"
                 )
             }
             GoalCategory::Form => matches!(

@@ -562,22 +562,27 @@ impl ArenaDom {
             }
         }
 
-        // nojs-divvar: id="nojs" eller class="no-js" — utan to_lowercase()
-        if let Some(id) = node.get_attr("id") {
-            if Self::NOJS_IDENTIFIERS
-                .iter()
-                .any(|pat| id.eq_ignore_ascii_case(pat))
-            {
-                return false;
+        // nojs-divvar: id="nojs" eller class="no-js" — men BARA på div-element.
+        // Många sajter (books.toscrape, python.org) har class="no-js" på <html>
+        // som Modernizr-mönster — det är INTE en osynlig nod.
+        let tag = self.tag_name(key).unwrap_or("");
+        if tag != "html" && tag != "body" {
+            if let Some(id) = node.get_attr("id") {
+                if Self::NOJS_IDENTIFIERS
+                    .iter()
+                    .any(|pat| id.eq_ignore_ascii_case(pat))
+                {
+                    return false;
+                }
             }
-        }
-        if let Some(class) = node.get_attr("class") {
-            if Self::NOJS_IDENTIFIERS.iter().any(|pat| {
-                class
-                    .split_whitespace()
-                    .any(|c| c.eq_ignore_ascii_case(pat))
-            }) {
-                return false;
+            if let Some(class) = node.get_attr("class") {
+                if Self::NOJS_IDENTIFIERS.iter().any(|pat| {
+                    class
+                        .split_whitespace()
+                        .any(|c| c.eq_ignore_ascii_case(pat))
+                }) {
+                    return false;
+                }
             }
         }
 
