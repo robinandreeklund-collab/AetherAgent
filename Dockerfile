@@ -28,11 +28,13 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 # Create minimal stubs so cargo can resolve and compile all dependencies
-RUN mkdir -p src/bin benches && \
+# Also stub examples/ (excluded by .dockerignore but declared in Cargo.toml)
+RUN mkdir -p src/bin benches examples && \
     echo "pub fn stub() {}" > src/lib.rs && \
     echo "fn main() {}" > src/bin/server.rs && \
     echo "fn main() {}" > src/bin/mcp_server.rs && \
-    echo "fn main() {}" > benches/bench_main.rs
+    echo "fn main() {}" > benches/bench_main.rs && \
+    echo "fn main() {}" > examples/render_demo.rs
 
 # Pre-compile all dependencies (this is the slow step, ~10-15 min first time)
 # Subsequent builds reuse this layer if only src/ code changed.
@@ -48,6 +50,9 @@ RUN rm -rf src/ benches/ && \
 # ── Build our code (fast: only our crate, deps are cached) ───────────────────
 COPY src/ src/
 COPY benches/ benches/
+COPY dashboard.html dashboard.html
+# Stub examples (excluded by .dockerignore but required by Cargo.toml [[example]])
+RUN mkdir -p examples && echo "fn main() {}" > examples/render_demo.rs
 
 RUN cargo build --profile server-release --features server,vision,cdp --bin aether-server && \
     cargo build --profile server-release --features mcp,vision,cdp --bin aether-mcp
