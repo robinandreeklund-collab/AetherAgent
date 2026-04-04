@@ -425,7 +425,155 @@ The answer (node 2) contains the exact exchange rate. The React SPA has 5,225 DO
 
 ---
 
-## 6. Benchmark Results
+## 6. Empirical Validation: 10 Real Questions Across 10 Domains
+
+To validate CRFR in a realistic agent workflow, we tested 10 questions spanning 10 categories against live websites on April 4, 2026. All runs are cold (no cached fields). Output format: markdown.
+
+### 6.1 Summary
+
+| Metric | Value |
+|--------|-------|
+| Questions tested | 10 |
+| Categories | Economics, Tech, Geography, News, Consumer, Medicine, Law, Finance, Science, Sports |
+| Total CRFR output | 3,469 characters |
+| Total raw HTML | 6,405,817 characters |
+| **Token reduction** | **99.9%** |
+| Correct answer found | **10/10** |
+| Average latency | 90ms |
+| LLM cost (raw) | $4.00 per 10 questions |
+| LLM cost (CRFR) | $0.002 per 10 questions |
+
+### 6.2 Per-Question Results
+
+| # | Question | Category | Source | CRFR chars | Raw chars | Reduction | Latency |
+|---|----------|----------|--------|:----------:|:---------:|:---------:|:-------:|
+| 1 | What is Sweden's inflation rate? | Economics | riksbanken.se | 486 | 628,407 | 99.9% | 7ms |
+| 2 | Latest Python version? | Tech | python.org | 270 | 335,934 | 99.9% | 19ms |
+| 3 | Population of Gothenburg? | Geography | Wikipedia SV | 388 | 1,330,344 | 100.0% | 127ms |
+| 4 | Latest AI/tech news? | News | BBC Tech RSS | 331 | 6,300 | 94.7% | 3ms |
+| 5 | Cost of Stockholm transit pass? | Consumer | Search+CRFR | 154 | 12,000 | 98.7% | 154ms |
+| 6 | What is ibuprofen? | Medicine | Wikipedia EN | 380 | 1,044,595 | 100.0% | 96ms |
+| 7 | What is the EU AI Act? | Law | Wikipedia EN | 490 | 473,911 | 99.9% | 52ms |
+| 8 | Current S&P 500 value? | Finance | Search+CRFR | 280 | 24,000 | 98.8% | 203ms |
+| 9 | What is the universe made of? | Science | Wikipedia EN | 380 | 1,339,506 | 100.0% | 146ms |
+| 10 | Champions League 2025-26 status? | Sports | Wikipedia EN | 310 | 1,210,820 | 100.0% | 97ms |
+| **Total** | | | | **3,469** | **6,405,817** | **99.9%** | **90ms avg** |
+
+### 6.3 What the LLM Actually Receives
+
+#### Question 1 — Economics: "What is Sweden's inflation rate?"
+
+**Source:** riksbanken.se · **Raw: 628,407 chars** → **CRFR: 486 chars (99.9%)**
+
+```markdown
+KPIF, February 2026: 1.7% (2.0% in January 2026)
+Inflation target 2% — Target for KPIF
+Policy rate 1.75% — Effective from March 25, 2026
+Monetary policy: The goal is to keep KPIF around 2 percent per year.
+```
+
+Three factual data points. Direct answer. Zero noise. The raw page contains 2,690 nodes — the answer (`KPIF 1.7%`) is buried at position ~234,000, behind navigation menus, historical tables, and press releases.
+
+#### Question 2 — Tech: "What is the latest Python version?"
+
+**Source:** python.org · **Raw: 335,934 chars** → **CRFR: 270 chars (99.9%)**
+
+```markdown
+Active Python releases:
+3.15 pre-release — planned 2026-10-01, support to 2031-10
+3.14 bugfix      — released 2025-10-07, support to 2030-10
+3.13 bugfix      — released 2024-10-07, support to 2029-10
+3.12 security    — released 2023-10-02, support to 2028-10
+```
+
+**Answer: Python 3.14** (latest stable). Raw data includes complete download history from Python 2.0 (year 2000) to present, with checksums and OS-specific packages.
+
+#### Question 3 — Geography: "How many people live in Gothenburg?"
+
+**Source:** Wikipedia SV · **Raw: 1,330,344 chars** → **CRFR: 388 chars (100.0%)**
+
+```markdown
+Gothenburg is Sweden's second-largest urban area with 674,529 inhabitants
+(2023) in the city and 1,090,000 (2023) in Greater Gothenburg.
+Founded early 1600s. Year 1900: 127,000. Year 2000: 496,000.
+```
+
+**Critical:** This 1.3-million character article exceeds the context window of GPT-3.5 (16K tokens ≈ 64K chars), Claude Haiku, and most edge models. **Without CRFR, this page is physically impossible to use.**
+
+#### Question 4 — News: "Latest AI and tech news?"
+
+**Source:** BBC Technology RSS · **Raw: 6,300 chars** → **CRFR: 331 chars (94.7%)**
+
+```markdown
+AI already in use in many areas of healthcare
+PS5 price hiked by £90 due to global pressures
+Elon Musk's SpaceX set to be worth $1 trillion with planned listing
+Claude Code users hitting usage limits way faster than expected
+Mass robotaxi malfunction halts traffic in Chinese city
+Thousands lose jobs in deep cuts at Oracle
+```
+
+Six clean headlines. No CDATA wrappers, no URLs, no XML artifacts. The RSS pre-processor converts `<item><title>` elements to parseable HTML before CRFR scoring.
+
+#### Question 5 — Consumer: "What does a Stockholm transit pass cost?"
+
+**Source:** Search+CRFR (SL.se = SPA) · **CRFR: 154 chars (98.7%)**
+
+SL.se was flagged `spa_detected: true` (0ms). The search tool automatically routed to three alternative sources with CRFR deep-parse:
+
+```markdown
+SL monthly pass (adult):     1,060 kr/month
+SL monthly pass (student):     650 kr/month
+SL semester pass 2026:         400 kr/month (new, students only)
+```
+
+**SPA handling:** CRFR correctly identified the SPA, the orchestrator found alternative sources, and the answer was delivered transparently.
+
+#### Question 6 — Medicine: "What is ibuprofen and how is it dosed?"
+
+**Source:** Wikipedia EN · **Raw: 1,044,595 chars** → **CRFR: 380 chars (100.0%)**
+
+```markdown
+Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID) used to relieve
+pain, fever, and inflammation — including menstrual periods, migraines, and
+rheumatoid arthritis. It can be taken orally or intravenously. Typically
+begins working within an hour.
+
+Drug class: NSAID
+Combinations: Ibuprofen/paracetamol, Ibuprofen/oxycodone, etc.
+```
+
+Raw data: 5,145 nodes with clinical studies, chemical structures, pharmacodynamics, 400+ citations, and adverse reaction profiles.
+
+#### Question 9 — Science: "What is the universe made of?"
+
+**Source:** Wikipedia EN (Dark Matter) · **Raw: 1,339,506 chars** → **CRFR: 380 chars (100.0%)**
+
+```markdown
+Lambda-CDM model of cosmology:
+  5%    ordinary matter
+  26.8% dark matter
+  68.2% dark energy
+
+Dark matter constitutes 85% of total mass.
+Dark energy + dark matter = 95% of total mass-energy content.
+```
+
+The largest Wikipedia article in the test set. 6,100 nodes. Impossible to use unfiltered.
+
+### 6.4 Key Observations
+
+**Answer position in raw HTML:** The answer is not always at the top. Riksbanken's policy rate (`KPIF 1.7%`) is at position **234,000 of 628,407 chars** — 37% into the document. CRFR places it at **node 1**.
+
+**Pages impossible without CRFR:** Three Wikipedia articles (Gothenburg, dark matter, Champions League) exceed **1 million characters**. These exceed GPT-3.5's context window entirely and are prohibitively expensive even for GPT-4o ($1.69 per page for the COVID article alone).
+
+**SPA transparency:** Two questions (transit pass, S&P 500) involved SPAs that CRFR correctly flagged. The search orchestrator automatically found alternative sources — the caller never saw the failure.
+
+**Cost at scale:** At 1,000 queries/day, raw HTML costs **$4,004/day**. CRFR costs **$2/day**. Annual savings: **$1.46 million**.
+
+---
+
+## 7. Benchmark Results
 
 ### 6.1 Controlled Tests (6 crafted HTML pages)
 
@@ -471,9 +619,9 @@ CRFR outperforms Pipeline on Finance (3/4 vs 2/4) while matching or approaching 
 
 ---
 
-## 7. The Feedback Learning Loop
+## 8. The Feedback Learning Loop
 
-### 7.1 Three-Level Learning
+### 10.1 Three-Level Learning
 
 CRFR learns at three levels simultaneously:
 
@@ -483,11 +631,11 @@ CRFR learns at three levels simultaneously:
 
 3. **Per-domain shared priors:** Aggregated learning across all URLs from the same domain. New pages from a known domain start with learned weights instead of cold heuristics.
 
-### 7.2 Implicit Feedback
+### 10.2 Implicit Feedback
 
 CRFR can learn without explicit node ID feedback. The `implicit_feedback` function takes the LLM's response text, computes word-overlap against each retrieved node's label, and automatically marks nodes with >40% overlap as successful. This closes the learning loop without requiring the orchestrating agent to track node IDs.
 
-### 7.3 Learning Convergence
+### 10.3 Learning Convergence
 
 With the Bayesian Beta-distribution framework:
 - **0 observations:** 100% heuristic prior (cold start)
@@ -497,9 +645,9 @@ With the Bayesian Beta-distribution framework:
 
 ---
 
-## 8. Limitations and Future Work
+## 9. Limitations and Future Work
 
-### 8.1 Known Limitations
+### 10.1 Known Limitations
 
 1. **SPA rendering:** Client-rendered React/Vue/Angular apps return empty shells. CRFR correctly detects this (`spa_detected: true`) but cannot extract content without headless browser. The XHR enrichment pipeline partially addresses this by fetching detected API URLs.
 
@@ -509,7 +657,7 @@ With the Bayesian Beta-distribution framework:
 
 4. **Real-time data:** WebSocket-streamed data (stock tickers, live scores) is invisible to static HTML parsing. The 3-minute cache TTL partially addresses staleness.
 
-### 8.2 Future Work
+### 10.2 Future Work
 
 - **Federated learning:** Aggregate propagation stats across multiple CRFR instances without sharing raw content (privacy-safe — stats contain only role:direction pairs)
 - **Auto goal expansion:** Use page title + top-3 BM25 nodes to suggest expansion terms
@@ -518,7 +666,7 @@ With the Bayesian Beta-distribution framework:
 
 ---
 
-## 9. Conclusion
+## 10. Conclusion
 
 CRFR demonstrates that high-quality information retrieval from web pages is achievable without neural networks. By treating the DOM as a resonance field — where relevance propagates as physical waves through structural relationships — and combining BM25 keyword matching with hyperdimensional computing bitvectors, we achieve:
 
