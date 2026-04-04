@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     # Build essentials for cc linker
     build-essential \
+    # libclang for bindgen (used by stylo/servo dependencies)
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Installera Rust via rustup (CACHE_BUST forces rebuild when version changes)
