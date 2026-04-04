@@ -10,6 +10,7 @@ pub(crate) mod compiler;
 mod css_cascade;
 #[cfg(feature = "blitz")]
 pub mod css_compiler;
+pub mod dashboard;
 pub(crate) mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
@@ -1525,6 +1526,103 @@ pub fn wrap_untrusted(content: &str) -> String {
 #[wasm_bindgen]
 pub fn health_check() -> String {
     r#"{"status": "ok", "version": "0.2.0", "engine": "AetherAgent"}"#.to_string()
+}
+
+// ─── Dashboard API ──────────────────────────────────────────────────────────
+
+/// Get full dashboard snapshot (CRFR cache, memory, WPT baseline).
+pub fn dashboard_snapshot(vision_available: bool, endpoint_count: usize) -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+
+    let entries: Vec<dashboard::SiteCacheEntry> = fields
+        .iter()
+        .map(|f| dashboard::SiteCacheEntry {
+            url_hash: f.url_hash,
+            node_count: f.node_count,
+            total_queries: f.total_queries,
+            domain_hash: f.domain_hash,
+            created_at_ms: f.created_at_ms,
+            age_ms: now.saturating_sub(f.created_at_ms),
+            propagation_weight_count: f.propagation_weight_count,
+            concept_memory_count: f.concept_memory_count,
+        })
+        .collect();
+
+    let snap = dashboard::DashboardSnapshot {
+        crfr_cache: dashboard::CacheOverview {
+            entries,
+            total_entries: cache_len,
+            capacity: cache_cap,
+        },
+        memory_stats: dashboard::read_memory_stats(),
+        wpt_baseline: dashboard::build_wpt_baseline(),
+        vision_available,
+        endpoint_count,
+        timestamp_ms: now,
+    };
+
+    serde_json::to_string(&snap).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get CRFR cache overview.
+pub fn dashboard_crfr_cache() -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+
+    let entries: Vec<dashboard::SiteCacheEntry> = fields
+        .iter()
+        .map(|f| dashboard::SiteCacheEntry {
+            url_hash: f.url_hash,
+            node_count: f.node_count,
+            total_queries: f.total_queries,
+            domain_hash: f.domain_hash,
+            created_at_ms: f.created_at_ms,
+            age_ms: now.saturating_sub(f.created_at_ms),
+            propagation_weight_count: f.propagation_weight_count,
+            concept_memory_count: f.concept_memory_count,
+        })
+        .collect();
+
+    let overview = dashboard::CacheOverview {
+        entries,
+        total_entries: cache_len,
+        capacity: cache_cap,
+    };
+
+    serde_json::to_string(&overview)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get propagation weights for a cached field by URL hash.
+pub fn dashboard_propagation_weights(url_hash: u64) -> String {
+    let fields = resonance::list_cached_fields();
+    let field = fields.iter().find(|f| f.url_hash == url_hash);
+
+    match field {
+        Some(f) => {
+            let now = now_ms();
+            let view = dashboard::build_causal_memory_view(
+                &f.propagation_stats,
+                f.concept_memory_count,
+                f.total_queries,
+                f.domain_hash,
+                f.created_at_ms,
+                now,
+            );
+            serde_json::to_string(&view)
+                .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+        }
+        None => r#"{"error":"field not found"}"#.to_string(),
+    }
+}
+
+/// Get WPT baseline panel.
+pub fn dashboard_wpt() -> String {
+    let panel = dashboard::build_wpt_baseline();
+    serde_json::to_string(&panel).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
 }
 
 // ─── Fas 2: Intent API ──────────────────────────────────────────────────────

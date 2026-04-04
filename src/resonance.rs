@@ -2055,6 +2055,40 @@ pub fn cache_stats() -> (usize, usize) {
     (cache.len(), cache.capacity)
 }
 
+/// Summary info for a cached resonance field (for dashboard).
+pub struct FieldSummary {
+    pub url_hash: u64,
+    pub node_count: usize,
+    pub total_queries: u32,
+    pub domain_hash: u64,
+    pub created_at_ms: u64,
+    pub propagation_weight_count: usize,
+    pub concept_memory_count: usize,
+    pub propagation_stats: std::collections::HashMap<String, (f32, f32)>,
+}
+
+/// List summaries of all cached resonance fields (non-destructive peek).
+pub fn list_cached_fields() -> Vec<FieldSummary> {
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache
+        .entries
+        .iter()
+        .map(|(url_hash, _insert_ms, field)| FieldSummary {
+            url_hash: *url_hash,
+            node_count: field.nodes.len(),
+            total_queries: field.total_queries,
+            domain_hash: field.domain_hash,
+            created_at_ms: field.created_at_ms,
+            propagation_weight_count: field.propagation_stats.len(),
+            concept_memory_count: field.concept_memory.len(),
+            propagation_stats: field.propagation_stats.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

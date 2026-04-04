@@ -6051,6 +6051,44 @@ async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl
     (StatusCode::OK, result)
 }
 
+// ─── Dashboard Endpoints ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DashboardWeightsRequest {
+    url_hash: u64,
+}
+
+async fn dashboard_snapshot_handler() -> impl IntoResponse {
+    let vision_available = cfg!(feature = "vision");
+    // 72 endpoints (ungefär)
+    let result = aether_agent::dashboard_snapshot(vision_available, 72);
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_crfr_cache_handler() -> impl IntoResponse {
+    let result = aether_agent::dashboard_crfr_cache();
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_weights_handler(Json(req): Json<DashboardWeightsRequest>) -> impl IntoResponse {
+    let result = aether_agent::dashboard_propagation_weights(req.url_hash);
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_wpt_handler() -> impl IntoResponse {
+    let result = aether_agent::dashboard_wpt();
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_html() -> impl IntoResponse {
+    let html = include_str!("../../dashboard.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6064,6 +6102,15 @@ fn build_router(state: AppState) -> Router {
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
+        // Dashboard
+        .route("/dashboard", get(dashboard_html))
+        .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
+        .route(
+            "/api/dashboard/crfr-cache",
+            get(dashboard_crfr_cache_handler),
+        )
+        .route("/api/dashboard/weights", post(dashboard_weights_handler))
+        .route("/api/dashboard/wpt", get(dashboard_wpt_handler))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
