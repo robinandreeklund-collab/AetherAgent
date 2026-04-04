@@ -4300,6 +4300,120 @@ fn test_dom_performance_benchmark() {
     assert!(t11 < 500_000, "200 noder < 500ms (debug): {}us", t11);
 }
 
+// ─── CRFR SPA Pipeline Diagnostic ───────────────────────────────────────────
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_crfr_spa_js_rendering_verified() {
+    let html = r#"<html><body><div id="r">STATIC CONTENT</div><script>
+        var r = document.getElementById('r');
+        r.textContent = 'JS RENDERED CONTENT';
+    </script></body></html>"#;
+
+    let result_js = aether_agent::parse_crfr(
+        html,
+        "RENDERED STATIC CONTENT",
+        "https://crfr-diag-js.local/1",
+        10,
+        true,
+        "json",
+    );
+    let result_no = aether_agent::parse_crfr(
+        html,
+        "RENDERED STATIC CONTENT",
+        "https://crfr-diag-no.local/1",
+        10,
+        false,
+        "json",
+    );
+
+    let js_val: serde_json::Value = serde_json::from_str(&result_js).unwrap();
+    let no_val: serde_json::Value = serde_json::from_str(&result_no).unwrap();
+
+    let js_label = js_val["nodes"][0]["label"].as_str().unwrap_or("");
+    let no_label = no_val["nodes"][0]["label"].as_str().unwrap_or("");
+
+    eprintln!("=== run_js=true label: {}", js_label);
+    eprintln!("=== run_js=false label: {}", no_label);
+    eprintln!("=== run_js=true total_nodes: {}", js_val["total_nodes"]);
+    eprintln!("=== run_js=false total_nodes: {}", no_val["total_nodes"]);
+    eprintln!("=== run_js=true js_eval: {}", js_val["crfr"]["js_eval"]);
+
+    assert!(
+        js_label.contains("JS RENDERED"),
+        "run_js=true borde visa JS-renderat: got '{}'",
+        js_label
+    );
+    assert!(
+        no_label.contains("STATIC"),
+        "run_js=false borde visa statiskt: got '{}'",
+        no_label
+    );
+    assert_ne!(js_label, no_label, "JS och non-JS borde ge olika resultat");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
+fn test_crfr_all_spa_apis_verified() {
+    let html = r#"<html><body><div id="r">BEFORE</div><script>
+        var r = document.getElementById('r');
+        var out = [];
+
+        // 1. createElement + appendChild
+        out.push('DOM:OK');
+
+        // 2. History API
+        history.pushState(null, '', '/verified');
+        out.push('ROUTE:' + location.pathname);
+
+        // 3. localStorage
+        localStorage.setItem('key', 'val');
+        out.push('STORAGE:' + localStorage.getItem('key'));
+
+        // 4. btoa/atob
+        out.push('B64:' + btoa('Hi') + '=' + atob('SGk='));
+
+        // 5. Intl.NumberFormat
+        var f = new Intl.NumberFormat('sv-SE', {style: 'currency', currency: 'SEK'});
+        out.push('INTL:' + f.format(1234));
+
+        // 6. structuredClone
+        var o = {a: 1};
+        var c = structuredClone(o);
+        c.a = 9;
+        out.push('CLONE:' + o.a + '/' + c.a);
+
+        // 7. scrollTo
+        scrollTo(0, 42);
+        out.push('SCROLL:' + scrollY);
+
+        r.textContent = out.join(' | ');
+    </script></body></html>"#;
+
+    let result = aether_agent::parse_crfr(
+        html,
+        "DOM ROUTE STORAGE B64 INTL CLONE SCROLL",
+        "https://all-apis-verify.local/2",
+        10,
+        true,
+        "json",
+    );
+
+    let val: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let label = val["nodes"][0]["label"].as_str().unwrap_or("");
+
+    eprintln!("ALL APIs label: {}", label);
+
+    assert!(label.contains("DOM:OK"), "createElement: {}", label);
+    assert!(label.contains("ROUTE:/verified"), "pushState: {}", label);
+    assert!(label.contains("STORAGE:val"), "localStorage: {}", label);
+    assert!(label.contains("B64:SGk="), "btoa: {}", label);
+    assert!(label.contains("=Hi"), "atob: {}", label);
+    assert!(label.contains("INTL:"), "Intl.NumberFormat: {}", label);
+    assert!(label.contains("CLONE:1/9"), "structuredClone: {}", label);
+    assert!(label.contains("SCROLL:42"), "scrollTo/scrollY: {}", label);
+}
+
 // ─── SPA Integration Tests ──────────────────────────────────────────────────
 
 #[cfg(feature = "js-eval")]

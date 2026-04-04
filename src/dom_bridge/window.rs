@@ -1373,6 +1373,10 @@ pub(super) fn register_window_with_viewport<'js>(
             globalThis.scrollTo = window.scrollTo;
             globalThis.scroll = window.scroll;
             globalThis.scrollBy = window.scrollBy;
+            Object.defineProperty(globalThis, 'scrollX', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'scrollY', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'pageXOffset', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'pageYOffset', { get: window.__scrollYGetter, enumerable: true, configurable: true });
         }
         // structuredClone redan registrerad som Rust-native
 
