@@ -744,6 +744,56 @@ pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> S
     }
 }
 
+fn is_error_page(title: &str, total_nodes: usize) -> bool {
+    let t = title.to_lowercase();
+    if t.contains("404")
+        || t.contains("not found")
+        || t.contains("hittades inte")
+        || t.contains("error")
+        || t.contains("fel")
+        || t.contains("page not found")
+        || t.contains("sidan finns inte")
+        || t.contains("access denied")
+        || t.contains("403")
+        || t.contains("500")
+    {
+        return true;
+    }
+    // Very few nodes + generic error-like title
+    if total_nodes < 20 && (t.contains("oops") || t.contains("sorry") || t.is_empty()) {
+        return true;
+    }
+    false
+}
+
+fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResult)]) -> bool {
+    if matched.is_empty() {
+        return false;
+    }
+    let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
+    data_count as f32 / matched.len() as f32 > 0.7
+}
+
+fn goal_title_overlap(goal: &str, title: &str) -> f32 {
+    if goal.is_empty() || title.is_empty() {
+        return 0.0;
+    }
+    let goal_lower = goal.to_lowercase();
+    let title_lower = title.to_lowercase();
+    let goal_words: Vec<&str> = goal_lower
+        .split_whitespace()
+        .filter(|w| w.len() > 2)
+        .collect();
+    if goal_words.is_empty() {
+        return 0.0;
+    }
+    let matches = goal_words
+        .iter()
+        .filter(|w| title_lower.contains(*w))
+        .count();
+    matches as f32 / goal_words.len() as f32
+}
+
 /// Run CRFR propagation on an existing (potentially XHR-enriched) tree.
 pub fn parse_crfr_from_tree(
     tree: &SemanticTree,
@@ -846,6 +896,9 @@ pub fn parse_crfr_from_tree(
             "total_nodes": total_dom_nodes,
             "injection_warnings": tree.injection_warnings,
             "spa_detected": total_dom_nodes < 10,
+            "error_detected": is_error_page(&tree.title, total_dom_nodes),
+            "ssr_json_only": is_ssr_json_only(&matched),
+            "goal_title_overlap": goal_title_overlap(goal, &tree.title),
             "xhr_intercepted": tree.xhr_intercepted,
             "parse_time_ms": total_ms,
             "crfr": {

@@ -397,8 +397,32 @@ fn now_ms() -> u64 {
 
 /// BUG-02: Penalize metadata-pattern nodes (HN .subtext, Reddit score lines, etc.)
 /// Matches: "N points by X N hours ago | hide | N comments"
+/// BUG-B: Penalize injected state nodes (__APOLLO_STATE__, __NEXT_DATA__, window.__*)
+fn state_injection_penalty(label: &str) -> f32 {
+    if label.starts_with("__APOLLO_STATE__")
+        || label.starts_with("__NEXT_DATA__")
+        || label.starts_with("window.__")
+        || label.starts_with("contentApiData.")
+        || label.starts_with("layoutData.")
+        || label.starts_with("commonI18nResources.")
+        || label.starts_with("dataManifest.")
+    {
+        return 0.3; // Strong penalty — this is serialized state, not content
+    }
+    1.0
+}
+
 fn metadata_penalty(label: &str) -> f32 {
     let lower = label.to_lowercase();
+    // BUG-E: Transient UI error messages
+    if lower.contains("uh oh! there was an error")
+        || lower.contains("please reload this page")
+        || lower.contains("something went wrong")
+        || lower.contains("loading...")
+        || lower.contains("laddar...")
+    {
+        return 0.5; // Penalty for error-state content
+    }
     // HN/Reddit/Lobsters metadata pattern
     if (lower.contains("points by") || lower.contains("hours ago") || lower.contains("minutes ago"))
         && (lower.contains("comments") || lower.contains("hide"))
@@ -708,6 +732,12 @@ impl ResonanceField {
                 let meta_pen =
                     metadata_penalty(self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""));
                 state.amplitude *= meta_pen;
+
+                // BUG-B: Penalize serialized state blobs
+                let state_pen = state_injection_penalty(
+                    self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""),
+                );
+                state.amplitude *= state_pen;
 
                 // BUG-05: Site-name penalization
                 if !site_words.is_empty() {
