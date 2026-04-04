@@ -1224,6 +1224,7 @@ mod fetch_tests {
             redirect_chain: vec![],
             fetch_time_ms: 150,
             body_size_bytes: 30,
+            cross_domain_redirect: false,
         };
 
         let json = serde_json::to_string(&result).expect("Ska serialisera FetchResult");
@@ -1246,6 +1247,7 @@ mod fetch_tests {
                 redirect_chain: vec![],
                 fetch_time_ms: 100,
                 body_size_bytes: 47,
+                cross_domain_redirect: false,
             },
             tree: SemanticTree {
                 url: "https://example.com".to_string(),

@@ -690,19 +690,6 @@ pub(super) fn register_window_with_viewport<'js>(
         )?;
     }
 
-    // location
-    let loc = Object::new(ctx.clone())?;
-    loc.set("href", "https://example.com/")?;
-    loc.set("protocol", "https:")?;
-    loc.set("host", "example.com")?;
-    loc.set("hostname", "example.com")?;
-    loc.set("pathname", "/")?;
-    loc.set("search", "")?;
-    loc.set("hash", "")?;
-    loc.set("origin", "https://example.com")?;
-    loc.set("port", "")?;
-    win.set("location", loc)?;
-
     // navigator
     let nav = Object::new(ctx.clone())?;
     nav.set("userAgent", "AetherAgent/1.0 (QuickJS Sandbox)")?;
@@ -847,54 +834,6 @@ pub(super) fn register_window_with_viewport<'js>(
             Function::new(ctx.clone(), JsFn(GetRandomValues))?,
         )?;
         win.set("crypto", crypto)?;
-    }
-
-    // location.searchParams — enkel URLSearchParams stub
-    {
-        let search_params = Object::new(ctx.clone())?;
-        struct SPGet;
-        impl JsHandler for SPGet {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_null(ctx.clone()))
-            }
-        }
-        struct SPHas;
-        impl JsHandler for SPHas {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_bool(ctx.clone(), false))
-            }
-        }
-        struct SPToString;
-        impl JsHandler for SPToString {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value())
-            }
-        }
-        search_params.set("get", Function::new(ctx.clone(), JsFn(SPGet))?)?;
-        search_params.set("getAll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("has", Function::new(ctx.clone(), JsFn(SPHas))?)?;
-        search_params.set("set", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("delete", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("toString", Function::new(ctx.clone(), JsFn(SPToString))?)?;
-        search_params.set("entries", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("keys", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("values", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("forEach", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        // Sätt på location-objektet
-        let loc: Object = win.get("location")?;
-        loc.set("searchParams", search_params)?;
     }
 
     // CSS object med native supports() och escape()
@@ -3848,35 +3787,212 @@ pub(super) fn register_window_with_viewport<'js>(
     "#,
     )?;
 
-    // SPA-stöd: fetch/XHR/Observer-stubs + URL-capture för Rust-side fetch
+    // SPA-stöd: fetch/XHR + URL-capture + pre-populated response support
+    // Registrera __fetchSync native handler som kollar BridgeState.fetch_responses
+    {
+        struct FetchSyncHandler {
+            state: SharedState,
+        }
+        impl JsHandler for FetchSyncHandler {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let url = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_default();
+                let method = args
+                    .get(1)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_else(|| "GET".to_string());
+                let headers_json = args
+                    .get(2)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_else(|| "{}".to_string());
+                let body = args
+                    .get(3)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok());
+
+                let mut s = self.state.borrow_mut();
+
+                // Kolla om vi har ett pre-populerat svar
+                if let Some(resp) = s.fetch_responses.get(&url).cloned() {
+                    // Returnera JSON-objekt med response-data
+                    drop(s); // Släpp borrow
+                    let result = Object::new(ctx.clone())?;
+                    result.set("found", true)?;
+                    result.set("status", resp.status)?;
+                    result.set(
+                        "contentType",
+                        rquickjs::String::from_str(ctx.clone(), &resp.content_type)?,
+                    )?;
+                    result.set("body", rquickjs::String::from_str(ctx.clone(), &resp.body)?)?;
+                    // Headers som JSON
+                    let headers_obj = Object::new(ctx.clone())?;
+                    for (k, v) in &resp.headers {
+                        headers_obj.set(k.as_str(), rquickjs::String::from_str(ctx.clone(), v)?)?;
+                    }
+                    result.set("headers", headers_obj)?;
+                    return Ok(result.into_value());
+                }
+
+                // Registrera som pending fetch
+                let headers: std::collections::HashMap<String, String> =
+                    serde_json::from_str(&headers_json).unwrap_or_default();
+                s.pending_fetches.push(super::state::PendingFetch {
+                    url: url.clone(),
+                    method,
+                    headers,
+                    body,
+                });
+                drop(s);
+
+                // Returnera "not found" — JS-sidan hanterar detta
+                let result = Object::new(ctx.clone())?;
+                result.set("found", false)?;
+                Ok(result.into_value())
+            }
+        }
+
+        let globals: Object = ctx.globals();
+        globals.set(
+            "__fetchSync",
+            Function::new(
+                ctx.clone(),
+                JsFn(FetchSyncHandler {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+    }
+
+    // WebSocket native handlers
+    {
+        // __wsOpen(url) → registrera URL, returnera pre-populated messages JSON-array eller null
+        struct WsOpenHandler {
+            state: SharedState,
+        }
+        impl JsHandler for WsOpenHandler {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let url = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_default();
+
+                let mut s = self.state.borrow_mut();
+                s.websocket_urls.push(url.clone());
+
+                // Kolla om vi har pre-populated meddelanden
+                if let Some(msgs) = s.websocket_messages.get(&url) {
+                    let messages = msgs.messages.clone();
+                    drop(s);
+                    let arr = rquickjs::Array::new(ctx.clone())?;
+                    for (i, msg) in messages.iter().enumerate() {
+                        arr.set(i, rquickjs::String::from_str(ctx.clone(), msg)?)?;
+                    }
+                    return Ok(arr.into_value());
+                }
+                drop(s);
+                Ok(Value::new_null(ctx.clone()))
+            }
+        }
+
+        let globals: Object = ctx.globals();
+        globals.set(
+            "__wsOpen",
+            Function::new(
+                ctx.clone(),
+                JsFn(WsOpenHandler {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+    }
+
     ctx.eval::<(), _>(
         r#"
         // Samlar fetch-URLs för Rust-side interception (BUGG J fix)
         globalThis.__fetchedUrls = [];
 
-        // fetch() — samla URL för Rust-fetch, returnera stub-Response
+        // fetch() — kolla pre-populated responses, annars registrera pending
         globalThis.fetch = function(url, opts) {
-            if (typeof url === 'string' && url.length > 0) {
-                globalThis.__fetchedUrls.push(url);
+            var urlStr = '';
+            if (typeof url === 'string') urlStr = url;
+            else if (url && url.url) urlStr = url.url;
+            else if (url && typeof url.toString === 'function') urlStr = url.toString();
+
+            if (urlStr.length > 0) {
+                globalThis.__fetchedUrls.push(urlStr);
             }
+
+            var method = (opts && opts.method) || 'GET';
+            var hdrs = {};
+            if (opts && opts.headers) {
+                if (typeof opts.headers.forEach === 'function') {
+                    opts.headers.forEach(function(v, k) { hdrs[k] = v; });
+                } else {
+                    for (var k in opts.headers) { hdrs[k] = opts.headers[k]; }
+                }
+            }
+            var bodyStr = (opts && opts.body) ? String(opts.body) : null;
+
+            // Kolla sync-respons via Rust
+            var syncResult = __fetchSync(urlStr, method, JSON.stringify(hdrs), bodyStr);
+
+            if (syncResult && syncResult.found) {
+                var status = syncResult.status || 200;
+                var ok = status >= 200 && status < 300;
+                var respBody = syncResult.body || '';
+                var ct = syncResult.contentType || '';
+                var respHeaders = new Headers(syncResult.headers || {});
+                if (ct) respHeaders.set('content-type', ct);
+                return Promise.resolve({
+                    ok: ok,
+                    status: status,
+                    statusText: ok ? 'OK' : 'Error',
+                    url: urlStr,
+                    redirected: false,
+                    type: 'basic',
+                    headers: respHeaders,
+                    json: function() {
+                        try { return Promise.resolve(JSON.parse(respBody)); }
+                        catch(e) { return Promise.reject(e); }
+                    },
+                    text: function() { return Promise.resolve(respBody); },
+                    blob: function() { return Promise.resolve(new Blob([respBody])); },
+                    arrayBuffer: function() {
+                        var enc = new TextEncoder();
+                        return Promise.resolve(enc.encode(respBody).buffer);
+                    },
+                    clone: function() { return this; },
+                    body: null,
+                    bodyUsed: false
+                });
+            }
+
+            // Ingen pre-populated response — returnera tom stub
             return Promise.resolve({
                 ok: false,
                 status: 0,
                 statusText: 'Sandbox: fetch deferred to Rust',
-                url: typeof url === 'string' ? url : '',
+                url: urlStr,
                 redirected: false,
                 type: 'basic',
-                headers: {
-                    get: function() { return null; },
-                    has: function() { return false; },
-                    forEach: function() {},
-                    entries: function() { return []; },
-                    keys: function() { return []; },
-                    values: function() { return []; }
-                },
-                json: function() { return Promise.reject(new Error('Sandbox: fetch deferred')); },
+                headers: new Headers({}),
+                json: function() { return Promise.reject(new Error('Sandbox: fetch pending')); },
                 text: function() { return Promise.resolve(''); },
-                blob: function() { return Promise.resolve(new Blob ? new Blob([]) : {}); },
+                blob: function() { return Promise.resolve(new Blob([])); },
                 arrayBuffer: function() { return Promise.resolve(new ArrayBuffer(0)); },
                 clone: function() { return this; },
                 body: null,
@@ -3926,30 +4042,144 @@ pub(super) fn register_window_with_viewport<'js>(
             this.abort = function() { this.signal.aborted = true; };
         };
 
-        // XMLHttpRequest stub
+        // XMLHttpRequest — med stöd för pre-populated responses
         globalThis.XMLHttpRequest = function XMLHttpRequest() {
             this.readyState = 0;
             this.status = 0;
             this.statusText = '';
             this.responseText = '';
             this.response = '';
+            this.responseType = '';
+            this.responseURL = '';
+            this.timeout = 0;
+            this.withCredentials = false;
             this.onreadystatechange = null;
             this.onload = null;
             this.onerror = null;
-            this.open = function() { this.readyState = 1; };
-            this.send = function() {
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onerror) { try { this.onerror({}); } catch(e) {} }
+            this.onprogress = null;
+            this.onloadend = null;
+            this.ontimeout = null;
+            this._method = 'GET';
+            this._url = '';
+            this._headers = {};
+            this._respHeaders = {};
+            this.UNSENT = 0; this.OPENED = 1; this.HEADERS_RECEIVED = 2; this.LOADING = 3; this.DONE = 4;
+            this.open = function(method, url) {
+                this._method = method || 'GET';
+                this._url = String(url || '');
+                this.readyState = 1;
                 if (this.onreadystatechange) { try { this.onreadystatechange(); } catch(e) {} }
             };
-            this.setRequestHeader = function() {};
-            this.getResponseHeader = function() { return null; };
-            this.getAllResponseHeaders = function() { return ''; };
-            this.abort = function() {};
-            this.addEventListener = function() {};
+            this.send = function(body) {
+                var self = this;
+                if (self._url) globalThis.__fetchedUrls.push(self._url);
+                var syncResult = __fetchSync(self._url, self._method, JSON.stringify(self._headers), body ? String(body) : null);
+                if (syncResult && syncResult.found) {
+                    self.status = syncResult.status || 200;
+                    self.statusText = self.status >= 200 && self.status < 300 ? 'OK' : 'Error';
+                    self.responseText = syncResult.body || '';
+                    self.response = self.responseText;
+                    self.responseURL = self._url;
+                    if (syncResult.headers) {
+                        for (var k in syncResult.headers) { self._respHeaders[k.toLowerCase()] = syncResult.headers[k]; }
+                    }
+                    self.readyState = 4;
+                    if (self.onreadystatechange) { try { self.onreadystatechange(); } catch(e) {} }
+                    if (self.onload) { try { self.onload({ type: 'load' }); } catch(e) {} }
+                    if (self.onloadend) { try { self.onloadend({ type: 'loadend' }); } catch(e) {} }
+                } else {
+                    self.readyState = 4;
+                    self.status = 0;
+                    if (self.onerror) { try { self.onerror({ type: 'error' }); } catch(e) {} }
+                    if (self.onreadystatechange) { try { self.onreadystatechange(); } catch(e) {} }
+                    if (self.onloadend) { try { self.onloadend({ type: 'loadend' }); } catch(e) {} }
+                }
+            };
+            this.setRequestHeader = function(k, v) { this._headers[k] = v; };
+            this.getResponseHeader = function(k) { return this._respHeaders[k.toLowerCase()] || null; };
+            this.getAllResponseHeaders = function() {
+                var r = '';
+                for (var k in this._respHeaders) { r += k + ': ' + this._respHeaders[k] + '\r\n'; }
+                return r;
+            };
+            this.abort = function() { this.readyState = 0; };
+            this.addEventListener = function(t, cb) { this['on' + t] = cb; };
             this.removeEventListener = function() {};
+            this.overrideMimeType = function() {};
         };
+
+        // WebSocket — klient-API med pre-populated messages
+        globalThis.WebSocket = function WebSocket(url, protocols) {
+            var self = this;
+            self.url = String(url || '');
+            self.protocol = '';
+            self.extensions = '';
+            self.readyState = 0; // CONNECTING
+            self.bufferedAmount = 0;
+            self.binaryType = 'blob';
+            self.onopen = null;
+            self.onmessage = null;
+            self.onerror = null;
+            self.onclose = null;
+            self._listeners = {};
+
+            // Konstanter
+            self.CONNECTING = 0;
+            self.OPEN = 1;
+            self.CLOSING = 2;
+            self.CLOSED = 3;
+
+            self.addEventListener = function(type, cb) {
+                if (!self._listeners[type]) self._listeners[type] = [];
+                self._listeners[type].push(cb);
+            };
+            self.removeEventListener = function(type, cb) {
+                if (!self._listeners[type]) return;
+                self._listeners[type] = self._listeners[type].filter(function(c) { return c !== cb; });
+            };
+            function dispatch(type, ev) {
+                if (self['on' + type]) { try { self['on' + type](ev); } catch(e) {} }
+                var ls = self._listeners[type] || [];
+                for (var i = 0; i < ls.length; i++) { try { ls[i](ev); } catch(e) {} }
+            }
+
+            self.send = function(data) {
+                if (self.readyState !== 1) throw new Error('WebSocket is not open');
+                // Data skickas inte — sandlådan fångar bara
+            };
+
+            self.close = function(code, reason) {
+                if (self.readyState >= 2) return;
+                self.readyState = 2;
+                setTimeout(function() {
+                    self.readyState = 3;
+                    dispatch('close', { type: 'close', code: code || 1000, reason: reason || '', wasClean: true });
+                }, 0);
+            };
+
+            // Simulera anslutning: hämta pre-populated messages via Rust
+            setTimeout(function() {
+                var messages = __wsOpen(self.url);
+                self.readyState = 1;
+                if (Array.isArray(protocols) && protocols.length > 0) self.protocol = protocols[0];
+                dispatch('open', { type: 'open' });
+
+                // Leverera pre-populated meddelanden
+                if (Array.isArray(messages)) {
+                    for (var i = 0; i < messages.length; i++) {
+                        (function(msg) {
+                            setTimeout(function() {
+                                dispatch('message', { type: 'message', data: msg, origin: self.url, lastEventId: '' });
+                            }, 0);
+                        })(messages[i]);
+                    }
+                }
+            }, 0);
+        };
+        WebSocket.CONNECTING = 0;
+        WebSocket.OPEN = 1;
+        WebSocket.CLOSING = 2;
+        WebSocket.CLOSED = 3;
 
         // IntersectionObserver stub
         globalThis.IntersectionObserver = function IntersectionObserver(cb, opts) {
@@ -4034,6 +4264,490 @@ pub(super) fn register_window_with_viewport<'js>(
     // Registrera localStorage/sessionStorage
     register_storage(ctx, Rc::clone(&state), "localStorage", true)?;
     register_storage(ctx, Rc::clone(&state), "sessionStorage", false)?;
+
+    // Registrera location (full SPA-stöd) + history API — EFTER window är på globalThis
+    let win_ref: Object = ctx.globals().get("window")?;
+    register_location(ctx, &win_ref, Rc::clone(&state))?;
+
+    Ok(())
+}
+
+// ─── Location (full SPA-stöd) ───────────────────────────────────────────────
+
+/// Registrera window.location med getters/setters kopplade till BridgeState.current_url
+fn register_location<'js>(
+    ctx: &Ctx<'js>,
+    win: &Object<'js>,
+    state: SharedState,
+) -> rquickjs::Result<()> {
+    // Registrera via JS med Proxy för dynamiska getters
+    // Vi lagrar __locationState i globalThis och bygger location som ett Proxy-objekt
+    // som läser/skriver BridgeState via native callbacks
+
+    // Native: __locationGetUrl → returnerar current_url från BridgeState
+    struct LocationGetUrl {
+        state: SharedState,
+    }
+    impl JsHandler for LocationGetUrl {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let url = self.state.borrow().current_url.clone();
+            Ok(rquickjs::String::from_str(ctx.clone(), &url)?.into_value())
+        }
+    }
+
+    // Native: __locationSetUrl(newUrl) → uppdaterar current_url i BridgeState
+    struct LocationSetUrl {
+        state: SharedState,
+    }
+    impl JsHandler for LocationSetUrl {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            if let Some(url) = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok())
+            {
+                let mut s = self.state.borrow_mut();
+                s.current_url = url;
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    let globals: Object = ctx.globals();
+    globals.set(
+        "__locationGetUrl",
+        Function::new(
+            ctx.clone(),
+            JsFn(LocationGetUrl {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__locationSetUrl",
+        Function::new(
+            ctx.clone(),
+            JsFn(LocationSetUrl {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
+    // location-objekt med dynamiska properties via JS getters/setters
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            // URL-parser helper
+            function parseUrl(href) {
+                var m = href.match(/^(https?:)\/\/([^/:]+)(:\d+)?(\/[^?#]*)(\?[^#]*)?(#.*)?$/);
+                if (!m) m = href.match(/^(about:)()()()()()$/);
+                if (!m) return { protocol:'https:', hostname:'example.com', port:'', pathname:'/', search:'', hash:'', href:href };
+                return {
+                    protocol: m[1] || 'https:',
+                    hostname: m[2] || '',
+                    port: (m[3] || '').replace(':',''),
+                    pathname: m[4] || '/',
+                    search: m[5] || '',
+                    hash: m[6] || '',
+                    href: href
+                };
+            }
+
+            var loc = {};
+            Object.defineProperty(loc, 'href', {
+                get: function() { return __locationGetUrl(); },
+                set: function(v) { __locationSetUrl(String(v)); },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'protocol', {
+                get: function() { return parseUrl(__locationGetUrl()).protocol; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(v + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'host', {
+                get: function() {
+                    var p = parseUrl(__locationGetUrl());
+                    return p.hostname + (p.port ? ':'+p.port : '');
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'hostname', {
+                get: function() { return parseUrl(__locationGetUrl()).hostname; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + v + (p.port ? ':'+p.port : '') + p.pathname + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'port', {
+                get: function() { return parseUrl(__locationGetUrl()).port; },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'pathname', {
+                get: function() { return parseUrl(__locationGetUrl()).pathname; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + v + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'search', {
+                get: function() { return parseUrl(__locationGetUrl()).search; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + v + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'hash', {
+                get: function() { return parseUrl(__locationGetUrl()).hash; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + p.search + v);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'origin', {
+                get: function() {
+                    var p = parseUrl(__locationGetUrl());
+                    return p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '');
+                },
+                enumerable: true, configurable: true
+            });
+            // searchParams — dynamisk getter baserad på aktuell search
+            Object.defineProperty(loc, 'searchParams', {
+                get: function() {
+                    var s = parseUrl(__locationGetUrl()).search || '';
+                    if (s.charAt(0) === '?') s = s.substring(1);
+                    var pairs = s ? s.split('&') : [];
+                    var data = {};
+                    for (var i = 0; i < pairs.length; i++) {
+                        var kv = pairs[i].split('=');
+                        data[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+                    }
+                    return {
+                        get: function(k) { return data.hasOwnProperty(k) ? data[k] : null; },
+                        has: function(k) { return data.hasOwnProperty(k); },
+                        getAll: function(k) { return data.hasOwnProperty(k) ? [data[k]] : []; },
+                        set: function() {},
+                        delete: function() {},
+                        toString: function() { return s; },
+                        entries: function() { var r = []; for (var k in data) { r.push([k, data[k]]); } return r; },
+                        keys: function() { return Object.keys(data); },
+                        values: function() { return Object.values(data); },
+                        forEach: function(cb) { for (var k in data) { cb(data[k], k); } }
+                    };
+                },
+                enumerable: true, configurable: true
+            });
+
+            loc.assign = function(url) { __locationSetUrl(String(url)); };
+            loc.replace = function(url) { __locationSetUrl(String(url)); };
+            loc.reload = function() {};
+            loc.toString = function() { return __locationGetUrl(); };
+
+            // Gör location tillgänglig
+            Object.defineProperty(window, 'location', {
+                get: function() { return loc; },
+                set: function(v) { loc.href = String(v); },
+                enumerable: true, configurable: true
+            });
+            globalThis.location = loc;
+        })();
+    "#,
+    )?;
+
+    // Registrera History API
+    register_history(ctx, win, state)?;
+
+    Ok(())
+}
+
+// ─── History API (SPA-routing) ──────────────────────────────────────────────
+
+/// Registrera window.history med pushState, replaceState, back, forward, go
+fn register_history<'js>(
+    ctx: &Ctx<'js>,
+    _win: &Object<'js>,
+    state: SharedState,
+) -> rquickjs::Result<()> {
+    // Native: __historyPushState(stateJson, title, url)
+    struct HistoryPushState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryPushState {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let state_json = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+            // args[1] = title (ignoreras per spec)
+            let url = args
+                .get(2)
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+
+            let mut s = self.state.borrow_mut();
+            // Ny URL: om angiven, resolve mot current_url; annars behåll current
+            let new_url = if let Some(u) = url {
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    u
+                } else if u.starts_with('/') {
+                    // Absolut path — behåll origin
+                    let cur = s.current_url.clone();
+                    if let Some(idx) = cur.find("://") {
+                        if let Some(slash) = cur[idx + 3..].find('/') {
+                            format!("{}{}", &cur[..idx + 3 + slash], u)
+                        } else {
+                            format!("{}{}", cur, u)
+                        }
+                    } else {
+                        u
+                    }
+                } else {
+                    // Relativ path
+                    let cur = s.current_url.clone();
+                    if let Some(last_slash) = cur.rfind('/') {
+                        format!("{}/{}", &cur[..last_slash], u)
+                    } else {
+                        u
+                    }
+                }
+            } else {
+                s.current_url.clone()
+            };
+
+            // Trunkera framåt-historik om vi inte är sist
+            let idx = s.history_index;
+            s.history_stack.truncate(idx + 1);
+            s.history_stack.push((new_url.clone(), state_json));
+            s.history_index = s.history_stack.len() - 1;
+            s.current_url = new_url;
+            // Ingen popstate vid pushState (per spec)
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    // Native: __historyReplaceState(stateJson, title, url)
+    struct HistoryReplaceState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryReplaceState {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let state_json = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+            let url = args
+                .get(2)
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+
+            let mut s = self.state.borrow_mut();
+            let new_url = if let Some(u) = url {
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    u
+                } else if u.starts_with('/') {
+                    let cur = s.current_url.clone();
+                    if let Some(idx) = cur.find("://") {
+                        if let Some(slash) = cur[idx + 3..].find('/') {
+                            format!("{}{}", &cur[..idx + 3 + slash], u)
+                        } else {
+                            format!("{}{}", cur, u)
+                        }
+                    } else {
+                        u
+                    }
+                } else {
+                    let cur = s.current_url.clone();
+                    if let Some(last_slash) = cur.rfind('/') {
+                        format!("{}/{}", &cur[..last_slash], u)
+                    } else {
+                        u
+                    }
+                }
+            } else {
+                s.current_url.clone()
+            };
+
+            let idx = s.history_index;
+            s.history_stack[idx] = (new_url.clone(), state_json);
+            s.current_url = new_url;
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    // Native: __historyGo(delta) → returnerar ny state JSON (eller null), avfyrar popstate
+    struct HistoryGo {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGo {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let delta = args.first().and_then(|v| v.as_int()).unwrap_or(0);
+
+            let mut s = self.state.borrow_mut();
+            let new_idx = s.history_index as i64 + delta as i64;
+            if new_idx < 0 || new_idx >= s.history_stack.len() as i64 {
+                return Ok(Value::new_null(ctx.clone()));
+            }
+            let new_idx = new_idx as usize;
+            s.history_index = new_idx;
+            let (url, state_json) = s.history_stack[new_idx].clone();
+            s.current_url = url;
+
+            // Returnera state JSON för popstate-eventet
+            match state_json {
+                Some(json) => Ok(rquickjs::String::from_str(ctx.clone(), &json)?.into_value()),
+                None => Ok(Value::new_null(ctx.clone())),
+            }
+        }
+    }
+
+    // Native: __historyGetState → returnerar current state JSON
+    struct HistoryGetState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGetState {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let s = self.state.borrow();
+            let idx = s.history_index;
+            match &s.history_stack[idx].1 {
+                Some(json) => Ok(rquickjs::String::from_str(ctx.clone(), json)?.into_value()),
+                None => Ok(Value::new_null(ctx.clone())),
+            }
+        }
+    }
+
+    // Native: __historyGetLength → returnerar stack-längd
+    struct HistoryGetLength {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGetLength {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let len = self.state.borrow().history_stack.len() as i32;
+            Ok(Value::new_int(ctx.clone(), len))
+        }
+    }
+
+    let globals: Object = ctx.globals();
+    globals.set(
+        "__historyPushState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryPushState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyReplaceState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryReplaceState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGo",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGo {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGetState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGetState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGetLength",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGetLength {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
+    // JS-wrapper: window.history med popstate-event firing
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            var history = {};
+            Object.defineProperty(history, 'length', {
+                get: function() { return __historyGetLength(); },
+                enumerable: true
+            });
+            Object.defineProperty(history, 'state', {
+                get: function() {
+                    var s = __historyGetState();
+                    if (s === null) return null;
+                    try { return JSON.parse(s); } catch(e) { return s; }
+                },
+                enumerable: true
+            });
+            history.scrollRestoration = 'auto';
+
+            history.pushState = function(state, title, url) {
+                var stateStr = (state === null || state === undefined) ? null : JSON.stringify(state);
+                var urlStr = (url === null || url === undefined) ? null : String(url);
+                __historyPushState(stateStr, String(title || ''), urlStr);
+            };
+
+            history.replaceState = function(state, title, url) {
+                var stateStr = (state === null || state === undefined) ? null : JSON.stringify(state);
+                var urlStr = (url === null || url === undefined) ? null : String(url);
+                __historyReplaceState(stateStr, String(title || ''), urlStr);
+            };
+
+            function firePopState(stateJson) {
+                var stateObj = null;
+                if (stateJson !== null) {
+                    try { stateObj = JSON.parse(stateJson); } catch(e) { stateObj = stateJson; }
+                }
+                var ev = new Event('popstate', { bubbles: true, cancelable: false });
+                ev.state = stateObj;
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    window.dispatchEvent(ev);
+                }
+            }
+
+            history.go = function(delta) {
+                if (delta === 0 || delta === undefined) return;
+                var stateJson = __historyGo(delta || 0);
+                firePopState(stateJson);
+            };
+
+            history.back = function() { history.go(-1); };
+            history.forward = function() { history.go(1); };
+
+            window.history = history;
+            globalThis.history = history;
+        })();
+    "#,
+    )?;
 
     Ok(())
 }

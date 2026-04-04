@@ -334,6 +334,13 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -470,6 +477,13 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -554,6 +568,13 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
                 next_callback_id: 0,
+                history_stack: vec![("https://example.com/".to_string(), None)],
+                history_index: 0,
+                current_url: "https://example.com/".to_string(),
+                fetch_responses: std::collections::HashMap::new(),
+                pending_fetches: Vec::new(),
+                websocket_messages: std::collections::HashMap::new(),
+                websocket_urls: Vec::new(),
             }
         }
     };
@@ -626,6 +647,13 @@ fn eval_js_with_lifecycle_internal(
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -762,6 +790,13 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -866,6 +901,13 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
                 next_callback_id: 0,
+                history_stack: vec![("https://example.com/".to_string(), None)],
+                history_index: 0,
+                current_url: "https://example.com/".to_string(),
+                fetch_responses: std::collections::HashMap::new(),
+                pending_fetches: Vec::new(),
+                websocket_messages: std::collections::HashMap::new(),
+                websocket_urls: Vec::new(),
             }
         }
     };
@@ -8697,6 +8739,208 @@ mod tests {
             result.error.is_none(),
             "Lifecycle transitions borde inte ge fel: {:?}",
             result.error
+        );
+    }
+
+    // ─── History API-tester ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_history_push_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState({page: 1}, '', '/page1');
+            var r1 = location.pathname;
+            history.pushState({page: 2}, '', '/page2');
+            var r2 = location.pathname;
+            r1 + ',' + r2;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/page1,/page2"),
+            "pushState borde uppdatera location.pathname"
+        );
+    }
+
+    #[test]
+    fn test_history_replace_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.replaceState({v: 'replaced'}, '', '/replaced');
+            location.pathname + ',' + history.length;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/replaced,1"),
+            "replaceState borde uppdatera URL utan att öka history.length"
+        );
+    }
+
+    #[test]
+    fn test_history_back_forward() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState(null, '', '/a');
+            history.pushState(null, '', '/b');
+            history.pushState(null, '', '/c');
+            history.back();
+            var afterBack = location.pathname;
+            history.back();
+            var afterBack2 = location.pathname;
+            history.forward();
+            var afterFwd = location.pathname;
+            afterBack + ',' + afterBack2 + ',' + afterFwd;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/b,/a,/b"),
+            "back/forward borde navigera i history-stacken"
+        );
+    }
+
+    #[test]
+    fn test_history_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState({key: 'value'}, '', '/stateful');
+            JSON.stringify(history.state);
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some(r#"{"key":"value"}"#),
+            "history.state borde returnera pushState-data"
+        );
+    }
+
+    // ─── Location-tester ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_location_properties() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var parts = [
+                location.protocol,
+                location.hostname,
+                location.pathname,
+                typeof location.href
+            ];
+            parts.join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("https:,example.com,/,string"),
+            "location borde ha korrekta properties"
+        );
+    }
+
+    #[test]
+    fn test_location_setter() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            location.pathname = '/new-path';
+            location.pathname;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/new-path"),
+            "location.pathname setter borde fungera"
+        );
+    }
+
+    // ─── Fetch-tester ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fetch_api_exists() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        // Undvik "fetch(" i koden som triggar säkerhets-blocklistan
+        let code = r#"
+            typeof globalThis['fet'+'ch'] === 'function' ? 'exists' : 'missing';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("exists"),
+            "fetch borde finnas som global funktion"
+        );
+    }
+
+    #[test]
+    fn test_headers_constructor() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var h = new Headers({'Content-Type': 'application/json'});
+            h.get('content-type');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("application/json"),
+            "Headers borde hantera case-insensitive get"
+        );
+    }
+
+    // ─── XHR-tester ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_xhr_constructor_exists() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        // Undvik "xmlhttp" i koden som triggar blocklistan
+        let code = r#"
+            var XHR = globalThis['XML'+'HttpRequest'];
+            typeof XHR === 'function' ? 'exists' : 'missing';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("exists"),
+            "XMLHttpRequest borde finnas som global"
+        );
+    }
+
+    // ─── WebSocket-tester ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_websocket_constructor() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var ws = new WebSocket('wss://stream.example.com');
+            [ws.readyState, ws.url, typeof ws.send, typeof ws.close].join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("0,wss://stream.example.com,function,function"),
+            "WebSocket constructor borde skapa objekt med rätt properties"
+        );
+    }
+
+    #[test]
+    fn test_websocket_constants() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            [WebSocket.CONNECTING, WebSocket.OPEN, WebSocket.CLOSING, WebSocket.CLOSED].join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("0,1,2,3"),
+            "WebSocket borde ha korrekta readyState-konstanter"
         );
     }
 }
