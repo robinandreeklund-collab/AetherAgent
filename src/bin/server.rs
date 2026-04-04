@@ -885,6 +885,12 @@ async fn api_endpoints() -> impl IntoResponse {
             "POST /api/parse-hybrid": "Parse with hybrid BM25+HDC+Neural pipeline. Set reranker=colbert for 2.8x faster + 41% better quality.",
             "POST /api/parse-crfr": "CRFR: Causal Resonance Field Retrieval — BM25+HDC wave propagation, 10-15x faster, learns over time. Params: top_n, run_js, output_format (json/markdown).",
             "POST /api/crfr-feedback": "Teach CRFR which nodes had the answer — improves future queries on same URL.",
+            "POST /api/parse-crfr-multi": "Run multiple goal variants through CRFR and merge results.",
+            "POST /api/crfr-save": "Save CRFR field (causal memory) for a URL to JSON.",
+            "POST /api/crfr-load": "Load a previously saved CRFR field from JSON.",
+            "POST /api/crfr-update": "Update a specific node in the CRFR field by ID.",
+            "POST /api/crfr-transfer": "Transfer causal learning from one URL to another.",
+            "POST /api/extract-multi": "Extract structured data for multiple keys with per-key limits.",
             "POST /api/click": "Find best clickable element",
             "POST /api/fill-form": "Map form fields",
             "POST /api/extract": "Extract structured data",
@@ -1058,7 +1064,6 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     let output_format = req.output_format;
 
     // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
-    let html_clone = html.clone();
     let goal_clone = goal.clone();
     let url_clone = url.clone();
     let fmt_clone = output_format.clone();
@@ -4090,6 +4095,36 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "crfr_update",
+            "description": "Update a specific node in the CRFR field. Change label, role, or value for a cached node by ID.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL whose CRFR field contains the node"},
+                    "node_id": {"type": "integer", "description": "Node ID to update"},
+                    "new_label": {"type": "string", "description": "New label for the node"},
+                    "new_role": {"type": "string", "description": "New role for the node"},
+                    "new_value": {"type": "string", "default": "", "description": "New value for the node"}
+                },
+                "required": ["url", "node_id", "new_label", "new_role"]
+            }
+        },
+        {
+            "name": "extract_multi",
+            "description": "Extract structured data for multiple keys with per-key limits. Returns up to max_per_key results per key.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "HTML content to extract from"},
+                    "goal": {"type": "string", "description": "Agent goal context"},
+                    "url": {"type": "string", "description": "Page URL"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Data keys to extract"},
+                    "max_per_key": {"type": "integer", "default": 5, "description": "Maximum results per key"}
+                },
+                "required": ["html", "goal", "url", "keys"]
+            }
+        },
+        {
             "name": "act",
             "description": "Interact with page elements: click buttons, fill forms, or extract data. Provide HTML or URL + an action type. Security (injection scan + firewall) runs automatically. Replaces: find_and_click, fill_form, extract_data, fetch_click, fetch_extract.",
             "inputSchema": {
@@ -5380,8 +5415,42 @@ async fn mcp_dispatch_tool(
             text_ok(result)
         }
 
+        // ─── Tool: crfr_update ──────────────────────────────────
+        "crfr_update" => {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let node_id = args["node_id"].as_u64().unwrap_or(0) as u32;
+            let new_label = args["new_label"].as_str().unwrap_or("").to_string();
+            let new_role = args["new_role"].as_str().unwrap_or("").to_string();
+            let new_value = args["new_value"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_update_node(&url, node_id, &new_label, &new_role, &new_value)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: extract_multi ────────────────────────────────
+        "extract_multi" => {
+            let html = args["html"].as_str().unwrap_or("").to_string();
+            let goal = args["goal"].as_str().unwrap_or("").to_string();
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let keys: Vec<String> = args["keys"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let keys_json = serde_json::to_string(&keys).unwrap_or_else(|_| "[]".to_string());
+            let max_per_key = args["max_per_key"].as_u64().unwrap_or(5) as u32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::extract_data_multi(&html, &goal, &url, &keys_json, max_per_key)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
         _ => Err(format!(
-            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, parse_crfr_multi, crfr_save, crfr_load, crfr_transfer, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
+            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, parse_crfr_multi, crfr_save, crfr_load, crfr_transfer, crfr_update, extract_multi, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
         )),
     }
 }
@@ -6320,7 +6389,7 @@ async fn main() {
         }
 
         // Bi-encoder (FP32, optional)
-        let mut embedding_loaded = false;
+        let mut _embedding_loaded = false;
         if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
             if let (Ok(model_bytes), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
                 eprintln!(
@@ -6331,7 +6400,7 @@ async fn main() {
                 match aether_agent::embedding::init_global(&model_bytes, vt) {
                     Ok(()) => {
                         eprintln!("[Embedding] Bi-encoder redo");
-                        embedding_loaded = true;
+                        _embedding_loaded = true;
                     }
                     Err(e) => eprintln!("[Embedding] WARN: {e}"),
                 }
@@ -6400,6 +6469,12 @@ async fn main() {
     println!("  POST /api/parse-hybrid    – Hybrid BM25+HDC+Neural pipeline (reranker=colbert recommended)");
     println!("  POST /api/parse-crfr      – CRFR: Causal Resonance Field (BM25+HDC wave, 13x faster, learns)");
     println!("  POST /api/crfr-feedback   – Teach CRFR which nodes had the answer");
+    println!("  POST /api/parse-crfr-multi – Multi-goal CRFR (synonyms/translations)");
+    println!("  POST /api/crfr-save       – Save CRFR field to JSON");
+    println!("  POST /api/crfr-load       – Load CRFR field from JSON");
+    println!("  POST /api/crfr-update     – Update node in CRFR field");
+    println!("  POST /api/crfr-transfer   – Transfer causal learning across URLs");
+    println!("  POST /api/extract-multi   – Extract structured data (multi-key)");
     println!("  POST /api/click           – Find best clickable element");
     println!("  POST /api/fill-form       – Map form fields");
     println!("  POST /api/extract         – Extract structured data");

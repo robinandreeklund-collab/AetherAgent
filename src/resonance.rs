@@ -688,20 +688,26 @@ impl ResonanceField {
         let mut node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         node_ids.sort_unstable();
 
-        // Pre-compute siblings count per nod (för answer-shape scoring)
-        let siblings_map: HashMap<u32, usize> = node_ids
+        // Pre-compute answer shape scores (avoids labels_ref clone)
+        let shape_scores: HashMap<u32, f32> = self
+            .node_labels
             .iter()
-            .map(|&nid| {
+            .map(|(&id, label)| {
+                let role = self.nodes.get(&id).map(|s| s.role.as_str()).unwrap_or("");
                 let siblings = self
                     .children_map
-                    .get(&self.parent_map.get(&nid).copied().unwrap_or(0))
+                    .get(&self.parent_map.get(&id).copied().unwrap_or(0))
                     .map(|c| c.len())
                     .unwrap_or(0);
-                (nid, siblings)
+                (id, answer_shape_score(label, role, siblings))
             })
             .collect();
-        // Snapshot labels (för answer-shape scoring utan borrow-konflikt)
-        let labels_ref: HashMap<u32, String> = self.node_labels.clone();
+        // Pre-compute metadata + state injection penalties (avoids label lookup in hot loop)
+        let meta_penalties: HashMap<u32, f32> = self
+            .node_labels
+            .iter()
+            .map(|(&id, label)| (id, metadata_penalty(label) * state_injection_penalty(label)))
+            .collect();
 
         // BUG-05: Extract site name for nav-artifact penalization
         let site_words: Vec<String> = self
@@ -829,27 +835,15 @@ impl ResonanceField {
                 }
 
                 // Answer-shape boost: noder som SER UT som svar rankas högre
-                let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
-                let shape = answer_shape_score(
-                    labels_ref.get(&nid).map(|s| s.as_str()).unwrap_or(""),
-                    &state.role,
-                    siblings,
-                );
+                let shape = shape_scores.get(&nid).copied().unwrap_or(0.0);
                 state.amplitude *= 1.0 + shape;
 
                 let zone = zone_penalty(&state.role, state.depth);
                 state.amplitude *= zone;
 
-                // BUG-02: Penalize metadata patterns (points/votes/ago)
-                let meta_pen =
-                    metadata_penalty(self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""));
-                state.amplitude *= meta_pen;
-
-                // BUG-B: Penalize serialized state blobs
-                let state_pen = state_injection_penalty(
-                    self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""),
-                );
-                state.amplitude *= state_pen;
+                // BUG-02 + BUG-B: Pre-computed metadata + state injection penalties
+                let penalty = meta_penalties.get(&nid).copied().unwrap_or(1.0);
+                state.amplitude *= penalty;
 
                 // BUG-05: Site-name penalization
                 if !site_words.is_empty() {
@@ -1174,24 +1168,6 @@ impl ResonanceField {
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
         let all = self.propagate(goal);
         Self::apply_gap_filter(all, top_k)
-    }
-
-    /// Query decomposition: split goal into token clusters, propagate each,
-    /// merge via max amplitude per node. No LLM needed.
-    pub fn propagate_decomposed(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
-        let tokens: Vec<&str> = goal.split_whitespace().collect();
-        if tokens.len() <= 3 {
-            return self.propagate_top_k(goal, top_k);
-        }
-        // Split into overlapping 3-token clusters
-        let mut clusters: Vec<String> = Vec::new();
-        for chunk in tokens.windows(3) {
-            clusters.push(chunk.join(" "));
-        }
-        // Also include full goal as one variant
-        clusters.push(goal.to_string());
-        let refs: Vec<&str> = clusters.iter().map(|s| s.as_str()).collect();
-        self.propagate_multi_variant(&refs, top_k)
     }
 
     /// Run multiple goal variants and merge results (union with max amplitude).
