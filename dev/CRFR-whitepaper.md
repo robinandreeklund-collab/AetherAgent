@@ -649,7 +649,7 @@ With the Bayesian Beta-distribution framework:
 
 ### 10.1 Known Limitations
 
-1. **SPA rendering:** Client-rendered React/Vue/Angular apps return empty shells. CRFR correctly detects this (`spa_detected: true`) but cannot extract content without headless browser. The XHR enrichment pipeline partially addresses this by fetching detected API URLs.
+1. **Heavy SPA data loading:** CRFR includes a QuickJS JavaScript sandbox with 40+ DOM API methods (getElementById, querySelector, classList, appendChild, setTimeout, etc.) and lifecycle events (DOMContentLoaded, load). With `run_js=true`, inline scripts execute against a full ArenaDom — handling SPAs whose rendering logic is embedded in HTML. However, SPAs that load data via `fetch()` or `XMLHttpRequest` at startup cannot complete because network calls are blocked in the sandbox for security. The server-side XHR enrichment pipeline partially addresses this: detected API URLs are fetched server-side and injected as DOM nodes before CRFR scoring. Fully client-rendered SPAs with encrypted/authenticated API calls remain inaccessible — CRFR flags these with `spa_detected: true` and `suggested_action: "fetch_api"` so the agent can route to alternative sources or a headless browser.
 
 2. **Goal quality dependency:** CRFR's recall is highly sensitive to goal expansion quality. Naive goals ("find price") underperform expanded goals ("price pris cost £ $ kr amount total"). The system documents this requirement but does not auto-expand.
 
