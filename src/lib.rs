@@ -258,12 +258,19 @@ fn build_tree_hybrid_with_config(
 /// Kör lifecycle-parse: extrahera scripts, kör med DOMContentLoaded/load, bygg träd.
 /// Om JS modifierar DOM:en serialiseras den modifierade arenan tillbaka till HTML
 /// och används för att bygga det semantiska trädet.
+#[cfg(feature = "js-eval")]
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
     run_lifecycle_parse_with_fetch(html, goal, url, std::collections::HashMap::new())
 }
 
+#[cfg(not(feature = "js-eval"))]
+fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
+    build_tree(html, goal, url)
+}
+
 /// Kör lifecycle-parse med pre-populated fetch-responses.
 /// Används av fetch_parse-pipelinen för att ge JS-sandbox tillgång till API-data.
+#[cfg(feature = "js-eval")]
 fn run_lifecycle_parse_with_fetch(
     html: &str,
     goal: &str,
@@ -322,6 +329,7 @@ fn run_lifecycle_parse_with_fetch(
 
 /// Samla pending fetch-URLs från (1) statisk HTML-analys + (2) runtime JS-capture.
 /// Deduplicera och filtrera bort tomma/relativa URLs.
+#[cfg(feature = "js-eval")]
 fn attach_pending_urls(tree: &mut SemanticTree, html: &str, runtime_urls: &[String]) {
     let mut urls: Vec<String> = Vec::new();
 
@@ -758,6 +766,7 @@ pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> S
 
 /// Build semantic tree for CRFR with pre-populated fetch responses.
 /// Used by fetch_parse pipeline: hämta sida → pre-fetch API URLs → eval JS med data.
+#[cfg(feature = "js-eval")]
 pub fn build_tree_for_crfr_with_fetch(
     html: &str,
     goal: &str,
@@ -1826,7 +1835,7 @@ pub fn detect_xhr_urls(html: &str) -> String {
 
 /// Pre-fetcha API-URLs som inline scripts refererar till.
 /// Returnerar HashMap<URL, FetchResponse> som kan injiceras i eval_spa.
-#[cfg(feature = "fetch")]
+#[cfg(all(feature = "fetch", feature = "js-eval"))]
 pub async fn prefetch_api_urls(
     html: &str,
     base_url: &str,
@@ -1845,7 +1854,7 @@ pub async fn prefetch_api_urls(
 }
 
 /// Pre-fetcha API-URLs med cookies och headers för autentiserade SPAs.
-#[cfg(feature = "fetch")]
+#[cfg(all(feature = "fetch", feature = "js-eval"))]
 pub async fn prefetch_api_urls_with_auth(
     html: &str,
     base_url: &str,
@@ -1948,7 +1957,7 @@ pub async fn prefetch_api_urls_with_auth(
 
 /// Adaptive parse med pre-fetched API-responses.
 /// Samma som parse_adaptive men injicerar API-data i JS-sandlådan.
-#[cfg(feature = "fetch")]
+#[cfg(all(feature = "fetch", feature = "js-eval"))]
 pub fn parse_adaptive_with_fetch(
     html: &str,
     goal: &str,
