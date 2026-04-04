@@ -88,6 +88,61 @@ struct CrfrFeedbackRequest {
 }
 
 #[derive(Deserialize)]
+struct ParseCrfrMultiRequest {
+    goals: Vec<String>,
+    html: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
+#[derive(Deserialize)]
+struct CrfrSaveRequest {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrLoadRequest {
+    json: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrUpdateRequest {
+    url: String,
+    node_id: u32,
+    new_label: String,
+    new_role: String,
+    #[serde(default)]
+    new_value: String,
+}
+
+#[derive(Deserialize)]
+struct CrfrTransferRequest {
+    donor_url: String,
+    recipient_url: String,
+    #[serde(default = "default_min_similarity")]
+    min_similarity: f32,
+}
+
+fn default_min_similarity() -> f32 {
+    0.3
+}
+
+#[derive(Deserialize)]
+struct ExtractMultiRequest {
+    html: String,
+    goal: String,
+    url: String,
+    keys: Vec<String>,
+    #[serde(default = "default_max_per_key")]
+    max_per_key: u32,
+}
+
+fn default_max_per_key() -> u32 {
+    5
+}
+
+#[derive(Deserialize)]
 struct ClickRequest {
     html: String,
     goal: String,
@@ -1043,6 +1098,74 @@ async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl Int
             .await
             .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
 
+    (StatusCode::OK, result)
+}
+
+async fn parse_crfr_multi_handler(Json(req): Json<ParseCrfrMultiRequest>) -> impl IntoResponse {
+    let goals_json = serde_json::to_string(&req.goals).unwrap_or_else(|_| "[]".to_string());
+    let html = req.html;
+    let url = req.url;
+    let top_n = req.top_n;
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_save_handler(Json(req): Json<CrfrSaveRequest>) -> impl IntoResponse {
+    let url = req.url;
+    let result = tokio::task::spawn_blocking(move || aether_agent::crfr_save_field(&url))
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_load_handler(Json(req): Json<CrfrLoadRequest>) -> impl IntoResponse {
+    let json = req.json;
+    let result = tokio::task::spawn_blocking(move || aether_agent::crfr_load_field(&json))
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_update_handler(Json(req): Json<CrfrUpdateRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::crfr_update_node(
+            &req.url,
+            req.node_id,
+            &req.new_label,
+            &req.new_role,
+            &req.new_value,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn crfr_transfer_handler(Json(req): Json<CrfrTransferRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::crfr_transfer(&req.donor_url, &req.recipient_url, req.min_similarity)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn extract_multi_handler(Json(req): Json<ExtractMultiRequest>) -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::extract_data_multi(
+            &req.html,
+            &req.goal,
+            &req.url,
+            &serde_json::to_string(&req.keys).unwrap_or_else(|_| "[]".to_string()),
+            req.max_per_key,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
     (StatusCode::OK, result)
 }
 
@@ -3918,6 +4041,55 @@ fn mcp_tool_definitions() -> serde_json::Value {
             }
         },
         {
+            "name": "parse_crfr_multi",
+            "description": "Run multiple goal variants through CRFR and merge results. Exploits sub-ms cache to try synonyms/translations. Pass goals as array.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "html": {"type": "string", "description": "Raw HTML string"},
+                    "url": {"type": "string", "description": "Source URL"},
+                    "goals": {"type": "array", "items": {"type": "string"}, "description": "Array of goal variant strings"},
+                    "top_n": {"type": "integer", "default": 20, "description": "Max nodes to return"}
+                },
+                "required": ["goals"]
+            }
+        },
+        {
+            "name": "crfr_save",
+            "description": "Save CRFR field (causal memory) for a URL to JSON. Use for persistent learning across sessions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL whose CRFR field to save"}
+                },
+                "required": ["url"]
+            }
+        },
+        {
+            "name": "crfr_load",
+            "description": "Load a previously saved CRFR field from JSON. Restores causal memory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "json": {"type": "string", "description": "JSON string from a previous crfr_save call"}
+                },
+                "required": ["json"]
+            }
+        },
+        {
+            "name": "crfr_transfer",
+            "description": "Transfer causal learning from one URL to another (cross-site learning). Use when visiting similar sites.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "donor_url": {"type": "string", "description": "URL to copy causal memory from"},
+                    "recipient_url": {"type": "string", "description": "URL to apply causal memory to"},
+                    "min_similarity": {"type": "number", "default": 0.3, "description": "Minimum similarity threshold for transfer"}
+                },
+                "required": ["donor_url", "recipient_url"]
+            }
+        },
+        {
             "name": "act",
             "description": "Interact with page elements: click buttons, fill forms, or extract data. Provide HTML or URL + an action type. Security (injection scan + firewall) runs automatically. Replaces: find_and_click, fill_form, extract_data, fetch_click, fetch_extract.",
             "inputSchema": {
@@ -5155,8 +5327,61 @@ async fn mcp_dispatch_tool(
             text_ok(result)
         }
 
+        // ─── Tool: parse_crfr_multi ──────────────────────────────
+        "parse_crfr_multi" => {
+            let goals: Vec<String> = args["goals"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
+            let html = args["html"].as_str().unwrap_or("").to_string();
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_save ─────────────────────────────────────
+        "crfr_save" => {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || aether_agent::crfr_save_field(&url))
+                .await
+                .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_load ─────────────────────────────────────
+        "crfr_load" => {
+            let json = args["json"].as_str().unwrap_or("").to_string();
+            let result = tokio::task::spawn_blocking(move || aether_agent::crfr_load_field(&json))
+                .await
+                .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
+        // ─── Tool: crfr_transfer ─────────────────────────────────
+        "crfr_transfer" => {
+            let donor = args["donor_url"].as_str().unwrap_or("").to_string();
+            let recipient = args["recipient_url"].as_str().unwrap_or("").to_string();
+            let min_sim = args["min_similarity"].as_f64().unwrap_or(0.3) as f32;
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::crfr_transfer(&donor, &recipient, min_sim)
+            })
+            .await
+            .unwrap_or_else(|_| r#"{"error":"panicked"}"#.to_string());
+            text_ok(result)
+        }
+
         _ => Err(format!(
-            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
+            "Unknown tool: '{name}'. Available: parse, parse_hybrid, parse_crfr, crfr_feedback, parse_crfr_multi, crfr_save, crfr_load, crfr_transfer, act, stream, plan, diff, search, secure, vision, discover, session, workflow, collab"
         )),
     }
 }
@@ -5748,6 +5973,12 @@ fn build_router(state: AppState) -> Router {
         .route("/api/parse-hybrid", post(parse_hybrid))
         .route("/api/parse-crfr", post(parse_crfr_handler))
         .route("/api/crfr-feedback", post(crfr_feedback_handler))
+        .route("/api/parse-crfr-multi", post(parse_crfr_multi_handler))
+        .route("/api/crfr-save", post(crfr_save_handler))
+        .route("/api/crfr-load", post(crfr_load_handler))
+        .route("/api/crfr-update", post(crfr_update_handler))
+        .route("/api/crfr-transfer", post(crfr_transfer_handler))
+        .route("/api/extract-multi", post(extract_multi_handler))
         .route("/api/extract-smart", post(parse_extract_handler))
         .route("/api/fetch/extract-smart", post(fetch_extract_smart))
         .route("/api/check-injection", post(check_injection))
