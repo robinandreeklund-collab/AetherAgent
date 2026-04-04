@@ -26,6 +26,7 @@ WORKDIR /app
 # This layer is cached as long as Cargo.toml/Cargo.lock don't change.
 # Rebuilds of our code reuse the cached ~300 compiled dependencies.
 COPY Cargo.toml Cargo.lock ./
+COPY vendor/ vendor/
 
 # Create minimal stubs so cargo can resolve and compile all dependencies
 # Also stub examples/ (excluded by .dockerignore but declared in Cargo.toml)
