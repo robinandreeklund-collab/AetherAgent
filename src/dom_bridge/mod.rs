@@ -42,6 +42,7 @@ mod html_properties;
 mod node_ops;
 mod selectors;
 mod state;
+pub use state::{FetchResponse, WebSocketMessages};
 mod style;
 mod utils;
 mod window;
@@ -334,6 +335,14 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -470,6 +479,14 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -554,6 +571,14 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
                 next_callback_id: 0,
+                history_stack: vec![("https://example.com/".to_string(), None)],
+                history_index: 0,
+                current_url: "https://example.com/".to_string(),
+                fetch_responses: std::collections::HashMap::new(),
+                pending_fetches: Vec::new(),
+                websocket_messages: std::collections::HashMap::new(),
+                websocket_urls: Vec::new(),
+                cookies: String::new(),
             }
         }
     };
@@ -626,6 +651,14 @@ fn eval_js_with_lifecycle_internal(
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -707,6 +740,167 @@ fn eval_js_with_lifecycle_internal(
     result
 }
 
+/// Konfiguration för SPA-evaluering
+pub struct SpaConfig {
+    /// Pre-populated fetch responses (URL → response)
+    pub fetch_responses: std::collections::HashMap<String, state::FetchResponse>,
+    /// Pre-populated WebSocket messages (URL → messages)
+    pub websocket_messages: std::collections::HashMap<String, state::WebSocketMessages>,
+    /// Start-URL (default: "https://example.com/")
+    pub base_url: String,
+    /// Cookies att exponera via document.cookie och skicka med fetch-requests
+    /// Format: "key1=value1; key2=value2"
+    pub cookies: String,
+    /// Extra HTTP-headers att skicka med pre-fetch requests
+    pub headers: std::collections::HashMap<String, String>,
+}
+
+impl Default for SpaConfig {
+    fn default() -> Self {
+        Self {
+            fetch_responses: std::collections::HashMap::new(),
+            websocket_messages: std::collections::HashMap::new(),
+            base_url: "https://example.com/".to_string(),
+            cookies: String::new(),
+            headers: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// SPA-evaluering: kör scripts med pre-populated fetch/WS, returnera DOM + resultat.
+///
+/// Designad för riktiga SPA-scenarier: React, Vue, Avanza etc.
+/// Till skillnad från `eval_js_with_dom` har denna INGEN blocklist — scripts
+/// kan använda fetch(), XMLHttpRequest, WebSocket fritt.
+pub fn eval_spa(
+    scripts: &[String],
+    arena: ArenaDom,
+    config: SpaConfig,
+) -> (DomEvalResult, ArenaDom) {
+    let start = std::time::Instant::now();
+
+    if scripts.is_empty() {
+        return (
+            DomEvalResult {
+                value: None,
+                error: None,
+                mutations: vec![],
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: 0,
+                timers_fired: 0,
+                fetched_urls: vec![],
+            },
+            arena,
+        );
+    }
+
+    let state: SharedState = Rc::new(RefCell::new(BridgeState {
+        arena,
+        mutations: vec![],
+        event_listeners: std::collections::HashMap::new(),
+        element_state: std::collections::HashMap::new(),
+        focused_element: None,
+        scroll_positions: std::collections::HashMap::new(),
+        css_context: None,
+        local_storage: std::collections::HashMap::new(),
+        session_storage: std::collections::HashMap::new(),
+        console_output: Vec::new(),
+        ready_state: "loading".to_string(),
+        #[cfg(feature = "blitz")]
+        blitz_styles: None,
+        #[cfg(feature = "blitz")]
+        original_html: None,
+        #[cfg(feature = "blitz")]
+        blitz_style_generation: 0,
+        #[cfg(feature = "blitz")]
+        blitz_cache_generation: 0,
+        next_callback_id: 0,
+        history_stack: vec![(config.base_url.clone(), None)],
+        history_index: 0,
+        current_url: config.base_url,
+        fetch_responses: config.fetch_responses,
+        pending_fetches: Vec::new(),
+        websocket_messages: config.websocket_messages,
+        websocket_urls: Vec::new(),
+        cookies: config.cookies,
+    }));
+
+    let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
+
+    let result = context.with(|ctx| {
+        let el: SharedEventLoop = Rc::new(RefCell::new(EventLoopState::new()));
+        let _ = event_loop::register_event_loop(&ctx, Rc::clone(&el));
+        let _ = ctx.eval::<Value, _>("globalThis.__nodeCache = new Map()");
+        let _ = register_document(&ctx, Rc::clone(&state));
+        let _ = register_window(&ctx, Rc::clone(&state));
+        let _ = register_dom_exception(&ctx);
+        let _ = register_console(&ctx, Rc::clone(&state));
+
+        let mut last_value: Option<String> = None;
+        let mut first_error: Option<String> = None;
+
+        // Fas 1: readyState = "loading" — kör alla scripts
+        for script in scripts {
+            match ctx.eval::<Value, _>(script.as_str()) {
+                Ok(r) => {
+                    let v = crate::js_eval::quickjs_value_to_string(&ctx, &r);
+                    if v != "undefined" {
+                        last_value = Some(v);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(crate::js_eval::quickjs_error_string(&ctx, &e));
+                    }
+                }
+            }
+        }
+
+        // Fas 2: DOMContentLoaded
+        state.borrow_mut().ready_state = "interactive".to_string();
+        let _ = ctx.eval::<Value, _>(
+            "if(typeof document!=='undefined'&&document.dispatchEvent){document.dispatchEvent(new Event('DOMContentLoaded'));}",
+        );
+
+        // Fas 3: load
+        state.borrow_mut().ready_state = "complete".to_string();
+        let _ = ctx.eval::<Value, _>(
+            "if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(new Event('load'));}",
+        );
+
+        // Dränera event loop
+        let loop_stats = event_loop::run_event_loop(&ctx, &el);
+        let (ticks, timers) = match &loop_stats {
+            Ok(s) => (s.ticks, s.timers_fired),
+            Err(_) => (0, 0),
+        };
+
+        let fetched_urls = extract_fetched_urls(&ctx);
+        let mutations = state.borrow().mutations.clone();
+        // Klona arena INNAN context/runtime droppas (undvik GC-assertion)
+        let arena_clone = state.borrow().arena.clone();
+
+        state.borrow_mut().event_listeners.clear();
+        el.borrow_mut().clear_persistent();
+
+        (
+            DomEvalResult {
+                value: last_value,
+                error: first_error.or_else(|| loop_stats.err()),
+                mutations,
+                eval_time_us: start.elapsed().as_micros() as u64,
+                event_loop_ticks: ticks,
+                timers_fired: timers,
+                fetched_urls,
+            },
+            arena_clone,
+        )
+    });
+
+    crate::js_eval::free_interrupt_state(interrupt_ptr);
+    result
+}
+
 /// Evaluera inline scripts med simulerad browser-lifecycle och returnera modifierad ArenaDom.
 ///
 /// Samma som `eval_js_with_lifecycle` men ger tillbaka arenan med alla DOM-mutationer
@@ -762,6 +956,14 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         #[cfg(feature = "blitz")]
         blitz_cache_generation: 0,
         next_callback_id: 0,
+        history_stack: vec![("https://example.com/".to_string(), None)],
+        history_index: 0,
+        current_url: "https://example.com/".to_string(),
+        fetch_responses: std::collections::HashMap::new(),
+        pending_fetches: Vec::new(),
+        websocket_messages: std::collections::HashMap::new(),
+        websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -866,6 +1068,14 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 #[cfg(feature = "blitz")]
                 blitz_cache_generation: 0,
                 next_callback_id: 0,
+                history_stack: vec![("https://example.com/".to_string(), None)],
+                history_index: 0,
+                current_url: "https://example.com/".to_string(),
+                fetch_responses: std::collections::HashMap::new(),
+                pending_fetches: Vec::new(),
+                websocket_messages: std::collections::HashMap::new(),
+                websocket_urls: Vec::new(),
+                cookies: String::new(),
             }
         }
     };
@@ -2245,16 +2455,6 @@ fn check_xml_namespace_prefixes(xml: &str) -> Option<String> {
 struct GetSelection;
 impl JsHandler for GetSelection {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        struct NoOp;
-        impl JsHandler for NoOp {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_undefined(ctx.clone()))
-            }
-        }
         struct SelectionToString;
         impl JsHandler for SelectionToString {
             fn handle<'js>(
@@ -2274,20 +2474,12 @@ impl JsHandler for GetSelection {
         selection.set("isCollapsed", true)?;
         selection.set("rangeCount", 0i32)?;
         selection.set("type", "None")?;
-        selection.set("removeAllRanges", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("addRange", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapse", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapseToStart", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapseToEnd", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("extend", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("setBaseAndExtent", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("empty", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("modify", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        // Dessa metoder patchas med riktig logik i JS-blocket nedan
+        selection.set("_ranges", rquickjs::Array::new(ctx.clone())?)?;
         selection.set(
-            "deleteFromDocument",
-            Function::new(ctx.clone(), JsFn(NoOp))?,
+            "_selectedText",
+            rquickjs::String::from_str(ctx.clone(), "")?,
         )?;
-        selection.set("containsNode", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         // selectAllChildren — selects all text content of a node
         // Lagrar vald text i selection-objektet via closure
         ctx.eval::<(), _>(
@@ -2299,6 +2491,73 @@ impl JsHandler for GetSelection {
                 // Patcha Selection-liknande objekt med selectAllChildren + toString
                 var _patchSel = function(sel) {
                     sel._selectedText = '';
+                    sel._ranges = [];
+
+                    sel.addRange = function(range) {
+                        sel._ranges.push(range);
+                        sel.rangeCount = sel._ranges.length;
+                        if (range && range.startContainer) {
+                            sel.anchorNode = range.startContainer;
+                            sel.anchorOffset = range.startOffset || 0;
+                            sel.focusNode = range.endContainer || range.startContainer;
+                            sel.focusOffset = range.endOffset || 0;
+                            sel.isCollapsed = range.collapsed;
+                            sel.type = range.collapsed ? 'Caret' : 'Range';
+                        }
+                    };
+                    sel.collapse = function(node, offset) {
+                        sel.anchorNode = node;
+                        sel.anchorOffset = offset || 0;
+                        sel.focusNode = node;
+                        sel.focusOffset = offset || 0;
+                        sel.isCollapsed = true;
+                        sel.rangeCount = 1;
+                        sel.type = 'Caret';
+                        sel._selectedText = '';
+                    };
+                    sel.collapseToStart = function() {
+                        if (sel.anchorNode) sel.collapse(sel.anchorNode, sel.anchorOffset);
+                    };
+                    sel.collapseToEnd = function() {
+                        if (sel.focusNode) sel.collapse(sel.focusNode, sel.focusOffset);
+                    };
+                    sel.extend = function(node, offset) {
+                        sel.focusNode = node;
+                        sel.focusOffset = offset || 0;
+                        sel.isCollapsed = (sel.anchorNode === sel.focusNode && sel.anchorOffset === sel.focusOffset);
+                        sel.type = sel.isCollapsed ? 'Caret' : 'Range';
+                    };
+                    sel.setBaseAndExtent = function(anchorNode, anchorOffset, focusNode, focusOffset) {
+                        sel.anchorNode = anchorNode;
+                        sel.anchorOffset = anchorOffset || 0;
+                        sel.focusNode = focusNode;
+                        sel.focusOffset = focusOffset || 0;
+                        sel.isCollapsed = (anchorNode === focusNode && sel.anchorOffset === sel.focusOffset);
+                        sel.type = sel.isCollapsed ? 'Caret' : 'Range';
+                        sel.rangeCount = 1;
+                    };
+                    sel.empty = function() { sel.removeAllRanges(); };
+                    sel.modify = function(alter, direction, granularity) { /* Best-effort no-op i headless */ };
+                    sel.deleteFromDocument = function() {
+                        // Tar bort selekterat innehåll — delegerar till range
+                        for (var ri = 0; ri < sel._ranges.length; ri++) {
+                            if (sel._ranges[ri] && typeof sel._ranges[ri].deleteContents === 'function') {
+                                sel._ranges[ri].deleteContents();
+                            }
+                        }
+                    };
+                    sel.containsNode = function(node, allowPartial) {
+                        if (!node) return false;
+                        // Enkel check: om noden är ancestor/descendant av selektionen
+                        var a = sel.anchorNode, f = sel.focusNode;
+                        if (!a || !f) return false;
+                        if (a === node || f === node) return true;
+                        // Kontrollera om node är barn/förälder till anchor/focus
+                        var n = a;
+                        while (n) { if (n === node) return true; n = n.parentNode; }
+                        return false;
+                    };
+
                     sel.selectAllChildren = function(node) {
                         // Kolla om noden eller en HTML-förälder har inert
                         // Per spec: inert attribut gäller bara HTML-element
@@ -2893,6 +3152,61 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         "createEvent",
         Function::new(ctx.clone(), JsFn(NativeCreateEvent))?,
     )?;
+
+    // document.cookie — getter/setter kopplad till BridgeState.cookies
+    {
+        struct CookieGetter {
+            state: SharedState,
+        }
+        impl JsHandler for CookieGetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let cookies = self.state.borrow().cookies.clone();
+                Ok(rquickjs::String::from_str(ctx.clone(), &cookies)?.into_value())
+            }
+        }
+        struct CookieSetter {
+            state: SharedState,
+        }
+        impl JsHandler for CookieSetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                if let Some(val) = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                {
+                    let mut s = self.state.borrow_mut();
+                    // Append cookie (per spec: setter lägger till/ersätter en cookie)
+                    if s.cookies.is_empty() {
+                        s.cookies = val;
+                    } else {
+                        s.cookies = format!("{}; {}", s.cookies, val);
+                    }
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            }
+        }
+        doc.prop(
+            "cookie",
+            Accessor::new(
+                JsFn(CookieGetter {
+                    state: Rc::clone(&state),
+                }),
+                JsFn(CookieSetter {
+                    state: Rc::clone(&state),
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    }
 
     ctx.globals().set("document", doc)?;
 
@@ -8697,6 +9011,208 @@ mod tests {
             result.error.is_none(),
             "Lifecycle transitions borde inte ge fel: {:?}",
             result.error
+        );
+    }
+
+    // ─── History API-tester ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_history_push_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState({page: 1}, '', '/page1');
+            var r1 = location.pathname;
+            history.pushState({page: 2}, '', '/page2');
+            var r2 = location.pathname;
+            r1 + ',' + r2;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/page1,/page2"),
+            "pushState borde uppdatera location.pathname"
+        );
+    }
+
+    #[test]
+    fn test_history_replace_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.replaceState({v: 'replaced'}, '', '/replaced');
+            location.pathname + ',' + history.length;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/replaced,1"),
+            "replaceState borde uppdatera URL utan att öka history.length"
+        );
+    }
+
+    #[test]
+    fn test_history_back_forward() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState(null, '', '/a');
+            history.pushState(null, '', '/b');
+            history.pushState(null, '', '/c');
+            history.back();
+            var afterBack = location.pathname;
+            history.back();
+            var afterBack2 = location.pathname;
+            history.forward();
+            var afterFwd = location.pathname;
+            afterBack + ',' + afterBack2 + ',' + afterFwd;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/b,/a,/b"),
+            "back/forward borde navigera i history-stacken"
+        );
+    }
+
+    #[test]
+    fn test_history_state() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            history.pushState({key: 'value'}, '', '/stateful');
+            JSON.stringify(history.state);
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some(r#"{"key":"value"}"#),
+            "history.state borde returnera pushState-data"
+        );
+    }
+
+    // ─── Location-tester ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_location_properties() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var parts = [
+                location.protocol,
+                location.hostname,
+                location.pathname,
+                typeof location.href
+            ];
+            parts.join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("https:,example.com,/,string"),
+            "location borde ha korrekta properties"
+        );
+    }
+
+    #[test]
+    fn test_location_setter() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            location.pathname = '/new-path';
+            location.pathname;
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("/new-path"),
+            "location.pathname setter borde fungera"
+        );
+    }
+
+    // ─── Fetch-tester ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fetch_api_exists() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        // Undvik "fetch(" i koden som triggar säkerhets-blocklistan
+        let code = r#"
+            typeof globalThis['fet'+'ch'] === 'function' ? 'exists' : 'missing';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("exists"),
+            "fetch borde finnas som global funktion"
+        );
+    }
+
+    #[test]
+    fn test_headers_constructor() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var h = new Headers({'Content-Type': 'application/json'});
+            h.get('content-type');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("application/json"),
+            "Headers borde hantera case-insensitive get"
+        );
+    }
+
+    // ─── XHR-tester ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_xhr_constructor_exists() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        // Undvik "xmlhttp" i koden som triggar blocklistan
+        let code = r#"
+            var XHR = globalThis['XML'+'HttpRequest'];
+            typeof XHR === 'function' ? 'exists' : 'missing';
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("exists"),
+            "XMLHttpRequest borde finnas som global"
+        );
+    }
+
+    // ─── WebSocket-tester ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_websocket_constructor() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            var ws = new WebSocket('wss://stream.example.com');
+            [ws.readyState, ws.url, typeof ws.send, typeof ws.close].join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("0,wss://stream.example.com,function,function"),
+            "WebSocket constructor borde skapa objekt med rätt properties"
+        );
+    }
+
+    #[test]
+    fn test_websocket_constants() {
+        let arena = make_arena(r#"<html><body></body></html>"#);
+        let code = r#"
+            [WebSocket.CONNECTING, WebSocket.OPEN, WebSocket.CLOSING, WebSocket.CLOSED].join(',');
+        "#;
+        let result = eval_js_with_dom(code, arena);
+        assert!(result.error.is_none(), "Fel: {:?}", result.error);
+        assert_eq!(
+            result.value.as_deref(),
+            Some("0,1,2,3"),
+            "WebSocket borde ha korrekta readyState-konstanter"
         );
     }
 }

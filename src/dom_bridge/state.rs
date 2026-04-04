@@ -91,6 +91,49 @@ pub(crate) struct BridgeState {
     pub(super) blitz_cache_generation: u64,
     /// Nästa callback_id för event listeners
     pub(super) next_callback_id: u64,
+    /// History API: stack av (url, state_json) — för pushState/replaceState/back/forward
+    pub(super) history_stack: Vec<(String, Option<String>)>,
+    /// History API: aktuell index i history_stack
+    pub(super) history_index: usize,
+    /// Aktuell URL — uppdateras av pushState/replaceState och location-setters
+    pub(super) current_url: String,
+    /// Pre-populerade fetch-responses: URL → (status, content_type, body)
+    /// Sätts av Rust innan JS-evaluering för att göra fetch() synkront tillgängligt
+    pub(crate) fetch_responses: std::collections::HashMap<String, FetchResponse>,
+    /// Pending fetch-requests som JS vill göra men inte har svar för
+    pub(crate) pending_fetches: Vec<PendingFetch>,
+    /// Pre-populerade WebSocket-meddelanden: URL → meddelanden
+    pub(crate) websocket_messages: std::collections::HashMap<String, WebSocketMessages>,
+    /// Registrerade WebSocket-URLer som JS öppnade
+    pub(crate) websocket_urls: Vec<String>,
+    /// Cookies att exponera via document.cookie (key=value par)
+    pub(crate) cookies: String,
+}
+
+/// Pre-populerat fetch-response för JS-sandlådan
+#[derive(Debug, Clone)]
+pub struct FetchResponse {
+    pub status: u16,
+    pub content_type: String,
+    pub body: String,
+    pub headers: std::collections::HashMap<String, String>,
+}
+
+/// En pending fetch-request som JS vill göra — fält läses av extern orkestreringslogik
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct PendingFetch {
+    pub url: String,
+    pub method: String,
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: Option<String>,
+}
+
+/// Pre-populerade WebSocket-meddelanden för JS-sandlådan
+#[derive(Debug, Clone, Default)]
+pub struct WebSocketMessages {
+    /// Meddelanden att leverera till JS i ordning
+    pub messages: Vec<String>,
 }
 
 pub(crate) type SharedState = Rc<RefCell<BridgeState>>;

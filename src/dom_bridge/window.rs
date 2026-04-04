@@ -582,6 +582,404 @@ impl JsHandler for CssEscapeHandler {
     }
 }
 
+// ─── Rust-native Base64 (btoa/atob) ─────────────────────────────────────────
+
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct BtoaHandler;
+impl JsHandler for BtoaHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let input = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Validera Latin1-range
+        for ch in input.chars() {
+            if ch as u32 > 255 {
+                return Err(ctx.throw(
+                    rquickjs::String::from_str(ctx.clone(), "InvalidCharacterError: The string to be encoded contains characters outside of the Latin1 range.")?.into(),
+                ));
+            }
+        }
+        let bytes: Vec<u8> = input.chars().map(|c| c as u8).collect();
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let a = chunk[0] as u32;
+            let b = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+            let c = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+            let n = (a << 16) | (b << 8) | c;
+            out.push(B64_CHARS[((n >> 18) & 63) as usize] as char);
+            out.push(B64_CHARS[((n >> 12) & 63) as usize] as char);
+            out.push(if chunk.len() > 1 {
+                B64_CHARS[((n >> 6) & 63) as usize] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                B64_CHARS[(n & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+        Ok(rquickjs::String::from_str(ctx.clone(), &out)?.into_value())
+    }
+}
+
+struct AtobHandler;
+impl JsHandler for AtobHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let input = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default();
+        // Strip whitespace
+        let cleaned: String = input
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' '))
+            .collect();
+        if cleaned.len() % 4 == 1 {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "InvalidCharacterError: The string to be decoded is not correctly encoded.",
+                )?
+                .into(),
+            ));
+        }
+        let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::with_capacity(cleaned.len() * 3 / 4);
+        let bytes = cleaned.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let a = table.iter().position(|&x| x == bytes[i]).unwrap_or(0) as u32;
+            let b = if i + 1 < bytes.len() {
+                table.iter().position(|&x| x == bytes[i + 1]).unwrap_or(0) as u32
+            } else {
+                0
+            };
+            let c_byte = if i + 2 < bytes.len() {
+                bytes[i + 2]
+            } else {
+                b'='
+            };
+            let d_byte = if i + 3 < bytes.len() {
+                bytes[i + 3]
+            } else {
+                b'='
+            };
+            let c = if c_byte == b'=' {
+                64u32
+            } else {
+                table.iter().position(|&x| x == c_byte).unwrap_or(0) as u32
+            };
+            let d = if d_byte == b'=' {
+                64u32
+            } else {
+                table.iter().position(|&x| x == d_byte).unwrap_or(0) as u32
+            };
+            out.push(((a << 2) | (b >> 4)) as u8);
+            if c != 64 {
+                out.push((((b & 15) << 4) | (c >> 2)) as u8);
+            }
+            if d != 64 {
+                out.push((((c & 3) << 6) | d) as u8);
+            }
+            i += 4;
+        }
+        // Latin1 output
+        let result: String = out.iter().map(|&b| b as char).collect();
+        Ok(rquickjs::String::from_str(ctx.clone(), &result)?.into_value())
+    }
+}
+
+// ─── Rust-native Scroll State ───────────────────────────────────────────────
+
+struct ScrollToHandler {
+    state: SharedState,
+}
+impl JsHandler for ScrollToHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        if let Some(first) = args.first() {
+            if let Some(obj) = first.as_object() {
+                // scrollTo({left, top})
+                let cur = s.scroll_positions.get(&0).copied().unwrap_or((0.0, 0.0));
+                let top = obj.get::<_, f64>("top").unwrap_or(cur.0);
+                let left = obj.get::<_, f64>("left").unwrap_or(cur.1);
+                s.scroll_positions.insert(0, (top, left));
+            } else if let Some(x) = first.as_number() {
+                let y = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0);
+                s.scroll_positions.insert(0, (y, x));
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ScrollByHandler {
+    state: SharedState,
+}
+impl JsHandler for ScrollByHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let mut s = self.state.borrow_mut();
+        let (cur_top, cur_left) = s.scroll_positions.get(&0).copied().unwrap_or((0.0, 0.0));
+        if let Some(first) = args.first() {
+            if let Some(obj) = first.as_object() {
+                let dx = obj.get::<_, f64>("left").unwrap_or(0.0);
+                let dy = obj.get::<_, f64>("top").unwrap_or(0.0);
+                s.scroll_positions.insert(0, (cur_top + dy, cur_left + dx));
+            } else if let Some(x) = first.as_number() {
+                let y = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0);
+                s.scroll_positions.insert(0, (cur_top + y, cur_left + x));
+            }
+        }
+        Ok(Value::new_undefined(ctx.clone()))
+    }
+}
+
+struct ScrollXGetter {
+    state: SharedState,
+}
+impl JsHandler for ScrollXGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let x = s.scroll_positions.get(&0).map_or(0.0, |p| p.1);
+        Ok(Value::new_float(ctx.clone(), x))
+    }
+}
+
+struct ScrollYGetter {
+    state: SharedState,
+}
+impl JsHandler for ScrollYGetter {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let s = self.state.borrow();
+        let y = s.scroll_positions.get(&0).map_or(0.0, |p| p.0);
+        Ok(Value::new_float(ctx.clone(), y))
+    }
+}
+
+// ─── Rust-native structuredClone ────────────────────────────────────────────
+
+struct StructuredCloneHandler;
+impl JsHandler for StructuredCloneHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let val = args
+            .first()
+            .cloned()
+            .unwrap_or(Value::new_undefined(ctx.clone()));
+        if val.is_undefined() {
+            return Err(ctx.throw(
+                rquickjs::String::from_str(
+                    ctx.clone(),
+                    "DataCloneError: The value could not be cloned.",
+                )?
+                .into(),
+            ));
+        }
+        // Serialisera till JSON och tillbaka — enklaste djupa kloningen
+        let json: String = ctx
+            .json_stringify(val)?
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_else(|| "null".to_string());
+        ctx.json_parse(json)
+    }
+}
+
+// ─── Rust-native Intl.NumberFormat ──────────────────────────────────────────
+
+struct IntlNumberFormatHandler;
+impl JsHandler for IntlNumberFormatHandler {
+    fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let locale = args
+            .first()
+            .and_then(|v| v.as_string())
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_else(|| "sv-SE".to_string());
+        let options = args.get(1).and_then(|v| v.as_object().cloned());
+
+        let style = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("style").ok())
+            .unwrap_or_else(|| "decimal".to_string());
+        let currency = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("currency").ok());
+        let currency_display = options
+            .as_ref()
+            .and_then(|o| o.get::<_, String>("currencyDisplay").ok())
+            .unwrap_or_else(|| "symbol".to_string());
+        let min_frac: i32 = options
+            .as_ref()
+            .and_then(|o| o.get::<_, i32>("minimumFractionDigits").ok())
+            .unwrap_or(if style == "currency" { 2 } else { 0 });
+        let max_frac: i32 = options
+            .as_ref()
+            .and_then(|o| o.get::<_, i32>("maximumFractionDigits").ok())
+            .unwrap_or(if style == "currency" { 2 } else { 3 });
+
+        let is_sv = locale.starts_with("sv");
+
+        let formatter = Object::new(ctx.clone())?;
+        let locale_c = locale.clone();
+        let style_c = style.clone();
+        let currency_c = currency.clone();
+        let currency_display_c = currency_display.clone();
+
+        // format(number) metod
+        #[allow(dead_code)]
+        struct FormatFn {
+            locale: String,
+            style: String,
+            currency: Option<String>,
+            currency_display: String,
+            min_frac: i32,
+            max_frac: i32,
+            is_sv: bool,
+        }
+        impl JsHandler for FormatFn {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let num = args.first().and_then(|v| v.as_number()).unwrap_or(0.0);
+                let formatted = format_number(num, self.max_frac, self.is_sv);
+                let result = if self.style == "currency" {
+                    let sym = match self.currency.as_deref() {
+                        Some(c) => {
+                            if self.currency_display == "code" {
+                                c.to_uppercase()
+                            } else {
+                                match c.to_uppercase().as_str() {
+                                    "SEK" | "NOK" | "DKK" => "kr".to_string(),
+                                    "USD" => "$".to_string(),
+                                    "EUR" => "€".to_string(),
+                                    "GBP" => "£".to_string(),
+                                    "JPY" => "¥".to_string(),
+                                    "CHF" => "CHF".to_string(),
+                                    other => other.to_string(),
+                                }
+                            }
+                        }
+                        None => String::new(),
+                    };
+                    if self.is_sv {
+                        format!("{}\u{a0}{}", formatted, sym)
+                    } else {
+                        format!("{}{}", sym, formatted)
+                    }
+                } else if self.style == "percent" {
+                    format!("{}%", formatted)
+                } else {
+                    formatted
+                };
+                Ok(rquickjs::String::from_str(ctx.clone(), &result)?.into_value())
+            }
+        }
+
+        formatter.set(
+            "format",
+            Function::new(
+                ctx.clone(),
+                JsFn(FormatFn {
+                    locale: locale_c.clone(),
+                    style: style_c.clone(),
+                    currency: currency_c.clone(),
+                    currency_display: currency_display_c,
+                    min_frac,
+                    max_frac,
+                    is_sv,
+                }),
+            )?,
+        )?;
+
+        // resolvedOptions — Rust-struct istället för Persistent (undviker GC-assertion)
+        struct ResolvedOpts {
+            locale: String,
+            style: String,
+            currency: Option<String>,
+            min_frac: i32,
+            max_frac: i32,
+        }
+        impl JsHandler for ResolvedOpts {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let obj = Object::new(ctx.clone())?;
+                obj.set(
+                    "locale",
+                    rquickjs::String::from_str(ctx.clone(), &self.locale)?,
+                )?;
+                obj.set("numberingSystem", "latn")?;
+                obj.set(
+                    "style",
+                    rquickjs::String::from_str(ctx.clone(), &self.style)?,
+                )?;
+                if let Some(ref c) = self.currency {
+                    obj.set("currency", rquickjs::String::from_str(ctx.clone(), c)?)?;
+                }
+                obj.set("minimumFractionDigits", self.min_frac)?;
+                obj.set("maximumFractionDigits", self.max_frac)?;
+                Ok(obj.into_value())
+            }
+        }
+        formatter.set(
+            "resolvedOptions",
+            Function::new(
+                ctx.clone(),
+                JsFn(ResolvedOpts {
+                    locale: locale_c,
+                    style: style_c,
+                    currency: currency_c,
+                    min_frac,
+                    max_frac,
+                }),
+            )?,
+        )?;
+
+        Ok(formatter.into_value())
+    }
+}
+
+/// Formatera nummer med locale-anpassad separator
+fn format_number(num: f64, max_frac: i32, is_sv: bool) -> String {
+    let fixed = format!("{:.prec$}", num, prec = max_frac as usize);
+    let (int_part, dec_part) = if let Some(dot) = fixed.find('.') {
+        (&fixed[..dot], &fixed[dot + 1..])
+    } else {
+        (fixed.as_str(), "")
+    };
+
+    // Tusentals-separator
+    let group_sep = if is_sv { '\u{a0}' } else { ',' };
+    let dec_sep = if is_sv { ',' } else { '.' };
+
+    let mut grouped = String::new();
+    let digits: Vec<char> = int_part.chars().collect();
+    let start = if digits.first() == Some(&'-') { 1 } else { 0 };
+    if start == 1 {
+        grouped.push('-');
+    }
+    let num_digits = digits.len() - start;
+    for (i, &ch) in digits[start..].iter().enumerate() {
+        if i > 0 && (num_digits - i).is_multiple_of(3) {
+            grouped.push(group_sep);
+        }
+        grouped.push(ch);
+    }
+
+    if dec_part.is_empty() {
+        grouped
+    } else {
+        format!("{}{}{}", grouped, dec_sep, dec_part)
+    }
+}
+
 pub(super) fn register_window<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Result<()> {
     register_window_with_viewport(ctx, state, 1280, 900)
 }
@@ -619,12 +1017,35 @@ pub(super) fn register_window_with_viewport<'js>(
     win.set("outerHeight", viewport_height)?;
     win.set("devicePixelRatio", 1.0)?;
 
-    // Scroll no-ops
-    win.set("scrollTo", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scrollBy", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scroll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scrollX", 0)?;
-    win.set("scrollY", 0)?;
+    // Scroll — Rust-native state tracking via BridgeState.scroll_positions[0]
+    win.set(
+        "scrollTo",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollToHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    win.set(
+        "scrollBy",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollByHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    win.set(
+        "scroll",
+        Function::new(
+            ctx.clone(),
+            JsFn(ScrollToHandler {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    // scrollX/scrollY registreras som getters i JS efter window sätts (se nedan)
     // getSelection — delegerar till document.getSelection
     win.set(
         "getSelection",
@@ -690,28 +1111,57 @@ pub(super) fn register_window_with_viewport<'js>(
         )?;
     }
 
-    // location
-    let loc = Object::new(ctx.clone())?;
-    loc.set("href", "https://example.com/")?;
-    loc.set("protocol", "https:")?;
-    loc.set("host", "example.com")?;
-    loc.set("hostname", "example.com")?;
-    loc.set("pathname", "/")?;
-    loc.set("search", "")?;
-    loc.set("hash", "")?;
-    loc.set("origin", "https://example.com")?;
-    loc.set("port", "")?;
-    win.set("location", loc)?;
-
-    // navigator
+    // navigator — utökad med alla vanliga properties
     let nav = Object::new(ctx.clone())?;
-    nav.set("userAgent", "AetherAgent/1.0 (QuickJS Sandbox)")?;
+    nav.set(
+        "userAgent",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) AetherAgent/1.0 Chrome/130.0.0.0 Safari/537.36",
+    )?;
     nav.set("language", "sv-SE")?;
-    nav.set("languages", rquickjs::Array::new(ctx.clone())?)?;
+    {
+        let langs = rquickjs::Array::new(ctx.clone())?;
+        langs.set(0, rquickjs::String::from_str(ctx.clone(), "sv-SE")?)?;
+        langs.set(1, rquickjs::String::from_str(ctx.clone(), "en-US")?)?;
+        langs.set(2, rquickjs::String::from_str(ctx.clone(), "en")?)?;
+        nav.set("languages", langs)?;
+    }
     nav.set("platform", "Linux x86_64")?;
-    nav.set("cookieEnabled", false)?;
+    nav.set("cookieEnabled", true)?;
     nav.set("onLine", true)?;
-    nav.set("hardwareConcurrency", 1)?;
+    nav.set("hardwareConcurrency", 4)?;
+    nav.set("maxTouchPoints", 0)?;
+    nav.set("vendor", "Google Inc.")?;
+    nav.set("vendorSub", "")?;
+    nav.set("productSub", "20030107")?;
+    nav.set("product", "Gecko")?;
+    nav.set("appName", "Netscape")?;
+    nav.set("appVersion", "5.0")?;
+    nav.set("appCodeName", "Mozilla")?;
+    nav.set("webdriver", false)?;
+    nav.set("pdfViewerEnabled", false)?;
+    nav.set("doNotTrack", Value::new_null(ctx.clone()))?;
+    // Clipboard API stub
+    let clipboard = Object::new(ctx.clone())?;
+    clipboard.set("writeText", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    clipboard.set("readText", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("clipboard", clipboard)?;
+    // Permissions API stub
+    let permissions = Object::new(ctx.clone())?;
+    permissions.set("query", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("permissions", permissions)?;
+    // mediaDevices stub
+    let media_devices = Object::new(ctx.clone())?;
+    media_devices.set(
+        "enumerateDevices",
+        Function::new(ctx.clone(), JsFn(NoOpHandler))?,
+    )?;
+    nav.set("mediaDevices", media_devices)?;
+    // serviceWorker stub
+    let sw = Object::new(ctx.clone())?;
+    sw.set("ready", Value::new_null(ctx.clone()))?;
+    sw.set("controller", Value::new_null(ctx.clone()))?;
+    sw.set("register", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("serviceWorker", sw)?;
     win.set("navigator", nav)?;
 
     // screen — synkad med viewport
@@ -746,37 +1196,7 @@ pub(super) fn register_window_with_viewport<'js>(
     )?;
     win.set("performance", perf)?;
 
-    // customElements
-    let custom_elements = Object::new(ctx.clone())?;
-    custom_elements.set("define", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    custom_elements.set("get", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    custom_elements.set(
-        "whenDefined",
-        Function::new(ctx.clone(), JsFn(NoOpHandler))?,
-    )?;
-    win.set("customElements", custom_elements)?;
-
-    // ResizeObserver
-    {
-        struct ResizeObserverConstructor;
-        impl JsHandler for ResizeObserverConstructor {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                let obs = Object::new(ctx.clone())?;
-                obs.set("observe", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                obs.set("unobserve", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                obs.set("disconnect", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                Ok(obs.into_value())
-            }
-        }
-        win.set(
-            "ResizeObserver",
-            Function::new(ctx.clone(), JsFn(ResizeObserverConstructor))?,
-        )?;
-    }
+    // customElements + ResizeObserver — registreras via JS efter window (se nedan)
 
     // crypto
     {
@@ -849,54 +1269,6 @@ pub(super) fn register_window_with_viewport<'js>(
         win.set("crypto", crypto)?;
     }
 
-    // location.searchParams — enkel URLSearchParams stub
-    {
-        let search_params = Object::new(ctx.clone())?;
-        struct SPGet;
-        impl JsHandler for SPGet {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_null(ctx.clone()))
-            }
-        }
-        struct SPHas;
-        impl JsHandler for SPHas {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_bool(ctx.clone(), false))
-            }
-        }
-        struct SPToString;
-        impl JsHandler for SPToString {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(rquickjs::String::from_str(ctx.clone(), "")?.into_value())
-            }
-        }
-        search_params.set("get", Function::new(ctx.clone(), JsFn(SPGet))?)?;
-        search_params.set("getAll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("has", Function::new(ctx.clone(), JsFn(SPHas))?)?;
-        search_params.set("set", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("delete", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("toString", Function::new(ctx.clone(), JsFn(SPToString))?)?;
-        search_params.set("entries", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("keys", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("values", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        search_params.set("forEach", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-        // Sätt på location-objektet
-        let loc: Object = win.get("location")?;
-        loc.set("searchParams", search_params)?;
-    }
-
     // CSS object med native supports() och escape()
     {
         let css = Object::new(ctx.clone())?;
@@ -914,11 +1286,52 @@ pub(super) fn register_window_with_viewport<'js>(
     // Kopiera till globalThis
     ctx.globals().set("window", win)?;
 
-    // Registrera atob/btoa, encodeURI/decodeURI via JS + Event/CustomEvent constructors
+    // ─── Rust-native global-funktioner ──────────────────────────────────────
+    {
+        let globals: Object = ctx.globals();
+        globals.set("btoa", Function::new(ctx.clone(), JsFn(BtoaHandler))?)?;
+        globals.set("atob", Function::new(ctx.clone(), JsFn(AtobHandler))?)?;
+        globals.set(
+            "structuredClone",
+            Function::new(ctx.clone(), JsFn(StructuredCloneHandler))?,
+        )?;
+        // Synka till window
+        let w: Object = globals.get("window")?;
+        w.set("btoa", Function::new(ctx.clone(), JsFn(BtoaHandler))?)?;
+        w.set("atob", Function::new(ctx.clone(), JsFn(AtobHandler))?)?;
+        w.set(
+            "structuredClone",
+            Function::new(ctx.clone(), JsFn(StructuredCloneHandler))?,
+        )?;
+        // Scroll getters (native handlers redan registrerade på win)
+        w.set(
+            "__scrollXGetter",
+            Function::new(
+                ctx.clone(),
+                JsFn(ScrollXGetter {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+        w.set(
+            "__scrollYGetter",
+            Function::new(
+                ctx.clone(),
+                JsFn(ScrollYGetter {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+        // Intl.NumberFormat — Rust-native constructor
+        globals.set(
+            "__intlNumberFormat",
+            Function::new(ctx.clone(), JsFn(IntlNumberFormatHandler))?,
+        )?;
+    }
+
+    // JS glue-kod som INTE kan vara ren Rust (behöver Object.defineProperty, prototype chains, etc)
     ctx.eval::<(), _>(
         r#"
-        globalThis.atob = function(s) { return s; };
-        globalThis.btoa = function(s) { return s; };
         globalThis.self = globalThis.window;
         globalThis.frames = globalThis.window;
         globalThis.parent = globalThis.window;
@@ -948,6 +1361,239 @@ pub(super) fn register_window_with_viewport<'js>(
                 globalThis.window.requestIdleCallback = globalThis.requestIdleCallback;
                 globalThis.window.cancelIdleCallback = globalThis.cancelIdleCallback;
             }
+        }
+
+        // ─── Scroll getters (Rust-native handlers) ────────────────────
+        if (globalThis.window) {
+            Object.defineProperty(window, 'scrollX', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'pageXOffset', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'scrollY', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            Object.defineProperty(window, 'pageYOffset', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            // scrollTo/scrollBy/scroll redan satta som Rust-native på win-objektet
+            globalThis.scrollTo = window.scrollTo;
+            globalThis.scroll = window.scroll;
+            globalThis.scrollBy = window.scrollBy;
+            Object.defineProperty(globalThis, 'scrollX', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'scrollY', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'pageXOffset', { get: window.__scrollXGetter, enumerable: true, configurable: true });
+            Object.defineProperty(globalThis, 'pageYOffset', { get: window.__scrollYGetter, enumerable: true, configurable: true });
+        }
+        // structuredClone redan registrerad som Rust-native
+
+        // ─── customElements registry ────────────────────────────────────
+        (function() {
+            var registry = {};
+            var whenDefinedCallbacks = {};
+            var ce = {
+                define: function(name, constructor, options) {
+                    name = String(name).toLowerCase();
+                    if (registry[name]) throw new DOMException("'" + name + "' has already been defined as a custom element", 'NotSupportedError');
+                    if (name.indexOf('-') === -1) throw new DOMException("'" + name + "' is not a valid custom element name", 'SyntaxError');
+                    registry[name] = { constructor: constructor, extends: (options && options.extends) || null };
+                    // Uppgradera befintliga element
+                    try {
+                        var existing = document.getElementsByTagName(name);
+                        if (existing && existing.length) {
+                            for (var i = 0; i < existing.length; i++) {
+                                try { constructor.call(existing[i]); } catch(e) {}
+                            }
+                        }
+                    } catch(e) {}
+                    // Resolve whenDefined-promises
+                    if (whenDefinedCallbacks[name]) {
+                        var cbs = whenDefinedCallbacks[name];
+                        delete whenDefinedCallbacks[name];
+                        for (var j = 0; j < cbs.length; j++) { try { cbs[j](constructor); } catch(e) {} }
+                    }
+                },
+                get: function(name) {
+                    var entry = registry[String(name).toLowerCase()];
+                    return entry ? entry.constructor : undefined;
+                },
+                whenDefined: function(name) {
+                    name = String(name).toLowerCase();
+                    if (registry[name]) return Promise.resolve(registry[name].constructor);
+                    return new Promise(function(resolve) {
+                        if (!whenDefinedCallbacks[name]) whenDefinedCallbacks[name] = [];
+                        whenDefinedCallbacks[name].push(resolve);
+                    });
+                },
+                getName: function(constructor) {
+                    for (var name in registry) {
+                        if (registry[name].constructor === constructor) return name;
+                    }
+                    return null;
+                },
+                upgrade: function(root) { /* Upgrade walk — no-op i sandbox */ }
+            };
+            if (typeof window !== 'undefined') window.customElements = ce;
+            globalThis.customElements = ce;
+        })();
+
+        // ─── ResizeObserver (callback-trigger via MutationObserver) ──────
+        globalThis.ResizeObserver = function ResizeObserver(callback) {
+            if (typeof callback !== 'function') throw new TypeError("Failed to construct 'ResizeObserver': parameter 1 is not of type 'Function'.");
+            var self = this;
+            self._callback = callback;
+            self._targets = [];
+            self._mo = null;
+
+            self.observe = function(target) {
+                if (!target || typeof target !== 'object') return;
+                for (var i = 0; i < self._targets.length; i++) {
+                    if (self._targets[i] === target) return; // Redan observerad
+                }
+                self._targets.push(target);
+                // Koppla till MutationObserver för att trigga vid DOM-ändringar
+                if (!self._mo && typeof MutationObserver !== 'undefined') {
+                    self._mo = new MutationObserver(function() {
+                        if (self._targets.length > 0) {
+                            var entries = [];
+                            for (var j = 0; j < self._targets.length; j++) {
+                                var t = self._targets[j];
+                                var rect = (typeof t.getBoundingClientRect === 'function') ? t.getBoundingClientRect() : {x:0,y:0,width:0,height:0};
+                                entries.push({
+                                    target: t,
+                                    contentRect: rect,
+                                    borderBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+                                    contentBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+                                    devicePixelContentBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }]
+                                });
+                            }
+                            try { self._callback(entries, self); } catch(e) {}
+                        }
+                    });
+                    if (typeof document !== 'undefined' && document.documentElement) {
+                        self._mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+                    }
+                }
+            };
+            self.unobserve = function(target) {
+                self._targets = self._targets.filter(function(t) { return t !== target; });
+                if (self._targets.length === 0 && self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.disconnect = function() {
+                self._targets = [];
+                if (self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+        };
+
+        // ─── IntersectionObserver (riktig callback-trigger) ─────────────
+        globalThis.IntersectionObserver = function IntersectionObserver(callback, options) {
+            if (typeof callback !== 'function') throw new TypeError("Failed to construct 'IntersectionObserver': parameter 1 is not of type 'Function'.");
+            var self = this;
+            self._callback = callback;
+            self._targets = [];
+            self._root = (options && options.root) || null;
+            self._rootMargin = (options && options.rootMargin) || '0px';
+            self._thresholds = (options && options.threshold) || [0];
+            if (typeof self._thresholds === 'number') self._thresholds = [self._thresholds];
+            self._mo = null;
+
+            function createEntry(target, isIntersecting) {
+                var rect = (typeof target.getBoundingClientRect === 'function') ? target.getBoundingClientRect() : {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0};
+                return {
+                    target: target,
+                    isIntersecting: isIntersecting,
+                    intersectionRatio: isIntersecting ? 1.0 : 0.0,
+                    boundingClientRect: rect,
+                    intersectionRect: isIntersecting ? rect : {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0},
+                    rootBounds: null,
+                    time: (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+                };
+            }
+
+            self.observe = function(target) {
+                if (!target || typeof target !== 'object') return;
+                for (var i = 0; i < self._targets.length; i++) {
+                    if (self._targets[i] === target) return;
+                }
+                self._targets.push(target);
+                // I headless antas alla element synliga — trigga direkt
+                setTimeout(function() {
+                    try { self._callback([createEntry(target, true)], self); } catch(e) {}
+                }, 0);
+                // MutationObserver för framtida DOM-ändringar
+                if (!self._mo && typeof MutationObserver !== 'undefined') {
+                    self._mo = new MutationObserver(function() {
+                        var entries = [];
+                        for (var j = 0; j < self._targets.length; j++) {
+                            entries.push(createEntry(self._targets[j], true));
+                        }
+                        if (entries.length > 0) { try { self._callback(entries, self); } catch(e) {} }
+                    });
+                    if (typeof document !== 'undefined' && document.documentElement) {
+                        self._mo.observe(document.documentElement, { childList: true, subtree: true });
+                    }
+                }
+            };
+            self.unobserve = function(target) {
+                self._targets = self._targets.filter(function(t) { return t !== target; });
+                if (self._targets.length === 0 && self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.disconnect = function() {
+                self._targets = [];
+                if (self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.takeRecords = function() {
+                var entries = [];
+                for (var j = 0; j < self._targets.length; j++) {
+                    entries.push(createEntry(self._targets[j], true));
+                }
+                return entries;
+            };
+        };
+
+        // Intl.NumberFormat — Rust-native (registreras via __intlNumberFormat)
+        if (typeof Intl === 'undefined') globalThis.Intl = {};
+        if (!Intl.NumberFormat) {
+            Intl.NumberFormat = function NumberFormat(loc, opts) {
+                return __intlNumberFormat(loc || 'sv-SE', opts || {});
+            };
+        }
+        // Intl.DateTimeFormat — minimal JS-wrapper (kan inte vara pure Rust utan icu4x)
+        if (!Intl.DateTimeFormat) {
+            Intl.DateTimeFormat = function DateTimeFormat(locale, options) {
+                this._locale = locale || 'sv-SE';
+                this._options = options || {};
+            };
+            Intl.DateTimeFormat.prototype.format = function(date) {
+                if (!date) date = new Date();
+                return date.toISOString();
+            };
+            Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+                return Object.assign({ locale: this._locale, calendar: 'gregory', timeZone: 'UTC' }, this._options);
+            };
+        }
+
+        // ─── PerformanceObserver / ReportingObserver ─────────────────────
+        // Dessa kräver JS prototype chains som inte kan vara pure Rust JsHandler
+        if (typeof PerformanceObserver === 'undefined') {
+            globalThis.PerformanceObserver = function PerformanceObserver(callback) {
+                this._callback = callback; this._types = [];
+            };
+            PerformanceObserver.prototype.observe = function(opts) {
+                if (opts && opts.entryTypes) this._types = opts.entryTypes;
+                if (opts && opts.type) this._types = [opts.type];
+            };
+            PerformanceObserver.prototype.disconnect = function() { this._types = []; };
+            PerformanceObserver.prototype.takeRecords = function() { return []; };
+            PerformanceObserver.supportedEntryTypes = ['mark', 'measure', 'navigation', 'resource', 'paint', 'longtask'];
+        }
+        if (typeof ReportingObserver === 'undefined') {
+            globalThis.ReportingObserver = function ReportingObserver(cb) { this._callback = cb; };
+            ReportingObserver.prototype.observe = function() {};
+            ReportingObserver.prototype.disconnect = function() {};
+            ReportingObserver.prototype.takeRecords = function() { return []; };
+        }
+
+        // Synka globalThis-registrerade constructors till window-objektet
+        if (typeof window !== 'undefined') {
+            if (typeof ResizeObserver !== 'undefined') window.ResizeObserver = ResizeObserver;
+            if (typeof IntersectionObserver !== 'undefined') window.IntersectionObserver = IntersectionObserver;
+            if (typeof PerformanceObserver !== 'undefined') window.PerformanceObserver = PerformanceObserver;
+            if (typeof ReportingObserver !== 'undefined') window.ReportingObserver = ReportingObserver;
+            if (typeof WebSocket !== 'undefined') window.WebSocket = WebSocket;
         }
 
         // TextEncoder/TextDecoder — UTF-8
@@ -2786,15 +3432,44 @@ pub(super) fn register_window_with_viewport<'js>(
                              getClientRect: function() { return new DOMRect(x || 0, y || 0, 0, 0); } };
                 };
             }
-            // elementFromPoint
+            // elementFromPoint — söker djupaste element som innehåller (x,y) via getBoundingClientRect
             if (!document.elementFromPoint) {
-                document.elementFromPoint = function(x, y) { return document.body || null; };
+                document.elementFromPoint = function(x, y) {
+                    function hitTest(el, px, py) {
+                        if (!el || el.nodeType !== 1) return null;
+                        var children = el.children || [];
+                        // Sök barn i omvänd ordning (sista = överst i Z)
+                        for (var i = children.length - 1; i >= 0; i--) {
+                            var hit = hitTest(children[i], px, py);
+                            if (hit) return hit;
+                        }
+                        if (typeof el.getBoundingClientRect === 'function') {
+                            var r = el.getBoundingClientRect();
+                            if (r && px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) return el;
+                        }
+                        return null;
+                    }
+                    var root = document.documentElement || document.body;
+                    return root ? (hitTest(root, x, y) || root) : null;
+                };
             }
-            // elementsFromPoint
+            // elementsFromPoint — returnerar alla element som innehåller (x,y) i z-ordning
             if (!document.elementsFromPoint) {
                 document.elementsFromPoint = function(x, y) {
-                    var el = document.elementFromPoint(x, y);
-                    return el ? [el] : [];
+                    var result = [];
+                    function collect(el, px, py) {
+                        if (!el || el.nodeType !== 1) return;
+                        if (typeof el.getBoundingClientRect === 'function') {
+                            var r = el.getBoundingClientRect();
+                            if (r && px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) result.push(el);
+                        }
+                        var children = el.children || [];
+                        for (var i = 0; i < children.length; i++) { collect(children[i], px, py); }
+                    }
+                    var root = document.documentElement || document.body;
+                    if (root) collect(root, x, y);
+                    result.reverse(); // Djupaste först
+                    return result;
                 };
             }
         }
@@ -3160,7 +3835,15 @@ pub(super) fn register_window_with_viewport<'js>(
                     s.reason = reason || new DOMException('The operation was aborted', 'AbortError');
                     return s;
                 };
-                AbortSignal.timeout = function(ms) { return new AbortSignal(); };
+                AbortSignal.timeout = function(ms) {
+                    var s = new AbortSignal();
+                    setTimeout(function() {
+                        s.aborted = true;
+                        s.reason = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+                        if (typeof s.onabort === 'function') s.onabort(new Event('abort'));
+                    }, ms);
+                    return s;
+                };
                 AbortSignal.any = function(signals) {
                     var s = new AbortSignal();
                     if (signals) {
@@ -3656,11 +4339,122 @@ pub(super) fn register_window_with_viewport<'js>(
             }
             return result;
         };
-        Range.prototype.deleteContents = function() {};
-        Range.prototype.extractContents = function() { return document.createDocumentFragment(); };
-        Range.prototype.cloneContents = function() { return document.createDocumentFragment(); };
-        Range.prototype.insertNode = function(node) {};
-        Range.prototype.surroundContents = function(node) {};
+        // Hjälpfunktion: samla alla noder inom range
+        Range.prototype._getContainedNodes = function() {
+            var nodes = [];
+            var sc = this.startContainer, so = this.startOffset;
+            var ec = this.endContainer, eo = this.endOffset;
+            if (!sc || !ec) return nodes;
+            if (sc === ec) {
+                if (sc.nodeType === 3) { nodes.push(sc); }
+                else {
+                    var children = sc.childNodes || [];
+                    for (var i = so; i < eo && i < children.length; i++) nodes.push(children[i]);
+                }
+                return nodes;
+            }
+            // Samla från start till end via tree walk
+            var n = sc;
+            var collecting = false;
+            function walk(node) {
+                if (node === sc) collecting = true;
+                if (collecting) nodes.push(node);
+                if (node === ec) { collecting = false; return true; }
+                if (node.childNodes) { for (var i = 0; i < node.childNodes.length; i++) { if (walk(node.childNodes[i])) return true; } }
+                return false;
+            }
+            var root = sc;
+            while (root.parentNode) root = root.parentNode;
+            walk(root);
+            return nodes;
+        };
+        Range.prototype.deleteContents = function() {
+            var nodes = this._getContainedNodes();
+            for (var i = nodes.length - 1; i >= 0; i--) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    // Text node — trim
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        n.data = data.substring(0, this.startOffset) + data.substring(this.endOffset);
+                    } else if (n === this.startContainer) {
+                        n.data = data.substring(0, this.startOffset);
+                    } else {
+                        n.data = data.substring(this.endOffset);
+                    }
+                } else if (n.parentNode) { n.parentNode.removeChild(n); }
+            }
+            this.collapse(true);
+        };
+        Range.prototype.extractContents = function() {
+            var frag = document.createDocumentFragment();
+            var nodes = this._getContainedNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        var extracted = data.substring(this.startOffset, this.endOffset);
+                        n.data = data.substring(0, this.startOffset) + data.substring(this.endOffset);
+                        frag.appendChild(document.createTextNode(extracted));
+                    } else if (n === this.startContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset)));
+                        n.data = data.substring(0, this.startOffset);
+                    } else {
+                        frag.appendChild(document.createTextNode(data.substring(0, this.endOffset)));
+                        n.data = data.substring(this.endOffset);
+                    }
+                } else {
+                    if (n.parentNode) n.parentNode.removeChild(n);
+                    frag.appendChild(n);
+                }
+            }
+            this.collapse(true);
+            return frag;
+        };
+        Range.prototype.cloneContents = function() {
+            var frag = document.createDocumentFragment();
+            var nodes = this._getContainedNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset, this.endOffset)));
+                    } else if (n === this.startContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset)));
+                    } else {
+                        frag.appendChild(document.createTextNode(data.substring(0, this.endOffset)));
+                    }
+                } else {
+                    frag.appendChild(n.cloneNode(true));
+                }
+            }
+            return frag;
+        };
+        Range.prototype.insertNode = function(node) {
+            if (!node) return;
+            var sc = this.startContainer;
+            if (!sc) return;
+            if (sc.nodeType === 3) {
+                // Split text node
+                var parent = sc.parentNode;
+                if (parent) {
+                    var after = sc.splitText ? sc.splitText(this.startOffset) : null;
+                    parent.insertBefore(node, after || sc.nextSibling);
+                }
+            } else {
+                var ref = sc.childNodes ? sc.childNodes[this.startOffset] : null;
+                sc.insertBefore(node, ref || null);
+            }
+        };
+        Range.prototype.surroundContents = function(newParent) {
+            if (!newParent) return;
+            var contents = this.extractContents();
+            newParent.appendChild(contents);
+            this.insertNode(newParent);
+            this.selectNode(newParent);
+        };
         Range.prototype.createContextualFragment = function(html) {
             // Spec: parse html as fragment, return DocumentFragment
             var frag = document.createDocumentFragment();
@@ -3848,35 +4642,212 @@ pub(super) fn register_window_with_viewport<'js>(
     "#,
     )?;
 
-    // SPA-stöd: fetch/XHR/Observer-stubs + URL-capture för Rust-side fetch
+    // SPA-stöd: fetch/XHR + URL-capture + pre-populated response support
+    // Registrera __fetchSync native handler som kollar BridgeState.fetch_responses
+    {
+        struct FetchSyncHandler {
+            state: SharedState,
+        }
+        impl JsHandler for FetchSyncHandler {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let url = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_default();
+                let method = args
+                    .get(1)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_else(|| "GET".to_string());
+                let headers_json = args
+                    .get(2)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_else(|| "{}".to_string());
+                let body = args
+                    .get(3)
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok());
+
+                let mut s = self.state.borrow_mut();
+
+                // Kolla om vi har ett pre-populerat svar
+                if let Some(resp) = s.fetch_responses.get(&url).cloned() {
+                    // Returnera JSON-objekt med response-data
+                    drop(s); // Släpp borrow
+                    let result = Object::new(ctx.clone())?;
+                    result.set("found", true)?;
+                    result.set("status", resp.status)?;
+                    result.set(
+                        "contentType",
+                        rquickjs::String::from_str(ctx.clone(), &resp.content_type)?,
+                    )?;
+                    result.set("body", rquickjs::String::from_str(ctx.clone(), &resp.body)?)?;
+                    // Headers som JSON
+                    let headers_obj = Object::new(ctx.clone())?;
+                    for (k, v) in &resp.headers {
+                        headers_obj.set(k.as_str(), rquickjs::String::from_str(ctx.clone(), v)?)?;
+                    }
+                    result.set("headers", headers_obj)?;
+                    return Ok(result.into_value());
+                }
+
+                // Registrera som pending fetch
+                let headers: std::collections::HashMap<String, String> =
+                    serde_json::from_str(&headers_json).unwrap_or_default();
+                s.pending_fetches.push(super::state::PendingFetch {
+                    url: url.clone(),
+                    method,
+                    headers,
+                    body,
+                });
+                drop(s);
+
+                // Returnera "not found" — JS-sidan hanterar detta
+                let result = Object::new(ctx.clone())?;
+                result.set("found", false)?;
+                Ok(result.into_value())
+            }
+        }
+
+        let globals: Object = ctx.globals();
+        globals.set(
+            "__fetchSync",
+            Function::new(
+                ctx.clone(),
+                JsFn(FetchSyncHandler {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+    }
+
+    // WebSocket native handlers
+    {
+        // __wsOpen(url) → registrera URL, returnera pre-populated messages JSON-array eller null
+        struct WsOpenHandler {
+            state: SharedState,
+        }
+        impl JsHandler for WsOpenHandler {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let url = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_default();
+
+                let mut s = self.state.borrow_mut();
+                s.websocket_urls.push(url.clone());
+
+                // Kolla om vi har pre-populated meddelanden
+                if let Some(msgs) = s.websocket_messages.get(&url) {
+                    let messages = msgs.messages.clone();
+                    drop(s);
+                    let arr = rquickjs::Array::new(ctx.clone())?;
+                    for (i, msg) in messages.iter().enumerate() {
+                        arr.set(i, rquickjs::String::from_str(ctx.clone(), msg)?)?;
+                    }
+                    return Ok(arr.into_value());
+                }
+                drop(s);
+                Ok(Value::new_null(ctx.clone()))
+            }
+        }
+
+        let globals: Object = ctx.globals();
+        globals.set(
+            "__wsOpen",
+            Function::new(
+                ctx.clone(),
+                JsFn(WsOpenHandler {
+                    state: Rc::clone(&state),
+                }),
+            )?,
+        )?;
+    }
+
     ctx.eval::<(), _>(
         r#"
         // Samlar fetch-URLs för Rust-side interception (BUGG J fix)
         globalThis.__fetchedUrls = [];
 
-        // fetch() — samla URL för Rust-fetch, returnera stub-Response
+        // fetch() — kolla pre-populated responses, annars registrera pending
         globalThis.fetch = function(url, opts) {
-            if (typeof url === 'string' && url.length > 0) {
-                globalThis.__fetchedUrls.push(url);
+            var urlStr = '';
+            if (typeof url === 'string') urlStr = url;
+            else if (url && url.url) urlStr = url.url;
+            else if (url && typeof url.toString === 'function') urlStr = url.toString();
+
+            if (urlStr.length > 0) {
+                globalThis.__fetchedUrls.push(urlStr);
             }
+
+            var method = (opts && opts.method) || 'GET';
+            var hdrs = {};
+            if (opts && opts.headers) {
+                if (typeof opts.headers.forEach === 'function') {
+                    opts.headers.forEach(function(v, k) { hdrs[k] = v; });
+                } else {
+                    for (var k in opts.headers) { hdrs[k] = opts.headers[k]; }
+                }
+            }
+            var bodyStr = (opts && opts.body) ? String(opts.body) : null;
+
+            // Kolla sync-respons via Rust
+            var syncResult = __fetchSync(urlStr, method, JSON.stringify(hdrs), bodyStr);
+
+            if (syncResult && syncResult.found) {
+                var status = syncResult.status || 200;
+                var ok = status >= 200 && status < 300;
+                var respBody = syncResult.body || '';
+                var ct = syncResult.contentType || '';
+                var respHeaders = new Headers(syncResult.headers || {});
+                if (ct) respHeaders.set('content-type', ct);
+                return Promise.resolve({
+                    ok: ok,
+                    status: status,
+                    statusText: ok ? 'OK' : 'Error',
+                    url: urlStr,
+                    redirected: false,
+                    type: 'basic',
+                    headers: respHeaders,
+                    json: function() {
+                        try { return Promise.resolve(JSON.parse(respBody)); }
+                        catch(e) { return Promise.reject(e); }
+                    },
+                    text: function() { return Promise.resolve(respBody); },
+                    blob: function() { return Promise.resolve(new Blob([respBody])); },
+                    arrayBuffer: function() {
+                        var enc = new TextEncoder();
+                        return Promise.resolve(enc.encode(respBody).buffer);
+                    },
+                    clone: function() { return this; },
+                    body: null,
+                    bodyUsed: false
+                });
+            }
+
+            // Ingen pre-populated response — returnera tom stub
             return Promise.resolve({
                 ok: false,
                 status: 0,
                 statusText: 'Sandbox: fetch deferred to Rust',
-                url: typeof url === 'string' ? url : '',
+                url: urlStr,
                 redirected: false,
                 type: 'basic',
-                headers: {
-                    get: function() { return null; },
-                    has: function() { return false; },
-                    forEach: function() {},
-                    entries: function() { return []; },
-                    keys: function() { return []; },
-                    values: function() { return []; }
-                },
-                json: function() { return Promise.reject(new Error('Sandbox: fetch deferred')); },
+                headers: new Headers({}),
+                json: function() { return Promise.reject(new Error('Sandbox: fetch pending')); },
                 text: function() { return Promise.resolve(''); },
-                blob: function() { return Promise.resolve(new Blob ? new Blob([]) : {}); },
+                blob: function() { return Promise.resolve(new Blob([])); },
                 arrayBuffer: function() { return Promise.resolve(new ArrayBuffer(0)); },
                 clone: function() { return this; },
                 body: null,
@@ -3920,67 +4891,145 @@ pub(super) fn register_window_with_viewport<'js>(
             this.body = (opts && opts.body) || null;
         };
 
-        // AbortController
-        globalThis.AbortController = function AbortController() {
-            this.signal = { aborted: false, addEventListener: function(){}, removeEventListener: function(){} };
-            this.abort = function() { this.signal.aborted = true; };
-        };
-
-        // XMLHttpRequest stub
+        // XMLHttpRequest — med stöd för pre-populated responses
         globalThis.XMLHttpRequest = function XMLHttpRequest() {
             this.readyState = 0;
             this.status = 0;
             this.statusText = '';
             this.responseText = '';
             this.response = '';
+            this.responseType = '';
+            this.responseURL = '';
+            this.timeout = 0;
+            this.withCredentials = false;
             this.onreadystatechange = null;
             this.onload = null;
             this.onerror = null;
-            this.open = function() { this.readyState = 1; };
-            this.send = function() {
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onerror) { try { this.onerror({}); } catch(e) {} }
+            this.onprogress = null;
+            this.onloadend = null;
+            this.ontimeout = null;
+            this._method = 'GET';
+            this._url = '';
+            this._headers = {};
+            this._respHeaders = {};
+            this.UNSENT = 0; this.OPENED = 1; this.HEADERS_RECEIVED = 2; this.LOADING = 3; this.DONE = 4;
+            this.open = function(method, url) {
+                this._method = method || 'GET';
+                this._url = String(url || '');
+                this.readyState = 1;
                 if (this.onreadystatechange) { try { this.onreadystatechange(); } catch(e) {} }
             };
-            this.setRequestHeader = function() {};
-            this.getResponseHeader = function() { return null; };
-            this.getAllResponseHeaders = function() { return ''; };
-            this.abort = function() {};
-            this.addEventListener = function() {};
+            this.send = function(body) {
+                var self = this;
+                if (self._url) globalThis.__fetchedUrls.push(self._url);
+                var syncResult = __fetchSync(self._url, self._method, JSON.stringify(self._headers), body ? String(body) : null);
+                if (syncResult && syncResult.found) {
+                    self.status = syncResult.status || 200;
+                    self.statusText = self.status >= 200 && self.status < 300 ? 'OK' : 'Error';
+                    self.responseText = syncResult.body || '';
+                    self.response = self.responseText;
+                    self.responseURL = self._url;
+                    if (syncResult.headers) {
+                        for (var k in syncResult.headers) { self._respHeaders[k.toLowerCase()] = syncResult.headers[k]; }
+                    }
+                    self.readyState = 4;
+                    if (self.onreadystatechange) { try { self.onreadystatechange(); } catch(e) {} }
+                    if (self.onload) { try { self.onload({ type: 'load' }); } catch(e) {} }
+                    if (self.onloadend) { try { self.onloadend({ type: 'loadend' }); } catch(e) {} }
+                } else {
+                    self.readyState = 4;
+                    self.status = 0;
+                    if (self.onerror) { try { self.onerror({ type: 'error' }); } catch(e) {} }
+                    if (self.onreadystatechange) { try { self.onreadystatechange(); } catch(e) {} }
+                    if (self.onloadend) { try { self.onloadend({ type: 'loadend' }); } catch(e) {} }
+                }
+            };
+            this.setRequestHeader = function(k, v) { this._headers[k] = v; };
+            this.getResponseHeader = function(k) { return this._respHeaders[k.toLowerCase()] || null; };
+            this.getAllResponseHeaders = function() {
+                var r = '';
+                for (var k in this._respHeaders) { r += k + ': ' + this._respHeaders[k] + '\r\n'; }
+                return r;
+            };
+            this.abort = function() { this.readyState = 0; };
+            this.addEventListener = function(t, cb) { this['on' + t] = cb; };
             this.removeEventListener = function() {};
+            this.overrideMimeType = function() {};
         };
 
-        // IntersectionObserver stub
-        globalThis.IntersectionObserver = function IntersectionObserver(cb, opts) {
-            this.observe = function() {};
-            this.unobserve = function() {};
-            this.disconnect = function() {};
-            this.takeRecords = function() { return []; };
-        };
-
-        // MessageChannel stub (React uses this)
-        globalThis.MessageChannel = function MessageChannel() {
+        // WebSocket — klient-API med pre-populated messages
+        globalThis.WebSocket = function WebSocket(url, protocols) {
             var self = this;
-            this.port1 = {
-                onmessage: null,
-                postMessage: function(msg) {
-                    if (self.port2.onmessage) {
-                        try { self.port2.onmessage({ data: msg }); } catch(e) {}
-                    }
-                },
-                close: function() {}
+            self.url = String(url || '');
+            self.protocol = '';
+            self.extensions = '';
+            self.readyState = 0; // CONNECTING
+            self.bufferedAmount = 0;
+            self.binaryType = 'blob';
+            self.onopen = null;
+            self.onmessage = null;
+            self.onerror = null;
+            self.onclose = null;
+            self._listeners = {};
+
+            // Konstanter
+            self.CONNECTING = 0;
+            self.OPEN = 1;
+            self.CLOSING = 2;
+            self.CLOSED = 3;
+
+            self.addEventListener = function(type, cb) {
+                if (!self._listeners[type]) self._listeners[type] = [];
+                self._listeners[type].push(cb);
             };
-            this.port2 = {
-                onmessage: null,
-                postMessage: function(msg) {
-                    if (self.port1.onmessage) {
-                        try { self.port1.onmessage({ data: msg }); } catch(e) {}
-                    }
-                },
-                close: function() {}
+            self.removeEventListener = function(type, cb) {
+                if (!self._listeners[type]) return;
+                self._listeners[type] = self._listeners[type].filter(function(c) { return c !== cb; });
             };
+            function dispatch(type, ev) {
+                if (self['on' + type]) { try { self['on' + type](ev); } catch(e) {} }
+                var ls = self._listeners[type] || [];
+                for (var i = 0; i < ls.length; i++) { try { ls[i](ev); } catch(e) {} }
+            }
+
+            self.send = function(data) {
+                if (self.readyState !== 1) throw new Error('WebSocket is not open');
+                // Data skickas inte — sandlådan fångar bara
+            };
+
+            self.close = function(code, reason) {
+                if (self.readyState >= 2) return;
+                self.readyState = 2;
+                setTimeout(function() {
+                    self.readyState = 3;
+                    dispatch('close', { type: 'close', code: code || 1000, reason: reason || '', wasClean: true });
+                }, 0);
+            };
+
+            // Simulera anslutning: hämta pre-populated messages via Rust
+            setTimeout(function() {
+                var messages = __wsOpen(self.url);
+                self.readyState = 1;
+                if (Array.isArray(protocols) && protocols.length > 0) self.protocol = protocols[0];
+                dispatch('open', { type: 'open' });
+
+                // Leverera pre-populated meddelanden
+                if (Array.isArray(messages)) {
+                    for (var i = 0; i < messages.length; i++) {
+                        (function(msg) {
+                            setTimeout(function() {
+                                dispatch('message', { type: 'message', data: msg, origin: self.url, lastEventId: '' });
+                            }, 0);
+                        })(messages[i]);
+                    }
+                }
+            }, 0);
         };
+        WebSocket.CONNECTING = 0;
+        WebSocket.OPEN = 1;
+        WebSocket.CLOSING = 2;
+        WebSocket.CLOSED = 3;
+
 
         // Blob stub
         if (typeof Blob === 'undefined') {
@@ -4034,6 +5083,490 @@ pub(super) fn register_window_with_viewport<'js>(
     // Registrera localStorage/sessionStorage
     register_storage(ctx, Rc::clone(&state), "localStorage", true)?;
     register_storage(ctx, Rc::clone(&state), "sessionStorage", false)?;
+
+    // Registrera location (full SPA-stöd) + history API — EFTER window är på globalThis
+    let win_ref: Object = ctx.globals().get("window")?;
+    register_location(ctx, &win_ref, Rc::clone(&state))?;
+
+    Ok(())
+}
+
+// ─── Location (full SPA-stöd) ───────────────────────────────────────────────
+
+/// Registrera window.location med getters/setters kopplade till BridgeState.current_url
+fn register_location<'js>(
+    ctx: &Ctx<'js>,
+    win: &Object<'js>,
+    state: SharedState,
+) -> rquickjs::Result<()> {
+    // Registrera via JS med Proxy för dynamiska getters
+    // Vi lagrar __locationState i globalThis och bygger location som ett Proxy-objekt
+    // som läser/skriver BridgeState via native callbacks
+
+    // Native: __locationGetUrl → returnerar current_url från BridgeState
+    struct LocationGetUrl {
+        state: SharedState,
+    }
+    impl JsHandler for LocationGetUrl {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let url = self.state.borrow().current_url.clone();
+            Ok(rquickjs::String::from_str(ctx.clone(), &url)?.into_value())
+        }
+    }
+
+    // Native: __locationSetUrl(newUrl) → uppdaterar current_url i BridgeState
+    struct LocationSetUrl {
+        state: SharedState,
+    }
+    impl JsHandler for LocationSetUrl {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            if let Some(url) = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok())
+            {
+                let mut s = self.state.borrow_mut();
+                s.current_url = url;
+            }
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    let globals: Object = ctx.globals();
+    globals.set(
+        "__locationGetUrl",
+        Function::new(
+            ctx.clone(),
+            JsFn(LocationGetUrl {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__locationSetUrl",
+        Function::new(
+            ctx.clone(),
+            JsFn(LocationSetUrl {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
+    // location-objekt med dynamiska properties via JS getters/setters
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            // URL-parser helper
+            function parseUrl(href) {
+                var m = href.match(/^(https?:)\/\/([^/:]+)(:\d+)?(\/[^?#]*)(\?[^#]*)?(#.*)?$/);
+                if (!m) m = href.match(/^(about:)()()()()()$/);
+                if (!m) return { protocol:'https:', hostname:'example.com', port:'', pathname:'/', search:'', hash:'', href:href };
+                return {
+                    protocol: m[1] || 'https:',
+                    hostname: m[2] || '',
+                    port: (m[3] || '').replace(':',''),
+                    pathname: m[4] || '/',
+                    search: m[5] || '',
+                    hash: m[6] || '',
+                    href: href
+                };
+            }
+
+            var loc = {};
+            Object.defineProperty(loc, 'href', {
+                get: function() { return __locationGetUrl(); },
+                set: function(v) { __locationSetUrl(String(v)); },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'protocol', {
+                get: function() { return parseUrl(__locationGetUrl()).protocol; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(v + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'host', {
+                get: function() {
+                    var p = parseUrl(__locationGetUrl());
+                    return p.hostname + (p.port ? ':'+p.port : '');
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'hostname', {
+                get: function() { return parseUrl(__locationGetUrl()).hostname; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + v + (p.port ? ':'+p.port : '') + p.pathname + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'port', {
+                get: function() { return parseUrl(__locationGetUrl()).port; },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'pathname', {
+                get: function() { return parseUrl(__locationGetUrl()).pathname; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + v + p.search + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'search', {
+                get: function() { return parseUrl(__locationGetUrl()).search; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + v + p.hash);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'hash', {
+                get: function() { return parseUrl(__locationGetUrl()).hash; },
+                set: function(v) {
+                    var p = parseUrl(__locationGetUrl());
+                    __locationSetUrl(p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '') + p.pathname + p.search + v);
+                },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(loc, 'origin', {
+                get: function() {
+                    var p = parseUrl(__locationGetUrl());
+                    return p.protocol + '//' + p.hostname + (p.port ? ':'+p.port : '');
+                },
+                enumerable: true, configurable: true
+            });
+            // searchParams — dynamisk getter baserad på aktuell search
+            Object.defineProperty(loc, 'searchParams', {
+                get: function() {
+                    var s = parseUrl(__locationGetUrl()).search || '';
+                    if (s.charAt(0) === '?') s = s.substring(1);
+                    var pairs = s ? s.split('&') : [];
+                    var data = {};
+                    for (var i = 0; i < pairs.length; i++) {
+                        var kv = pairs[i].split('=');
+                        data[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+                    }
+                    return {
+                        get: function(k) { return data.hasOwnProperty(k) ? data[k] : null; },
+                        has: function(k) { return data.hasOwnProperty(k); },
+                        getAll: function(k) { return data.hasOwnProperty(k) ? [data[k]] : []; },
+                        set: function() {},
+                        delete: function() {},
+                        toString: function() { return s; },
+                        entries: function() { var r = []; for (var k in data) { r.push([k, data[k]]); } return r; },
+                        keys: function() { return Object.keys(data); },
+                        values: function() { return Object.values(data); },
+                        forEach: function(cb) { for (var k in data) { cb(data[k], k); } }
+                    };
+                },
+                enumerable: true, configurable: true
+            });
+
+            loc.assign = function(url) { __locationSetUrl(String(url)); };
+            loc.replace = function(url) { __locationSetUrl(String(url)); };
+            loc.reload = function() {};
+            loc.toString = function() { return __locationGetUrl(); };
+
+            // Gör location tillgänglig
+            Object.defineProperty(window, 'location', {
+                get: function() { return loc; },
+                set: function(v) { loc.href = String(v); },
+                enumerable: true, configurable: true
+            });
+            globalThis.location = loc;
+        })();
+    "#,
+    )?;
+
+    // Registrera History API
+    register_history(ctx, win, state)?;
+
+    Ok(())
+}
+
+// ─── History API (SPA-routing) ──────────────────────────────────────────────
+
+/// Registrera window.history med pushState, replaceState, back, forward, go
+fn register_history<'js>(
+    ctx: &Ctx<'js>,
+    _win: &Object<'js>,
+    state: SharedState,
+) -> rquickjs::Result<()> {
+    // Native: __historyPushState(stateJson, title, url)
+    struct HistoryPushState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryPushState {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let state_json = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+            // args[1] = title (ignoreras per spec)
+            let url = args
+                .get(2)
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+
+            let mut s = self.state.borrow_mut();
+            // Ny URL: om angiven, resolve mot current_url; annars behåll current
+            let new_url = if let Some(u) = url {
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    u
+                } else if u.starts_with('/') {
+                    // Absolut path — behåll origin
+                    let cur = s.current_url.clone();
+                    if let Some(idx) = cur.find("://") {
+                        if let Some(slash) = cur[idx + 3..].find('/') {
+                            format!("{}{}", &cur[..idx + 3 + slash], u)
+                        } else {
+                            format!("{}{}", cur, u)
+                        }
+                    } else {
+                        u
+                    }
+                } else {
+                    // Relativ path
+                    let cur = s.current_url.clone();
+                    if let Some(last_slash) = cur.rfind('/') {
+                        format!("{}/{}", &cur[..last_slash], u)
+                    } else {
+                        u
+                    }
+                }
+            } else {
+                s.current_url.clone()
+            };
+
+            // Trunkera framåt-historik om vi inte är sist
+            let idx = s.history_index;
+            s.history_stack.truncate(idx + 1);
+            s.history_stack.push((new_url.clone(), state_json));
+            s.history_index = s.history_stack.len() - 1;
+            s.current_url = new_url;
+            // Ingen popstate vid pushState (per spec)
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    // Native: __historyReplaceState(stateJson, title, url)
+    struct HistoryReplaceState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryReplaceState {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let state_json = args
+                .first()
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+            let url = args
+                .get(2)
+                .and_then(|v| v.as_string())
+                .and_then(|s| s.to_string().ok());
+
+            let mut s = self.state.borrow_mut();
+            let new_url = if let Some(u) = url {
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    u
+                } else if u.starts_with('/') {
+                    let cur = s.current_url.clone();
+                    if let Some(idx) = cur.find("://") {
+                        if let Some(slash) = cur[idx + 3..].find('/') {
+                            format!("{}{}", &cur[..idx + 3 + slash], u)
+                        } else {
+                            format!("{}{}", cur, u)
+                        }
+                    } else {
+                        u
+                    }
+                } else {
+                    let cur = s.current_url.clone();
+                    if let Some(last_slash) = cur.rfind('/') {
+                        format!("{}/{}", &cur[..last_slash], u)
+                    } else {
+                        u
+                    }
+                }
+            } else {
+                s.current_url.clone()
+            };
+
+            let idx = s.history_index;
+            s.history_stack[idx] = (new_url.clone(), state_json);
+            s.current_url = new_url;
+            Ok(Value::new_undefined(ctx.clone()))
+        }
+    }
+
+    // Native: __historyGo(delta) → returnerar ny state JSON (eller null), avfyrar popstate
+    struct HistoryGo {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGo {
+        fn handle<'js>(&self, ctx: &Ctx<'js>, args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+            let delta = args.first().and_then(|v| v.as_int()).unwrap_or(0);
+
+            let mut s = self.state.borrow_mut();
+            let new_idx = s.history_index as i64 + delta as i64;
+            if new_idx < 0 || new_idx >= s.history_stack.len() as i64 {
+                return Ok(Value::new_null(ctx.clone()));
+            }
+            let new_idx = new_idx as usize;
+            s.history_index = new_idx;
+            let (url, state_json) = s.history_stack[new_idx].clone();
+            s.current_url = url;
+
+            // Returnera state JSON för popstate-eventet
+            match state_json {
+                Some(json) => Ok(rquickjs::String::from_str(ctx.clone(), &json)?.into_value()),
+                None => Ok(Value::new_null(ctx.clone())),
+            }
+        }
+    }
+
+    // Native: __historyGetState → returnerar current state JSON
+    struct HistoryGetState {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGetState {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let s = self.state.borrow();
+            let idx = s.history_index;
+            match &s.history_stack[idx].1 {
+                Some(json) => Ok(rquickjs::String::from_str(ctx.clone(), json)?.into_value()),
+                None => Ok(Value::new_null(ctx.clone())),
+            }
+        }
+    }
+
+    // Native: __historyGetLength → returnerar stack-längd
+    struct HistoryGetLength {
+        state: SharedState,
+    }
+    impl JsHandler for HistoryGetLength {
+        fn handle<'js>(
+            &self,
+            ctx: &Ctx<'js>,
+            _args: &[Value<'js>],
+        ) -> rquickjs::Result<Value<'js>> {
+            let len = self.state.borrow().history_stack.len() as i32;
+            Ok(Value::new_int(ctx.clone(), len))
+        }
+    }
+
+    let globals: Object = ctx.globals();
+    globals.set(
+        "__historyPushState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryPushState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyReplaceState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryReplaceState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGo",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGo {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGetState",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGetState {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+    globals.set(
+        "__historyGetLength",
+        Function::new(
+            ctx.clone(),
+            JsFn(HistoryGetLength {
+                state: Rc::clone(&state),
+            }),
+        )?,
+    )?;
+
+    // JS-wrapper: window.history med popstate-event firing
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            var history = {};
+            Object.defineProperty(history, 'length', {
+                get: function() { return __historyGetLength(); },
+                enumerable: true
+            });
+            Object.defineProperty(history, 'state', {
+                get: function() {
+                    var s = __historyGetState();
+                    if (s === null) return null;
+                    try { return JSON.parse(s); } catch(e) { return s; }
+                },
+                enumerable: true
+            });
+            history.scrollRestoration = 'auto';
+
+            history.pushState = function(state, title, url) {
+                var stateStr = (state === null || state === undefined) ? null : JSON.stringify(state);
+                var urlStr = (url === null || url === undefined) ? null : String(url);
+                __historyPushState(stateStr, String(title || ''), urlStr);
+            };
+
+            history.replaceState = function(state, title, url) {
+                var stateStr = (state === null || state === undefined) ? null : JSON.stringify(state);
+                var urlStr = (url === null || url === undefined) ? null : String(url);
+                __historyReplaceState(stateStr, String(title || ''), urlStr);
+            };
+
+            function firePopState(stateJson) {
+                var stateObj = null;
+                if (stateJson !== null) {
+                    try { stateObj = JSON.parse(stateJson); } catch(e) { stateObj = stateJson; }
+                }
+                var ev = new Event('popstate', { bubbles: true, cancelable: false });
+                ev.state = stateObj;
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    window.dispatchEvent(ev);
+                }
+            }
+
+            history.go = function(delta) {
+                if (delta === 0 || delta === undefined) return;
+                var stateJson = __historyGo(delta || 0);
+                firePopState(stateJson);
+            };
+
+            history.back = function() { history.go(-1); };
+            history.forward = function() { history.go(1); };
+
+            window.history = history;
+            globalThis.history = history;
+        })();
+    "#,
+    )?;
 
     Ok(())
 }

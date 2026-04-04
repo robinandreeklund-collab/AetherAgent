@@ -78,11 +78,13 @@ fn default_hybrid_top_n() -> u32 {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct ParseCrfrParams {
-    /// Raw HTML string
-    html: String,
+    /// Raw HTML to parse directly (if omitted, fetches from url)
+    #[serde(default)]
+    html: Option<String>,
     /// Goal / query — what are you looking for? Include specific keywords.
     goal: String,
-    /// The page URL (used for caching — same URL reuses causal memory)
+    /// URL to fetch, or page URL for caching (same URL reuses causal memory)
+    #[serde(default)]
     url: String,
     /// Max nodes to return (default: 20). CRFR uses amplitude-gap detection to find natural clusters, often returning fewer.
     #[serde(default = "default_crfr_top_n")]
@@ -93,6 +95,14 @@ struct ParseCrfrParams {
     /// Output format: "json" (default, structured nodes) or "markdown" (readable text, token-efficient)
     #[serde(default = "default_json_format")]
     output_format: String,
+    /// Cookies to send with fetch requests and expose via document.cookie.
+    /// Format: "key1=value1; key2=value2"
+    #[serde(default)]
+    cookies: Option<String>,
+    /// Extra HTTP headers to send with fetch requests.
+    /// Example: {"Authorization": "Bearer token123"}
+    #[serde(default)]
+    headers: Option<std::collections::HashMap<String, String>>,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -599,8 +609,11 @@ impl AetherMcpServer {
         description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking. Before calling this tool, YOU (the LLM) MUST expand the goal with SPECIFIC synonyms, translations, and expected values. Do NOT add generic words.\n\nExample: User asks 'what is the price?'\n  BAD:  'price information product'\n  GOOD: 'price pris cost £ $ kr amount total fee belopp checkout'\n\nExample: User asks 'vem skrev artikeln?'\n  BAD:  'author article'\n  GOOD: 'author författare writer journalist publicerad by name namn reporter'\n\nCRFR combines BM25 keyword matching with HDC wave propagation. Key advantages:\n- 10-15x FASTER than parse_hybrid (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions\n- Per-URL caching: revisiting same page is near-instant (~300µs)\n- Natural top-k via amplitude-gap detection\n\nParameters:\n- top_n: Max nodes (default 20, gap-detection often returns fewer)\n- run_js: Set true for SPA/dynamic pages — evaluates inline JS via QuickJS sandbox\n- output_format: 'json' (default, structured) or 'markdown' (readable, token-efficient)\n\nEach node includes resonance_type: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
     )]
     fn parse_crfr(&self, Parameters(params): Parameters<ParseCrfrParams>) -> String {
+        // Synkron fallback — async handler i call_tool interceptar alla anrop
+        // men denna finns som backup om interceptorn inte fångar
+        let html = params.html.as_deref().unwrap_or("");
         aether_agent::parse_crfr(
-            &params.html,
+            html,
             &params.goal,
             &params.url,
             params.top_n,
@@ -1315,6 +1328,129 @@ fn extract_page_nodes(stream_json: &str, max: usize) -> Vec<aether_agent::search
         .collect()
 }
 
+// ─── parse_crfr async handler (auto-fetch + SPA JS + API prefetch) ──────────
+
+async fn handle_parse_crfr(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "parse_crfr: arguments required. Expected: {goal, url} or {goal, html}".to_string(),
+            )]);
+        }
+    };
+
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let html_param = args
+        .get("html")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+    let run_js = args
+        .get("run_js")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let output_format = args
+        .get("output_format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("json");
+    let cookies = args
+        .get("cookies")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let extra_headers: std::collections::HashMap<String, String> = args
+        .get("headers")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if goal.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "goal parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    // Bestäm HTML: direkt eller via URL-fetch
+    let (html, final_url) = if !html_param.is_empty() {
+        (html_param.to_string(), url.to_string())
+    } else if !url.is_empty() {
+        // Auto-fetch från URL med cookies/headers
+        if let Err(e) = aether_agent::fetch::validate_url(url) {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "URL blocked: {e}"}}"#
+            ))]);
+        }
+        let mut config = aether_agent::types::FetchConfig::default();
+        if !cookies.is_empty() {
+            config
+                .extra_headers
+                .insert("Cookie".to_string(), cookies.clone());
+        }
+        for (k, v) in &extra_headers {
+            config.extra_headers.insert(k.clone(), v.clone());
+        }
+        match aether_agent::fetch::fetch_page(url, &config).await {
+            Ok(r) => (r.body, r.final_url),
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!(r#"{{"error": "fetch failed: {e}"}}"#),
+                )]);
+            }
+        }
+    } else {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "provide either 'html' or 'url' parameter"}"#.to_string(),
+        )]);
+    };
+
+    // Om run_js=true: pre-fetcha API-URLs med cookies/headers för SPA-rendering
+    let result = if run_js {
+        let api_responses = aether_agent::prefetch_api_urls_with_auth(
+            &html,
+            &final_url,
+            10,
+            3000,
+            &cookies,
+            &extra_headers,
+        )
+        .await;
+        if api_responses.is_empty() {
+            aether_agent::parse_crfr(&html, goal, &final_url, top_n, true, output_format)
+        } else {
+            // Bygg träd med pre-fetched API-data → kör genom CRFR
+            let tree = aether_agent::build_tree_for_crfr_with_fetch(
+                &html,
+                goal,
+                &final_url,
+                api_responses,
+            );
+            aether_agent::parse_crfr_from_tree_js(
+                &tree,
+                goal,
+                &final_url,
+                top_n,
+                output_format,
+                true,
+            )
+        }
+    } else {
+        aether_agent::parse_crfr(&html, goal, &final_url, top_n, false, output_format)
+    };
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
+}
+
 /// Hanterar fetch_parse: hämta URL + parsa till semantiskt träd
 async fn handle_fetch_parse(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -1354,10 +1490,27 @@ async fn handle_fetch_parse(
     };
 
     let fetch_ms = start.elapsed().as_millis() as u64;
+
+    // Pre-fetcha API-URLs från inline scripts (SPA-stöd)
+    let api_responses =
+        aether_agent::prefetch_api_urls(&fetch_result.body, &fetch_result.final_url, 10, 3000)
+            .await;
+    let prefetched_count = api_responses.len();
+
     let parse_start = std::time::Instant::now();
 
-    let tree_json =
-        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url);
+    // Använd adaptive parse med pre-fetched API-data om tillgängligt
+    let tree_json = if api_responses.is_empty() {
+        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url)
+    } else {
+        let tree = aether_agent::build_tree_for_crfr_with_fetch(
+            &fetch_result.body,
+            goal,
+            &fetch_result.final_url,
+            api_responses,
+        );
+        serde_json::to_string(&tree).unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e))
+    };
     let xhr_json = aether_agent::detect_xhr_urls(&fetch_result.body);
 
     let parse_ms = parse_start.elapsed().as_millis() as u64;
@@ -2005,6 +2158,11 @@ impl ServerHandler for AetherMcpServer {
             "fetch_search" => {
                 let args = request.arguments.as_ref();
                 let result = handle_fetch_search(args).await;
+                Ok(result)
+            }
+            "parse_crfr" => {
+                let args = request.arguments.as_ref();
+                let result = handle_parse_crfr(args).await;
                 Ok(result)
             }
             "fetch_parse" => {
