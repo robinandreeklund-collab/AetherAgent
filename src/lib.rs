@@ -743,7 +743,7 @@ pub fn parse_crfr(
     output_format: &str,
 ) -> String {
     let tree = build_tree_for_crfr(html, goal, url, run_js);
-    parse_crfr_from_tree(&tree, goal, url, top_n, output_format)
+    parse_crfr_from_tree_with_js_flag(&tree, goal, url, top_n, output_format, run_js)
 }
 
 // Build semantic tree for CRFR (with optional JS eval).
@@ -827,6 +827,17 @@ pub fn parse_crfr_from_tree(
     url: &str,
     top_n: u32,
     output_format: &str,
+) -> String {
+    parse_crfr_from_tree_with_js_flag(tree, goal, url, top_n, output_format, false)
+}
+
+fn parse_crfr_from_tree_with_js_flag(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+    js_eval_ran: bool,
 ) -> String {
     let start = now_ms();
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
@@ -967,7 +978,7 @@ pub fn parse_crfr_from_tree(
                 "field_build_ms": field_ms,
                 "propagation_ms": prop_ms,
                 "cache_hit": cache_hit,
-                "js_eval": false,
+                "js_eval": js_eval_ran,
                 "xhr_enriched": tree.xhr_intercepted > 0,
                 "field_queries": field.total_queries,
                 "cache_entries": cache_entries,
