@@ -182,6 +182,9 @@ pub struct ResonanceField {
     /// Lär sig "vad price-frågor matchar" globalt, inte per nod.
     #[serde(default)]
     concept_memory: HashMap<String, HvData>,
+    /// Structural fingerprint: hash of top-20 role sequence (for template detection)
+    #[serde(default)]
+    structure_hash: u64,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
@@ -377,6 +380,33 @@ fn learned_weight_precomputed(
     0.2 + mean * 1.3
 }
 
+/// Compute page-level features for contextual weight selection.
+/// Returns (text_density, list_density, table_density, nav_density, depth_spread)
+fn page_profile(nodes: &HashMap<u32, ResonanceState>) -> (f32, f32, f32, f32, f32) {
+    if nodes.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0, 0.0);
+    }
+    let n = nodes.len() as f32;
+    let text = nodes
+        .values()
+        .filter(|s| matches!(s.role.as_str(), "text" | "paragraph" | "heading"))
+        .count() as f32;
+    let list = nodes
+        .values()
+        .filter(|s| matches!(s.role.as_str(), "listitem" | "list"))
+        .count() as f32;
+    let table = nodes
+        .values()
+        .filter(|s| matches!(s.role.as_str(), "cell" | "row" | "table" | "data"))
+        .count() as f32;
+    let nav = nodes
+        .values()
+        .filter(|s| matches!(s.role.as_str(), "navigation" | "complementary" | "banner"))
+        .count() as f32;
+    let max_depth = nodes.values().map(|s| s.depth).max().unwrap_or(0) as f32;
+    (text / n, list / n, table / n, nav / n, max_depth)
+}
+
 /// Enkel hash-funktion för URL:er (FNV-1a)
 fn hash_url(url: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -478,6 +508,7 @@ impl ResonanceField {
             bm25_cache: None,
             propagation_stats: HashMap::new(),
             concept_memory: HashMap::new(),
+            structure_hash: 0,
             url_hash: hash_url(url),
             created_at_ms: now_ms(),
             total_queries: 0,
@@ -560,6 +591,25 @@ impl ResonanceField {
                 node_labels,
             );
         }
+
+        // #17 Hierarchical HDC: blend children's HVs into parent (structural context)
+        if !node.children.is_empty() && nodes.contains_key(&node.id) {
+            let child_hvs: Vec<Hypervector> = node
+                .children
+                .iter()
+                .filter_map(|child| nodes.get(&child.id).map(|s| s.text_hv.clone()))
+                .collect();
+            if !child_hvs.is_empty() {
+                let refs: Vec<&Hypervector> = child_hvs.iter().collect();
+                let children_bundle = Hypervector::bundle(&refs);
+                // 80% own text + 20% children context
+                if let Some(parent_state) = nodes.get_mut(&node.id) {
+                    let own = parent_state.text_hv.clone();
+                    parent_state.text_hv =
+                        Hypervector::bundle(&[&own, &own, &own, &own, &children_bundle]);
+                }
+            }
+        }
     }
 
     /// Propagate a goal through the resonance field.
@@ -573,6 +623,29 @@ impl ResonanceField {
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
+
+        // #15 LinUCB: Contextual weight adjustment based on page profile
+        let (_text_d, _list_d, table_d, nav_d, _depth) = page_profile(&self.nodes);
+
+        // #19 Template detection: compute structural fingerprint
+        let current_structure: u64 = {
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            let mut roles: Vec<(&u32, &str)> = self
+                .nodes
+                .iter()
+                .map(|(id, s)| (id, s.role.as_str()))
+                .collect();
+            roles.sort_by_key(|(id, _)| *id);
+            for (_, role) in roles.iter().take(20) {
+                for b in role.as_bytes() {
+                    h ^= *b as u64;
+                    h = h.wrapping_mul(0x0100_0000_01b3);
+                }
+            }
+            h
+        };
+        let template_match = self.structure_hash != 0 && self.structure_hash == current_structure;
+        self.structure_hash = current_structure;
 
         // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
         // #3: Label + values konkateneras per nod (ett dokument per nod)
@@ -645,7 +718,41 @@ impl ResonanceField {
             .filter(|w| w.len() > 3)
             .collect();
 
+        // CASCADE Stage 1: BM25-only fast pre-filter (all N nodes → top 100)
+        // Only nodes with BM25 > 0 proceed to expensive scoring
+        let bm25_candidates: Vec<u32> = {
+            let mut scored: Vec<(u32, f32)> = bm25_scores
+                .iter()
+                .map(|(&id, &score)| (id, score))
+                .filter(|(_, s)| *s > 0.0)
+                .collect();
+            scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+            scored.truncate(100); // Top 100 BM25 candidates
+            scored.into_iter().map(|(id, _)| id).collect()
+        };
+        // Also include nodes with causal memory (they may score 0 on BM25 but have learned value)
+        let causal_nodes: Vec<u32> = node_ids
+            .iter()
+            .filter(|&&nid| {
+                self.nodes
+                    .get(&nid)
+                    .map(|s| s.hit_count > 0)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
+        let cascade_candidates: std::collections::HashSet<u32> =
+            bm25_candidates.into_iter().chain(causal_nodes).collect();
+
         for &nid in &node_ids {
+            // CASCADE: skip expensive scoring for nodes not in candidate set
+            if !cascade_candidates.contains(&nid) {
+                // Give non-candidates a minimal amplitude (can still be boosted by propagation)
+                if let Some(state) = self.nodes.get_mut(&nid) {
+                    state.amplitude = 0.0;
+                }
+                continue;
+            }
             if let Some(state) = self.nodes.get_mut(&nid) {
                 let bm25_score = bm25_scores.get(&nid).copied().unwrap_or(0.0);
 
@@ -716,6 +823,11 @@ impl ResonanceField {
                     base_resonance + causal_boost * (1.0 - base_resonance.min(0.95)) + answer_type;
                 state.amplitude *= combmnz;
 
+                // #19 Template match: extra boost when same page structure detected
+                if template_match && state.hit_count > 0 {
+                    state.amplitude *= 1.2; // 20% extra when we recognize the template
+                }
+
                 // Answer-shape boost: noder som SER UT som svar rankas högre
                 let siblings = siblings_map.get(&nid).copied().unwrap_or(0);
                 let shape = answer_shape_score(
@@ -762,6 +874,27 @@ impl ResonanceField {
                     resonance_types.insert(nid, ResonanceType::CausalMemory);
                 } else if base_resonance > ACTIVATION_THRESHOLD {
                     resonance_types.insert(nid, ResonanceType::Direct);
+                }
+            }
+        }
+
+        // #15 Contextual adjustment: page-type-aware amplitude scaling
+        if nav_d > 0.3 {
+            // High-nav pages: boost content nodes, penalize nav further
+            for state in self.nodes.values_mut() {
+                if matches!(
+                    state.role.as_str(),
+                    "text" | "paragraph" | "heading" | "price" | "data"
+                ) {
+                    state.amplitude *= 1.1;
+                }
+            }
+        }
+        if table_d > 0.15 {
+            // Table-heavy pages: boost data/cell nodes
+            for state in self.nodes.values_mut() {
+                if matches!(state.role.as_str(), "cell" | "data" | "row") {
+                    state.amplitude *= 1.15;
                 }
             }
         }
