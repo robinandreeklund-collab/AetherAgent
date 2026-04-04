@@ -187,6 +187,9 @@ pub struct ResonanceField {
     structure_hash: u64,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
+    /// Domain-hash (för domain-level learning)
+    #[serde(default)]
+    pub domain_hash: u64,
     /// Tidpunkt då fältet skapades (ms sedan epoch)
     pub created_at_ms: u64,
     /// Totalt antal propagations-anrop
@@ -417,6 +420,15 @@ fn hash_url(url: &str) -> u64 {
     h
 }
 
+/// Extrahera domain-hash från en URL.
+/// "https://www.example.com/path" → hash("example.com")
+fn domain_hash_from_url(url: &str) -> u64 {
+    let without_scheme = url.split("://").last().unwrap_or(url);
+    let domain = without_scheme.split('/').next().unwrap_or("");
+    let clean = domain.strip_prefix("www.").unwrap_or(domain);
+    hash_url(clean)
+}
+
 /// Hämta nuvarande tid i millisekunder (fallback till 0 utan std::time)
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -499,7 +511,8 @@ impl ResonanceField {
         let mut node_values: HashMap<u32, String> = HashMap::new();
         Self::collect_values(tree_nodes, &mut node_values);
 
-        ResonanceField {
+        let dh = domain_hash_from_url(url);
+        let mut field = ResonanceField {
             nodes,
             parent_map,
             children_map,
@@ -510,9 +523,30 @@ impl ResonanceField {
             concept_memory: HashMap::new(),
             structure_hash: 0,
             url_hash: hash_url(url),
+            domain_hash: dh,
             created_at_ms: now_ms(),
             total_queries: 0,
+        };
+
+        // Applicera domain-level priors (warm-start från samma domäns lärande)
+        if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+            if let Some(profile) = registry.get(dh) {
+                for (key, &(alpha, beta)) in &profile.stats {
+                    field
+                        .propagation_stats
+                        .entry(key.clone())
+                        .or_insert((alpha, beta));
+                }
+                for (token, hv_data) in &profile.concepts {
+                    field
+                        .concept_memory
+                        .entry(token.clone())
+                        .or_insert_with(|| hv_data.clone());
+                }
+            }
         }
+
+        field
     }
 
     /// #3 Value-aware: samla action/href/value från noder
@@ -1838,6 +1872,82 @@ impl FieldCacheInner {
 static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
     std::sync::LazyLock::new(|| Mutex::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
 
+// ─── Domain-Level Shared Learning ──────────────────────────────────────────
+
+/// Domain-level aggregated learning: shared propagation stats + concept memory.
+/// Used as warm-start prior for new URLs from the same domain.
+struct DomainProfile {
+    /// Aggregated propagation stats from all URLs on this domain
+    stats: HashMap<String, (f32, f32)>,
+    /// Aggregated concept memory from all successful extractions
+    concepts: HashMap<String, HvData>,
+    /// Number of fields that contributed to this profile
+    field_count: u32,
+}
+
+struct DomainRegistry {
+    profiles: HashMap<u64, DomainProfile>, // domain_hash → profile
+    capacity: usize,
+}
+
+impl DomainRegistry {
+    fn new(capacity: usize) -> Self {
+        DomainRegistry {
+            profiles: HashMap::new(),
+            capacity,
+        }
+    }
+
+    /// Hämta domain-profil (om den finns)
+    fn get(&self, domain_hash: u64) -> Option<&DomainProfile> {
+        self.profiles.get(&domain_hash)
+    }
+
+    /// Uppdatera domain-profil med ett fälts inlärda stats
+    fn update(&mut self, domain_hash: u64, field: &ResonanceField) {
+        let profile = self
+            .profiles
+            .entry(domain_hash)
+            .or_insert_with(|| DomainProfile {
+                stats: HashMap::new(),
+                concepts: HashMap::new(),
+                field_count: 0,
+            });
+
+        // Merge field's propagation_stats into domain profile (running average)
+        profile.field_count += 1;
+        let n = profile.field_count as f32;
+        for (key, &(alpha, beta)) in &field.propagation_stats {
+            let entry = profile.stats.entry(key.clone()).or_insert((1.0, 1.0));
+            // Weighted running average: blend new data with existing
+            entry.0 = entry.0 * ((n - 1.0) / n) + alpha / n;
+            entry.1 = entry.1 * ((n - 1.0) / n) + beta / n;
+        }
+
+        // Merge concept memory (bundle HVs)
+        for (token, hv_data) in &field.concept_memory {
+            let entry = profile
+                .concepts
+                .entry(token.clone())
+                .or_insert_with(|| HvData::from_hv(&Hypervector::zero()));
+            let existing = entry.to_hv();
+            let new_hv = hv_data.to_hv();
+            let merged = Hypervector::bundle(&[&existing, &new_hv]);
+            *entry = HvData::from_hv(&merged);
+        }
+
+        // Evict oldest if over capacity
+        if self.profiles.len() > self.capacity {
+            if let Some(key) = self.profiles.keys().next().cloned() {
+                self.profiles.remove(&key);
+            }
+        }
+    }
+}
+
+static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
+    std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(128)));
+
 /// Get a cached resonance field for a URL, or build a new one.
 ///
 /// If a cached field exists, it retains all causal memory from previous
@@ -1863,6 +1973,11 @@ pub fn save_field(field: &ResonanceField) {
         Err(poisoned) => poisoned.into_inner(),
     };
     cache.put(field.url_hash, field.clone());
+
+    // Uppdatera domain-profil med inlärda stats
+    if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
+        registry.update(field.domain_hash, field);
+    }
 }
 
 /// Get cache statistics (entries, capacity).
