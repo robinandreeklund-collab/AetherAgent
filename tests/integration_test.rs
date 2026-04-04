@@ -4354,6 +4354,56 @@ fn test_crfr_spa_js_rendering_verified() {
 
 #[cfg(feature = "js-eval")]
 #[test]
+fn test_crfr_cache_separates_js_variants() {
+    // SAMMA URL, anropa med run_js=true SEDAN run_js=false
+    // Verifiera att vi INTE får cache_hit=true med fel variant
+    let html = r#"<html><body><div id="r">STATIC_V</div><script>
+        document.getElementById('r').textContent = 'JSRENDERED_V';
+    </script></body></html>"#;
+
+    // Första anropet: run_js=true → borde ge "JSRENDERED_V"
+    let r1 = aether_agent::parse_crfr(
+        html,
+        "STATIC JSRENDERED",
+        "https://cache-test-variant.local/1",
+        5,
+        true,
+        "json",
+    );
+    let v1: serde_json::Value = serde_json::from_str(&r1).unwrap();
+    let l1 = v1["nodes"][0]["label"].as_str().unwrap_or("");
+    let ch1 = v1["crfr"]["cache_hit"].as_bool().unwrap_or(false);
+    eprintln!("run_js=true:  label={:?}, cache_hit={}", l1, ch1);
+
+    // Andra anropet: run_js=false SAMMA URL → borde ge "STATIC_V"
+    let r2 = aether_agent::parse_crfr(
+        html,
+        "STATIC JSRENDERED",
+        "https://cache-test-variant.local/1",
+        5,
+        false,
+        "json",
+    );
+    let v2: serde_json::Value = serde_json::from_str(&r2).unwrap();
+    let l2 = v2["nodes"][0]["label"].as_str().unwrap_or("");
+    let ch2 = v2["crfr"]["cache_hit"].as_bool().unwrap_or(false);
+    eprintln!("run_js=false: label={:?}, cache_hit={}", l2, ch2);
+
+    assert!(
+        l1.contains("JSRENDERED"),
+        "run_js=true borde ge JS-renderat: '{}'",
+        l1
+    );
+    assert!(
+        l2.contains("STATIC"),
+        "run_js=false borde ge statiskt (INTE cachat JS-resultat): '{}'",
+        l2
+    );
+    assert_ne!(l1, l2, "Olika run_js borde ge olika resultat");
+}
+
+#[cfg(feature = "js-eval")]
+#[test]
 fn test_crfr_all_spa_apis_verified() {
     let html = r#"<html><body><div id="r">BEFORE</div><script>
         var r = document.getElementById('r');
