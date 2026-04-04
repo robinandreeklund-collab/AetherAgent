@@ -4721,6 +4721,7 @@ mod spa_tests {
             fetch_responses,
             websocket_messages: ws_messages,
             base_url: "https://www.avanza.se/".to_string(),
+            ..Default::default()
         };
 
         let (result, arena) = eval_spa(&[script], arena, config);
@@ -4865,7 +4866,47 @@ mod spa_tests {
         );
     }
 
-    // ─── Test 8: base64 btoa/atob roundtrip ─────────────────────────────
+    // ─── Test 8: Cookies genom document.cookie ────────────────────────
+
+    #[test]
+    fn test_spa_cookies_auth() {
+        let html = r##"<html><body><div id="r">No auth</div></body></html>"##;
+        let arena = parse_html_to_arena(html);
+
+        let script = r#"
+            var r = document.getElementById('r');
+            var cookies = document.cookie;
+            // Extrahera session_token
+            var match = cookies.match(/session_token=([^;]+)/);
+            var token = match ? match[1] : 'none';
+            // Skriv en ny cookie
+            document.cookie = 'theme=dark';
+            var updated = document.cookie;
+            r.textContent = 'token:' + token + ' cookies:' + updated;
+        "#
+        .to_string();
+
+        let config = SpaConfig {
+            cookies: "session_token=abc123; user=Robin".to_string(),
+            ..Default::default()
+        };
+
+        let (result, arena) = eval_spa(&[script], arena, config);
+        assert!(result.error.is_none(), "Cookie error: {:?}", result.error);
+        let rendered = arena.serialize_inner_html(arena.document);
+        assert!(
+            rendered.contains("token:abc123"),
+            "Borde läsa session_token: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("theme=dark"),
+            "Borde ha skrivit ny cookie: {}",
+            rendered
+        );
+    }
+
+    // ─── Test 9: base64 btoa/atob roundtrip ─────────────────────────────
 
     #[test]
     fn test_spa_base64_roundtrip() {

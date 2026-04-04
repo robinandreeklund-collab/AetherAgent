@@ -106,6 +106,8 @@ pub(crate) struct BridgeState {
     pub(crate) websocket_messages: std::collections::HashMap<String, WebSocketMessages>,
     /// Registrerade WebSocket-URLer som JS öppnade
     pub(crate) websocket_urls: Vec<String>,
+    /// Cookies att exponera via document.cookie (key=value par)
+    pub(crate) cookies: String,
 }
 
 /// Pre-populerat fetch-response för JS-sandlådan

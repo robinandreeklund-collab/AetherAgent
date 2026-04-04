@@ -95,6 +95,14 @@ struct ParseCrfrParams {
     /// Output format: "json" (default, structured nodes) or "markdown" (readable text, token-efficient)
     #[serde(default = "default_json_format")]
     output_format: String,
+    /// Cookies to send with fetch requests and expose via document.cookie.
+    /// Format: "key1=value1; key2=value2"
+    #[serde(default)]
+    cookies: Option<String>,
+    /// Extra HTTP headers to send with fetch requests.
+    /// Example: {"Authorization": "Bearer token123"}
+    #[serde(default)]
+    headers: Option<std::collections::HashMap<String, String>>,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -1352,6 +1360,20 @@ async fn handle_parse_crfr(
         .get("output_format")
         .and_then(|v| v.as_str())
         .unwrap_or("json");
+    let cookies = args
+        .get("cookies")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let extra_headers: std::collections::HashMap<String, String> = args
+        .get("headers")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
 
     if goal.is_empty() {
         return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
@@ -1363,13 +1385,21 @@ async fn handle_parse_crfr(
     let (html, final_url) = if !html_param.is_empty() {
         (html_param.to_string(), url.to_string())
     } else if !url.is_empty() {
-        // Auto-fetch från URL
+        // Auto-fetch från URL med cookies/headers
         if let Err(e) = aether_agent::fetch::validate_url(url) {
             return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
                 r#"{{"error": "URL blocked: {e}"}}"#
             ))]);
         }
-        let config = aether_agent::types::FetchConfig::default();
+        let mut config = aether_agent::types::FetchConfig::default();
+        if !cookies.is_empty() {
+            config
+                .extra_headers
+                .insert("Cookie".to_string(), cookies.clone());
+        }
+        for (k, v) in &extra_headers {
+            config.extra_headers.insert(k.clone(), v.clone());
+        }
         match aether_agent::fetch::fetch_page(url, &config).await {
             Ok(r) => (r.body, r.final_url),
             Err(e) => {
@@ -1384,9 +1414,17 @@ async fn handle_parse_crfr(
         )]);
     };
 
-    // Om run_js=true: pre-fetcha API-URLs för SPA-rendering
+    // Om run_js=true: pre-fetcha API-URLs med cookies/headers för SPA-rendering
     let result = if run_js {
-        let api_responses = aether_agent::prefetch_api_urls(&html, &final_url, 10, 3000).await;
+        let api_responses = aether_agent::prefetch_api_urls_with_auth(
+            &html,
+            &final_url,
+            10,
+            3000,
+            &cookies,
+            &extra_headers,
+        )
+        .await;
         if api_responses.is_empty() {
             aether_agent::parse_crfr(&html, goal, &final_url, top_n, true, output_format)
         } else {

@@ -342,6 +342,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
         pending_fetches: Vec::new(),
         websocket_messages: std::collections::HashMap::new(),
         websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -485,6 +486,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
         pending_fetches: Vec::new(),
         websocket_messages: std::collections::HashMap::new(),
         websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -576,6 +578,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                 pending_fetches: Vec::new(),
                 websocket_messages: std::collections::HashMap::new(),
                 websocket_urls: Vec::new(),
+                cookies: String::new(),
             }
         }
     };
@@ -655,6 +658,7 @@ fn eval_js_with_lifecycle_internal(
         pending_fetches: Vec::new(),
         websocket_messages: std::collections::HashMap::new(),
         websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -744,6 +748,11 @@ pub struct SpaConfig {
     pub websocket_messages: std::collections::HashMap<String, state::WebSocketMessages>,
     /// Start-URL (default: "https://example.com/")
     pub base_url: String,
+    /// Cookies att exponera via document.cookie och skicka med fetch-requests
+    /// Format: "key1=value1; key2=value2"
+    pub cookies: String,
+    /// Extra HTTP-headers att skicka med pre-fetch requests
+    pub headers: std::collections::HashMap<String, String>,
 }
 
 impl Default for SpaConfig {
@@ -752,6 +761,8 @@ impl Default for SpaConfig {
             fetch_responses: std::collections::HashMap::new(),
             websocket_messages: std::collections::HashMap::new(),
             base_url: "https://example.com/".to_string(),
+            cookies: String::new(),
+            headers: std::collections::HashMap::new(),
         }
     }
 }
@@ -811,6 +822,7 @@ pub fn eval_spa(
         pending_fetches: Vec::new(),
         websocket_messages: config.websocket_messages,
         websocket_urls: Vec::new(),
+        cookies: config.cookies,
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -951,6 +963,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
         pending_fetches: Vec::new(),
         websocket_messages: std::collections::HashMap::new(),
         websocket_urls: Vec::new(),
+        cookies: String::new(),
     }));
 
     let (_rt, context, interrupt_ptr) = crate::js_eval::create_sandboxed_runtime();
@@ -1062,6 +1075,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 pending_fetches: Vec::new(),
                 websocket_messages: std::collections::HashMap::new(),
                 websocket_urls: Vec::new(),
+                cookies: String::new(),
             }
         }
     };
@@ -3138,6 +3152,61 @@ fn register_document<'js>(ctx: &Ctx<'js>, state: SharedState) -> rquickjs::Resul
         "createEvent",
         Function::new(ctx.clone(), JsFn(NativeCreateEvent))?,
     )?;
+
+    // document.cookie — getter/setter kopplad till BridgeState.cookies
+    {
+        struct CookieGetter {
+            state: SharedState,
+        }
+        impl JsHandler for CookieGetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                _args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                let cookies = self.state.borrow().cookies.clone();
+                Ok(rquickjs::String::from_str(ctx.clone(), &cookies)?.into_value())
+            }
+        }
+        struct CookieSetter {
+            state: SharedState,
+        }
+        impl JsHandler for CookieSetter {
+            fn handle<'js>(
+                &self,
+                ctx: &Ctx<'js>,
+                args: &[Value<'js>],
+            ) -> rquickjs::Result<Value<'js>> {
+                if let Some(val) = args
+                    .first()
+                    .and_then(|v| v.as_string())
+                    .and_then(|s| s.to_string().ok())
+                {
+                    let mut s = self.state.borrow_mut();
+                    // Append cookie (per spec: setter lägger till/ersätter en cookie)
+                    if s.cookies.is_empty() {
+                        s.cookies = val;
+                    } else {
+                        s.cookies = format!("{}; {}", s.cookies, val);
+                    }
+                }
+                Ok(Value::new_undefined(ctx.clone()))
+            }
+        }
+        doc.prop(
+            "cookie",
+            Accessor::new(
+                JsFn(CookieGetter {
+                    state: Rc::clone(&state),
+                }),
+                JsFn(CookieSetter {
+                    state: Rc::clone(&state),
+                }),
+            )
+            .configurable()
+            .enumerable(),
+        )?;
+    }
 
     ctx.globals().set("document", doc)?;
 

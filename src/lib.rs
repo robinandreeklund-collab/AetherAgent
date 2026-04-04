@@ -843,7 +843,8 @@ fn parse_crfr_from_tree_with_js_flag(
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
     let field_start = now_ms();
-    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let (mut field, cache_hit) =
+        resonance::get_or_build_field_with_variant(&tree.nodes, url, js_eval_ran);
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
@@ -1828,14 +1829,52 @@ pub async fn prefetch_api_urls(
     max_urls: usize,
     timeout_ms: u64,
 ) -> std::collections::HashMap<String, dom_bridge::FetchResponse> {
+    prefetch_api_urls_with_auth(
+        html,
+        base_url,
+        max_urls,
+        timeout_ms,
+        "",
+        &std::collections::HashMap::new(),
+    )
+    .await
+}
+
+/// Pre-fetcha API-URLs med cookies och headers för autentiserade SPAs.
+#[cfg(feature = "fetch")]
+pub async fn prefetch_api_urls_with_auth(
+    html: &str,
+    base_url: &str,
+    max_urls: usize,
+    timeout_ms: u64,
+    cookies: &str,
+    extra_headers: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, dom_bridge::FetchResponse> {
     let mut responses = std::collections::HashMap::new();
 
     // Extrahera API-URLs från inline scripts
     let captures = js_bridge::extract_xhr_from_snippets(html);
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
-        .build()
-    {
+    let mut builder =
+        reqwest::Client::builder().timeout(std::time::Duration::from_millis(timeout_ms));
+
+    // Sätt default headers (cookies + custom headers)
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    if !cookies.is_empty() {
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(cookies) {
+            default_headers.insert(reqwest::header::COOKIE, val);
+        }
+    }
+    for (k, v) in extra_headers {
+        if let (Ok(name), Ok(val)) = (
+            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+            reqwest::header::HeaderValue::from_str(v),
+        ) {
+            default_headers.insert(name, val);
+        }
+    }
+    builder = builder.default_headers(default_headers);
+
+    let client = match builder.build() {
         Ok(c) => c,
         Err(_) => return responses,
     };

@@ -2000,7 +2000,24 @@ static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
 /// interactions. The caller should call `save_field` after propagation
 /// to persist any new causal learning.
 pub fn get_or_build_field(tree_nodes: &[SemanticNode], url: &str) -> (ResonanceField, bool) {
-    let url_hash = hash_url(url);
+    get_or_build_field_with_variant(tree_nodes, url, false)
+}
+
+/// Get/build field med JS-variant-separation.
+/// run_js=true och run_js=false cachelagras separat så att JS-renderat
+/// innehåll inte förväxlas med statiskt.
+pub fn get_or_build_field_with_variant(
+    tree_nodes: &[SemanticNode],
+    url: &str,
+    js_variant: bool,
+) -> (ResonanceField, bool) {
+    // Inkludera js_variant i hash så att samma URL med/utan JS får olika cache-entries
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    let url_hash = hash_url(&variant_url);
     let mut cache = match FIELD_CACHE.lock() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
@@ -2009,7 +2026,10 @@ pub fn get_or_build_field(tree_nodes: &[SemanticNode], url: &str) -> (ResonanceF
         return (field, true);
     }
     drop(cache);
-    (ResonanceField::from_semantic_tree(tree_nodes, url), false)
+    let mut field = ResonanceField::from_semantic_tree(tree_nodes, url);
+    // Sätt korrekt url_hash (med variant) för cache-konistens
+    field.url_hash = url_hash;
+    (field, false)
 }
 
 /// Save a resonance field back to the cache (preserves causal memory).
