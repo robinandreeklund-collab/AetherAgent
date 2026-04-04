@@ -1587,6 +1587,15 @@ pub(super) fn register_window_with_viewport<'js>(
             ReportingObserver.prototype.takeRecords = function() { return []; };
         }
 
+        // Synka globalThis-registrerade constructors till window-objektet
+        if (typeof window !== 'undefined') {
+            if (typeof ResizeObserver !== 'undefined') window.ResizeObserver = ResizeObserver;
+            if (typeof IntersectionObserver !== 'undefined') window.IntersectionObserver = IntersectionObserver;
+            if (typeof PerformanceObserver !== 'undefined') window.PerformanceObserver = PerformanceObserver;
+            if (typeof ReportingObserver !== 'undefined') window.ReportingObserver = ReportingObserver;
+            if (typeof WebSocket !== 'undefined') window.WebSocket = WebSocket;
+        }
+
         // TextEncoder/TextDecoder — UTF-8
         globalThis.TextEncoder = function TextEncoder() {
             this.encoding = 'utf-8';
