@@ -901,6 +901,17 @@ pub fn parse_crfr_from_tree(
             "goal_title_overlap": goal_title_overlap(goal, &tree.title),
             "xhr_intercepted": tree.xhr_intercepted,
             "parse_time_ms": total_ms,
+            "suggested_action": if top_nodes.is_empty() {
+                "no_results"
+            } else {
+                let max_conf = top_nodes.iter()
+                    .filter_map(|n| n.get("confidence").and_then(|c| c.as_f64()))
+                    .fold(0.0f64, f64::max);
+                if max_conf > 0.8 { "answer_directly" }
+                else if max_conf > 0.5 { "verify_with_context" }
+                else if max_conf > 0.2 { "expand_search" }
+                else { "try_different_goal" }
+            },
             "crfr": {
                 "method": "causal_resonance_field",
                 "field_build_ms": field_ms,
@@ -945,6 +956,20 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         "field_queries": field.total_queries,
     })
     .to_string()
+}
+
+/// Implicit feedback: infer useful nodes from LLM response text.
+/// Closes the learning loop without explicit node ID tracking.
+#[wasm_bindgen]
+pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> String {
+    let dummy: Vec<types::SemanticNode> = vec![];
+    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    if !found {
+        return r#"{"status":"no_field"}"#.to_string();
+    }
+    field.implicit_feedback(goal, response_text);
+    resonance::save_field(&field);
+    serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
 }
 
 /// Run multiple goal variants through CRFR and merge results.

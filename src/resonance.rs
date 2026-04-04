@@ -1157,6 +1157,34 @@ impl ResonanceField {
             results = deduped;
         }
 
+        // Diversity penalty: penalize nodes sharing the same parent
+        // Prevents top-N from being dominated by one DOM subtree
+        {
+            let mut parent_count: HashMap<u32, u32> = HashMap::new();
+            for r in &results {
+                if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                    *parent_count.entry(pid).or_insert(0) += 1;
+                }
+            }
+            // Penalize 3rd+ sibling from same parent
+            let mut parent_seen: HashMap<u32, u32> = HashMap::new();
+            for r in results.iter_mut() {
+                if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                    let seen = parent_seen.entry(pid).or_insert(0);
+                    *seen += 1;
+                    if *seen >= 3 && parent_count.get(&pid).copied().unwrap_or(0) >= 3 {
+                        r.amplitude *= 0.7; // 30% penalty for 3rd+ sibling
+                    }
+                }
+            }
+            // Re-sort after diversity penalty
+            results.sort_by(|a, b| {
+                b.amplitude
+                    .total_cmp(&a.amplitude)
+                    .then_with(|| a.node_id.cmp(&b.node_id))
+            });
+        }
+
         results
     }
 
@@ -1387,6 +1415,62 @@ impl ResonanceField {
             } else {
                 break;
             }
+        }
+    }
+
+    /// Implicit feedback: infer which nodes were useful from the LLM's response text.
+    /// Computes BM25 similarity between response and each node's label.
+    /// Nodes whose label appears (partially) in the response are treated as successful.
+    /// This closes the learning loop without requiring explicit crfr_feedback calls.
+    pub fn implicit_feedback(&mut self, goal: &str, response_text: &str) {
+        if response_text.len() < 10 {
+            return;
+        }
+        let response_lower = response_text.to_lowercase();
+        let response_words: std::collections::HashSet<&str> = response_lower
+            .split_whitespace()
+            .filter(|w| w.len() > 3)
+            .collect();
+
+        if response_words.is_empty() {
+            return;
+        }
+
+        // Find nodes whose labels significantly overlap with response
+        let successful_ids: Vec<u32> = self
+            .node_labels
+            .iter()
+            .filter_map(|(&id, label)| {
+                if label.len() < 10 {
+                    return None;
+                }
+                let label_lower = label.to_lowercase();
+                let label_words: Vec<&str> = label_lower
+                    .split_whitespace()
+                    .filter(|w| w.len() > 3)
+                    .collect();
+                if label_words.is_empty() {
+                    return None;
+                }
+
+                // Count word overlap
+                let overlap = label_words
+                    .iter()
+                    .filter(|w| response_words.contains(w as &str))
+                    .count();
+                let ratio = overlap as f32 / label_words.len() as f32;
+
+                // Require >40% word overlap to count as implicit success
+                if ratio > 0.4 {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !successful_ids.is_empty() {
+            self.feedback(goal, &successful_ids);
         }
     }
 
