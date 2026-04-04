@@ -431,28 +431,66 @@ fn find_labels_recursive(
 // ─── URL-komplettering ───────────────────────────────────────────────────────
 
 pub(super) fn compute_url_username(state: &BridgeState, key: NodeKey) -> String {
-    // URL username/password kräver full URL-parsning — stub för nu
-    let _ = (state, key);
-    String::new()
+    // Extrahera username från href: https://user:pass@host/path
+    extract_url_userinfo(state, key, true)
 }
 
 pub(super) fn compute_url_password(state: &BridgeState, key: NodeKey) -> String {
-    let _ = (state, key);
+    extract_url_userinfo(state, key, false)
+}
+
+/// Extrahera username (is_user=true) eller password (is_user=false) från href-attribut
+fn extract_url_userinfo(state: &BridgeState, key: NodeKey, is_user: bool) -> String {
+    let href = state
+        .arena
+        .nodes
+        .get(key)
+        .and_then(|n| n.get_attr("href"))
+        .unwrap_or("");
+    // Format: scheme://user:pass@host/...
+    if let Some(after_scheme) = href.split("://").nth(1) {
+        if let Some(at_pos) = after_scheme.find('@') {
+            let userinfo = &after_scheme[..at_pos];
+            if let Some(colon) = userinfo.find(':') {
+                if is_user {
+                    return userinfo[..colon].to_string();
+                } else {
+                    return userinfo[colon + 1..].to_string();
+                }
+            } else if is_user {
+                return userinfo.to_string();
+            }
+        }
+    }
     String::new()
 }
 
 // ─── HTMLImageElement ─────────────────────────────────────────────────────────
 
-pub(super) fn compute_img_natural_width(_state: &BridgeState, _key: NodeKey) -> i32 {
-    0 // Kräver bildladdning — returnerar 0 i headless
+pub(super) fn compute_img_natural_width(state: &BridgeState, key: NodeKey) -> i32 {
+    // Fallback: använd width-attributet om det finns, annars 0
+    state
+        .arena
+        .nodes
+        .get(key)
+        .and_then(|n| n.get_attr("width"))
+        .and_then(|w| w.parse::<i32>().ok())
+        .unwrap_or(0)
 }
 
-pub(super) fn compute_img_natural_height(_state: &BridgeState, _key: NodeKey) -> i32 {
-    0
+pub(super) fn compute_img_natural_height(state: &BridgeState, key: NodeKey) -> i32 {
+    state
+        .arena
+        .nodes
+        .get(key)
+        .and_then(|n| n.get_attr("height"))
+        .and_then(|h| h.parse::<i32>().ok())
+        .unwrap_or(0)
 }
 
 pub(super) fn compute_img_complete(_state: &BridgeState, _key: NodeKey) -> bool {
-    false // Kräver bildladdning
+    // I headless-mode antar vi att alla bilder är laddade
+    true
 }
 
 pub(super) fn compute_img_current_src(state: &BridgeState, key: NodeKey) -> String {

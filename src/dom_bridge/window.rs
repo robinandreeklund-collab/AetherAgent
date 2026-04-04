@@ -619,12 +619,10 @@ pub(super) fn register_window_with_viewport<'js>(
     win.set("outerHeight", viewport_height)?;
     win.set("devicePixelRatio", 1.0)?;
 
-    // Scroll no-ops
-    win.set("scrollTo", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scrollBy", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scroll", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    win.set("scrollX", 0)?;
-    win.set("scrollY", 0)?;
+    // Scroll — spårar scrollX/scrollY via JS-getters
+    // Sätts upp via JS eval efter att window placerats på globalThis (se nedan)
+    win.set("_scrollX", 0.0f64)?;
+    win.set("_scrollY", 0.0f64)?;
     // getSelection — delegerar till document.getSelection
     win.set(
         "getSelection",
@@ -690,15 +688,57 @@ pub(super) fn register_window_with_viewport<'js>(
         )?;
     }
 
-    // navigator
+    // navigator — utökad med alla vanliga properties
     let nav = Object::new(ctx.clone())?;
-    nav.set("userAgent", "AetherAgent/1.0 (QuickJS Sandbox)")?;
+    nav.set(
+        "userAgent",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) AetherAgent/1.0 Chrome/130.0.0.0 Safari/537.36",
+    )?;
     nav.set("language", "sv-SE")?;
-    nav.set("languages", rquickjs::Array::new(ctx.clone())?)?;
+    {
+        let langs = rquickjs::Array::new(ctx.clone())?;
+        langs.set(0, rquickjs::String::from_str(ctx.clone(), "sv-SE")?)?;
+        langs.set(1, rquickjs::String::from_str(ctx.clone(), "en-US")?)?;
+        langs.set(2, rquickjs::String::from_str(ctx.clone(), "en")?)?;
+        nav.set("languages", langs)?;
+    }
     nav.set("platform", "Linux x86_64")?;
-    nav.set("cookieEnabled", false)?;
+    nav.set("cookieEnabled", true)?;
     nav.set("onLine", true)?;
-    nav.set("hardwareConcurrency", 1)?;
+    nav.set("hardwareConcurrency", 4)?;
+    nav.set("maxTouchPoints", 0)?;
+    nav.set("vendor", "Google Inc.")?;
+    nav.set("vendorSub", "")?;
+    nav.set("productSub", "20030107")?;
+    nav.set("product", "Gecko")?;
+    nav.set("appName", "Netscape")?;
+    nav.set("appVersion", "5.0")?;
+    nav.set("appCodeName", "Mozilla")?;
+    nav.set("webdriver", false)?;
+    nav.set("pdfViewerEnabled", false)?;
+    nav.set("doNotTrack", Value::new_null(ctx.clone()))?;
+    // Clipboard API stub
+    let clipboard = Object::new(ctx.clone())?;
+    clipboard.set("writeText", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    clipboard.set("readText", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("clipboard", clipboard)?;
+    // Permissions API stub
+    let permissions = Object::new(ctx.clone())?;
+    permissions.set("query", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("permissions", permissions)?;
+    // mediaDevices stub
+    let media_devices = Object::new(ctx.clone())?;
+    media_devices.set(
+        "enumerateDevices",
+        Function::new(ctx.clone(), JsFn(NoOpHandler))?,
+    )?;
+    nav.set("mediaDevices", media_devices)?;
+    // serviceWorker stub
+    let sw = Object::new(ctx.clone())?;
+    sw.set("ready", Value::new_null(ctx.clone()))?;
+    sw.set("controller", Value::new_null(ctx.clone()))?;
+    sw.set("register", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
+    nav.set("serviceWorker", sw)?;
     win.set("navigator", nav)?;
 
     // screen — synkad med viewport
@@ -733,37 +773,7 @@ pub(super) fn register_window_with_viewport<'js>(
     )?;
     win.set("performance", perf)?;
 
-    // customElements
-    let custom_elements = Object::new(ctx.clone())?;
-    custom_elements.set("define", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    custom_elements.set("get", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-    custom_elements.set(
-        "whenDefined",
-        Function::new(ctx.clone(), JsFn(NoOpHandler))?,
-    )?;
-    win.set("customElements", custom_elements)?;
-
-    // ResizeObserver
-    {
-        struct ResizeObserverConstructor;
-        impl JsHandler for ResizeObserverConstructor {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                let obs = Object::new(ctx.clone())?;
-                obs.set("observe", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                obs.set("unobserve", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                obs.set("disconnect", Function::new(ctx.clone(), JsFn(NoOpHandler))?)?;
-                Ok(obs.into_value())
-            }
-        }
-        win.set(
-            "ResizeObserver",
-            Function::new(ctx.clone(), JsFn(ResizeObserverConstructor))?,
-        )?;
-    }
+    // customElements + ResizeObserver — registreras via JS efter window (se nedan)
 
     // crypto
     {
@@ -856,8 +866,42 @@ pub(super) fn register_window_with_viewport<'js>(
     // Registrera atob/btoa, encodeURI/decodeURI via JS + Event/CustomEvent constructors
     ctx.eval::<(), _>(
         r#"
-        globalThis.atob = function(s) { return s; };
-        globalThis.btoa = function(s) { return s; };
+        // btoa — RFC 4648 base64-encoding
+        globalThis.btoa = function(str) {
+            str = String(str);
+            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            var out = '';
+            for (var i = 0; i < str.length; i += 3) {
+                var a = str.charCodeAt(i);
+                var b = i + 1 < str.length ? str.charCodeAt(i+1) : 0;
+                var c = i + 2 < str.length ? str.charCodeAt(i+2) : 0;
+                if (a > 255 || b > 255 || c > 255) throw new DOMException('The string to be encoded contains characters outside of the Latin1 range.', 'InvalidCharacterError');
+                var n = (a << 16) | (b << 8) | c;
+                out += chars[(n >> 18) & 63];
+                out += chars[(n >> 12) & 63];
+                out += (i + 1 < str.length) ? chars[(n >> 6) & 63] : '=';
+                out += (i + 2 < str.length) ? chars[n & 63] : '=';
+            }
+            return out;
+        };
+        // atob — RFC 4648 base64-decoding
+        globalThis.atob = function(encoded) {
+            encoded = String(encoded).replace(/[\t\n\f\r ]/g, '');
+            if (encoded.length % 4 === 1) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
+            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+            var out = '';
+            for (var i = 0; i < encoded.length; i += 4) {
+                var a = chars.indexOf(encoded[i]);
+                var b = chars.indexOf(encoded[i+1]);
+                var c = chars.indexOf(encoded[i+2]);
+                var d = chars.indexOf(encoded[i+3]);
+                if (a < 0 || b < 0) throw new DOMException('The string to be decoded is not correctly encoded.', 'InvalidCharacterError');
+                out += String.fromCharCode((a << 2) | (b >> 4));
+                if (c !== 64 && c >= 0) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+                if (d !== 64 && d >= 0) out += String.fromCharCode(((c & 3) << 6) | d);
+            }
+            return out;
+        };
         globalThis.self = globalThis.window;
         globalThis.frames = globalThis.window;
         globalThis.parent = globalThis.window;
@@ -887,6 +931,310 @@ pub(super) fn register_window_with_viewport<'js>(
                 globalThis.window.requestIdleCallback = globalThis.requestIdleCallback;
                 globalThis.window.cancelIdleCallback = globalThis.cancelIdleCallback;
             }
+        }
+
+        // ─── Scroll state tracking ──────────────────────────────────────
+        if (globalThis.window) {
+            Object.defineProperty(window, 'scrollX', {
+                get: function() { return window._scrollX || 0; },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(window, 'pageXOffset', {
+                get: function() { return window._scrollX || 0; },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(window, 'scrollY', {
+                get: function() { return window._scrollY || 0; },
+                enumerable: true, configurable: true
+            });
+            Object.defineProperty(window, 'pageYOffset', {
+                get: function() { return window._scrollY || 0; },
+                enumerable: true, configurable: true
+            });
+            window.scrollTo = function(xOrOpts, y) {
+                if (typeof xOrOpts === 'object' && xOrOpts !== null) {
+                    window._scrollX = xOrOpts.left || 0;
+                    window._scrollY = xOrOpts.top || 0;
+                } else {
+                    window._scrollX = xOrOpts || 0;
+                    window._scrollY = y || 0;
+                }
+            };
+            window.scroll = window.scrollTo;
+            window.scrollBy = function(xOrOpts, y) {
+                if (typeof xOrOpts === 'object' && xOrOpts !== null) {
+                    window._scrollX = (window._scrollX || 0) + (xOrOpts.left || 0);
+                    window._scrollY = (window._scrollY || 0) + (xOrOpts.top || 0);
+                } else {
+                    window._scrollX = (window._scrollX || 0) + (xOrOpts || 0);
+                    window._scrollY = (window._scrollY || 0) + (y || 0);
+                }
+            };
+            globalThis.scrollTo = window.scrollTo;
+            globalThis.scroll = window.scroll;
+            globalThis.scrollBy = window.scrollBy;
+        }
+
+        // ─── structuredClone ────────────────────────────────────────────
+        if (typeof globalThis.structuredClone === 'undefined') {
+            globalThis.structuredClone = function(obj) {
+                if (obj === undefined) throw new DOMException('The value could not be cloned.', 'DataCloneError');
+                return JSON.parse(JSON.stringify(obj));
+            };
+        }
+
+        // ─── customElements registry ────────────────────────────────────
+        (function() {
+            var registry = {};
+            var whenDefinedCallbacks = {};
+            var ce = {
+                define: function(name, constructor, options) {
+                    name = String(name).toLowerCase();
+                    if (registry[name]) throw new DOMException("'" + name + "' has already been defined as a custom element", 'NotSupportedError');
+                    if (name.indexOf('-') === -1) throw new DOMException("'" + name + "' is not a valid custom element name", 'SyntaxError');
+                    registry[name] = { constructor: constructor, extends: (options && options.extends) || null };
+                    // Uppgradera befintliga element
+                    try {
+                        var existing = document.getElementsByTagName(name);
+                        if (existing && existing.length) {
+                            for (var i = 0; i < existing.length; i++) {
+                                try { constructor.call(existing[i]); } catch(e) {}
+                            }
+                        }
+                    } catch(e) {}
+                    // Resolve whenDefined-promises
+                    if (whenDefinedCallbacks[name]) {
+                        var cbs = whenDefinedCallbacks[name];
+                        delete whenDefinedCallbacks[name];
+                        for (var j = 0; j < cbs.length; j++) { try { cbs[j](constructor); } catch(e) {} }
+                    }
+                },
+                get: function(name) {
+                    var entry = registry[String(name).toLowerCase()];
+                    return entry ? entry.constructor : undefined;
+                },
+                whenDefined: function(name) {
+                    name = String(name).toLowerCase();
+                    if (registry[name]) return Promise.resolve(registry[name].constructor);
+                    return new Promise(function(resolve) {
+                        if (!whenDefinedCallbacks[name]) whenDefinedCallbacks[name] = [];
+                        whenDefinedCallbacks[name].push(resolve);
+                    });
+                },
+                getName: function(constructor) {
+                    for (var name in registry) {
+                        if (registry[name].constructor === constructor) return name;
+                    }
+                    return null;
+                },
+                upgrade: function(root) { /* Upgrade walk — no-op i sandbox */ }
+            };
+            if (typeof window !== 'undefined') window.customElements = ce;
+            globalThis.customElements = ce;
+        })();
+
+        // ─── ResizeObserver (callback-trigger via MutationObserver) ──────
+        globalThis.ResizeObserver = function ResizeObserver(callback) {
+            if (typeof callback !== 'function') throw new TypeError("Failed to construct 'ResizeObserver': parameter 1 is not of type 'Function'.");
+            var self = this;
+            self._callback = callback;
+            self._targets = [];
+            self._mo = null;
+
+            self.observe = function(target) {
+                if (!target || typeof target !== 'object') return;
+                for (var i = 0; i < self._targets.length; i++) {
+                    if (self._targets[i] === target) return; // Redan observerad
+                }
+                self._targets.push(target);
+                // Koppla till MutationObserver för att trigga vid DOM-ändringar
+                if (!self._mo && typeof MutationObserver !== 'undefined') {
+                    self._mo = new MutationObserver(function() {
+                        if (self._targets.length > 0) {
+                            var entries = [];
+                            for (var j = 0; j < self._targets.length; j++) {
+                                var t = self._targets[j];
+                                var rect = (typeof t.getBoundingClientRect === 'function') ? t.getBoundingClientRect() : {x:0,y:0,width:0,height:0};
+                                entries.push({
+                                    target: t,
+                                    contentRect: rect,
+                                    borderBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+                                    contentBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+                                    devicePixelContentBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }]
+                                });
+                            }
+                            try { self._callback(entries, self); } catch(e) {}
+                        }
+                    });
+                    if (typeof document !== 'undefined' && document.documentElement) {
+                        self._mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+                    }
+                }
+            };
+            self.unobserve = function(target) {
+                self._targets = self._targets.filter(function(t) { return t !== target; });
+                if (self._targets.length === 0 && self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.disconnect = function() {
+                self._targets = [];
+                if (self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+        };
+
+        // ─── IntersectionObserver (riktig callback-trigger) ─────────────
+        globalThis.IntersectionObserver = function IntersectionObserver(callback, options) {
+            if (typeof callback !== 'function') throw new TypeError("Failed to construct 'IntersectionObserver': parameter 1 is not of type 'Function'.");
+            var self = this;
+            self._callback = callback;
+            self._targets = [];
+            self._root = (options && options.root) || null;
+            self._rootMargin = (options && options.rootMargin) || '0px';
+            self._thresholds = (options && options.threshold) || [0];
+            if (typeof self._thresholds === 'number') self._thresholds = [self._thresholds];
+            self._mo = null;
+
+            function createEntry(target, isIntersecting) {
+                var rect = (typeof target.getBoundingClientRect === 'function') ? target.getBoundingClientRect() : {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0};
+                return {
+                    target: target,
+                    isIntersecting: isIntersecting,
+                    intersectionRatio: isIntersecting ? 1.0 : 0.0,
+                    boundingClientRect: rect,
+                    intersectionRect: isIntersecting ? rect : {x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0},
+                    rootBounds: null,
+                    time: (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+                };
+            }
+
+            self.observe = function(target) {
+                if (!target || typeof target !== 'object') return;
+                for (var i = 0; i < self._targets.length; i++) {
+                    if (self._targets[i] === target) return;
+                }
+                self._targets.push(target);
+                // I headless antas alla element synliga — trigga direkt
+                setTimeout(function() {
+                    try { self._callback([createEntry(target, true)], self); } catch(e) {}
+                }, 0);
+                // MutationObserver för framtida DOM-ändringar
+                if (!self._mo && typeof MutationObserver !== 'undefined') {
+                    self._mo = new MutationObserver(function() {
+                        var entries = [];
+                        for (var j = 0; j < self._targets.length; j++) {
+                            entries.push(createEntry(self._targets[j], true));
+                        }
+                        if (entries.length > 0) { try { self._callback(entries, self); } catch(e) {} }
+                    });
+                    if (typeof document !== 'undefined' && document.documentElement) {
+                        self._mo.observe(document.documentElement, { childList: true, subtree: true });
+                    }
+                }
+            };
+            self.unobserve = function(target) {
+                self._targets = self._targets.filter(function(t) { return t !== target; });
+                if (self._targets.length === 0 && self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.disconnect = function() {
+                self._targets = [];
+                if (self._mo) { self._mo.disconnect(); self._mo = null; }
+            };
+            self.takeRecords = function() {
+                var entries = [];
+                for (var j = 0; j < self._targets.length; j++) {
+                    entries.push(createEntry(self._targets[j], true));
+                }
+                return entries;
+            };
+        };
+
+        // ─── Intl.NumberFormat (valutaformatering, prisvisning) ─────────
+        if (typeof Intl === 'undefined') globalThis.Intl = {};
+        if (!Intl.NumberFormat) {
+            Intl.NumberFormat = function NumberFormat(locale, options) {
+                this._locale = locale || 'sv-SE';
+                this._options = options || {};
+            };
+            Intl.NumberFormat.prototype.format = function(num) {
+                num = Number(num);
+                var opts = this._options;
+                var style = opts.style || 'decimal';
+                var minFrac = opts.minimumFractionDigits;
+                var maxFrac = opts.maximumFractionDigits;
+                if (minFrac === undefined && maxFrac === undefined) {
+                    if (style === 'currency') { minFrac = 2; maxFrac = 2; }
+                    else { minFrac = 0; maxFrac = 3; }
+                }
+                if (minFrac === undefined) minFrac = 0;
+                if (maxFrac === undefined) maxFrac = minFrac;
+                var str = num.toFixed(maxFrac);
+                // Decimal → locale separator
+                var locale = this._locale || 'en';
+                var sep = locale.indexOf('sv') === 0 ? ',' : '.';
+                var groupSep = locale.indexOf('sv') === 0 ? '\u00a0' : ',';
+                str = str.replace('.', sep);
+                // Tusentals-separator
+                var parts = str.split(sep);
+                var intPart = parts[0];
+                var decPart = parts[1] || '';
+                intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, groupSep);
+                str = decPart ? (intPart + sep + decPart) : intPart;
+                // Currency prefix/suffix
+                if (style === 'currency' && opts.currency) {
+                    var curr = opts.currency.toUpperCase();
+                    var display = opts.currencyDisplay || 'symbol';
+                    var symbols = {SEK:'kr',USD:'$',EUR:'€',GBP:'£',NOK:'kr',DKK:'kr',JPY:'¥',CHF:'CHF'};
+                    var sym = (display === 'code') ? curr : (symbols[curr] || curr);
+                    if (locale.indexOf('sv') === 0) str = str + '\u00a0' + sym;
+                    else str = sym + str;
+                }
+                if (style === 'percent') str = str + '%';
+                return str;
+            };
+            Intl.NumberFormat.prototype.resolvedOptions = function() {
+                return Object.assign({ locale: this._locale, numberingSystem: 'latn' }, this._options);
+            };
+            Intl.NumberFormat.prototype.formatToParts = function(num) {
+                var str = this.format(num);
+                return [{ type: 'literal', value: str }];
+            };
+        }
+        if (!Intl.DateTimeFormat) {
+            Intl.DateTimeFormat = function DateTimeFormat(locale, options) {
+                this._locale = locale || 'sv-SE';
+                this._options = options || {};
+            };
+            Intl.DateTimeFormat.prototype.format = function(date) {
+                if (!date) date = new Date();
+                return date.toISOString();
+            };
+            Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+                return Object.assign({ locale: this._locale, calendar: 'gregory', timeZone: 'UTC' }, this._options);
+            };
+        }
+
+        // ─── PerformanceObserver ─────────────────────────────────────────
+        if (typeof PerformanceObserver === 'undefined') {
+            globalThis.PerformanceObserver = function PerformanceObserver(callback) {
+                this._callback = callback;
+                this._types = [];
+            };
+            PerformanceObserver.prototype.observe = function(options) {
+                if (options && options.entryTypes) this._types = options.entryTypes;
+                if (options && options.type) this._types = [options.type];
+            };
+            PerformanceObserver.prototype.disconnect = function() { this._types = []; };
+            PerformanceObserver.prototype.takeRecords = function() { return []; };
+            PerformanceObserver.supportedEntryTypes = ['mark', 'measure', 'navigation', 'resource', 'paint', 'longtask'];
+        }
+
+        // ─── ReportingObserver ──────────────────────────────────────────
+        if (typeof ReportingObserver === 'undefined') {
+            globalThis.ReportingObserver = function ReportingObserver(callback, options) {
+                this._callback = callback;
+            };
+            ReportingObserver.prototype.observe = function() {};
+            ReportingObserver.prototype.disconnect = function() {};
+            ReportingObserver.prototype.takeRecords = function() { return []; };
         }
 
         // TextEncoder/TextDecoder — UTF-8
@@ -2725,15 +3073,44 @@ pub(super) fn register_window_with_viewport<'js>(
                              getClientRect: function() { return new DOMRect(x || 0, y || 0, 0, 0); } };
                 };
             }
-            // elementFromPoint
+            // elementFromPoint — söker djupaste element som innehåller (x,y) via getBoundingClientRect
             if (!document.elementFromPoint) {
-                document.elementFromPoint = function(x, y) { return document.body || null; };
+                document.elementFromPoint = function(x, y) {
+                    function hitTest(el, px, py) {
+                        if (!el || el.nodeType !== 1) return null;
+                        var children = el.children || [];
+                        // Sök barn i omvänd ordning (sista = överst i Z)
+                        for (var i = children.length - 1; i >= 0; i--) {
+                            var hit = hitTest(children[i], px, py);
+                            if (hit) return hit;
+                        }
+                        if (typeof el.getBoundingClientRect === 'function') {
+                            var r = el.getBoundingClientRect();
+                            if (r && px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) return el;
+                        }
+                        return null;
+                    }
+                    var root = document.documentElement || document.body;
+                    return root ? (hitTest(root, x, y) || root) : null;
+                };
             }
-            // elementsFromPoint
+            // elementsFromPoint — returnerar alla element som innehåller (x,y) i z-ordning
             if (!document.elementsFromPoint) {
                 document.elementsFromPoint = function(x, y) {
-                    var el = document.elementFromPoint(x, y);
-                    return el ? [el] : [];
+                    var result = [];
+                    function collect(el, px, py) {
+                        if (!el || el.nodeType !== 1) return;
+                        if (typeof el.getBoundingClientRect === 'function') {
+                            var r = el.getBoundingClientRect();
+                            if (r && px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) result.push(el);
+                        }
+                        var children = el.children || [];
+                        for (var i = 0; i < children.length; i++) { collect(children[i], px, py); }
+                    }
+                    var root = document.documentElement || document.body;
+                    if (root) collect(root, x, y);
+                    result.reverse(); // Djupaste först
+                    return result;
                 };
             }
         }
@@ -3099,7 +3476,15 @@ pub(super) fn register_window_with_viewport<'js>(
                     s.reason = reason || new DOMException('The operation was aborted', 'AbortError');
                     return s;
                 };
-                AbortSignal.timeout = function(ms) { return new AbortSignal(); };
+                AbortSignal.timeout = function(ms) {
+                    var s = new AbortSignal();
+                    setTimeout(function() {
+                        s.aborted = true;
+                        s.reason = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+                        if (typeof s.onabort === 'function') s.onabort(new Event('abort'));
+                    }, ms);
+                    return s;
+                };
                 AbortSignal.any = function(signals) {
                     var s = new AbortSignal();
                     if (signals) {
@@ -3595,11 +3980,122 @@ pub(super) fn register_window_with_viewport<'js>(
             }
             return result;
         };
-        Range.prototype.deleteContents = function() {};
-        Range.prototype.extractContents = function() { return document.createDocumentFragment(); };
-        Range.prototype.cloneContents = function() { return document.createDocumentFragment(); };
-        Range.prototype.insertNode = function(node) {};
-        Range.prototype.surroundContents = function(node) {};
+        // Hjälpfunktion: samla alla noder inom range
+        Range.prototype._getContainedNodes = function() {
+            var nodes = [];
+            var sc = this.startContainer, so = this.startOffset;
+            var ec = this.endContainer, eo = this.endOffset;
+            if (!sc || !ec) return nodes;
+            if (sc === ec) {
+                if (sc.nodeType === 3) { nodes.push(sc); }
+                else {
+                    var children = sc.childNodes || [];
+                    for (var i = so; i < eo && i < children.length; i++) nodes.push(children[i]);
+                }
+                return nodes;
+            }
+            // Samla från start till end via tree walk
+            var n = sc;
+            var collecting = false;
+            function walk(node) {
+                if (node === sc) collecting = true;
+                if (collecting) nodes.push(node);
+                if (node === ec) { collecting = false; return true; }
+                if (node.childNodes) { for (var i = 0; i < node.childNodes.length; i++) { if (walk(node.childNodes[i])) return true; } }
+                return false;
+            }
+            var root = sc;
+            while (root.parentNode) root = root.parentNode;
+            walk(root);
+            return nodes;
+        };
+        Range.prototype.deleteContents = function() {
+            var nodes = this._getContainedNodes();
+            for (var i = nodes.length - 1; i >= 0; i--) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    // Text node — trim
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        n.data = data.substring(0, this.startOffset) + data.substring(this.endOffset);
+                    } else if (n === this.startContainer) {
+                        n.data = data.substring(0, this.startOffset);
+                    } else {
+                        n.data = data.substring(this.endOffset);
+                    }
+                } else if (n.parentNode) { n.parentNode.removeChild(n); }
+            }
+            this.collapse(true);
+        };
+        Range.prototype.extractContents = function() {
+            var frag = document.createDocumentFragment();
+            var nodes = this._getContainedNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        var extracted = data.substring(this.startOffset, this.endOffset);
+                        n.data = data.substring(0, this.startOffset) + data.substring(this.endOffset);
+                        frag.appendChild(document.createTextNode(extracted));
+                    } else if (n === this.startContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset)));
+                        n.data = data.substring(0, this.startOffset);
+                    } else {
+                        frag.appendChild(document.createTextNode(data.substring(0, this.endOffset)));
+                        n.data = data.substring(this.endOffset);
+                    }
+                } else {
+                    if (n.parentNode) n.parentNode.removeChild(n);
+                    frag.appendChild(n);
+                }
+            }
+            this.collapse(true);
+            return frag;
+        };
+        Range.prototype.cloneContents = function() {
+            var frag = document.createDocumentFragment();
+            var nodes = this._getContainedNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (n.nodeType === 3 && (n === this.startContainer || n === this.endContainer)) {
+                    var data = n.data || '';
+                    if (n === this.startContainer && n === this.endContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset, this.endOffset)));
+                    } else if (n === this.startContainer) {
+                        frag.appendChild(document.createTextNode(data.substring(this.startOffset)));
+                    } else {
+                        frag.appendChild(document.createTextNode(data.substring(0, this.endOffset)));
+                    }
+                } else {
+                    frag.appendChild(n.cloneNode(true));
+                }
+            }
+            return frag;
+        };
+        Range.prototype.insertNode = function(node) {
+            if (!node) return;
+            var sc = this.startContainer;
+            if (!sc) return;
+            if (sc.nodeType === 3) {
+                // Split text node
+                var parent = sc.parentNode;
+                if (parent) {
+                    var after = sc.splitText ? sc.splitText(this.startOffset) : null;
+                    parent.insertBefore(node, after || sc.nextSibling);
+                }
+            } else {
+                var ref = sc.childNodes ? sc.childNodes[this.startOffset] : null;
+                sc.insertBefore(node, ref || null);
+            }
+        };
+        Range.prototype.surroundContents = function(newParent) {
+            if (!newParent) return;
+            var contents = this.extractContents();
+            newParent.appendChild(contents);
+            this.insertNode(newParent);
+            this.selectNode(newParent);
+        };
         Range.prototype.createContextualFragment = function(html) {
             // Spec: parse html as fragment, return DocumentFragment
             var frag = document.createDocumentFragment();
@@ -4036,12 +4532,6 @@ pub(super) fn register_window_with_viewport<'js>(
             this.body = (opts && opts.body) || null;
         };
 
-        // AbortController
-        globalThis.AbortController = function AbortController() {
-            this.signal = { aborted: false, addEventListener: function(){}, removeEventListener: function(){} };
-            this.abort = function() { this.signal.aborted = true; };
-        };
-
         // XMLHttpRequest — med stöd för pre-populated responses
         globalThis.XMLHttpRequest = function XMLHttpRequest() {
             this.readyState = 0;
@@ -4181,36 +4671,6 @@ pub(super) fn register_window_with_viewport<'js>(
         WebSocket.CLOSING = 2;
         WebSocket.CLOSED = 3;
 
-        // IntersectionObserver stub
-        globalThis.IntersectionObserver = function IntersectionObserver(cb, opts) {
-            this.observe = function() {};
-            this.unobserve = function() {};
-            this.disconnect = function() {};
-            this.takeRecords = function() { return []; };
-        };
-
-        // MessageChannel stub (React uses this)
-        globalThis.MessageChannel = function MessageChannel() {
-            var self = this;
-            this.port1 = {
-                onmessage: null,
-                postMessage: function(msg) {
-                    if (self.port2.onmessage) {
-                        try { self.port2.onmessage({ data: msg }); } catch(e) {}
-                    }
-                },
-                close: function() {}
-            };
-            this.port2 = {
-                onmessage: null,
-                postMessage: function(msg) {
-                    if (self.port1.onmessage) {
-                        try { self.port1.onmessage({ data: msg }); } catch(e) {}
-                    }
-                },
-                close: function() {}
-            };
-        };
 
         // Blob stub
         if (typeof Blob === 'undefined') {

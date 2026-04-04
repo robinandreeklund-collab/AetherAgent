@@ -2287,16 +2287,6 @@ fn check_xml_namespace_prefixes(xml: &str) -> Option<String> {
 struct GetSelection;
 impl JsHandler for GetSelection {
     fn handle<'js>(&self, ctx: &Ctx<'js>, _args: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        struct NoOp;
-        impl JsHandler for NoOp {
-            fn handle<'js>(
-                &self,
-                ctx: &Ctx<'js>,
-                _args: &[Value<'js>],
-            ) -> rquickjs::Result<Value<'js>> {
-                Ok(Value::new_undefined(ctx.clone()))
-            }
-        }
         struct SelectionToString;
         impl JsHandler for SelectionToString {
             fn handle<'js>(
@@ -2316,20 +2306,12 @@ impl JsHandler for GetSelection {
         selection.set("isCollapsed", true)?;
         selection.set("rangeCount", 0i32)?;
         selection.set("type", "None")?;
-        selection.set("removeAllRanges", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("addRange", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapse", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapseToStart", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("collapseToEnd", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("extend", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("setBaseAndExtent", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("empty", Function::new(ctx.clone(), JsFn(NoOp))?)?;
-        selection.set("modify", Function::new(ctx.clone(), JsFn(NoOp))?)?;
+        // Dessa metoder patchas med riktig logik i JS-blocket nedan
+        selection.set("_ranges", rquickjs::Array::new(ctx.clone())?)?;
         selection.set(
-            "deleteFromDocument",
-            Function::new(ctx.clone(), JsFn(NoOp))?,
+            "_selectedText",
+            rquickjs::String::from_str(ctx.clone(), "")?,
         )?;
-        selection.set("containsNode", Function::new(ctx.clone(), JsFn(NoOp))?)?;
         // selectAllChildren — selects all text content of a node
         // Lagrar vald text i selection-objektet via closure
         ctx.eval::<(), _>(
@@ -2341,6 +2323,73 @@ impl JsHandler for GetSelection {
                 // Patcha Selection-liknande objekt med selectAllChildren + toString
                 var _patchSel = function(sel) {
                     sel._selectedText = '';
+                    sel._ranges = [];
+
+                    sel.addRange = function(range) {
+                        sel._ranges.push(range);
+                        sel.rangeCount = sel._ranges.length;
+                        if (range && range.startContainer) {
+                            sel.anchorNode = range.startContainer;
+                            sel.anchorOffset = range.startOffset || 0;
+                            sel.focusNode = range.endContainer || range.startContainer;
+                            sel.focusOffset = range.endOffset || 0;
+                            sel.isCollapsed = range.collapsed;
+                            sel.type = range.collapsed ? 'Caret' : 'Range';
+                        }
+                    };
+                    sel.collapse = function(node, offset) {
+                        sel.anchorNode = node;
+                        sel.anchorOffset = offset || 0;
+                        sel.focusNode = node;
+                        sel.focusOffset = offset || 0;
+                        sel.isCollapsed = true;
+                        sel.rangeCount = 1;
+                        sel.type = 'Caret';
+                        sel._selectedText = '';
+                    };
+                    sel.collapseToStart = function() {
+                        if (sel.anchorNode) sel.collapse(sel.anchorNode, sel.anchorOffset);
+                    };
+                    sel.collapseToEnd = function() {
+                        if (sel.focusNode) sel.collapse(sel.focusNode, sel.focusOffset);
+                    };
+                    sel.extend = function(node, offset) {
+                        sel.focusNode = node;
+                        sel.focusOffset = offset || 0;
+                        sel.isCollapsed = (sel.anchorNode === sel.focusNode && sel.anchorOffset === sel.focusOffset);
+                        sel.type = sel.isCollapsed ? 'Caret' : 'Range';
+                    };
+                    sel.setBaseAndExtent = function(anchorNode, anchorOffset, focusNode, focusOffset) {
+                        sel.anchorNode = anchorNode;
+                        sel.anchorOffset = anchorOffset || 0;
+                        sel.focusNode = focusNode;
+                        sel.focusOffset = focusOffset || 0;
+                        sel.isCollapsed = (anchorNode === focusNode && sel.anchorOffset === sel.focusOffset);
+                        sel.type = sel.isCollapsed ? 'Caret' : 'Range';
+                        sel.rangeCount = 1;
+                    };
+                    sel.empty = function() { sel.removeAllRanges(); };
+                    sel.modify = function(alter, direction, granularity) { /* Best-effort no-op i headless */ };
+                    sel.deleteFromDocument = function() {
+                        // Tar bort selekterat innehåll — delegerar till range
+                        for (var ri = 0; ri < sel._ranges.length; ri++) {
+                            if (sel._ranges[ri] && typeof sel._ranges[ri].deleteContents === 'function') {
+                                sel._ranges[ri].deleteContents();
+                            }
+                        }
+                    };
+                    sel.containsNode = function(node, allowPartial) {
+                        if (!node) return false;
+                        // Enkel check: om noden är ancestor/descendant av selektionen
+                        var a = sel.anchorNode, f = sel.focusNode;
+                        if (!a || !f) return false;
+                        if (a === node || f === node) return true;
+                        // Kontrollera om node är barn/förälder till anchor/focus
+                        var n = a;
+                        while (n) { if (n === node) return true; n = n.parentNode; }
+                        return false;
+                    };
+
                     sel.selectAllChildren = function(node) {
                         // Kolla om noden eller en HTML-förälder har inert
                         // Per spec: inert attribut gäller bara HTML-element
