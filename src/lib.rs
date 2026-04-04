@@ -743,7 +743,7 @@ pub fn parse_crfr(
     output_format: &str,
 ) -> String {
     let tree = build_tree_for_crfr(html, goal, url, run_js);
-    parse_crfr_from_tree_with_js_flag(&tree, goal, url, top_n, output_format, run_js)
+    parse_crfr_from_tree_js(&tree, goal, url, top_n, output_format, run_js)
 }
 
 // Build semantic tree for CRFR (with optional JS eval).
@@ -821,6 +821,8 @@ fn goal_title_overlap(goal: &str, title: &str) -> f32 {
 }
 
 /// Run CRFR propagation on an existing (potentially XHR-enriched) tree.
+/// Parse CRFR from pre-built tree (utan JS-eval markering).
+/// Anropare som vet att JS kördes bör använda varianten med `js_eval=true`.
 pub fn parse_crfr_from_tree(
     tree: &SemanticTree,
     goal: &str,
@@ -828,10 +830,12 @@ pub fn parse_crfr_from_tree(
     top_n: u32,
     output_format: &str,
 ) -> String {
-    parse_crfr_from_tree_with_js_flag(tree, goal, url, top_n, output_format, false)
+    parse_crfr_from_tree_js(tree, goal, url, top_n, output_format, false)
 }
 
-fn parse_crfr_from_tree_with_js_flag(
+/// Parse CRFR from pre-built tree med explicit JS-eval-flagga.
+/// js_eval=true separerar cache-entry från statisk variant.
+pub fn parse_crfr_from_tree_js(
     tree: &SemanticTree,
     goal: &str,
     url: &str,

@@ -1435,7 +1435,14 @@ async fn handle_parse_crfr(
                 &final_url,
                 api_responses,
             );
-            aether_agent::parse_crfr_from_tree(&tree, goal, &final_url, top_n, output_format)
+            aether_agent::parse_crfr_from_tree_js(
+                &tree,
+                goal,
+                &final_url,
+                top_n,
+                output_format,
+                true,
+            )
         }
     } else {
         aether_agent::parse_crfr(&html, goal, &final_url, top_n, false, output_format)

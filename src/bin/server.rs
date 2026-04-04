@@ -1084,7 +1084,14 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 
     // Pass 3: Kör CRFR på (potentiellt berikad) tree
     let result = tokio::task::spawn_blocking(move || {
-        aether_agent::parse_crfr_from_tree(&tree, &goal_clone, &url_clone, top_n, &fmt_clone)
+        aether_agent::parse_crfr_from_tree_js(
+            &tree,
+            &goal_clone,
+            &url_clone,
+            top_n,
+            &fmt_clone,
+            run_js,
+        )
     })
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
@@ -5350,7 +5357,7 @@ async fn mcp_dispatch_tool(
             }
 
             let result = tokio::task::spawn_blocking(move || {
-                aether_agent::parse_crfr_from_tree(&tree, &goal_str, &page_url, top_n, &fmt)
+                aether_agent::parse_crfr_from_tree_js(&tree, &goal_str, &page_url, top_n, &fmt, run_js)
             })
             .await
             .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
