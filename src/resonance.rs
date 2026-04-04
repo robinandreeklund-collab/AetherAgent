@@ -767,7 +767,7 @@ impl ResonanceField {
                 .filter(|(_, s)| *s > 0.0)
                 .collect();
             scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-            scored.truncate(100); // Top 100 BM25 candidates
+            scored.truncate(200); // Top 200 BM25 candidates (generous)
             scored.into_iter().map(|(id, _)| id).collect()
         };
         // Also include nodes with causal memory (they may score 0 on BM25 but have learned value)
@@ -786,7 +786,8 @@ impl ResonanceField {
 
         for &nid in &node_ids {
             // CASCADE: skip expensive scoring for nodes not in candidate set
-            if !cascade_candidates.contains(&nid) {
+            // BUT: on small DOMs (< 200 nodes), score everything — no need to filter
+            if node_ids.len() >= 200 && !cascade_candidates.contains(&nid) {
                 // Give non-candidates a minimal amplitude (can still be boosted by propagation)
                 if let Some(state) = self.nodes.get_mut(&nid) {
                     state.amplitude = 0.0;
@@ -1206,8 +1207,8 @@ impl ResonanceField {
                 if let Some(&pid) = self.parent_map.get(&r.node_id) {
                     let seen = parent_seen.entry(pid).or_insert(0);
                     *seen += 1;
-                    if *seen >= 3 && parent_count.get(&pid).copied().unwrap_or(0) >= 3 {
-                        r.amplitude *= 0.7; // 30% penalty for 3rd+ sibling
+                    if *seen >= 4 && parent_count.get(&pid).copied().unwrap_or(0) >= 5 {
+                        r.amplitude *= 0.85; // 15% penalty for 4th+ sibling (only in large groups)
                     }
                 }
             }
