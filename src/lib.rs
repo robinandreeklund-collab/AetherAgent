@@ -1580,13 +1580,19 @@ pub fn dashboard_wpt() -> String {
 }
 
 /// Run a CRFR query with full trace for dashboard explorer.
-pub fn dashboard_crfr_explore(html: &str, goal: &str, url: &str, top_n: u32) -> String {
-    let start = now_ms();
-    let tree = build_tree(html, goal, url);
+/// Uses the real CRFR pipeline: JS eval + field cache + wave propagation.
+pub fn dashboard_crfr_explore(
+    tree: &types::SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+) -> String {
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
     let field_start = now_ms();
-    let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
+    let (mut field, cache_hit) =
+        resonance::get_or_build_field_with_variant(&tree.nodes, url, run_js);
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
@@ -1679,7 +1685,6 @@ pub fn dashboard_crfr_explore(html: &str, goal: &str, url: &str, top_n: u32) -> 
         total_queries: field.total_queries,
     };
 
-    let _ = now_ms().saturating_sub(start);
     serde_json::to_string(&explorer)
         .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
 }

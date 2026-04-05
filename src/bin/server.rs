@@ -6121,8 +6121,28 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
+
+    // Bygg träd med JS-eval (samma pipeline som parse-crfr)
+    let goal_clone = goal.clone();
+    let url_clone = url.clone();
+    let mut tree = tokio::task::spawn_blocking({
+        let h = html.clone();
+        let g = goal.clone();
+        let u = url.clone();
+        move || aether_agent::build_tree_for_crfr(&h, &g, &u, true)
+    })
+    .await
+    .unwrap_or_default();
+
+    // Resolve pending fetch-URLs (SPA enrichment)
+    #[cfg(feature = "fetch")]
+    if !tree.pending_fetch_urls.is_empty() {
+        aether_agent::tools::resolve_pending_fetches(&mut tree, &goal).await;
+    }
+
+    // Kör CRFR explorer med traced propagation
     let result = tokio::task::spawn_blocking(move || {
-        aether_agent::dashboard_crfr_explore(&html, &goal, &url, top_n)
+        aether_agent::dashboard_crfr_explore(&tree, &goal_clone, &url_clone, top_n, true)
     })
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
