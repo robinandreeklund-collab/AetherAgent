@@ -174,6 +174,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         }
     }
 
+    // Extrahera Set-Cookie headers INNAN body konsumeras (response.bytes() tar ownership)
+    let set_cookie_headers: Vec<String> = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+        .collect();
+
     let body_bytes = response
         .bytes()
         .await
@@ -187,14 +195,6 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
     let body = String::from_utf8_lossy(&body_bytes).into_owned();
     let body_size_bytes = body.len();
     let fetch_time_ms = start.elapsed().as_millis() as u64;
-
-    // Extrahera Set-Cookie headers (för JS cookie bridge)
-    let set_cookie_headers: Vec<String> = response
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
-        .collect();
 
     Ok(FetchResult {
         final_url,
