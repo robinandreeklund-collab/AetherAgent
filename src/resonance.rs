@@ -1061,19 +1061,29 @@ impl ResonanceField {
         // Apply Chebyshev spectral filter
         let filtered = self.chebyshev_filter(&seed_signal, &down_keys, &up_keys, &bm25_scores);
 
-        // Apply filtered amplitudes back to nodes
+        // Apply Chebyshev output as additive propagation boost.
+        // Nodes keep their Phase 1 amplitude and gain extra signal from
+        // neighbors via the spectral filter. The filter captures multi-hop
+        // structural proximity — a node next to a strong BM25 match gets
+        // a boost proportional to the graph-spectral proximity.
         let mut total_delta: f32 = 0.0;
-        for (&id, &new_amp) in &filtered {
+        for (&id, &filtered_amp) in &filtered {
             if let Some(state) = self.nodes.get_mut(&id) {
                 let old_amp = state.amplitude;
-                // Take max of original and filtered (never reduce below seed)
-                let final_amp = old_amp.max(new_amp);
-                if final_amp > old_amp + ACTIVATION_THRESHOLD {
-                    total_delta += final_amp - old_amp;
-                    state.amplitude = final_amp;
-                    resonance_types
-                        .entry(id)
-                        .or_insert(ResonanceType::Propagated);
+                let seed_amp = seed_signal.get(&id).copied().unwrap_or(0.0);
+                // Propagation contribution = filtered minus direct seed
+                // (what neighbors contributed via the spectral filter)
+                let propagation_boost = (filtered_amp - seed_amp * CHEBYSHEV_THETA[0]).max(0.0);
+                let new_amp = old_amp + propagation_boost;
+                if propagation_boost > ACTIVATION_THRESHOLD {
+                    total_delta += propagation_boost;
+                    state.amplitude = new_amp;
+                    if seed_amp < ACTIVATION_THRESHOLD {
+                        // This node had no direct match — all signal from propagation
+                        resonance_types
+                            .entry(id)
+                            .or_insert(ResonanceType::Propagated);
+                    }
                 }
             }
         }
