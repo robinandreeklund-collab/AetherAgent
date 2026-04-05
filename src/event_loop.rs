@@ -817,12 +817,14 @@ pub fn run_event_loop(ctx: &Ctx<'_>, el: &SharedEventLoop) -> Result<EventLoopSt
         }
     }
 
-    Ok(EventLoopStats {
+    let stats = EventLoopStats {
         ticks: total_ticks,
         timers_fired,
         rafs_fired,
         mutations_delivered,
-    })
+    };
+    record_stats(&stats);
+    Ok(stats)
 }
 
 /// Statistik från event-loop-körningen
@@ -836,6 +838,57 @@ pub struct EventLoopStats {
     pub rafs_fired: usize,
     /// Antal mutation-records som levererades
     pub mutations_delivered: usize,
+}
+
+/// Kumulativ event-loop-statistik (ackumuleras över alla eval-anrop)
+static CUMULATIVE_STATS: std::sync::Mutex<CumulativeEventLoopStats> =
+    std::sync::Mutex::new(CumulativeEventLoopStats {
+        total_runs: 0,
+        total_ticks: 0,
+        total_timers_fired: 0,
+        total_rafs_fired: 0,
+        total_mutations_delivered: 0,
+        peak_ticks: 0,
+    });
+
+/// Kumulativ statistik över alla event-loop-körningar
+#[derive(Debug, Clone, Copy)]
+pub struct CumulativeEventLoopStats {
+    pub total_runs: u64,
+    pub total_ticks: u64,
+    pub total_timers_fired: u64,
+    pub total_rafs_fired: u64,
+    pub total_mutations_delivered: u64,
+    pub peak_ticks: u64,
+}
+
+/// Registrera en event-loop-körning i kumulativ statistik
+pub fn record_stats(stats: &EventLoopStats) {
+    if let Ok(mut cum) = CUMULATIVE_STATS.lock() {
+        cum.total_runs += 1;
+        cum.total_ticks += stats.ticks as u64;
+        cum.total_timers_fired += stats.timers_fired as u64;
+        cum.total_rafs_fired += stats.rafs_fired as u64;
+        cum.total_mutations_delivered += stats.mutations_delivered as u64;
+        if stats.ticks as u64 > cum.peak_ticks {
+            cum.peak_ticks = stats.ticks as u64;
+        }
+    }
+}
+
+/// Hämta kumulativ statistik (för dashboard)
+pub fn cumulative_stats() -> CumulativeEventLoopStats {
+    CUMULATIVE_STATS
+        .lock()
+        .map(|s| *s)
+        .unwrap_or(CumulativeEventLoopStats {
+            total_runs: 0,
+            total_ticks: 0,
+            total_timers_fired: 0,
+            total_rafs_fired: 0,
+            total_mutations_delivered: 0,
+            peak_ticks: 0,
+        })
 }
 
 impl std::fmt::Display for EventLoopStats {

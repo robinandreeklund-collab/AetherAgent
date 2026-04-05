@@ -131,10 +131,20 @@ pub struct SpaRuntimeSnapshot {
     pub event_dispatch: bool,
     pub computed_style: bool,
     pub form_state: bool,
+    /// Cumulative runtime stats (real data from event loop)
+    pub total_eval_runs: u64,
+    pub total_ticks: u64,
+    pub total_timers_fired: u64,
+    pub total_rafs_fired: u64,
+    pub total_mutations_delivered: u64,
+    pub peak_ticks_single_run: u64,
 }
 
-/// Build static SPA runtime info
+/// Build SPA runtime info with live cumulative stats
 pub fn build_spa_runtime() -> SpaRuntimeSnapshot {
+    #[cfg(feature = "js-eval")]
+    let cum = crate::event_loop::cumulative_stats();
+
     SpaRuntimeSnapshot {
         engine: "QuickJS (rquickjs 0.11)".into(),
         max_timers: 500,
@@ -148,6 +158,30 @@ pub fn build_spa_runtime() -> SpaRuntimeSnapshot {
         event_dispatch: true,
         computed_style: true,
         form_state: true,
+        #[cfg(feature = "js-eval")]
+        total_eval_runs: cum.total_runs,
+        #[cfg(feature = "js-eval")]
+        total_ticks: cum.total_ticks,
+        #[cfg(feature = "js-eval")]
+        total_timers_fired: cum.total_timers_fired,
+        #[cfg(feature = "js-eval")]
+        total_rafs_fired: cum.total_rafs_fired,
+        #[cfg(feature = "js-eval")]
+        total_mutations_delivered: cum.total_mutations_delivered,
+        #[cfg(feature = "js-eval")]
+        peak_ticks_single_run: cum.peak_ticks,
+        #[cfg(not(feature = "js-eval"))]
+        total_eval_runs: 0,
+        #[cfg(not(feature = "js-eval"))]
+        total_ticks: 0,
+        #[cfg(not(feature = "js-eval"))]
+        total_timers_fired: 0,
+        #[cfg(not(feature = "js-eval"))]
+        total_rafs_fired: 0,
+        #[cfg(not(feature = "js-eval"))]
+        total_mutations_delivered: 0,
+        #[cfg(not(feature = "js-eval"))]
+        peak_ticks_single_run: 0,
     }
 }
 

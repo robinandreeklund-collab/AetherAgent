@@ -253,21 +253,36 @@ function renderWpt(panel) {
 function renderSpa(spa) {
   const body = document.getElementById('spa-body');
   const badge = document.getElementById('spa-badge');
-  badge.textContent = spa.engine.split(' ')[0];
+  const runs = spa.total_eval_runs || 0;
+  badge.textContent = runs > 0 ? `${runs} evals` : spa.engine.split(' ')[0];
   const bool = v => v ? '<span class="tag tag-green">Active</span>' : '<span class="tag tag-red">Off</span>';
+  const hasStats = runs > 0;
+  let statsHtml = '';
+  if (hasStats) {
+    statsHtml = `
+    <tr><td colspan="2" style="color:var(--accent);font-weight:600;padding-top:10px;border-bottom:1px solid var(--border)">Cumulative Runtime Stats</td></tr>
+    <tr><td style="color:var(--text2)">Eval Runs</td><td style="color:var(--accent);font-weight:600">${fmtNum(runs)}</td></tr>
+    <tr><td style="color:var(--text2)">Total Ticks</td><td>${fmtNum(spa.total_ticks)}</td></tr>
+    <tr><td style="color:var(--text2)">Timers Fired</td><td>${fmtNum(spa.total_timers_fired)}</td></tr>
+    <tr><td style="color:var(--text2)">rAF Fired</td><td>${fmtNum(spa.total_rafs_fired)}</td></tr>
+    <tr><td style="color:var(--text2)">Mutations</td><td>${fmtNum(spa.total_mutations_delivered)}</td></tr>
+    <tr><td style="color:var(--text2)">Peak Ticks (single)</td><td>${fmtNum(spa.peak_ticks_single_run)}</td></tr>
+    <tr><td style="color:var(--text2)">Avg Ticks/Run</td><td>${runs > 0 ? (spa.total_ticks / runs).toFixed(1) : '0'}</td></tr>`;
+  }
   body.innerHTML = `<table>
     <tr><td style="color:var(--text2)">Engine</td><td>${spa.engine}</td></tr>
-    <tr><td style="color:var(--text2)">Max Timers</td><td>${spa.max_timers}</td></tr>
-    <tr><td style="color:var(--text2)">Max Delay</td><td>${spa.max_delay_ms}ms</td></tr>
-    <tr><td style="color:var(--text2)">Max Ticks</td><td>${fmtNum(spa.max_ticks)}</td></tr>
-    <tr><td style="color:var(--text2)">Max Runtime</td><td>${(spa.max_runtime_us/1000).toFixed(0)}ms</td></tr>
-    <tr><td style="color:var(--text2)">rAF Interval</td><td>${spa.raf_interval_ms}ms (simulated)</td></tr>
-    <tr><td style="color:var(--text2)">DOM Wrappers</td><td>${spa.dom_element_wrappers}+ element types</td></tr>
-    <tr><td style="color:var(--text2)">DOM Methods</td><td>${spa.dom_methods}+ methods</td></tr>
+    <tr><td style="color:var(--text2)">DOM Bridge</td><td>${spa.dom_element_wrappers}+ element types, ${spa.dom_methods}+ methods</td></tr>
     <tr><td style="color:var(--text2)">MutationObserver</td><td>${bool(spa.mutation_observer)}</td></tr>
     <tr><td style="color:var(--text2)">Event Dispatch</td><td>${bool(spa.event_dispatch)}</td></tr>
     <tr><td style="color:var(--text2)">Computed Style</td><td>${bool(spa.computed_style)}</td></tr>
     <tr><td style="color:var(--text2)">Form State</td><td>${bool(spa.form_state)}</td></tr>
+    <tr><td colspan="2" style="color:var(--text3);font-weight:600;padding-top:10px;border-bottom:1px solid var(--border)">Sandbox Limits</td></tr>
+    <tr><td style="color:var(--text2)">Max Timers</td><td>${spa.max_timers}</td></tr>
+    <tr><td style="color:var(--text2)">Max Delay</td><td>${spa.max_delay_ms}ms</td></tr>
+    <tr><td style="color:var(--text2)">Max Ticks</td><td>${fmtNum(spa.max_ticks)}</td></tr>
+    <tr><td style="color:var(--text2)">Max Runtime</td><td>${(spa.max_runtime_us/1000).toFixed(0)}ms</td></tr>
+    <tr><td style="color:var(--text2)">rAF Interval</td><td>${spa.raf_interval_ms}ms</td></tr>
+    ${statsHtml}
   </table>`;
 }
 
