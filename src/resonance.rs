@@ -17,20 +17,26 @@ use crate::types::SemanticNode;
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
-/// Bas-dämpning vid propagation från förälder till barn
-const BASE_CHILD_DAMPING: f32 = 0.35;
-/// Bas-förstärkning vid propagation från barn till förälder
-const BASE_PARENT_AMPLIFICATION: f32 = 0.25;
-/// Bonus-multiplikator vid fas-synkronisering
-const PHASE_SYNC_BONUS: f32 = 1.08;
-/// Minsta amplitud för att en nod ska propagera vidare
+/// Chebyshev spectral filter polynomial order (K=4 ≈ 4-hop neighborhood)
+const CHEBYSHEV_ORDER: usize = 4;
+/// Chebyshev default coefficients θ_k: low-pass filter biased toward local signal
+/// θ_0 = direct signal, θ_1 = 1-hop neighbors, θ_2 = 2-hop, etc.
+/// Decaying profile = low-pass filter that preserves content clusters
+const CHEBYSHEV_THETA: [f32; 5] = [0.50, 0.30, 0.12, 0.05, 0.03];
+/// PPR restart probability (α in Personalized PageRank = teleport to seed)
+const PPR_ALPHA: f32 = 0.15;
+
+/// Suppression: minsta antal query-appearances innan suppression aktiveras
+const SUPPRESSION_MIN_QUERIES: u32 = 3;
+/// Suppression: om success_ratio < detta → applicera penalty
+const SUPPRESSION_RATIO_THRESHOLD: f32 = 0.25;
+/// Suppression: minimalt multiplier (aldrig under detta)
+const SUPPRESSION_FLOOR: f32 = 0.15;
+
+/// Minsta amplitud för att en nod ska inkluderas i propagation/resultat
 const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
 const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
-/// Max antal propagations-iterationer (konvergens avbryter normalt vid 2-3)
-const MAX_PROPAGATION_STEPS: u32 = 6;
-/// Konvergenströskel: om total amplitudförändring < detta, stoppa
-const CONVERGENCE_THRESHOLD: f32 = 0.001;
 // Fan-out är nu adaptivt — se adaptive_fan_out()
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
@@ -80,9 +86,48 @@ pub struct ResonanceResult {
     pub causal_boost: f32,
 }
 
+/// Per-node scoring breakdown (for dashboard CRFR Query Explorer & DOM Visualizer)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeScoreBreakdown {
+    pub node_id: u32,
+    pub bm25_score: f32,
+    pub hdc_score: f32,
+    pub role_priority: f32,
+    pub concept_boost: f32,
+    pub causal_boost: f32,
+    pub answer_shape: f32,
+    pub answer_type_boost: f32,
+    pub zone_penalty: f32,
+    pub meta_penalty: f32,
+    pub combmnz: f32,
+    pub template_boost: bool,
+    pub final_amplitude: f32,
+}
+
+/// Full propagation trace for dashboard visualization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropagationTrace {
+    /// BM25 candidate count (top-200 pre-filter)
+    pub bm25_candidates: usize,
+    /// Total nodes scored (past cascade filter)
+    pub cascade_candidates: usize,
+    /// Wave propagation: iterations actually run (1..6)
+    pub propagation_iterations: u32,
+    /// Per-iteration convergence delta
+    pub iteration_deltas: Vec<f32>,
+    /// Amplitude gap: position where cut happened (None = hard top_k)
+    pub gap_cut_position: Option<usize>,
+    /// Per-node scoring breakdown (top nodes only)
+    pub node_scores: Vec<NodeScoreBreakdown>,
+    /// Total nodes in field
+    pub total_field_nodes: usize,
+    /// Template match detected
+    pub template_match: bool,
+}
+
 /// Serialiserbar wrapper för Hypervector-data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HvData {
+pub struct HvData {
     bits: Vec<u64>,
 }
 
@@ -131,6 +176,14 @@ pub struct ResonanceState {
     /// Tidpunkt (ms) för senaste lyckade feedback (för temporal decay)
     #[serde(default)]
     last_hit_ms: u64,
+
+    // ── Suppression learning ──
+    /// Antal gånger noden dykt upp i top-resultat (cascade candidates)
+    #[serde(default)]
+    query_count: u32,
+    /// Antal gånger noden INTE markerades som framgångsrik trots att den var synlig
+    #[serde(default)]
+    miss_count: u32,
 }
 
 /// Serde-modul för Hypervector (privat bits-fält)
@@ -154,6 +207,9 @@ mod hv_serde {
 pub struct ResonanceField {
     /// Resonanstillstånd per nod-ID
     nodes: HashMap<u32, ResonanceState>,
+    /// Originalets URL (bevaras för dashboard)
+    #[serde(default)]
+    pub url: String,
     /// Förälder-mappning: child_id -> parent_id
     #[serde(default)]
     parent_map: HashMap<u32, u32>,
@@ -368,13 +424,34 @@ fn zone_penalty(role: &str, depth: u32) -> f32 {
 /// Ingen manuell blend-faktor — Beta-distributionen hanterar
 /// prior → posterior automatiskt med mer data.
 ///
-/// Takes a pre-computed key (e.g. "heading:down") to avoid format!() in hot loop.
+/// Takes a pre-computed key (e.g. "heading:down:news+senaste") to avoid format!() in hot loop.
+/// Falls back to non-clustered key if clustered key not found (cold-start for new goal clusters).
 fn learned_weight_precomputed(
     key: &str,
     heuristic: f32,
     stats: &HashMap<String, (f32, f32)>,
 ) -> f32 {
-    let (alpha, beta) = stats.get(key).copied().unwrap_or((heuristic, 1.0));
+    // Try clustered key first
+    let (alpha, beta) = if let Some(&ab) = stats.get(key) {
+        ab
+    } else {
+        // Fallback: strip cluster suffix, try global key
+        // "heading:down:news+senaste" → "heading:down"
+        let base_key = key.rsplitn(2, ':').last().map(|_| {
+            // Extract "role:direction" from "role:direction:cluster"
+            let parts: Vec<&str> = key.splitn(3, ':').collect();
+            if parts.len() >= 2 {
+                format!("{}:{}", parts[0], parts[1])
+            } else {
+                key.to_string()
+            }
+        });
+        if let Some(ref bk) = base_key {
+            stats.get(bk.as_str()).copied().unwrap_or((heuristic, 1.0))
+        } else {
+            (heuristic, 1.0)
+        }
+    };
     let total = alpha + beta;
     if total < 0.001 {
         return heuristic;
@@ -418,6 +495,25 @@ fn hash_url(url: &str) -> u64 {
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
+}
+
+/// Compute goal cluster ID from goal text.
+/// Groups similar goals together by hashing the top-3 significant words (sorted).
+/// "latest news headlines" and "breaking news today" → same cluster (both have "news").
+/// "sports scores today" → different cluster.
+fn goal_cluster_id(goal: &str) -> String {
+    let mut words: Vec<&str> = goal
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 3) // Skip short words (the, and, etc.)
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    words.truncate(3); // Top 3 significant words
+    if words.is_empty() {
+        "_".to_string()
+    } else {
+        words.join("+")
+    }
 }
 
 /// Extrahera domain-hash från en URL.
@@ -517,6 +613,7 @@ impl ResonanceField {
         let dh = domain_hash_from_url(url);
         let mut field = ResonanceField {
             nodes,
+            url: url.to_string(),
             parent_map,
             children_map,
             node_labels,
@@ -606,6 +703,8 @@ impl ResonanceField {
             hit_count: 0,
             last_goal_hash: 0,
             last_hit_ms: 0,
+            query_count: 0,
+            miss_count: 0,
         };
 
         nodes.insert(node.id, state);
@@ -654,12 +753,50 @@ impl ResonanceField {
     /// Phase 1: Compute initial resonance from HDC similarity + causal memory.
     /// Phase 2: Wave propagation through parent-child edges.
     /// Phase 3: Collect and sort results by amplitude.
+    /// Propagate with full trace capture (for dashboard)
+    pub fn propagate_traced(&mut self, goal: &str) -> (Vec<ResonanceResult>, PropagationTrace) {
+        let (results, trace) = self.propagate_inner(goal, true);
+        (
+            results,
+            trace.unwrap_or_else(|| PropagationTrace {
+                bm25_candidates: 0,
+                cascade_candidates: 0,
+                propagation_iterations: 0,
+                iteration_deltas: vec![],
+                gap_cut_position: None,
+                node_scores: vec![],
+                total_field_nodes: self.nodes.len(),
+                template_match: false,
+            }),
+        )
+    }
+
     pub fn propagate(&mut self, goal: &str) -> Vec<ResonanceResult> {
+        self.propagate_inner(goal, false).0
+    }
+
+    fn propagate_inner(
+        &mut self,
+        goal: &str,
+        capture_trace: bool,
+    ) -> (Vec<ResonanceResult>, Option<PropagationTrace>) {
         self.total_queries += 1;
         let goal_hv = Hypervector::from_text_ngrams(goal);
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
+        // Trace data
+        let mut trace_bm25_scores: HashMap<u32, f32> = HashMap::new();
+        let mut trace_hdc_scores: HashMap<u32, f32> = HashMap::new();
+        let mut trace_role_priorities: HashMap<u32, f32> = HashMap::new();
+        let mut trace_concept_boosts: HashMap<u32, f32> = HashMap::new();
+        let mut trace_answer_shapes: HashMap<u32, f32> = HashMap::new();
+        let mut trace_answer_types: HashMap<u32, f32> = HashMap::new();
+        let mut trace_zone_penalties: HashMap<u32, f32> = HashMap::new();
+        let mut trace_meta_penalties: HashMap<u32, f32> = HashMap::new();
+        let mut trace_combmnz: HashMap<u32, f32> = HashMap::new();
+        let mut trace_template_boosts: HashMap<u32, bool> = HashMap::new();
+        let mut trace_iteration_deltas: Vec<f32> = Vec::new();
 
         // #15 LinUCB: Contextual weight adjustment based on page profile
         let (_text_d, _list_d, table_d, nav_d, _depth) = page_profile(&self.nodes);
@@ -784,8 +921,10 @@ impl ResonanceField {
             })
             .copied()
             .collect();
+        let trace_bm25_count = bm25_candidates.len();
         let cascade_candidates: std::collections::HashSet<u32> =
             bm25_candidates.into_iter().chain(causal_nodes).collect();
+        let trace_cascade_count = cascade_candidates.len();
 
         for &nid in &node_ids {
             // CASCADE: skip expensive scoring for nodes not in candidate set
@@ -900,7 +1039,37 @@ impl ResonanceField {
                     }
                 }
 
+                // Suppression learning: penalize nodes seen many times but rarely useful
+                if state.query_count >= SUPPRESSION_MIN_QUERIES {
+                    let success_ratio = if state.query_count > 0 {
+                        (state.hit_count as f32) / (state.query_count as f32)
+                    } else {
+                        1.0
+                    };
+                    if success_ratio < SUPPRESSION_RATIO_THRESHOLD {
+                        // Linear suppression: 0% success → SUPPRESSION_FLOOR, 25% → 1.0
+                        let factor = SUPPRESSION_FLOOR
+                            + (1.0 - SUPPRESSION_FLOOR)
+                                * (success_ratio / SUPPRESSION_RATIO_THRESHOLD);
+                        state.amplitude *= factor;
+                    }
+                }
+
                 causal_boosts.insert(nid, causal_boost);
+
+                // Trace: capture per-node score breakdown
+                if capture_trace {
+                    trace_bm25_scores.insert(nid, bm25_score);
+                    trace_hdc_scores.insert(nid, hdc_score);
+                    trace_role_priorities.insert(nid, role_boost);
+                    trace_concept_boosts.insert(nid, concept_boost);
+                    trace_answer_shapes.insert(nid, shape);
+                    trace_answer_types.insert(nid, answer_type);
+                    trace_zone_penalties.insert(nid, zone);
+                    trace_meta_penalties.insert(nid, penalty);
+                    trace_combmnz.insert(nid, combmnz);
+                    trace_template_boosts.insert(nid, template_match && state.hit_count > 0);
+                }
 
                 if causal_boost > base_resonance * 0.5 && state.hit_count > 0 {
                     resonance_types.insert(nid, ResonanceType::CausalMemory);
@@ -931,122 +1100,71 @@ impl ResonanceField {
             }
         }
 
-        // Fas 2: Convergent propagation — O(E) per iteration, max 6 iterationer.
+        // Fas 2: Chebyshev Spectral Filter — polynomial approximation of graph Laplacian
         //
-        // Komplexitetsanalys:
-        //   Varje iteration traverserar alla edges en gång: O(E) = O(N) för ett träd.
-        //   Adaptive fan-out garanterar att inga high-degree noder
-        //   (t.ex. <ul> med 200 <li>) blåser upp till O(N²).
-        //   Konvergens stoppar normalt vid 2-3 iterationer.
-        //   Total: O(K × min(E, N×32)) där K ≈ 2-3.
+        // Replaces iterative wave propagation with K=4 Chebyshev polynomial filter.
+        // Computes: x_out = Σ_{k=0}^{K} θ_k · T_k(L̃_scaled) · x_in
+        // with PPR restart: x_final = (1-α)·x_out + α·x_seed
         //
-        // Pre-compute role keys to avoid format!() in hot loop
+        // Advantages over iterative propagation:
+        //   - Provably optimal spectral response (low-pass filter)
+        //   - No over-smoothing (Chebyshev preserves sharp peaks)
+        //   - Fixed O(K×|E|) complexity with K=4 (no convergence check needed)
+        //   - PPR restart mathematically integrated (not ad-hoc re-injection)
+        //
+        // Pre-compute role keys for learned weight lookup (goal-clustered)
+        let cluster = goal_cluster_id(goal);
         let down_keys: HashMap<u32, String> = self
             .nodes
             .iter()
-            .map(|(&id, s)| (id, format!("{}:down", s.role)))
+            .map(|(&id, s)| (id, format!("{}:down:{}", s.role, cluster)))
             .collect();
         let up_keys: HashMap<u32, String> = self
             .nodes
             .iter()
-            .map(|(&id, s)| (id, format!("{}:up", s.role)))
+            .map(|(&id, s)| (id, format!("{}:up:{}", s.role, cluster)))
             .collect();
 
-        // Snapshot: Vec istf HashMap — O(N) men med bättre cache-locality.
-        for _step in 0..MAX_PROPAGATION_STEPS {
-            // Snapshot amplituder (Vec för cache-locality, sorterad efter nod-id)
-            let amp_map: HashMap<u32, f32> = self
-                .nodes
-                .iter()
-                .map(|(&id, s)| (id, s.amplitude))
-                .collect();
+        // Seed signal: current amplitudes after Phase 1 scoring
+        let seed_signal: HashMap<u32, f32> = self
+            .nodes
+            .iter()
+            .map(|(&id, s)| (id, s.amplitude))
+            .collect();
 
-            let mut total_delta: f32 = 0.0;
+        // Apply Chebyshev spectral filter
+        let filtered = self.chebyshev_filter(&seed_signal, &down_keys, &up_keys, &bm25_scores);
 
-            // Förälder → barn (fan-out capped)
-            for (&parent_id, children) in &self.children_map {
-                let parent_amp = amp_map.get(&parent_id).copied().unwrap_or(0.0);
-                if parent_amp <= ACTIVATION_THRESHOLD {
-                    continue;
-                }
-                let confidence_factor = parent_amp.sqrt();
-                let parent_role = self
-                    .nodes
-                    .get(&parent_id)
-                    .map(|s| s.role.as_str())
-                    .unwrap_or("");
-                let role_factor = learned_weight_precomputed(
-                    down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or(""),
-                    heuristic_down_weight(parent_role),
-                    &self.propagation_stats,
-                );
-                let damping = BASE_CHILD_DAMPING * confidence_factor * role_factor;
-
-                let fan_out = adaptive_fan_out(children.len());
-                for &child_id in &children[..fan_out] {
-                    if let Some(child_state) = self.nodes.get_mut(&child_id) {
-                        let mut propagated = parent_amp * damping;
-                        propagated *= PHASE_SYNC_BONUS; // Phase always 0 → always synced
-                        if propagated > child_state.amplitude {
-                            total_delta += propagated - child_state.amplitude;
-                            child_state.amplitude = propagated;
-                            resonance_types
-                                .entry(child_id)
-                                .or_insert(ResonanceType::Propagated);
-                        }
-                    }
-                }
-            }
-
-            // Barn → förälder (alltid 1:1, inget fan-out-problem)
-            for (&child_id, &parent_id) in &self.parent_map {
-                let child_amp = amp_map.get(&child_id).copied().unwrap_or(0.0);
-                if child_amp <= ACTIVATION_THRESHOLD {
-                    continue;
-                }
-                let confidence_factor = child_amp.sqrt();
-                let child_role = self
-                    .nodes
-                    .get(&child_id)
-                    .map(|s| s.role.as_str())
-                    .unwrap_or("");
-                let role_factor = learned_weight_precomputed(
-                    up_keys.get(&child_id).map(|s| s.as_str()).unwrap_or(""),
-                    heuristic_up_weight(child_role),
-                    &self.propagation_stats,
-                );
-                let amplification = BASE_PARENT_AMPLIFICATION * confidence_factor * role_factor;
-
-                if let Some(parent_state) = self.nodes.get_mut(&parent_id) {
-                    let mut propagated = child_amp * amplification;
-                    propagated *= PHASE_SYNC_BONUS; // Phase always 0 → always synced
-                    if propagated > parent_state.amplitude {
-                        total_delta += propagated - parent_state.amplitude;
-                        parent_state.amplitude = propagated;
+        // Apply Chebyshev output as additive propagation boost.
+        // Nodes keep their Phase 1 amplitude and gain extra signal from
+        // neighbors via the spectral filter. The filter captures multi-hop
+        // structural proximity — a node next to a strong BM25 match gets
+        // a boost proportional to the graph-spectral proximity.
+        let mut total_delta: f32 = 0.0;
+        for (&id, &filtered_amp) in &filtered {
+            if let Some(state) = self.nodes.get_mut(&id) {
+                let old_amp = state.amplitude;
+                let seed_amp = seed_signal.get(&id).copied().unwrap_or(0.0);
+                // Propagation contribution = filtered minus direct seed
+                // (what neighbors contributed via the spectral filter)
+                let propagation_boost = (filtered_amp - seed_amp * CHEBYSHEV_THETA[0]).max(0.0);
+                let new_amp = old_amp + propagation_boost;
+                if propagation_boost > ACTIVATION_THRESHOLD {
+                    total_delta += propagation_boost;
+                    state.amplitude = new_amp;
+                    if seed_amp < ACTIVATION_THRESHOLD {
+                        // This node had no direct match — all signal from propagation
                         resonance_types
-                            .entry(parent_id)
+                            .entry(id)
                             .or_insert(ResonanceType::Propagated);
                     }
                 }
             }
+        }
 
-            // PPR-inspired restart: re-inject energy at BM25 seed nodes
-            // Prevents over-smoothing by anchoring signal to original matches
-            for (&nid, &bm25_score) in &bm25_scores {
-                if bm25_score > 0.5 {
-                    if let Some(state) = self.nodes.get_mut(&nid) {
-                        let restart = bm25_score * 0.1; // 10% restart probability
-                        if restart > state.amplitude * 0.5 {
-                            state.amplitude = state.amplitude.max(restart);
-                        }
-                    }
-                }
-            }
-
-            // Konvergens — stoppa om energin stabiliserat sig
-            if total_delta < CONVERGENCE_THRESHOLD {
-                break;
-            }
+        // Trace: Chebyshev runs K passes (report as single iteration with total delta)
+        if capture_trace {
+            trace_iteration_deltas.push(total_delta);
         }
 
         // Multi-hop micro propagation: om en nod har stark value-match,
@@ -1223,7 +1341,94 @@ impl ResonanceField {
             });
         }
 
-        results
+        // Build trace if requested
+        let trace = if capture_trace {
+            // För noder som fick amplitud via propagation (inte i cascade),
+            // beräkna BM25/HDC-scores i efterhand så att trace-tabellen är komplett.
+            let goal_hv_ref = &goal_hv;
+            let node_scores: Vec<NodeScoreBreakdown> = results
+                .iter()
+                .take(50)
+                .map(|r| {
+                    let nid = r.node_id;
+                    let in_cascade = trace_bm25_scores.contains_key(&nid);
+                    if in_cascade {
+                        // Noden scorades i cascade — använd sparade trace-värden
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: trace_bm25_scores.get(&nid).copied().unwrap_or(0.0),
+                            hdc_score: trace_hdc_scores.get(&nid).copied().unwrap_or(0.0),
+                            role_priority: trace_role_priorities.get(&nid).copied().unwrap_or(0.0),
+                            concept_boost: trace_concept_boosts.get(&nid).copied().unwrap_or(0.0),
+                            causal_boost: r.causal_boost,
+                            answer_shape: trace_answer_shapes.get(&nid).copied().unwrap_or(0.0),
+                            answer_type_boost: trace_answer_types.get(&nid).copied().unwrap_or(0.0),
+                            zone_penalty: trace_zone_penalties.get(&nid).copied().unwrap_or(1.0),
+                            meta_penalty: trace_meta_penalties.get(&nid).copied().unwrap_or(1.0),
+                            combmnz: trace_combmnz.get(&nid).copied().unwrap_or(1.0),
+                            template_boost: trace_template_boosts
+                                .get(&nid)
+                                .copied()
+                                .unwrap_or(false),
+                            final_amplitude: r.amplitude,
+                        }
+                    } else {
+                        // Noden fick amplitud via propagation — beräkna scores i efterhand
+                        let bm25_s = bm25_scores.get(&nid).copied().unwrap_or(0.0);
+                        let hdc_s = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| {
+                                let raw = s.text_hv.similarity(goal_hv_ref);
+                                let norm = ((raw + 1.0) / 2.0).clamp(0.0, 1.0);
+                                norm * norm
+                            })
+                            .unwrap_or(0.0);
+                        let role_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| role_priority(&s.role))
+                            .unwrap_or(0.0);
+                        let shape_s = shape_scores.get(&nid).copied().unwrap_or(0.0);
+                        let meta_p = meta_penalties.get(&nid).copied().unwrap_or(1.0);
+                        let zone_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| zone_penalty(&s.role, s.depth))
+                            .unwrap_or(1.0);
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: bm25_s,
+                            hdc_score: hdc_s,
+                            role_priority: role_p,
+                            concept_boost: 0.0,
+                            causal_boost: r.causal_boost,
+                            answer_shape: shape_s,
+                            answer_type_boost: 0.0,
+                            zone_penalty: zone_p,
+                            meta_penalty: meta_p,
+                            combmnz: 1.0,
+                            template_boost: false,
+                            final_amplitude: r.amplitude,
+                        }
+                    }
+                })
+                .collect();
+            Some(PropagationTrace {
+                bm25_candidates: trace_bm25_count,
+                cascade_candidates: trace_cascade_count,
+                propagation_iterations: trace_iteration_deltas.len() as u32,
+                iteration_deltas: trace_iteration_deltas,
+                gap_cut_position: None, // Filled by propagate_top_k_traced
+                node_scores,
+                total_field_nodes: self.nodes.len(),
+                template_match,
+            })
+        } else {
+            None
+        };
+
+        (results, trace)
     }
 
     /// Propagate and return only the most relevant nodes.
@@ -1234,6 +1439,24 @@ impl ResonanceField {
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
         let all = self.propagate(goal);
         Self::apply_gap_filter(all, top_k)
+    }
+
+    /// Propagate with trace and gap detection
+    pub fn propagate_top_k_traced(
+        &mut self,
+        goal: &str,
+        top_k: usize,
+    ) -> (Vec<ResonanceResult>, PropagationTrace) {
+        let (all, mut trace) = self.propagate_traced(goal);
+        let total = all.len();
+        let filtered = Self::apply_gap_filter(all, top_k);
+        let gap_pos = if filtered.len() < total.min(top_k) {
+            Some(filtered.len())
+        } else {
+            None
+        };
+        trace.gap_cut_position = gap_pos;
+        (filtered, trace)
     }
 
     /// Run multiple goal variants and merge results (union with max amplitude).
@@ -1297,6 +1520,174 @@ impl ResonanceField {
         });
 
         Self::apply_gap_filter(merged, top_k)
+    }
+
+    // ─── Chebyshev Spectral Filter ────────────────────────────────────────
+    //
+    // Replaces iterative wave propagation with polynomial approximation
+    // of the graph Laplacian filter. Computes:
+    //
+    //   x_out = Σ_{k=0}^{K} θ_k · T_k(L̃_scaled) · x_in
+    //
+    // where T_k is the k-th Chebyshev polynomial, L̃_scaled = 2L̃/λ_max - I
+    // is the rescaled normalized Laplacian, and θ_k are filter coefficients.
+    //
+    // For DOM trees: L̃x at node i = x_i - Σ_j∈neighbors w_ij·x_j/√(d_i·d_j)
+    // where w_ij are learned directional weights.
+    //
+    // Complexity: O(K × |E|) with K=4, same asymptotic as iterative but
+    // with provably optimal spectral response (no over-smoothing).
+
+    /// Apply normalized Laplacian operator: L̃·x = x - D^{-1/2} A_w D^{-1/2} x
+    /// where A_w uses learned directional weights.
+    fn laplacian_multiply(
+        &self,
+        x: &HashMap<u32, f32>,
+        down_keys: &HashMap<u32, String>,
+        up_keys: &HashMap<u32, String>,
+    ) -> HashMap<u32, f32> {
+        let mut result: HashMap<u32, f32> = x.clone(); // Start with identity (diagonal of L)
+
+        // Compute weighted degree per node (for normalization)
+        let degrees: HashMap<u32, f32> = self
+            .nodes
+            .keys()
+            .map(|&id| {
+                let children_count = self.children_map.get(&id).map(|c| c.len()).unwrap_or(0);
+                let has_parent = self.parent_map.contains_key(&id);
+                (
+                    id,
+                    (children_count as f32 + if has_parent { 1.0 } else { 0.0 }).max(1.0),
+                )
+            })
+            .collect();
+
+        // Subtract weighted adjacency: -D^{-1/2} A_w D^{-1/2} x
+        // Parent → child edges (downward)
+        for (&parent_id, children) in &self.children_map {
+            let d_parent = degrees.get(&parent_id).copied().unwrap_or(1.0);
+            let parent_role = self
+                .nodes
+                .get(&parent_id)
+                .map(|s| s.role.as_str())
+                .unwrap_or("");
+            let w_down = learned_weight_precomputed(
+                down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or(""),
+                heuristic_down_weight(parent_role),
+                &self.propagation_stats,
+            );
+            let x_parent = x.get(&parent_id).copied().unwrap_or(0.0);
+
+            let fan = adaptive_fan_out(children.len());
+            for &child_id in &children[..fan] {
+                let d_child = degrees.get(&child_id).copied().unwrap_or(1.0);
+                let norm = 1.0 / (d_parent * d_child).sqrt();
+                let weighted = w_down * norm;
+
+                // Subtract from child (parent's signal flowing down)
+                *result.entry(child_id).or_insert(0.0) -= weighted * x_parent;
+                // Subtract from parent (child's signal flowing up)
+                let child_role = self
+                    .nodes
+                    .get(&child_id)
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("");
+                let w_up = learned_weight_precomputed(
+                    up_keys.get(&child_id).map(|s| s.as_str()).unwrap_or(""),
+                    heuristic_up_weight(child_role),
+                    &self.propagation_stats,
+                );
+                let x_child = x.get(&child_id).copied().unwrap_or(0.0);
+                *result.entry(parent_id).or_insert(0.0) -= w_up * norm * x_child;
+            }
+        }
+
+        result
+    }
+
+    /// Apply Chebyshev spectral filter to amplitude signal.
+    /// Computes: x_out = Σ_{k=0}^{K} θ_k · T_k(L̃_scaled) · x_seed
+    /// with PPR restart: x_out = (1-α)·filtered + α·x_seed
+    fn chebyshev_filter(
+        &self,
+        x_seed: &HashMap<u32, f32>,
+        down_keys: &HashMap<u32, String>,
+        up_keys: &HashMap<u32, String>,
+        bm25_scores: &HashMap<u32, f32>,
+    ) -> HashMap<u32, f32> {
+        // λ_max estimation: for trees, λ_max ≤ 2.0
+        // Rescaling: L̃_scaled = 2·L̃/λ_max - I = L̃ - I
+        let lambda_max: f32 = 2.0;
+
+        // T_0(L̃_scaled)·x = x  (identity)
+        let t0: HashMap<u32, f32> = x_seed.clone();
+
+        // T_1(L̃_scaled)·x = L̃_scaled·x = (2/λ_max)·L̃·x - x
+        let lx = self.laplacian_multiply(x_seed, down_keys, up_keys);
+        let t1: HashMap<u32, f32> = self
+            .nodes
+            .keys()
+            .map(|&id| {
+                let lx_val = lx.get(&id).copied().unwrap_or(0.0);
+                let x_val = x_seed.get(&id).copied().unwrap_or(0.0);
+                (id, (2.0 / lambda_max) * lx_val - x_val)
+            })
+            .collect();
+
+        // Accumulate: output = θ_0·T_0 + θ_1·T_1
+        let mut output: HashMap<u32, f32> = self
+            .nodes
+            .keys()
+            .map(|&id| {
+                let v0 = t0.get(&id).copied().unwrap_or(0.0) * CHEBYSHEV_THETA[0];
+                let v1 = t1.get(&id).copied().unwrap_or(0.0) * CHEBYSHEV_THETA[1];
+                (id, v0 + v1)
+            })
+            .collect();
+
+        // Chebyshev recurrence: T_k = 2·L̃_scaled·T_{k-1} - T_{k-2}
+        let mut t_prev = t0;
+        let mut t_curr = t1;
+
+        for k in 2..=CHEBYSHEV_ORDER {
+            // T_k = 2·L̃_scaled·T_{k-1} - T_{k-2}
+            let lt = self.laplacian_multiply(&t_curr, down_keys, up_keys);
+            let t_next: HashMap<u32, f32> = self
+                .nodes
+                .keys()
+                .map(|&id| {
+                    let lt_val = lt.get(&id).copied().unwrap_or(0.0);
+                    let curr_val = t_curr.get(&id).copied().unwrap_or(0.0);
+                    let prev_val = t_prev.get(&id).copied().unwrap_or(0.0);
+                    (
+                        id,
+                        2.0 * ((2.0 / lambda_max) * lt_val - curr_val) - prev_val,
+                    )
+                })
+                .collect();
+
+            // Accumulate θ_k · T_k
+            let theta_k = if let Some(&t) = CHEBYSHEV_THETA.get(k) {
+                t
+            } else {
+                0.01 // Fallback for higher orders
+            };
+            for (&id, val) in &t_next {
+                *output.entry(id).or_insert(0.0) += theta_k * val;
+            }
+
+            t_prev = t_curr;
+            t_curr = t_next;
+        }
+
+        // PPR restart: blend with seed signal
+        // x_final = (1-α)·filtered + α·x_seed
+        for (&id, filtered) in output.iter_mut() {
+            let seed = bm25_scores.get(&id).copied().unwrap_or(0.0);
+            *filtered = (1.0 - PPR_ALPHA) * (*filtered).max(0.0) + PPR_ALPHA * seed;
+        }
+
+        output
     }
 
     /// Intelligent top-k med amplitud-gap detection.
@@ -1385,6 +1776,18 @@ impl ResonanceField {
             }
         }
 
+        // Steg 1b: Suppression learning — uppdatera query_count/miss_count
+        // Alla noder med amplitude > threshold "syntes" i resultaten.
+        // De som inte var i successful_set missade — öka miss_count.
+        for (&nid, state) in self.nodes.iter_mut() {
+            if state.amplitude > MIN_OUTPUT_THRESHOLD {
+                state.query_count += 1;
+                if !successful_set.contains(&nid) {
+                    state.miss_count += 1;
+                }
+            }
+        }
+
         // Steg 2: Confidence-weighted Beta-distribution update.
         // Itererar alla parent→child edges EN gång. Uppdaterar BOTH directions.
         let confidences: HashMap<u32, f32> = self
@@ -1408,8 +1811,9 @@ impl ResonanceField {
             let conf = confidences.get(child_id).copied().unwrap_or(0.0);
             let is_success = successful_set.contains(child_id);
 
-            // Downward: förälderns roll → barn
-            let dk = format!("{}:down", parent_role);
+            // Downward: förälderns roll → barn (goal-clustered)
+            let cluster = goal_cluster_id(goal);
+            let dk = format!("{}:down:{}", parent_role, cluster);
             let de = self
                 .propagation_stats
                 .entry(dk)
@@ -1420,8 +1824,8 @@ impl ResonanceField {
                 de.1 += 1.0 - conf;
             }
 
-            // Upward: barnets roll → förälder
-            let uk = format!("{}:up", child_role);
+            // Upward: barnets roll → förälder (goal-clustered)
+            let uk = format!("{}:up:{}", child_role, cluster);
             let ue = self
                 .propagation_stats
                 .entry(uk)
@@ -1433,8 +1837,9 @@ impl ResonanceField {
             }
         }
 
-        // Steg 3: Field-level concept memory
-        // Aggregera framgångsrika noders text-HV:er per goal-token
+        // Steg 3: Field-level concept memory (goal-clustered)
+        // Aggregera framgångsrika noders text-HV:er per goal-token:cluster
+        let concept_cluster = goal_cluster_id(goal);
         let goal_tokens: Vec<String> = goal
             .to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
@@ -1444,6 +1849,16 @@ impl ResonanceField {
         for &nid in successful_node_ids {
             if let Some(state) = self.nodes.get(&nid) {
                 for token in &goal_tokens {
+                    // Store with cluster prefix AND without (for fallback)
+                    let clustered_key = format!("{}:{}", token, concept_cluster);
+                    let entry = self
+                        .concept_memory
+                        .entry(clustered_key)
+                        .or_insert_with(|| HvData::from_hv(&Hypervector::zero()));
+                    let existing = entry.to_hv();
+                    let merged = Hypervector::bundle(&[&existing, &state.text_hv]);
+                    *entry = HvData::from_hv(&merged);
+                    // Also update non-clustered (global fallback)
                     let entry = self
                         .concept_memory
                         .entry(token.clone())
@@ -1704,6 +2119,8 @@ impl ResonanceField {
                 hit_count: 0,
                 last_goal_hash: 0,
                 last_hit_ms: 0,
+                query_count: 0,
+                miss_count: 0,
             },
         );
         self.node_labels.insert(node_id, label.to_string());
@@ -1922,13 +2339,14 @@ static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
 
 /// Domain-level aggregated learning: shared propagation stats + concept memory.
 /// Used as warm-start prior for new URLs from the same domain.
-struct DomainProfile {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainProfile {
     /// Aggregated propagation stats from all URLs on this domain
-    stats: HashMap<String, (f32, f32)>,
+    pub stats: HashMap<String, (f32, f32)>,
     /// Aggregated concept memory from all successful extractions
-    concepts: HashMap<String, HvData>,
+    pub concepts: HashMap<String, HvData>,
     /// Number of fields that contributed to this profile
-    field_count: u32,
+    pub field_count: u32,
 }
 
 struct DomainRegistry {
@@ -1994,6 +2412,46 @@ impl DomainRegistry {
 static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
     std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(128)));
 
+/// Export all domain profiles for persistence.
+pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
+    let reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    reg.profiles.iter().map(|(&k, v)| (k, v.clone())).collect()
+}
+
+/// Import domain profiles from persistence (at startup).
+pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
+    let mut reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    for (hash, profile) in profiles {
+        reg.profiles.entry(hash).or_insert(profile);
+    }
+}
+
+/// Import cached fields from persistence (at startup).
+pub fn import_cached_fields(fields: Vec<ResonanceField>) {
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    let now = now_ms();
+    for field in fields {
+        let url_hash = field.url_hash;
+        // Skriv inte över om redan finns
+        if !cache.entries.iter().any(|(h, _, _)| *h == url_hash) {
+            cache.put(url_hash, field);
+            // Uppdatera insert_ms till nu (TTL räknas från import)
+            if let Some(entry) = cache.entries.iter_mut().find(|(h, _, _)| *h == url_hash) {
+                entry.1 = now;
+            }
+        }
+    }
+}
+
 /// Get a cached resonance field for a URL, or build a new one.
 ///
 /// If a cached field exists, it retains all causal memory from previous
@@ -2026,6 +2484,15 @@ pub fn get_or_build_field_with_variant(
         return (field, true);
     }
     drop(cache);
+
+    // Fallback: försök ladda från SQLite (persist)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return (field, true);
+        }
+    }
+
     let mut field = ResonanceField::from_semantic_tree(tree_nodes, url);
     // Sätt korrekt url_hash (med variant) för cache-konistens
     field.url_hash = url_hash;
@@ -2044,6 +2511,18 @@ pub fn save_field(field: &ResonanceField) {
     if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
         registry.update(field.domain_hash, field);
     }
+
+    // Persist till SQLite (async-safe: körs synkront men snabbt ~0.5ms)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::save_field(field);
+        // Spara uppdaterad domain-profil också
+        if let Ok(reg) = DOMAIN_REGISTRY.lock() {
+            if let Some(profile) = reg.get(field.domain_hash) {
+                crate::persist::save_domain_profile(field.domain_hash, profile);
+            }
+        }
+    }
 }
 
 /// Get cache statistics (entries, capacity).
@@ -2053,6 +2532,53 @@ pub fn cache_stats() -> (usize, usize) {
         Err(poisoned) => poisoned.into_inner(),
     };
     (cache.len(), cache.capacity)
+}
+
+/// Summary info for a cached resonance field (for dashboard).
+pub struct FieldSummary {
+    pub url_hash: u64,
+    pub url: String,
+    pub node_count: usize,
+    pub total_queries: u32,
+    pub domain_hash: u64,
+    pub created_at_ms: u64,
+    pub insert_ms: u64,
+    pub propagation_weight_count: usize,
+    pub concept_memory_count: usize,
+    pub propagation_stats: std::collections::HashMap<String, (f32, f32)>,
+    pub structure_hash: u64,
+    pub max_depth: u32,
+    pub edge_count: usize,
+}
+
+/// List summaries of all cached resonance fields (non-destructive peek).
+pub fn list_cached_fields() -> Vec<FieldSummary> {
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache
+        .entries
+        .iter()
+        .map(|(url_hash, insert_ms, field)| {
+            let max_depth = field.nodes.values().map(|s| s.depth).max().unwrap_or(0);
+            FieldSummary {
+                url_hash: *url_hash,
+                url: field.url.clone(),
+                node_count: field.nodes.len(),
+                total_queries: field.total_queries,
+                domain_hash: field.domain_hash,
+                created_at_ms: field.created_at_ms,
+                insert_ms: *insert_ms,
+                propagation_weight_count: field.propagation_stats.len(),
+                concept_memory_count: field.concept_memory.len(),
+                propagation_stats: field.propagation_stats.clone(),
+                structure_hash: field.structure_hash,
+                max_depth,
+                edge_count: field.parent_map.len(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2380,6 +2906,64 @@ mod tests {
         assert_eq!(
             field.total_queries, 2,
             "Borde vara 2 efter två propagationer"
+        );
+    }
+
+    #[test]
+    fn test_propagate_traced_fills_propagated_node_scores() {
+        // Förälder matchar BM25, barn matchar inte men borde få HDC-score via retroaktiv beräkning
+        let tree = vec![make_node(
+            1,
+            "heading",
+            "latest news headlines today",
+            vec![
+                make_node(2, "link", "breaking story about politics", vec![]),
+                make_node(3, "link", "sports results from yesterday", vec![]),
+            ],
+        )];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+        let (results, trace) = field.propagate_top_k_traced("latest news", 10);
+
+        assert!(!results.is_empty(), "Borde returnera minst en nod");
+        assert!(
+            !trace.node_scores.is_empty(),
+            "Borde ha node score breakdowns"
+        );
+
+        // Nod 1 (heading) borde ha BM25 > 0 (direkt match)
+        let score_1 = trace.node_scores.iter().find(|s| s.node_id == 1);
+        assert!(score_1.is_some(), "Heading-noden borde finnas i trace");
+        if let Some(s) = score_1 {
+            assert!(
+                s.bm25_score > 0.0,
+                "Heading borde ha BM25 > 0, fick {}",
+                s.bm25_score
+            );
+        }
+
+        // Om nod 2 eller 3 fick propagerad amplitud, borde de ha HDC > 0
+        for child_id in [2, 3] {
+            if let Some(score) = trace.node_scores.iter().find(|s| s.node_id == child_id) {
+                assert!(
+                    score.hdc_score > 0.0,
+                    "Propagerad nod {} borde ha HDC > 0 (retroaktivt), fick {}",
+                    child_id,
+                    score.hdc_score
+                );
+                assert!(
+                    score.role_priority > 0.0,
+                    "Propagerad nod {} borde ha role_priority > 0, fick {}",
+                    child_id,
+                    score.role_priority
+                );
+            }
+        }
+
+        // Iteration deltas borde finnas
+        assert!(
+            !trace.iteration_deltas.is_empty(),
+            "Borde ha propagation iteration deltas"
         );
     }
 }

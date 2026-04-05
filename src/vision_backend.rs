@@ -904,7 +904,7 @@ fn wait_for_page_settle(
             })()
         "#;
 
-        let (pending, ready, since_activity, dom_len) = tab
+        let (pending, ready, _since_activity, dom_len) = tab
             .evaluate(status_js, false)
             .ok()
             .and_then(|v| v.value)

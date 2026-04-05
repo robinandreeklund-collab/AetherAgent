@@ -27,6 +27,8 @@ pub struct DomEvalResult {
     /// URLs som JS anropade via fetch() — för Rust-side interception (BUGG J)
     #[cfg_attr(not(feature = "js-eval"), allow(dead_code))]
     pub fetched_urls: Vec<String>,
+    /// Cookies satta av JS via document.cookie (propageras tillbaka till HTTP-session)
+    pub cookies: String,
 }
 
 /// En mutation som JS-koden utförde på DOM:en — Cow undviker allokering för statiska strängar

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherAgent Live Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0a0e14;--bg2:#0d1117;--bg3:#161b22;
+    --border:#1d2433;--border2:#2d3748;
+    --text:#b3b1ad;--text2:#8b949e;--text3:#484f58;
+    --accent:#ffb432;--accent2:#ff8c00;
+    --green:#28c840;--red:#ff5f57;--yellow:#ffbd2e;--blue:#58a6ff;
+    --cyan:#56d4dd;--purple:#bc8cff;--pink:#f778ba;
+  }
+  body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow-x:hidden}
+  .scanline{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:100;background:repeating-linear-gradient(0deg,rgba(0,0,0,0.03) 0px,rgba(0,0,0,0.03) 1px,transparent 1px,transparent 2px)}
+  .header{background:var(--bg3);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:50}
+  .header h1{font-size:16px;font-weight:700;color:var(--accent)}
+  .header .status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)}
+  .header .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .header .refresh-btn{margin-left:auto;padding:6px 14px;font-size:11px;background:transparent;color:var(--accent);border:1px solid var(--accent);border-radius:4px;cursor:pointer;font-family:inherit;transition:all 0.15s}
+  .header .refresh-btn:hover{background:var(--accent);color:var(--bg)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px;padding:20px 24px}
+  .panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg3);border-bottom:1px solid var(--border);font-size:12px}
+  .panel-header h2{font-size:13px;font-weight:600;color:var(--text)}
+  .panel-header .badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(255,180,50,0.15);color:var(--accent)}
+  .panel-body{padding:16px;font-size:12px;line-height:1.6}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;color:var(--text2);font-weight:400;font-size:11px;padding:6px 8px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:0.5px}
+  td{padding:6px 8px;border-bottom:1px solid rgba(29,36,51,0.5);vertical-align:top}
+  tr:hover td{background:rgba(255,180,50,0.03)}
+  .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;padding:20px 24px 4px}
+  .stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+  .stat-card .label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+  .stat-card .value{font-size:22px;font-weight:700;color:var(--accent);margin-top:4px}
+  .stat-card .sub{font-size:10px;color:var(--text2);margin-top:2px}
+  .progress-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
+  .progress-fill{height:100%;border-radius:3px;transition:width 0.4s ease}
+  .fill-green{background:linear-gradient(90deg,var(--green),#45d160)}
+  .fill-yellow{background:linear-gradient(90deg,var(--yellow),var(--accent))}
+  .fill-red{background:linear-gradient(90deg,var(--red),#ff7b72)}
+  .fill-blue{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+  .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;margin:1px 2px}
+  .tag-green{background:rgba(40,200,64,0.15);color:var(--green)}
+  .tag-yellow{background:rgba(255,189,46,0.15);color:var(--yellow)}
+  .tag-red{background:rgba(255,95,87,0.15);color:var(--red)}
+  .tag-blue{background:rgba(88,166,255,0.15);color:var(--blue)}
+  .tag-purple{background:rgba(188,140,255,0.15);color:var(--purple)}
+  .tag-cyan{background:rgba(86,212,221,0.15);color:var(--cyan)}
+  .weight-bar{display:flex;align-items:center;gap:6px}
+  .weight-bar .bar{width:80px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+  .weight-bar .bar-fill{height:100%;background:var(--cyan);border-radius:2px}
+  .weight-bar .val{font-size:10px;color:var(--text2);min-width:36px;text-align:right}
+  .empty{color:var(--text3);font-style:italic;padding:20px;text-align:center}
+  .full-width{grid-column:1/-1}
+  .timestamp{font-size:10px;color:var(--text3);text-align:right;padding:8px 24px 16px}
+  .loading{color:var(--text3);padding:24px;text-align:center}
+  .loading::after{content:'...';animation:dots 1.5s steps(3,end) infinite}
+  @keyframes dots{0%{content:''}33%{content:'.'}66%{content:'..'}100%{content:'...'}}
+  .explore-form{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .explore-form input{flex:1;min-width:200px;padding:6px 10px;font-size:12px;background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:4px;font-family:inherit}
+  .explore-form button{padding:6px 16px;font-size:12px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:600}
+  .explore-form button:hover{background:var(--accent2)}
+  .heat{font-weight:600}
+  .heat-high{color:var(--green)}.heat-med{color:var(--yellow)}.heat-low{color:var(--red)}.heat-none{color:var(--text3)}
+  .pipe-stage{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:11px;background:var(--bg3);border:1px solid var(--border);margin:2px}
+  .pipe-arrow{color:var(--text3);margin:0 2px}
+  .delta-bar{display:inline-block;height:12px;background:var(--cyan);border-radius:2px;min-width:2px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="header">
+  <h1>AetherAgent Live Dashboard</h1>
+  <div class="status"><span class="dot"></span><span id="conn-status">Connecting</span></div>
+  <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+</div>
+
+<div class="stats-row" id="stats-row">
+  <div class="stat-card"><div class="label">RSS Memory</div><div class="value" id="st-rss">--</div><div class="sub" id="st-rss-sub">peak --</div></div>
+  <div class="stat-card"><div class="label">Threads</div><div class="value" id="st-threads">--</div><div class="sub">active</div></div>
+  <div class="stat-card"><div class="label">CRFR Cache</div><div class="value" id="st-cache">--</div><div class="sub" id="st-cache-sub">of -- capacity</div></div>
+  <div class="stat-card"><div class="label">Endpoints</div><div class="value" id="st-endpoints">--</div><div class="sub">HTTP routes</div></div>
+  <div class="stat-card"><div class="label">Vision</div><div class="value" id="st-vision">--</div><div class="sub">ONNX model</div></div>
+  <div class="stat-card"><div class="label">Phases</div><div class="value" id="st-phases">--</div><div class="sub">completed</div></div>
+</div>
+
+<div class="grid">
+  <!-- 1. CRFR Query Explorer -->
+  <div class="panel full-width">
+    <div class="panel-header"><h2>CRFR Query Explorer</h2><span class="badge">Pipeline Trace</span></div>
+    <div class="panel-body">
+      <div class="explore-form">
+        <input id="ex-url" placeholder="URL (e.g. https://svt.se)" value="">
+        <input id="ex-goal" placeholder="Goal (e.g. hitta senaste nyheterna)" value="">
+        <button onclick="runExplore()">Explore CRFR</button>
+      </div>
+      <div id="explore-body"><div class="empty">Enter a URL and goal above to trace the full CRFR pipeline</div></div>
+    </div>
+  </div>
+
+  <!-- 2. Site & Cache Overview -->
+  <div class="panel">
+    <div class="panel-header"><h2>Site &amp; Cache Overview</h2><span class="badge" id="cache-badge">0 fields</span></div>
+    <div class="panel-body" id="crfr-cache-body"><div class="loading">Loading CRFR cache</div></div>
+  </div>
+
+  <!-- 3. Propagation Weights & Causal Memory -->
+  <div class="panel">
+    <div class="panel-header"><h2>Propagation Weights &amp; Causal Memory</h2><span class="badge">Beta(&alpha;,&beta;)</span></div>
+    <div class="panel-body" id="weights-body"><div class="empty">Select a field from cache to view weights</div></div>
+  </div>
+
+  <!-- 4. WPT Compatibility -->
+  <div class="panel full-width">
+    <div class="panel-header"><h2>WPT Compatibility Status</h2><span class="badge" id="wpt-badge">baseline</span></div>
+    <div class="panel-body" id="wpt-body"><div class="loading">Loading WPT data</div></div>
+  </div>
+
+  <!-- 5. SPA Runtime Monitor -->
+  <div class="panel">
+    <div class="panel-header"><h2>SPA Runtime Monitor</h2><span class="badge" id="spa-badge">QuickJS</span></div>
+    <div class="panel-body" id="spa-body"><div class="loading">Loading</div></div>
+  </div>
+
+  <!-- 6. Engine Capabilities -->
+  <div class="panel">
+    <div class="panel-header"><h2>Engine Capabilities</h2><span class="badge" id="engine-badge">Fas 18</span></div>
+    <div class="panel-body" id="engine-body"><div class="loading">Loading</div></div>
+  </div>
+
+  <!-- 7. Persistent Storage -->
+  <div class="panel full-width">
+    <div class="panel-header"><h2>Persistent Storage (SQLite)</h2><span class="badge" id="persist-badge">--</span></div>
+    <div class="panel-body" id="persist-body"><div class="loading">Loading</div></div>
+  </div>
+</div>
+
+<div class="timestamp" id="ts">Last updated: --</div>
+
+<script>
+const API = window.location.origin;
+async function fetchJson(path) { try { const r = await fetch(API + path); return r.ok ? await r.json() : null; } catch { return null; } }
+async function postJson(path, body) { try { const r = await fetch(API + path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch { return null; } }
+function fmtNum(n) { return n != null ? n.toLocaleString() : '--'; }
+function fmtPct(n) { return n != null ? n.toFixed(1) + '%' : '--'; }
+function fmtMs(n) { return n != null ? (n < 1000 ? n + 'ms' : (n/1000).toFixed(1) + 's') : '--'; }
+function progressClass(pct) { return pct >= 80 ? 'fill-green' : pct >= 50 ? 'fill-yellow' : 'fill-red'; }
+function heatClass(v, max) { const r = max > 0 ? v / max : 0; return r > 0.5 ? 'heat-high' : r > 0.1 ? 'heat-med' : r > 0 ? 'heat-low' : 'heat-none'; }
+function truncUrl(u, n) { return u && u.length > n ? u.substring(0, n) + '...' : (u || ''); }
+
+function renderSnapshot(snap) {
+  if (!snap) return;
+  document.getElementById('st-rss').textContent = snap.memory_stats.rss_mb || '0';
+  document.getElementById('st-rss-sub').textContent = `peak ${snap.memory_stats.peak_rss_mb || 0} MB`;
+  document.getElementById('st-threads').textContent = snap.memory_stats.threads || '0';
+  document.getElementById('st-cache').textContent = snap.crfr_cache.total_entries;
+  document.getElementById('st-cache-sub').textContent = `of ${snap.crfr_cache.capacity} (TTL ${snap.crfr_cache.ttl_ms/1000}s)`;
+  document.getElementById('st-endpoints').textContent = snap.endpoint_count;
+  document.getElementById('st-vision').textContent = snap.vision_available ? 'Loaded' : 'Off';
+  document.getElementById('st-phases').textContent = snap.engine ? snap.engine.phases_completed : '--';
+  document.getElementById('conn-status').textContent = 'Live';
+  document.getElementById('ts').textContent = `Last updated: ${new Date(snap.timestamp_ms).toLocaleTimeString()}`;
+  // Render SPA panel
+  if (snap.spa_runtime) renderSpa(snap.spa_runtime);
+  // Render Engine panel
+  if (snap.engine) renderEngine(snap.engine);
+}
+
+function renderCrfrCache(cache) {
+  const body = document.getElementById('crfr-cache-body');
+  const badge = document.getElementById('cache-badge');
+  if (!cache || !cache.entries.length) {
+    body.innerHTML = '<div class="empty">No cached CRFR fields. Parse a page with /api/parse-crfr to populate.</div>';
+    badge.textContent = '0 fields';
+    return;
+  }
+  badge.textContent = `${cache.entries.length} fields`;
+  let html = '<table><tr><th>URL</th><th>Nodes</th><th>Q</th><th>W/C</th><th>Depth</th><th>TTL</th><th></th></tr>';
+  for (const e of cache.entries) {
+    const ttlPct = cache.ttl_ms > 0 ? (e.ttl_remaining_ms / cache.ttl_ms * 100) : 0;
+    html += `<tr>
+      <td style="color:var(--cyan);font-size:11px" title="${e.url}">${truncUrl(e.url, 35) || e.url_hash}</td>
+      <td>${fmtNum(e.node_count)}</td>
+      <td>${e.total_queries}</td>
+      <td>${e.propagation_weight_count}<span style="color:var(--text3)">w</span> ${e.concept_memory_count}<span style="color:var(--text3)">c</span></td>
+      <td style="color:var(--text2)">${e.max_depth}</td>
+      <td><div class="progress-bar" style="width:50px;display:inline-block;vertical-align:middle"><div class="progress-fill ${ttlPct > 50 ? 'fill-green' : ttlPct > 20 ? 'fill-yellow' : 'fill-red'}" style="width:${ttlPct}%"></div></div> <span style="color:var(--text3);font-size:10px">${(e.ttl_remaining_ms/1000).toFixed(0)}s</span></td>
+      <td><button onclick="loadWeights('${e.url_hash}')" style="background:none;border:1px solid var(--border2);color:var(--blue);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit">Inspect</button></td>
+    </tr>`;
+  }
+  html += '</table>';
+  body.innerHTML = html;
+}
+
+async function loadWeights(urlHash) {
+  const body = document.getElementById('weights-body');
+  body.innerHTML = '<div class="loading">Loading weights</div>';
+  const data = await postJson('/api/dashboard/weights', {url_hash: urlHash});
+  if (!data || data.error) { body.innerHTML = `<div class="empty">${data?.error || 'Failed to load'}</div>`; return; }
+  let html = `<div style="margin-bottom:10px;color:var(--text2);font-size:11px">
+    <span style="color:var(--cyan)" title="${data.url}">${truncUrl(data.url, 45)}</span><br>
+    Domain: <span style="color:var(--text)">${data.domain_hash}</span> |
+    Concepts: <span style="color:var(--accent)">${data.concept_memory_count}</span> |
+    Age: <span style="color:var(--text)">${fmtMs(data.field_age_ms)}</span> |
+    Depth: <span style="color:var(--text)">${data.max_depth}</span> |
+    Edges: <span style="color:var(--text)">${data.edge_count}</span> |
+    Struct: <span style="color:var(--text3)">${data.structure_hash}</span>
+  </div>`;
+  if (!data.propagation_weights.length) {
+    html += '<div class="empty">No learned weights yet (needs feedback via /api/crfr-feedback)</div>';
+  } else {
+    html += '<table><tr><th>Role:Dir</th><th>Mean</th><th>Conf</th><th>Distribution</th></tr>';
+    for (const w of data.propagation_weights) {
+      const pct = (w.mean * 100).toFixed(0);
+      html += `<tr>
+        <td style="color:var(--purple)">${w.key}</td>
+        <td>${w.mean.toFixed(3)}</td>
+        <td style="color:var(--text2)">${w.confidence.toFixed(2)}</td>
+        <td><div class="weight-bar"><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div><div class="val">&alpha;=${w.alpha.toFixed(1)} &beta;=${w.beta.toFixed(1)}</div></div></td>
+      </tr>`;
+    }
+    html += '</table>';
+  }
+  body.innerHTML = html;
+}
+
+function renderWpt(panel) {
+  const body = document.getElementById('wpt-body');
+  const badge = document.getElementById('wpt-badge');
+  if (!panel) { body.innerHTML = '<div class="empty">Failed to load WPT data</div>'; return; }
+  badge.textContent = `baseline ${panel.last_updated}`;
+  let html = `<div style="margin-bottom:12px;font-size:13px">
+    Overall: <span style="color:var(--accent);font-weight:700">${fmtNum(panel.total_passed)}</span> / ${fmtNum(panel.total_cases)} tests passing
+    (<span style="color:var(--accent)">${panel.overall_rate.toFixed(1)}%</span>)
+    <div class="progress-bar" style="margin-top:6px;height:8px"><div class="progress-fill ${progressClass(panel.overall_rate)}" style="width:${panel.overall_rate}%"></div></div>
+  </div>`;
+  html += '<table><tr><th>Suite</th><th>Passed</th><th>Total</th><th>Rate</th><th style="width:120px">Progress</th><th>Missing APIs</th></tr>';
+  for (const s of panel.suites) {
+    const apis = (s.missing_apis || []).map(a => `<span class="tag tag-red">${a}</span>`).join('');
+    html += `<tr>
+      <td style="color:var(--cyan)">${s.suite}</td>
+      <td style="color:var(--green)">${fmtNum(s.passed)}</td>
+      <td>${fmtNum(s.total_cases)}</td>
+      <td style="font-weight:600;color:${s.rate_percent >= 80 ? 'var(--green)' : s.rate_percent >= 50 ? 'var(--yellow)' : 'var(--red)'}">${fmtPct(s.rate_percent)}</td>
+      <td><div class="progress-bar"><div class="progress-fill ${progressClass(s.rate_percent)}" style="width:${s.rate_percent}%"></div></div></td>
+      <td>${apis || '<span class="tag tag-green">Complete</span>'}</td>
+    </tr>`;
+  }
+  html += '</table>';
+  body.innerHTML = html;
+}
+
+function renderSpa(spa) {
+  const body = document.getElementById('spa-body');
+  const badge = document.getElementById('spa-badge');
+  const runs = spa.total_eval_runs || 0;
+  badge.textContent = runs > 0 ? `${runs} evals` : spa.engine.split(' ')[0];
+  const bool = v => v ? '<span class="tag tag-green">Active</span>' : '<span class="tag tag-red">Off</span>';
+  const hasStats = runs > 0;
+  let statsHtml = '';
+  if (hasStats) {
+    statsHtml = `
+    <tr><td colspan="2" style="color:var(--accent);font-weight:600;padding-top:10px;border-bottom:1px solid var(--border)">Cumulative Runtime Stats</td></tr>
+    <tr><td style="color:var(--text2)">Eval Runs</td><td style="color:var(--accent);font-weight:600">${fmtNum(runs)}</td></tr>
+    <tr><td style="color:var(--text2)">Total Ticks</td><td>${fmtNum(spa.total_ticks)}</td></tr>
+    <tr><td style="color:var(--text2)">Timers Fired</td><td>${fmtNum(spa.total_timers_fired)}</td></tr>
+    <tr><td style="color:var(--text2)">rAF Fired</td><td>${fmtNum(spa.total_rafs_fired)}</td></tr>
+    <tr><td style="color:var(--text2)">Mutations</td><td>${fmtNum(spa.total_mutations_delivered)}</td></tr>
+    <tr><td style="color:var(--text2)">Peak Ticks (single)</td><td>${fmtNum(spa.peak_ticks_single_run)}</td></tr>
+    <tr><td style="color:var(--text2)">Avg Ticks/Run</td><td>${runs > 0 ? (spa.total_ticks / runs).toFixed(1) : '0'}</td></tr>`;
+  }
+  body.innerHTML = `<table>
+    <tr><td style="color:var(--text2)">Engine</td><td>${spa.engine}</td></tr>
+    <tr><td style="color:var(--text2)">DOM Bridge</td><td>${spa.dom_element_wrappers}+ element types, ${spa.dom_methods}+ methods</td></tr>
+    <tr><td style="color:var(--text2)">MutationObserver</td><td>${bool(spa.mutation_observer)}</td></tr>
+    <tr><td style="color:var(--text2)">Event Dispatch</td><td>${bool(spa.event_dispatch)}</td></tr>
+    <tr><td style="color:var(--text2)">Computed Style</td><td>${bool(spa.computed_style)}</td></tr>
+    <tr><td style="color:var(--text2)">Form State</td><td>${bool(spa.form_state)}</td></tr>
+    <tr><td colspan="2" style="color:var(--text3);font-weight:600;padding-top:10px;border-bottom:1px solid var(--border)">Sandbox Limits</td></tr>
+    <tr><td style="color:var(--text2)">Max Timers</td><td>${spa.max_timers}</td></tr>
+    <tr><td style="color:var(--text2)">Max Delay</td><td>${spa.max_delay_ms}ms</td></tr>
+    <tr><td style="color:var(--text2)">Max Ticks</td><td>${fmtNum(spa.max_ticks)}</td></tr>
+    <tr><td style="color:var(--text2)">Max Runtime</td><td>${(spa.max_runtime_us/1000).toFixed(0)}ms</td></tr>
+    <tr><td style="color:var(--text2)">rAF Interval</td><td>${spa.raf_interval_ms}ms</td></tr>
+    ${statsHtml}
+  </table>`;
+}
+
+function renderEngine(eng) {
+  const body = document.getElementById('engine-body');
+  const badge = document.getElementById('engine-badge');
+  badge.textContent = `Fas ${eng.phases_completed}`;
+  let html = '<div style="margin-bottom:10px"><b style="color:var(--text)">Scoring Pipeline</b><br>';
+  for (const s of eng.scoring_pipeline) html += `<span class="pipe-stage">${s}</span><span class="pipe-arrow">&#8594;</span>`;
+  html = html.replace(/&#8594;<\/span>$/, '</span>');
+  html += '</div>';
+  html += `<div style="margin-bottom:10px;font-size:11px;color:var(--text2)">
+    Trust patterns: <span style="color:var(--accent)">${eng.trust_patterns}</span> |
+    Firewall: <span style="color:var(--accent)">L1/L2/L3</span> (${eng.firewall_levels} levels) |
+    Hydration: <span style="color:var(--accent)">${eng.hydration_frameworks}</span> frameworks
+  </div>`;
+  html += '<div style="margin-bottom:8px"><b style="color:var(--text)">Render Tiers</b></div>';
+  for (const t of eng.render_tiers) html += `<div style="margin-bottom:4px"><span class="tag tag-blue">${t}</span></div>`;
+  html += '<div style="margin-top:10px;margin-bottom:8px"><b style="color:var(--text)">Features</b></div>';
+  html += '<table><tr><th>Feature</th><th>Status</th><th>Detail</th></tr>';
+  for (const f of eng.features) {
+    const sc = f.status === 'active' ? 'tag-green' : 'tag-yellow';
+    html += `<tr><td style="color:var(--cyan)">${f.name}</td><td><span class="tag ${sc}">${f.status}</span></td><td style="color:var(--text2)">${f.detail}</td></tr>`;
+  }
+  html += '</table>';
+  body.innerHTML = html;
+}
+
+async function runExplore() {
+  const url = document.getElementById('ex-url').value.trim();
+  const goal = document.getElementById('ex-goal').value.trim();
+  const body = document.getElementById('explore-body');
+  if (!url || !goal) { body.innerHTML = '<div class="empty">Enter both URL and goal</div>'; return; }
+  body.innerHTML = '<div class="loading">Fetching page &amp; running CRFR pipeline</div>';
+  // Step 1: fetch HTML
+  const fetchRes = await postJson('/api/fetch', {url});
+  if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
+  // Step 2: explore CRFR (pass Set-Cookie headers for JS cookie bridge)
+  const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
+  if (!data || data.error) { body.innerHTML = `<div class="empty">${data?.error || 'Explore failed'}</div>`; return; }
+  renderExplore(data);
+}
+
+function renderExplore(d) {
+  const body = document.getElementById('explore-body');
+  // Pipeline stages
+  const maxDelta = d.iteration_deltas.length > 0 ? Math.max(...d.iteration_deltas) : 1;
+  let deltaHtml = d.iteration_deltas.map((delta, i) => {
+    const w = Math.max(2, (delta / maxDelta) * 60);
+    return `<span title="Iteration ${i+1}: delta=${delta.toFixed(4)}"><span class="delta-bar" style="width:${w}px"></span></span>`;
+  }).join(' ');
+
+  let html = `<div style="margin-bottom:12px">
+    <span class="pipe-stage" style="border-color:var(--blue)">BM25 <b>${d.bm25_candidates}</b></span>
+    <span class="pipe-arrow">&#8594;</span>
+    <span class="pipe-stage" style="border-color:var(--purple)">Cascade <b>${d.cascade_candidates}</b></span>
+    <span class="pipe-arrow">&#8594;</span>
+    <span class="pipe-stage" style="border-color:var(--cyan)">Wave x${d.propagation_iterations} ${deltaHtml}</span>
+    <span class="pipe-arrow">&#8594;</span>
+    <span class="pipe-stage" style="border-color:var(--accent)">Top <b>${d.top_nodes.length}</b>${d.gap_cut_position != null ? ' (gap@' + d.gap_cut_position + ')' : ''}</span>
+    ${d.template_match ? '<span class="tag tag-purple">Template Match</span>' : ''}
+    <span style="color:var(--text3);font-size:11px;margin-left:8px">${d.total_field_nodes} nodes, ${d.propagation_ms}ms, cache=${d.cache_hit}</span>
+  </div>`;
+
+  // Node score breakdown
+  if (d.node_scores && d.node_scores.length > 0) {
+    html += '<div style="margin-bottom:8px"><b style="color:var(--text)">Score Breakdown (top nodes)</b></div>';
+    html += '<div style="overflow-x:auto"><table><tr><th>ID</th><th>Role</th><th>Label</th><th>BM25</th><th>HDC</th><th>Role</th><th>Causal</th><th>Shape</th><th>CombMNZ</th><th>Zone</th><th>Meta</th><th>Final</th></tr>';
+    const maxAmp = d.node_scores.length > 0 ? Math.max(...d.node_scores.map(n => n.final_amplitude)) : 1;
+    for (const n of d.node_scores.slice(0, 20)) {
+      html += `<tr>
+        <td style="color:var(--text3)">${n.node_id}</td>
+        <td><span class="tag tag-cyan">${n.role}</span></td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${n.label}">${n.label}</td>
+        <td class="heat ${heatClass(n.bm25_score, 1)}">${n.bm25_score.toFixed(3)}</td>
+        <td class="heat ${heatClass(n.hdc_score, 0.5)}">${n.hdc_score.toFixed(3)}</td>
+        <td class="heat ${heatClass(n.role_priority, 1)}">${n.role_priority.toFixed(2)}</td>
+        <td class="heat ${heatClass(n.causal_boost, 0.3)}">${n.causal_boost.toFixed(3)}</td>
+        <td class="heat ${heatClass(n.answer_shape, 0.5)}">${n.answer_shape.toFixed(2)}</td>
+        <td class="heat ${heatClass(n.combmnz - 1, 0.5)}">${n.combmnz.toFixed(2)}</td>
+        <td style="color:${n.zone_penalty < 1 ? 'var(--red)' : 'var(--text3)'}">${n.zone_penalty.toFixed(2)}</td>
+        <td style="color:${n.meta_penalty < 1 ? 'var(--red)' : 'var(--text3)'}">${n.meta_penalty.toFixed(2)}</td>
+        <td class="heat ${heatClass(n.final_amplitude, maxAmp)}" style="font-weight:700">${n.final_amplitude.toFixed(3)}</td>
+      </tr>`;
+    }
+    html += '</table></div>';
+  }
+
+  // Top ranked results
+  if (d.top_nodes && d.top_nodes.length > 0) {
+    html += '<div style="margin-top:12px;margin-bottom:8px"><b style="color:var(--text)">Ranked Results</b></div>';
+    html += '<table><tr><th>#</th><th>ID</th><th>Role</th><th>Label</th><th>Amplitude</th><th>Confidence</th><th>Type</th><th>Causal</th></tr>';
+    d.top_nodes.forEach((n, i) => {
+      const typeClass = n.resonance_type === 'Direct' ? 'tag-green' : n.resonance_type === 'CausalMemory' ? 'tag-purple' : 'tag-blue';
+      html += `<tr>
+        <td style="color:var(--accent);font-weight:700">${i+1}</td>
+        <td style="color:var(--text3)">${n.node_id}</td>
+        <td><span class="tag tag-cyan">${n.role}</span></td>
+        <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${n.label}">${n.label}</td>
+        <td style="color:var(--accent);font-weight:600">${n.amplitude.toFixed(3)}</td>
+        <td style="color:var(--green)">${(n.confidence * 100).toFixed(1)}%</td>
+        <td><span class="tag ${typeClass}">${n.resonance_type}</span></td>
+        <td class="heat ${heatClass(n.causal_boost, 0.3)}">${n.causal_boost.toFixed(3)}</td>
+      </tr>`;
+    });
+    html += '</table>';
+  }
+  body.innerHTML = html;
+}
+
+function renderPersistence(data) {
+  const body = document.getElementById('persist-body');
+  const badge = document.getElementById('persist-badge');
+  if (!data || data.enabled === false) {
+    body.innerHTML = '<div class="empty">Persistence not enabled (no SQLite)</div>';
+    badge.textContent = 'disabled';
+    return;
+  }
+  const dbKb = (data.db_size_bytes / 1024).toFixed(1);
+  badge.textContent = `${data.field_count} fields, ${data.domain_count} domains, ${dbKb} KB`;
+
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+
+  // Left: stored fields
+  html += '<div>';
+  html += `<div style="margin-bottom:8px;color:var(--text);font-weight:600">Stored Fields (${data.field_count})</div>`;
+  if (data.fields && data.fields.length > 0) {
+    html += '<table><tr><th>URL</th><th>Size</th><th>Updated</th></tr>';
+    for (const f of data.fields) {
+      const age = Date.now() - f.updated_at;
+      const ageStr = age < 60000 ? `${(age/1000).toFixed(0)}s ago` : age < 3600000 ? `${(age/60000).toFixed(0)}m ago` : `${(age/3600000).toFixed(1)}h ago`;
+      const sizeKb = (f.data_size_bytes / 1024).toFixed(1);
+      html += `<tr>
+        <td style="color:var(--cyan);font-size:11px" title="${f.url}">${truncUrl(f.url, 35)}</td>
+        <td style="color:var(--text2)">${sizeKb} KB</td>
+        <td style="color:var(--text3)">${ageStr}</td>
+      </tr>`;
+    }
+    html += '</table>';
+  } else {
+    html += '<div class="empty">No stored fields</div>';
+  }
+  html += '</div>';
+
+  // Right: domain profiles
+  html += '<div>';
+  html += `<div style="margin-bottom:8px;color:var(--text);font-weight:600">Domain Profiles (${data.domain_count})</div>`;
+  if (data.domains && data.domains.length > 0) {
+    html += '<table><tr><th>Domain</th><th>Weights</th><th>Concepts</th><th>Fields</th><th>Size</th></tr>';
+    for (const d of data.domains) {
+      const sizeKb = (d.data_size_bytes / 1024).toFixed(1);
+      html += `<tr>
+        <td style="color:var(--purple)">${d.domain_hash}</td>
+        <td style="color:var(--accent)">${d.weight_count}</td>
+        <td>${d.concept_count}</td>
+        <td style="color:var(--text2)">${d.field_count}</td>
+        <td style="color:var(--text3)">${sizeKb} KB</td>
+      </tr>`;
+    }
+    html += '</table>';
+  } else {
+    html += '<div class="empty">No domain profiles</div>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+async function refreshAll() {
+  const [snap, wpt, persist] = await Promise.all([
+    fetchJson('/api/dashboard/snapshot'),
+    fetchJson('/api/dashboard/wpt'),
+    fetchJson('/api/dashboard/persistence'),
+  ]);
+  renderSnapshot(snap);
+  if (snap) renderCrfrCache(snap.crfr_cache);
+  renderWpt(wpt);
+  renderPersistence(persist);
+}
+
+refreshAll();
+setInterval(refreshAll, 5000);
+</script>
+</body>
+</html>

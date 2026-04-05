@@ -112,6 +112,11 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         request = request.header(key.as_str(), value.as_str());
     }
 
+    // Injicera cookies (från JS cookie bridge — bot challenge completion)
+    if !config.cookies.is_empty() {
+        request = request.header("Cookie", config.cookies.as_str());
+    }
+
     // Utför request
     let response = request
         .send()
@@ -169,6 +174,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         }
     }
 
+    // Extrahera Set-Cookie headers INNAN body konsumeras (response.bytes() tar ownership)
+    let set_cookie_headers: Vec<String> = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+        .collect();
+
     let body_bytes = response
         .bytes()
         .await
@@ -192,6 +205,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         fetch_time_ms,
         body_size_bytes,
         cross_domain_redirect,
+        set_cookie_headers,
     })
 }
 

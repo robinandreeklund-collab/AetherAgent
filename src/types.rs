@@ -117,6 +117,9 @@ pub struct SemanticTree {
     /// Async-lagret (server/MCP) kan fetcha dessa och merge-a noder i trädet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_fetch_urls: Vec<String>,
+    /// Cookies satta av JS under evaluation (för re-fetch vid bot challenge)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub js_cookies: String,
 }
 
 /// Varning när trust shield hittar misstänkt innehåll
@@ -291,6 +294,9 @@ pub struct FetchConfig {
     /// Timeout per XHR-anrop i ms (Fas 10)
     #[serde(default = "FetchConfig::default_intercept_timeout_ms")]
     pub intercept_timeout_ms: u64,
+    /// Cookies to inject as Cookie header (name=value; name2=value2)
+    #[serde(default)]
+    pub cookies: String,
 }
 
 /// Resultat av en HTTP-fetch
@@ -313,6 +319,9 @@ pub struct FetchResult {
     /// Om redirects gick till en annan domän (potentiell OAuth/tracking)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cross_domain_redirect: bool,
+    /// Set-Cookie headers from HTTP response (for JS cookie bridge)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub set_cookie_headers: Vec<String>,
 }
 
 /// Kombinerat fetch + parse-resultat
@@ -682,6 +691,7 @@ impl Default for FetchConfig {
             intercept_xhr: false,
             intercept_max: Self::default_intercept_max(),
             intercept_timeout_ms: Self::default_intercept_timeout_ms(),
+            cookies: String::new(),
         }
     }
 }

@@ -39,6 +39,9 @@ rquickjs = { version = "0.11", features = ["bindgen"], optional = true }
 # HTTP fetch (Fas 7 – optional, for standalone page fetching)
 reqwest = { version = "0.12", features = ["cookies", "gzip", "brotli", "rustls-tls", "rustls-tls-native-roots"], optional = true, default-features = false }
 
+# Persistence (SQLite — optional, for CRFR field/domain caching)
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+
 # Fas 8: Ethical Engine – robots.txt (Google's parser) + rate limiting
 robotstxt = { version = "0.3", optional = true }
 governor = { version = "0.10", optional = true }
@@ -89,7 +92,8 @@ base64 = "0.22"
 
 [features]
 default = []
-server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision", "embeddings"]
+server = ["axum", "tokio", "tokio-stream", "tower-http", "js-eval", "fetch", "base64", "blitz", "vision", "embeddings", "persist"]
+persist = ["rusqlite"]
 js-eval = ["rquickjs"]
 fetch = ["reqwest", "tokio", "robotstxt", "governor"]
 mcp = ["rmcp", "tokio", "schemars", "base64", "blitz", "reqwest", "vision", "fetch", "js-eval", "axum", "tower-http", "embeddings"]

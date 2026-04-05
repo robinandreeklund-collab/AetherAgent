@@ -478,6 +478,7 @@ mod tests {
             xhr_intercepted: 0,
             xhr_blocked: 0,
             pending_fetch_urls: vec![],
+            js_cookies: String::new(),
         };
         let tree2 = tree1.clone();
         let delta = diff_trees(&tree1, &tree2);

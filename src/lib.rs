@@ -10,6 +10,7 @@ pub(crate) mod compiler;
 mod css_cascade;
 #[cfg(feature = "blitz")]
 pub mod css_compiler;
+pub mod dashboard;
 pub(crate) mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
@@ -29,6 +30,8 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+#[cfg(feature = "persist")]
+pub mod persist;
 pub mod resonance;
 pub mod scoring;
 pub mod search;
@@ -52,6 +55,27 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wasm_bindgen::prelude::*;
+
+/// Parse Set-Cookie headers to document.cookie format.
+/// "session=abc; Path=/; HttpOnly" → "session=abc"
+/// Multiple headers → "session=abc; lang=en"
+#[cfg(feature = "js-eval")]
+fn parse_set_cookies_to_document_cookie(headers: &[String]) -> String {
+    headers
+        .iter()
+        .filter_map(|h| {
+            // Ta name=value-delen (före första ';')
+            let kv = h.split(';').next()?;
+            let kv = kv.trim();
+            if kv.contains('=') {
+                Some(kv.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
 
 // Global delad TieredBackend så att tier-statistik ackumuleras över anrop
 static GLOBAL_TIERED_BACKEND: OnceLock<vision_backend::TieredBackend> = OnceLock::new();
@@ -260,7 +284,7 @@ fn build_tree_hybrid_with_config(
 /// och används för att bygga det semantiska trädet.
 #[cfg(feature = "js-eval")]
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
-    run_lifecycle_parse_with_fetch(html, goal, url, std::collections::HashMap::new())
+    run_lifecycle_parse_with_cookies(html, goal, url, std::collections::HashMap::new(), &[])
 }
 
 #[cfg(not(feature = "js-eval"))]
@@ -268,8 +292,7 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
     build_tree(html, goal, url)
 }
 
-/// Kör lifecycle-parse med pre-populated fetch-responses.
-/// Används av fetch_parse-pipelinen för att ge JS-sandbox tillgång till API-data.
+/// Kör lifecycle-parse med pre-populated fetch-responses (bakåtkompatibel wrapper)
 #[cfg(feature = "js-eval")]
 fn run_lifecycle_parse_with_fetch(
     html: &str,
@@ -277,20 +300,39 @@ fn run_lifecycle_parse_with_fetch(
     url: &str,
     fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
 ) -> SemanticTree {
+    run_lifecycle_parse_with_cookies(html, goal, url, fetch_responses, &[])
+}
+
+/// Kör lifecycle-parse med pre-populated fetch-responses + Set-Cookie headers.
+/// Cookies från HTTP-svar propageras till JS document.cookie.
+#[cfg(feature = "js-eval")]
+fn run_lifecycle_parse_with_cookies(
+    html: &str,
+    goal: &str,
+    url: &str,
+    fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
+    set_cookie_headers: &[String],
+) -> SemanticTree {
     #[cfg(feature = "js-eval")]
     {
         let scripts = js_eval::extract_ordered_scripts(html);
         if !scripts.is_empty() {
             let arena = arena_dom_sink::parse_html_to_arena(html);
+
+            // Parse Set-Cookie headers → document.cookie format (name=value par)
+            let cookie_string = parse_set_cookies_to_document_cookie(set_cookie_headers);
+
             let config = dom_bridge::SpaConfig {
                 fetch_responses,
                 base_url: url.to_string(),
+                cookies: cookie_string,
                 ..Default::default()
             };
             let (eval_result, eval_arena) = dom_bridge::eval_spa(&scripts, arena, config);
 
-            // Samla fetch-URLs från JS runtime
+            // Samla fetch-URLs och cookies från JS runtime
             let runtime_urls = eval_result.fetched_urls.clone();
+            let js_cookies = eval_result.cookies.clone();
 
             // Logga JS-fel
             if let Some(ref err) = eval_result.error {
@@ -302,6 +344,7 @@ fn run_lifecycle_parse_with_fetch(
                 let modified_html = eval_arena.serialize_html(eval_arena.document);
                 let mut tree = build_tree(&modified_html, goal, url);
                 attach_pending_urls(&mut tree, html, &runtime_urls);
+                tree.js_cookies = js_cookies;
                 return tree;
             }
 
@@ -311,6 +354,7 @@ fn run_lifecycle_parse_with_fetch(
                 if arena_html.len() > 10 && arena_html != html {
                     let mut tree = build_tree(&arena_html, goal, url);
                     attach_pending_urls(&mut tree, html, &runtime_urls);
+                    tree.js_cookies = js_cookies;
                     return tree;
                 }
             }
@@ -318,6 +362,7 @@ fn run_lifecycle_parse_with_fetch(
             // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
             let mut tree = build_tree(html, goal, url);
             attach_pending_urls(&mut tree, html, &runtime_urls);
+            tree.js_cookies = js_cookies;
             return tree;
         }
     }
@@ -776,6 +821,24 @@ pub fn build_tree_for_crfr_with_fetch(
     run_lifecycle_parse_with_fetch(html, goal, url, fetch_responses)
 }
 
+/// Build tree with Set-Cookie headers propagated to JS document.cookie.
+/// Closes the cookie loop: HTTP Set-Cookie → JS execution → challenge completion.
+#[cfg(feature = "js-eval")]
+pub fn build_tree_with_cookies(
+    html: &str,
+    goal: &str,
+    url: &str,
+    set_cookie_headers: &[String],
+) -> SemanticTree {
+    run_lifecycle_parse_with_cookies(
+        html,
+        goal,
+        url,
+        std::collections::HashMap::new(),
+        set_cookie_headers,
+    )
+}
+
 fn is_error_page(title: &str, total_nodes: usize) -> bool {
     let t = title.to_lowercase();
     if t.contains("404")
@@ -798,6 +861,44 @@ fn is_error_page(title: &str, total_nodes: usize) -> bool {
     if total_nodes < 20 && (t.contains("oops") || t.contains("sorry") || t.is_empty()) {
         return true;
     }
+    false
+}
+
+/// Detect if a page is likely a bot challenge that JS tried to solve.
+/// Returns true if JS set cookies AND the page has very few nodes (challenge shell).
+pub fn is_likely_bot_challenge(tree: &types::SemanticTree, js_cookies: &str) -> bool {
+    let total_nodes = collect_all_nodes(&tree.nodes).len();
+    let title = tree.title.to_lowercase();
+
+    // JS set cookies + tiny DOM = almost certainly a challenge
+    if !js_cookies.is_empty() && total_nodes < 15 {
+        return true;
+    }
+
+    // Challenge-specific title patterns (Cloudflare, Akamai, PerimeterX, etc.)
+    let challenge_titles = [
+        "just a moment",
+        "checking your browser",
+        "please wait",
+        "verifying",
+        "attention required",
+        "access denied",
+        "one more step",
+        "security check",
+        "please enable",
+        "enable javascript",
+        "ddos protection",
+        "challenge",
+    ];
+    if challenge_titles.iter().any(|t2| title.contains(t2)) && total_nodes < 30 {
+        return true;
+    }
+
+    // Very small page with redirect-like content
+    if total_nodes <= 3 && !tree.url.is_empty() {
+        return true;
+    }
+
     false
 }
 
@@ -1015,11 +1116,17 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — om det inte finns, kan vi inte ge feedback
+    // Hämta cacheat fält — prova båda varianter (med/utan JS eval)
     let dummy_nodes: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
     if !found {
-        return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        // Prova JS-variant (explore/parse-crfr med run_js=true cachar under #__js_eval)
+        let (field_js, found_js) =
+            resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
+        if !found_js {
+            return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        }
+        field = field_js;
     }
 
     field.feedback(goal, &ids);
@@ -1040,7 +1147,11 @@ pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> Str
     let dummy: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy, url);
     if !found {
-        return r#"{"status":"no_field"}"#.to_string();
+        let (field_js, found_js) = resonance::get_or_build_field_with_variant(&dummy, url, true);
+        if !found_js {
+            return r#"{"status":"no_field"}"#.to_string();
+        }
+        field = field_js;
     }
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
@@ -1525,6 +1636,206 @@ pub fn wrap_untrusted(content: &str) -> String {
 #[wasm_bindgen]
 pub fn health_check() -> String {
     r#"{"status": "ok", "version": "0.2.0", "engine": "AetherAgent"}"#.to_string()
+}
+
+// ─── Dashboard API ──────────────────────────────────────────────────────────
+
+/// Get full dashboard snapshot.
+pub fn dashboard_snapshot(vision_available: bool, endpoint_count: usize) -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+
+    let persist = {
+        #[cfg(feature = "persist")]
+        {
+            let (sf, sd, sz) = persist::db_stats();
+            dashboard::PersistStats {
+                enabled: persist::is_initialized(),
+                stored_fields: sf,
+                stored_domains: sd,
+                db_size_bytes: sz,
+            }
+        }
+        #[cfg(not(feature = "persist"))]
+        {
+            dashboard::PersistStats {
+                enabled: false,
+                stored_fields: 0,
+                stored_domains: 0,
+                db_size_bytes: 0,
+            }
+        }
+    };
+
+    let snap = dashboard::DashboardSnapshot {
+        crfr_cache: dashboard::build_cache_overview(&fields, cache_len, cache_cap, now),
+        memory_stats: dashboard::read_memory_stats(),
+        wpt_baseline: dashboard::build_wpt_baseline(),
+        spa_runtime: dashboard::build_spa_runtime(),
+        engine: dashboard::build_engine_capabilities(),
+        persist,
+        vision_available,
+        endpoint_count,
+        timestamp_ms: now,
+    };
+
+    serde_json::to_string(&snap).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get CRFR cache overview.
+pub fn dashboard_crfr_cache() -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+    let overview = dashboard::build_cache_overview(&fields, cache_len, cache_cap, now);
+    serde_json::to_string(&overview)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get propagation weights for a cached field by URL hash.
+pub fn dashboard_propagation_weights(url_hash: u64) -> String {
+    let fields = resonance::list_cached_fields();
+    match fields.iter().find(|f| f.url_hash == url_hash) {
+        Some(f) => {
+            let view = dashboard::build_causal_memory_view(f, now_ms());
+            serde_json::to_string(&view)
+                .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+        }
+        None => r#"{"error":"field not found"}"#.to_string(),
+    }
+}
+
+/// Get WPT baseline panel.
+pub fn dashboard_wpt() -> String {
+    let panel = dashboard::build_wpt_baseline();
+    serde_json::to_string(&panel).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get persistent storage overview (stored fields + domain profiles from SQLite).
+#[cfg(feature = "persist")]
+pub fn dashboard_persistence() -> String {
+    let fields = persist::list_stored_fields();
+    let domains = persist::list_stored_domain_profiles();
+    let (fc, dc, db_size) = persist::db_stats();
+    let result = serde_json::json!({
+        "fields": fields,
+        "domains": domains,
+        "field_count": fc,
+        "domain_count": dc,
+        "db_size_bytes": db_size,
+    });
+    result.to_string()
+}
+
+/// Run a CRFR query with full trace for dashboard explorer.
+/// Uses the real CRFR pipeline: JS eval + field cache + wave propagation.
+pub fn dashboard_crfr_explore(
+    tree: &types::SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+) -> String {
+    let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
+
+    let field_start = now_ms();
+    let (mut field, cache_hit) =
+        resonance::get_or_build_field_with_variant(&tree.nodes, url, run_js);
+    let field_ms = now_ms().saturating_sub(field_start);
+
+    let prop_start = now_ms();
+    let (results, trace) = field.propagate_top_k_traced(goal, top_n as usize);
+    let prop_ms = now_ms().saturating_sub(prop_start);
+    resonance::save_field(&field);
+
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let res_vec: Vec<resonance::ResonanceResult> = results.to_vec();
+    let calibrated = field.calibrate_results(&res_vec);
+    let cal_map: HashMap<u32, f32> = calibrated.iter().map(|&(id, _, prob)| (id, prob)).collect();
+
+    let top_nodes: Vec<dashboard::CrfrNodeRank> = results
+        .iter()
+        .filter_map(|r| {
+            node_map.get(&r.node_id).map(|node| {
+                dashboard::build_crfr_node_rank(
+                    node.id,
+                    &node.role,
+                    &node.label,
+                    r.amplitude,
+                    cal_map.get(&r.node_id).copied().unwrap_or(0.0),
+                    &format!("{:?}", r.resonance_type),
+                    r.causal_boost,
+                )
+            })
+        })
+        .collect();
+
+    // Build node score views with labels
+    let node_scores: Vec<dashboard::NodeScoreView> = trace
+        .node_scores
+        .iter()
+        .filter_map(|ns| {
+            node_map
+                .get(&ns.node_id)
+                .map(|node| dashboard::NodeScoreView {
+                    node_id: ns.node_id,
+                    role: node.role.clone(),
+                    label: if node.label.len() > 80 {
+                        format!("{}...", &node.label[..node.label.floor_char_boundary(77)])
+                    } else {
+                        node.label.clone()
+                    },
+                    bm25_score: ns.bm25_score,
+                    hdc_score: ns.hdc_score,
+                    role_priority: ns.role_priority,
+                    concept_boost: ns.concept_boost,
+                    causal_boost: ns.causal_boost,
+                    answer_shape: ns.answer_shape,
+                    answer_type_boost: ns.answer_type_boost,
+                    zone_penalty: ns.zone_penalty,
+                    meta_penalty: ns.meta_penalty,
+                    combmnz: ns.combmnz,
+                    template_boost: ns.template_boost,
+                    final_amplitude: ns.final_amplitude,
+                })
+        })
+        .collect();
+
+    let explorer = dashboard::CrfrQueryExplorer {
+        goal: goal.to_string(),
+        url: url.to_string(),
+        bm25_candidates: trace.bm25_candidates,
+        cascade_candidates: trace.cascade_candidates,
+        propagation_iterations: trace.propagation_iterations,
+        iteration_deltas: trace.iteration_deltas,
+        gap_cut_position: trace.gap_cut_position,
+        template_match: trace.template_match,
+        node_scores,
+        top_nodes,
+        field_build_ms: field_ms,
+        propagation_ms: prop_ms,
+        cache_hit,
+        total_field_nodes: total_dom_nodes,
+        total_queries: field.total_queries,
+    };
+
+    serde_json::to_string(&explorer)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
 }
 
 // ─── Fas 2: Intent API ──────────────────────────────────────────────────────

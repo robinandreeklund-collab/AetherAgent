@@ -310,6 +310,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                 event_loop_ticks: 0,
                 timers_fired: 0,
                 fetched_urls: vec![],
+                cookies: String::new(),
             };
         }
     }
@@ -373,6 +374,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
 
                 // Extrahera fetch-URLs som JS anropade (BUGG J)
                 let fetched_urls = extract_fetched_urls(&ctx);
+                let js_cookies = state.borrow().cookies.clone();
 
                 DomEvalResult {
                     value: if value_str == "undefined" {
@@ -386,6 +388,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                     event_loop_ticks: ticks,
                     timers_fired: timers,
                     fetched_urls,
+                    cookies: js_cookies,
                 }
             }
             Err(e) => {
@@ -398,6 +401,7 @@ pub fn eval_js_with_dom(code: &str, arena: ArenaDom) -> DomEvalResult {
                     event_loop_ticks: 0,
                     timers_fired: 0,
                     fetched_urls: vec![],
+                    cookies: String::new(),
                 }
             }
         };
@@ -452,6 +456,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     event_loop_ticks: 0,
                     timers_fired: 0,
                     fetched_urls: vec![],
+                    cookies: String::new(),
                 },
                 arena,
             };
@@ -522,6 +527,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     event_loop_ticks: ticks,
                     timers_fired: timers,
                     fetched_urls: vec![],
+                    cookies: String::new(),
                 }
             }
             Err(e) => {
@@ -534,6 +540,7 @@ pub fn eval_js_with_dom_and_arena(code: &str, arena: ArenaDom) -> DomEvalWithAre
                     event_loop_ticks: 0,
                     timers_fired: 0,
                     fetched_urls: vec![],
+                    cookies: String::new(),
                 }
             }
         };
@@ -627,6 +634,7 @@ fn eval_js_with_lifecycle_internal(
             event_loop_ticks: 0,
             timers_fired: 0,
             fetched_urls: vec![],
+            cookies: String::new(),
         };
     }
 
@@ -733,6 +741,7 @@ fn eval_js_with_lifecycle_internal(
             event_loop_ticks: ticks,
             timers_fired: timers,
             fetched_urls: vec![],
+            cookies: String::new(),
         }
     });
 
@@ -789,6 +798,7 @@ pub fn eval_spa(
                 event_loop_ticks: 0,
                 timers_fired: 0,
                 fetched_urls: vec![],
+                cookies: String::new(),
             },
             arena,
         );
@@ -879,6 +889,7 @@ pub fn eval_spa(
         let mutations = state.borrow().mutations.clone();
         // Klona arena INNAN context/runtime droppas (undvik GC-assertion)
         let arena_clone = state.borrow().arena.clone();
+        let js_cookies = state.borrow().cookies.clone();
 
         state.borrow_mut().event_listeners.clear();
         el.borrow_mut().clear_persistent();
@@ -892,6 +903,7 @@ pub fn eval_spa(
                 event_loop_ticks: ticks,
                 timers_fired: timers,
                 fetched_urls,
+                cookies: js_cookies,
             },
             arena_clone,
         )
@@ -930,6 +942,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
                 event_loop_ticks: 0,
                 timers_fired: 0,
                 fetched_urls: vec![],
+                cookies: String::new(),
             },
             arena,
         };
@@ -1037,6 +1050,7 @@ pub fn eval_js_with_lifecycle_and_arena_viewport(
             event_loop_ticks: ticks,
             timers_fired: timers,
             fetched_urls: vec![],
+            cookies: String::new(),
         }
     });
 

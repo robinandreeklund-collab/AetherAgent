@@ -1,0 +1,2386 @@
+{
+  "results": [
+    {
+      "name": "BBC News",
+      "url": "https://www.bbc.com/news",
+      "html_bytes": 316574,
+      "baseline_ndcg5": 0.38364913903790027,
+      "baseline_mrr": 0.25,
+      "train_ndcg5": 0.3441984885958755,
+      "train_mrr": 0.3333333333333333,
+      "test_ndcg5": 0.4762886051799353,
+      "test_mrr": 0.3611111111111111,
+      "test_ndcg5_std": 0.03951156575064834,
+      "test_mrr_std": 0.1272937693043289,
+      "test_p5": 0.26666666666666666,
+      "test_causal": 5,
+      "feedback_total": 16,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news headlines today",
+          "phase": "BASELINE",
+          "ndcg5": 0.38364913903790027,
+          "mrr": 0.25,
+          "p5": 0.4,
+          "causal": 9,
+          "relevant": 3
+        },
+        {
+          "i": 2,
+          "goal": "breaking news stories right now",
+          "phase": "TRAIN",
+          "ndcg5": 0.41618115554873086,
+          "mrr": 0.3333333333333333,
+          "p5": 0.4,
+          "causal": 8,
+          "relevant": 3
+        },
+        {
+          "i": 3,
+          "goal": "top news articles today",
+          "phase": "TRAIN",
+          "ndcg5": 0.23463936301137822,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 7,
+          "relevant": 3
+        },
+        {
+          "i": 4,
+          "goal": "current world news updates",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 8,
+          "relevant": 3
+        },
+        {
+          "i": 5,
+          "goal": "major news events happening now",
+          "phase": "TRAIN",
+          "ndcg5": 0.23463936301137822,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 8,
+          "relevant": 3
+        },
+        {
+          "i": 6,
+          "goal": "important world headlines today",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 3,
+          "relevant": 1
+        },
+        {
+          "i": 7,
+          "goal": "todays top news stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.6797310500037655,
+          "mrr": 0.5,
+          "p5": 0.6,
+          "causal": 8,
+          "relevant": 3
+        },
+        {
+          "i": 8,
+          "goal": "what is happening in the world right now",
+          "phase": "TEST",
+          "ndcg5": 0.43067655807339306,
+          "mrr": 0.25,
+          "p5": 0.2,
+          "causal": 3,
+          "relevant": 1
+        },
+        {
+          "i": 9,
+          "goal": "global news and current events",
+          "phase": "TEST",
+          "ndcg5": 0.49818925746641285,
+          "mrr": 0.5,
+          "p5": 0.4,
+          "causal": 9,
+          "relevant": 3
+        },
+        {
+          "i": 10,
+          "goal": "recent major world developments",
+          "phase": "TEST",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 3,
+          "relevant": 1
+        }
+      ]
+    },
+    {
+      "name": "NPR",
+      "url": "https://www.npr.org/",
+      "html_bytes": 706909,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.10515495892857625,
+      "train_mrr": 0.08333333333333333,
+      "test_ndcg5": 0.16666666666666666,
+      "test_mrr": 0.1111111111111111,
+      "test_ndcg5_std": 0.28867513459481287,
+      "test_mrr_std": 0.19245008972987523,
+      "test_p5": 0.06666666666666667,
+      "test_causal": 1.3333333333333333,
+      "feedback_total": 6,
+      "feedback_precision": 0.16666666666666666,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news stories today",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "breaking news headlines now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 3,
+          "goal": "top articles published today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "important current events",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "major stories happening right now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "key news developments today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "most notable news stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.6309297535714575,
+          "mrr": 0.5,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 1
+        },
+        {
+          "i": 8,
+          "goal": "what are todays biggest news stories",
+          "phase": "TEST",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 2,
+          "relevant": 1
+        },
+        {
+          "i": 9,
+          "goal": "current affairs and global events",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "recent notable world happenings",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        }
+      ]
+    },
+    {
+      "name": "The Guardian",
+      "url": "https://www.theguardian.com/us",
+      "html_bytes": 1475410,
+      "baseline_ndcg5": 0.5,
+      "baseline_mrr": 0.3333333333333333,
+      "train_ndcg5": 0.25,
+      "train_mrr": 0.30158730158730157,
+      "test_ndcg5": 0.35386877054828353,
+      "test_mrr": 0.25,
+      "test_ndcg5_std": 0.3224014045468968,
+      "test_mrr_std": 0.25,
+      "test_p5": 0.13333333333333333,
+      "test_causal": 2.6666666666666665,
+      "feedback_total": 9,
+      "feedback_precision": 0.8888888888888888,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news stories today",
+          "phase": "BASELINE",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 4,
+          "relevant": 1
+        },
+        {
+          "i": 2,
+          "goal": "breaking news and headlines",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 3,
+          "relevant": 1
+        },
+        {
+          "i": 3,
+          "goal": "top stories right now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.14285714285714285,
+          "p5": 0.0,
+          "causal": 4,
+          "relevant": 1
+        },
+        {
+          "i": 4,
+          "goal": "current world news coverage",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 6,
+          "relevant": 1
+        },
+        {
+          "i": 5,
+          "goal": "important events today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "major headlines today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 6,
+          "relevant": 2
+        },
+        {
+          "i": 7,
+          "goal": "todays most read stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 3
+        },
+        {
+          "i": 8,
+          "goal": "global news developments today",
+          "phase": "TEST",
+          "ndcg5": 0.6309297535714575,
+          "mrr": 0.5,
+          "p5": 0.2,
+          "causal": 3,
+          "relevant": 1
+        },
+        {
+          "i": 9,
+          "goal": "current affairs and analysis",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "recent world events and reports",
+          "phase": "TEST",
+          "ndcg5": 0.43067655807339306,
+          "mrr": 0.25,
+          "p5": 0.2,
+          "causal": 4,
+          "relevant": 1
+        }
+      ]
+    },
+    {
+      "name": "GitHub Trending",
+      "url": "https://github.com/trending",
+      "html_bytes": 563286,
+      "baseline_ndcg5": 0.6843515475204855,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.9121445431927219,
+      "train_mrr": 1.0,
+      "test_ndcg5": 0.7925926503792521,
+      "test_mrr": 0.8333333333333334,
+      "test_ndcg5_std": 0.17967733513390524,
+      "test_mrr_std": 0.28867513459481287,
+      "test_p5": 0.4666666666666667,
+      "test_causal": 2,
+      "feedback_total": 20,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "popular Rust repositories today",
+          "phase": "BASELINE",
+          "ndcg5": 0.6843515475204855,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 0,
+          "relevant": 10
+        },
+        {
+          "i": 2,
+          "goal": "trending Rust projects",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 3,
+          "goal": "top Rust repos with most stars",
+          "phase": "TRAIN",
+          "ndcg5": 0.5531464700081437,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 10
+        },
+        {
+          "i": 4,
+          "goal": "Rust language repositories trending now",
+          "phase": "TRAIN",
+          "ndcg5": 0.9197207891481876,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 5,
+          "goal": "best Rust projects on GitHub",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 6,
+          "goal": "most starred Rust repos today",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 7,
+          "goal": "Rust repositories gaining traction",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 8,
+          "goal": "open source Rust codebases trending",
+          "phase": "TEST",
+          "ndcg5": 0.6934264036172708,
+          "mrr": 0.5,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 9,
+          "goal": "Rust tools and libraries popular now",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 10,
+          "goal": "which Rust projects are hot today",
+          "phase": "TEST",
+          "ndcg5": 0.6843515475204855,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 2,
+          "relevant": 10
+        }
+      ]
+    },
+    {
+      "name": "Hacker News",
+      "url": "https://news.ycombinator.com/",
+      "html_bytes": 34631,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.4866201315246979,
+      "train_mrr": 0.5,
+      "test_ndcg5": 0.2924051051126831,
+      "test_mrr": 0.2222222222222222,
+      "test_ndcg5_std": 0.2855845802240077,
+      "test_mrr_std": 0.19245008972987523,
+      "test_p5": 0.2,
+      "test_causal": 1.3333333333333333,
+      "feedback_total": 8,
+      "feedback_precision": 0.625,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "AI and machine learning news",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "artificial intelligence stories today",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 3,
+          "goal": "deep learning articles",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 1,
+          "relevant": 2
+        },
+        {
+          "i": 4,
+          "goal": "machine learning project news",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "AI research and breakthroughs",
+          "phase": "TRAIN",
+          "ndcg5": 0.9197207891481876,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 3,
+          "relevant": 2
+        },
+        {
+          "i": 6,
+          "goal": "neural network developments",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "latest AI tools and frameworks",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "language model and LLM news",
+          "phase": "TEST",
+          "ndcg5": 0.3065735963827292,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 2
+        },
+        {
+          "i": 9,
+          "goal": "computer vision advances today",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "generative AI developments",
+          "phase": "TEST",
+          "ndcg5": 0.5706417189553201,
+          "mrr": 0.3333333333333333,
+          "p5": 0.4,
+          "causal": 3,
+          "relevant": 2
+        }
+      ]
+    },
+    {
+      "name": "Stack Overflow",
+      "url": "https://stackoverflow.com/questions",
+      "html_bytes": 241707,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.5,
+      "train_mrr": 0.5277777777777778,
+      "test_ndcg5": 0.3333333333333333,
+      "test_mrr": 0.3333333333333333,
+      "test_ndcg5_std": 0.5773502691896257,
+      "test_mrr_std": 0.5773502691896257,
+      "test_p5": 0.06666666666666667,
+      "test_causal": 0.3333333333333333,
+      "feedback_total": 6,
+      "feedback_precision": 0.6666666666666666,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "how to parse HTML in Rust",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "Rust HTML parser library",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 3,
+          "goal": "parsing HTML with Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "best Rust crate for HTML parsing",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 1
+        },
+        {
+          "i": 5,
+          "goal": "html5ever Rust usage",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 2,
+          "relevant": 1
+        },
+        {
+          "i": 6,
+          "goal": "web scraping with Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "Rust DOM parsing library",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 2,
+          "relevant": 1
+        },
+        {
+          "i": 8,
+          "goal": "Rust crate for processing web pages",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 9,
+          "goal": "extract data from HTML using Rust",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "DOM manipulation Rust programming",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 1
+        }
+      ]
+    },
+    {
+      "name": "Wikipedia Einstein",
+      "url": "https://en.wikipedia.org/wiki/Albert_Einstein",
+      "html_bytes": 1051938,
+      "baseline_ndcg5": 0.7860137352654724,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.6949300171061347,
+      "train_mrr": 0.8518518518518519,
+      "test_ndcg5": 0.8721445442095548,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.1129302439101196,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.6666666666666667,
+      "test_causal": 7.333333333333333,
+      "feedback_total": 38,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "when was Einstein born",
+          "phase": "BASELINE",
+          "ndcg5": 0.7860137352654724,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 8
+        },
+        {
+          "i": 2,
+          "goal": "Einstein birth date and place",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 3,
+          "goal": "where was Albert Einstein born",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 0,
+          "relevant": 9
+        },
+        {
+          "i": 4,
+          "goal": "year Einstein was born",
+          "phase": "TRAIN",
+          "ndcg5": 0.6164336326286644,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 7,
+          "relevant": 8
+        },
+        {
+          "i": 5,
+          "goal": "Einstein early life birthplace",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.1111111111111111,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 6,
+          "goal": "born Albert Einstein date",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 12,
+          "relevant": 12
+        },
+        {
+          "i": 7,
+          "goal": "Einstein birth year and location",
+          "phase": "TRAIN",
+          "ndcg5": 0.5531464700081437,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 5,
+          "relevant": 5
+        },
+        {
+          "i": 8,
+          "goal": "what year was Einstein born and where",
+          "phase": "TEST",
+          "ndcg5": 0.7860137352654724,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 10,
+          "relevant": 10
+        },
+        {
+          "i": 9,
+          "goal": "Einstein origins and birthplace",
+          "phase": "TEST",
+          "ndcg5": 0.830419897363192,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 10,
+          "relevant": 10
+        },
+        {
+          "i": 10,
+          "goal": "birth facts about Albert Einstein",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        }
+      ]
+    },
+    {
+      "name": "Wikipedia Rust",
+      "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+      "html_bytes": 589719,
+      "baseline_ndcg5": 1.0,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.0,
+      "train_mrr": 0.027777777777777776,
+      "test_ndcg5": 0.0,
+      "test_mrr": 0.07792207792207792,
+      "test_ndcg5_std": 0.0,
+      "test_mrr_std": 0.011247083166031674,
+      "test_p5": 0.0,
+      "test_causal": 0,
+      "feedback_total": 7,
+      "feedback_precision": 0.2857142857142857,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "who created Rust programming language",
+          "phase": "BASELINE",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 2,
+          "goal": "Rust language creator",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 3,
+          "goal": "who invented Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "Rust programming origin story",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 5,
+          "goal": "creator of the Rust language",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "who designed Rust originally",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "Rust language author and history",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "who started the Rust project",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.07142857142857142,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 9,
+          "goal": "developer who made Rust",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.07142857142857142,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 10,
+          "goal": "Rust programming creation history",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.09090909090909091,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 1
+        }
+      ]
+    },
+    {
+      "name": "Wikipedia Python",
+      "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+      "html_bytes": 617069,
+      "baseline_ndcg5": 0.9197207891481876,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.3728662854615494,
+      "train_mrr": 0.33194444444444443,
+      "test_ndcg5": 0.0,
+      "test_mrr": 0.1164021164021164,
+      "test_ndcg5_std": 0.0,
+      "test_mrr_std": 0.047838998201124666,
+      "test_p5": 0.0,
+      "test_causal": 1.6666666666666667,
+      "feedback_total": 7,
+      "feedback_precision": 0.8571428571428571,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "who created Python programming language",
+          "phase": "BASELINE",
+          "ndcg5": 0.9197207891481876,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 2,
+          "goal": "Python language creator",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 3,
+          "goal": "who invented Python",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.125,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 1
+        },
+        {
+          "i": 4,
+          "goal": "Python programming origin",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "creator of Python language",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 1
+        },
+        {
+          "i": 6,
+          "goal": "who designed Python",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 7,
+          "goal": "Python language author",
+          "phase": "TRAIN",
+          "ndcg5": 0.23719771276929622,
+          "mrr": 0.2,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 2
+        },
+        {
+          "i": 8,
+          "goal": "who started the Python project",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.1111111111111111,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 9,
+          "goal": "developer who made Python",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.16666666666666666,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 10,
+          "goal": "Python creation history",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.07142857142857142,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 1
+        }
+      ]
+    },
+    {
+      "name": "Wikipedia Linux",
+      "url": "https://en.wikipedia.org/wiki/Linux",
+      "html_bytes": 615724,
+      "baseline_ndcg5": 0.6131471927654584,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.8194145874080973,
+      "train_mrr": 0.8333333333333334,
+      "test_ndcg5": 0.635703997432628,
+      "test_mrr": 0.7777777777777778,
+      "test_ndcg5_std": 0.31593707479840105,
+      "test_mrr_std": 0.3849001794597505,
+      "test_p5": 0.6,
+      "test_causal": 8.333333333333334,
+      "feedback_total": 73,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "who created Linux operating system",
+          "phase": "BASELINE",
+          "ndcg5": 0.6131471927654584,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 2,
+          "goal": "Linux creator and history",
+          "phase": "TRAIN",
+          "ndcg5": 0.38685280723454163,
+          "mrr": 0.5,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 3,
+          "goal": "who invented Linux",
+          "phase": "TRAIN",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 1,
+          "relevant": 12
+        },
+        {
+          "i": 4,
+          "goal": "Linux kernel origin story",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 7,
+          "relevant": 15
+        },
+        {
+          "i": 5,
+          "goal": "creator of Linux OS",
+          "phase": "TRAIN",
+          "ndcg5": 0.6608397947263839,
+          "mrr": 0.5,
+          "p5": 0.8,
+          "causal": 14,
+          "relevant": 14
+        },
+        {
+          "i": 6,
+          "goal": "who designed Linux",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 12,
+          "relevant": 15
+        },
+        {
+          "i": 7,
+          "goal": "Linux kernel author",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 14,
+          "relevant": 15
+        },
+        {
+          "i": 8,
+          "goal": "who started the Linux project",
+          "phase": "TEST",
+          "ndcg5": 0.4703652827859579,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 9,
+          "relevant": 9
+        },
+        {
+          "i": 9,
+          "goal": "developer who made Linux kernel",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 14,
+          "relevant": 14
+        },
+        {
+          "i": 10,
+          "goal": "Linux creation and history",
+          "phase": "TEST",
+          "ndcg5": 0.4367467095119258,
+          "mrr": 0.3333333333333333,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 3
+        }
+      ]
+    },
+    {
+      "name": "Amazon",
+      "url": "https://www.amazon.com/",
+      "html_bytes": 820410,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.0,
+      "train_mrr": 0.0,
+      "test_ndcg5": 0.20438239758848611,
+      "test_mrr": 0.3333333333333333,
+      "test_ndcg5_std": 0.35400069679600077,
+      "test_mrr_std": 0.5773502691896257,
+      "test_p5": 0.06666666666666667,
+      "test_causal": 1,
+      "feedback_total": 5,
+      "feedback_precision": 0.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "best selling laptops today",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "popular laptop deals",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 3,
+          "goal": "top rated laptops on sale",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "laptop computer best deals",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "affordable laptop recommendations",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "most popular laptop brands",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "best laptop value today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "laptop deals under 500 dollars",
+          "phase": "TEST",
+          "ndcg5": 0.6131471927654584,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 2
+        },
+        {
+          "i": 9,
+          "goal": "budget friendly laptops",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "student laptop recommendations",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 2,
+          "relevant": 0
+        }
+      ]
+    },
+    {
+      "name": "ESPN",
+      "url": "https://www.espn.com/",
+      "html_bytes": 282997,
+      "baseline_ndcg5": 0.8539316501572937,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.703606669313625,
+      "train_mrr": 0.8055555555555556,
+      "test_ndcg5": 0.8849219099468539,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.05367670449527717,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.7333333333333334,
+      "test_causal": 7,
+      "feedback_total": 26,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest sports scores today",
+          "phase": "BASELINE",
+          "ndcg5": 0.8539316501572937,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 6
+        },
+        {
+          "i": 2,
+          "goal": "todays game results",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 4
+        },
+        {
+          "i": 3,
+          "goal": "live sports scores and updates",
+          "phase": "TRAIN",
+          "ndcg5": 0.5296347172140421,
+          "mrr": 0.5,
+          "p5": 0.6,
+          "causal": 0,
+          "relevant": 5
+        },
+        {
+          "i": 4,
+          "goal": "major sports results today",
+          "phase": "TRAIN",
+          "ndcg5": 0.46927872602275644,
+          "mrr": 1.0,
+          "p5": 0.2,
+          "causal": 1,
+          "relevant": 3
+        },
+        {
+          "i": 5,
+          "goal": "current game scores",
+          "phase": "TRAIN",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 7,
+          "relevant": 7
+        },
+        {
+          "i": 6,
+          "goal": "todays match results",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 7,
+          "goal": "sports scores and highlights",
+          "phase": "TRAIN",
+          "ndcg5": 0.8539316501572937,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 6,
+          "relevant": 6
+        },
+        {
+          "i": 8,
+          "goal": "what are todays sports results",
+          "phase": "TEST",
+          "ndcg5": 0.9469024295259745,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 3
+        },
+        {
+          "i": 9,
+          "goal": "live game updates and scores",
+          "phase": "TEST",
+          "ndcg5": 0.8539316501572937,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 8,
+          "relevant": 8
+        },
+        {
+          "i": 10,
+          "goal": "current sports standings and scores",
+          "phase": "TEST",
+          "ndcg5": 0.8539316501572937,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 10,
+          "relevant": 11
+        }
+      ]
+    },
+    {
+      "name": "Weather.com",
+      "url": "https://weather.com/",
+      "html_bytes": 2464704,
+      "baseline_ndcg5": 1.0,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.8145997722418974,
+      "train_mrr": 0.8333333333333334,
+      "test_ndcg5": 0.8053843254207409,
+      "test_mrr": 0.8333333333333334,
+      "test_ndcg5_std": 0.09724279617023354,
+      "test_mrr_std": 0.28867513459481287,
+      "test_p5": 0.6666666666666667,
+      "test_causal": 6,
+      "feedback_total": 32,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "weather forecast today",
+          "phase": "BASELINE",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 2,
+          "goal": "current weather conditions",
+          "phase": "TRAIN",
+          "ndcg5": 0.7328286204777911,
+          "mrr": 0.5,
+          "p5": 0.6,
+          "causal": 0,
+          "relevant": 3
+        },
+        {
+          "i": 3,
+          "goal": "todays temperature forecast",
+          "phase": "TRAIN",
+          "ndcg5": 0.7227265726449519,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 8
+        },
+        {
+          "i": 4,
+          "goal": "weather report for today",
+          "phase": "TRAIN",
+          "ndcg5": 0.830419897363192,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 7,
+          "relevant": 7
+        },
+        {
+          "i": 5,
+          "goal": "local weather update",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 3
+        },
+        {
+          "i": 6,
+          "goal": "hourly weather forecast",
+          "phase": "TRAIN",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 8,
+          "relevant": 8
+        },
+        {
+          "i": 7,
+          "goal": "weather conditions right now",
+          "phase": "TRAIN",
+          "ndcg5": 0.7328286204777911,
+          "mrr": 0.5,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 3
+        },
+        {
+          "i": 8,
+          "goal": "is it going to rain today",
+          "phase": "TEST",
+          "ndcg5": 0.6934264036172708,
+          "mrr": 0.5,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 9,
+          "goal": "temperature and weather today",
+          "phase": "TEST",
+          "ndcg5": 0.8539316501572937,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 8,
+          "relevant": 8
+        },
+        {
+          "i": 10,
+          "goal": "todays weather outlook and forecast",
+          "phase": "TEST",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 8,
+          "relevant": 8
+        }
+      ]
+    },
+    {
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/",
+      "html_bytes": 2481098,
+      "baseline_ndcg5": 1.0,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.7336108037077707,
+      "train_mrr": 0.7222222222222222,
+      "test_ndcg5": 0.8362467693034747,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.2836289154699293,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.8,
+      "test_causal": 6.333333333333333,
+      "feedback_total": 53,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "stock market today",
+          "phase": "BASELINE",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 0,
+          "relevant": 13
+        },
+        {
+          "i": 2,
+          "goal": "major stock indices performance",
+          "phase": "TRAIN",
+          "ndcg5": 0.6608397947263839,
+          "mrr": 0.5,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 14
+        },
+        {
+          "i": 3,
+          "goal": "market summary today",
+          "phase": "TRAIN",
+          "ndcg5": 0.830419897363192,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 4,
+          "relevant": 10
+        },
+        {
+          "i": 4,
+          "goal": "S&P 500 performance today",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 5,
+          "goal": "stock market news and updates",
+          "phase": "TRAIN",
+          "ndcg5": 0.6096199500078984,
+          "mrr": 0.5,
+          "p5": 0.6,
+          "causal": 6,
+          "relevant": 4
+        },
+        {
+          "i": 6,
+          "goal": "Dow Jones today",
+          "phase": "TRAIN",
+          "ndcg5": 0.30078518014914984,
+          "mrr": 0.3333333333333333,
+          "p5": 0.4,
+          "causal": 3,
+          "relevant": 11
+        },
+        {
+          "i": 7,
+          "goal": "market trends and analysis",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 12,
+          "relevant": 12
+        },
+        {
+          "i": 8,
+          "goal": "how are stocks performing today",
+          "phase": "TEST",
+          "ndcg5": 0.5087403079104241,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 6
+        },
+        {
+          "i": 9,
+          "goal": "current market movements",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 12,
+          "relevant": 12
+        },
+        {
+          "i": 10,
+          "goal": "stock exchange results today",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 7,
+          "relevant": 15
+        }
+      ]
+    },
+    {
+      "name": "Allrecipes",
+      "url": "https://www.allrecipes.com/",
+      "html_bytes": 447087,
+      "baseline_ndcg5": 1.0,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.9434732991210639,
+      "train_mrr": 0.9166666666666666,
+      "test_ndcg5": 0.9562649741625527,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.07575128682079624,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.9333333333333333,
+      "test_causal": 7,
+      "feedback_total": 53,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "best pasta recipes",
+          "phase": "BASELINE",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 0,
+          "relevant": 8
+        },
+        {
+          "i": 2,
+          "goal": "popular pasta dinner recipes",
+          "phase": "TRAIN",
+          "ndcg5": 0.6608397947263839,
+          "mrr": 0.5,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 5
+        },
+        {
+          "i": 3,
+          "goal": "easy pasta recipes for tonight",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 5,
+          "relevant": 10
+        },
+        {
+          "i": 4,
+          "goal": "homemade pasta dish ideas",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 8,
+          "relevant": 10
+        },
+        {
+          "i": 5,
+          "goal": "quick pasta recipes for dinner",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 8,
+          "relevant": 8
+        },
+        {
+          "i": 6,
+          "goal": "classic pasta recipes",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 10,
+          "relevant": 10
+        },
+        {
+          "i": 7,
+          "goal": "best rated pasta recipes",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 10,
+          "relevant": 10
+        },
+        {
+          "i": 8,
+          "goal": "what pasta should I cook tonight",
+          "phase": "TEST",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 5,
+          "relevant": 6
+        },
+        {
+          "i": 9,
+          "goal": "simple and delicious pasta meals",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 9,
+          "relevant": 11
+        },
+        {
+          "i": 10,
+          "goal": "family pasta dinner ideas",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 7,
+          "relevant": 8
+        }
+      ]
+    },
+    {
+      "name": "Khan Academy",
+      "url": "https://www.khanacademy.org/",
+      "html_bytes": 166634,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.0,
+      "train_mrr": 0.0,
+      "test_ndcg5": 0.0,
+      "test_mrr": 0.0,
+      "test_ndcg5_std": 0.0,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.0,
+      "test_causal": 1,
+      "feedback_total": 6,
+      "feedback_precision": 0.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "learn mathematics online",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "math courses and tutorials",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 3,
+          "goal": "algebra lessons free",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "mathematics learning resources",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "online math education courses",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "free math tutoring",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "math practice and lessons",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "where to learn math online free",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 9,
+          "goal": "interactive math courses",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "best math education platform",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        }
+      ]
+    },
+    {
+      "name": "USA.gov",
+      "url": "https://www.usa.gov/",
+      "html_bytes": 47211,
+      "baseline_ndcg5": 1.0,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.7372236295329592,
+      "train_mrr": 0.9166666666666666,
+      "test_ndcg5": 0.929234018986879,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.12257027456218007,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.8666666666666667,
+      "test_causal": 8.666666666666666,
+      "feedback_total": 53,
+      "feedback_precision": 1.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "government benefits and services",
+          "phase": "BASELINE",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 0,
+          "relevant": 11
+        },
+        {
+          "i": 2,
+          "goal": "how to apply for government benefits",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 0,
+          "relevant": 12
+        },
+        {
+          "i": 3,
+          "goal": "federal services for citizens",
+          "phase": "TRAIN",
+          "ndcg5": 0.36005461457723403,
+          "mrr": 0.5,
+          "p5": 0.4,
+          "causal": 3,
+          "relevant": 5
+        },
+        {
+          "i": 4,
+          "goal": "government assistance programs",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 8,
+          "relevant": 10
+        },
+        {
+          "i": 5,
+          "goal": "public benefits information",
+          "phase": "TRAIN",
+          "ndcg5": 0.6164336326286644,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 9,
+          "relevant": 10
+        },
+        {
+          "i": 6,
+          "goal": "citizen services overview",
+          "phase": "TRAIN",
+          "ndcg5": 0.6164336326286644,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 4,
+          "relevant": 5
+        },
+        {
+          "i": 7,
+          "goal": "federal government help",
+          "phase": "TRAIN",
+          "ndcg5": 0.830419897363192,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 9,
+          "relevant": 11
+        },
+        {
+          "i": 8,
+          "goal": "what government services are available",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 10,
+          "relevant": 11
+        },
+        {
+          "i": 9,
+          "goal": "how to get government assistance",
+          "phase": "TEST",
+          "ndcg5": 0.787702056960637,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 4
+        },
+        {
+          "i": 10,
+          "goal": "public services and benefits guide",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 13,
+          "relevant": 13
+        }
+      ]
+    },
+    {
+      "name": "Nature",
+      "url": "https://www.nature.com/?error=cookies_not_supported&code=30f11344-55b3-44a5-bae0-badeb894b48a",
+      "html_bytes": 225051,
+      "baseline_ndcg5": 0.6548086577531307,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.5328566905764968,
+      "train_mrr": 0.5055555555555555,
+      "test_ndcg5": 0.6257384384460164,
+      "test_mrr": 0.6666666666666666,
+      "test_ndcg5_std": 0.5453718591094777,
+      "test_mrr_std": 0.5773502691896257,
+      "test_p5": 0.4666666666666667,
+      "test_causal": 4,
+      "feedback_total": 29,
+      "feedback_precision": 0.9655172413793104,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest scientific research",
+          "phase": "BASELINE",
+          "ndcg5": 0.6548086577531307,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 0,
+          "relevant": 11
+        },
+        {
+          "i": 2,
+          "goal": "new science publications today",
+          "phase": "TRAIN",
+          "ndcg5": 0.38685280723454163,
+          "mrr": 0.2,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 3,
+          "goal": "recent scientific discoveries",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "mrr": 0.3333333333333333,
+          "p5": 0.2,
+          "causal": 0,
+          "relevant": 1
+        },
+        {
+          "i": 4,
+          "goal": "important research papers",
+          "phase": "TRAIN",
+          "ndcg5": 0.8687949224876582,
+          "mrr": 1.0,
+          "p5": 0.8,
+          "causal": 0,
+          "relevant": 11
+        },
+        {
+          "i": 5,
+          "goal": "breakthrough science news",
+          "phase": "TRAIN",
+          "ndcg5": 0.44149241373678083,
+          "mrr": 0.5,
+          "p5": 0.4,
+          "causal": 6,
+          "relevant": 4
+        },
+        {
+          "i": 6,
+          "goal": "major scientific findings",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "new research in science journals",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 10,
+          "relevant": 11
+        },
+        {
+          "i": 8,
+          "goal": "what are the latest scientific discoveries",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 9,
+          "goal": "cutting edge research papers",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 1.0,
+          "causal": 11,
+          "relevant": 11
+        },
+        {
+          "i": 10,
+          "goal": "notable science publications this week",
+          "phase": "TEST",
+          "ndcg5": 0.8772153153380493,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 1,
+          "relevant": 2
+        }
+      ]
+    },
+    {
+      "name": "TripAdvisor",
+      "url": "https://www.tripadvisor.com/",
+      "html_bytes": 775,
+      "baseline_ndcg5": 0.0,
+      "baseline_mrr": 0.0,
+      "train_ndcg5": 0.0,
+      "train_mrr": 0.0,
+      "test_ndcg5": 0.0,
+      "test_mrr": 0.0,
+      "test_ndcg5_std": 0.0,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.0,
+      "test_causal": 1,
+      "feedback_total": 6,
+      "feedback_precision": 0.0,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "best hotels in New York",
+          "phase": "BASELINE",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 2,
+          "goal": "top rated New York hotels",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 0,
+          "relevant": 0
+        },
+        {
+          "i": 3,
+          "goal": "popular hotels in NYC",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 4,
+          "goal": "New York City hotel recommendations",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 5,
+          "goal": "best places to stay in New York",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 6,
+          "goal": "NYC hotel deals",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 7,
+          "goal": "highly rated New York accommodations",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "where to stay in New York City",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 9,
+          "goal": "New York hotel reviews and ratings",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 10,
+          "goal": "recommended hotels in Manhattan",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        }
+      ]
+    },
+    {
+      "name": "WebMD",
+      "url": "https://www.webmd.com/",
+      "html_bytes": 379342,
+      "baseline_ndcg5": 0.7227265726449519,
+      "baseline_mrr": 1.0,
+      "train_ndcg5": 0.772780406455472,
+      "train_mrr": 0.8333333333333334,
+      "test_ndcg5": 1.0,
+      "test_mrr": 1.0,
+      "test_ndcg5_std": 0.0,
+      "test_mrr_std": 0.0,
+      "test_p5": 0.5333333333333333,
+      "test_causal": 2.6666666666666665,
+      "feedback_total": 14,
+      "feedback_precision": 0.9285714285714286,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "common cold symptoms and treatment",
+          "phase": "BASELINE",
+          "ndcg5": 0.7227265726449519,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 0,
+          "relevant": 6
+        },
+        {
+          "i": 2,
+          "goal": "cold flu symptoms guide",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 0,
+          "relevant": 2
+        },
+        {
+          "i": 3,
+          "goal": "how to treat a cold",
+          "phase": "TRAIN",
+          "ndcg5": 0.6366824387328317,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 4
+        },
+        {
+          "i": 4,
+          "goal": "symptoms of common cold",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 2,
+          "relevant": 3
+        },
+        {
+          "i": 5,
+          "goal": "cold remedies and treatment",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 6,
+          "goal": "what helps with a cold",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 7,
+          "goal": "cold virus symptoms list",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "mrr": 0.0,
+          "p5": 0.0,
+          "causal": 1,
+          "relevant": 0
+        },
+        {
+          "i": 8,
+          "goal": "home remedies for cold symptoms",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 3
+        },
+        {
+          "i": 9,
+          "goal": "when to see doctor for cold",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.4,
+          "causal": 2,
+          "relevant": 2
+        },
+        {
+          "i": 10,
+          "goal": "cold versus flu symptoms difference",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "mrr": 1.0,
+          "p5": 0.6,
+          "causal": 3,
+          "relevant": 3
+        }
+      ]
+    }
+  ],
+  "date": "2026-04-05",
+  "version": "v13 + suppression + goal-clusters"
+}

@@ -13,10 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     # Build essentials for cc linker
     build-essential \
+    # libclang for bindgen (used by stylo/servo dependencies)
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Installera Rust via rustup
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+# Installera Rust via rustup (CACHE_BUST forces rebuild when version changes)
+ARG RUST_VERSION=1.94.1
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
@@ -26,13 +29,16 @@ WORKDIR /app
 # This layer is cached as long as Cargo.toml/Cargo.lock don't change.
 # Rebuilds of our code reuse the cached ~300 compiled dependencies.
 COPY Cargo.toml Cargo.lock ./
+COPY vendor/ vendor/
 
 # Create minimal stubs so cargo can resolve and compile all dependencies
-RUN mkdir -p src/bin benches && \
+# Also stub examples/ (excluded by .dockerignore but declared in Cargo.toml)
+RUN mkdir -p src/bin benches examples && \
     echo "pub fn stub() {}" > src/lib.rs && \
     echo "fn main() {}" > src/bin/server.rs && \
     echo "fn main() {}" > src/bin/mcp_server.rs && \
-    echo "fn main() {}" > benches/bench_main.rs
+    echo "fn main() {}" > benches/bench_main.rs && \
+    echo "fn main() {}" > examples/render_demo.rs
 
 # Pre-compile all dependencies (this is the slow step, ~10-15 min first time)
 # Subsequent builds reuse this layer if only src/ code changed.
@@ -48,6 +54,9 @@ RUN rm -rf src/ benches/ && \
 # ── Build our code (fast: only our crate, deps are cached) ───────────────────
 COPY src/ src/
 COPY benches/ benches/
+COPY dashboard.html dashboard.html
+# Stub examples (excluded by .dockerignore but required by Cargo.toml [[example]])
+RUN mkdir -p examples && echo "fn main() {}" > examples/render_demo.rs
 
 RUN cargo build --profile server-release --features server,vision,cdp --bin aether-server && \
     cargo build --profile server-release --features mcp,vision,cdp --bin aether-mcp
@@ -82,6 +91,10 @@ COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aeth
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
 
 ENV PORT=10000
+
+# Persistence: SQLite database path (mount persistent disk here on Render)
+ENV AETHER_DB_PATH=/data/aether.db
+RUN mkdir -p /data
 
 # Vision model: set AETHER_MODEL_URL to a public URL (e.g. GitHub Release)
 # or AETHER_MODEL_PATH to a local file path inside the container.
