@@ -1,0 +1,79 @@
+{
+  "benchmark": "CRFR MS MARCO Evaluation",
+  "variants": [
+    {
+      "name": "A: BM25 only",
+      "metrics": {
+        "mrr_at_10": 0.099785,
+        "ndcg_at_10": 0.114136,
+        "recall_at_100": 0.507462,
+        "recall_at_1000": 0.813037
+      },
+      "latency": {
+        "mean_us": 18768.4,
+        "p50_us": 19504,
+        "p95_us": 22156,
+        "p99_us": 23935,
+        "qps": 53.3
+      },
+      "queries_evaluated": 6980
+    },
+    {
+      "name": "B: BM25 + HDC",
+      "metrics": {
+        "mrr_at_10": 0.098913,
+        "ndcg_at_10": 0.113682,
+        "recall_at_100": 0.506817,
+        "recall_at_1000": 0.624331
+      },
+      "latency": {
+        "mean_us": 77398.6,
+        "p50_us": 79041,
+        "p95_us": 94028,
+        "p99_us": 102746,
+        "qps": 12.9
+      },
+      "queries_evaluated": 6980
+    },
+    {
+      "name": "C: CRFR cold",
+      "metrics": {
+        "mrr_at_10": 0.103822,
+        "ndcg_at_10": 0.118888,
+        "recall_at_100": 0.507581,
+        "recall_at_1000": 0.572827
+      },
+      "latency": {
+        "mean_us": 81416.3,
+        "p50_us": 83170,
+        "p95_us": 99147,
+        "p99_us": 107718,
+        "qps": 12.3
+      },
+      "queries_evaluated": 6980
+    },
+    {
+      "name": "D: CRFR + feedback",
+      "metrics": {
+        "mrr_at_10": 0.103731,
+        "ndcg_at_10": 0.119173,
+        "recall_at_100": 0.508084,
+        "recall_at_1000": 0.573482
+      },
+      "latency": {
+        "mean_us": 81792.1,
+        "p50_us": 83457,
+        "p95_us": 99398,
+        "p99_us": 108756,
+        "qps": 12.2
+      },
+      "queries_evaluated": 6979
+    }
+  ],
+  "reference_baselines": {
+    "bm25_anserini_mrr10": 0.187,
+    "doct5query_bm25_mrr10": 0.277,
+    "ance_dense_mrr10": 0.330,
+    "colbert_v2_mrr10": 0.397
+  }
+}
