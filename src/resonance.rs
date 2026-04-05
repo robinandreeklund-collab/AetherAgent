@@ -1327,29 +1327,75 @@ impl ResonanceField {
 
         // Build trace if requested
         let trace = if capture_trace {
+            // För noder som fick amplitud via propagation (inte i cascade),
+            // beräkna BM25/HDC-scores i efterhand så att trace-tabellen är komplett.
+            let goal_hv_ref = &goal_hv;
             let node_scores: Vec<NodeScoreBreakdown> = results
                 .iter()
                 .take(50)
-                .map(|r| NodeScoreBreakdown {
-                    node_id: r.node_id,
-                    bm25_score: trace_bm25_scores.get(&r.node_id).copied().unwrap_or(0.0),
-                    hdc_score: trace_hdc_scores.get(&r.node_id).copied().unwrap_or(0.0),
-                    role_priority: trace_role_priorities
-                        .get(&r.node_id)
-                        .copied()
-                        .unwrap_or(0.0),
-                    concept_boost: trace_concept_boosts.get(&r.node_id).copied().unwrap_or(0.0),
-                    causal_boost: r.causal_boost,
-                    answer_shape: trace_answer_shapes.get(&r.node_id).copied().unwrap_or(0.0),
-                    answer_type_boost: trace_answer_types.get(&r.node_id).copied().unwrap_or(0.0),
-                    zone_penalty: trace_zone_penalties.get(&r.node_id).copied().unwrap_or(1.0),
-                    meta_penalty: trace_meta_penalties.get(&r.node_id).copied().unwrap_or(1.0),
-                    combmnz: trace_combmnz.get(&r.node_id).copied().unwrap_or(1.0),
-                    template_boost: trace_template_boosts
-                        .get(&r.node_id)
-                        .copied()
-                        .unwrap_or(false),
-                    final_amplitude: r.amplitude,
+                .map(|r| {
+                    let nid = r.node_id;
+                    let in_cascade = trace_bm25_scores.contains_key(&nid);
+                    if in_cascade {
+                        // Noden scorades i cascade — använd sparade trace-värden
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: trace_bm25_scores.get(&nid).copied().unwrap_or(0.0),
+                            hdc_score: trace_hdc_scores.get(&nid).copied().unwrap_or(0.0),
+                            role_priority: trace_role_priorities.get(&nid).copied().unwrap_or(0.0),
+                            concept_boost: trace_concept_boosts.get(&nid).copied().unwrap_or(0.0),
+                            causal_boost: r.causal_boost,
+                            answer_shape: trace_answer_shapes.get(&nid).copied().unwrap_or(0.0),
+                            answer_type_boost: trace_answer_types.get(&nid).copied().unwrap_or(0.0),
+                            zone_penalty: trace_zone_penalties.get(&nid).copied().unwrap_or(1.0),
+                            meta_penalty: trace_meta_penalties.get(&nid).copied().unwrap_or(1.0),
+                            combmnz: trace_combmnz.get(&nid).copied().unwrap_or(1.0),
+                            template_boost: trace_template_boosts
+                                .get(&nid)
+                                .copied()
+                                .unwrap_or(false),
+                            final_amplitude: r.amplitude,
+                        }
+                    } else {
+                        // Noden fick amplitud via propagation — beräkna scores i efterhand
+                        let bm25_s = bm25_scores.get(&nid).copied().unwrap_or(0.0);
+                        let hdc_s = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| {
+                                let raw = s.text_hv.similarity(goal_hv_ref);
+                                let norm = ((raw + 1.0) / 2.0).clamp(0.0, 1.0);
+                                norm * norm
+                            })
+                            .unwrap_or(0.0);
+                        let role_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| role_priority(&s.role))
+                            .unwrap_or(0.0);
+                        let shape_s = shape_scores.get(&nid).copied().unwrap_or(0.0);
+                        let meta_p = meta_penalties.get(&nid).copied().unwrap_or(1.0);
+                        let zone_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| zone_penalty(&s.role, s.depth))
+                            .unwrap_or(1.0);
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: bm25_s,
+                            hdc_score: hdc_s,
+                            role_priority: role_p,
+                            concept_boost: 0.0,
+                            causal_boost: r.causal_boost,
+                            answer_shape: shape_s,
+                            answer_type_boost: 0.0,
+                            zone_penalty: zone_p,
+                            meta_penalty: meta_p,
+                            combmnz: 1.0,
+                            template_boost: false,
+                            final_amplitude: r.amplitude,
+                        }
+                    }
                 })
                 .collect();
             Some(PropagationTrace {
