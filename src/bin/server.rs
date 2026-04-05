@@ -6055,7 +6055,35 @@ async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl
 
 #[derive(Deserialize)]
 struct DashboardWeightsRequest {
+    /// Accepterar både string ("12345") och number (12345) — JS Number förlorar precision >2^53
+    #[serde(deserialize_with = "deser_u64_from_string_or_number")]
     url_hash: u64,
+}
+
+fn deser_u64_from_string_or_number<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<u64, D::Error> {
+    use serde::de::{self, Visitor};
+    struct U64Visitor;
+    impl<'de> Visitor<'de> for U64Visitor {
+        type Value = u64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("u64 as string or number")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
+            Ok(v as u64)
+        }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<u64, E> {
+            Ok(v as u64)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+    d.deserialize_any(U64Visitor)
 }
 
 #[derive(Deserialize)]

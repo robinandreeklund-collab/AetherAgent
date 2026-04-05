@@ -6,6 +6,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::resonance;
 
+/// Serde-modul: serialiserar u64 som JSON-sträng (JS Number förlorar precision >2^53)
+mod u64_as_string {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(val: &u64, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&val.to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 // ─── 1. CRFR Query Explorer ────────────────────────────────────────────────
 
 /// Full CRFR query trace: entire pipeline from goal to ranked results
@@ -154,12 +168,15 @@ pub struct PropagationWeight {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CausalMemoryView {
     pub url: String,
+    #[serde(with = "u64_as_string")]
     pub url_hash: u64,
     pub propagation_weights: Vec<PropagationWeight>,
     pub concept_memory_count: usize,
     pub total_feedback_events: u32,
+    #[serde(with = "u64_as_string")]
     pub domain_hash: u64,
     pub field_age_ms: u64,
+    #[serde(with = "u64_as_string")]
     pub structure_hash: u64,
     pub max_depth: u32,
     pub edge_count: usize,
@@ -217,16 +234,19 @@ const CACHE_TTL_MS: u64 = 180_000;
 /// A cached site entry with full metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteCacheEntry {
+    #[serde(with = "u64_as_string")]
     pub url_hash: u64,
     pub url: String,
     pub node_count: usize,
     pub total_queries: u32,
+    #[serde(with = "u64_as_string")]
     pub domain_hash: u64,
     pub created_at_ms: u64,
     pub age_ms: u64,
     pub ttl_remaining_ms: u64,
     pub propagation_weight_count: usize,
     pub concept_memory_count: usize,
+    #[serde(with = "u64_as_string")]
     pub structure_hash: u64,
     pub max_depth: u32,
     pub edge_count: usize,
