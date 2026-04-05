@@ -1016,11 +1016,17 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — om det inte finns, kan vi inte ge feedback
+    // Hämta cacheat fält — prova båda varianter (med/utan JS eval)
     let dummy_nodes: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
     if !found {
-        return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        // Prova JS-variant (explore/parse-crfr med run_js=true cachar under #__js_eval)
+        let (field_js, found_js) =
+            resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
+        if !found_js {
+            return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        }
+        field = field_js;
     }
 
     field.feedback(goal, &ids);
@@ -1041,7 +1047,11 @@ pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> Str
     let dummy: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy, url);
     if !found {
-        return r#"{"status":"no_field"}"#.to_string();
+        let (field_js, found_js) = resonance::get_or_build_field_with_variant(&dummy, url, true);
+        if !found_js {
+            return r#"{"status":"no_field"}"#.to_string();
+        }
+        field = field_js;
     }
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
