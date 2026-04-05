@@ -10,6 +10,7 @@ pub(crate) mod compiler;
 mod css_cascade;
 #[cfg(feature = "blitz")]
 pub mod css_compiler;
+pub mod dashboard;
 pub(crate) mod diff;
 #[cfg(feature = "js-eval")]
 pub mod dom_bridge;
@@ -29,6 +30,8 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+#[cfg(feature = "persist")]
+pub mod persist;
 pub mod resonance;
 pub mod scoring;
 pub mod search;
@@ -1015,11 +1018,17 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — om det inte finns, kan vi inte ge feedback
+    // Hämta cacheat fält — prova båda varianter (med/utan JS eval)
     let dummy_nodes: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
     if !found {
-        return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        // Prova JS-variant (explore/parse-crfr med run_js=true cachar under #__js_eval)
+        let (field_js, found_js) =
+            resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
+        if !found_js {
+            return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
+        }
+        field = field_js;
     }
 
     field.feedback(goal, &ids);
@@ -1040,7 +1049,11 @@ pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> Str
     let dummy: Vec<types::SemanticNode> = vec![];
     let (mut field, found) = resonance::get_or_build_field(&dummy, url);
     if !found {
-        return r#"{"status":"no_field"}"#.to_string();
+        let (field_js, found_js) = resonance::get_or_build_field_with_variant(&dummy, url, true);
+        if !found_js {
+            return r#"{"status":"no_field"}"#.to_string();
+        }
+        field = field_js;
     }
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
@@ -1525,6 +1538,190 @@ pub fn wrap_untrusted(content: &str) -> String {
 #[wasm_bindgen]
 pub fn health_check() -> String {
     r#"{"status": "ok", "version": "0.2.0", "engine": "AetherAgent"}"#.to_string()
+}
+
+// ─── Dashboard API ──────────────────────────────────────────────────────────
+
+/// Get full dashboard snapshot.
+pub fn dashboard_snapshot(vision_available: bool, endpoint_count: usize) -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+
+    let persist = {
+        #[cfg(feature = "persist")]
+        {
+            let (sf, sd, sz) = persist::db_stats();
+            dashboard::PersistStats {
+                enabled: persist::is_initialized(),
+                stored_fields: sf,
+                stored_domains: sd,
+                db_size_bytes: sz,
+            }
+        }
+        #[cfg(not(feature = "persist"))]
+        {
+            dashboard::PersistStats {
+                enabled: false,
+                stored_fields: 0,
+                stored_domains: 0,
+                db_size_bytes: 0,
+            }
+        }
+    };
+
+    let snap = dashboard::DashboardSnapshot {
+        crfr_cache: dashboard::build_cache_overview(&fields, cache_len, cache_cap, now),
+        memory_stats: dashboard::read_memory_stats(),
+        wpt_baseline: dashboard::build_wpt_baseline(),
+        spa_runtime: dashboard::build_spa_runtime(),
+        engine: dashboard::build_engine_capabilities(),
+        persist,
+        vision_available,
+        endpoint_count,
+        timestamp_ms: now,
+    };
+
+    serde_json::to_string(&snap).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get CRFR cache overview.
+pub fn dashboard_crfr_cache() -> String {
+    let now = now_ms();
+    let fields = resonance::list_cached_fields();
+    let (cache_len, cache_cap) = resonance::cache_stats();
+    let overview = dashboard::build_cache_overview(&fields, cache_len, cache_cap, now);
+    serde_json::to_string(&overview)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Get propagation weights for a cached field by URL hash.
+pub fn dashboard_propagation_weights(url_hash: u64) -> String {
+    let fields = resonance::list_cached_fields();
+    match fields.iter().find(|f| f.url_hash == url_hash) {
+        Some(f) => {
+            let view = dashboard::build_causal_memory_view(f, now_ms());
+            serde_json::to_string(&view)
+                .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+        }
+        None => r#"{"error":"field not found"}"#.to_string(),
+    }
+}
+
+/// Get WPT baseline panel.
+pub fn dashboard_wpt() -> String {
+    let panel = dashboard::build_wpt_baseline();
+    serde_json::to_string(&panel).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
+}
+
+/// Run a CRFR query with full trace for dashboard explorer.
+/// Uses the real CRFR pipeline: JS eval + field cache + wave propagation.
+pub fn dashboard_crfr_explore(
+    tree: &types::SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+) -> String {
+    let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
+
+    let field_start = now_ms();
+    let (mut field, cache_hit) =
+        resonance::get_or_build_field_with_variant(&tree.nodes, url, run_js);
+    let field_ms = now_ms().saturating_sub(field_start);
+
+    let prop_start = now_ms();
+    let (results, trace) = field.propagate_top_k_traced(goal, top_n as usize);
+    let prop_ms = now_ms().saturating_sub(prop_start);
+    resonance::save_field(&field);
+
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect(&n.children, m);
+            }
+        }
+        collect(&tree.nodes, &mut m);
+        m
+    };
+
+    let res_vec: Vec<resonance::ResonanceResult> = results.to_vec();
+    let calibrated = field.calibrate_results(&res_vec);
+    let cal_map: HashMap<u32, f32> = calibrated.iter().map(|&(id, _, prob)| (id, prob)).collect();
+
+    let top_nodes: Vec<dashboard::CrfrNodeRank> = results
+        .iter()
+        .filter_map(|r| {
+            node_map.get(&r.node_id).map(|node| {
+                dashboard::build_crfr_node_rank(
+                    node.id,
+                    &node.role,
+                    &node.label,
+                    r.amplitude,
+                    cal_map.get(&r.node_id).copied().unwrap_or(0.0),
+                    &format!("{:?}", r.resonance_type),
+                    r.causal_boost,
+                )
+            })
+        })
+        .collect();
+
+    // Build node score views with labels
+    let node_scores: Vec<dashboard::NodeScoreView> = trace
+        .node_scores
+        .iter()
+        .filter_map(|ns| {
+            node_map
+                .get(&ns.node_id)
+                .map(|node| dashboard::NodeScoreView {
+                    node_id: ns.node_id,
+                    role: node.role.clone(),
+                    label: if node.label.len() > 80 {
+                        format!("{}...", &node.label[..node.label.floor_char_boundary(77)])
+                    } else {
+                        node.label.clone()
+                    },
+                    bm25_score: ns.bm25_score,
+                    hdc_score: ns.hdc_score,
+                    role_priority: ns.role_priority,
+                    concept_boost: ns.concept_boost,
+                    causal_boost: ns.causal_boost,
+                    answer_shape: ns.answer_shape,
+                    answer_type_boost: ns.answer_type_boost,
+                    zone_penalty: ns.zone_penalty,
+                    meta_penalty: ns.meta_penalty,
+                    combmnz: ns.combmnz,
+                    template_boost: ns.template_boost,
+                    final_amplitude: ns.final_amplitude,
+                })
+        })
+        .collect();
+
+    let explorer = dashboard::CrfrQueryExplorer {
+        goal: goal.to_string(),
+        url: url.to_string(),
+        bm25_candidates: trace.bm25_candidates,
+        cascade_candidates: trace.cascade_candidates,
+        propagation_iterations: trace.propagation_iterations,
+        iteration_deltas: trace.iteration_deltas,
+        gap_cut_position: trace.gap_cut_position,
+        template_match: trace.template_match,
+        node_scores,
+        top_nodes,
+        field_build_ms: field_ms,
+        propagation_ms: prop_ms,
+        cache_hit,
+        total_field_nodes: total_dom_nodes,
+        total_queries: field.total_queries,
+    };
+
+    serde_json::to_string(&explorer)
+        .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
 }
 
 // ─── Fas 2: Intent API ──────────────────────────────────────────────────────

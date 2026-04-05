@@ -80,9 +80,48 @@ pub struct ResonanceResult {
     pub causal_boost: f32,
 }
 
+/// Per-node scoring breakdown (for dashboard CRFR Query Explorer & DOM Visualizer)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeScoreBreakdown {
+    pub node_id: u32,
+    pub bm25_score: f32,
+    pub hdc_score: f32,
+    pub role_priority: f32,
+    pub concept_boost: f32,
+    pub causal_boost: f32,
+    pub answer_shape: f32,
+    pub answer_type_boost: f32,
+    pub zone_penalty: f32,
+    pub meta_penalty: f32,
+    pub combmnz: f32,
+    pub template_boost: bool,
+    pub final_amplitude: f32,
+}
+
+/// Full propagation trace for dashboard visualization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropagationTrace {
+    /// BM25 candidate count (top-200 pre-filter)
+    pub bm25_candidates: usize,
+    /// Total nodes scored (past cascade filter)
+    pub cascade_candidates: usize,
+    /// Wave propagation: iterations actually run (1..6)
+    pub propagation_iterations: u32,
+    /// Per-iteration convergence delta
+    pub iteration_deltas: Vec<f32>,
+    /// Amplitude gap: position where cut happened (None = hard top_k)
+    pub gap_cut_position: Option<usize>,
+    /// Per-node scoring breakdown (top nodes only)
+    pub node_scores: Vec<NodeScoreBreakdown>,
+    /// Total nodes in field
+    pub total_field_nodes: usize,
+    /// Template match detected
+    pub template_match: bool,
+}
+
 /// Serialiserbar wrapper för Hypervector-data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HvData {
+pub struct HvData {
     bits: Vec<u64>,
 }
 
@@ -154,6 +193,9 @@ mod hv_serde {
 pub struct ResonanceField {
     /// Resonanstillstånd per nod-ID
     nodes: HashMap<u32, ResonanceState>,
+    /// Originalets URL (bevaras för dashboard)
+    #[serde(default)]
+    pub url: String,
     /// Förälder-mappning: child_id -> parent_id
     #[serde(default)]
     parent_map: HashMap<u32, u32>,
@@ -517,6 +559,7 @@ impl ResonanceField {
         let dh = domain_hash_from_url(url);
         let mut field = ResonanceField {
             nodes,
+            url: url.to_string(),
             parent_map,
             children_map,
             node_labels,
@@ -654,12 +697,50 @@ impl ResonanceField {
     /// Phase 1: Compute initial resonance from HDC similarity + causal memory.
     /// Phase 2: Wave propagation through parent-child edges.
     /// Phase 3: Collect and sort results by amplitude.
+    /// Propagate with full trace capture (for dashboard)
+    pub fn propagate_traced(&mut self, goal: &str) -> (Vec<ResonanceResult>, PropagationTrace) {
+        let (results, trace) = self.propagate_inner(goal, true);
+        (
+            results,
+            trace.unwrap_or_else(|| PropagationTrace {
+                bm25_candidates: 0,
+                cascade_candidates: 0,
+                propagation_iterations: 0,
+                iteration_deltas: vec![],
+                gap_cut_position: None,
+                node_scores: vec![],
+                total_field_nodes: self.nodes.len(),
+                template_match: false,
+            }),
+        )
+    }
+
     pub fn propagate(&mut self, goal: &str) -> Vec<ResonanceResult> {
+        self.propagate_inner(goal, false).0
+    }
+
+    fn propagate_inner(
+        &mut self,
+        goal: &str,
+        capture_trace: bool,
+    ) -> (Vec<ResonanceResult>, Option<PropagationTrace>) {
         self.total_queries += 1;
         let goal_hv = Hypervector::from_text_ngrams(goal);
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
+        // Trace data
+        let mut trace_bm25_scores: HashMap<u32, f32> = HashMap::new();
+        let mut trace_hdc_scores: HashMap<u32, f32> = HashMap::new();
+        let mut trace_role_priorities: HashMap<u32, f32> = HashMap::new();
+        let mut trace_concept_boosts: HashMap<u32, f32> = HashMap::new();
+        let mut trace_answer_shapes: HashMap<u32, f32> = HashMap::new();
+        let mut trace_answer_types: HashMap<u32, f32> = HashMap::new();
+        let mut trace_zone_penalties: HashMap<u32, f32> = HashMap::new();
+        let mut trace_meta_penalties: HashMap<u32, f32> = HashMap::new();
+        let mut trace_combmnz: HashMap<u32, f32> = HashMap::new();
+        let mut trace_template_boosts: HashMap<u32, bool> = HashMap::new();
+        let mut trace_iteration_deltas: Vec<f32> = Vec::new();
 
         // #15 LinUCB: Contextual weight adjustment based on page profile
         let (_text_d, _list_d, table_d, nav_d, _depth) = page_profile(&self.nodes);
@@ -784,8 +865,10 @@ impl ResonanceField {
             })
             .copied()
             .collect();
+        let trace_bm25_count = bm25_candidates.len();
         let cascade_candidates: std::collections::HashSet<u32> =
             bm25_candidates.into_iter().chain(causal_nodes).collect();
+        let trace_cascade_count = cascade_candidates.len();
 
         for &nid in &node_ids {
             // CASCADE: skip expensive scoring for nodes not in candidate set
@@ -901,6 +984,20 @@ impl ResonanceField {
                 }
 
                 causal_boosts.insert(nid, causal_boost);
+
+                // Trace: capture per-node score breakdown
+                if capture_trace {
+                    trace_bm25_scores.insert(nid, bm25_score);
+                    trace_hdc_scores.insert(nid, hdc_score);
+                    trace_role_priorities.insert(nid, role_boost);
+                    trace_concept_boosts.insert(nid, concept_boost);
+                    trace_answer_shapes.insert(nid, shape);
+                    trace_answer_types.insert(nid, answer_type);
+                    trace_zone_penalties.insert(nid, zone);
+                    trace_meta_penalties.insert(nid, penalty);
+                    trace_combmnz.insert(nid, combmnz);
+                    trace_template_boosts.insert(nid, template_match && state.hit_count > 0);
+                }
 
                 if causal_boost > base_resonance * 0.5 && state.hit_count > 0 {
                     resonance_types.insert(nid, ResonanceType::CausalMemory);
@@ -1041,6 +1138,11 @@ impl ResonanceField {
                         }
                     }
                 }
+            }
+
+            // Trace: capture iteration delta
+            if capture_trace {
+                trace_iteration_deltas.push(total_delta);
             }
 
             // Konvergens — stoppa om energin stabiliserat sig
@@ -1223,7 +1325,94 @@ impl ResonanceField {
             });
         }
 
-        results
+        // Build trace if requested
+        let trace = if capture_trace {
+            // För noder som fick amplitud via propagation (inte i cascade),
+            // beräkna BM25/HDC-scores i efterhand så att trace-tabellen är komplett.
+            let goal_hv_ref = &goal_hv;
+            let node_scores: Vec<NodeScoreBreakdown> = results
+                .iter()
+                .take(50)
+                .map(|r| {
+                    let nid = r.node_id;
+                    let in_cascade = trace_bm25_scores.contains_key(&nid);
+                    if in_cascade {
+                        // Noden scorades i cascade — använd sparade trace-värden
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: trace_bm25_scores.get(&nid).copied().unwrap_or(0.0),
+                            hdc_score: trace_hdc_scores.get(&nid).copied().unwrap_or(0.0),
+                            role_priority: trace_role_priorities.get(&nid).copied().unwrap_or(0.0),
+                            concept_boost: trace_concept_boosts.get(&nid).copied().unwrap_or(0.0),
+                            causal_boost: r.causal_boost,
+                            answer_shape: trace_answer_shapes.get(&nid).copied().unwrap_or(0.0),
+                            answer_type_boost: trace_answer_types.get(&nid).copied().unwrap_or(0.0),
+                            zone_penalty: trace_zone_penalties.get(&nid).copied().unwrap_or(1.0),
+                            meta_penalty: trace_meta_penalties.get(&nid).copied().unwrap_or(1.0),
+                            combmnz: trace_combmnz.get(&nid).copied().unwrap_or(1.0),
+                            template_boost: trace_template_boosts
+                                .get(&nid)
+                                .copied()
+                                .unwrap_or(false),
+                            final_amplitude: r.amplitude,
+                        }
+                    } else {
+                        // Noden fick amplitud via propagation — beräkna scores i efterhand
+                        let bm25_s = bm25_scores.get(&nid).copied().unwrap_or(0.0);
+                        let hdc_s = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| {
+                                let raw = s.text_hv.similarity(goal_hv_ref);
+                                let norm = ((raw + 1.0) / 2.0).clamp(0.0, 1.0);
+                                norm * norm
+                            })
+                            .unwrap_or(0.0);
+                        let role_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| role_priority(&s.role))
+                            .unwrap_or(0.0);
+                        let shape_s = shape_scores.get(&nid).copied().unwrap_or(0.0);
+                        let meta_p = meta_penalties.get(&nid).copied().unwrap_or(1.0);
+                        let zone_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| zone_penalty(&s.role, s.depth))
+                            .unwrap_or(1.0);
+                        NodeScoreBreakdown {
+                            node_id: nid,
+                            bm25_score: bm25_s,
+                            hdc_score: hdc_s,
+                            role_priority: role_p,
+                            concept_boost: 0.0,
+                            causal_boost: r.causal_boost,
+                            answer_shape: shape_s,
+                            answer_type_boost: 0.0,
+                            zone_penalty: zone_p,
+                            meta_penalty: meta_p,
+                            combmnz: 1.0,
+                            template_boost: false,
+                            final_amplitude: r.amplitude,
+                        }
+                    }
+                })
+                .collect();
+            Some(PropagationTrace {
+                bm25_candidates: trace_bm25_count,
+                cascade_candidates: trace_cascade_count,
+                propagation_iterations: trace_iteration_deltas.len() as u32,
+                iteration_deltas: trace_iteration_deltas,
+                gap_cut_position: None, // Filled by propagate_top_k_traced
+                node_scores,
+                total_field_nodes: self.nodes.len(),
+                template_match,
+            })
+        } else {
+            None
+        };
+
+        (results, trace)
     }
 
     /// Propagate and return only the most relevant nodes.
@@ -1234,6 +1423,24 @@ impl ResonanceField {
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
         let all = self.propagate(goal);
         Self::apply_gap_filter(all, top_k)
+    }
+
+    /// Propagate with trace and gap detection
+    pub fn propagate_top_k_traced(
+        &mut self,
+        goal: &str,
+        top_k: usize,
+    ) -> (Vec<ResonanceResult>, PropagationTrace) {
+        let (all, mut trace) = self.propagate_traced(goal);
+        let total = all.len();
+        let filtered = Self::apply_gap_filter(all, top_k);
+        let gap_pos = if filtered.len() < total.min(top_k) {
+            Some(filtered.len())
+        } else {
+            None
+        };
+        trace.gap_cut_position = gap_pos;
+        (filtered, trace)
     }
 
     /// Run multiple goal variants and merge results (union with max amplitude).
@@ -1922,13 +2129,14 @@ static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
 
 /// Domain-level aggregated learning: shared propagation stats + concept memory.
 /// Used as warm-start prior for new URLs from the same domain.
-struct DomainProfile {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainProfile {
     /// Aggregated propagation stats from all URLs on this domain
-    stats: HashMap<String, (f32, f32)>,
+    pub stats: HashMap<String, (f32, f32)>,
     /// Aggregated concept memory from all successful extractions
-    concepts: HashMap<String, HvData>,
+    pub concepts: HashMap<String, HvData>,
     /// Number of fields that contributed to this profile
-    field_count: u32,
+    pub field_count: u32,
 }
 
 struct DomainRegistry {
@@ -1994,6 +2202,46 @@ impl DomainRegistry {
 static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
     std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(128)));
 
+/// Export all domain profiles for persistence.
+pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
+    let reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    reg.profiles.iter().map(|(&k, v)| (k, v.clone())).collect()
+}
+
+/// Import domain profiles from persistence (at startup).
+pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
+    let mut reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    for (hash, profile) in profiles {
+        reg.profiles.entry(hash).or_insert(profile);
+    }
+}
+
+/// Import cached fields from persistence (at startup).
+pub fn import_cached_fields(fields: Vec<ResonanceField>) {
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    let now = now_ms();
+    for field in fields {
+        let url_hash = field.url_hash;
+        // Skriv inte över om redan finns
+        if !cache.entries.iter().any(|(h, _, _)| *h == url_hash) {
+            cache.put(url_hash, field);
+            // Uppdatera insert_ms till nu (TTL räknas från import)
+            if let Some(entry) = cache.entries.iter_mut().find(|(h, _, _)| *h == url_hash) {
+                entry.1 = now;
+            }
+        }
+    }
+}
+
 /// Get a cached resonance field for a URL, or build a new one.
 ///
 /// If a cached field exists, it retains all causal memory from previous
@@ -2026,6 +2274,15 @@ pub fn get_or_build_field_with_variant(
         return (field, true);
     }
     drop(cache);
+
+    // Fallback: försök ladda från SQLite (persist)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return (field, true);
+        }
+    }
+
     let mut field = ResonanceField::from_semantic_tree(tree_nodes, url);
     // Sätt korrekt url_hash (med variant) för cache-konistens
     field.url_hash = url_hash;
@@ -2044,6 +2301,18 @@ pub fn save_field(field: &ResonanceField) {
     if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
         registry.update(field.domain_hash, field);
     }
+
+    // Persist till SQLite (async-safe: körs synkront men snabbt ~0.5ms)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::save_field(field);
+        // Spara uppdaterad domain-profil också
+        if let Ok(reg) = DOMAIN_REGISTRY.lock() {
+            if let Some(profile) = reg.get(field.domain_hash) {
+                crate::persist::save_domain_profile(field.domain_hash, profile);
+            }
+        }
+    }
 }
 
 /// Get cache statistics (entries, capacity).
@@ -2053,6 +2322,53 @@ pub fn cache_stats() -> (usize, usize) {
         Err(poisoned) => poisoned.into_inner(),
     };
     (cache.len(), cache.capacity)
+}
+
+/// Summary info for a cached resonance field (for dashboard).
+pub struct FieldSummary {
+    pub url_hash: u64,
+    pub url: String,
+    pub node_count: usize,
+    pub total_queries: u32,
+    pub domain_hash: u64,
+    pub created_at_ms: u64,
+    pub insert_ms: u64,
+    pub propagation_weight_count: usize,
+    pub concept_memory_count: usize,
+    pub propagation_stats: std::collections::HashMap<String, (f32, f32)>,
+    pub structure_hash: u64,
+    pub max_depth: u32,
+    pub edge_count: usize,
+}
+
+/// List summaries of all cached resonance fields (non-destructive peek).
+pub fn list_cached_fields() -> Vec<FieldSummary> {
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache
+        .entries
+        .iter()
+        .map(|(url_hash, insert_ms, field)| {
+            let max_depth = field.nodes.values().map(|s| s.depth).max().unwrap_or(0);
+            FieldSummary {
+                url_hash: *url_hash,
+                url: field.url.clone(),
+                node_count: field.nodes.len(),
+                total_queries: field.total_queries,
+                domain_hash: field.domain_hash,
+                created_at_ms: field.created_at_ms,
+                insert_ms: *insert_ms,
+                propagation_weight_count: field.propagation_stats.len(),
+                concept_memory_count: field.concept_memory.len(),
+                propagation_stats: field.propagation_stats.clone(),
+                structure_hash: field.structure_hash,
+                max_depth,
+                edge_count: field.parent_map.len(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2380,6 +2696,64 @@ mod tests {
         assert_eq!(
             field.total_queries, 2,
             "Borde vara 2 efter två propagationer"
+        );
+    }
+
+    #[test]
+    fn test_propagate_traced_fills_propagated_node_scores() {
+        // Förälder matchar BM25, barn matchar inte men borde få HDC-score via retroaktiv beräkning
+        let tree = vec![make_node(
+            1,
+            "heading",
+            "latest news headlines today",
+            vec![
+                make_node(2, "link", "breaking story about politics", vec![]),
+                make_node(3, "link", "sports results from yesterday", vec![]),
+            ],
+        )];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+        let (results, trace) = field.propagate_top_k_traced("latest news", 10);
+
+        assert!(!results.is_empty(), "Borde returnera minst en nod");
+        assert!(
+            !trace.node_scores.is_empty(),
+            "Borde ha node score breakdowns"
+        );
+
+        // Nod 1 (heading) borde ha BM25 > 0 (direkt match)
+        let score_1 = trace.node_scores.iter().find(|s| s.node_id == 1);
+        assert!(score_1.is_some(), "Heading-noden borde finnas i trace");
+        if let Some(s) = score_1 {
+            assert!(
+                s.bm25_score > 0.0,
+                "Heading borde ha BM25 > 0, fick {}",
+                s.bm25_score
+            );
+        }
+
+        // Om nod 2 eller 3 fick propagerad amplitud, borde de ha HDC > 0
+        for child_id in [2, 3] {
+            if let Some(score) = trace.node_scores.iter().find(|s| s.node_id == child_id) {
+                assert!(
+                    score.hdc_score > 0.0,
+                    "Propagerad nod {} borde ha HDC > 0 (retroaktivt), fick {}",
+                    child_id,
+                    score.hdc_score
+                );
+                assert!(
+                    score.role_priority > 0.0,
+                    "Propagerad nod {} borde ha role_priority > 0, fick {}",
+                    child_id,
+                    score.role_priority
+                );
+            }
+        }
+
+        // Iteration deltas borde finnas
+        assert!(
+            !trace.iteration_deltas.is_empty(),
+            "Borde ha propagation iteration deltas"
         );
     }
 }

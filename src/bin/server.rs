@@ -6051,6 +6051,113 @@ async fn workflow_status_handler(Json(req): Json<WorkflowStatusRequest>) -> impl
     (StatusCode::OK, result)
 }
 
+// ─── Dashboard Endpoints ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DashboardWeightsRequest {
+    /// Accepterar både string ("12345") och number (12345) — JS Number förlorar precision >2^53
+    #[serde(deserialize_with = "deser_u64_from_string_or_number")]
+    url_hash: u64,
+}
+
+fn deser_u64_from_string_or_number<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<u64, D::Error> {
+    use serde::de::{self, Visitor};
+    struct U64Visitor;
+    impl<'de> Visitor<'de> for U64Visitor {
+        type Value = u64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("u64 as string or number")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
+            Ok(v as u64)
+        }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<u64, E> {
+            Ok(v as u64)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+    d.deserialize_any(U64Visitor)
+}
+
+#[derive(Deserialize)]
+struct DashboardExploreRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
+async fn dashboard_snapshot_handler() -> impl IntoResponse {
+    let vision_available = cfg!(feature = "vision");
+    let result = aether_agent::dashboard_snapshot(vision_available, 76);
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_crfr_cache_handler() -> impl IntoResponse {
+    let result = aether_agent::dashboard_crfr_cache();
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_weights_handler(Json(req): Json<DashboardWeightsRequest>) -> impl IntoResponse {
+    let result = aether_agent::dashboard_propagation_weights(req.url_hash);
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_wpt_handler() -> impl IntoResponse {
+    let result = aether_agent::dashboard_wpt();
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> impl IntoResponse {
+    let html = req.html;
+    let goal = req.goal;
+    let url = req.url;
+    let top_n = req.top_n;
+
+    // Bygg träd med JS-eval (samma pipeline som parse-crfr)
+    let goal_clone = goal.clone();
+    let url_clone = url.clone();
+    let mut tree = tokio::task::spawn_blocking({
+        let h = html.clone();
+        let g = goal.clone();
+        let u = url.clone();
+        move || aether_agent::build_tree_for_crfr(&h, &g, &u, true)
+    })
+    .await
+    .unwrap_or_default();
+
+    // Resolve pending fetch-URLs (SPA enrichment)
+    #[cfg(feature = "fetch")]
+    if !tree.pending_fetch_urls.is_empty() {
+        aether_agent::tools::resolve_pending_fetches(&mut tree, &goal).await;
+    }
+
+    // Kör CRFR explorer med traced propagation
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::dashboard_crfr_explore(&tree, &goal_clone, &url_clone, top_n, true)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_html() -> impl IntoResponse {
+    let html = include_str!("../../dashboard.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6064,6 +6171,16 @@ fn build_router(state: AppState) -> Router {
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
+        // Dashboard
+        .route("/dashboard", get(dashboard_html))
+        .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
+        .route(
+            "/api/dashboard/crfr-cache",
+            get(dashboard_crfr_cache_handler),
+        )
+        .route("/api/dashboard/weights", post(dashboard_weights_handler))
+        .route("/api/dashboard/wpt", get(dashboard_wpt_handler))
+        .route("/api/dashboard/explore", post(dashboard_explore_handler))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
@@ -6332,12 +6449,20 @@ async fn memory_stats_handler() -> impl IntoResponse {
 }
 
 /// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
+/// + periodisk persist-checkpoint (var 60:e sekund)
 fn spawn_memory_monitor() {
     tokio::spawn(async {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        let mut tick_count: u32 = 0;
         loop {
             interval.tick().await;
             log_rss("periodic");
+            tick_count += 1;
+            // Persist checkpoint varannan tick (var 60:e sekund)
+            #[cfg(feature = "persist")]
+            if tick_count % 2 == 0 {
+                aether_agent::persist::checkpoint();
+            }
         }
     });
 }
@@ -6346,6 +6471,32 @@ fn spawn_memory_monitor() {
 async fn main() {
     eprintln!("=== AetherAgent Memory Startup Trace ===");
     log_rss("1. process start");
+
+    // Persistence: init SQLite + restore CRFR state
+    #[cfg(feature = "persist")]
+    {
+        let db_path =
+            std::env::var("AETHER_DB_PATH").unwrap_or_else(|_| "/data/aether.db".to_string());
+        // Skapa katalog om den inte finns
+        if let Some(parent) = std::path::Path::new(&db_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match aether_agent::persist::init(&db_path) {
+            Ok(()) => {
+                eprintln!("[PERSIST] SQLite initialized at {db_path}");
+                aether_agent::persist::restore();
+                let (fields, domains, size) = aether_agent::persist::db_stats();
+                eprintln!(
+                    "[PERSIST] DB stats: {fields} fields, {domains} domain profiles, {:.1} KB",
+                    size as f64 / 1024.0
+                );
+            }
+            Err(e) => {
+                eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
+            }
+        }
+        log_rss("1b. after persistence init");
+    }
 
     let port: u16 = std::env::var("PORT")
         .ok()
