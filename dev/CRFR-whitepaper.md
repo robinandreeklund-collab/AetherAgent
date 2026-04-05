@@ -2,7 +2,7 @@
 
 **Authors:** AetherAgent Team
 **Date:** April 2026
-**Version:** CRFR v12
+**Version:** CRFR v13 (Chebyshev spectral propagation)
 
 ---
 
@@ -195,17 +195,65 @@ CRFR treats the DOM tree as a physical medium. When a node scores high on BM25 +
 
 This is not a metaphor for marketing — it is the literal algorithm. Amplitude propagates through edges with damping (downward) and amplification (upward), exactly like a mechanical wave in a medium with varying impedance.
 
-### 4.2 GWN Second-Order Update Rule
+### 4.2 Chebyshev Spectral Filter
 
-Standard graph diffusion (heat equation) averages neighbor amplitudes — this blurs signal peaks and causes over-smoothing after 3+ iterations. CRFR uses a second-order wave equation inspired by Graph Wave Networks (arXiv 2505.20034):
+Standard graph diffusion (heat equation) averages neighbor amplitudes — this blurs signal peaks and causes over-smoothing after 3+ iterations. Earlier versions of CRFR used an iterative GWN second-order update rule. As of v13, CRFR replaces the iterative loop with a **Chebyshev polynomial approximation of the graph Laplacian**, providing provably optimal spectral response.
+
+The Chebyshev filter computes:
 
 ```
-target = max(2 × current_amplitude - previous_amplitude, propagated_signal)
+x_out = Σ_{k=0}^{K} θ_k · T_k(L̃_scaled) · x_seed
 ```
 
-This preserves sharp amplitude peaks while still allowing propagation to distant nodes. The `prev_amplitude` field tracks the previous iteration's value for each node.
+where:
+- `T_k` is the k-th Chebyshev polynomial of the first kind
+- `L̃_scaled = 2L̃/λ_max - I` is the rescaled normalized Laplacian
+- `θ_k = [0.50, 0.30, 0.12, 0.05, 0.03]` are low-pass filter coefficients
+- `K = 4` (4-hop spectral neighborhood)
 
-**Convergence:** Propagation stops when total amplitude change across all nodes drops below 0.001 per iteration. Typical convergence: 2-3 iterations (max 6).
+The Chebyshev recurrence avoids explicit matrix construction:
+
+```
+T_0(L̃)·x = x                           (identity)
+T_1(L̃)·x = L̃_scaled · x                (1-hop neighborhood)
+T_k(L̃)��x = 2·L̃_scaled·T_{k-1} - T_{k-2}  (recurrence)
+```
+
+For DOM trees, the normalized Laplacian operator `L̃·x` at node `i` is:
+
+```
+(L̃·x)_i = x_i - Σ_{j∈neighbors} w_ij · x_j / √(d_i · d_j)
+```
+
+where `w_ij` are the **learned directional weights** (Beta distributions per role+direction) and `d_i` is the weighted degree of node `i`. This means the spectral filter inherits CRFR's Bayesian learning — the Laplacian's structure adapts with feedback.
+
+**PPR integration:** Personalized PageRank restart is mathematically integrated into the filter output:
+
+```
+x_final = (1 - α) · x_filtered + α · x_seed     (α = 0.15)
+```
+
+The filter output is applied as an **additive propagation boost** — nodes keep their Phase 1 amplitude and gain extra signal from neighbors. The propagation contribution is:
+
+```
+boost_i = max(0, filtered_i - seed_i × θ_0)
+amplitude_i = phase1_amplitude_i + boost_i
+```
+
+This ensures Chebyshev never reduces below the seed signal (monotonic improvement).
+
+**Advantages over iterative propagation:**
+
+| Property | Iterative (v12) | Chebyshev (v13) |
+|----------|:-----------:|:------------:|
+| Convergence | Needs check per iteration | Fixed K=4 passes |
+| Over-smoothing | Possible after 3+ iterations | Provably bounded |
+| Spectral response | Ad-hoc (depends on damping constants) | Optimal low-pass |
+| PPR restart | Bolted-on re-injection per iteration | Mathematically integrated |
+| Complexity | O(K × \|E\|), K=2-6 variable | O(4 × \|E\|) fixed |
+| Learned weights | Applied per edge in loop | Absorbed into Laplacian |
+
+**Complexity:** O(K × |E|) = O(4N) for trees. Same asymptotic as iterative, but with guaranteed spectral properties and no convergence loop overhead.
 
 ### 4.3 Directional Propagation with Learned Weights
 
@@ -662,7 +710,6 @@ With the Bayesian Beta-distribution framework:
 - **Federated learning:** Aggregate propagation stats across multiple CRFR instances without sharing raw content (privacy-safe — stats contain only role:direction pairs)
 - **Auto goal expansion:** Use page title + top-3 BM25 nodes to suggest expansion terms
 - **WASM SIMD:** Explicit i64x2 intrinsics for browser deployment
-- **Chebyshev spectral filters:** Polynomial approximation of graph Laplacian for provably optimal propagation
 
 ---
 
@@ -685,6 +732,6 @@ The system is open-source, implemented in Rust, and available as an MCP tool (fo
 
 ---
 
-*AetherAgent CRFR v12 — April 2026*
+*AetherAgent CRFR v13 — April 2026*
 *Implementation: `src/resonance.rs` (2,100+ lines of Rust)*
 *Repository: github.com/robinandreeklund-collab/AetherAgent*
