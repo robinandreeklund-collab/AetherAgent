@@ -56,6 +56,27 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wasm_bindgen::prelude::*;
 
+/// Parse Set-Cookie headers to document.cookie format.
+/// "session=abc; Path=/; HttpOnly" → "session=abc"
+/// Multiple headers → "session=abc; lang=en"
+#[cfg(feature = "js-eval")]
+fn parse_set_cookies_to_document_cookie(headers: &[String]) -> String {
+    headers
+        .iter()
+        .filter_map(|h| {
+            // Ta name=value-delen (före första ';')
+            let kv = h.split(';').next()?;
+            let kv = kv.trim();
+            if kv.contains('=') {
+                Some(kv.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 // Global delad TieredBackend så att tier-statistik ackumuleras över anrop
 static GLOBAL_TIERED_BACKEND: OnceLock<vision_backend::TieredBackend> = OnceLock::new();
 
@@ -263,7 +284,7 @@ fn build_tree_hybrid_with_config(
 /// och används för att bygga det semantiska trädet.
 #[cfg(feature = "js-eval")]
 fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
-    run_lifecycle_parse_with_fetch(html, goal, url, std::collections::HashMap::new())
+    run_lifecycle_parse_with_cookies(html, goal, url, std::collections::HashMap::new(), &[])
 }
 
 #[cfg(not(feature = "js-eval"))]
@@ -271,8 +292,7 @@ fn run_lifecycle_parse(html: &str, goal: &str, url: &str) -> SemanticTree {
     build_tree(html, goal, url)
 }
 
-/// Kör lifecycle-parse med pre-populated fetch-responses.
-/// Används av fetch_parse-pipelinen för att ge JS-sandbox tillgång till API-data.
+/// Kör lifecycle-parse med pre-populated fetch-responses (bakåtkompatibel wrapper)
 #[cfg(feature = "js-eval")]
 fn run_lifecycle_parse_with_fetch(
     html: &str,
@@ -280,14 +300,32 @@ fn run_lifecycle_parse_with_fetch(
     url: &str,
     fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
 ) -> SemanticTree {
+    run_lifecycle_parse_with_cookies(html, goal, url, fetch_responses, &[])
+}
+
+/// Kör lifecycle-parse med pre-populated fetch-responses + Set-Cookie headers.
+/// Cookies från HTTP-svar propageras till JS document.cookie.
+#[cfg(feature = "js-eval")]
+fn run_lifecycle_parse_with_cookies(
+    html: &str,
+    goal: &str,
+    url: &str,
+    fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
+    set_cookie_headers: &[String],
+) -> SemanticTree {
     #[cfg(feature = "js-eval")]
     {
         let scripts = js_eval::extract_ordered_scripts(html);
         if !scripts.is_empty() {
             let arena = arena_dom_sink::parse_html_to_arena(html);
+
+            // Parse Set-Cookie headers → document.cookie format (name=value par)
+            let cookie_string = parse_set_cookies_to_document_cookie(set_cookie_headers);
+
             let config = dom_bridge::SpaConfig {
                 fetch_responses,
                 base_url: url.to_string(),
+                cookies: cookie_string,
                 ..Default::default()
             };
             let (eval_result, eval_arena) = dom_bridge::eval_spa(&scripts, arena, config);
@@ -777,6 +815,24 @@ pub fn build_tree_for_crfr_with_fetch(
     fetch_responses: std::collections::HashMap<String, dom_bridge::FetchResponse>,
 ) -> SemanticTree {
     run_lifecycle_parse_with_fetch(html, goal, url, fetch_responses)
+}
+
+/// Build tree with Set-Cookie headers propagated to JS document.cookie.
+/// Closes the cookie loop: HTTP Set-Cookie → JS execution → challenge completion.
+#[cfg(feature = "js-eval")]
+pub fn build_tree_with_cookies(
+    html: &str,
+    goal: &str,
+    url: &str,
+    set_cookie_headers: &[String],
+) -> SemanticTree {
+    run_lifecycle_parse_with_cookies(
+        html,
+        goal,
+        url,
+        std::collections::HashMap::new(),
+        set_cookie_headers,
+    )
 }
 
 fn is_error_page(title: &str, total_nodes: usize) -> bool {

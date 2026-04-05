@@ -183,6 +183,14 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
     let body_size_bytes = body.len();
     let fetch_time_ms = start.elapsed().as_millis() as u64;
 
+    // Extrahera Set-Cookie headers (för JS cookie bridge)
+    let set_cookie_headers: Vec<String> = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+        .collect();
+
     Ok(FetchResult {
         final_url,
         status_code,
@@ -192,6 +200,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         fetch_time_ms,
         body_size_bytes,
         cross_domain_redirect,
+        set_cookie_headers,
     })
 }
 

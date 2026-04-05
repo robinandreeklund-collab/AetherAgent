@@ -313,6 +313,9 @@ pub struct FetchResult {
     /// Om redirects gick till en annan domän (potentiell OAuth/tracking)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cross_domain_redirect: bool,
+    /// Set-Cookie headers from HTTP response (for JS cookie bridge)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub set_cookie_headers: Vec<String>,
 }
 
 /// Kombinerat fetch + parse-resultat

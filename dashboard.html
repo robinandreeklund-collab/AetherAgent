@@ -320,8 +320,8 @@ async function runExplore() {
   // Step 1: fetch HTML
   const fetchRes = await postJson('/api/fetch', {url});
   if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
-  // Step 2: explore CRFR
-  const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20});
+  // Step 2: explore CRFR (pass Set-Cookie headers for JS cookie bridge)
+  const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
   if (!data || data.error) { body.innerHTML = `<div class="empty">${data?.error || 'Explore failed'}</div>`; return; }
   renderExplore(data);
 }

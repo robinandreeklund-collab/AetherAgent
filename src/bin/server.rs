@@ -6093,6 +6093,9 @@ struct DashboardExploreRequest {
     url: String,
     #[serde(default = "default_crfr_top_n")]
     top_n: u32,
+    /// Set-Cookie headers from HTTP response (for JS cookie bridge)
+    #[serde(default)]
+    set_cookie_headers: Vec<String>,
 }
 
 async fn dashboard_snapshot_handler() -> impl IntoResponse {
@@ -6121,15 +6124,23 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
+    let set_cookies = req.set_cookie_headers;
 
-    // Bygg träd med JS-eval (samma pipeline som parse-crfr)
+    // Bygg träd med JS-eval + cookie-bridge (HTTP Set-Cookie → JS document.cookie)
     let goal_clone = goal.clone();
     let url_clone = url.clone();
     let mut tree = tokio::task::spawn_blocking({
         let h = html.clone();
         let g = goal.clone();
         let u = url.clone();
-        move || aether_agent::build_tree_for_crfr(&h, &g, &u, true)
+        let sc = set_cookies;
+        move || {
+            if sc.is_empty() {
+                aether_agent::build_tree_for_crfr(&h, &g, &u, true)
+            } else {
+                aether_agent::build_tree_with_cookies(&h, &g, &u, &sc)
+            }
+        }
     })
     .await
     .unwrap_or_default();
