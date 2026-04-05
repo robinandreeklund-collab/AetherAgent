@@ -25,3 +25,5 @@ testsuite/benchmark/lightpanda/
 codegen/target/
 package.json
 package-lock.json
+msmarco-data/
+msmarco_eval_log.txt
