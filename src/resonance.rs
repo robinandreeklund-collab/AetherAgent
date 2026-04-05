@@ -26,6 +26,13 @@ const CHEBYSHEV_THETA: [f32; 5] = [0.50, 0.30, 0.12, 0.05, 0.03];
 /// PPR restart probability (α in Personalized PageRank = teleport to seed)
 const PPR_ALPHA: f32 = 0.15;
 
+/// Suppression: minsta antal query-appearances innan suppression aktiveras
+const SUPPRESSION_MIN_QUERIES: u32 = 3;
+/// Suppression: om success_ratio < detta → applicera penalty
+const SUPPRESSION_RATIO_THRESHOLD: f32 = 0.25;
+/// Suppression: minimalt multiplier (aldrig under detta)
+const SUPPRESSION_FLOOR: f32 = 0.15;
+
 /// Minsta amplitud för att en nod ska inkluderas i propagation/resultat
 const ACTIVATION_THRESHOLD: f32 = 0.01;
 /// Minsta amplitud för att inkluderas i resultat
@@ -169,6 +176,14 @@ pub struct ResonanceState {
     /// Tidpunkt (ms) för senaste lyckade feedback (för temporal decay)
     #[serde(default)]
     last_hit_ms: u64,
+
+    // ── Suppression learning ──
+    /// Antal gånger noden dykt upp i top-resultat (cascade candidates)
+    #[serde(default)]
+    query_count: u32,
+    /// Antal gånger noden INTE markerades som framgångsrik trots att den var synlig
+    #[serde(default)]
+    miss_count: u32,
 }
 
 /// Serde-modul för Hypervector (privat bits-fält)
@@ -409,13 +424,34 @@ fn zone_penalty(role: &str, depth: u32) -> f32 {
 /// Ingen manuell blend-faktor — Beta-distributionen hanterar
 /// prior → posterior automatiskt med mer data.
 ///
-/// Takes a pre-computed key (e.g. "heading:down") to avoid format!() in hot loop.
+/// Takes a pre-computed key (e.g. "heading:down:news+senaste") to avoid format!() in hot loop.
+/// Falls back to non-clustered key if clustered key not found (cold-start for new goal clusters).
 fn learned_weight_precomputed(
     key: &str,
     heuristic: f32,
     stats: &HashMap<String, (f32, f32)>,
 ) -> f32 {
-    let (alpha, beta) = stats.get(key).copied().unwrap_or((heuristic, 1.0));
+    // Try clustered key first
+    let (alpha, beta) = if let Some(&ab) = stats.get(key) {
+        ab
+    } else {
+        // Fallback: strip cluster suffix, try global key
+        // "heading:down:news+senaste" → "heading:down"
+        let base_key = key.rsplitn(2, ':').last().map(|_| {
+            // Extract "role:direction" from "role:direction:cluster"
+            let parts: Vec<&str> = key.splitn(3, ':').collect();
+            if parts.len() >= 2 {
+                format!("{}:{}", parts[0], parts[1])
+            } else {
+                key.to_string()
+            }
+        });
+        if let Some(ref bk) = base_key {
+            stats.get(bk.as_str()).copied().unwrap_or((heuristic, 1.0))
+        } else {
+            (heuristic, 1.0)
+        }
+    };
     let total = alpha + beta;
     if total < 0.001 {
         return heuristic;
@@ -459,6 +495,25 @@ fn hash_url(url: &str) -> u64 {
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
+}
+
+/// Compute goal cluster ID from goal text.
+/// Groups similar goals together by hashing the top-3 significant words (sorted).
+/// "latest news headlines" and "breaking news today" → same cluster (both have "news").
+/// "sports scores today" → different cluster.
+fn goal_cluster_id(goal: &str) -> String {
+    let mut words: Vec<&str> = goal
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 3) // Skip short words (the, and, etc.)
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    words.truncate(3); // Top 3 significant words
+    if words.is_empty() {
+        "_".to_string()
+    } else {
+        words.join("+")
+    }
 }
 
 /// Extrahera domain-hash från en URL.
@@ -648,6 +703,8 @@ impl ResonanceField {
             hit_count: 0,
             last_goal_hash: 0,
             last_hit_ms: 0,
+            query_count: 0,
+            miss_count: 0,
         };
 
         nodes.insert(node.id, state);
@@ -982,6 +1039,22 @@ impl ResonanceField {
                     }
                 }
 
+                // Suppression learning: penalize nodes seen many times but rarely useful
+                if state.query_count >= SUPPRESSION_MIN_QUERIES {
+                    let success_ratio = if state.query_count > 0 {
+                        (state.hit_count as f32) / (state.query_count as f32)
+                    } else {
+                        1.0
+                    };
+                    if success_ratio < SUPPRESSION_RATIO_THRESHOLD {
+                        // Linear suppression: 0% success → SUPPRESSION_FLOOR, 25% → 1.0
+                        let factor = SUPPRESSION_FLOOR
+                            + (1.0 - SUPPRESSION_FLOOR)
+                                * (success_ratio / SUPPRESSION_RATIO_THRESHOLD);
+                        state.amplitude *= factor;
+                    }
+                }
+
                 causal_boosts.insert(nid, causal_boost);
 
                 // Trace: capture per-node score breakdown
@@ -1039,16 +1112,17 @@ impl ResonanceField {
         //   - Fixed O(K×|E|) complexity with K=4 (no convergence check needed)
         //   - PPR restart mathematically integrated (not ad-hoc re-injection)
         //
-        // Pre-compute role keys for learned weight lookup
+        // Pre-compute role keys for learned weight lookup (goal-clustered)
+        let cluster = goal_cluster_id(goal);
         let down_keys: HashMap<u32, String> = self
             .nodes
             .iter()
-            .map(|(&id, s)| (id, format!("{}:down", s.role)))
+            .map(|(&id, s)| (id, format!("{}:down:{}", s.role, cluster)))
             .collect();
         let up_keys: HashMap<u32, String> = self
             .nodes
             .iter()
-            .map(|(&id, s)| (id, format!("{}:up", s.role)))
+            .map(|(&id, s)| (id, format!("{}:up:{}", s.role, cluster)))
             .collect();
 
         // Seed signal: current amplitudes after Phase 1 scoring
@@ -1702,6 +1776,18 @@ impl ResonanceField {
             }
         }
 
+        // Steg 1b: Suppression learning — uppdatera query_count/miss_count
+        // Alla noder med amplitude > threshold "syntes" i resultaten.
+        // De som inte var i successful_set missade — öka miss_count.
+        for (&nid, state) in self.nodes.iter_mut() {
+            if state.amplitude > MIN_OUTPUT_THRESHOLD {
+                state.query_count += 1;
+                if !successful_set.contains(&nid) {
+                    state.miss_count += 1;
+                }
+            }
+        }
+
         // Steg 2: Confidence-weighted Beta-distribution update.
         // Itererar alla parent→child edges EN gång. Uppdaterar BOTH directions.
         let confidences: HashMap<u32, f32> = self
@@ -1725,8 +1811,9 @@ impl ResonanceField {
             let conf = confidences.get(child_id).copied().unwrap_or(0.0);
             let is_success = successful_set.contains(child_id);
 
-            // Downward: förälderns roll → barn
-            let dk = format!("{}:down", parent_role);
+            // Downward: förälderns roll → barn (goal-clustered)
+            let cluster = goal_cluster_id(goal);
+            let dk = format!("{}:down:{}", parent_role, cluster);
             let de = self
                 .propagation_stats
                 .entry(dk)
@@ -1737,8 +1824,8 @@ impl ResonanceField {
                 de.1 += 1.0 - conf;
             }
 
-            // Upward: barnets roll → förälder
-            let uk = format!("{}:up", child_role);
+            // Upward: barnets roll → förälder (goal-clustered)
+            let uk = format!("{}:up:{}", child_role, cluster);
             let ue = self
                 .propagation_stats
                 .entry(uk)
@@ -1750,8 +1837,9 @@ impl ResonanceField {
             }
         }
 
-        // Steg 3: Field-level concept memory
-        // Aggregera framgångsrika noders text-HV:er per goal-token
+        // Steg 3: Field-level concept memory (goal-clustered)
+        // Aggregera framgångsrika noders text-HV:er per goal-token:cluster
+        let concept_cluster = goal_cluster_id(goal);
         let goal_tokens: Vec<String> = goal
             .to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
@@ -1761,6 +1849,16 @@ impl ResonanceField {
         for &nid in successful_node_ids {
             if let Some(state) = self.nodes.get(&nid) {
                 for token in &goal_tokens {
+                    // Store with cluster prefix AND without (for fallback)
+                    let clustered_key = format!("{}:{}", token, concept_cluster);
+                    let entry = self
+                        .concept_memory
+                        .entry(clustered_key)
+                        .or_insert_with(|| HvData::from_hv(&Hypervector::zero()));
+                    let existing = entry.to_hv();
+                    let merged = Hypervector::bundle(&[&existing, &state.text_hv]);
+                    *entry = HvData::from_hv(&merged);
+                    // Also update non-clustered (global fallback)
                     let entry = self
                         .concept_memory
                         .entry(token.clone())
@@ -2021,6 +2119,8 @@ impl ResonanceField {
                 hit_count: 0,
                 last_goal_hash: 0,
                 last_hit_ms: 0,
+                query_count: 0,
+                miss_count: 0,
             },
         );
         self.node_labels.insert(node_id, label.to_string());
