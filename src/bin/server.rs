@@ -6058,10 +6058,18 @@ struct DashboardWeightsRequest {
     url_hash: u64,
 }
 
+#[derive(Deserialize)]
+struct DashboardExploreRequest {
+    html: String,
+    goal: String,
+    url: String,
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
 async fn dashboard_snapshot_handler() -> impl IntoResponse {
     let vision_available = cfg!(feature = "vision");
-    // 72 endpoints (ungefär)
-    let result = aether_agent::dashboard_snapshot(vision_available, 72);
+    let result = aether_agent::dashboard_snapshot(vision_available, 76);
     (StatusCode::OK, result)
 }
 
@@ -6077,6 +6085,19 @@ async fn dashboard_weights_handler(Json(req): Json<DashboardWeightsRequest>) -> 
 
 async fn dashboard_wpt_handler() -> impl IntoResponse {
     let result = aether_agent::dashboard_wpt();
+    (StatusCode::OK, result)
+}
+
+async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> impl IntoResponse {
+    let html = req.html;
+    let goal = req.goal;
+    let url = req.url;
+    let top_n = req.top_n;
+    let result = tokio::task::spawn_blocking(move || {
+        aether_agent::dashboard_crfr_explore(&html, &goal, &url, top_n)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
     (StatusCode::OK, result)
 }
 
@@ -6111,6 +6132,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/dashboard/weights", post(dashboard_weights_handler))
         .route("/api/dashboard/wpt", get(dashboard_wpt_handler))
+        .route("/api/dashboard/explore", post(dashboard_explore_handler))
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
