@@ -112,6 +112,11 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         request = request.header(key.as_str(), value.as_str());
     }
 
+    // Injicera cookies (från JS cookie bridge — bot challenge completion)
+    if !config.cookies.is_empty() {
+        request = request.header("Cookie", config.cookies.as_str());
+    }
+
     // Utför request
     let response = request
         .send()

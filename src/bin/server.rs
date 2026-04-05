@@ -1076,13 +1076,47 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     .await
     .unwrap_or_default();
 
-    // Pass 2: SPA-enrichment — om pending_fetch_urls finns, hämta och merge
+    // Pass 2: Bot challenge re-fetch — om JS satte cookies och DOM är minimal
+    #[cfg(feature = "fetch")]
+    {
+        let is_challenge = {
+            let t = &tree;
+            let c = &tree.js_cookies;
+            aether_agent::is_likely_bot_challenge(t, c)
+        };
+        if is_challenge && !tree.js_cookies.is_empty() {
+            eprintln!(
+                "[COOKIE-BRIDGE] Bot challenge on {} — re-fetching with cookies",
+                url
+            );
+            let mut rc = aether_agent::types::FetchConfig::default();
+            rc.cookies = tree.js_cookies.clone();
+            if let Ok(rr) = aether_agent::fetch::fetch_page(&url, &rc).await {
+                eprintln!(
+                    "[COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
+                    rr.body.len(),
+                    rr.status_code
+                );
+                let g = goal.clone();
+                let u = rr.final_url.clone();
+                let sc = rr.set_cookie_headers.clone();
+                let b = rr.body;
+                tree = tokio::task::spawn_blocking(move || {
+                    aether_agent::build_tree_with_cookies(&b, &g, &u, &sc)
+                })
+                .await
+                .unwrap_or_default();
+            }
+        }
+    }
+
+    // Pass 3: SPA-enrichment — om pending_fetch_urls finns, hämta och merge
     #[cfg(feature = "fetch")]
     if !tree.pending_fetch_urls.is_empty() {
         aether_agent::tools::resolve_pending_fetches(&mut tree, &goal).await;
     }
 
-    // Pass 3: Kör CRFR på (potentiellt berikad) tree
+    // Pass 4: Kör CRFR på (potentiellt berikad) tree
     let result = tokio::task::spawn_blocking(move || {
         aether_agent::parse_crfr_from_tree_js(
             &tree,
@@ -6144,6 +6178,47 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
     })
     .await
     .unwrap_or_default();
+
+    // Bot challenge re-fetch: om JS satte cookies och sidan ser ut som en challenge,
+    // re-fetcha med JS-cookies och parsa igen
+    #[cfg(feature = "fetch")]
+    {
+        let is_challenge = tokio::task::spawn_blocking({
+            let t = tree.clone();
+            let c = tree.js_cookies.clone();
+            move || aether_agent::is_likely_bot_challenge(&t, &c)
+        })
+        .await
+        .unwrap_or(false);
+
+        if is_challenge && !tree.js_cookies.is_empty() {
+            eprintln!(
+                "[COOKIE-BRIDGE] Bot challenge detected on {}. Re-fetching with JS cookies...",
+                url
+            );
+            let mut refetch_config = aether_agent::types::FetchConfig::default();
+            refetch_config.cookies = tree.js_cookies.clone();
+
+            if let Ok(refetch_result) = aether_agent::fetch::fetch_page(&url, &refetch_config).await
+            {
+                eprintln!(
+                    "[COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
+                    refetch_result.body.len(),
+                    refetch_result.status_code
+                );
+                // Re-parse med nya cookies
+                let g2 = goal.clone();
+                let u2 = refetch_result.final_url.clone();
+                let sc2 = refetch_result.set_cookie_headers.clone();
+                let body2 = refetch_result.body;
+                tree = tokio::task::spawn_blocking(move || {
+                    aether_agent::build_tree_with_cookies(&body2, &g2, &u2, &sc2)
+                })
+                .await
+                .unwrap_or_default();
+            }
+        }
+    }
 
     // Resolve pending fetch-URLs (SPA enrichment)
     #[cfg(feature = "fetch")]

@@ -249,6 +249,7 @@ pub fn detections_to_tree(detections: &[UiDetection], goal: &str, url: &str) -> 
         xhr_intercepted: 0,
         xhr_blocked: 0,
         pending_fetch_urls: vec![],
+        js_cookies: String::new(),
     }
 }
 

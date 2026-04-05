@@ -84,6 +84,7 @@ impl SemanticBuilder {
             xhr_intercepted: 0,
             xhr_blocked: 0,
             pending_fetch_urls: vec![],
+            js_cookies: String::new(),
         }
     }
 
@@ -106,6 +107,7 @@ impl SemanticBuilder {
             xhr_intercepted: 0,
             xhr_blocked: 0,
             pending_fetch_urls: vec![],
+            js_cookies: String::new(),
         }
     }
 

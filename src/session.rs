@@ -818,6 +818,7 @@ mod tests {
             xhr_intercepted: 0,
             xhr_blocked: 0,
             pending_fetch_urls: vec![],
+            js_cookies: String::new(),
         };
 
         let form = SessionManager::detect_login_form(&tree);
@@ -849,6 +850,7 @@ mod tests {
             xhr_intercepted: 0,
             xhr_blocked: 0,
             pending_fetch_urls: vec![],
+            js_cookies: String::new(),
         };
 
         let form = SessionManager::detect_login_form(&tree);

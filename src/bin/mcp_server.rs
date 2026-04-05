@@ -1415,37 +1415,70 @@ async fn handle_parse_crfr(
     };
 
     // Om run_js=true: pre-fetcha API-URLs med cookies/headers för SPA-rendering
+    let mut current_html = html;
+    let mut current_url = final_url;
+
     let result = if run_js {
         let api_responses = aether_agent::prefetch_api_urls_with_auth(
-            &html,
-            &final_url,
+            &current_html,
+            &current_url,
             10,
             3000,
             &cookies,
             &extra_headers,
         )
         .await;
-        if api_responses.is_empty() {
-            aether_agent::parse_crfr(&html, goal, &final_url, top_n, true, output_format)
+        let mut tree = if api_responses.is_empty() {
+            aether_agent::build_tree_for_crfr(&current_html, goal, &current_url, true)
         } else {
-            // Bygg träd med pre-fetched API-data → kör genom CRFR
-            let tree = aether_agent::build_tree_for_crfr_with_fetch(
-                &html,
+            aether_agent::build_tree_for_crfr_with_fetch(
+                &current_html,
                 goal,
-                &final_url,
+                &current_url,
                 api_responses,
-            );
-            aether_agent::parse_crfr_from_tree_js(
-                &tree,
-                goal,
-                &final_url,
-                top_n,
-                output_format,
-                true,
             )
+        };
+
+        // Bot challenge re-fetch: JS set cookies → re-fetch with cookies → re-parse
+        if aether_agent::is_likely_bot_challenge(&tree, &tree.js_cookies)
+            && !tree.js_cookies.is_empty()
+        {
+            eprintln!(
+                "[MCP-COOKIE-BRIDGE] Challenge detected on {} — re-fetching",
+                current_url
+            );
+            let mut rc = aether_agent::types::FetchConfig::default();
+            rc.cookies = tree.js_cookies.clone();
+            for (k, v) in &extra_headers {
+                rc.extra_headers.insert(k.clone(), v.clone());
+            }
+            if let Ok(rr) = aether_agent::fetch::fetch_page(&current_url, &rc).await {
+                eprintln!(
+                    "[MCP-COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
+                    rr.body.len(),
+                    rr.status_code
+                );
+                current_html = rr.body;
+                current_url = rr.final_url;
+                tree = aether_agent::build_tree_with_cookies(
+                    &current_html,
+                    goal,
+                    &current_url,
+                    &rr.set_cookie_headers,
+                );
+            }
         }
+
+        aether_agent::parse_crfr_from_tree_js(&tree, goal, &current_url, top_n, output_format, true)
     } else {
-        aether_agent::parse_crfr(&html, goal, &final_url, top_n, false, output_format)
+        aether_agent::parse_crfr(
+            &current_html,
+            goal,
+            &current_url,
+            top_n,
+            false,
+            output_format,
+        )
     };
 
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])

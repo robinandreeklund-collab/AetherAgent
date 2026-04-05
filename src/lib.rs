@@ -330,8 +330,9 @@ fn run_lifecycle_parse_with_cookies(
             };
             let (eval_result, eval_arena) = dom_bridge::eval_spa(&scripts, arena, config);
 
-            // Samla fetch-URLs från JS runtime
+            // Samla fetch-URLs och cookies från JS runtime
             let runtime_urls = eval_result.fetched_urls.clone();
+            let js_cookies = eval_result.cookies.clone();
 
             // Logga JS-fel
             if let Some(ref err) = eval_result.error {
@@ -343,6 +344,7 @@ fn run_lifecycle_parse_with_cookies(
                 let modified_html = eval_arena.serialize_html(eval_arena.document);
                 let mut tree = build_tree(&modified_html, goal, url);
                 attach_pending_urls(&mut tree, html, &runtime_urls);
+                tree.js_cookies = js_cookies;
                 return tree;
             }
 
@@ -352,6 +354,7 @@ fn run_lifecycle_parse_with_cookies(
                 if arena_html.len() > 10 && arena_html != html {
                     let mut tree = build_tree(&arena_html, goal, url);
                     attach_pending_urls(&mut tree, html, &runtime_urls);
+                    tree.js_cookies = js_cookies;
                     return tree;
                 }
             }
@@ -359,6 +362,7 @@ fn run_lifecycle_parse_with_cookies(
             // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
             let mut tree = build_tree(html, goal, url);
             attach_pending_urls(&mut tree, html, &runtime_urls);
+            tree.js_cookies = js_cookies;
             return tree;
         }
     }
@@ -857,6 +861,44 @@ fn is_error_page(title: &str, total_nodes: usize) -> bool {
     if total_nodes < 20 && (t.contains("oops") || t.contains("sorry") || t.is_empty()) {
         return true;
     }
+    false
+}
+
+/// Detect if a page is likely a bot challenge that JS tried to solve.
+/// Returns true if JS set cookies AND the page has very few nodes (challenge shell).
+pub fn is_likely_bot_challenge(tree: &types::SemanticTree, js_cookies: &str) -> bool {
+    let total_nodes = collect_all_nodes(&tree.nodes).len();
+    let title = tree.title.to_lowercase();
+
+    // JS set cookies + tiny DOM = almost certainly a challenge
+    if !js_cookies.is_empty() && total_nodes < 15 {
+        return true;
+    }
+
+    // Challenge-specific title patterns (Cloudflare, Akamai, PerimeterX, etc.)
+    let challenge_titles = [
+        "just a moment",
+        "checking your browser",
+        "please wait",
+        "verifying",
+        "attention required",
+        "access denied",
+        "one more step",
+        "security check",
+        "please enable",
+        "enable javascript",
+        "ddos protection",
+        "challenge",
+    ];
+    if challenge_titles.iter().any(|t2| title.contains(t2)) && total_nodes < 30 {
+        return true;
+    }
+
+    // Very small page with redirect-like content
+    if total_nodes <= 3 && !tree.url.is_empty() {
+        return true;
+    }
+
     false
 }
 
