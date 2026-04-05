@@ -1,0 +1,3638 @@
+{
+  "sites": [
+    {
+      "name": "SVT Nyheter",
+      "url": "https://www.svt.se/",
+      "converged_at": null,
+      "total_iterations": 20,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "senaste nyheterna idag",
+          "articles_in_top5": 2,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 1.798437e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 1.798437e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "aktuella nyheter och händelser just nu",
+          "articles_in_top5": 1,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "SHL 52 sek Rögle skrev svensk historia: ”Det är fa",
+              "is_article": true,
+              "causal": 7.264343e-07,
+              "type": "Direct"
+            },
+            {
+              "label": "SVT Nyheter Nyheter Lokalt Sport SVT Play Barn Tv-",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "SHL",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Huvudmeny",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Gå direkt till textinnehållet SVT Nyheter Nyheter ",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "dagens viktigaste nyhetsartiklar",
+          "articles_in_top5": 1,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "Därför har Pontus Rasmusson startat Onlyfans",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "breaking news Sverige senaste",
+          "articles_in_top5": 4,
+          "causal_nodes": 1,
+          "max_causal": 0.0763,
+          "consecutive_good": 1,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "FBK blåstes på viktiga målet: ”Han vet – den är på",
+              "is_article": true,
+              "causal": 0.076309286,
+              "type": "Direct"
+            },
+            {
+              "label": "Unga talangen drömmer om landslaget Vi köper mer p",
+              "is_article": true,
+              "causal": 1.5369709e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Rögle skrev svensk historia: ”Det är faktiskt lite",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "STORMEN DAVE 36 sek Liverapport Väder-Nils: Vet in",
+              "is_article": true,
+              "causal": 9.172829e-07,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "vad händer i nyheterna idag",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.081,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "Därför har Pontus Rasmusson startat Onlyfans",
+              "is_article": true,
+              "causal": 0.08096714,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "senaste rubrikerna SVT nyheter",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.0813,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07747645,
+              "type": "Direct"
+            },
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.07810639,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.08127407,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.07602958,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "aktuellt nyhetsläge händelser",
+          "articles_in_top5": 3,
+          "causal_nodes": 6,
+          "max_causal": 0.1384,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.12005713,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Därför har Pontus Rasmusson startat Onlyfans",
+              "is_article": true,
+              "causal": 0.10892301,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.119686864,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.13839987,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07246937,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "de viktigaste nyheterna just nu",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.1232,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "SHL 52 sek Rögle skrev svensk historia: ”Det är fa",
+              "is_article": true,
+              "causal": 0.1232337,
+              "type": "Direct"
+            },
+            {
+              "label": "SVT Nyheter Nyheter Lokalt Sport SVT Play Barn Tv-",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "SHL",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Huvudmeny",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "nyhetsrapporter och artiklar idag",
+          "articles_in_top5": 1,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Husvagn började brinna – mitt bland tusentals unga",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "senaste från SVT nyheter idag",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.1041,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.08642792,
+              "type": "Direct"
+            },
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.08642792,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07409931,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.10407189,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 11,
+          "goal": "Sverige nyheter händelser senaste",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.088,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.07805442,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.08797704,
+              "type": "Direct"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07805442,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.07359944,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 12,
+          "goal": "aktuella nyhetsartiklar publicerade",
+          "articles_in_top5": 3,
+          "causal_nodes": 7,
+          "max_causal": 0.124,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "Därför har Pontus Rasmusson startat Onlyfans",
+              "is_article": true,
+              "causal": 0.12400073,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.07567528,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07180515,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.11103866,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07567528,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 13,
+          "goal": "vad har hänt i världen idag",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.1136,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "Därför har Pontus Rasmusson startat Onlyfans",
+              "is_article": true,
+              "causal": 0.11364056,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 14,
+          "goal": "nyhetssändning senaste händelser",
+          "articles_in_top5": 3,
+          "causal_nodes": 3,
+          "max_causal": 0.0958,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 31,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.09576014,
+              "type": "Direct"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.09576014,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07778551,
+              "type": "Direct"
+            },
+            {
+              "label": "Vlogg: Campar inför Hov1:s sista konsert",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 15,
+          "goal": "svenska nyheter viktigaste idag",
+          "articles_in_top5": 2,
+          "causal_nodes": 3,
+          "max_causal": 0.0789,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.076580085,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07006493,
+              "type": "Direct"
+            },
+            {
+              "label": "Vem är Maximilian Ibrahimović?",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.07891915,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 16,
+          "goal": "senaste rapporteringen nyheter Sverige",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.0779,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 33,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.0779114,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07057224,
+              "type": "Direct"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07475406,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.07357043,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 17,
+          "goal": "aktuell bevakning nyheter SVT",
+          "articles_in_top5": 3,
+          "causal_nodes": 2,
+          "max_causal": 0.0764,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 35,
+          "top5": [
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.07642493,
+              "type": "Direct"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07076812,
+              "type": "Direct"
+            },
+            {
+              "label": "Här utlöses jättelavinen i Sorsele – av skoterföra",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Trump: Goda chanser för avtal innan måndag",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Gå direkt till textinnehållet SVT Nyheter Nyheter ",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 18,
+          "goal": "viktiga händelser idag Sverige världen",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.0991,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 36,
+          "top5": [
+            {
+              "label": "OS-mästaren: ”Det är den konstigaste sporten”",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Tv-tablå",
+              "is_article": false,
+              "causal": 0.09913932,
+              "type": "Direct"
+            },
+            {
+              "label": "Trump: Goda chanser för avtal innan måndag",
+              "is_article": true,
+              "causal": 0.07480381,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 19,
+          "goal": "nyhetsflödet senaste timmarna",
+          "articles_in_top5": 3,
+          "causal_nodes": 4,
+          "max_causal": 0.118,
+          "consecutive_good": 0,
+          "weight_count": 18,
+          "concept_count": 38,
+          "top5": [
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.07431171,
+              "type": "Direct"
+            },
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.074837066,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.07645311,
+              "type": "Direct"
+            },
+            {
+              "label": "Vlogg: Campar inför Hov1:s sista konsert",
+              "is_article": true,
+              "causal": 0.11804059,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 20,
+          "goal": "senaste uppdateringarna nyheter",
+          "articles_in_top5": 4,
+          "causal_nodes": 5,
+          "max_causal": 0.1209,
+          "consecutive_good": 1,
+          "weight_count": 18,
+          "concept_count": 39,
+          "top5": [
+            {
+              "label": "Liverapport Tre saknas efter robotattack mot Haifa",
+              "is_article": true,
+              "causal": 0.12093122,
+              "type": "Direct"
+            },
+            {
+              "label": "KRIGET I MELLANÖSTERN",
+              "is_article": false,
+              "causal": 0.06821761,
+              "type": "Direct"
+            },
+            {
+              "label": "LAVINER 56 sek Här utlöses jättelavinen i Sorsele ",
+              "is_article": true,
+              "causal": 0.11288972,
+              "type": "Direct"
+            },
+            {
+              "label": "Vlogg: Campar inför Hov1:s sista konsert",
+              "is_article": true,
+              "causal": 0.11235151,
+              "type": "Direct"
+            },
+            {
+              "label": "Vem är Maximilian Ibrahimović?",
+              "is_article": true,
+              "causal": 0.08261041,
+              "type": "Direct"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "BBC News",
+      "url": "https://www.bbc.com/news",
+      "converged_at": null,
+      "total_iterations": 20,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news headlines today",
+          "articles_in_top5": 0,
+          "causal_nodes": 1,
+          "max_causal": 0.0411,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 22,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04111347,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.description: Visit BBC News for the latest",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "meta.description: Visit BBC News for the latest ne",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.description: Visit BBC News for the late",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "breaking news stories right now",
+          "articles_in_top5": 0,
+          "causal_nodes": 1,
+          "max_causal": 0.0467,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 22,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04669711,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top news articles published today",
+          "articles_in_top5": 4,
+          "causal_nodes": 6,
+          "max_causal": 0.1262,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.08439243,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04814962,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.10080388,
+              "type": "Direct"
+            },
+            {
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "is_article": true,
+              "causal": 0.12615205,
+              "type": "Direct"
+            },
+            {
+              "label": "5 Pepsi withdraws as UK festival sponsor after Kan",
+              "is_article": true,
+              "causal": 0.108057424,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "current world news headlines",
+          "articles_in_top5": 0,
+          "causal_nodes": 2,
+          "max_causal": 0.0729,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.050461266,
+              "type": "Direct"
+            },
+            {
+              "label": "Europe",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Africa",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Australia",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Asia",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "most important news events today",
+          "articles_in_top5": 5,
+          "causal_nodes": 5,
+          "max_causal": 0.104,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "1 Artemis's stunning Moon pictures - science or ho",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "1 'Absolutely spectacular': Artemis II crew see fi",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "major news stories happening now",
+          "articles_in_top5": 3,
+          "causal_nodes": 7,
+          "max_causal": 0.1327,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04844235,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "How downed F-15 US airman was rescued inside Iran ",
+              "is_article": true,
+              "causal": 0.13266745,
+              "type": "Direct"
+            },
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.07502748,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.11490761,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "todays top headline stories",
+          "articles_in_top5": 0,
+          "causal_nodes": 1,
+          "max_causal": 0.0485,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 23,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04846343,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "what happened in the world today",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.0743,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Watch: Artemis II's journey so far as it leaves Ea",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.03554946,
+              "type": "Direct"
+            },
+            {
+              "label": "3 Royal Family arrive at church for Easter Sunday ",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Live",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Video",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "global news developments and events",
+          "articles_in_top5": 4,
+          "causal_nodes": 8,
+          "max_causal": 0.1168,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 28,
+          "top5": [
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.106222115,
+              "type": "Direct"
+            },
+            {
+              "label": "Pope Leo calls for global leaders to choose peace ",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.113841854,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.047982685,
+              "type": "Direct"
+            },
+            {
+              "label": "5 Pepsi withdraws as UK festival sponsor after Kan",
+              "is_article": true,
+              "causal": 0.114926055,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "recent important world news reports",
+          "articles_in_top5": 0,
+          "causal_nodes": 4,
+          "max_causal": 0.1035,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.04257767,
+              "type": "Direct"
+            },
+            {
+              "label": "Middle East",
+              "is_article": false,
+              "causal": 0.0777219,
+              "type": "Direct"
+            },
+            {
+              "label": "Africa",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Europe",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Asia",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 11,
+          "goal": "breaking international news stories",
+          "articles_in_top5": 0,
+          "causal_nodes": 1,
+          "max_causal": 0.0476,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.047585033,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 12,
+          "goal": "latest world events and headlines",
+          "articles_in_top5": 0,
+          "causal_nodes": 1,
+          "max_causal": 0.0474,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.047388416,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 13,
+          "goal": "todays major news coverage",
+          "articles_in_top5": 4,
+          "causal_nodes": 7,
+          "max_causal": 0.0813,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.08127388,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.046864532,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.07700958,
+              "type": "Direct"
+            },
+            {
+              "label": "5 Pepsi withdraws as UK festival sponsor after Kan",
+              "is_article": true,
+              "causal": 0.07700958,
+              "type": "Direct"
+            },
+            {
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "is_article": true,
+              "causal": 0.07700958,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 14,
+          "goal": "current affairs and breaking news",
+          "articles_in_top5": 0,
+          "causal_nodes": 6,
+          "max_causal": 0.1128,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 31,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.047072805,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "meta.description: Visit BBC News for the latest ne",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.description: Visit BBC News for the latest",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.description: Visit BBC News for the late",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 15,
+          "goal": "most read news articles today",
+          "articles_in_top5": 5,
+          "causal_nodes": 10,
+          "max_causal": 0.1122,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "1 Artemis's stunning Moon pictures - science or ho",
+              "is_article": true,
+              "causal": 0.11215724,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.11215724,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.11215724,
+              "type": "Direct"
+            },
+            {
+              "label": "Artemis's stunning Moon pictures - science or holi",
+              "is_article": true,
+              "causal": 0.11215724,
+              "type": "Direct"
+            },
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.084002785,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 16,
+          "goal": "important world developments today",
+          "articles_in_top5": 1,
+          "causal_nodes": 3,
+          "max_causal": 0.0768,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "US &Canada UK Africa Asia Australia Europe Latin A",
+              "is_article": true,
+              "causal": 0.07678036,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.034012895,
+              "type": "Direct"
+            },
+            {
+              "label": "Video",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Earth",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Live",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 17,
+          "goal": "news headlines from around the world",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.0781,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 34,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.03798192,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Middle East",
+              "is_article": false,
+              "causal": 0.07205281,
+              "type": "Direct"
+            },
+            {
+              "label": "How downed F-15 US airman was rescued inside Iran ",
+              "is_article": true,
+              "causal": 0.073462,
+              "type": "Direct"
+            },
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.0781432,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 18,
+          "goal": "significant events in the news now",
+          "articles_in_top5": 4,
+          "causal_nodes": 8,
+          "max_causal": 0.0888,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 35,
+          "top5": [
+            {
+              "label": "How downed F-15 US airman was rescued inside Iran ",
+              "is_article": true,
+              "causal": 0.078968905,
+              "type": "Direct"
+            },
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.08139159,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.088832594,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.039585195,
+              "type": "Direct"
+            },
+            {
+              "label": "5 Pepsi withdraws as UK festival sponsor after Kan",
+              "is_article": true,
+              "causal": 0.088832594,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 19,
+          "goal": "latest reporting on world events",
+          "articles_in_top5": 1,
+          "causal_nodes": 3,
+          "max_causal": 0.0923,
+          "consecutive_good": 0,
+          "weight_count": 19,
+          "concept_count": 36,
+          "top5": [
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.0513132,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.title: BBC News - Breaking news, video and",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "US &Canada UK Africa Asia Australia Europe Latin A",
+              "is_article": true,
+              "causal": 0.09227881,
+              "type": "Direct"
+            },
+            {
+              "label": "twitter.description: Visit BBC News for the latest",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "meta.description: Visit BBC News for the latest ne",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 20,
+          "goal": "todays news summary and headlines",
+          "articles_in_top5": 4,
+          "causal_nodes": 7,
+          "max_causal": 0.1026,
+          "consecutive_good": 1,
+          "weight_count": 19,
+          "concept_count": 37,
+          "top5": [
+            {
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahe",
+              "is_article": true,
+              "causal": 0.076662675,
+              "type": "Direct"
+            },
+            {
+              "label": "openGraph.title: BBC News - Breaking news, video a",
+              "is_article": false,
+              "causal": 0.047348794,
+              "type": "Direct"
+            },
+            {
+              "label": "2 How downed F-15 US airman was rescued inside Ira",
+              "is_article": true,
+              "causal": 0.10030005,
+              "type": "Direct"
+            },
+            {
+              "label": "5 Pepsi withdraws as UK festival sponsor after Kan",
+              "is_article": true,
+              "causal": 0.10030005,
+              "type": "Direct"
+            },
+            {
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "is_article": true,
+              "causal": 0.10030005,
+              "type": "Direct"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "The Guardian",
+      "url": "https://www.theguardian.com/us",
+      "converged_at": null,
+      "total_iterations": 20,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news stories today",
+          "articles_in_top5": 1,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 19,
+          "top5": [
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Politics US health officials appear to shy away fr",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Ukraine",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Ukraine",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "breaking news and headlines now",
+          "articles_in_top5": 5,
+          "causal_nodes": 4,
+          "max_causal": 0.0923,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 19,
+          "top5": [
+            {
+              "label": "Sign up to the Filter US: our newsletter guide to ",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.092345655,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.092345655,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.092345655,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.092345655,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top stories and articles today",
+          "articles_in_top5": 2,
+          "causal_nodes": 1,
+          "max_causal": 0.1075,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "Politics US health officials appear to shy away fr",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Politics US health officials appear to shy away fr",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Kitchen equipment ‘They look goofy and I don’t car",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.10753543,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "current world news coverage",
+          "articles_in_top5": 1,
+          "causal_nodes": 5,
+          "max_causal": 0.0756,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "UK Pepsi drops Wireless sponsorship amid criticism",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "US news US politics World Climate crisis Middle Ea",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Climate crisis",
+              "is_article": false,
+              "causal": 0.0016711976,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.07563438,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "most important news events today",
+          "articles_in_top5": 5,
+          "causal_nodes": 4,
+          "max_causal": 0.1065,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "‘Unhinged madman’: US politicians react to Trump’s",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Most viewed What readers are clicking on ‘Unhinged",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "‘Unhinged madman’: US politicians react to Trump’s",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.10648299,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.10422761,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "major headlines and stories now",
+          "articles_in_top5": 2,
+          "causal_nodes": 0,
+          "max_causal": 0.0004,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "Climate crisis",
+              "is_article": false,
+              "causal": 0.00039785862,
+              "type": "Direct"
+            },
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "double quotation mark The hill I will die on: Orde",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Climate crisis",
+              "is_article": false,
+              "causal": 0.00039785862,
+              "type": "Direct"
+            },
+            {
+              "label": "Newsletters",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "todays most read news stories",
+          "articles_in_top5": 5,
+          "causal_nodes": 7,
+          "max_causal": 0.1112,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "‘Unhinged madman’: US politicians react to Trump’s",
+              "is_article": true,
+              "causal": 0.07771143,
+              "type": "Direct"
+            },
+            {
+              "label": "‘Unhinged madman’: US politicians react to Trump’s",
+              "is_article": true,
+              "causal": 0.07771143,
+              "type": "Direct"
+            },
+            {
+              "label": "Most viewed What readers are clicking on ‘Unhinged",
+              "is_article": true,
+              "causal": 0.07771143,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11122664,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.110160574,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "global news and current affairs",
+          "articles_in_top5": 4,
+          "causal_nodes": 5,
+          "max_causal": 0.1238,
+          "consecutive_good": 2,
+          "weight_count": 16,
+          "concept_count": 22,
+          "top5": [
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11955408,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11955408,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11448469,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11448469,
+              "type": "Direct"
+            },
+            {
+              "label": "Editorials",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "recent world events and reports",
+          "articles_in_top5": 3,
+          "causal_nodes": 1,
+          "max_causal": 0.0857,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "Europe edition",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "California Three-week-old mountain lion cub rescue",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.08567629,
+              "type": "Direct"
+            },
+            {
+              "label": "Lifestyle",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "France holidays A cruise through history on the Ca",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "breaking news developments today",
+          "articles_in_top5": 5,
+          "causal_nodes": 5,
+          "max_causal": 0.0945,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 25,
+          "top5": [
+            {
+              "label": "Sign up to the Filter US: our newsletter guide to ",
+              "is_article": true,
+              "causal": 0.09446179,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.08596273,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.08596273,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.07876095,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.07861114,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 11,
+          "goal": "important stories published today",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0697,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.06970861,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 12,
+          "goal": "latest journalism and reporting",
+          "articles_in_top5": 1,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 28,
+          "top5": [
+            {
+              "label": "This is how we do it ‘The fact he’s comfortable en",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 13,
+          "goal": "todays news and analysis",
+          "articles_in_top5": 4,
+          "causal_nodes": 5,
+          "max_causal": 0.0909,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 29,
+          "top5": [
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.08180206,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.08180206,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.076991245,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.076991245,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 14,
+          "goal": "major world developments now",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.0799,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 29,
+          "top5": [
+            {
+              "label": "Climate crisis",
+              "is_article": false,
+              "causal": 0.00048007083,
+              "type": "Direct"
+            },
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.07540289,
+              "type": "Direct"
+            },
+            {
+              "label": "France holidays A cruise through history on the Ca",
+              "is_article": true,
+              "causal": 0.079858415,
+              "type": "Direct"
+            },
+            {
+              "label": "Climate crisis",
+              "is_article": false,
+              "causal": 0.00048007083,
+              "type": "Direct"
+            },
+            {
+              "label": "Newsletters",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 15,
+          "goal": "current news stories and coverage",
+          "articles_in_top5": 4,
+          "causal_nodes": 5,
+          "max_causal": 0.1103,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 29,
+          "top5": [
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.110336624,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.110336624,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.10874589,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.10856985,
+              "type": "Direct"
+            },
+            {
+              "label": "Politics US health officials appear to shy away fr",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 16,
+          "goal": "significant world events today",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.099,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.08012146,
+              "type": "Direct"
+            },
+            {
+              "label": "France holidays A cruise through history on the Ca",
+              "is_article": true,
+              "causal": 0.09895271,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 17,
+          "goal": "latest articles and investigations",
+          "articles_in_top5": 0,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 18,
+          "goal": "news headlines and analysis today",
+          "articles_in_top5": 4,
+          "causal_nodes": 5,
+          "max_causal": 0.1166,
+          "consecutive_good": 1,
+          "weight_count": 16,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "meta.description: Latest US news, world news, spor",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Analysis Despite propaganda coup of F-15 crew resc",
+              "is_article": true,
+              "causal": 0.10460463,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11664838,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11664838,
+              "type": "Direct"
+            },
+            {
+              "label": "Louisiana Man charged with impaired driving after ",
+              "is_article": true,
+              "causal": 0.11628499,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 19,
+          "goal": "todays top investigative stories",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0737,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 31,
+          "top5": [
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.07369357,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 20,
+          "goal": "breaking stories from around the world",
+          "articles_in_top5": 2,
+          "causal_nodes": 1,
+          "max_causal": 0.0723,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 34,
+          "top5": [
+            {
+              "label": "Nutrition Protein chips, sex chocolate: what are ‘",
+              "is_article": true,
+              "causal": 0.07229104,
+              "type": "Direct"
+            },
+            {
+              "label": "Health &fitness",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Well actually What to know about the controversial",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NPR",
+      "url": "https://www.npr.org/",
+      "converged_at": null,
+      "total_iterations": 20,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news stories from NPR",
+          "articles_in_top5": 3,
+          "causal_nodes": 0,
+          "max_causal": 0.0005,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Culture Natural disasters and political instabilit",
+              "is_article": true,
+              "causal": 4.8899146e-05,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "The Art Newspaper's latest annual study of \"the wo",
+              "is_article": true,
+              "causal": 0.0004708747,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "breaking news headlines today",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0843,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.0842813,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00047949457,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top articles and stories now",
+          "articles_in_top5": 0,
+          "causal_nodes": 0,
+          "max_causal": 0.0005,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.0005331832,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "current world news and events",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0805,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.08051443,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "most important stories today",
+          "articles_in_top5": 3,
+          "causal_nodes": 2,
+          "max_causal": 0.0768,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 26,
+          "top5": [
+            {
+              "label": "LEBANON-MEDICS KILLED Listen · 5:04 5:04 Transcrip",
+              "is_article": true,
+              "causal": 0.071958564,
+              "type": "Direct"
+            },
+            {
+              "label": "In Lebanon, more than 50 medics have been killed b",
+              "is_article": true,
+              "causal": 1.6840108e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Middle East conflict In Lebanon, more than 50 medi",
+              "is_article": true,
+              "causal": 0.07676179,
+              "type": "Direct"
+            },
+            {
+              "label": "",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "major news developments now",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0771,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00040104415,
+              "type": "Direct"
+            },
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.07706698,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "todays top news stories",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0768,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.07683692,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.0003974707,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "global events and current affairs",
+          "articles_in_top5": 3,
+          "causal_nodes": 0,
+          "max_causal": 0.0004,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 29,
+          "top5": [
+            {
+              "label": "Navigate next",
+              "is_article": false,
+              "causal": 0.0004201499,
+              "type": "Direct"
+            },
+            {
+              "label": "Opinion Simon Says Opinion: Humanity's hopes ascen",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Advertisements for sports betting apps are seen in",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Opinion",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Image Source/Getty Image Source/Getty Life Kit Que",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "recent news reports and coverage",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.1177,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.11765632,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.0003774425,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "breaking stories and developments",
+          "articles_in_top5": 3,
+          "causal_nodes": 7,
+          "max_causal": 0.0868,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "NPR - Breaking News, Analysis, Music, Arts &Podcas",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Pop Culture Happy Hour",
+              "is_article": false,
+              "causal": 0.07361351,
+              "type": "Direct"
+            },
+            {
+              "label": "In Lebanon, more than 50 medics have been killed b",
+              "is_article": true,
+              "causal": 0.07298109,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Middle East conflict In Lebanon, more than 50 medi",
+              "is_article": true,
+              "causal": 0.07269319,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "LEBANON-MEDICS KILLED Listen · 5:04 5:04 Transcrip",
+              "is_article": true,
+              "causal": 0.07226242,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 11,
+          "goal": "latest reporting and journalism",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.0807,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Middle East conflict In Lebanon, more than 50 medi",
+              "is_article": true,
+              "causal": 0.08074126,
+              "type": "Direct"
+            },
+            {
+              "label": "LEBANON-MEDICS KILLED Listen · 5:04 5:04 Transcrip",
+              "is_article": true,
+              "causal": 0.07922929,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 12,
+          "goal": "important news happening today",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0723,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.072284564,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00046905637,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 13,
+          "goal": "todays headline news articles",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0782,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.078180306,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00037866985,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 14,
+          "goal": "current affairs and major stories",
+          "articles_in_top5": 2,
+          "causal_nodes": 0,
+          "max_causal": 0.0007,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Red Cross director of emergency medical services A",
+              "is_article": true,
+              "causal": 0.00067249907,
+              "type": "Direct"
+            },
+            {
+              "label": "Red Cross director of emergency medical services A",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 15,
+          "goal": "notable news events today",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.079,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.07900173,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00045014196,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 16,
+          "goal": "latest national and world news",
+          "articles_in_top5": 3,
+          "causal_nodes": 3,
+          "max_causal": 0.0997,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 33,
+          "top5": [
+            {
+              "label": "Culture Natural disasters and political instabilit",
+              "is_article": true,
+              "causal": 0.09970292,
+              "type": "Direct"
+            },
+            {
+              "label": "The Art Newspaper's latest annual study of \"the wo",
+              "is_article": true,
+              "causal": 0.09970292,
+              "type": "Direct"
+            },
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.08850231,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 17,
+          "goal": "important developments in the news",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.1048,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 34,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.10477099,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Transcript",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Bush: Tiny Desk Concert If you think you know \"Mac",
+              "is_article": false,
+              "causal": 0.00038666598,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 18,
+          "goal": "todays major reporting",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.1174,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 34,
+          "top5": [
+            {
+              "label": "Red Cross director of emergency medical services A",
+              "is_article": true,
+              "causal": 0.117365465,
+              "type": "Direct"
+            },
+            {
+              "label": "Red Cross director of emergency medical services A",
+              "is_article": true,
+              "causal": 0.086765766,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 19,
+          "goal": "breaking news and analysis",
+          "articles_in_top5": 1,
+          "causal_nodes": 1,
+          "max_causal": 0.0787,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 35,
+          "top5": [
+            {
+              "label": "Embed \" /> < iframe src=\"https://www.npr.org/playe",
+              "is_article": true,
+              "causal": 0.07870581,
+              "type": "Direct"
+            },
+            {
+              "label": "more from news culture music",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 20,
+          "goal": "significant stories from today",
+          "articles_in_top5": 1,
+          "causal_nodes": 2,
+          "max_causal": 0.075,
+          "consecutive_good": 0,
+          "weight_count": 16,
+          "concept_count": 36,
+          "top5": [
+            {
+              "label": "Pop Culture Happy Hour",
+              "is_article": false,
+              "causal": 0.073187284,
+              "type": "Direct"
+            },
+            {
+              "label": "Ollella: Tiny Desk Concert",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Red Cross director of emergency medical services A",
+              "is_article": true,
+              "causal": 0.07500357,
+              "type": "Direct"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Aftonbladet",
+      "url": "https://www.aftonbladet.se/",
+      "converged_at": 16,
+      "total_iterations": 19,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "senaste nyheterna idag",
+          "articles_in_top5": 0,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 18,
+          "top5": [
+            {
+              "label": "Gå till Nyheter",
+              "is_article": false,
+              "causal": 1.9232926e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Så gick det sen",
+              "is_article": false,
+              "causal": 1.9232926e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.094134e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Söndag 5 april",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Film Melodifestivalen Musik Rockbjörnen Schlagerbl",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "aktuella nyheter just nu",
+          "articles_in_top5": 3,
+          "causal_nodes": 1,
+          "max_causal": 0.074,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 20,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.2553327e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.07401272,
+              "type": "Direct"
+            },
+            {
+              "label": "JUST NU: Stulen lyxbil\ni krasch – stor polisjakt",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "JUST NU: Stulen lyxbil i krasch – stor polisjakt G",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "dagens viktigaste nyhetsartiklar",
+          "articles_in_top5": 4,
+          "causal_nodes": 0,
+          "max_causal": 0.0,
+          "consecutive_good": 1,
+          "weight_count": 22,
+          "concept_count": 22,
+          "top5": [
+            {
+              "label": "Hockey, Svaret om Lodins frånvaro: ”Har varit på s",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Casinobonusar BONUSAR Hitta bästa bonus som passar",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "17.00 Hockey Rasar efter bortdömda målet: ”Ett jät",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens E-tidning",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "ANNONS CASINOGUIDEN Jämför casino CASINOGUIDEN Sve",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "breaking news Sverige",
+          "articles_in_top5": 0,
+          "causal_nodes": 0,
+          "max_causal": 0,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 22,
+          "top5": []
+        },
+        {
+          "i": 5,
+          "goal": "vad händer i nyheterna",
+          "articles_in_top5": 2,
+          "causal_nodes": 1,
+          "max_causal": 0.112,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 24,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.0754555e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.11203032,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Expandera meny för Nyheter",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "senaste rubrikerna nyheter",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.1231,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 25,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.1588435e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.1230677,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.095396034,
+              "type": "Direct"
+            },
+            {
+              "label": "Expandera meny för Nyheter",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "aktuellt nyhetsläge Sverige",
+          "articles_in_top5": 2,
+          "causal_nodes": 1,
+          "max_causal": 0.1237,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 27,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Chefredaktör, vd och ansvarig utgivare: Lotta Folc",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.123687,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "viktiga händelser idag",
+          "articles_in_top5": 5,
+          "causal_nodes": 9,
+          "max_causal": 0.133,
+          "consecutive_good": 1,
+          "weight_count": 22,
+          "concept_count": 29,
+          "top5": [
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.115134105,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.13301374,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Casinobonusar BONUSAR Hitta bästa bonus som passar",
+              "is_article": true,
+              "causal": 0.09523233,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Hockey, Svaret om Lodins frånvaro: ”Har varit på s",
+              "is_article": true,
+              "causal": 0.09523233,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "17.00 Hockey Rasar efter bortdömda målet: ”Ett jät",
+              "is_article": true,
+              "causal": 0.09523233,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "nyhetsartiklar publicerade idag",
+          "articles_in_top5": 4,
+          "causal_nodes": 1,
+          "max_causal": 0.1348,
+          "consecutive_good": 2,
+          "weight_count": 22,
+          "concept_count": 30,
+          "top5": [
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.13483831,
+              "type": "Direct"
+            },
+            {
+              "label": "Missa inte succéspelet: Dagens ordsvans NYTT SPEL:",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "senaste nyheterna och rapporterna",
+          "articles_in_top5": 2,
+          "causal_nodes": 4,
+          "max_causal": 0.072,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "Gå till Nyheter",
+              "is_article": false,
+              "causal": 1.7460637e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Så gick det sen",
+              "is_article": false,
+              "causal": 1.7460637e-08,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.071958415,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.07056187,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.0036523e-06,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 11,
+          "goal": "nyheter just nu senaste",
+          "articles_in_top5": 4,
+          "causal_nodes": 6,
+          "max_causal": 0.074,
+          "consecutive_good": 1,
+          "weight_count": 22,
+          "concept_count": 32,
+          "top5": [
+            {
+              "label": "JUST NU: Stulen lyxbil\ni krasch – stor polisjakt",
+              "is_article": true,
+              "causal": 0.06946912,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.073546626,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.1114606e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "JUST NU: Stulen lyxbil i krasch – stor polisjakt G",
+              "is_article": true,
+              "causal": 0.06946912,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.07325708,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 12,
+          "goal": "aktuella händelser Sverige världen",
+          "articles_in_top5": 2,
+          "causal_nodes": 2,
+          "max_causal": 0.0904,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 33,
+          "top5": [
+            {
+              "label": "Chefredaktör, vd och ansvarig utgivare: Lotta Folc",
+              "is_article": true,
+              "causal": 0.09044617,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.07153233,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 13,
+          "goal": "viktigaste rubrikerna nyheter",
+          "articles_in_top5": 3,
+          "causal_nodes": 4,
+          "max_causal": 0.1291,
+          "consecutive_good": 0,
+          "weight_count": 22,
+          "concept_count": 33,
+          "top5": [
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.12822619,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.0882641e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12911223,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12025291,
+              "type": "Direct"
+            },
+            {
+              "label": "Söndag 5 april",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 14,
+          "goal": "senaste rapporteringen nyheter",
+          "articles_in_top5": 4,
+          "causal_nodes": 4,
+          "max_causal": 0.1297,
+          "consecutive_good": 1,
+          "weight_count": 22,
+          "concept_count": 34,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.1239486e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.1275955,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12855163,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12970369,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12816873,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 15,
+          "goal": "nyhetsflödet idag Sverige",
+          "articles_in_top5": 4,
+          "causal_nodes": 6,
+          "max_causal": 0.1336,
+          "consecutive_good": 2,
+          "weight_count": 22,
+          "concept_count": 35,
+          "top5": [
+            {
+              "label": "Chefredaktör, vd och ansvarig utgivare: Lotta Folc",
+              "is_article": true,
+              "causal": 0.1242886,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.13342139,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.13361666,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.13089581,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 16,
+          "goal": "aktuell nyhetsbevakning",
+          "articles_in_top5": 5,
+          "causal_nodes": 10,
+          "max_causal": 0.0753,
+          "consecutive_good": 3,
+          "weight_count": 22,
+          "concept_count": 37,
+          "top5": [
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.07041239,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Missa inte succéspelet: Dagens ordsvans NYTT SPEL:",
+              "is_article": true,
+              "causal": 0.07528369,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Hockey, Svaret om Lodins frånvaro: ”Har varit på s",
+              "is_article": true,
+              "causal": 0.07086176,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.07127191,
+              "type": "CausalMemory"
+            },
+            {
+              "label": "JUST NU: Stulen lyxbil\ni krasch – stor polisjakt",
+              "is_article": true,
+              "causal": 0.07356257,
+              "type": "CausalMemory"
+            }
+          ]
+        },
+        {
+          "i": 17,
+          "goal": "breaking nyheter senaste",
+          "articles_in_top5": 4,
+          "causal_nodes": 4,
+          "max_causal": 0.124,
+          "consecutive_good": 4,
+          "weight_count": 22,
+          "concept_count": 38,
+          "top5": [
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.12400383,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.3421619e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.123292826,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12235631,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.12344039,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 18,
+          "goal": "viktiga nyheter och händelser",
+          "articles_in_top5": 4,
+          "causal_nodes": 4,
+          "max_causal": 0.073,
+          "consecutive_good": 5,
+          "weight_count": 22,
+          "concept_count": 38,
+          "top5": [
+            {
+              "label": "Dagens tidning Söndag 5 april Läs dagens tidning I",
+              "is_article": false,
+              "causal": 1.1493503e-06,
+              "type": "Direct"
+            },
+            {
+              "label": "Nyheter, Emely, 32, lyfte i stormen – slog sig ill",
+              "is_article": true,
+              "causal": 0.07252598,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.072382145,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.07295832,
+              "type": "Direct"
+            },
+            {
+              "label": "Vet du mer? Har du ett nyhetstips? Hör av dig!",
+              "is_article": true,
+              "causal": 0.072669946,
+              "type": "Direct"
+            }
+          ]
+        },
+        {
+          "i": 19,
+          "goal": "dagens nyhetsartiklar senaste",
+          "articles_in_top5": 4,
+          "causal_nodes": 4,
+          "max_causal": 0.125,
+          "consecutive_good": 6,
+          "weight_count": 22,
+          "concept_count": 38,
+          "top5": [
+            {
+              "label": "Hockey, Svaret om Lodins frånvaro: ”Har varit på s",
+              "is_article": true,
+              "causal": 0.12447297,
+              "type": "Direct"
+            },
+            {
+              "label": "Casinobonusar BONUSAR Hitta bästa bonus som passar",
+              "is_article": true,
+              "causal": 0.12499586,
+              "type": "Direct"
+            },
+            {
+              "label": "17.00 Hockey Rasar efter bortdömda målet: ”Ett jät",
+              "is_article": true,
+              "causal": 0.12015886,
+              "type": "Direct"
+            },
+            {
+              "label": "ANNONS CASINOGUIDEN Jämför casino CASINOGUIDEN Sve",
+              "is_article": true,
+              "causal": 0.1065221,
+              "type": "Direct"
+            },
+            {
+              "label": "Dagens E-tidning",
+              "is_article": false,
+              "causal": 0.0,
+              "type": "Direct"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "date": "2026-04-05"
+}
