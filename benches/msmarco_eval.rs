@@ -20,7 +20,7 @@
 ///
 /// Användning:
 ///   cargo run --bin msmarco-eval --release -- --data-dir ./msmarco-data [--top1000] [--max-queries 100] [--feedback]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -38,6 +38,8 @@ struct Args {
     max_queries: usize,
     use_top1000: bool,
     run_feedback: bool,
+    run_topic_demo: bool,
+    run_latency_demo: bool,
     json_output: bool,
     verbose: bool,
 }
@@ -48,6 +50,8 @@ fn parse_args() -> Args {
     let mut max_queries = 0usize; // 0 = alla
     let mut use_top1000 = false;
     let mut run_feedback = false;
+    let mut run_topic_demo = false;
+    let mut run_latency_demo = false;
     let mut json_output = false;
     let mut verbose = false;
 
@@ -68,6 +72,12 @@ fn parse_args() -> Args {
             }
             "--top1000" => use_top1000 = true,
             "--feedback" => run_feedback = true,
+            "--topic-demo" => run_topic_demo = true,
+            "--latency-demo" => run_latency_demo = true,
+            "--killer-demo" => {
+                run_topic_demo = true;
+                run_latency_demo = true;
+            }
             "--json" => json_output = true,
             "--verbose" | "-v" => verbose = true,
             "--help" | "-h" => {
@@ -78,6 +88,9 @@ fn parse_args() -> Args {
                        --max-queries <N>    Limit number of queries (0 = all)\n  \
                        --top1000            Use pre-retrieved top1000.tsv candidates\n  \
                        --feedback           Run simulated feedback loop variant\n  \
+                       --topic-demo         Topic-grouped feedback improvement curve\n  \
+                       --latency-demo       Latency micro-benchmark with cache-hit\n  \
+                       --killer-demo        Run both topic-demo + latency-demo\n  \
                        --json               Output results as JSON\n  \
                        -v, --verbose        Verbose per-query output\n  \
                        -h, --help           Show this help"
@@ -96,6 +109,8 @@ fn parse_args() -> Args {
         max_queries,
         use_top1000,
         run_feedback,
+        run_topic_demo,
+        run_latency_demo,
         json_output,
         verbose,
     }
@@ -668,6 +683,16 @@ fn main() {
         all_results.push((variant_name.to_string(), metrics, latency));
     }
 
+    // ── Topic-grouped feedback demo ──
+    if args.run_topic_demo {
+        run_topic_grouped_demo(&queries, &qrels, &top1000, &collection, &query_ids);
+    }
+
+    // ── Latency micro-benchmark ──
+    if args.run_latency_demo {
+        run_latency_demo(&queries, &top1000, &query_ids);
+    }
+
     // ── Output ──
 
     if args.json_output {
@@ -675,6 +700,424 @@ fn main() {
     } else {
         print_table_results(&all_results);
     }
+}
+
+// ─── Topic Grouping ─────────────────────────────────────────────────────────
+
+/// Tokenisera en query till unika content-words (stopord filtrerade)
+fn query_tokens(query: &str) -> HashSet<String> {
+    const STOP: &[&str] = &[
+        "the", "a", "an", "is", "are", "was", "were", "of", "in", "to", "for", "and", "or", "on",
+        "at", "by", "it", "do", "does", "did", "what", "how", "when", "where", "who", "which",
+        "that", "this", "with", "from", "be", "has", "have", "had", "not", "no", "can", "will",
+        "i", "you", "we", "they", "my", "your", "its", "if", "so", "as", "but",
+    ];
+    query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 1 && !STOP.contains(w))
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Jaccard-likhet mellan två token-mängder
+fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    if a.is_empty() && b.is_empty() {
+        return 0.0;
+    }
+    let intersection = a.intersection(b).count();
+    let union = a.union(b).count();
+    intersection as f64 / union as f64
+}
+
+/// Gruppera queries efter topic via greedy Jaccard-klustring.
+/// Returnerar grupper med >= min_size queries, sorterade efter storlek.
+fn cluster_queries_by_topic(
+    queries: &HashMap<u32, String>,
+    query_ids: &[u32],
+    min_similarity: f64,
+    min_size: usize,
+) -> Vec<Vec<u32>> {
+    let tokens: HashMap<u32, HashSet<String>> = query_ids
+        .iter()
+        .filter_map(|&qid| queries.get(&qid).map(|q| (qid, query_tokens(q))))
+        .collect();
+
+    let mut assigned: HashSet<u32> = HashSet::new();
+    let mut groups: Vec<Vec<u32>> = Vec::new();
+
+    for &qid in query_ids {
+        if assigned.contains(&qid) {
+            continue;
+        }
+        let my_tokens = match tokens.get(&qid) {
+            Some(t) if !t.is_empty() => t,
+            _ => continue,
+        };
+
+        let mut group = vec![qid];
+        assigned.insert(qid);
+
+        // Hitta alla queries med Jaccard >= threshold
+        for &other in query_ids {
+            if assigned.contains(&other) {
+                continue;
+            }
+            if let Some(other_tokens) = tokens.get(&other) {
+                if jaccard(my_tokens, other_tokens) >= min_similarity {
+                    group.push(other);
+                    assigned.insert(other);
+                }
+            }
+        }
+
+        if group.len() >= min_size {
+            groups.push(group);
+        }
+    }
+
+    groups.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    groups
+}
+
+/// Killer Demo 1: Topic-grouped feedback improvement curve
+fn run_topic_grouped_demo(
+    queries: &HashMap<u32, String>,
+    qrels: &HashMap<u32, Vec<u32>>,
+    top1000: &Option<HashMap<u32, Vec<(u32, String)>>>,
+    _collection: &Option<HashMap<u32, String>>,
+    query_ids: &[u32],
+) {
+    eprintln!("══════════════════════════════════════════════════════");
+    eprintln!("  KILLER DEMO 1: Topic-Grouped Feedback Curve");
+    eprintln!("══════════════════════════════════════════════════════\n");
+
+    // Klustra queries per topic (Jaccard >= 0.3, min 3 queries per grupp)
+    let groups = cluster_queries_by_topic(queries, query_ids, 0.3, 3);
+    eprintln!(
+        "Hittade {} topic-grupper (min 3 queries per grupp)",
+        groups.len()
+    );
+
+    if groups.is_empty() {
+        eprintln!("  Inga grupper hittade, försöker lägre threshold...");
+        let groups_low = cluster_queries_by_topic(queries, query_ids, 0.2, 2);
+        eprintln!("  Med threshold 0.2: {} grupper", groups_low.len());
+        if groups_low.is_empty() {
+            eprintln!("  Inte tillräckligt med topic-överlapp i datasetet.");
+            return;
+        }
+    }
+
+    // Visa top-10 grupper
+    let show_groups = groups.len().min(10);
+    for (gi, group) in groups.iter().take(show_groups).enumerate() {
+        let sample_q = queries.get(&group[0]).map(|s| s.as_str()).unwrap_or("?");
+        eprintln!(
+            "  Grupp {}: {} queries (ex: \"{}\")",
+            gi + 1,
+            group.len(),
+            if sample_q.len() > 60 {
+                &sample_q[..60]
+            } else {
+                sample_q
+            }
+        );
+    }
+    eprintln!();
+
+    // Kör feedback-experiment per grupp
+    // Mät: position 1 (cold) vs position N (warm) inom varje grupp
+    let max_groups = groups.len().min(50);
+    let mut cold_mrr_sum = 0.0f64;
+    let mut warm_mrr_sum = 0.0f64;
+    let mut cold_count = 0usize;
+    let mut warm_count = 0usize;
+
+    // Per-position tracking (improvement curve)
+    let mut position_mrr: Vec<(f64, usize)> = Vec::new(); // (mrr_sum, count) per position
+
+    for group in groups.iter().take(max_groups) {
+        // Hämta top1000 per grupp — alla passager från alla group-queries
+        let t1k = match top1000 {
+            Some(ref t) => t,
+            None => continue,
+        };
+
+        // Samla top-200 BM25-passager per query i gruppen → union
+        let mut merged_passages: HashMap<u32, String> = HashMap::new();
+        for &qid in group {
+            let query_text = match queries.get(&qid) {
+                Some(q) => q.as_str(),
+                None => continue,
+            };
+            let per_query: Vec<(u32, &str)> = match t1k.get(&qid) {
+                Some(ps) => ps.iter().map(|(pid, text)| (*pid, text.as_str())).collect(),
+                None => continue,
+            };
+            if per_query.is_empty() {
+                continue;
+            }
+            // BM25 top-200 per query
+            let index = TfIdfIndex::build(&per_query);
+            let top = index.query(query_text, 200);
+            for &(pid, _) in &top {
+                if let Some(&(_, text)) = per_query.iter().find(|&&(id, _)| id == pid) {
+                    merged_passages
+                        .entry(pid)
+                        .or_insert_with(|| text.to_string());
+                }
+            }
+        }
+        if merged_passages.is_empty() {
+            continue;
+        }
+
+        let passage_list: Vec<(u32, &str)> = merged_passages
+            .iter()
+            .map(|(pid, text)| (*pid, text.as_str()))
+            .collect();
+        let nodes = passages_to_nodes(&passage_list);
+        let mut field = ResonanceField::from_semantic_tree(&nodes, "msmarco://topic-group");
+
+        // Kör queries sekventiellt inom gruppen
+        for (pos, &qid) in group.iter().enumerate() {
+            let query_text = match queries.get(&qid) {
+                Some(q) => q.as_str(),
+                None => continue,
+            };
+            let relevant = match qrels.get(&qid) {
+                Some(r) => r.as_slice(),
+                None => continue,
+            };
+
+            let results = field.propagate_top_k(query_text, 100);
+            let ranked: Vec<u32> = results.iter().map(|r| r.node_id).collect();
+            let rr = reciprocal_rank(&ranked, relevant);
+
+            // Ge feedback med relevanta dokument
+            let successful: Vec<u32> = ranked
+                .iter()
+                .filter(|pid| relevant.contains(pid))
+                .copied()
+                .collect();
+            if !successful.is_empty() {
+                field.feedback(query_text, &successful);
+            }
+
+            // Position 0 = cold, position >= 1 = warm
+            if pos == 0 {
+                cold_mrr_sum += rr;
+                cold_count += 1;
+            } else {
+                warm_mrr_sum += rr;
+                warm_count += 1;
+            }
+
+            // Track per-position
+            while position_mrr.len() <= pos {
+                position_mrr.push((0.0, 0));
+            }
+            position_mrr[pos].0 += rr;
+            position_mrr[pos].1 += 1;
+        }
+    }
+
+    // Resultat
+    let cold_mrr = if cold_count > 0 {
+        cold_mrr_sum / cold_count as f64
+    } else {
+        0.0
+    };
+    let warm_mrr = if warm_count > 0 {
+        warm_mrr_sum / warm_count as f64
+    } else {
+        0.0
+    };
+    let improvement = if cold_mrr > 0.0 {
+        ((warm_mrr - cold_mrr) / cold_mrr) * 100.0
+    } else {
+        0.0
+    };
+
+    eprintln!("── Topic-Grouped Feedback Results ──");
+    eprintln!(
+        "  Groups evaluated: {} ({} cold queries, {} warm queries)",
+        max_groups, cold_count, warm_count
+    );
+    eprintln!("  Cold MRR (position 0):  {:.4}", cold_mrr);
+    eprintln!("  Warm MRR (position 1+): {:.4}", warm_mrr);
+    eprintln!("  Improvement:            {:.1}%", improvement);
+    eprintln!();
+
+    // Improvement curve per position
+    eprintln!("  Position │ MRR     │ Queries │ vs Cold");
+    eprintln!("  ─────────┼─────────┼─────────┼────────");
+    for (pos, (mrr_sum, count)) in position_mrr.iter().enumerate() {
+        if *count == 0 {
+            continue;
+        }
+        let pos_mrr = mrr_sum / *count as f64;
+        let vs_cold = if cold_mrr > 0.0 {
+            ((pos_mrr - cold_mrr) / cold_mrr) * 100.0
+        } else {
+            0.0
+        };
+        let bar = if vs_cold > 0.0 {
+            "+".repeat((vs_cold / 2.0).min(20.0) as usize)
+        } else {
+            String::new()
+        };
+        eprintln!(
+            "  {:>8} │ {:.4}  │ {:>7} │ {:>+5.1}% {}",
+            pos, pos_mrr, count, vs_cold, bar
+        );
+    }
+    eprintln!();
+}
+
+/// Killer Demo 2: Latency micro-benchmark med cache-hit
+fn run_latency_demo(
+    queries: &HashMap<u32, String>,
+    top1000: &Option<HashMap<u32, Vec<(u32, String)>>>,
+    query_ids: &[u32],
+) {
+    eprintln!("══════════════════════════════════════════════════════");
+    eprintln!("  KILLER DEMO 2: Latency Micro-Benchmark");
+    eprintln!("══════════════════════════════════════════════════════\n");
+
+    let t1k = match top1000 {
+        Some(ref t) => t,
+        None => {
+            eprintln!("  Kräver --top1000 för latency-demo");
+            return;
+        }
+    };
+
+    let passage_sizes = [50, 100, 200, 500, 1000];
+    let n_queries = 100.min(query_ids.len());
+
+    eprintln!(
+        "Kör {} queries per passage-storlek, mäter cold + cache-hit latency\n",
+        n_queries
+    );
+    eprintln!("  Passages │ Cold (µs) │ Cache-hit (µs) │ Speedup │ BM25 (µs) │ CRFR/BM25");
+    eprintln!("  ─────────┼───────────┼────────────────┼─────────┼───────────┼──────────");
+
+    for &size in &passage_sizes {
+        let mut cold_times: Vec<u64> = Vec::new();
+        let mut cache_times: Vec<u64> = Vec::new();
+        let mut bm25_times: Vec<u64> = Vec::new();
+
+        for &qid in query_ids.iter().take(n_queries) {
+            let query_text = match queries.get(&qid) {
+                Some(q) => q.as_str(),
+                None => continue,
+            };
+            let passages_full: Vec<(u32, &str)> = match t1k.get(&qid) {
+                Some(ps) => ps.iter().map(|(pid, text)| (*pid, text.as_str())).collect(),
+                None => continue,
+            };
+            let passages: Vec<(u32, &str)> = passages_full.into_iter().take(size).collect();
+            if passages.is_empty() {
+                continue;
+            }
+
+            // BM25 baseline timing
+            let bm25_start = Instant::now();
+            let _ = run_bm25_only(&passages, query_text, 100);
+            bm25_times.push(bm25_start.elapsed().as_micros() as u64);
+
+            // CRFR cold (includes field build + BM25 index build)
+            let cold_start = Instant::now();
+            let nodes = passages_to_nodes(&passages);
+            let mut field = ResonanceField::from_semantic_tree(&nodes, "msmarco://latency-bench");
+            let _ = field.propagate_top_k(query_text, 20);
+            cold_times.push(cold_start.elapsed().as_micros() as u64);
+
+            // CRFR cache-hit (field already built, BM25 index cached)
+            let cache_start = Instant::now();
+            let _ = field.propagate_top_k(query_text, 20);
+            cache_times.push(cache_start.elapsed().as_micros() as u64);
+        }
+
+        if cold_times.is_empty() {
+            continue;
+        }
+
+        cold_times.sort_unstable();
+        cache_times.sort_unstable();
+        bm25_times.sort_unstable();
+
+        let cold_p50 = cold_times[cold_times.len() / 2];
+        let cache_p50 = cache_times[cache_times.len() / 2];
+        let bm25_p50 = bm25_times[bm25_times.len() / 2];
+        let speedup = if cache_p50 > 0 {
+            cold_p50 as f64 / cache_p50 as f64
+        } else {
+            0.0
+        };
+        let crfr_vs_bm25 = if bm25_p50 > 0 {
+            cache_p50 as f64 / bm25_p50 as f64
+        } else {
+            0.0
+        };
+
+        eprintln!(
+            "  {:>8} │ {:>9} │ {:>14} │ {:>6.1}x │ {:>9} │ {:>8.2}x",
+            size, cold_p50, cache_p50, speedup, bm25_p50, crfr_vs_bm25
+        );
+    }
+
+    eprintln!();
+    eprintln!("  Cold = field build + BM25 index + propagation");
+    eprintln!("  Cache-hit = propagation only (field + BM25 index cached)");
+    eprintln!("  BM25 = pure TfIdfIndex::build + query (no CRFR)");
+    eprintln!();
+
+    // Extra: sub-ms demo med 20 noder (typisk DOM-storlek)
+    eprintln!("── Sub-ms Demo (20 noder, DOM-realistisk storlek) ──");
+    let mut sub_ms_times: Vec<u64> = Vec::new();
+    for &qid in query_ids.iter().take(500) {
+        let query_text = match queries.get(&qid) {
+            Some(q) => q.as_str(),
+            None => continue,
+        };
+        let passages: Vec<(u32, &str)> = match t1k.get(&qid) {
+            Some(ps) => ps
+                .iter()
+                .take(20)
+                .map(|(pid, text)| (*pid, text.as_str()))
+                .collect(),
+            None => continue,
+        };
+        if passages.is_empty() {
+            continue;
+        }
+        let nodes = passages_to_nodes(&passages);
+        let mut field = ResonanceField::from_semantic_tree(&nodes, "msmarco://sub-ms");
+        // Första anropet bygger cache
+        let _ = field.propagate_top_k(query_text, 10);
+        // Andra = cache-hit
+        let start = Instant::now();
+        let _ = field.propagate_top_k(query_text, 10);
+        sub_ms_times.push(start.elapsed().as_micros() as u64);
+    }
+    sub_ms_times.sort_unstable();
+    if !sub_ms_times.is_empty() {
+        let p50 = sub_ms_times[sub_ms_times.len() / 2];
+        let p95 = sub_ms_times[(sub_ms_times.len() as f64 * 0.95) as usize];
+        let p99 = sub_ms_times[(sub_ms_times.len() as f64 * 0.99) as usize];
+        let mean: f64 = sub_ms_times.iter().sum::<u64>() as f64 / sub_ms_times.len() as f64;
+        eprintln!(
+            "  20 noder, cache-hit: mean={:.0}µs  p50={}µs  p95={}µs  p99={}µs",
+            mean, p50, p95, p99
+        );
+        if p50 < 1000 {
+            eprintln!("  >>> SUB-MILLISECOND: p50 = {}µs (0.{}ms)", p50, p50);
+        }
+    }
+    eprintln!();
 }
 
 fn print_table_results(results: &[(String, MetricAccumulator, LatencyStats)]) {
