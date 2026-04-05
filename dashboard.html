@@ -133,6 +133,12 @@
     <div class="panel-header"><h2>Engine Capabilities</h2><span class="badge" id="engine-badge">Fas 18</span></div>
     <div class="panel-body" id="engine-body"><div class="loading">Loading</div></div>
   </div>
+
+  <!-- 7. Persistent Storage -->
+  <div class="panel full-width">
+    <div class="panel-header"><h2>Persistent Storage (SQLite)</h2><span class="badge" id="persist-badge">--</span></div>
+    <div class="panel-body" id="persist-body"><div class="loading">Loading</div></div>
+  </div>
 </div>
 
 <div class="timestamp" id="ts">Last updated: --</div>
@@ -393,11 +399,75 @@ function renderExplore(d) {
   body.innerHTML = html;
 }
 
+function renderPersistence(data) {
+  const body = document.getElementById('persist-body');
+  const badge = document.getElementById('persist-badge');
+  if (!data || data.enabled === false) {
+    body.innerHTML = '<div class="empty">Persistence not enabled (no SQLite)</div>';
+    badge.textContent = 'disabled';
+    return;
+  }
+  const dbKb = (data.db_size_bytes / 1024).toFixed(1);
+  badge.textContent = `${data.field_count} fields, ${data.domain_count} domains, ${dbKb} KB`;
+
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+
+  // Left: stored fields
+  html += '<div>';
+  html += `<div style="margin-bottom:8px;color:var(--text);font-weight:600">Stored Fields (${data.field_count})</div>`;
+  if (data.fields && data.fields.length > 0) {
+    html += '<table><tr><th>URL</th><th>Size</th><th>Updated</th></tr>';
+    for (const f of data.fields) {
+      const age = Date.now() - f.updated_at;
+      const ageStr = age < 60000 ? `${(age/1000).toFixed(0)}s ago` : age < 3600000 ? `${(age/60000).toFixed(0)}m ago` : `${(age/3600000).toFixed(1)}h ago`;
+      const sizeKb = (f.data_size_bytes / 1024).toFixed(1);
+      html += `<tr>
+        <td style="color:var(--cyan);font-size:11px" title="${f.url}">${truncUrl(f.url, 35)}</td>
+        <td style="color:var(--text2)">${sizeKb} KB</td>
+        <td style="color:var(--text3)">${ageStr}</td>
+      </tr>`;
+    }
+    html += '</table>';
+  } else {
+    html += '<div class="empty">No stored fields</div>';
+  }
+  html += '</div>';
+
+  // Right: domain profiles
+  html += '<div>';
+  html += `<div style="margin-bottom:8px;color:var(--text);font-weight:600">Domain Profiles (${data.domain_count})</div>`;
+  if (data.domains && data.domains.length > 0) {
+    html += '<table><tr><th>Domain</th><th>Weights</th><th>Concepts</th><th>Fields</th><th>Size</th></tr>';
+    for (const d of data.domains) {
+      const sizeKb = (d.data_size_bytes / 1024).toFixed(1);
+      html += `<tr>
+        <td style="color:var(--purple)">${d.domain_hash}</td>
+        <td style="color:var(--accent)">${d.weight_count}</td>
+        <td>${d.concept_count}</td>
+        <td style="color:var(--text2)">${d.field_count}</td>
+        <td style="color:var(--text3)">${sizeKb} KB</td>
+      </tr>`;
+    }
+    html += '</table>';
+  } else {
+    html += '<div class="empty">No domain profiles</div>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  body.innerHTML = html;
+}
+
 async function refreshAll() {
-  const [snap, wpt] = await Promise.all([fetchJson('/api/dashboard/snapshot'), fetchJson('/api/dashboard/wpt')]);
+  const [snap, wpt, persist] = await Promise.all([
+    fetchJson('/api/dashboard/snapshot'),
+    fetchJson('/api/dashboard/wpt'),
+    fetchJson('/api/dashboard/persistence'),
+  ]);
   renderSnapshot(snap);
   if (snap) renderCrfrCache(snap.crfr_cache);
   renderWpt(wpt);
+  renderPersistence(persist);
 }
 
 refreshAll();

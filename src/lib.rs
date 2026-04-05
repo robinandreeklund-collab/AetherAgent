@@ -1712,6 +1712,22 @@ pub fn dashboard_wpt() -> String {
     serde_json::to_string(&panel).unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into())
 }
 
+/// Get persistent storage overview (stored fields + domain profiles from SQLite).
+#[cfg(feature = "persist")]
+pub fn dashboard_persistence() -> String {
+    let fields = persist::list_stored_fields();
+    let domains = persist::list_stored_domain_profiles();
+    let (fc, dc, db_size) = persist::db_stats();
+    let result = serde_json::json!({
+        "fields": fields,
+        "domains": domains,
+        "field_count": fc,
+        "domain_count": dc,
+        "db_size_bytes": db_size,
+    });
+    result.to_string()
+}
+
 /// Run a CRFR query with full trace for dashboard explorer.
 /// Uses the real CRFR pipeline: JS eval + field cache + wave propagation.
 pub fn dashboard_crfr_explore(

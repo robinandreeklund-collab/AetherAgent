@@ -153,6 +153,105 @@ pub fn evict_old_fields(max_age_ms: u64) -> usize {
     .unwrap_or(0)
 }
 
+/// Stored field summary (lightweight — doesn't deserialize the full field).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredFieldInfo {
+    pub url_hash: i64,
+    pub url: String,
+    pub updated_at: i64,
+    pub data_size_bytes: usize,
+}
+
+/// List all stored fields with metadata (no full deserialization).
+pub fn list_stored_fields() -> Vec<StoredFieldInfo> {
+    let db = match DB.lock() {
+        Ok(db) => db,
+        Err(_) => return vec![],
+    };
+    let conn = match db.as_ref() {
+        Some(c) => c,
+        None => return vec![],
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT url_hash, url, updated_at, LENGTH(data) FROM resonance_fields ORDER BY updated_at DESC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(StoredFieldInfo {
+            url_hash: row.get(0)?,
+            url: row.get(1)?,
+            updated_at: row.get(2)?,
+            data_size_bytes: row.get::<_, i64>(3)? as usize,
+        })
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// Stored domain profile summary.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredDomainInfo {
+    pub domain_hash: i64,
+    pub updated_at: i64,
+    pub data_size_bytes: usize,
+    /// Antal weights (deserialiserade från data)
+    pub weight_count: usize,
+    /// Antal concepts
+    pub concept_count: usize,
+    pub field_count: u32,
+}
+
+/// List all stored domain profiles with metadata.
+pub fn list_stored_domain_profiles() -> Vec<StoredDomainInfo> {
+    let db = match DB.lock() {
+        Ok(db) => db,
+        Err(_) => return vec![],
+    };
+    let conn = match db.as_ref() {
+        Some(c) => c,
+        None => return vec![],
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT domain_hash, updated_at, data, LENGTH(data) FROM domain_profiles ORDER BY updated_at DESC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        let hash: i64 = row.get(0)?;
+        let updated: i64 = row.get(1)?;
+        let data: Vec<u8> = row.get(2)?;
+        let size: i64 = row.get(3)?;
+        Ok((hash, updated, data, size as usize))
+    }) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    rows.filter_map(|r| r.ok())
+        .map(|(hash, updated, data, size)| {
+            let profile: Option<DomainProfile> = serde_json::from_slice(&data).ok();
+            StoredDomainInfo {
+                domain_hash: hash,
+                updated_at: updated,
+                data_size_bytes: size,
+                weight_count: profile.as_ref().map(|p| p.stats.len()).unwrap_or(0),
+                concept_count: profile.as_ref().map(|p| p.concepts.len()).unwrap_or(0),
+                field_count: profile.map(|p| p.field_count).unwrap_or(0),
+            }
+        })
+        .collect()
+}
+
 /// Count stored fields.
 pub fn field_count() -> usize {
     let db = match DB.lock() {

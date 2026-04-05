@@ -6153,6 +6153,14 @@ async fn dashboard_wpt_handler() -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn dashboard_persistence_handler() -> impl IntoResponse {
+    #[cfg(feature = "persist")]
+    let result = aether_agent::dashboard_persistence();
+    #[cfg(not(feature = "persist"))]
+    let result = r#"{"enabled":false}"#.to_string();
+    (StatusCode::OK, result)
+}
+
 async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> impl IntoResponse {
     let html = req.html;
     let goal = req.goal;
@@ -6267,6 +6275,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/dashboard/weights", post(dashboard_weights_handler))
         .route("/api/dashboard/wpt", get(dashboard_wpt_handler))
         .route("/api/dashboard/explore", post(dashboard_explore_handler))
+        .route(
+            "/api/dashboard/persistence",
+            get(dashboard_persistence_handler),
+        )
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
         .route("/api/parse-top", post(parse_top))
