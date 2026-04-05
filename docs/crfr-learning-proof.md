@@ -409,9 +409,9 @@ The Beta(α, β) distributions converge toward meaningful values. High beta (600
 
 Domain profiles enable warm-start: when a new URL is queried on a previously-seen domain, it inherits learned propagation weights and concept memories, reducing the cold-start problem.
 
-### 7.6 Generalization Proven via Counterfactual
+### 7.6 Generalization Strongly Suggested
 
-The train/test split (Section 6) demonstrates that CRFR generalizes to unseen query formulations. Grand average nDCG@5 improves by 22% on test queries that were never used during training. This definitively rules out pure memorization.
+The train/test split evaluation (Section 6) shows that unseen query formulations benefit from CRFR training. Grand average nDCG@5 on test queries (0.315) exceeds early training (0.259). However, the effect is most pronounced on structurally consistent sites, while sites with already-optimal BM25 baselines may not benefit. See [`crfr-20site-evaluation.md`](crfr-20site-evaluation.md) for the full 20-site analysis with baselines and variance.
 
 ### 7.7 All State Persists
 
