@@ -534,9 +534,19 @@ pub struct DashboardSnapshot {
     pub wpt_baseline: WptPanel,
     pub spa_runtime: SpaRuntimeSnapshot,
     pub engine: EngineCapabilities,
+    pub persist: PersistStats,
     pub vision_available: bool,
     pub endpoint_count: usize,
     pub timestamp_ms: u64,
+}
+
+/// Persistence stats
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistStats {
+    pub enabled: bool,
+    pub stored_fields: usize,
+    pub stored_domains: usize,
+    pub db_size_bytes: u64,
 }
 
 /// Memory stats
@@ -759,6 +769,12 @@ mod tests {
             wpt_baseline: build_wpt_baseline(),
             spa_runtime: build_spa_runtime(),
             engine: build_engine_capabilities(),
+            persist: PersistStats {
+                enabled: true,
+                stored_fields: 5,
+                stored_domains: 2,
+                db_size_bytes: 4096,
+            },
             vision_available: false,
             endpoint_count: 72,
             timestamp_ms: 1234567890,

@@ -6449,12 +6449,20 @@ async fn memory_stats_handler() -> impl IntoResponse {
 }
 
 /// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
+/// + periodisk persist-checkpoint (var 60:e sekund)
 fn spawn_memory_monitor() {
     tokio::spawn(async {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        let mut tick_count: u32 = 0;
         loop {
             interval.tick().await;
             log_rss("periodic");
+            tick_count += 1;
+            // Persist checkpoint varannan tick (var 60:e sekund)
+            #[cfg(feature = "persist")]
+            if tick_count % 2 == 0 {
+                aether_agent::persist::checkpoint();
+            }
         }
     });
 }
@@ -6463,6 +6471,32 @@ fn spawn_memory_monitor() {
 async fn main() {
     eprintln!("=== AetherAgent Memory Startup Trace ===");
     log_rss("1. process start");
+
+    // Persistence: init SQLite + restore CRFR state
+    #[cfg(feature = "persist")]
+    {
+        let db_path =
+            std::env::var("AETHER_DB_PATH").unwrap_or_else(|_| "/data/aether.db".to_string());
+        // Skapa katalog om den inte finns
+        if let Some(parent) = std::path::Path::new(&db_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match aether_agent::persist::init(&db_path) {
+            Ok(()) => {
+                eprintln!("[PERSIST] SQLite initialized at {db_path}");
+                aether_agent::persist::restore();
+                let (fields, domains, size) = aether_agent::persist::db_stats();
+                eprintln!(
+                    "[PERSIST] DB stats: {fields} fields, {domains} domain profiles, {:.1} KB",
+                    size as f64 / 1024.0
+                );
+            }
+            Err(e) => {
+                eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
+            }
+        }
+        log_rss("1b. after persistence init");
+    }
 
     let port: u16 = std::env::var("PORT")
         .ok()

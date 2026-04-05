@@ -30,6 +30,8 @@ pub(crate) mod js_eval;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
+#[cfg(feature = "persist")]
+pub mod persist;
 pub mod resonance;
 pub mod scoring;
 pub mod search;
@@ -1546,12 +1548,35 @@ pub fn dashboard_snapshot(vision_available: bool, endpoint_count: usize) -> Stri
     let fields = resonance::list_cached_fields();
     let (cache_len, cache_cap) = resonance::cache_stats();
 
+    let persist = {
+        #[cfg(feature = "persist")]
+        {
+            let (sf, sd, sz) = persist::db_stats();
+            dashboard::PersistStats {
+                enabled: persist::is_initialized(),
+                stored_fields: sf,
+                stored_domains: sd,
+                db_size_bytes: sz,
+            }
+        }
+        #[cfg(not(feature = "persist"))]
+        {
+            dashboard::PersistStats {
+                enabled: false,
+                stored_fields: 0,
+                stored_domains: 0,
+                db_size_bytes: 0,
+            }
+        }
+    };
+
     let snap = dashboard::DashboardSnapshot {
         crfr_cache: dashboard::build_cache_overview(&fields, cache_len, cache_cap, now),
         memory_stats: dashboard::read_memory_stats(),
         wpt_baseline: dashboard::build_wpt_baseline(),
         spa_runtime: dashboard::build_spa_runtime(),
         engine: dashboard::build_engine_capabilities(),
+        persist,
         vision_available,
         endpoint_count,
         timestamp_ms: now,

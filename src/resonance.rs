@@ -121,7 +121,7 @@ pub struct PropagationTrace {
 
 /// Serialiserbar wrapper för Hypervector-data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HvData {
+pub struct HvData {
     bits: Vec<u64>,
 }
 
@@ -2129,13 +2129,14 @@ static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
 
 /// Domain-level aggregated learning: shared propagation stats + concept memory.
 /// Used as warm-start prior for new URLs from the same domain.
-struct DomainProfile {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainProfile {
     /// Aggregated propagation stats from all URLs on this domain
-    stats: HashMap<String, (f32, f32)>,
+    pub stats: HashMap<String, (f32, f32)>,
     /// Aggregated concept memory from all successful extractions
-    concepts: HashMap<String, HvData>,
+    pub concepts: HashMap<String, HvData>,
     /// Number of fields that contributed to this profile
-    field_count: u32,
+    pub field_count: u32,
 }
 
 struct DomainRegistry {
@@ -2201,6 +2202,46 @@ impl DomainRegistry {
 static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
     std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(128)));
 
+/// Export all domain profiles for persistence.
+pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
+    let reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    reg.profiles.iter().map(|(&k, v)| (k, v.clone())).collect()
+}
+
+/// Import domain profiles from persistence (at startup).
+pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
+    let mut reg = match DOMAIN_REGISTRY.lock() {
+        Ok(r) => r,
+        Err(p) => p.into_inner(),
+    };
+    for (hash, profile) in profiles {
+        reg.profiles.entry(hash).or_insert(profile);
+    }
+}
+
+/// Import cached fields from persistence (at startup).
+pub fn import_cached_fields(fields: Vec<ResonanceField>) {
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    let now = now_ms();
+    for field in fields {
+        let url_hash = field.url_hash;
+        // Skriv inte över om redan finns
+        if !cache.entries.iter().any(|(h, _, _)| *h == url_hash) {
+            cache.put(url_hash, field);
+            // Uppdatera insert_ms till nu (TTL räknas från import)
+            if let Some(entry) = cache.entries.iter_mut().find(|(h, _, _)| *h == url_hash) {
+                entry.1 = now;
+            }
+        }
+    }
+}
+
 /// Get a cached resonance field for a URL, or build a new one.
 ///
 /// If a cached field exists, it retains all causal memory from previous
@@ -2233,6 +2274,15 @@ pub fn get_or_build_field_with_variant(
         return (field, true);
     }
     drop(cache);
+
+    // Fallback: försök ladda från SQLite (persist)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return (field, true);
+        }
+    }
+
     let mut field = ResonanceField::from_semantic_tree(tree_nodes, url);
     // Sätt korrekt url_hash (med variant) för cache-konistens
     field.url_hash = url_hash;
@@ -2250,6 +2300,18 @@ pub fn save_field(field: &ResonanceField) {
     // Uppdatera domain-profil med inlärda stats
     if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
         registry.update(field.domain_hash, field);
+    }
+
+    // Persist till SQLite (async-safe: körs synkront men snabbt ~0.5ms)
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::save_field(field);
+        // Spara uppdaterad domain-profil också
+        if let Ok(reg) = DOMAIN_REGISTRY.lock() {
+            if let Some(profile) = reg.get(field.domain_hash) {
+                crate::persist::save_domain_profile(field.domain_hash, profile);
+            }
+        }
     }
 }
 

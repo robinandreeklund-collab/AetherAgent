@@ -92,6 +92,10 @@ COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-
 
 ENV PORT=10000
 
+# Persistence: SQLite database path (mount persistent disk here on Render)
+ENV AETHER_DB_PATH=/data/aether.db
+RUN mkdir -p /data
+
 # Vision model: set AETHER_MODEL_URL to a public URL (e.g. GitHub Release)
 # or AETHER_MODEL_PATH to a local file path inside the container.
 # The server loads the model at startup and exposes /api/vision/parse.
