@@ -2636,4 +2636,62 @@ mod tests {
             "Borde vara 2 efter två propagationer"
         );
     }
+
+    #[test]
+    fn test_propagate_traced_fills_propagated_node_scores() {
+        // Förälder matchar BM25, barn matchar inte men borde få HDC-score via retroaktiv beräkning
+        let tree = vec![make_node(
+            1,
+            "heading",
+            "latest news headlines today",
+            vec![
+                make_node(2, "link", "breaking story about politics", vec![]),
+                make_node(3, "link", "sports results from yesterday", vec![]),
+            ],
+        )];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+        let (results, trace) = field.propagate_top_k_traced("latest news", 10);
+
+        assert!(!results.is_empty(), "Borde returnera minst en nod");
+        assert!(
+            !trace.node_scores.is_empty(),
+            "Borde ha node score breakdowns"
+        );
+
+        // Nod 1 (heading) borde ha BM25 > 0 (direkt match)
+        let score_1 = trace.node_scores.iter().find(|s| s.node_id == 1);
+        assert!(score_1.is_some(), "Heading-noden borde finnas i trace");
+        if let Some(s) = score_1 {
+            assert!(
+                s.bm25_score > 0.0,
+                "Heading borde ha BM25 > 0, fick {}",
+                s.bm25_score
+            );
+        }
+
+        // Om nod 2 eller 3 fick propagerad amplitud, borde de ha HDC > 0
+        for child_id in [2, 3] {
+            if let Some(score) = trace.node_scores.iter().find(|s| s.node_id == child_id) {
+                assert!(
+                    score.hdc_score > 0.0,
+                    "Propagerad nod {} borde ha HDC > 0 (retroaktivt), fick {}",
+                    child_id,
+                    score.hdc_score
+                );
+                assert!(
+                    score.role_priority > 0.0,
+                    "Propagerad nod {} borde ha role_priority > 0, fick {}",
+                    child_id,
+                    score.role_priority
+                );
+            }
+        }
+
+        // Iteration deltas borde finnas
+        assert!(
+            !trace.iteration_deltas.is_empty(),
+            "Borde ha propagation iteration deltas"
+        );
+    }
 }
