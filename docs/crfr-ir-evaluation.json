@@ -1,0 +1,4354 @@
+{
+  "test_date": "2026-04-05",
+  "protocol": "Train on queries 1-7 (with feedback), Test on queries 8-10 (no feedback)",
+  "metrics": [
+    "nDCG@5",
+    "nDCG@10",
+    "MRR",
+    "Precision@5",
+    "Recall@5"
+  ],
+  "sites": [
+    {
+      "site_name": "BBC News",
+      "url": "https://www.bbc.com/news",
+      "html_bytes": 322133,
+      "estimated_total_relevant": 8,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news headlines today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.434,
+          "mrr": 0.1667,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 6,
+          "avg_causal": 0.0049,
+          "causal_memory_nodes": 0,
+          "relevant_count": 5,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 2.0838,
+              "causal_boost": 0.0061204815,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 7,
+              "role": "data",
+              "label": "twitter.title: BBC News - Breaking news, video and the lates",
+              "amplitude": 1.5452294,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 6,
+              "role": "data",
+              "label": "twitter.description: Visit BBC News for the latest news, bre",
+              "amplitude": 1.1932882,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1,
+              "role": "data",
+              "label": "meta.description: Visit BBC News for the latest news, breaki",
+              "amplitude": 1.1922747,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 4,
+              "role": "data",
+              "label": "openGraph.description: Visit BBC News for the latest news, b",
+              "amplitude": 1.1911942,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 0.9417261,
+              "causal_boost": 0.004627585,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 0.91773385,
+              "causal_boost": 0.004627585,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 742,
+              "role": "link",
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "amplitude": 0.8533762,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 0.8521031,
+              "causal_boost": 0.004627585,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 0.84966534,
+              "causal_boost": 0.004627585,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "breaking news stories now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0067,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 2.0931604,
+              "causal_boost": 0.006674453,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 7,
+              "role": "data",
+              "label": "twitter.title: BBC News - Breaking news, video and the lates",
+              "amplitude": 1.5466007,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top news articles today",
+          "phase": "TRAIN",
+          "ndcg5": 0.5148,
+          "ndcg10": 0.7486,
+          "mrr": 0.5,
+          "precision5": 0.6,
+          "recall5": 0.375,
+          "causal_count": 6,
+          "avg_causal": 0.0836,
+          "causal_memory_nodes": 0,
+          "relevant_count": 5,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 2.069635,
+              "causal_boost": 0.09071501,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 1.9953675,
+              "causal_boost": 0.082117625,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 1.9345125,
+              "causal_boost": 0.082117625,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 742,
+              "role": "link",
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "amplitude": 1.8272575,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 1.797,
+              "causal_boost": 0.082117625,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 1.7540789,
+              "causal_boost": 0.082117625,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "link",
+              "label": "How downed F-15 US airman was rescued inside Iran The US has",
+              "amplitude": 1.6370518,
+              "causal_boost": 0.082117625,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 444,
+              "role": "link",
+              "label": "Apple at 50: Three products that changed how we live - and t",
+              "amplitude": 1.5935965,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 734,
+              "role": "link",
+              "label": "2 Artemis's stunning Moon pictures - science or holiday phot",
+              "amplitude": 1.5707908,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 766,
+              "role": "link",
+              "label": "6 'Don't be guilted into staying for your dog's last breath'",
+              "amplitude": 1.5517361,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "current world news headlines",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.236,
+          "mrr": 0.125,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 5,
+          "avg_causal": 0.062,
+          "causal_memory_nodes": 0,
+          "relevant_count": 4,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 1.8658528,
+              "causal_boost": 0.06978844,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 76,
+              "role": "link",
+              "label": "Europe",
+              "amplitude": 1.5254626,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 67,
+              "role": "link",
+              "label": "Africa",
+              "amplitude": 1.5207568,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 73,
+              "role": "link",
+              "label": "Australia",
+              "amplitude": 1.5191714,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 70,
+              "role": "link",
+              "label": "Asia",
+              "amplitude": 1.513854,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 82,
+              "role": "link",
+              "label": "Middle East",
+              "amplitude": 1.4518056,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "link",
+              "label": "Latin America",
+              "amplitude": 1.4444363,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "link",
+              "label": "How downed F-15 US airman was rescued inside Iran The US has",
+              "amplitude": 1.4222711,
+              "causal_boost": 0.0783628,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 7,
+              "role": "data",
+              "label": "twitter.title: BBC News - Breaking news, video and the lates",
+              "amplitude": 1.3574531,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 633,
+              "role": "link",
+              "label": "US says it has arrested relatives of late Iranian ​general Q",
+              "amplitude": 1.2123417,
+              "causal_boost": 0.004886547,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "important news events today",
+          "phase": "TRAIN",
+          "ndcg5": 0.5296,
+          "ndcg10": 0.7525,
+          "mrr": 0.5,
+          "precision5": 0.6,
+          "recall5": 0.375,
+          "causal_count": 6,
+          "avg_causal": 0.0759,
+          "causal_memory_nodes": 0,
+          "relevant_count": 5,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 1.8474315,
+              "causal_boost": 0.086724974,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 1.7920827,
+              "causal_boost": 0.07233531,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 1.742403,
+              "causal_boost": 0.07233531,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 1.6240088,
+              "causal_boost": 0.07591649,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 742,
+              "role": "link",
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "amplitude": 1.6178763,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 1.56857,
+              "causal_boost": 0.07591649,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 17,
+              "role": "listitem",
+              "label": "News",
+              "amplitude": 1.5354067,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 19,
+              "role": "link",
+              "label": "News",
+              "amplitude": 1.5199082,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "link",
+              "label": "How downed F-15 US airman was rescued inside Iran The US has",
+              "amplitude": 1.4638553,
+              "causal_boost": 0.07233531,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 64,
+              "role": "link",
+              "label": "UK",
+              "amplitude": 1.4559932,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "major news stories right now",
+          "phase": "TRAIN",
+          "ndcg5": 0.4469,
+          "ndcg10": 0.7028,
+          "mrr": 0.3333,
+          "precision5": 0.6,
+          "recall5": 0.375,
+          "causal_count": 7,
+          "avg_causal": 0.1042,
+          "causal_memory_nodes": 0,
+          "relevant_count": 6,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 2.121424,
+              "causal_boost": 0.12203226,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 7,
+              "role": "data",
+              "label": "twitter.title: BBC News - Breaking news, video and the lates",
+              "amplitude": 1.5513072,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "link",
+              "label": "How downed F-15 US airman was rescued inside Iran The US has",
+              "amplitude": 1.3964581,
+              "causal_boost": 0.09029974,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 1.0404911,
+              "causal_boost": 0.09029974,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 1.0260265,
+              "causal_boost": 0.11692166,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 1.0243254,
+              "causal_boost": 0.11692166,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 1.0149779,
+              "causal_boost": 0.09029974,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 633,
+              "role": "link",
+              "label": "US says it has arrested relatives of late Iranian ​general Q",
+              "amplitude": 0.83026266,
+              "causal_boost": 0.10282983,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 742,
+              "role": "link",
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "amplitude": 0.8100074,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 17,
+              "role": "listitem",
+              "label": "News",
+              "amplitude": 0.76559675,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "todays most important news",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.3749,
+          "mrr": 0.1429,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 7,
+          "avg_causal": 0.0792,
+          "causal_memory_nodes": 0,
+          "relevant_count": 6,
+          "node_data": [
+            {
+              "id": 717,
+              "role": "text",
+              "label": "Most read",
+              "amplitude": 1.5353863,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 720,
+              "role": "text",
+              "label": "Most read",
+              "amplitude": 1.5353863,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 721,
+              "role": "text",
+              "label": "Most read",
+              "amplitude": 1.5353863,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 722,
+              "role": "heading",
+              "label": "Most read",
+              "amplitude": 1.5353863,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 651,
+              "role": "text",
+              "label": "Most watched",
+              "amplitude": 1.530498,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 1.3193994,
+              "causal_boost": 0.07858285,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 1.2798914,
+              "causal_boost": 0.072785534,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 1.2360669,
+              "causal_boost": 0.072785534,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 1.1854266,
+              "causal_boost": 0.08416319,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 1.1762445,
+              "causal_boost": 0.08416319,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "what happened in the world today",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0909,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 2,
+          "avg_causal": 0.0772,
+          "causal_memory_nodes": 0,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 1.513164,
+              "causal_boost": 0.07452938,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 696,
+              "role": "link",
+              "label": "2 Watch: Artemis II's journey so far as it leaves Earth orbi",
+              "amplitude": 1.4160181,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 76,
+              "role": "text",
+              "label": "Live",
+              "amplitude": 1.3061281,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 73,
+              "role": "text",
+              "label": "Video",
+              "amplitude": 1.3046961,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 70,
+              "role": "text",
+              "label": "Audio",
+              "amplitude": 1.3027976,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 67,
+              "role": "text",
+              "label": "Earth",
+              "amplitude": 1.3025234,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 82,
+              "role": "navigation",
+              "label": "US &Canada UK Africa Asia Australia Europe Latin America Mid",
+              "amplitude": 1.2403189,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "text",
+              "label": "Documentaries",
+              "amplitude": 1.2340124,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "text",
+              "label": "",
+              "amplitude": 1.1305139,
+              "causal_boost": 0.079865284,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 7,
+              "role": "data",
+              "label": "twitter.title: BBC News - Breaking news, video and the lates",
+              "amplitude": 1.0687582,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "global events and current affairs",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 338,
+              "role": "heading",
+              "label": "Artemis's stunning Moon pictures - science or holiday photos",
+              "amplitude": 1.1551019,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "recent international news reports",
+          "phase": "TEST",
+          "ndcg5": 0.4469,
+          "ndcg10": 0.6019,
+          "mrr": 0.3333,
+          "precision5": 0.6,
+          "recall5": 0.375,
+          "causal_count": 7,
+          "avg_causal": 0.0748,
+          "causal_memory_nodes": 0,
+          "relevant_count": 6,
+          "node_data": [
+            {
+              "id": 273,
+              "role": "link",
+              "label": "Pepsi withdraws as UK festival sponsor after Kanye West back",
+              "amplitude": 1.6432403,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 5,
+              "role": "data",
+              "label": "openGraph.title: BBC News - Breaking news, video and the lat",
+              "amplitude": 1.477021,
+              "causal_boost": 0.07330325,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 726,
+              "role": "link",
+              "label": "1 How downed F-15 US airman was rescued inside Iran",
+              "amplitude": 1.4335246,
+              "causal_boost": 0.07503502,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 750,
+              "role": "link",
+              "label": "4 Hungary alleges plot to blow up gas pipeline ahead of elec",
+              "amplitude": 1.3990719,
+              "causal_boost": 0.07503502,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 595,
+              "role": "link",
+              "label": "Russian attack on Ukraine market kills five A Russian drone ",
+              "amplitude": 1.3214782,
+              "causal_boost": 0.07503502,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 518,
+              "role": "link",
+              "label": "AI videos fuel anti-Ukraine rhetoric ahead of Hungary's pivo",
+              "amplitude": 1.2928759,
+              "causal_boost": 0.07503502,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 742,
+              "role": "link",
+              "label": "3 Royals attend Windsor Easter Sunday service",
+              "amplitude": 1.2536031,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 254,
+              "role": "link",
+              "label": "How downed F-15 US airman was rescued inside Iran The US has",
+              "amplitude": 1.1974602,
+              "causal_boost": 0.07503502,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 17,
+              "role": "listitem",
+              "label": "News",
+              "amplitude": 1.1840538,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 19,
+              "role": "link",
+              "label": "News",
+              "amplitude": 1.1656716,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "site_name": "GitHub Trending",
+      "url": "https://github.com/trending",
+      "html_bytes": 563287,
+      "estimated_total_relevant": 3,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "popular Rust repositories today",
+          "phase": "TRAIN",
+          "ndcg5": 0.6844,
+          "ndcg10": 0.7315,
+          "mrr": 1.0,
+          "precision5": 0.6,
+          "recall5": 1.0,
+          "causal_count": 9,
+          "avg_causal": 0.0051,
+          "causal_memory_nodes": 0,
+          "relevant_count": 10,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.4981678,
+              "causal_boost": 0.0053468985,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.4523835,
+              "causal_boost": 0.0053468985,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.7494977,
+              "causal_boost": 0.0043054814,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.3113972,
+              "causal_boost": 0.0043054814,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2702,
+              "role": "text",
+              "label": "C++ 1,436 177 Built by 193 stars today",
+              "amplitude": 1.2355202,
+              "causal_boost": 0.0053718495,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2476,
+              "role": "text",
+              "label": "Kotlin 16,689 1,519 Built by 495 stars today",
+              "amplitude": 1.1951312,
+              "causal_boost": 0.0053718495,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2637,
+              "role": "text",
+              "label": "TypeScript 31,798 3,465 Built by 340 stars today",
+              "amplitude": 1.1944922,
+              "causal_boost": 0.0053718495,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2733,
+              "role": "text",
+              "label": "C++ 31,015 6,534 Built by 265 stars today",
+              "amplitude": 1.1900898,
+              "causal_boost": 0.0053718495,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2602,
+              "role": "text",
+              "label": "Python 24,833 3,320 Built by 960 stars today",
+              "amplitude": 1.1889249,
+              "causal_boost": 0.0053718495,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 291,
+              "role": "listitem",
+              "label": "REPOSITORIES Topics Trending Collections",
+              "amplitude": 1.0458893,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "trending Rust projects on GitHub",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 3,
+          "avg_causal": 0.0726,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.2286954,
+              "causal_boost": 0.10659287,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.1870632,
+              "causal_boost": 0.10659287,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 14,
+              "role": "data",
+              "label": "twitter.description: GitHub is where people build software. ",
+              "amplitude": 1.8285289,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.7059724,
+              "causal_boost": 0.0046240254,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1,
+              "role": "data",
+              "label": "meta.description: GitHub is where people build software. Mor",
+              "amplitude": 1.6658416,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 3,
+              "role": "data",
+              "label": "openGraph.description: GitHub is where people build software",
+              "amplitude": 1.6582814,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 299,
+              "role": "link",
+              "label": "Trending",
+              "amplitude": 1.562016,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 298,
+              "role": "listitem",
+              "label": "Trending",
+              "amplitude": 1.3807462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 408,
+              "role": "link",
+              "label": "Trending",
+              "amplitude": 1.3460997,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 291,
+              "role": "listitem",
+              "label": "REPOSITORIES Topics Trending Collections",
+              "amplitude": 1.2552081,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top Rust repos with most stars",
+          "phase": "TRAIN",
+          "ndcg5": 0.6844,
+          "ndcg10": 0.7168,
+          "mrr": 1.0,
+          "precision5": 0.6,
+          "recall5": 1.0,
+          "causal_count": 13,
+          "avg_causal": 0.0644,
+          "causal_memory_nodes": 0,
+          "relevant_count": 10,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.215284,
+              "causal_boost": 0.08170002,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.1875503,
+              "causal_boost": 0.08170002,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 2.1115365,
+              "causal_boost": 0.0042996723,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.5290124,
+              "causal_boost": 0.0042996723,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2702,
+              "role": "text",
+              "label": "C++ 1,436 177 Built by 193 stars today",
+              "amplitude": 1.2524956,
+              "causal_boost": 0.07968036,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2593,
+              "role": "generic",
+              "label": "Star onyx-dot-app / onyx Open Source AI Platform - AI Chat w",
+              "amplitude": 1.219897,
+              "causal_boost": 0.004314099,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2476,
+              "role": "text",
+              "label": "Kotlin 16,689 1,519 Built by 495 stars today",
+              "amplitude": 1.1958779,
+              "causal_boost": 0.07968036,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2602,
+              "role": "text",
+              "label": "Python 24,833 3,320 Built by 960 stars today",
+              "amplitude": 1.1946353,
+              "causal_boost": 0.07968036,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2637,
+              "role": "text",
+              "label": "TypeScript 31,798 3,465 Built by 340 stars today",
+              "amplitude": 1.1893616,
+              "causal_boost": 0.07968036,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2509,
+              "role": "text",
+              "label": "Python 3,844 413 Built by 408 stars today",
+              "amplitude": 1.1771946,
+              "causal_boost": 0.08740448,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "Rust language repositories trending",
+          "phase": "TRAIN",
+          "ndcg5": 0.9197,
+          "ndcg10": 0.9197,
+          "mrr": 1.0,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 4,
+          "avg_causal": 0.037,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 1.7521471,
+              "causal_boost": 0.06947763,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 291,
+              "role": "listitem",
+              "label": "REPOSITORIES Topics Trending Collections",
+              "amplitude": 1.7278332,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 1.6988283,
+              "causal_boost": 0.06947763,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 420,
+              "role": "link",
+              "label": "Repositories",
+              "amplitude": 1.5126332,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.2880895,
+              "causal_boost": 0.0045195986,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 298,
+              "role": "listitem",
+              "label": "Trending",
+              "amplitude": 1.0178207,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 428,
+              "role": "text",
+              "label": "Select a spoken language",
+              "amplitude": 1.0110126,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 408,
+              "role": "link",
+              "label": "Trending",
+              "amplitude": 0.9893316,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 812,
+              "role": "text",
+              "label": "Select a language",
+              "amplitude": 0.9423005,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 294,
+              "role": "list",
+              "label": "Topics Trending Collections",
+              "amplitude": 0.93692994,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "best Rust projects right now",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 4,
+          "avg_causal": 0.0481,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.5260146,
+              "causal_boost": 0.09161427,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.4855773,
+              "causal_boost": 0.09161427,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.968871,
+              "causal_boost": 0.004516019,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 14,
+              "role": "data",
+              "label": "twitter.description: GitHub is where people build software. ",
+              "amplitude": 1.6316739,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1,
+              "role": "data",
+              "label": "meta.description: GitHub is where people build software. Mor",
+              "amplitude": 1.487781,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 3,
+              "role": "data",
+              "label": "openGraph.description: GitHub is where people build software",
+              "amplitude": 1.4854951,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.313557,
+              "causal_boost": 0.004516019,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "most starred Rust GitHub repos",
+          "phase": "TRAIN",
+          "ndcg5": 0.6934,
+          "ndcg10": 0.6934,
+          "mrr": 0.5,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 3,
+          "avg_causal": 0.0568,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 2.1052032,
+              "causal_boost": 0.005096643,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 1.8655484,
+              "causal_boost": 0.08259462,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 1.8234217,
+              "causal_boost": 0.08259462,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "Rust repositories trending today",
+          "phase": "TRAIN",
+          "ndcg5": 0.5531,
+          "ndcg10": 0.71,
+          "mrr": 1.0,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 12,
+          "avg_causal": 0.0832,
+          "causal_memory_nodes": 0,
+          "relevant_count": 10,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.4400795,
+              "causal_boost": 0.076441444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.4151487,
+              "causal_boost": 0.076441444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 291,
+              "role": "listitem",
+              "label": "REPOSITORIES Topics Trending Collections",
+              "amplitude": 1.7427408,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.6936339,
+              "causal_boost": 0.004378868,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 420,
+              "role": "link",
+              "label": "Repositories",
+              "amplitude": 1.5184904,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2702,
+              "role": "text",
+              "label": "C++ 1,436 177 Built by 193 stars today",
+              "amplitude": 1.381413,
+              "causal_boost": 0.12011444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2476,
+              "role": "text",
+              "label": "Kotlin 16,689 1,519 Built by 495 stars today",
+              "amplitude": 1.3551425,
+              "causal_boost": 0.12011444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2733,
+              "role": "text",
+              "label": "C++ 31,015 6,534 Built by 265 stars today",
+              "amplitude": 1.3500232,
+              "causal_boost": 0.12011444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2637,
+              "role": "text",
+              "label": "TypeScript 31,798 3,465 Built by 340 stars today",
+              "amplitude": 1.3487742,
+              "causal_boost": 0.12011444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2602,
+              "role": "text",
+              "label": "Python 24,833 3,320 Built by 960 stars today",
+              "amplitude": 1.3395511,
+              "causal_boost": 0.12011444,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "open source Rust codebases gaining traction",
+          "phase": "TEST",
+          "ndcg5": 0.4415,
+          "ndcg10": 0.4415,
+          "mrr": 0.5,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 8,
+          "avg_causal": 0.0407,
+          "causal_memory_nodes": 2,
+          "relevant_count": 4,
+          "node_data": [
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.7876039,
+              "causal_boost": 0.0047887964,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 1.7316599,
+              "causal_boost": 0.07628767,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 1.6987494,
+              "causal_boost": 0.07628767,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 260,
+              "role": "button",
+              "label": "Open Source",
+              "amplitude": 1.5946616,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 267,
+              "role": "listitem",
+              "label": "GitHub Sponsors Fund open source developers",
+              "amplitude": 1.5232942,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 263,
+              "role": "listitem",
+              "label": "COMMUNITY GitHub Sponsors Fund open source developers",
+              "amplitude": 1.4367402,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 258,
+              "role": "listitem",
+              "label": "Open Source COMMUNITY GitHub Sponsors Fund open source devel",
+              "amplitude": 1.3224382,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.2831774,
+              "causal_boost": 0.0047887964,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2593,
+              "role": "generic",
+              "label": "Star onyx-dot-app / onyx Open Source AI Platform - AI Chat w",
+              "amplitude": 1.209815,
+              "causal_boost": 0.0050037787,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2755,
+              "role": "generic",
+              "label": "Sponsor Star freeCodeCamp / freeCodeCamp freeCodeCamp.org's ",
+              "amplitude": 0.9670663,
+              "causal_boost": 0.0050037787,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "Rust tools and libraries popular now",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.4,
+          "recall5": 0.6667,
+          "causal_count": 4,
+          "avg_causal": 0.0426,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.5185149,
+              "causal_boost": 0.08060124,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.485758,
+              "causal_boost": 0.08060124,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.9657263,
+              "causal_boost": 0.00451265,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 60,
+              "role": "listitem",
+              "label": "MCP Registry New Integrate external tools",
+              "amplitude": 1.4688699,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.3216392,
+              "causal_boost": 0.00451265,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2624,
+              "role": "generic",
+              "label": "Sponsor Star badlogic / pi-mono AI agent toolkit: coding age",
+              "amplitude": 1.2838401,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "which Rust projects are hot today",
+          "phase": "TEST",
+          "ndcg5": 0.8304,
+          "ndcg10": 0.8237,
+          "mrr": 1.0,
+          "precision5": 0.8,
+          "recall5": 1.3333,
+          "causal_count": 12,
+          "avg_causal": 0.067,
+          "causal_memory_nodes": 0,
+          "relevant_count": 10,
+          "node_data": [
+            {
+              "id": 2571,
+              "role": "text",
+              "label": "Rust 36,615 3,475 Built by 866 stars today",
+              "amplitude": 2.5229273,
+              "causal_boost": 0.07891393,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2672,
+              "role": "text",
+              "label": "Rust 3,609 148 Built by 111 stars today",
+              "amplitude": 2.4784,
+              "causal_boost": 0.07891393,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2659,
+              "role": "generic",
+              "label": "Sponsor Star dmtrKovalenko / fff.nvim The fastest and the mo",
+              "amplitude": 1.7575133,
+              "causal_boost": 0.0049666795,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2702,
+              "role": "text",
+              "label": "C++ 1,436 177 Built by 193 stars today",
+              "amplitude": 1.3465208,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2602,
+              "role": "text",
+              "label": "Python 24,833 3,320 Built by 960 stars today",
+              "amplitude": 1.3196442,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2476,
+              "role": "text",
+              "label": "Kotlin 16,689 1,519 Built by 495 stars today",
+              "amplitude": 1.3186119,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2733,
+              "role": "text",
+              "label": "C++ 31,015 6,534 Built by 265 stars today",
+              "amplitude": 1.3145576,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2637,
+              "role": "text",
+              "label": "TypeScript 31,798 3,465 Built by 340 stars today",
+              "amplitude": 1.3099808,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 2562,
+              "role": "generic",
+              "label": "Star block / goose an open source, extensible AI agent that ",
+              "amplitude": 1.3064685,
+              "causal_boost": 0.0049666795,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2509,
+              "role": "text",
+              "label": "Python 3,844 413 Built by 408 stars today",
+              "amplitude": 1.2707843,
+              "causal_boost": 0.07951574,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "site_name": "Hacker News",
+      "url": "https://news.ycombinator.com/",
+      "html_bytes": 34812,
+      "estimated_total_relevant": 3,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "AI and machine learning stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.3155,
+          "mrr": 0.125,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 8,
+          "avg_causal": 0.0056,
+          "causal_memory_nodes": 0,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 241,
+              "role": "link",
+              "label": "Finnish sauna heat exposure induces stronger immune cell tha",
+              "amplitude": 1.6709929,
+              "causal_boost": 0.0074216947,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 725,
+              "role": "generic",
+              "label": "29. Scientists Figured Out How Eels Reproduce (2022) ( intel",
+              "amplitude": 0.28679955,
+              "causal_boost": 0.0058106063,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 700,
+              "role": "generic",
+              "label": "28. StackOverflow: Retiring the Beta Site ( stackoverflow.co",
+              "amplitude": 0.26956108,
+              "causal_boost": 0.0036492432,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 500,
+              "role": "generic",
+              "label": "20. Perfmon – Consolidate your favorite CLI monitoring tools",
+              "amplitude": 0.26522103,
+              "causal_boost": 0.0035744205,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 242,
+              "role": "text",
+              "label": "( tandfonline.com )",
+              "amplitude": 0.25064895,
+              "causal_boost": 4.1722098e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 207,
+              "role": "generic",
+              "label": "8. Nanocode: The best Claude Code that $200 can buy in pure ",
+              "amplitude": 0.24983223,
+              "causal_boost": 0.0065060807,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 240,
+              "role": "text",
+              "label": "Finnish sauna heat exposure induces stronger immune cell tha",
+              "amplitude": 0.23829566,
+              "causal_boost": 0.0074216947,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 116,
+              "role": "link",
+              "label": "A tail-call interpreter in (nightly) Rust",
+              "amplitude": 0.22967759,
+              "causal_boost": 0.006087428,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 0.21632381,
+              "causal_boost": 0.0045905206,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "artificial intelligence news today",
+          "phase": "TRAIN",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.2,
+          "recall5": 0.3333,
+          "causal_count": 2,
+          "avg_causal": 0.0434,
+          "causal_memory_nodes": 0,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 116,
+              "role": "link",
+              "label": "A tail-call interpreter in (nightly) Rust",
+              "amplitude": 1.6943398,
+              "causal_boost": 0.08263813,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 0.90057796,
+              "causal_boost": 0.0041843494,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 26,
+              "role": "link",
+              "label": "login",
+              "amplitude": 0.7514184,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 54,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 104,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 129,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 154,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 179,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 204,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.7124641,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "deep learning and neural network stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0054,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 207,
+              "role": "generic",
+              "label": "8. Nanocode: The best Claude Code that $200 can buy in pure ",
+              "amplitude": 2.0936444,
+              "causal_boost": 0.005426922,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 215,
+              "role": "text",
+              "label": "Nanocode: The best Claude Code that $200 can buy in pure JAX",
+              "amplitude": 1.4094905,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 216,
+              "role": "link",
+              "label": "Nanocode: The best Claude Code that $200 can buy in pure JAX",
+              "amplitude": 1.351921,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "latest AI research on Hacker News",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0177,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 1.8016256,
+              "causal_boost": 0.017673139,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 14,
+              "role": "text",
+              "label": "Hacker News new | past | comments | ask | show | jobs | subm",
+              "amplitude": 1.0715003,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 7,
+              "role": "table",
+              "label": "Hacker News new | past | comments | ask | show | jobs | subm",
+              "amplitude": 0.9892954,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 316,
+              "role": "link",
+              "label": "Baby's Second Garbage Collector",
+              "amplitude": 0.8097101,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 26,
+              "role": "link",
+              "label": "login",
+              "amplitude": 0.6386305,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 54,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.61583835,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.61583835,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 104,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.61583835,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 129,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.61583835,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 154,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.61583835,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "machine learning projects trending",
+          "phase": "TRAIN",
+          "ndcg5": 0.5,
+          "ndcg10": 0.5,
+          "mrr": 0.3333,
+          "precision5": 0.2,
+          "recall5": 0.3333,
+          "causal_count": 8,
+          "avg_causal": 0.0233,
+          "causal_memory_nodes": 2,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 241,
+              "role": "link",
+              "label": "Finnish sauna heat exposure induces stronger immune cell tha",
+              "amplitude": 1.6690372,
+              "causal_boost": 0.0053781644,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 207,
+              "role": "generic",
+              "label": "8. Nanocode: The best Claude Code that $200 can buy in pure ",
+              "amplitude": 0.3846658,
+              "causal_boost": 0.083526514,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 116,
+              "role": "link",
+              "label": "A tail-call interpreter in (nightly) Rust",
+              "amplitude": 0.33578718,
+              "causal_boost": 0.076830976,
+              "resonance_type": "CausalMemory",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 725,
+              "role": "generic",
+              "label": "29. Scientists Figured Out How Eels Reproduce (2022) ( intel",
+              "amplitude": 0.27057284,
+              "causal_boost": 0.004428412,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 700,
+              "role": "generic",
+              "label": "28. StackOverflow: Retiring the Beta Site ( stackoverflow.co",
+              "amplitude": 0.26381582,
+              "causal_boost": 0.0031315722,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 500,
+              "role": "generic",
+              "label": "20. Perfmon – Consolidate your favorite CLI monitoring tools",
+              "amplitude": 0.26339203,
+              "causal_boost": 0.003074054,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 242,
+              "role": "text",
+              "label": "( tandfonline.com )",
+              "amplitude": 0.25949302,
+              "causal_boost": 3.9927458e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 240,
+              "role": "text",
+              "label": "Finnish sauna heat exposure induces stronger immune cell tha",
+              "amplitude": 0.23096207,
+              "causal_boost": 0.0053781644,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 0.21007904,
+              "causal_boost": 0.0045993957,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "AI tools and frameworks news",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 2,
+          "avg_causal": 0.0107,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 725,
+              "role": "generic",
+              "label": "29. Scientists Figured Out How Eels Reproduce (2022) ( intel",
+              "amplitude": 2.1353724,
+              "causal_boost": 0.016718732,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 658,
+              "role": "text",
+              "label": "Shared mutable state in Rust (2022) ( ryhl.io )",
+              "amplitude": 1.5228775,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 650,
+              "role": "generic",
+              "label": "26. Shared mutable state in Rust (2022) ( ryhl.io )",
+              "amplitude": 1.4538989,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 733,
+              "role": "text",
+              "label": "Scientists Figured Out How Eels Reproduce (2022) ( intellige",
+              "amplitude": 1.4009981,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 1.222283,
+              "causal_boost": 0.004588742,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 734,
+              "role": "link",
+              "label": "Scientists Figured Out How Eels Reproduce (2022)",
+              "amplitude": 1.1329279,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 26,
+              "role": "link",
+              "label": "login",
+              "amplitude": 0.9850165,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 54,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.9408423,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.9408423,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 104,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 0.9408423,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "neural network breakthroughs",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.1644,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 207,
+              "role": "generic",
+              "label": "8. Nanocode: The best Claude Code that $200 can buy in pure ",
+              "amplitude": 2.1461136,
+              "causal_boost": 0.16436546,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 215,
+              "role": "text",
+              "label": "Nanocode: The best Claude Code that $200 can buy in pure JAX",
+              "amplitude": 1.4077345,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 216,
+              "role": "link",
+              "label": "Nanocode: The best Claude Code that $200 can buy in pure JAX",
+              "amplitude": 1.3589416,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "language models and LLM developments",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0032,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 700,
+              "role": "generic",
+              "label": "28. StackOverflow: Retiring the Beta Site ( stackoverflow.co",
+              "amplitude": 2.1353645,
+              "causal_boost": 0.003212545,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 182,
+              "role": "generic",
+              "label": "7. Computational Physics (2nd Edition) ( umich.edu )",
+              "amplitude": 1.6663303,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 708,
+              "role": "text",
+              "label": "StackOverflow: Retiring the Beta Site ( stackoverflow.com )",
+              "amplitude": 1.3991164,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 190,
+              "role": "text",
+              "label": "Computational Physics (2nd Edition) ( umich.edu )",
+              "amplitude": 1.3491347,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 709,
+              "role": "link",
+              "label": "StackOverflow: Retiring the Beta Site",
+              "amplitude": 1.2104064,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 191,
+              "role": "link",
+              "label": "Computational Physics (2nd Edition)",
+              "amplitude": 1.1026666,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "computer vision and AI advances",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 483,
+              "role": "text",
+              "label": "My Google Workspace account suspension ( zencapital.substack",
+              "amplitude": 1.7913357,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 475,
+              "role": "generic",
+              "label": "19. My Google Workspace account suspension ( zencapital.subs",
+              "amplitude": 1.7644483,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 484,
+              "role": "link",
+              "label": "My Google Workspace account suspension",
+              "amplitude": 1.4736124,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "generative AI and transformer news",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0049,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 15,
+              "role": "generic",
+              "label": "Hacker News",
+              "amplitude": 1.585194,
+              "causal_boost": 0.0049226494,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 26,
+              "role": "link",
+              "label": "login",
+              "amplitude": 1.2791282,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 54,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 79,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 104,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 129,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 154,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 179,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 204,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 229,
+              "role": "link",
+              "label": "hide",
+              "amplitude": 1.2214462,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "site_name": "Stack Overflow",
+      "url": "https://stackoverflow.com/questions",
+      "html_bytes": 239757,
+      "estimated_total_relevant": 3,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "how to parse HTML in Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 1003,
+              "role": "listitem",
+              "label": "How to make the girl stand out in this watercolour painting?",
+              "amplitude": 2.296322,
+              "causal_boost": 0.00015748534,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1027,
+              "role": "listitem",
+              "label": "Are \"The Super Mario Galaxy Movie\"events canon?",
+              "amplitude": 2.0006754,
+              "causal_boost": 0.00015748534,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1021,
+              "role": "listitem",
+              "label": "Manga in which the main character reincarnates to when he wa",
+              "amplitude": 1.6868734,
+              "causal_boost": 0.00015748534,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 407,
+              "role": "text",
+              "label": "Need to Understand how to find work after ISO certifications",
+              "amplitude": 1.2916604,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 760,
+              "role": "text",
+              "label": "shell systemd Suntooth 39 asked 2 hours ago",
+              "amplitude": 1.1555334,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 882,
+              "role": "text",
+              "label": "javascript css reactjs",
+              "amplitude": 1.1434246,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 329,
+              "role": "text",
+              "label": "How to link seperate images in UI to Health script- Unreal B",
+              "amplitude": 1.0318692,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 990,
+              "role": "text",
+              "label": "Hot Network Questions Trying to find a sci-fi book with a hi",
+              "amplitude": 0.51856995,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 993,
+              "role": "list",
+              "label": "Trying to find a sci-fi book with a high gravity world where",
+              "amplitude": 0.48750544,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 317,
+              "role": "text",
+              "label": "0 votes 0 answers 3 views How to link seperate images in UI ",
+              "amplitude": 0.48327595,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "parsing HTML with Rust programming",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0053,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 294,
+              "role": "text",
+              "label": "Tagged with My watched tags The following tags:",
+              "amplitude": 1.9968139,
+              "causal_boost": 0.0053246287,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 645,
+              "role": "text",
+              "label": "flutter BinaryFox 1 asked 2 hours ago",
+              "amplitude": 1.3144858,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1057,
+              "role": "listitem",
+              "label": "Seeking Resolution for Artemis 2 SRB Case History Discrepanc",
+              "amplitude": 1.3134482,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 608,
+              "role": "text",
+              "label": "winforms .net-10.0 somecallmetim 1 asked 1 hour ago",
+              "amplitude": 1.2371529,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 329,
+              "role": "text",
+              "label": "How to link seperate images in UI to Health script- Unreal B",
+              "amplitude": 1.1069669,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 802,
+              "role": "list",
+              "label": "bash parameters switch-statement eval getopt",
+              "amplitude": 0.9103678,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 365,
+              "role": "heading",
+              "label": "The closing square bracket within a charlist in the Like sta",
+              "amplitude": 0.8987816,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 682,
+              "role": "text",
+              "label": "google-cloud-platform publish-subscribe architect",
+              "amplitude": 0.84590554,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 181,
+              "role": "text",
+              "label": "24,162,616 questions Newest Active Bountied 9 Unanswered Mor",
+              "amplitude": 0.72996736,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 226,
+              "role": "text",
+              "label": "Filter by No answers No upvoted or accepted answers No Stagi",
+              "amplitude": 0.7249949,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "Rust HTML parser library",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 3,
+          "avg_causal": 0.0289,
+          "causal_memory_nodes": 1,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 294,
+              "role": "text",
+              "label": "Tagged with My watched tags The following tags:",
+              "amplitude": 0.40268388,
+              "causal_boost": 0.07778019,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1003,
+              "role": "listitem",
+              "label": "How to make the girl stand out in this watercolour painting?",
+              "amplitude": 0.32205215,
+              "causal_boost": 3.9466937e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1027,
+              "role": "listitem",
+              "label": "Are \"The Super Mario Galaxy Movie\"events canon?",
+              "amplitude": 0.3014474,
+              "causal_boost": 3.9466937e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 0.27871072,
+              "causal_boost": 0.004723931,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1021,
+              "role": "listitem",
+              "label": "Manga in which the main character reincarnates to when he wa",
+              "amplitude": 0.27375445,
+              "causal_boost": 3.9466937e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 166,
+              "role": "listitem",
+              "label": "Bring the best of human thought and AI automation together a",
+              "amplitude": 0.26357374,
+              "causal_boost": 0.0041522942,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "best way to parse HTML in Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0177,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 166,
+              "role": "listitem",
+              "label": "Bring the best of human thought and AI automation together a",
+              "amplitude": 1.9274693,
+              "causal_boost": 0.017685452,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 141,
+              "role": "listitem",
+              "label": "Stack Internal Stack Overflow for Teams is now called Stack ",
+              "amplitude": 1.2072943,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 143,
+              "role": "text",
+              "label": "Stack Overflow for Teams is now called Stack Internal . Brin",
+              "amplitude": 1.128472,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 365,
+              "role": "heading",
+              "label": "The closing square bracket within a charlist in the Like sta",
+              "amplitude": 1.016144,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 88,
+              "role": "text",
+              "label": "Home Questions AI Assist Tags Challenges Chat Articles Users",
+              "amplitude": 0.94718784,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 85,
+              "role": "text",
+              "label": "Home Questions AI Assist Tags Challenges Chat Articles Users",
+              "amplitude": 0.86537564,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 352,
+              "role": "text",
+              "label": "0 votes 0 answers 8 views The closing square bracket within ",
+              "amplitude": 0.6910769,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "html5ever Rust HTML parsing",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 3,
+          "avg_causal": 0.0289,
+          "causal_memory_nodes": 1,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 294,
+              "role": "text",
+              "label": "Tagged with My watched tags The following tags:",
+              "amplitude": 0.40114203,
+              "causal_boost": 0.07741786,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1003,
+              "role": "listitem",
+              "label": "How to make the girl stand out in this watercolour painting?",
+              "amplitude": 0.3209484,
+              "causal_boost": 4.0106006e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1027,
+              "role": "listitem",
+              "label": "Are \"The Super Mario Galaxy Movie\"events canon?",
+              "amplitude": 0.3070167,
+              "causal_boost": 4.0106006e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1021,
+              "role": "listitem",
+              "label": "Manga in which the main character reincarnates to when he wa",
+              "amplitude": 0.27702272,
+              "causal_boost": 4.0106006e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 0.27233022,
+              "causal_boost": 0.0049433024,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 166,
+              "role": "listitem",
+              "label": "Bring the best of human thought and AI automation together a",
+              "amplitude": 0.2695543,
+              "causal_boost": 0.004375253,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "Rust web scraping HTML parsing",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0093,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 2.0036314,
+              "causal_boost": 0.00925976,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 937,
+              "role": "text",
+              "label": "Collectives see all Mobile Development 28k Members Join A co",
+              "amplitude": 1.0597605,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "parse HTML document in Rust",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 3,
+          "avg_causal": 0.0685,
+          "causal_memory_nodes": 2,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 0.45301977,
+              "causal_boost": 0.103291996,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 294,
+              "role": "text",
+              "label": "Tagged with My watched tags The following tags:",
+              "amplitude": 0.4434028,
+              "causal_boost": 0.097617365,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1003,
+              "role": "listitem",
+              "label": "How to make the girl stand out in this watercolour painting?",
+              "amplitude": 0.33293328,
+              "causal_boost": 3.8894123e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1027,
+              "role": "listitem",
+              "label": "Are \"The Super Mario Galaxy Movie\"events canon?",
+              "amplitude": 0.3131793,
+              "causal_boost": 3.8894123e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1021,
+              "role": "listitem",
+              "label": "Manga in which the main character reincarnates to when he wa",
+              "amplitude": 0.27877215,
+              "causal_boost": 3.8894123e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 166,
+              "role": "listitem",
+              "label": "Bring the best of human thought and AI automation together a",
+              "amplitude": 0.2756081,
+              "causal_boost": 0.004550681,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 8,
+          "goal": "Rust crate for processing web pages",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0769,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 2.016978,
+              "causal_boost": 0.076882996,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 937,
+              "role": "text",
+              "label": "Collectives see all Mobile Development 28k Members Join A co",
+              "amplitude": 1.0643378,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "extract data from HTML using Rust",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0048,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 868,
+              "role": "text",
+              "label": "OpenAI 2k Members Join",
+              "amplitude": 0.5682635,
+              "causal_boost": 0.0047924593,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "DOM manipulation library Rust programming",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.2,
+          "recall5": 0.3333,
+          "causal_count": 2,
+          "avg_causal": 0.093,
+          "causal_memory_nodes": 2,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 9,
+              "role": "data",
+              "label": "twitter.domain: stackoverflow.com",
+              "amplitude": 1.9902928,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 663,
+              "role": "text",
+              "label": "Advice 0 votes 1 replies 21 views Is Pub/Sub a good choice f",
+              "amplitude": 1.1288077,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 648,
+              "role": "listitem",
+              "label": "flutter",
+              "amplitude": 1.0391052,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 365,
+              "role": "heading",
+              "label": "The closing square bracket within a charlist in the Like sta",
+              "amplitude": 0.6616604,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 294,
+              "role": "text",
+              "label": "Tagged with My watched tags The following tags:",
+              "amplitude": 0.4361716,
+              "causal_boost": 0.096781425,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 954,
+              "role": "text",
+              "label": "CI/CD 24k Members Join A collective where developers focused",
+              "amplitude": 0.4244311,
+              "causal_boost": 0.08925895,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1003,
+              "role": "listitem",
+              "label": "How to make the girl stand out in this watercolour painting?",
+              "amplitude": 0.33667073,
+              "causal_boost": 3.8674192e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 352,
+              "role": "text",
+              "label": "0 votes 0 answers 8 views The closing square bracket within ",
+              "amplitude": 0.31645846,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1027,
+              "role": "listitem",
+              "label": "Are \"The Super Mario Galaxy Movie\"events canon?",
+              "amplitude": 0.30276987,
+              "causal_boost": 3.8674192e-05,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 13,
+              "role": "link",
+              "label": "Stack Overflow",
+              "amplitude": 0.29854393,
+              "causal_boost": 0.0,
+              "resonance_type": "Propagated",
+              "is_relevant": false,
+              "is_nav": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "site_name": "NPR",
+      "url": "https://www.npr.org/",
+      "html_bytes": 757143,
+      "estimated_total_relevant": 5,
+      "iterations": [
+        {
+          "i": 1,
+          "goal": "latest news stories today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 2,
+          "avg_causal": 0.0046,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 325,
+              "role": "text",
+              "label": "Culture Natural disasters and political instability hampered",
+              "amplitude": 1.5808794,
+              "causal_boost": 0.0046335054,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.5238184,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.3504217,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 331,
+              "role": "link",
+              "label": "The Art Newspaper's latest annual study of \"the world's 100 ",
+              "amplitude": 1.1889043,
+              "causal_boost": 0.0046335054,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1149,
+              "role": "heading",
+              "label": "Bush: Tiny Desk Concert",
+              "amplitude": 1.1211566,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.0517603,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 2,
+          "goal": "breaking news headlines now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.6620877,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1149,
+              "role": "heading",
+              "label": "Bush: Tiny Desk Concert",
+              "amplitude": 1.6545053,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.3515296,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.2055684,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            }
+          ]
+        },
+        {
+          "i": 3,
+          "goal": "top news articles today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0934,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.3083563,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.2201596,
+              "causal_boost": 0.09337558,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.169713,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1149,
+              "role": "heading",
+              "label": "Bush: Tiny Desk Concert",
+              "amplitude": 0.985591,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 4,
+          "goal": "current events and major stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 290,
+              "role": "text",
+              "label": "Red Cross director of emergency medical services Alexy Nehme",
+              "amplitude": 1.6725855,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 286,
+              "role": "text",
+              "label": "Red Cross director of emergency medical services Alexy Nehme",
+              "amplitude": 1.4184148,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 5,
+          "goal": "important news happening today",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0893,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.513317,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.3633868,
+              "causal_boost": 0.089328684,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.3468585,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1149,
+              "role": "heading",
+              "label": "Bush: Tiny Desk Concert",
+              "amplitude": 1.1231904,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 6,
+          "goal": "major world news stories",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0729,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.5215974,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 2178,
+              "role": "text",
+              "label": "World",
+              "amplitude": 1.3573004,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.3495666,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.3396335,
+              "causal_boost": 0.07286695,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 7,
+          "goal": "top headline stories now",
+          "phase": "TRAIN",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 0,
+          "avg_causal": 0.0,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": []
+        },
+        {
+          "i": 8,
+          "goal": "current affairs and world events",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.3618,
+          "mrr": 0.1111,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 2,
+          "avg_causal": 0.0483,
+          "causal_memory_nodes": 0,
+          "relevant_count": 2,
+          "node_data": [
+            {
+              "id": 2178,
+              "role": "generic",
+              "label": "Opinion: Humanity's hopes ascended with Artemis II NPR's Sco",
+              "amplitude": 1.5208902,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2171,
+              "role": "generic",
+              "label": "Simon Says",
+              "amplitude": 1.517484,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2172,
+              "role": "generic",
+              "label": "Simon Says",
+              "amplitude": 1.517484,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2173,
+              "role": "link",
+              "label": "Simon Says",
+              "amplitude": 1.4739838,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2174,
+              "role": "generic",
+              "label": "Opinion: Humanity's hopes ascended with Artemis II NPR's Sco",
+              "amplitude": 1.4739838,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2175,
+              "role": "generic",
+              "label": "Opinion: Humanity's hopes ascended with Artemis II NPR's Sco",
+              "amplitude": 1.4739838,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2176,
+              "role": "generic",
+              "label": "Opinion: Humanity's hopes ascended with Artemis II NPR's Sco",
+              "amplitude": 1.4739838,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 2177,
+              "role": "generic",
+              "label": "Opinion: Humanity's hopes ascended with Artemis II NPR's Sco",
+              "amplitude": 1.4739838,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 325,
+              "role": "text",
+              "label": "Middle East conflict In Lebanon, more than 50 medics have be",
+              "amplitude": 1.3395075,
+              "causal_boost": 0.091713354,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 331,
+              "role": "generic",
+              "label": "LEBANON-MEDICS KILLED Listen · 5:04 5:04 Toggle more options",
+              "amplitude": 0.94764066,
+              "causal_boost": 0.00487823,
+              "resonance_type": "Direct",
+              "is_relevant": true,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 9,
+          "goal": "recent developments in the news",
+          "phase": "TEST",
+          "ndcg5": 0.0,
+          "ndcg10": 0.0,
+          "mrr": 0.0,
+          "precision5": 0.0,
+          "recall5": 0.0,
+          "causal_count": 1,
+          "avg_causal": 0.0714,
+          "causal_memory_nodes": 0,
+          "relevant_count": 0,
+          "node_data": [
+            {
+              "id": 2475,
+              "role": "list",
+              "label": "news culture music",
+              "amplitude": 1.5245073,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 2468,
+              "role": "text",
+              "label": "more from news culture music",
+              "amplitude": 1.3620964,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": true
+            },
+            {
+              "id": 1145,
+              "role": "generic",
+              "label": "Bush: Tiny Desk Concert If you think you know \"Machinehead\" ",
+              "amplitude": 1.3326721,
+              "causal_boost": 0.071369015,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            },
+            {
+              "id": 1149,
+              "role": "heading",
+              "label": "Bush: Tiny Desk Concert",
+              "amplitude": 1.1233764,
+              "causal_boost": 0.0,
+              "resonance_type": "Direct",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        },
+        {
+          "i": 10,
+          "goal": "notable happenings across the globe",
+          "phase": "TEST",
+          "ndcg5": 1.0,
+          "ndcg10": 1.0,
+          "mrr": 1.0,
+          "precision5": 0.2,
+          "recall5": 0.2,
+          "causal_count": 2,
+          "avg_causal": 0.0857,
+          "causal_memory_nodes": 2,
+          "relevant_count": 1,
+          "node_data": [
+            {
+              "id": 325,
+              "role": "text",
+              "label": "Middle East conflict In Lebanon, more than 50 medics have be",
+              "amplitude": 0.32068452,
+              "causal_boost": 0.09254576,
+              "resonance_type": "CausalMemory",
+              "is_relevant": true,
+              "is_nav": false
+            },
+            {
+              "id": 290,
+              "role": "text",
+              "label": "Red Cross director of emergency medical services Alexy Nehme",
+              "amplitude": 0.3034314,
+              "causal_boost": 0.07889361,
+              "resonance_type": "CausalMemory",
+              "is_relevant": false,
+              "is_nav": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summaries": [
+    {
+      "name": "BBC News",
+      "early_ndcg5": 0.1716,
+      "late_ndcg5": 0.32549999999999996,
+      "test_ndcg5": 0.14896666666666666,
+      "early_mrr": 0.2222333333333333,
+      "late_mrr": 0.32539999999999997,
+      "test_mrr": 0.1414,
+      "early_p5": 0.19999999999999998,
+      "late_p5": 0.39999999999999997,
+      "test_p5": 0.19999999999999998,
+      "early_causal": 4.333333333333333,
+      "late_causal": 6.666666666666667,
+      "test_causal": 3.0,
+      "total_cm": 0
+    },
+    {
+      "name": "GitHub Trending",
+      "early_ndcg5": 0.7896000000000001,
+      "late_ndcg5": 0.7488333333333334,
+      "test_ndcg5": 0.7573,
+      "early_mrr": 1.0,
+      "late_mrr": 0.8333333333333334,
+      "test_mrr": 0.8333333333333334,
+      "early_p5": 0.5333333333333333,
+      "late_p5": 0.4000000000000001,
+      "test_p5": 0.5333333333333333,
+      "early_causal": 8.333333333333334,
+      "late_causal": 6.333333333333333,
+      "test_causal": 8.0,
+      "total_cm": 2
+    },
+    {
+      "name": "Hacker News",
+      "early_ndcg5": 0.3333333333333333,
+      "late_ndcg5": 0.16666666666666666,
+      "test_ndcg5": 0.0,
+      "early_mrr": 0.375,
+      "late_mrr": 0.11109999999999999,
+      "test_mrr": 0.0,
+      "early_p5": 0.06666666666666667,
+      "late_p5": 0.06666666666666667,
+      "test_p5": 0.0,
+      "early_causal": 3.6666666666666665,
+      "late_causal": 3.6666666666666665,
+      "test_causal": 0.6666666666666666,
+      "total_cm": 2
+    },
+    {
+      "name": "Stack Overflow",
+      "early_ndcg5": 0.0,
+      "late_ndcg5": 0.0,
+      "test_ndcg5": 0.3333333333333333,
+      "early_mrr": 0.0,
+      "late_mrr": 0.0,
+      "test_mrr": 0.3333333333333333,
+      "early_p5": 0.0,
+      "late_p5": 0.0,
+      "test_p5": 0.06666666666666667,
+      "early_causal": 1.3333333333333333,
+      "late_causal": 2.3333333333333335,
+      "test_causal": 1.3333333333333333,
+      "total_cm": 6
+    },
+    {
+      "name": "NPR",
+      "early_ndcg5": 0.0,
+      "late_ndcg5": 0.0,
+      "test_ndcg5": 0.3333333333333333,
+      "early_mrr": 0.0,
+      "late_mrr": 0.0,
+      "test_mrr": 0.3703666666666667,
+      "early_p5": 0.0,
+      "late_p5": 0.0,
+      "test_p5": 0.06666666666666667,
+      "early_causal": 1.0,
+      "late_causal": 0.6666666666666666,
+      "test_causal": 1.6666666666666667,
+      "total_cm": 2
+    }
+  ]
+}
