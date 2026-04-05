@@ -327,9 +327,25 @@ fn run_bm25_hdc(passages: &[(u32, &str)], query: &str, top_k: usize) -> Vec<u32>
     scored.into_iter().take(top_k).map(|(pid, _)| pid).collect()
 }
 
-/// Variant C: Full CRFR cold (ResonanceField, no prior feedback)
+/// Variant C: CRFR cold with BM25 pre-filter (top-200 → ResonanceField)
+/// Matchar produktionspipelinen: BM25 filtrerar ner till hanterbar storlek
 fn run_crfr_cold(passages: &[(u32, &str)], query: &str, top_k: usize) -> Vec<u32> {
-    let nodes = passages_to_nodes(passages);
+    // BM25 pre-filter: ta top-200 candidates (som i ScoringPipeline steg 1)
+    let index = TfIdfIndex::build(passages);
+    let bm25_top = index.query(query, 200);
+    let filtered: Vec<(u32, &str)> = bm25_top
+        .iter()
+        .filter_map(|&(pid, _)| {
+            passages
+                .iter()
+                .find(|&&(id, _)| id == pid)
+                .map(|&(id, text)| (id, text))
+        })
+        .collect();
+    if filtered.is_empty() {
+        return vec![];
+    }
+    let nodes = passages_to_nodes(&filtered);
     let mut field = ResonanceField::from_semantic_tree(&nodes, "msmarco://eval");
     let results = field.propagate_top_k(query, top_k);
     results.into_iter().map(|r| r.node_id).collect()
@@ -575,18 +591,26 @@ fn main() {
                 "B: BM25 + HDC" => run_bm25_hdc(&passages, query_text, 1000),
                 "C: CRFR cold" => run_crfr_cold(&passages, query_text, 1000),
                 "D: CRFR + feedback" => {
-                    // Bygg field vid första query, återanvänd sedan
-                    if feedback_field.is_none() {
-                        let nodes = passages_to_nodes(&passages);
-                        feedback_field =
-                            Some(ResonanceField::from_semantic_tree(&nodes, "msmarco://eval"));
+                    // BM25 pre-filter → CRFR field med feedback
+                    // Nytt field per query, men feedback ackumuleras via domain registry
+                    let index = TfIdfIndex::build(&passages);
+                    let bm25_top = index.query(query_text, 200);
+                    let filtered: Vec<(u32, &str)> = bm25_top
+                        .iter()
+                        .filter_map(|&(pid, _)| {
+                            passages
+                                .iter()
+                                .find(|&&(id, _)| id == pid)
+                                .map(|&(id, text)| (id, text))
+                        })
+                        .collect();
+                    if filtered.is_empty() {
+                        continue;
                     }
-                    run_crfr_with_feedback(
-                        feedback_field.as_mut().unwrap(),
-                        query_text,
-                        1000,
-                        relevant,
-                    )
+                    let nodes = passages_to_nodes(&filtered);
+                    let field = feedback_field
+                        .insert(ResonanceField::from_semantic_tree(&nodes, "msmarco://eval"));
+                    run_crfr_with_feedback(field, query_text, 1000, relevant)
                 }
                 _ => vec![],
             };
