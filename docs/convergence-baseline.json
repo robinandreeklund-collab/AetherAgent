@@ -7,7 +7,7 @@
       "total_iterations": 9,
       "total_nodes": 146,
       "article_headings_found": 5,
-      "avg_propagation_ms": 9.788192777777777,
+      "avg_propagation_ms": 9.933982111111112,
       "history": [
         {
           "i": 1,
@@ -81,7 +81,7 @@
       "total_iterations": 9,
       "total_nodes": 609,
       "article_headings_found": 5,
-      "avg_propagation_ms": 34.755231111111115,
+      "avg_propagation_ms": 32.878732,
       "history": [
         {
           "i": 1,
@@ -155,7 +155,7 @@
       "total_iterations": 9,
       "total_nodes": 490,
       "article_headings_found": 5,
-      "avg_propagation_ms": 38.57979955555556,
+      "avg_propagation_ms": 39.53875466666667,
       "history": [
         {
           "i": 1,
@@ -229,7 +229,7 @@
       "total_iterations": 9,
       "total_nodes": 739,
       "article_headings_found": 5,
-      "avg_propagation_ms": 37.19945855555555,
+      "avg_propagation_ms": 37.86082466666666,
       "history": [
         {
           "i": 1,
@@ -303,7 +303,7 @@
       "total_iterations": 9,
       "total_nodes": 1266,
       "article_headings_found": 5,
-      "avg_propagation_ms": 69.44628422222222,
+      "avg_propagation_ms": 69.50566944444444,
       "history": [
         {
           "i": 1,
