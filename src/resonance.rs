@@ -1253,9 +1253,22 @@ impl ResonanceField {
         let max_depth = self.nodes.values().map(|s| s.depth).max().unwrap_or(0);
         let cheb_k = adaptive_chebyshev_k(self.nodes.len(), max_depth);
 
+        // For large DOMs: limit Chebyshev to top-500 nodes by seed amplitude.
+        // This prevents O(K×|E|) from blowing up on 1000+ node pages.
+        // Nodes outside the top-500 keep their Phase 1 amplitude (no propagation boost).
+        let cheb_seed = if seed_signal.len() > 500 {
+            let mut sorted: Vec<(u32, f32)> =
+                seed_signal.iter().map(|(&id, &amp)| (id, amp)).collect();
+            sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
+            sorted.truncate(500);
+            sorted.into_iter().collect::<HashMap<u32, f32>>()
+        } else {
+            seed_signal.clone()
+        };
+
         // Apply Chebyshev spectral filter with adaptive order
         let filtered =
-            self.chebyshev_filter(&seed_signal, &down_keys, &up_keys, &bm25_scores, cheb_k);
+            self.chebyshev_filter(&cheb_seed, &down_keys, &up_keys, &bm25_scores, cheb_k);
 
         // Apply Chebyshev output as additive propagation boost.
         // Nodes keep their Phase 1 amplitude and gain extra signal from
