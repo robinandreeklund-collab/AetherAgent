@@ -1116,17 +1116,19 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — prova båda varianter (med/utan JS eval)
+    // Hämta cacheat fält — prova JS-variant FÖRST (parse_crfr med run_js=true
+    // cachar under #__js_eval). Om den inte finns, prova non-JS.
+    // BUG FIX: Tidigare provades non-JS först, vilket ledde till att feedback
+    // hamnade i fel fält när parse kördes med run_js=true.
     let dummy_nodes: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field(&dummy_nodes, url);
+    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
     if !found {
-        // Prova JS-variant (explore/parse-crfr med run_js=true cachar under #__js_eval)
-        let (field_js, found_js) =
-            resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
-        if !found_js {
+        // Prova non-JS-variant
+        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy_nodes, url);
+        if !found_njs {
             return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
         }
-        field = field_js;
+        field = field_njs;
     }
 
     field.feedback(goal, &ids);
@@ -1144,14 +1146,15 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
 /// Closes the learning loop without explicit node ID tracking.
 #[wasm_bindgen]
 pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> String {
+    // Try JS-variant first (most parse_crfr calls use run_js=true)
     let dummy: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
     if !found {
-        let (field_js, found_js) = resonance::get_or_build_field_with_variant(&dummy, url, true);
-        if !found_js {
+        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
+        if !found_njs {
             return r#"{"status":"no_field"}"#.to_string();
         }
-        field = field_js;
+        field = field_njs;
     }
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
@@ -1214,10 +1217,17 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
 /// Save CRFR field for a URL to a JSON string (for persistent storage).
 #[wasm_bindgen]
 pub fn crfr_save_field(url: &str) -> String {
+    // Try JS-variant first, then non-JS
     let dummy: Vec<types::SemanticNode> = vec![];
-    let (field, found) = resonance::get_or_build_field(&dummy, url);
+    let (field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
     if !found {
-        return r#"{"error":"no cached field for this URL"}"#.to_string();
+        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
+        if !found_njs {
+            return r#"{"error":"no cached field for this URL"}"#.to_string();
+        }
+        return field_njs
+            .to_json()
+            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
     }
     field
         .to_json()
@@ -1247,10 +1257,15 @@ pub fn crfr_update_node(
     new_role: &str,
     new_value: &str,
 ) -> String {
+    // Try JS-variant first, then non-JS
     let dummy: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field(&dummy, url);
+    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
     if !found {
-        return r#"{"error":"no cached field for this URL"}"#.to_string();
+        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
+        if !found_njs {
+            return r#"{"error":"no cached field for this URL"}"#.to_string();
+        }
+        field = field_njs;
     }
     let val = if new_value.is_empty() {
         None
