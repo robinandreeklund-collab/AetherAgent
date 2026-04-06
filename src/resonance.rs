@@ -3108,4 +3108,90 @@ mod tests {
             "Borde ha propagation iteration deltas"
         );
     }
+
+    #[test]
+    fn test_goal_role_affinity_headlines() {
+        // Test that "find headlines" boosts heading nodes
+        let affinity = goal_role_affinity("find news article headlines", "heading");
+        assert!(
+            affinity > 0.3,
+            "Heading affinity for headlines goal borde vara > 0.3, fick {affinity}"
+        );
+
+        let nav_affinity = goal_role_affinity("find news article headlines", "navigation");
+        assert!(
+            nav_affinity < 0.01,
+            "Navigation affinity for headlines goal borde vara ~0, fick {nav_affinity}"
+        );
+    }
+
+    #[test]
+    fn test_goal_role_affinity_products() {
+        let price_affinity = goal_role_affinity("find product price", "price");
+        assert!(
+            price_affinity > 0.3,
+            "Price affinity for product goal borde vara > 0.3, fick {price_affinity}"
+        );
+    }
+
+    #[test]
+    fn test_dcfr_feedback_builds_regret() {
+        // Test that DCFR feedback accumulates positive regret for successful nodes
+        let tree = vec![make_node(
+            1,
+            "heading",
+            "breaking news headline story",
+            vec![make_node(2, "text", "article content paragraph", vec![])],
+        )];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://news.test");
+
+        // Initial propagation
+        let results = field.propagate("find news headline");
+        assert!(!results.is_empty(), "Borde hitta noder");
+
+        // Give feedback: node 1 was successful
+        field.feedback("find news headline", &[1]);
+
+        // Check that propagation_stats has accumulated regret
+        assert!(
+            !field.propagation_stats.is_empty(),
+            "DCFR borde ha ackumulerat regret-data efter feedback"
+        );
+
+        // Second propagation should benefit from feedback
+        let results2 = field.propagate("find news headline");
+        assert!(!results2.is_empty(), "Andra propagation borde ge resultat");
+    }
+
+    #[test]
+    fn test_structural_cascade_bypass() {
+        // Test that heading nodes are included in cascade even without BM25 match
+        // Build a large enough tree (>= 200 nodes) to trigger cascade filtering
+        let mut children = Vec::new();
+        for i in 0..200 {
+            children.push(make_node(
+                i + 10,
+                if i < 5 { "heading" } else { "generic" },
+                &format!("Node content {}", i),
+                vec![],
+            ));
+        }
+        let tree = vec![make_node(1, "main", "Page", children)];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
+        let results = field.propagate("find article headlines");
+
+        // Heading nodes (10-14) should be in results thanks to structural bypass + affinity
+        let heading_ids: Vec<u32> = (10..15).collect();
+        let found = results
+            .iter()
+            .filter(|r| heading_ids.contains(&r.node_id))
+            .count();
+
+        assert!(
+            found >= 3,
+            "Borde hitta minst 3 av 5 headings via structural bypass, hittade {found}"
+        );
+    }
 }
