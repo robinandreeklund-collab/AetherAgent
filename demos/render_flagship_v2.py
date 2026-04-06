@@ -378,7 +378,112 @@ def build():
 
     fade(frames, i, 0.35); add(frames, i, 5.0)
 
-    # ═══ ACT 7: CLOSE (57-63s) ═══════════════════════════════════════
+    # ═══ ACT 7: ABLATION STUDY (57-65s) ══════════════════════════════
+    # Whitepaper Section 9.5 — 10 sites, test queries (unseen)
+
+    i=mk(); d=ImageDraw.Draw(i)
+    ct(d, 35, "Ablation study.  What actually matters?", DIM2, FM)
+    d.text((PAD, 75), "10 real websites  ·  test queries (unseen, no feedback given)", fill=DIM2, font=FS)
+    d.text((PAD, 95), "Whitepaper Section 9.5 — standard IR evaluation", fill=DIM, font=FS)
+
+    y = 140
+    # Table header
+    d.text((PAD, y), f"{'Variant':<44} {'nDCG@5':>8}  {'MRR':>8}  {'vs BM25':>10}", fill=DIM2, font=FSB)
+    y += 24
+    d.rectangle([PAD, y, W-PAD, y+1], fill=ACCENT); y += 10
+
+    ablation = [
+        ("A: BM25 only (keyword matching)",             "0.456", "0.593", "baseline",  DIM2),
+        ("B: + HDC + MiniLM reranker",                  "0.476", "0.584", "+4.4%",     DIM2),
+        ("C: CRFR cold (BM25+HDC+Chebyshev, no learn)", "0.464", "0.524", "+1.8%",     DIM2),
+        ("D: CRFR + 3 feedback rounds",                 "0.765", "0.873", "+67.8%",    GREEN),
+        ("E: CRFR full (suppression + goal-clusters)",   "0.765", "0.873", "+67.8%",    GREEN),
+    ]
+    for label, ndcg, mrr, delta, color in ablation:
+        is_highlight = color == GREEN
+        if is_highlight:
+            d.rectangle([PAD-4, y-2, W-PAD+4, y+22], fill=(20, 55, 30))
+        d.text((PAD, y), f"{label:<44}", fill=color, font=FB if is_highlight else F)
+        d.text((PAD+580, y), ndcg, fill=color, font=FB if is_highlight else F)
+        d.text((PAD+680, y), mrr, fill=color, font=FB if is_highlight else F)
+        d.text((PAD+780, y), delta, fill=GREEN if delta != "baseline" else DIM2, font=FB if is_highlight else FS)
+        y += 28
+
+    y += 20
+    d.text((PAD, y), "Key finding:", fill=WHITE, font=FB); y += 26
+    d.text((PAD+20, y), "Causal memory is the dominant contributor: +67.8% nDCG@5.", fill=GREEN, font=F)
+    y += 26
+    d.text((PAD+20, y), "Three feedback rounds transform ranking quality from 0.464 to 0.765.", fill=DIM2, font=F)
+    y += 26
+    d.text((PAD+20, y), "HDC and Chebyshev provide modest cold-start gains (+4.4%, +1.8%).", fill=DIM2, font=F)
+    y += 26
+    d.text((PAD+20, y), "MRR improves 0.593 -> 0.873 (+47%) — correct answer moves to #1.", fill=DIM2, font=F)
+
+    fade(frames, i, 0.35); add(frames, i, 7.5)
+
+    # ═══ ACT 8: MS MARCO BENCHMARK (65-73s) ══════════════════════════
+    # Not a passage retriever — a candidate generator for AI agents
+
+    i=mk(); d=ImageDraw.Draw(i)
+    ct(d, 35, "Benchmark: MS MARCO passage ranking.", DIM2, FM)
+
+    y = 80
+    d.text((PAD, y), "6,980 queries  ·  standard IR evaluation  ·  all results reproducible", fill=DIM2, font=FS)
+    y += 24
+    d.text((PAD, y), "Note: This is not a traditional passage retriever. It is a candidate", fill=DIM, font=FS)
+    y += 20
+    d.text((PAD, y), "generator for autonomous AI agents operating on raw, unsegmented web pages.", fill=DIM, font=FS)
+    y += 32
+
+    # Results table
+    d.text((PAD, y), f"{'Variant':<28} {'MRR@10':>8}  {'nDCG@10':>8}  {'R@100':>8}  {'p50(us)':>9}  {'QPS':>5}", fill=DIM2, font=FSB)
+    y += 24
+    d.rectangle([PAD, y, W-PAD, y+1], fill=ACCENT); y += 10
+
+    marco = [
+        ("A: BM25 only",         "0.100", "0.114", "0.507", "19,504", "53",  DIM2),
+        ("B: BM25 + HDC",        "0.099", "0.114", "0.507", "79,041", "13",  DIM2),
+        ("C: CRFR cold",         "0.104", "0.119", "0.508", "83,170", "12",  GREEN),
+        ("D: CRFR + feedback",   "0.104", "0.119", "0.508", "83,457", "12",  GREEN),
+    ]
+    for label, mrr, ndcg, recall, p50, qps, color in marco:
+        d.text((PAD, y), f"{label:<28}", fill=color, font=FB if color==GREEN else F)
+        d.text((PAD+370, y), mrr, fill=color, font=F)
+        d.text((PAD+470, y), ndcg, fill=color, font=F)
+        d.text((PAD+570, y), recall, fill=color, font=F)
+        d.text((PAD+680, y), p50, fill=DIM2, font=F)
+        d.text((PAD+800, y), qps, fill=DIM2, font=F)
+        y += 26
+
+    y += 16
+    d.text((PAD, y), "Topic-grouped feedback (18 clusters, 1,000 queries):", fill=WHITE, font=FB)
+    y += 30
+
+    # Animated-looking bars for feedback improvement
+    cold_w = int(0.095 / 0.4 * 500)
+    warm_w = int(0.354 / 0.4 * 500)
+
+    d.text((PAD+20, y), "Cold (position 0):", fill=DIM2, font=F)
+    d.rectangle([PAD+260, y+2, PAD+260+cold_w, y+18], fill=BAR_IN)
+    d.text((PAD+260+cold_w+10, y), "MRR 0.095", fill=DIM2, font=FS)
+    y += 28
+
+    d.text((PAD+20, y), "After 1 feedback:", fill=GREEN, font=FB)
+    d.rectangle([PAD+260, y+2, PAD+260+warm_w, y+18], fill=BAR_OUT)
+    d.text((PAD+260+warm_w+10, y), "MRR 0.354", fill=GREEN, font=FB)
+    d.text((PAD+260+warm_w+120, y), "+274%", fill=GREEN, font=FX)
+    y += 38
+
+    d.text((PAD+20, y), "One feedback signal. No training data. +274% improvement.", fill=GREEN, font=F)
+    y += 28
+
+    d.text((PAD+20, y), "Sub-millisecond (20-node DOM): p50 = 184 us (0.184ms)", fill=DIM2, font=F)
+    y += 22
+    d.text((PAD+20, y), "Cache-hit CRFR is 4x faster than pure BM25.", fill=DIM2, font=F)
+
+    fade(frames, i, 0.35); add(frames, i, 7.5)
+
+    # ═══ ACT 9: CLOSE ════════════════════════════════════════════════
 
     i=mk(); d=ImageDraw.Draw(i)
     cy = 160
