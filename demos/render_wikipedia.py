@@ -54,6 +54,7 @@ def _font(size, bold=False):
 F    = _font(19)
 FB   = _font(19, bold=True)
 F_SM = _font(15)
+F_SMB = _font(15, bold=True)
 F_MD = _font(22, bold=True)
 F_LG = _font(28, bold=True)
 F_XL = _font(36, bold=True)
@@ -112,47 +113,101 @@ def fade_to(frames, target_arr, dur=0.3):
         t = i / max(1, n - 1)
         frames.append(((1 - t) * src + t * dst).astype(np.uint8))
 
-# ── DOM Grid ─────────────────────────────────────────────────────────────
+# ── DOM Tree Lines (scrolling representation) ────────────────────────────
+# Represent 12,434 nodes as labeled rows that scroll past a viewport.
+# Hit nodes glow green. A cyan scan-line sweeps down.
 
-CELL = 5          # pixel size per node cell
-GAP  = 1          # gap between cells
-COLS = 130        # nodes per row
-ROWS = math.ceil(TOTAL_NODES / COLS)  # ~96 rows
-GRID_W = COLS * (CELL + GAP)
-GRID_H = ROWS * (CELL + GAP)
-GRID_X = (W - GRID_W) // 2
-GRID_Y = 260
+# Build a representative DOM tree listing (abbreviated — shows structure)
+DOM_LINES = []
+_rng = random.Random(42)
 
-# Pre-compute hit positions in grid coords
-HIT_CELLS = set()
-for nid in HIT_POSITIONS:
-    idx = min(nid, TOTAL_NODES - 1)
-    HIT_CELLS.add(idx)
+# Generate ~200 representative lines covering the 12,434 node range
+# Each line = (node_id_approx, depth, label, is_hit)
+_sections = [
+    (0,    0, "html", False),
+    (1,    1, "head", False),
+    (2,    2, "meta × 48", False),
+    (3,    2, "link × 22 (stylesheets)", False),
+    (10,   1, "body", False),
+    (15,   2, "nav#mw-navigation", False),
+    (20,   3, "div.vector-menu × 8", False),
+    (30,   3, "a.mw-wiki-logo", False),
+    (40,   3, "div#p-search", False),
+    (60,   2, "div#content", False),
+    (70,   3, "h1: COVID-19 vaccine", False),
+    (80,   3, "div#mw-content-text", False),
+    (90,   4, "div.mw-parser-output", False),
+    (100,  5, "p: A COVID-19 vaccine is a vaccine intended to...", False),
+    (120,  5, "div.toc (table of contents)", False),
+    (140,  6, "li × 42 (TOC entries)", False),
+    (180,  5, "h2: History", False),
+    (200,  5, "p × 12 (history paragraphs)", False),
+    (250,  5, "h2: Types", False),
+    (270,  5, "p × 18 (vaccine types)", False),
+    (308,  5, "a: 8 Adverse effects", True),         # ← HIT
+    (320,  5, "h2: Development", False),
+    (380,  5, "p × 24 (development)", False),
+    (450,  5, "table.wikitable (clinical trials)", False),
+    (500,  6, "tr × 35", False),
+    (600,  5, "h2: Deployment", False),
+    (650,  5, "p × 20 (deployment)", False),
+    (750,  5, "div.navbox × 4", False),
+    (850,  5, "h3: Authorization", False),
+    (900,  5, "p × 15", False),
+    (1000, 5, "h2: Society and culture", False),
+    (1100, 5, "p × 22", False),
+    (1200, 5, "table × 3 (vaccination rates)", False),
+    (1400, 5, "h2: Research", False),
+    (1500, 5, "p × 30", False),
+    (1700, 5, "h2: COVID-19 vaccine types", False),
+    (1800, 5, "p × 18", False),
+    (1959, 5, "p: mRNA vaccines were the first authorised in UK, US, EU. Pfizer-BioNTech, Moderna.", True),  # ← HIT
+    (2000, 5, "h3: Viral vector", False),
+    (2100, 5, "p × 14", False),
+    (2300, 5, "h3: Inactivated", False),
+    (2400, 5, "p × 12", False),
+    (2600, 5, "h2: Side effects", False),
+    (2800, 5, "p × 28", False),
+    (3000, 5, "table.wikitable (adverse events)", False),
+    (3100, 6, "tr × 45", False),
+    (3251, 5, "p: The risks of serious illness from COVID-19 are far higher than the risk posed by vaccines...", True),  # ← HIT
+    (3321, 5, "p: up to 20% report disruptive side effects after 2nd mRNA dose. Fever, fatigue, headache.", True),  # ← HIT
+    (3400, 5, "h3: Serious adverse events", False),
+    (3500, 5, "p × 16", False),
+    (3700, 5, "h2: Misconceptions", False),
+    (3800, 5, "p × 22", False),
+    (4000, 5, "h2: Economics", False),
+    (4200, 5, "p × 18", False),
+    (4500, 5, "div.reflist", False),
+    (4600, 6, "li.reference × 340", False),
+    (5500, 5, "div.navbox × 8", False),
+    (6000, 5, "div.catlinks", False),
+    (6100, 4, "div#mw-navigation-footer", False),
+    (6200, 3, "footer", False),
+    (6300, 4, "ul × 6 (footer links)", False),
+]
 
-def draw_dom_grid(draw, scan_row=-1, found_so_far=None):
-    """Draw the full DOM grid with scan line and highlights."""
-    if found_so_far is None:
-        found_so_far = set()
+for nid, depth, label, is_hit in _sections:
+    DOM_LINES.append((nid, depth, label, is_hit))
 
-    for idx in range(TOTAL_NODES):
-        row = idx // COLS
-        col = idx % COLS
-        x = GRID_X + col * (CELL + GAP)
-        y = GRID_Y + row * (CELL + GAP)
+# Fill gaps with generic nodes
+_filled = []
+_prev_id = 0
+for nid, depth, label, is_hit in DOM_LINES:
+    # Add filler lines between sections
+    gap = nid - _prev_id
+    if gap > 50:
+        n_fill = min(gap // 40, 6)
+        for k in range(n_fill):
+            fid = _prev_id + (k + 1) * (gap // (n_fill + 1))
+            ftag = _rng.choice(["p", "div", "span", "a", "li", "td", "th", "img", "sup", "cite"])
+            flabel = f"{ftag} (node {fid})"
+            _filled.append((fid, min(depth + 1, 7), flabel, False))
+    _filled.append((nid, depth, label, is_hit))
+    _prev_id = nid
 
-        if idx in found_so_far:
-            # Hit node — bright green with glow
-            draw.rectangle([x-1, y-1, x+CELL+1, y+CELL+1], fill=NODE_HIT_GLOW)
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_HIT)
-        elif row == scan_row:
-            # Scan line
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_SCAN)
-        elif row < scan_row:
-            # Already scanned
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=ACCENT)
-        else:
-            # Not yet scanned
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_DIM)
+DOM_LINES = _filled
+TOTAL_DOM_LINES = len(DOM_LINES)
 
 # ── Build Frames ─────────────────────────────────────────────────────────
 
@@ -205,78 +260,115 @@ def build():
 
     # ════════════════════════════════════════════════════════════════════
     # ACT 3: THE DOM SWEEP (7s - 14s)
+    # Scrolling DOM tree with cyan scan-line and green hit highlights
     # ════════════════════════════════════════════════════════════════════
 
-    found = set()
-    # Sweep through rows
-    total_sweep_frames = int(6.0 * FPS)  # 6 seconds of sweep
-    rows_per_frame = max(1, ROWS / total_sweep_frames)
+    TREE_TOP = 110      # viewport top
+    TREE_BOT = H - 30   # viewport bottom
+    LINE_H_TREE = 22    # pixels per tree line
+    VISIBLE = (TREE_BOT - TREE_TOP) // LINE_H_TREE  # ~34 visible lines
+    INDENT_PX = 18      # pixels per indent level
+
+    found_results = []   # accumulated found results
+    total_sweep_frames = int(6.0 * FPS)
 
     for fi in range(total_sweep_frames):
-        scan_row = int(fi * rows_per_frame)
-        if scan_row >= ROWS:
-            scan_row = ROWS - 1
+        # Current scan position in the DOM_LINES array
+        t = fi / total_sweep_frames
+        scan_idx = int(t * TOTAL_DOM_LINES)
+        # Corresponding node ID for the counter
+        if scan_idx < TOTAL_DOM_LINES:
+            current_node_id = DOM_LINES[scan_idx][0]
+        else:
+            current_node_id = TOTAL_NODES
 
-        # Check if any hit nodes are in scanned rows
-        for hit_idx in HIT_CELLS:
-            hit_row = hit_idx // COLS
-            if hit_row <= scan_row:
-                found.add(hit_idx)
+        # Check for new hits
+        for li in range(min(scan_idx + 1, TOTAL_DOM_LINES)):
+            nid, depth, label, is_hit = DOM_LINES[li]
+            if is_hit and nid not in [r[0] for r in found_results]:
+                # Find matching result
+                for hi, hid in enumerate(HIT_POSITIONS):
+                    if hid == nid:
+                        found_results.append((nid, RESULTS[hi]))
+                        break
 
         img = Image.new("RGB", (W, H), BG)
         draw = ImageDraw.Draw(img)
 
         # Header
-        draw.text((PAD, 20), "en.wikipedia.org/wiki/COVID-19_vaccine", fill=CYAN, font=F_MD)
+        draw.text((PAD, 15), "en.wikipedia.org/wiki/COVID-19_vaccine", fill=CYAN, font=F_MD)
 
-        # Stats line
-        pct_scanned = min(100, (scan_row + 1) / ROWS * 100)
-        draw.text((PAD, 55), f"Scanning {TOTAL_NODES:,} DOM nodes...", fill=DIM2, font=F)
-        draw.text((PAD + 400, 55),
-                  f"{pct_scanned:.0f}%  ·  {len(found)}/4 found", fill=YELLOW, font=FB)
+        # Progress counter
+        pct = min(100, current_node_id / TOTAL_NODES * 100)
+        draw.text((PAD, 52), f"Scanning DOM...", fill=DIM2, font=F)
+        node_str = f"{current_node_id:,}/{TOTAL_NODES:,}"
+        draw.text((PAD + 230, 52), node_str, fill=YELLOW, font=FB)
+        draw.text((PAD + 230 + len(node_str) * 11 + 10, 52),
+                  f"  {len(found_results)}/4 found", fill=GREEN if found_results else DIM2, font=FB)
 
         # Progress bar
-        bar_w = int((W - PAD * 2) * pct_scanned / 100)
-        draw.rectangle([PAD, 90, PAD + W - PAD * 2, 94], fill=ACCENT)
-        draw.rectangle([PAD, 90, PAD + bar_w, 94], fill=CYAN)
+        bar_full = W - PAD * 2
+        draw.rectangle([PAD, 84, PAD + bar_full, 90], fill=ACCENT)
+        draw.rectangle([PAD, 84, PAD + int(bar_full * pct / 100), 90], fill=CYAN)
 
-        # Legend
-        draw.text((PAD, 105), "■", fill=NODE_DIM, font=F_SM)
-        draw.text((PAD + 16, 105), " unscanned", fill=DIM, font=F_SM)
-        draw.text((PAD + 130, 105), "■", fill=ACCENT, font=F_SM)
-        draw.text((PAD + 146, 105), " scanned", fill=DIM, font=F_SM)
-        draw.text((PAD + 250, 105), "■", fill=NODE_HIT, font=F_SM)
-        draw.text((PAD + 266, 105), " ANSWER FOUND", fill=GREEN, font=F_SM)
+        # Scrolling tree viewport
+        # Center the scan line in the viewport
+        scan_line_in_view = VISIBLE // 3  # scan line at 1/3 from top
+        start_line = max(0, scan_idx - scan_line_in_view)
+        end_line = min(TOTAL_DOM_LINES, start_line + VISIBLE)
 
-        # Draw grid
-        # Shift grid up a bit
-        old_grid_y = GRID_Y
-        # Use dynamic offset for grid
-        draw_dom_grid_offset(draw, scan_row, found, y_offset=140)
+        for vi, li in enumerate(range(start_line, end_line)):
+            nid, depth, label, is_hit = DOM_LINES[li]
+            y = TREE_TOP + vi * LINE_H_TREE
+            x = PAD + depth * INDENT_PX
 
-        # Found nodes panel (right side, appears as nodes are found)
-        panel_x = W - 480
-        panel_y = 140
-        if found:
-            draw.text((panel_x, panel_y), "Located:", fill=GREEN, font=FB)
-            panel_y += 30
+            is_scan_line = (li == scan_idx)
+            is_scanned = (li < scan_idx)
 
-            for i, (score, role, text) in enumerate(RESULTS):
-                nid = HIT_POSITIONS[i]
-                if nid not in found:
-                    continue
-                # Score badge
+            if is_hit and li <= scan_idx:
+                # HIT — green highlight bar
+                draw.rectangle([PAD - 4, y - 2, W // 2 + 60, y + LINE_H_TREE - 4], fill=(20, 60, 30))
+                draw.rectangle([PAD - 6, y - 2, PAD - 2, y + LINE_H_TREE - 4], fill=NODE_HIT)
+                # Tree connector
+                if depth > 0:
+                    draw.text((x - INDENT_PX, y), "├─", fill=GREEN, font=F_SM)
+                draw.text((x, y), label[:65], fill=NODE_HIT_GLOW, font=F_SMB)
+                draw.text((x, y), label[:65], fill=GREEN, font=F_SMB)  # double for brightness
+            elif is_scan_line:
+                # Scan line — cyan highlight
+                draw.rectangle([PAD - 4, y - 1, W // 2 + 60, y + LINE_H_TREE - 5], fill=(20, 35, 55))
+                if depth > 0:
+                    draw.text((x - INDENT_PX, y), "├─", fill=CYAN, font=F_SM)
+                draw.text((x, y), label[:65], fill=CYAN, font=F_SM)
+            elif is_scanned:
+                # Already passed — dim
+                if depth > 0:
+                    draw.text((x - INDENT_PX, y), "│ ", fill=(35, 40, 50), font=F_SM)
+                draw.text((x, y), label[:65], fill=DIM, font=F_SM)
+            else:
+                # Not yet reached
+                if depth > 0:
+                    draw.text((x - INDENT_PX, y), "│ ", fill=(30, 35, 42), font=F_SM)
+                draw.text((x, y), label[:65], fill=(50, 55, 65), font=F_SM)
+
+        # Right panel: found results
+        panel_x = W // 2 + 100
+        panel_y = TREE_TOP
+        if found_results:
+            draw.text((panel_x, panel_y), f"CRFR Located ({len(found_results)}/4):", fill=GREEN, font=FB)
+            panel_y += 32
+
+            for nid, (score, role, text) in found_results:
                 draw.text((panel_x, panel_y), f"[{score:.3f}]", fill=YELLOW, font=F_SM)
-                draw.text((panel_x + 70, panel_y), f" {role}", fill=CYAN, font=F_SM)
+                draw.text((panel_x + 65, panel_y), f" {role}", fill=CYAN, font=F_SM)
                 panel_y += 20
-                # Text (truncated)
-                short = text[:50] + "..." if len(text) > 50 else text
-                draw.text((panel_x + 10, panel_y), f'"{short}"', fill=WHITE, font=F_SM)
-                panel_y += 24
+                short = text[:42] + "..." if len(text) > 42 else text
+                draw.text((panel_x + 8, panel_y), f'"{short}"', fill=WHITE, font=F_SM)
+                panel_y += 28
 
         frames.append(np.array(img))
 
-    # Hold final grid for a moment
+    # Hold final sweep frame
     add_frames(frames, frames[-1], 0.8)
 
     # ════════════════════════════════════════════════════════════════════
@@ -361,26 +453,6 @@ def build():
     return frames
 
 
-def draw_dom_grid_offset(draw, scan_row, found, y_offset=140):
-    """Draw DOM grid with custom y offset."""
-    for idx in range(TOTAL_NODES):
-        row = idx // COLS
-        col = idx % COLS
-        x = GRID_X + col * (CELL + GAP)
-        y = y_offset + row * (CELL + GAP)
-
-        if y > H - 20:  # clip
-            break
-
-        if idx in found:
-            draw.rectangle([x-1, y-1, x+CELL+1, y+CELL+1], fill=NODE_HIT_GLOW)
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_HIT)
-        elif row == scan_row:
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_SCAN)
-        elif row < scan_row:
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=ACCENT)
-        else:
-            draw.rectangle([x, y, x+CELL, y+CELL], fill=NODE_DIM)
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
