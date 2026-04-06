@@ -81,24 +81,24 @@ def build():
     i=mk(); d=ImageDraw.Draw(i)
     ct(d, 300, "Every day, AI agents make", DIM2, FL)
     ct(d, 350, "700 million web requests.", WHITE, FX)
-    add(frames, i, 2.5)
+    add(frames, i, 3.5)
 
     i=mk(); d=ImageDraw.Draw(i)
     ct(d, 250, "Each page can be millions of characters.", DIM2, FM)
     ct(d, 300, "Thousands of DOM nodes. Hundreds of thousands of tokens.", DIM2, FM)
     ct(d, 370, "Most of it is navigation, boilerplate, and noise.", DIM2, F)
-    fade(frames, i, 0.35); add(frames, i, 2.5)
+    fade(frames, i, 0.35); add(frames, i, 3.5)
 
     i=mk(); d=ImageDraw.Draw(i)
     ct(d, 250, "Every token costs compute.", WHITE, FL)
     ct(d, 300, "Every token costs energy.", WHITE, FL)
     ct(d, 350, "Every token costs money.", WHITE, FL)
-    fade(frames, i, 0.35); add(frames, i, 2.0)
+    fade(frames, i, 0.35); add(frames, i, 3.0)
 
     i=mk(); d=ImageDraw.Draw(i)
     ct(d, 280, "What if you only sent the 0.01%", WHITE, FL)
     ct(d, 330, "that actually answers the question?", WHITE, FL)
-    fade(frames, i, 0.35); add(frames, i, 2.5)
+    fade(frames, i, 0.35); add(frames, i, 3.5)
 
     # ═══ ACT 2: THE SEARCH (10-22s) ══════════════════════════════════
     # Wikipedia DOM sweep — 12,434 nodes, find 4
@@ -161,7 +161,7 @@ def build():
 
         frames.append(np.array(i))
 
-    add(frames, frames[-1], 0.5)
+    add(frames, frames[-1], 1.0)
 
     # ═══ ACT 3: THREE SITES (22-32s) ═════════════════════════════════
     # Show 3 real sites with answers
@@ -202,14 +202,14 @@ def build():
         d.text((PAD,360),f'{red}%',fill=GREEN,font=FXX)
         d.text((PAD+260,378),"reduction",fill=DIM2,font=FM)
 
-        fade(frames, i, 0.35); add(frames, i, 2.8)
+        fade(frames, i, 0.35); add(frames, i, 4.0)
 
     # ═══ ACT 4: IT LEARNS (32-42s) ═══════════════════════════════════
     # Animated score bars growing with feedback
 
     i=mk(); d=ImageDraw.Draw(i)
     ct(d, 380, "It learns from every interaction.", WHITE, FX)
-    fade(frames, i, 0.35); add(frames, i, 1.5)
+    fade(frames, i, 0.35); add(frames, i, 2.0)
 
     # Animate 3 query iterations with growing bars
     learn_steps = [
@@ -283,7 +283,7 @@ def build():
             frames.append(np.array(i))
 
         # Hold completed step
-        add(frames, frames[-1], 1.5)
+        add(frames, frames[-1], 2.0)
 
     # ═══ ACT 5: THE NUMBERS (42-52s) ═════════════════════════════════
     # All metrics with sourced data
@@ -343,7 +343,7 @@ def build():
     d.text((PAD,y),"Annual savings:",fill=DIM2,font=F)
     d.text((PAD+220,y),"$1,460,730",fill=GREEN,font=FX)
 
-    fade(frames, i, 0.35); add(frames, i, 8.0)
+    fade(frames, i, 0.35); add(frames, i, 10.0)
 
     # ═══ ACT 6: ENVIRONMENT (52-57s) ═════════════════════════════════
 
@@ -376,7 +376,7 @@ def build():
     y += 24
     d.text((PAD, y), "Sources: HUMAN Security 2026, IEA, Google Cloud AI blog, Goldman Sachs Research", fill=DIM, font=FS)
 
-    fade(frames, i, 0.35); add(frames, i, 5.0)
+    fade(frames, i, 0.35); add(frames, i, 7.0)
 
     # ═══ ACT 7: ABLATION STUDY (57-65s) ══════════════════════════════
     # Whitepaper Section 9.5 — 10 sites, test queries (unseen)
@@ -417,7 +417,7 @@ def build():
     y += 26
     d.text((PAD+20, y), "MRR improves 0.593 -> 0.873 (+47%) — correct answer moves to #1.", fill=DIM2, font=F)
 
-    fade(frames, i, 0.35); add(frames, i, 7.5)
+    fade(frames, i, 0.35); add(frames, i, 9.0)
 
     # ═══ ACT 8: MS MARCO BENCHMARK (65-73s) ══════════════════════════
     # Not a passage retriever — a candidate generator for AI agents
@@ -479,7 +479,7 @@ def build():
     y += 22
     d.text((PAD+20, y), "Cache-hit is 4x faster than keyword-only baseline.", fill=DIM2, font=F)
 
-    fade(frames, i, 0.35); add(frames, i, 7.5)
+    fade(frames, i, 0.35); add(frames, i, 9.0)
 
     # ═══ ACT 9: CLOSE ════════════════════════════════════════════════
 
@@ -494,10 +494,10 @@ def build():
     ct(d, cy, "1.8 MB binary  ·  pure Rust  ·  single CPU core", DIM2, F); cy+=30
     ct(d, cy, "5,600x cheaper  ·  learns without training data", GREEN, FB)
 
-    fade(frames, i, 0.4); add(frames, i, 4.5)
+    fade(frames, i, 0.4); add(frames, i, 6.0)
 
     # Final black
-    add(frames, mk(), 1.0)
+    add(frames, mk(), 1.5)
 
     return frames
 
