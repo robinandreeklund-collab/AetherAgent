@@ -6252,6 +6252,33 @@ async fn dashboard_html() -> impl IntoResponse {
     )
 }
 
+async fn landing_index() -> impl IntoResponse {
+    let html = include_str!("../../landing-pages/index.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+async fn landing_concept_1() -> impl IntoResponse {
+    let html = include_str!("../../landing-pages/concept-1-the-reduction.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+async fn landing_concept_2() -> impl IntoResponse {
+    let html = include_str!("../../landing-pages/concept-2-the-signal.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6259,12 +6286,17 @@ fn build_router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
-        // Root & Health
-        .route("/", get(root))
+        // Root = landing page
+        .route("/", get(landing_concept_1))
+        .route("/api-info", get(root))
         .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
+        // Landing pages
+        .route("/landing", get(landing_index))
+        .route("/landing/1", get(landing_concept_1))
+        .route("/landing/2", get(landing_concept_2))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))

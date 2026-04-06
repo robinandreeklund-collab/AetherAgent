@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slaash — The web, distilled.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.35);
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;overflow-x:hidden}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.7);border-bottom:1px solid var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .2s}
+.btn-accent{background:var(--accent);color:#fff}
+.btn-accent:hover{background:#2563eb;color:#fff;transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:rgba(255,255,255,0.25);color:#fff}
+
+/* HERO */
+.hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
+.hero-content{position:relative;z-index:2;max-width:720px}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero .subtitle{font-size:clamp(1.1rem,2.5vw,1.5rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em}
+.hero .subtitle span{color:#fff;font-weight:600}
+.hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
+.hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
+
+/* METRICS */
+.metrics{padding:6rem 2rem;max-width:1000px;margin:0 auto}
+.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:transform .3s,border-color .3s}
+.metric-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.metric-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.metric-label{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
+
+/* CODE DEMO */
+.code-section{padding:6rem 2rem;max-width:1100px;margin:0 auto}
+.section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem;text-align:center}
+.section-sub{color:var(--muted);text-align:center;margin-bottom:3rem;font-size:1.05rem}
+.code-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+.code-block{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.82rem;line-height:1.7;overflow-x:auto;position:relative}
+.code-block::before{content:attr(data-label);position:absolute;top:.75rem;right:1rem;font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:var(--font)}
+.code-block .kw{color:#ff7b72}.code-block .str{color:#a5d6ff}.code-block .num{color:#79c0ff}
+.code-block .key{color:#d2a8ff}.code-block .punc{color:#888}.code-block .comment{color:#555}
+
+/* LEARNING */
+.learning{padding:6rem 2rem;max-width:900px;margin:0 auto}
+#chart-canvas{width:100%;height:280px;border-radius:14px;background:var(--surface);border:1px solid var(--border)}
+.learning-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-top:2rem;text-align:center}
+.learning-stat-value{font-size:1.4rem;font-weight:700;color:#fff}
+.learning-stat-label{font-size:.8rem;color:var(--muted);margin-top:.25rem}
+
+/* FEATURES */
+.features{padding:6rem 2rem;max-width:1100px;margin:0 auto}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem}
+.feature-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem 1.5rem;transition:all .3s}
+.feature-card:hover{border-color:var(--accent);box-shadow:0 0 30px var(--accent-glow)}
+.feature-icon{font-size:1.5rem;margin-bottom:1rem;display:block}
+.feature-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem}
+.feature-card p{font-size:.85rem;color:var(--muted);line-height:1.5}
+
+/* CTA FOOTER */
+.cta-section{padding:8rem 2rem;text-align:center}
+.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:1.5rem}
+.cta-section .btn-sm{padding:.85rem 2.5rem;font-size:1rem;border-radius:12px}
+footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
+footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:1rem}
+
+/* SCROLL REVEAL */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .metrics-grid,.features-grid{grid-template-columns:1fr}
+  .code-grid{grid-template-columns:1fr}
+  .learning-stats{grid-template-columns:1fr}
+  nav{padding:1rem}
+  .nav-links{gap:1rem}
+}
+@media(max-width:480px){
+  .nav-links a:not(.btn-sm){display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="wordmark">slaash</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#docs">Docs</a>
+    <a href="#github">GitHub</a>
+    <a class="btn-sm btn-accent" href="#start">Get started</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="hero-content">
+    <h1>The web, distilled.</h1>
+    <p class="subtitle"><span>50,000</span> tokens &rarr; <span>200</span>. In <span>1ms</span>.</p>
+    <div class="hero-ctas">
+      <a class="btn-sm btn-accent" href="#start">Get started</a>
+      <a class="btn-sm btn-ghost" href="#docs">Documentation</a>
+    </div>
+  </div>
+</section>
+
+<!-- METRICS -->
+<section class="metrics reveal">
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-value" data-target="99.2" data-suffix="%">0%</div>
+      <div class="metric-label">Token reduction</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
+      <div class="metric-label">Parse latency</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value" data-target="97.8" data-suffix="%">0%</div>
+      <div class="metric-label">Recall accuracy</div>
+    </div>
+  </div>
+</section>
+
+<!-- CODE DEMO -->
+<section class="code-section reveal" id="demo">
+  <h2 class="section-title">One request. Pure signal.</h2>
+  <p class="section-sub">Send a URL and a goal. Get back only what matters.</p>
+  <div class="code-grid">
+    <div class="code-block" data-label="Request">
+<span class="kw">curl</span> -X POST https://api.slaash.ai/parse \
+  -H <span class="str">"Authorization: Bearer sk-..."</span> \
+  -d <span class="str">'{
+    "url": "https://apple.com",
+    "goal": "find iPhone 16 price"
+  }'</span></div>
+    <div class="code-block" data-label="Response">
+{
+  <span class="key">"tokens_in"</span>: <span class="num">30567</span>,
+  <span class="key">"tokens_out"</span>: <span class="num">613</span>,
+  <span class="key">"savings"</span>: <span class="str">"98.0%"</span>,
+  <span class="key">"latency_ms"</span>: <span class="num">0.8</span>,
+  <span class="key">"nodes"</span>: [
+    {
+      <span class="key">"role"</span>: <span class="str">"heading"</span>,
+      <span class="key">"label"</span>: <span class="str">"iPhone 16 Pro"</span>,
+      <span class="key">"relevance"</span>: <span class="num">0.94</span>
+    },
+    {
+      <span class="key">"role"</span>: <span class="str">"text"</span>,
+      <span class="key">"label"</span>: <span class="str">"From $999"</span>,
+      <span class="key">"relevance"</span>: <span class="num">0.91</span>
+    }
+  ]
+}</div>
+  </div>
+</section>
+
+<!-- LEARNING -->
+<section class="learning reveal" id="learning">
+  <h2 class="section-title">It learns. Without training data.</h2>
+  <p class="section-sub">CRFR improves with every interaction. No GPU. No fine-tuning.</p>
+  <canvas id="chart-canvas"></canvas>
+  <div class="learning-stats">
+    <div><div class="learning-stat-value">5 levels</div><div class="learning-stat-label">Online learning</div></div>
+    <div><div class="learning-stat-value">92.3%</div><div class="learning-stat-label">Feedback precision</div></div>
+    <div><div class="learning-stat-value">30KB</div><div class="learning-stat-label">SQLite state</div></div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features reveal" id="features">
+  <h2 class="section-title">Everything you need</h2>
+  <p class="section-sub">A complete perception layer for AI agents.</p>
+  <div class="features-grid">
+    <div class="feature-card">
+      <span class="feature-icon">&#x1F441;</span>
+      <h3>Semantic Perception</h3>
+      <p>HTML &rarr; accessibility tree with goal-relevance scores for every node.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">&#x1F6E1;</span>
+      <h3>Trust Shield</h3>
+      <p>20+ prompt injection patterns detected and neutralized at parse time.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">&#x26A1;</span>
+      <h3>Adaptive Streaming</h3>
+      <p>LLM-directed DOM exploration. 95&ndash;99% further token savings.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">&#x1F4E6;</span>
+      <h3>JS Sandbox</h3>
+      <p>QuickJS with 55+ DOM methods. Sandboxed execution, zero escape risk.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">&#x1F4F7;</span>
+      <h3>Vision</h3>
+      <p>YOLOv8-nano screenshot analysis with pure Rust rendering engine.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">&#x1F50C;</span>
+      <h3>MCP Server</h3>
+      <p>30 tools ready for Claude, Cursor, and VS Code. Plug and play.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section reveal">
+  <h2>Start building with Slaash</h2>
+  <a class="btn-sm btn-accent" href="#start">Get started &rarr;</a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="#">Documentation</a>
+    <a href="#">GitHub</a>
+    <a href="#">Discord</a>
+  </div>
+  <p>&copy; 2026 Slaash. MIT Licensed.</p>
+</footer>
+
+<script>
+// ── HERO PARTICLE ANIMATION ──
+(function(){
+  const canvas = document.getElementById('hero-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [], mouse = {x:0,y:0};
+
+  const fragments = [
+    '<div class="nav">', '<button>', '<span>', '<input type="text">',
+    'aria-label="search"', 'id="price"', '<a href="#">', 'onclick="..."',
+    '<img src="...">', '<h1>', '</div>', '<ul>', '<li>', 'class="hero"',
+    'role="main"', '<form>', 'data-id="42"', '<section>', '<footer>',
+    'style="display:flex"', '<meta charset>', '<link rel>', '<p>',
+    'tabindex="0"', '<select>', '<option>', 'aria-hidden="true"',
+    'placeholder="..."', '<nav>', '<header>', '<article>',
+    'class="price"', 'data-price="999"', '<table>', '<tr>', '<td>',
+    'alt="product"', '<svg>', '<path d="...">', 'viewBox="0 0"',
+    'xmlns="http"', '<script>', '<template>', 'v-if="show"',
+    ':class="{}"', '@click="fn"', 'ref="el"', '<slot>',
+    'display:none', 'opacity:0', '<iframe>', 'sandbox=""'
+  ];
+
+  function resize(){
+    W = canvas.width = canvas.offsetWidth * devicePixelRatio;
+    H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+  }
+
+  function createParticles(){
+    particles = [];
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    const maxR = Math.min(w, h) * 0.42;
+    for(let i=0; i<45; i++){
+      const orbit = 80 + Math.random() * (maxR - 80);
+      const angle = Math.random() * Math.PI * 2;
+      // Each particle has its own orbit speed — outer ones slower
+      const speed = (0.0003 + Math.random() * 0.0006) * (1 - orbit / maxR * 0.5);
+      // Alternate direction for some rings
+      const dir = Math.random() < 0.3 ? -1 : 1;
+      particles.push({
+        text: fragments[i % fragments.length],
+        orbit: orbit,
+        angle: angle,
+        speed: speed * dir,
+        tilt: 0.3 + Math.random() * 0.4, // ellipse squash (0=line, 1=circle)
+        alpha: 0.06 + Math.random() * 0.1,
+        size: 9 + Math.random() * 3,
+        rotationOffset: (Math.random() - 0.5) * 0.4,
+        wobble: Math.random() * Math.PI * 2, // phase for subtle wobble
+        wobbleAmp: 2 + Math.random() * 6
+      });
+    }
+  }
+
+  function animate(time){
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    ctx.clearRect(0,0,w,h);
+    const cx = w/2, cy = h/2;
+
+    for(const p of particles){
+      p.angle += p.speed;
+
+      // Elliptical orbit with subtle wobble
+      const wobble = Math.sin(time * 0.0004 + p.wobble) * p.wobbleAmp;
+      const x = cx + Math.cos(p.angle) * (p.orbit + wobble);
+      const y = cy + Math.sin(p.angle) * (p.orbit + wobble) * p.tilt;
+
+      // Fade particles near center text area (avoid overlap with heading)
+      const dx = x - cx, dy = y - cy;
+      const distFromCenter = Math.sqrt(dx*dx + dy*dy);
+      const fadeZone = Math.min(w, h) * 0.18;
+      const centerFade = distFromCenter < fadeZone ? distFromCenter / fadeZone : 1;
+      const alpha = p.alpha * centerFade;
+
+      // Gentle rotation follows orbit direction
+      const rot = p.angle * 0.15 + p.rotationOffset;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.font = `${p.size}px 'JetBrains Mono', monospace`;
+      ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.fillText(p.text, 0, 0);
+      ctx.restore();
+    }
+
+    // Soft center glow
+    const grd = ctx.createRadialGradient(cx,cy,0,cx,cy,100);
+    grd.addColorStop(0,'rgba(59,130,246,0.06)');
+    grd.addColorStop(1,'rgba(59,130,246,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(cx,cy,100,0,Math.PI*2);
+    ctx.fill();
+
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener('resize', ()=>{resize();createParticles()});
+  resize(); createParticles(); animate();
+})();
+
+// ── SCROLL REVEAL ──
+const reveals = document.querySelectorAll('.reveal');
+const revealObs = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');revealObs.unobserve(e.target)}});
+},{threshold:0.15});
+reveals.forEach(el=>revealObs.observe(el));
+
+// ── METRIC COUNT-UP ──
+function countUp(el, target, prefix='', suffix='', duration=1500){
+  const start = performance.now();
+  const isInt = target % 1 === 0;
+  function tick(now){
+    const t = Math.min((now-start)/duration, 1);
+    const ease = 1 - Math.pow(1-t, 4); // easeOutQuart
+    const val = ease * target;
+    el.textContent = prefix + (isInt ? Math.round(val) : val.toFixed(1)) + suffix;
+    if(t<1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+document.querySelectorAll('.metric-value').forEach(el=>{
+  const obs = new IntersectionObserver(([e])=>{
+    if(e.isIntersecting){
+      const target = parseFloat(el.dataset.target);
+      const prefix = el.dataset.prefix || '';
+      const suffix = el.dataset.suffix || '';
+      countUp(el, target, prefix, suffix);
+      obs.unobserve(el);
+    }
+  },{threshold:0.5});
+  obs.observe(el);
+});
+
+// ── LEARNING CHART ──
+(function(){
+  const canvas = document.getElementById('chart-canvas');
+  const ctx = canvas.getContext('2d');
+  const dataPoints = [0.31, 0.35, 0.42, 0.51, 0.58, 0.65, 0.72, 0.78, 0.83, 0.87];
+  let drawn = false;
+
+  function drawChart(progress){
+    const dpr = devicePixelRatio;
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+
+    const pad = {top:30, right:30, bottom:40, left:50};
+    const cw = w - pad.left - pad.right;
+    const ch = h - pad.top - pad.bottom;
+
+    ctx.clearRect(0,0,w,h);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for(let i=0;i<=4;i++){
+      const y = pad.top + ch * (1 - i/4);
+      ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(w-pad.right,y);ctx.stroke();
+    }
+
+    // Y labels
+    ctx.fillStyle = '#555';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    for(let i=0;i<=4;i++){
+      const val = (i*0.25).toFixed(2);
+      const y = pad.top + ch * (1 - i/4);
+      ctx.fillText(val, pad.left-8, y+4);
+    }
+
+    // X labels
+    ctx.textAlign = 'center';
+    for(let i=0;i<10;i++){
+      const x = pad.left + (i/(dataPoints.length-1))*cw;
+      ctx.fillText(i+1, x, h-pad.bottom+20);
+    }
+    ctx.fillText('Interactions', w/2, h-6);
+
+    // Line
+    const numPoints = Math.ceil(progress * dataPoints.length);
+    if(numPoints < 2) return;
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    for(let i=0;i<numPoints;i++){
+      const x = pad.left + (i/(dataPoints.length-1))*cw;
+      const y = pad.top + ch * (1 - dataPoints[i]);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // Dots
+    for(let i=0;i<numPoints;i++){
+      const x = pad.left + (i/(dataPoints.length-1))*cw;
+      const y = pad.top + ch * (1 - dataPoints[i]);
+      ctx.beginPath();
+      ctx.arc(x,y,4,0,Math.PI*2);
+      ctx.fillStyle = '#3b82f6';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x,y,2,0,Math.PI*2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
+
+    // Glow under line
+    ctx.beginPath();
+    for(let i=0;i<numPoints;i++){
+      const x = pad.left + (i/(dataPoints.length-1))*cw;
+      const y = pad.top + ch * (1 - dataPoints[i]);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    const lastX = pad.left + ((numPoints-1)/(dataPoints.length-1))*cw;
+    ctx.lineTo(lastX, pad.top+ch);
+    ctx.lineTo(pad.left, pad.top+ch);
+    ctx.closePath();
+    const grd = ctx.createLinearGradient(0,pad.top,0,pad.top+ch);
+    grd.addColorStop(0,'rgba(59,130,246,0.15)');
+    grd.addColorStop(1,'rgba(59,130,246,0)');
+    ctx.fillStyle = grd;
+    ctx.fill();
+  }
+
+  const obs = new IntersectionObserver(([e])=>{
+    if(e.isIntersecting && !drawn){
+      drawn = true;
+      const duration = 2000;
+      const start = performance.now();
+      function tick(now){
+        const t = Math.min((now-start)/duration, 1);
+        drawChart(t);
+        if(t<1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+      obs.unobserve(canvas);
+    }
+  },{threshold:0.3});
+  obs.observe(canvas);
+
+  window.addEventListener('resize', ()=>{if(drawn) drawChart(1)});
+})();
+</script>
+</body>
+</html>
