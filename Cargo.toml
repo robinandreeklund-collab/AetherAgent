@@ -173,7 +173,7 @@ path = "benches/real_world_validation.rs"
 [[bin]]
 name = "aether-convergence-test"
 path = "src/bin/convergence_test.rs"
-required-features = ["fetch"]
+required-features = ["fetch", "js-eval"]
 
 [[bin]]
 name = "aether-crfr-bench"

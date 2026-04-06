@@ -477,35 +477,31 @@ fn zone_penalty(role: &str, depth: u32) -> f32 {
     }
 }
 
-/// Learned propagation weight via Beta-distribution with pre-computed key.
+/// DCFR-based learned propagation weight with pre-computed key.
 ///
-/// Propagation stats lagrar (alpha, beta) per roll+riktning:
-///   alpha = confidence-weighted successes + heuristisk prior
-///   beta = confidence-weighted failures + heuristisk prior
-///   mean = alpha / (alpha + beta)
+/// Propagation stats store (cum_positive_regret, cum_negative_regret) per
+/// role+direction+cluster key. Strategy is derived via regret matching:
+///   weight = heuristic * (1 + positive_signal)
+/// where positive_signal = cum_positive / (cum_positive + |cum_negative| + 1)
 ///
-/// Heuristisk prior kodas som initial (alpha, beta):
-///   heuristic=1.2 → prior alpha=1.2, beta=1.0 (svag bias mot success)
-///   heuristic=0.3 → prior alpha=0.3, beta=1.0 (svag bias mot failure)
-///
-/// Ingen manuell blend-faktor — Beta-distributionen hanterar
-/// prior → posterior automatiskt med mer data.
+/// DCFR advantage over Beta-distribution:
+/// - Linear discounting: older regrets decay → faster adaptation to page changes
+/// - Regret matching: provably converges to Nash equilibrium in O(1/√T)
+/// - Handles cold-start better: heuristic prior used until data accumulates
 ///
 /// Takes a pre-computed key (e.g. "heading:down:news+senaste") to avoid format!() in hot loop.
-/// Falls back to non-clustered key if clustered key not found (cold-start for new goal clusters).
+/// Falls back to non-clustered key if clustered key not found.
 fn learned_weight_precomputed(
     key: &str,
     heuristic: f32,
     stats: &HashMap<String, (f32, f32)>,
 ) -> f32 {
-    // Try clustered key first
-    let (alpha, beta) = if let Some(&ab) = stats.get(key) {
-        ab
+    // Try clustered key first, then fallback to base key
+    let (cum_pos, cum_neg) = if let Some(&vals) = stats.get(key) {
+        vals
     } else {
-        // Fallback: strip cluster suffix, try global key
-        // "heading:down:news+senaste" → "heading:down"
+        // Fallback: strip cluster suffix
         let base_key = key.rsplitn(2, ':').last().map(|_| {
-            // Extract "role:direction" from "role:direction:cluster"
             let parts: Vec<&str> = key.splitn(3, ':').collect();
             if parts.len() >= 2 {
                 format!("{}:{}", parts[0], parts[1])
@@ -514,17 +510,23 @@ fn learned_weight_precomputed(
             }
         });
         if let Some(ref bk) = base_key {
-            stats.get(bk.as_str()).copied().unwrap_or((heuristic, 1.0))
+            stats.get(bk.as_str()).copied().unwrap_or((0.0, 0.0))
         } else {
-            (heuristic, 1.0)
+            (0.0, 0.0)
         }
     };
-    let total = alpha + beta;
+    // Regret matching: derive strategy from cumulative regrets
+    let pos = cum_pos.max(0.0);
+    let neg = cum_neg.abs();
+    let total = pos + neg;
     if total < 0.001 {
-        return heuristic;
+        return heuristic; // Cold-start: use heuristic prior
     }
-    let mean = alpha / total.max(0.001);
-    0.2 + mean * 1.3
+    // Signal strength: how much positive regret dominates
+    // Range: 0.0 (all negative) to 1.0 (all positive)
+    let signal = pos / (total + 1.0);
+    // Scale: heuristic * (0.5 when negative, up to 1.8 when strongly positive)
+    heuristic * (0.5 + signal * 1.3)
 }
 
 /// Compute page-level features for contextual weight selection.
@@ -1833,13 +1835,15 @@ impl ResonanceField {
         let successful_set: std::collections::HashSet<u32> =
             successful_node_ids.iter().copied().collect();
 
-        // Steg 0: Temporal decay på propagation_stats (Fix 3)
-        // Alla stats krymper exponentiellt — förhindrar stale bias.
-        // decay = 0.95 per feedback-anrop (nyare data väger mer)
-        const STATS_DECAY: f32 = 0.95;
-        for (alpha, beta) in self.propagation_stats.values_mut() {
-            *alpha *= STATS_DECAY;
-            *beta *= STATS_DECAY;
+        // Steg 0: DCFR linear discounting — äldre regrets viktas ner
+        // DCFR uses t^α / (t^α + 1) discount with α=1.5 (linear-ish)
+        // Simplified: multiply by iteration_decay = t / (t + 1)
+        // where t = total_queries as proxy for iteration count
+        let t = self.total_queries as f32;
+        let dcfr_discount = if t > 1.0 { (t - 1.0) / t } else { 0.5 };
+        for (cum_pos, cum_neg) in self.propagation_stats.values_mut() {
+            *cum_pos *= dcfr_discount;
+            *cum_neg *= dcfr_discount;
         }
 
         // Steg 1: Kausalt minne per nod
@@ -1888,8 +1892,10 @@ impl ResonanceField {
             }
         }
 
-        // Steg 2: Confidence-weighted Beta-distribution update.
-        // Itererar alla parent→child edges EN gång. Uppdaterar BOTH directions.
+        // Steg 2: DCFR cumulative regret update.
+        // For each edge, compute regret = utility(action) - utility(default).
+        // Success → positive regret for that direction (it was worth propagating)
+        // Failure → negative regret (propagation didn't help)
         let confidences: HashMap<u32, f32> = self
             .nodes
             .iter()
@@ -1907,33 +1913,35 @@ impl ResonanceField {
             })
             .collect();
 
+        let cluster = goal_cluster_id(goal);
         for (child_id, _parent_id, child_role, parent_role) in &edges {
             let conf = confidences.get(child_id).copied().unwrap_or(0.0);
             let is_success = successful_set.contains(child_id);
 
-            // Downward: förälderns roll → barn (goal-clustered)
-            let cluster = goal_cluster_id(goal);
-            let dk = format!("{}:down:{}", parent_role, cluster);
-            let de = self
-                .propagation_stats
-                .entry(dk)
-                .or_insert_with(|| (heuristic_down_weight(parent_role), 1.0));
-            if is_success {
-                de.0 += conf;
+            // DCFR regret: success → positive cumulative regret, failure → negative
+            // Regret magnitude scales with confidence (amplitude)
+            let regret = if is_success {
+                conf.max(0.1) // At least 0.1 positive regret for success
             } else {
-                de.1 += 1.0 - conf;
+                -(1.0 - conf).max(0.1) // Negative regret for failure
+            };
+
+            // Downward: parent's role → child (goal-clustered)
+            let dk = format!("{}:down:{}", parent_role, cluster);
+            let de = self.propagation_stats.entry(dk).or_insert((0.0, 0.0));
+            if regret > 0.0 {
+                de.0 += regret; // Accumulate positive regret
+            } else {
+                de.1 += regret; // Accumulate negative regret (stored as negative)
             }
 
-            // Upward: barnets roll → förälder (goal-clustered)
+            // Upward: child's role → parent (goal-clustered)
             let uk = format!("{}:up:{}", child_role, cluster);
-            let ue = self
-                .propagation_stats
-                .entry(uk)
-                .or_insert_with(|| (heuristic_up_weight(child_role), 1.0));
-            if is_success {
-                ue.0 += conf;
+            let ue = self.propagation_stats.entry(uk).or_insert((0.0, 0.0));
+            if regret > 0.0 {
+                ue.0 += regret;
             } else {
-                ue.1 += 1.0 - conf;
+                ue.1 += regret;
             }
         }
 

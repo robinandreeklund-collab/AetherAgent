@@ -274,7 +274,7 @@ async fn main() {
             &fetch_result.body,
             goal,
             &fetch_result.final_url,
-            false,
+            true, // JS-eval: handles SPA/JS-rendered pages like BBC, Guardian
         );
         let total_nodes = flatten_nodes(&tree.nodes).len();
         let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
