@@ -17,8 +17,8 @@ use crate::types::SemanticNode;
 
 // ─── Konstanter ─────────────────────────────────────────────────────────────
 
-/// Chebyshev spectral filter polynomial order (K=4 ≈ 4-hop neighborhood)
-const CHEBYSHEV_ORDER: usize = 4;
+/// Chebyshev max spectral filter polynomial order
+const CHEBYSHEV_MAX_ORDER: usize = 4;
 /// Chebyshev default coefficients θ_k: low-pass filter biased toward local signal
 /// θ_0 = direct signal, θ_1 = 1-hop neighbors, θ_2 = 2-hop, etc.
 /// Decaying profile = low-pass filter that preserves content clusters
@@ -286,6 +286,21 @@ fn heuristic_up_weight(role: &str) -> f32 {
         "button" | "link" | "cta" => 0.9,
         "navigation" | "complementary" => 0.3,
         _ => 1.0,
+    }
+}
+
+/// Adaptive Chebyshev K: scales polynomial order with graph size.
+/// Smaller DOMs need fewer hops, larger DOMs benefit from deeper propagation.
+/// Each K requires one Laplacian multiply (O(|E|)), so reducing K directly cuts latency.
+fn adaptive_chebyshev_k(node_count: usize, max_depth: u32) -> usize {
+    if node_count < 50 {
+        2 // Tiny DOM: 2-hop is sufficient
+    } else if node_count < 200 {
+        3 // Small DOM: 3-hop captures most structure
+    } else if max_depth > 15 || node_count > 2000 {
+        CHEBYSHEV_MAX_ORDER // Deep/large DOM: need full 4-hop
+    } else {
+        3 // Medium DOM: 3-hop is usually enough
     }
 }
 
@@ -1234,8 +1249,13 @@ impl ResonanceField {
             .map(|(&id, s)| (id, s.amplitude))
             .collect();
 
-        // Apply Chebyshev spectral filter
-        let filtered = self.chebyshev_filter(&seed_signal, &down_keys, &up_keys, &bm25_scores);
+        // Adaptive Chebyshev K: scale polynomial order with graph size
+        let max_depth = self.nodes.values().map(|s| s.depth).max().unwrap_or(0);
+        let cheb_k = adaptive_chebyshev_k(self.nodes.len(), max_depth);
+
+        // Apply Chebyshev spectral filter with adaptive order
+        let filtered =
+            self.chebyshev_filter(&seed_signal, &down_keys, &up_keys, &bm25_scores, cheb_k);
 
         // Apply Chebyshev output as additive propagation boost.
         // Nodes keep their Phase 1 amplitude and gain extra signal from
@@ -1716,6 +1736,7 @@ impl ResonanceField {
         down_keys: &HashMap<u32, String>,
         up_keys: &HashMap<u32, String>,
         bm25_scores: &HashMap<u32, f32>,
+        order: usize,
     ) -> HashMap<u32, f32> {
         // λ_max estimation: for trees, λ_max ≤ 2.0
         // Rescaling: L̃_scaled = 2·L̃/λ_max - I = L̃ - I
@@ -1751,7 +1772,7 @@ impl ResonanceField {
         let mut t_prev = t0;
         let mut t_curr = t1;
 
-        for k in 2..=CHEBYSHEV_ORDER {
+        for k in 2..=order {
             // T_k = 2·L̃_scaled·T_{k-1} - T_{k-2}
             let lt = self.laplacian_multiply(&t_curr, down_keys, up_keys);
             let t_next: HashMap<u32, f32> = self
