@@ -55,6 +55,7 @@ RUN rm -rf src/ benches/ && \
 COPY src/ src/
 COPY benches/ benches/
 COPY dashboard.html dashboard.html
+COPY landing-pages/ landing-pages/
 # Stub examples (excluded by .dockerignore but required by Cargo.toml [[example]])
 RUN mkdir -p examples && echo "fn main() {}" > examples/render_demo.rs
 
