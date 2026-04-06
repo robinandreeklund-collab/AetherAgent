@@ -6286,8 +6286,9 @@ fn build_router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
-        // Root & Health
-        .route("/", get(root))
+        // Root = landing page
+        .route("/", get(landing_concept_1))
+        .route("/api-info", get(root))
         .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))

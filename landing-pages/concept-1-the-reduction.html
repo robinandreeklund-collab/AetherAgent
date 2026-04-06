@@ -272,67 +272,69 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   function createParticles(){
     particles = [];
     const w = canvas.offsetWidth, h = canvas.offsetHeight;
-    for(let i=0; i<50; i++){
+    const maxR = Math.min(w, h) * 0.42;
+    for(let i=0; i<45; i++){
+      const orbit = 80 + Math.random() * (maxR - 80);
+      const angle = Math.random() * Math.PI * 2;
+      // Each particle has its own orbit speed — outer ones slower
+      const speed = (0.0003 + Math.random() * 0.0006) * (1 - orbit / maxR * 0.5);
+      // Alternate direction for some rings
+      const dir = Math.random() < 0.3 ? -1 : 1;
       particles.push({
         text: fragments[i % fragments.length],
-        x: Math.random() * w,
-        y: Math.random() * h,
-        originX: Math.random() * w,
-        originY: Math.random() * h,
-        vx: (Math.random()-0.5)*0.3,
-        vy: (Math.random()-0.5)*0.3,
-        alpha: 0.08 + Math.random()*0.14,
-        size: 10 + Math.random()*3,
-        rotation: (Math.random()-0.5)*0.3
+        orbit: orbit,
+        angle: angle,
+        speed: speed * dir,
+        tilt: 0.3 + Math.random() * 0.4, // ellipse squash (0=line, 1=circle)
+        alpha: 0.06 + Math.random() * 0.1,
+        size: 9 + Math.random() * 3,
+        rotationOffset: (Math.random() - 0.5) * 0.4,
+        wobble: Math.random() * Math.PI * 2, // phase for subtle wobble
+        wobbleAmp: 2 + Math.random() * 6
       });
     }
   }
 
-  function animate(){
+  function animate(time){
     const w = canvas.offsetWidth, h = canvas.offsetHeight;
     ctx.clearRect(0,0,w,h);
     const cx = w/2, cy = h/2;
 
     for(const p of particles){
-      // Gentle drift toward center
-      const dx = cx - p.x, dy = cy - p.y;
-      const dist = Math.sqrt(dx*dx+dy*dy);
-      const pull = 0.00008;
-      p.vx += dx * pull;
-      p.vy += dy * pull;
-      p.vx *= 0.995;
-      p.vy *= 0.995;
-      p.x += p.vx;
-      p.y += p.vy;
+      p.angle += p.speed;
 
-      // Fade more as closer to center
-      const maxDist = Math.min(w,h)*0.5;
-      const distRatio = Math.min(dist/maxDist, 1);
-      const alpha = p.alpha * (0.3 + 0.7*distRatio);
+      // Elliptical orbit with subtle wobble
+      const wobble = Math.sin(time * 0.0004 + p.wobble) * p.wobbleAmp;
+      const x = cx + Math.cos(p.angle) * (p.orbit + wobble);
+      const y = cy + Math.sin(p.angle) * (p.orbit + wobble) * p.tilt;
 
-      // Reset if too close to center
-      if(dist < 40){
-        p.x = Math.random() < 0.5 ? Math.random()*w*0.2 : w - Math.random()*w*0.2;
-        p.y = Math.random() * h;
-        p.vx = (Math.random()-0.5)*0.3;
-        p.vy = (Math.random()-0.5)*0.3;
-      }
+      // Fade particles near center text area (avoid overlap with heading)
+      const dx = x - cx, dy = y - cy;
+      const distFromCenter = Math.sqrt(dx*dx + dy*dy);
+      const fadeZone = Math.min(w, h) * 0.18;
+      const centerFade = distFromCenter < fadeZone ? distFromCenter / fadeZone : 1;
+      const alpha = p.alpha * centerFade;
+
+      // Gentle rotation follows orbit direction
+      const rot = p.angle * 0.15 + p.rotationOffset;
 
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
+      ctx.translate(x, y);
+      ctx.rotate(rot);
       ctx.font = `${p.size}px 'JetBrains Mono', monospace`;
-      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
       ctx.fillText(p.text, 0, 0);
       ctx.restore();
     }
 
-    // Center glow
-    const grd = ctx.createRadialGradient(cx,cy,0,cx,cy,80);
-    grd.addColorStop(0,'rgba(59,130,246,0.08)');
+    // Soft center glow
+    const grd = ctx.createRadialGradient(cx,cy,0,cx,cy,100);
+    grd.addColorStop(0,'rgba(59,130,246,0.06)');
     grd.addColorStop(1,'rgba(59,130,246,0)');
     ctx.fillStyle = grd;
-    ctx.fillRect(cx-80,cy-80,160,160);
+    ctx.beginPath();
+    ctx.arc(cx,cy,100,0,Math.PI*2);
+    ctx.fill();
 
     requestAnimationFrame(animate);
   }
