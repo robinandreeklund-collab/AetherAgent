@@ -218,10 +218,10 @@ def build():
          "No prior knowledge. Pure keyword matching."),
         ("Q2: AFTER FEEDBACK", "vaccine safety adverse events clinical trials",
          "Risks of serious illness far higher...", 1.390, 0.081,
-         "causal_boost: +0.081  ← learned from Q1 feedback"),
+         "score +0.081  ← learned from previous feedback"),
         ("Q3: GENERALIZATION", "immunization risks profile serious reactions",
          "Still found — completely new vocabulary", 1.390, 0.081,
-         "Concept memory transfers to unseen phrasings."),
+         "Learned patterns transfer to unseen phrasings."),
     ]
 
     bar_max = 500
@@ -337,7 +337,7 @@ def build():
     d.text((PAD,y),"Raw HTML:",fill=FG,font=FB)
     d.text((PAD+160,y),"$4,004/day",fill=RED,font=FB)
     d.text((PAD+380,y),"$1,461,460/year",fill=RED,font=F); y+=28
-    d.text((PAD,y),"With CRFR:",fill=GREEN,font=FB)
+    d.text((PAD,y),"With us:",fill=GREEN,font=FB)
     d.text((PAD+160,y),"$2/day",fill=GREEN,font=FB)
     d.text((PAD+380,y),"$730/year",fill=GREEN,font=F); y+=34
     d.text((PAD,y),"Annual savings:",fill=DIM2,font=F)
@@ -388,16 +388,16 @@ def build():
 
     y = 140
     # Table header
-    d.text((PAD, y), f"{'Variant':<44} {'nDCG@5':>8}  {'MRR':>8}  {'vs BM25':>10}", fill=DIM2, font=FSB)
+    d.text((PAD, y), f"{'Variant':<44} {'nDCG@5':>8}  {'MRR':>8}  {'vs baseline':>10}", fill=DIM2, font=FSB)
     y += 24
     d.rectangle([PAD, y, W-PAD, y+1], fill=ACCENT); y += 10
 
     ablation = [
-        ("A: BM25 only (keyword matching)",             "0.456", "0.593", "baseline",  DIM2),
-        ("B: + HDC + MiniLM reranker",                  "0.476", "0.584", "+4.4%",     DIM2),
-        ("C: CRFR cold (BM25+HDC+Chebyshev, no learn)", "0.464", "0.524", "+1.8%",     DIM2),
-        ("D: CRFR + 3 feedback rounds",                 "0.765", "0.873", "+67.8%",    GREEN),
-        ("E: CRFR full (suppression + goal-clusters)",   "0.765", "0.873", "+67.8%",    GREEN),
+        ("A: Keyword matching only",                    "0.456", "0.593", "baseline",  DIM2),
+        ("B: + Structural reranker",                    "0.476", "0.584", "+4.4%",     DIM2),
+        ("C: Full pipeline, cold (no learning)",        "0.464", "0.524", "+1.8%",     DIM2),
+        ("D: + 3 feedback rounds",                      "0.765", "0.873", "+67.8%",    GREEN),
+        ("E: + All learning features",                  "0.765", "0.873", "+67.8%",    GREEN),
     ]
     for label, ndcg, mrr, delta, color in ablation:
         is_highlight = color == GREEN
@@ -411,11 +411,9 @@ def build():
 
     y += 20
     d.text((PAD, y), "Key finding:", fill=WHITE, font=FB); y += 26
-    d.text((PAD+20, y), "Causal memory is the dominant contributor: +67.8% nDCG@5.", fill=GREEN, font=F)
+    d.text((PAD+20, y), "Feedback learning is the dominant contributor: +67.8% nDCG@5.", fill=GREEN, font=F)
     y += 26
-    d.text((PAD+20, y), "Three feedback rounds transform ranking quality from 0.464 to 0.765.", fill=DIM2, font=F)
-    y += 26
-    d.text((PAD+20, y), "HDC and Chebyshev provide modest cold-start gains (+4.4%, +1.8%).", fill=DIM2, font=F)
+    d.text((PAD+20, y), "Three feedback rounds transform ranking from 0.464 to 0.765.", fill=DIM2, font=F)
     y += 26
     d.text((PAD+20, y), "MRR improves 0.593 -> 0.873 (+47%) — correct answer moves to #1.", fill=DIM2, font=F)
 
@@ -441,10 +439,10 @@ def build():
     d.rectangle([PAD, y, W-PAD, y+1], fill=ACCENT); y += 10
 
     marco = [
-        ("A: BM25 only",         "0.100", "0.114", "0.507", "19,504", "53",  DIM2),
-        ("B: BM25 + HDC",        "0.099", "0.114", "0.507", "79,041", "13",  DIM2),
-        ("C: CRFR cold",         "0.104", "0.119", "0.508", "83,170", "12",  GREEN),
-        ("D: CRFR + feedback",   "0.104", "0.119", "0.508", "83,457", "12",  GREEN),
+        ("A: Keyword only",         "0.100", "0.114", "0.507", "19,504", "53",  DIM2),
+        ("B: + Structure scoring",   "0.099", "0.114", "0.507", "79,041", "13",  DIM2),
+        ("C: Full pipeline, cold",   "0.104", "0.119", "0.508", "83,170", "12",  GREEN),
+        ("D: + Feedback learning",   "0.104", "0.119", "0.508", "83,457", "12",  GREEN),
     ]
     for label, mrr, ndcg, recall, p50, qps, color in marco:
         d.text((PAD, y), f"{label:<28}", fill=color, font=FB if color==GREEN else F)
@@ -479,7 +477,7 @@ def build():
 
     d.text((PAD+20, y), "Sub-millisecond (20-node DOM): p50 = 184 us (0.184ms)", fill=DIM2, font=F)
     y += 22
-    d.text((PAD+20, y), "Cache-hit CRFR is 4x faster than pure BM25.", fill=DIM2, font=F)
+    d.text((PAD+20, y), "Cache-hit is 4x faster than keyword-only baseline.", fill=DIM2, font=F)
 
     fade(frames, i, 0.35); add(frames, i, 7.5)
 
@@ -494,9 +492,7 @@ def build():
     ct(d, cy, "99.98% token reduction  ·  sub-ms latency  ·  1,000+ qps", DIM2, F); cy+=30
     ct(d, cy, "No GPU  ·  No embeddings  ·  No external models", DIM2, F); cy+=30
     ct(d, cy, "1.8 MB binary  ·  pure Rust  ·  single CPU core", DIM2, F); cy+=30
-    ct(d, cy, "5,600x cheaper  ·  learns without training data", GREEN, FB); cy+=50
-
-    ct(d, cy, "Open source.", DIM2, FM)
+    ct(d, cy, "5,600x cheaper  ·  learns without training data", GREEN, FB)
 
     fade(frames, i, 0.4); add(frames, i, 4.5)
 
