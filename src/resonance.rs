@@ -400,6 +400,73 @@ fn answer_type_boost(goal: &str, label: &str) -> f32 {
     0.0
 }
 
+/// Goal-role affinity: when the goal semantically implies a certain role,
+/// boost nodes of that role even without keyword overlap.
+/// This is critical for cross-language scenarios (e.g. English goal on Swedish page)
+/// where BM25 gives 0 but the structural intent is clear.
+/// Returns bonus score (0.0-0.5).
+fn goal_role_affinity(goal: &str, role: &str) -> f32 {
+    let g = goal.to_lowercase();
+
+    // Headlines/articles/news goals → boost heading and article roles
+    if g.contains("headline")
+        || g.contains("article")
+        || g.contains("rubrik")
+        || g.contains("nyheter")
+        || g.contains("stories")
+        || g.contains("top stories")
+    {
+        return match role {
+            "heading" => 0.45,
+            "article" => 0.3,
+            "text" | "paragraph" => 0.1,
+            _ => 0.0,
+        };
+    }
+
+    // Product/buy/shop goals → boost price, button, product roles
+    if g.contains("product")
+        || g.contains("price")
+        || g.contains("buy")
+        || g.contains("shop")
+        || g.contains("pris")
+        || g.contains("köp")
+    {
+        return match role {
+            "price" | "data" => 0.4,
+            "button" | "cta" => 0.3,
+            "heading" => 0.15,
+            _ => 0.0,
+        };
+    }
+
+    // Form/login/search goals → boost form elements
+    if g.contains("form")
+        || g.contains("login")
+        || g.contains("search")
+        || g.contains("register")
+        || g.contains("sign")
+    {
+        return match role {
+            "textbox" | "searchbox" => 0.4,
+            "button" => 0.3,
+            "select" => 0.2,
+            _ => 0.0,
+        };
+    }
+
+    // Navigation/menu goals → boost navigation
+    if g.contains("menu") || g.contains("navigate") || g.contains("meny") {
+        return match role {
+            "navigation" => 0.4,
+            "link" => 0.2,
+            _ => 0.0,
+        };
+    }
+
+    0.0
+}
+
 /// Boilerplate zone penalty: nodes in nav/footer/aside get penalized.
 /// Based on HTML5 landmark roles — not semantics, pure structure.
 fn zone_penalty(role: &str, depth: u32) -> f32 {
@@ -771,6 +838,11 @@ impl ResonanceField {
         )
     }
 
+    /// Kolla om en nod-ID finns i fältet
+    pub fn has_node(&self, id: u32) -> bool {
+        self.nodes.contains_key(&id)
+    }
+
     pub fn propagate(&mut self, goal: &str) -> Vec<ResonanceResult> {
         self.propagate_inner(goal, false).0
     }
@@ -921,9 +993,31 @@ impl ResonanceField {
             })
             .copied()
             .collect();
+        // Structural bypass: include content-role nodes that BM25 may miss.
+        // Headings, text, articles — these are semantically important regardless
+        // of keyword overlap. Without this, "find article headlines" never finds
+        // headings whose text has zero query-word overlap (e.g. Swedish titles).
+        let structural_nodes: Vec<u32> = node_ids
+            .iter()
+            .filter(|&&nid| {
+                self.nodes
+                    .get(&nid)
+                    .map(|s| {
+                        matches!(
+                            s.role.as_str(),
+                            "heading" | "article" | "text" | "paragraph"
+                        )
+                    })
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
         let trace_bm25_count = bm25_candidates.len();
-        let cascade_candidates: std::collections::HashSet<u32> =
-            bm25_candidates.into_iter().chain(causal_nodes).collect();
+        let cascade_candidates: std::collections::HashSet<u32> = bm25_candidates
+            .into_iter()
+            .chain(causal_nodes)
+            .chain(structural_nodes)
+            .collect();
         let trace_cascade_count = cascade_candidates.len();
 
         for &nid in &node_ids {
@@ -966,10 +1060,15 @@ impl ResonanceField {
                 // #9: Ren roll-prioritet — ingen semantisk HV-matchning
                 let role_boost = role_priority(&state.role);
 
+                // Goal-role affinity: structural intent matching without keyword overlap.
+                // Critical for cross-language queries and generic goals like "find headlines".
+                let affinity = goal_role_affinity(goal, &state.role);
+
                 let base_resonance = BM25_WEIGHT * bm25_score
                     + HDC_TEXT_WEIGHT * hdc_score
                     + ROLE_WEIGHT * role_boost
-                    + concept_boost;
+                    + concept_boost
+                    + affinity;
 
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
@@ -987,6 +1086,7 @@ impl ResonanceField {
                     hdc_score > 0.01,
                     role_boost > 0.1,
                     concept_boost > 0.001,
+                    affinity > 0.05,
                 ]
                 .iter()
                 .filter(|&&b| b)
