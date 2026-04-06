@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 W, H, FPS = 1400, 880, 30
-BG=(13,17,23); FG=(230,237,243); DIM=(72,78,88); DIM2=(100,110,120)
+BG=(13,17,23); FG=(230,237,243); DIM=(120,128,140); DIM2=(155,163,175)
 GREEN=(63,185,80); CYAN=(88,166,255); YELLOW=(210,153,34)
 WHITE=(240,246,252); RED=(255,123,114); ORANGE=(255,166,87)
 BAR_IN=(58,86,145); BAR_OUT=(57,211,83); ACCENT=(40,46,56)
@@ -295,8 +295,10 @@ def build():
     metrics = [
         ("TOKENS",      "677,061 in",  "130 out",       "99.98% eliminated"),
         ("LATENCY",     "528ms cold",  "< 1ms cached",  "sub-millisecond on repeat queries"),
+        ("THROUGHPUT",  "< 1ms/query", "1,000+ qps",    "scales linearly on a single CPU core"),
         ("DOM NODES",   "12,434",      "4 returned",    "0.03% of the page"),
-        ("BINARY SIZE", "1.8 MB",      "zero deps",     "no GPU, no model files, no runtime"),
+        ("EMBEDDINGS",  "none",        "zero models",   "no ONNX, no transformers, no GPU"),
+        ("BINARY SIZE", "1.8 MB",      "zero deps",     "pure Rust, no external model files"),
     ]
     for lb,v1,v2,nt in metrics:
         d.text((PAD,y),f"{lb:14}",fill=DIM2,font=FB)
@@ -384,8 +386,9 @@ def build():
     ct(d, cy, "Kill the noise.", WHITE, FX); cy+=50
     ct(d, cy, "Learn from every interaction.", GREEN, FX); cy+=70
 
-    ct(d, cy, "99.98% token reduction  ·  sub-ms latency", DIM2, F); cy+=30
-    ct(d, cy, "No GPU  ·  No models  ·  1.8 MB  ·  pure Rust", DIM2, F); cy+=30
+    ct(d, cy, "99.98% token reduction  ·  sub-ms latency  ·  1,000+ qps", DIM2, F); cy+=30
+    ct(d, cy, "No GPU  ·  No embeddings  ·  No external models", DIM2, F); cy+=30
+    ct(d, cy, "1.8 MB binary  ·  pure Rust  ·  single CPU core", DIM2, F); cy+=30
     ct(d, cy, "5,600x cheaper  ·  learns without training data", GREEN, FB); cy+=50
 
     ct(d, cy, "Open source.", DIM2, FM)
