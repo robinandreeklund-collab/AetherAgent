@@ -7,7 +7,7 @@
       "total_iterations": 9,
       "total_nodes": 146,
       "article_headings_found": 5,
-      "avg_propagation_ms": 10.135635888888888,
+      "avg_propagation_ms": 8.842404222222221,
       "history": [
         {
           "i": 1,
@@ -79,9 +79,9 @@
       "url": "https://www.dn.se/",
       "converged_at": 1,
       "total_iterations": 9,
-      "total_nodes": 604,
+      "total_nodes": 609,
       "article_headings_found": 5,
-      "avg_propagation_ms": 34.78283255555556,
+      "avg_propagation_ms": 35.43294533333333,
       "history": [
         {
           "i": 1,
@@ -155,7 +155,7 @@
       "total_iterations": 9,
       "total_nodes": 490,
       "article_headings_found": 5,
-      "avg_propagation_ms": 37.19288077777778,
+      "avg_propagation_ms": 37.372724000000005,
       "history": [
         {
           "i": 1,
@@ -196,7 +196,7 @@
           "i": 6,
           "articles": 5,
           "causal": 5,
-          "max_causal": 0.3,
+          "max_causal": 0.2999,
           "streak": 6
         },
         {
@@ -229,7 +229,7 @@
       "total_iterations": 9,
       "total_nodes": 739,
       "article_headings_found": 5,
-      "avg_propagation_ms": 37.01627122222222,
+      "avg_propagation_ms": 36.41728,
       "history": [
         {
           "i": 1,
@@ -303,7 +303,7 @@
       "total_iterations": 9,
       "total_nodes": 1266,
       "article_headings_found": 5,
-      "avg_propagation_ms": 69.25731766666667,
+      "avg_propagation_ms": 70.740237,
       "history": [
         {
           "i": 1,

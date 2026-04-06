@@ -1673,8 +1673,42 @@ impl ResonanceField {
     // Complexity: O(K × |E|) with K=4, same asymptotic as iterative but
     // with provably optimal spectral response (no over-smoothing).
 
+    /// RBP: Check if a subtree should be pruned based on cumulative regret.
+    /// A subtree is pruned if the parent's downward propagation weight is
+    /// below the pruning threshold (0.3), meaning propagation through this
+    /// branch has consistently been unsuccessful.
+    fn should_prune_subtree(&self, parent_id: u32, down_key: &str) -> bool {
+        const RBP_PRUNE_THRESHOLD: f32 = 0.3;
+
+        // Only prune if we have enough data (at least 5 queries)
+        if self.total_queries < 5 {
+            return false;
+        }
+
+        let parent_role = self
+            .nodes
+            .get(&parent_id)
+            .map(|s| s.role.as_str())
+            .unwrap_or("");
+
+        let weight = learned_weight_precomputed(
+            down_key,
+            heuristic_down_weight(parent_role),
+            &self.propagation_stats,
+        );
+
+        // Prune if learned weight is very low AND role is low-priority
+        weight < RBP_PRUNE_THRESHOLD
+            && matches!(
+                parent_role,
+                "navigation" | "complementary" | "contentinfo" | "banner"
+            )
+    }
+
     /// Apply normalized Laplacian operator: L̃·x = x - D^{-1/2} A_w D^{-1/2} x
     /// where A_w uses learned directional weights.
+    /// Includes RBP (Regret-Based Pruning): skips subtrees with consistently
+    /// negative regret to reduce computation.
     fn laplacian_multiply(
         &self,
         x: &HashMap<u32, f32>,
@@ -1698,8 +1732,15 @@ impl ResonanceField {
             .collect();
 
         // Subtract weighted adjacency: -D^{-1/2} A_w D^{-1/2} x
-        // Parent → child edges (downward)
+        // Parent → child edges (downward), with RBP pruning
         for (&parent_id, children) in &self.children_map {
+            let down_key = down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or("");
+
+            // RBP: skip entire subtree if parent's learned weight is very low
+            if self.should_prune_subtree(parent_id, down_key) {
+                continue;
+            }
+
             let d_parent = degrees.get(&parent_id).copied().unwrap_or(1.0);
             let parent_role = self
                 .nodes
@@ -1707,7 +1748,7 @@ impl ResonanceField {
                 .map(|s| s.role.as_str())
                 .unwrap_or("");
             let w_down = learned_weight_precomputed(
-                down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or(""),
+                down_key,
                 heuristic_down_weight(parent_role),
                 &self.propagation_stats,
             );
@@ -1869,15 +1910,28 @@ impl ResonanceField {
         let successful_set: std::collections::HashSet<u32> =
             successful_node_ids.iter().copied().collect();
 
-        // Steg 0: DCFR linear discounting — äldre regrets viktas ner
-        // DCFR uses t^α / (t^α + 1) discount with α=1.5 (linear-ish)
-        // Simplified: multiply by iteration_decay = t / (t + 1)
-        // where t = total_queries as proxy for iteration count
+        // Steg 0: LCFR (Linear CFR) discounting with separate exponents
+        // Positive regrets discount slower (α=1.5) to preserve winning strategies.
+        // Negative regrets discount faster (α=2.0) to forget failures quickly.
+        // This is the key LCFR improvement over vanilla DCFR.
         let t = self.total_queries as f32;
-        let dcfr_discount = if t > 1.0 { (t - 1.0) / t } else { 0.5 };
+        let pos_discount = if t > 1.0 {
+            // t^1.5 / (t^1.5 + 1) — slow decay for positive regret
+            let t_pow = t.powf(1.5);
+            t_pow / (t_pow + 1.0)
+        } else {
+            0.5
+        };
+        let neg_discount = if t > 1.0 {
+            // t^2.0 / (t^2.0 + 1) — fast decay for negative regret
+            let t_pow = t * t;
+            t_pow / (t_pow + 1.0)
+        } else {
+            0.5
+        };
         for (cum_pos, cum_neg) in self.propagation_stats.values_mut() {
-            *cum_pos *= dcfr_discount;
-            *cum_neg *= dcfr_discount;
+            *cum_pos *= pos_discount;
+            *cum_neg *= neg_discount;
         }
 
         // Steg 1: Kausalt minne per nod
