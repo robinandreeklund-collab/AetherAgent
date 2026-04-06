@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slaash — Find the signal.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#050508;--surface:#0c0c12;--border:rgba(255,255,255,0.07);
+  --text:#eee;--muted:#666;--cyan:#06b6d4;--cyan-glow:rgba(6,182,212,0.25);
+  --amber:#f59e0b;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;overflow-x:hidden}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);background:rgba(5,5,8,0.6);border-bottom:1px solid var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .2s;display:inline-block;text-align:center}
+.btn-cyan{background:var(--cyan);color:#000}
+.btn-cyan:hover{background:#22d3ee;color:#000;transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:rgba(255,255,255,0.2);color:#fff}
+
+/* HERO */
+.hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
+#sonar-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+.hero-content{position:relative;z-index:2;max-width:680px}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem}
+.hero .subtitle{font-size:clamp(1rem,2.2vw,1.35rem);color:var(--muted);margin-bottom:2.5rem}
+.hero .subtitle em{color:var(--cyan);font-style:normal;font-weight:500}
+
+/* BEFORE/AFTER */
+.comparison{padding:6rem 2rem;max-width:1100px;margin:0 auto}
+.section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.5rem;text-align:center}
+.section-sub{color:var(--muted);text-align:center;margin-bottom:3rem;font-size:1rem}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+.compare-card{border-radius:16px;padding:2rem;font-family:var(--mono);font-size:.75rem;line-height:1.6;overflow:hidden;position:relative}
+.compare-card.noise{background:#0d0a0a;border:1px solid rgba(255,80,80,0.1);color:#553333;filter:blur(0.3px)}
+.compare-card.signal{background:var(--surface);border:1px solid rgba(6,182,212,0.2);color:var(--text);box-shadow:0 0 40px rgba(6,182,212,0.05)}
+.compare-card h3{font-family:var(--font);font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:1rem;font-weight:600}
+.compare-card.noise h3{color:#994444}
+.compare-card.signal h3{color:var(--cyan)}
+.compare-stats{display:flex;gap:1.5rem;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)}
+.compare-stat{font-family:var(--font)}
+.compare-stat .val{font-size:1.1rem;font-weight:700;color:#fff}
+.compare-card.noise .compare-stat .val{color:#aa5555}
+.compare-card.signal .compare-stat .val{color:var(--cyan)}
+.compare-stat .lbl{font-size:.7rem;color:var(--muted)}
+
+/* FEATURES */
+.features{padding:6rem 2rem;max-width:1000px;margin:0 auto}
+.features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem}
+.feature-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem;transition:all .3s}
+.feature-card:hover{border-color:var(--cyan);box-shadow:0 0 30px var(--cyan-glow)}
+.feature-card svg{width:28px;height:28px;margin-bottom:1rem;stroke:var(--cyan);fill:none;stroke-width:1.5}
+.feature-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem}
+.feature-card p{font-size:.85rem;color:var(--muted);line-height:1.5}
+
+/* BATTLE TESTED */
+.battle{padding:6rem 2rem;max-width:900px;margin:0 auto;text-align:center}
+.site-badges{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem;margin-bottom:2.5rem}
+.site-badge{padding:.4rem .9rem;border-radius:20px;font-size:.75rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-weight:500}
+.battle-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:2rem}
+.battle-val{font-size:clamp(2rem,4vw,2.75rem);font-weight:700;color:var(--cyan);font-variant-numeric:tabular-nums}
+.battle-lbl{font-size:.85rem;color:var(--muted);margin-top:.25rem}
+
+/* CODE TABS */
+.code-section{padding:6rem 2rem;max-width:800px;margin:0 auto}
+.tabs{display:flex;gap:0;margin-bottom:0;border-bottom:1px solid var(--border)}
+.tab{padding:.6rem 1.5rem;font-size:.8rem;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;font-family:var(--font);background:none;border-top:none;border-left:none;border-right:none}
+.tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.tab-content{display:none;background:#0a0d11;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7;overflow-x:auto}
+.tab-content.active{display:block}
+.code-section .kw{color:#ff7b72}.code-section .str{color:#a5d6ff}.code-section .num{color:#79c0ff}
+.code-section .key{color:#d2a8ff}.code-section .cmt{color:#484f58}
+
+/* PERF TABLE */
+.perf{padding:6rem 2rem;max-width:800px;margin:0 auto}
+.perf-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.perf-table th,.perf-table td{padding:.85rem 1rem;text-align:left;border-bottom:1px solid var(--border)}
+.perf-table th{color:var(--muted);font-weight:500;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em}
+.perf-table td{color:var(--text)}
+.perf-table .highlight{color:var(--cyan);font-weight:700}
+.perf-table tr:hover td{background:rgba(6,182,212,0.03)}
+
+/* CTA */
+.cta-section{padding:8rem 2rem;text-align:center}
+.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem}
+.cta-section .sub{color:var(--muted);margin-bottom:2rem;font-size:1rem}
+.cta-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
+.cta-buttons .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
+footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
+
+/* SCROLL REVEAL */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+@media(max-width:768px){
+  .compare-grid,.features-grid{grid-template-columns:1fr}
+  .battle-metrics{grid-template-columns:1fr}
+  nav{padding:1rem}
+  .nav-links{gap:1rem}
+}
+@media(max-width:480px){
+  .nav-links a:not(.btn-sm){display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="wordmark">slaash</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#docs">Docs</a>
+    <a href="#github">GitHub</a>
+    <a class="btn-sm btn-cyan" href="#start">Get started</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <canvas id="sonar-canvas"></canvas>
+  <div class="hero-content">
+    <h1>Find the signal.</h1>
+    <p class="subtitle">AI agents see HTML. <em>Slaash sees meaning.</em></p>
+    <a class="btn-sm btn-cyan" href="#start" style="padding:.75rem 2rem;font-size:.95rem;border-radius:10px">Get started &rarr;</a>
+  </div>
+</section>
+
+<!-- BEFORE / AFTER -->
+<section class="comparison reveal">
+  <h2 class="section-title">Noise vs. Signal</h2>
+  <p class="section-sub">What your agent sees today vs. with Slaash.</p>
+  <div class="compare-grid">
+    <div class="compare-card noise">
+      <h3>Without Slaash</h3>
+&lt;html&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;
+&lt;link rel="stylesheet" href="/s/a8e3f.css"&gt;
+&lt;script src="/js/vendor.38fa1.js"&gt;&lt;/script&gt;
+&lt;div class="nav-wrap" role="navigation"&gt;
+  &lt;ul class="nav__list"&gt;&lt;li&gt;&lt;a href="/"&gt;Home&lt;/a&gt;
+  &lt;li&gt;&lt;a href="/store"&gt;Store&lt;/a&gt;&lt;/li&gt;
+  &lt;li class="nav__item--active"&gt;...&lt;/li&gt;
+&lt;/ul&gt;&lt;/div&gt;&lt;div class="hero__bg"
+  style="background:url(/img/hero.webp)"&gt;
+&lt;div class="promo-banner" aria-hidden="true"&gt;
+  &lt;div class="promo__inner"&gt;...&lt;/div&gt;...
+      <div class="compare-stats">
+        <div class="compare-stat"><div class="val">50,000</div><div class="lbl">tokens</div></div>
+        <div class="compare-stat"><div class="val">$4,004</div><div class="lbl">/day</div></div>
+        <div class="compare-stat"><div class="val">400ms</div><div class="lbl">latency</div></div>
+      </div>
+    </div>
+    <div class="compare-card signal">
+      <h3>With Slaash</h3>
+{
+  "nodes": [
+    {
+      "role": "heading",
+      "label": "iPhone 16 Pro",
+      "relevance": 0.94
+    },
+    {
+      "role": "text",
+      "label": "From $999",
+      "relevance": 0.91
+    },
+    {
+      "role": "link",
+      "label": "Buy now",
+      "relevance": 0.88
+    }
+  ]
+}
+      <div class="compare-stats">
+        <div class="compare-stat"><div class="val">200</div><div class="lbl">tokens</div></div>
+        <div class="compare-stat"><div class="val">$2</div><div class="lbl">/day</div></div>
+        <div class="compare-stat"><div class="val">1ms</div><div class="lbl">latency</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features reveal" id="features">
+  <h2 class="section-title">Precision instruments</h2>
+  <p class="section-sub">Built for agents that need to act, not just read.</p>
+  <div class="features-grid">
+    <div class="feature-card">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7z"/></svg>
+      <h3>Semantic Perception</h3>
+      <p>HTML &rarr; goal-ranked semantic tree. Every node scored for relevance.</p>
+    </div>
+    <div class="feature-card">
+      <svg viewBox="0 0 24 24"><path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/></svg>
+      <h3>Trust Shield</h3>
+      <p>20+ prompt injection patterns neutralized at parse time.</p>
+    </div>
+    <div class="feature-card">
+      <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 8v4l3 3"/></svg>
+      <h3>CRFR Learning</h3>
+      <p>Gets smarter every interaction. No GPU, no training data needed.</p>
+    </div>
+    <div class="feature-card">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/></svg>
+      <h3>Adaptive Streaming</h3>
+      <p>LLM-directed DOM exploration. 95&ndash;99% further token savings.</p>
+    </div>
+  </div>
+</section>
+
+<!-- BATTLE TESTED -->
+<section class="battle reveal">
+  <h2 class="section-title">Battle-tested on the real web</h2>
+  <p class="section-sub">Evaluated across 20 live production sites.</p>
+  <div class="site-badges">
+    <span class="site-badge">Apple</span><span class="site-badge">Wikipedia</span>
+    <span class="site-badge">BBC</span><span class="site-badge">GitHub</span>
+    <span class="site-badge">Stack Overflow</span><span class="site-badge">ESPN</span>
+    <span class="site-badge">NPR</span><span class="site-badge">Hacker News</span>
+    <span class="site-badge">Reddit</span><span class="site-badge">Allrecipes</span>
+    <span class="site-badge">XE.com</span><span class="site-badge">Riksbanken</span>
+    <span class="site-badge">Avanza</span><span class="site-badge">TripAdvisor</span>
+    <span class="site-badge">Khan Academy</span><span class="site-badge">NYT</span>
+    <span class="site-badge">Lobste.rs</span><span class="site-badge">Rust-lang</span>
+    <span class="site-badge">SVT</span><span class="site-badge">IMDB</span>
+  </div>
+  <div class="battle-metrics">
+    <div><div class="battle-val" data-target="97.8" data-suffix="%">0%</div><div class="battle-lbl">Recall accuracy</div></div>
+    <div><div class="battle-val" data-target="99.2" data-suffix="%">0%</div><div class="battle-lbl">Token reduction</div></div>
+    <div><div class="battle-val" data-target="20" data-suffix=" sites">0</div><div class="battle-lbl">Zero failures</div></div>
+  </div>
+</section>
+
+<!-- CODE TABS -->
+<section class="code-section reveal">
+  <h2 class="section-title">Three lines. Full power.</h2>
+  <p class="section-sub">MCP, HTTP, or WASM &mdash; your choice.</p>
+  <div class="tabs">
+    <button class="tab active" data-tab="mcp">MCP</button>
+    <button class="tab" data-tab="http">HTTP API</button>
+    <button class="tab" data-tab="wasm">WASM</button>
+  </div>
+  <div class="tab-content active" id="tab-mcp">
+{
+  <span class="key">"tool"</span>: <span class="str">"parse"</span>,
+  <span class="key">"arguments"</span>: {
+    <span class="key">"url"</span>: <span class="str">"https://apple.com"</span>,
+    <span class="key">"goal"</span>: <span class="str">"find iPhone 16 price"</span>
+  }
+}</div>
+  <div class="tab-content" id="tab-http">
+<span class="kw">curl</span> -X POST https://api.slaash.ai/parse \
+  -H <span class="str">"Authorization: Bearer sk-..."</span> \
+  -d <span class="str">'{"url":"https://apple.com","goal":"find iPhone 16 price"}'</span></div>
+  <div class="tab-content" id="tab-wasm">
+<span class="kw">import</span> { parse } <span class="kw">from</span> <span class="str">'slaash'</span>;
+
+<span class="kw">const</span> result = <span class="kw">await</span> parse(<span class="str">"https://apple.com"</span>, <span class="str">"find iPhone 16 price"</span>);
+console.log(result.nodes);
+<span class="cmt">// [{role: "text", label: "From $999", relevance: 0.91}]</span></div>
+</section>
+
+<!-- PERFORMANCE TABLE -->
+<section class="perf reveal">
+  <h2 class="section-title">Engineered for speed</h2>
+  <p class="section-sub">Benchmarked against industry alternatives.</p>
+  <table class="perf-table">
+    <thead><tr><th></th><th>Slaash</th><th>Chrome CDP</th><th>LightPanda</th></tr></thead>
+    <tbody>
+      <tr><td>Parse time</td><td class="highlight">1ms</td><td>167ms</td><td>4ms</td></tr>
+      <tr><td>Tokens out</td><td class="highlight">200</td><td>50,000</td><td>79,406</td></tr>
+      <tr><td>Memory</td><td class="highlight">27MB</td><td>500MB+</td><td>200MB+</td></tr>
+      <tr><td>Startup</td><td class="highlight">&lt;1ms</td><td>2-5s</td><td>1-3s</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- CTA -->
+<section class="cta-section reveal">
+  <h2>Give your agent eyes.</h2>
+  <p class="sub">Built in Rust. MIT Licensed. Deploy anywhere.</p>
+  <div class="cta-buttons">
+    <a class="btn-sm btn-cyan" href="#start">Get started &rarr;</a>
+    <a class="btn-sm btn-ghost" href="#docs">Read the docs</a>
+  </div>
+</section>
+
+<footer>
+  <p>&copy; 2026 Slaash. MIT Licensed.</p>
+</footer>
+
+<!-- JS added in phases below -->
+<script>
+// ── SONAR CANVAS ANIMATION ──
+(function() {
+  const canvas = document.getElementById('sonar-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, nodes = [], pulses = [], lastPulse = 0;
+
+  const signalIndices = new Set();
+
+  function resize() {
+    W = canvas.width = canvas.offsetWidth * devicePixelRatio;
+    H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    initNodes();
+  }
+
+  function initNodes() {
+    nodes = [];
+    signalIndices.clear();
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    const cx = w / 2, cy = h / 2;
+    const count = 100;
+    // Pick 6 signal nodes
+    while (signalIndices.size < 6) signalIndices.add(Math.floor(Math.random() * count));
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 60 + Math.random() * Math.min(w, h) * 0.38;
+      nodes.push({
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+        r: 2 + Math.random() * 2,
+        lit: false,
+        litAlpha: 0,
+        isSignal: signalIndices.has(i)
+      });
+    }
+  }
+
+  function animate(time) {
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    const cx = w / 2, cy = h / 2;
+    ctx.clearRect(0, 0, w, h);
+
+    // Emit pulse every 2.5s
+    if (time - lastPulse > 2500) {
+      pulses.push({ t: time, radius: 0 });
+      lastPulse = time;
+    }
+
+    // Update & draw pulses
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i];
+      const age = (time - p.t) / 1000;
+      p.radius = age * 120;
+      const alpha = Math.max(0, 0.35 - age * 0.1);
+      if (alpha <= 0) { pulses.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(cx, cy, p.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(6,182,212,${alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Check node hits
+      for (const n of nodes) {
+        if (n.isSignal && !n.lit) {
+          const dist = Math.sqrt((n.x - cx) ** 2 + (n.y - cy) ** 2);
+          if (Math.abs(dist - p.radius) < 8) {
+            n.lit = true;
+          }
+        }
+      }
+    }
+
+    // Draw nodes
+    for (const n of nodes) {
+      if (n.lit && n.litAlpha < 1) n.litAlpha = Math.min(1, n.litAlpha + 0.02);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      if (n.lit) {
+        ctx.fillStyle = `rgba(6,182,212,${0.3 + 0.7 * n.litAlpha})`;
+        ctx.shadowColor = 'rgba(6,182,212,0.6)';
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(6,182,212,0.5)';
+    ctx.fill();
+
+    requestAnimationFrame(animate);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(animate);
+})();
+
+// ── SCROLL REVEAL ──
+const reveals = document.querySelectorAll('.reveal');
+const revealObs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visible'); revealObs.unobserve(e.target); }
+  });
+}, { threshold: 0.12 });
+reveals.forEach(el => revealObs.observe(el));
+
+// ── COUNT-UP METRICS ──
+function countUp(el, target, suffix, duration) {
+  const start = performance.now();
+  const isInt = target % 1 === 0;
+  function tick(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - t, 4);
+    const val = ease * target;
+    el.textContent = (isInt ? Math.round(val) : val.toFixed(1)) + suffix;
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+document.querySelectorAll('.battle-val').forEach(el => {
+  const obs = new IntersectionObserver(([e]) => {
+    if (e.isIntersecting) {
+      countUp(el, parseFloat(el.dataset.target), el.dataset.suffix || '', 1500);
+      obs.unobserve(el);
+    }
+  }, { threshold: 0.5 });
+  obs.observe(el);
+});
+
+// ── TABS ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+</script>
+</body>
+</html>
