@@ -1030,11 +1030,53 @@ impl ResonanceField {
             .copied()
             .collect();
         let trace_bm25_count = bm25_candidates.len();
-        let cascade_candidates: std::collections::HashSet<u32> = bm25_candidates
+        let mut cascade_vec: Vec<u32> = bm25_candidates
             .into_iter()
             .chain(causal_nodes)
             .chain(structural_nodes)
             .collect();
+
+        // v17 MCCFR: If cascade set is very large, sample down to max 300 nodes
+        // weighted by prior probability (role priority + BM25 score).
+        // This prevents O(N) expensive scoring on huge DOMs while preserving
+        // the most likely useful candidates.
+        const MCCFR_MAX_CANDIDATES: usize = 300;
+        if cascade_vec.len() > MCCFR_MAX_CANDIDATES {
+            // Deduplicate first
+            cascade_vec.sort_unstable();
+            cascade_vec.dedup();
+
+            if cascade_vec.len() > MCCFR_MAX_CANDIDATES {
+                // Score each candidate by prior: BM25 + role priority + causal memory
+                let mut scored: Vec<(u32, f32)> = cascade_vec
+                    .iter()
+                    .map(|&nid| {
+                        let bm25 = bm25_scores.get(&nid).copied().unwrap_or(0.0);
+                        let role_p = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| role_priority(&s.role))
+                            .unwrap_or(0.0);
+                        let causal = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| if s.hit_count > 0 { 0.5 } else { 0.0 })
+                            .unwrap_or(0.0);
+                        let affinity_score = self
+                            .nodes
+                            .get(&nid)
+                            .map(|s| goal_role_affinity(goal, &s.role))
+                            .unwrap_or(0.0);
+                        (nid, bm25 + role_p * 0.3 + causal + affinity_score)
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+                scored.truncate(MCCFR_MAX_CANDIDATES);
+                cascade_vec = scored.into_iter().map(|(id, _)| id).collect();
+            }
+        }
+
+        let cascade_candidates: std::collections::HashSet<u32> = cascade_vec.into_iter().collect();
         let trace_cascade_count = cascade_candidates.len();
 
         for &nid in &node_ids {
