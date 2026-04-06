@@ -214,14 +214,10 @@ async fn main() {
             "https://www.aftonbladet.se/",
             "find news article headlines",
         ),
+        ("DN.se", "https://www.dn.se/", "find news article headlines"),
         (
-            "BBC News",
-            "https://www.bbc.com/news",
-            "find news article headlines",
-        ),
-        (
-            "The Guardian",
-            "https://www.theguardian.com/us",
+            "CNN",
+            "https://edition.cnn.com/",
             "find news article headlines",
         ),
         (

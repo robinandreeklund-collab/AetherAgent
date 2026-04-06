@@ -7,7 +7,7 @@
       "total_iterations": 9,
       "total_nodes": 146,
       "article_headings_found": 5,
-      "avg_propagation_ms": 10.875447999999999,
+      "avg_propagation_ms": 10.888193444444445,
       "history": [
         {
           "i": 1,
@@ -75,24 +75,152 @@
       ]
     },
     {
-      "name": "BBC News",
-      "url": "https://www.bbc.com/news",
-      "converged_at": null,
-      "total_iterations": 0,
-      "total_nodes": 1,
-      "article_headings_found": 0,
-      "avg_propagation_ms": 0.0,
-      "history": []
+      "name": "DN.se",
+      "url": "https://www.dn.se/",
+      "converged_at": 1,
+      "total_iterations": 9,
+      "total_nodes": 604,
+      "article_headings_found": 5,
+      "avg_propagation_ms": 37.56481366666666,
+      "history": [
+        {
+          "i": 1,
+          "articles": 4,
+          "causal": 0,
+          "max_causal": 0.0,
+          "streak": 1
+        },
+        {
+          "i": 2,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.3,
+          "streak": 2
+        },
+        {
+          "i": 3,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.3,
+          "streak": 3
+        },
+        {
+          "i": 4,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.3,
+          "streak": 4
+        },
+        {
+          "i": 5,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.3,
+          "streak": 5
+        },
+        {
+          "i": 6,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.2999,
+          "streak": 6
+        },
+        {
+          "i": 7,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.2999,
+          "streak": 7
+        },
+        {
+          "i": 8,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.2999,
+          "streak": 8
+        },
+        {
+          "i": 9,
+          "articles": 4,
+          "causal": 4,
+          "max_causal": 0.2999,
+          "streak": 9
+        }
+      ]
     },
     {
-      "name": "The Guardian",
-      "url": "https://www.theguardian.com/us",
-      "converged_at": null,
-      "total_iterations": 0,
-      "total_nodes": 1,
-      "article_headings_found": 0,
-      "avg_propagation_ms": 0.0,
-      "history": []
+      "name": "CNN",
+      "url": "https://edition.cnn.com/",
+      "converged_at": 1,
+      "total_iterations": 9,
+      "total_nodes": 490,
+      "article_headings_found": 5,
+      "avg_propagation_ms": 35.760340222222226,
+      "history": [
+        {
+          "i": 1,
+          "articles": 5,
+          "causal": 0,
+          "max_causal": 0.0,
+          "streak": 1
+        },
+        {
+          "i": 2,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.3,
+          "streak": 2
+        },
+        {
+          "i": 3,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.3,
+          "streak": 3
+        },
+        {
+          "i": 4,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.3,
+          "streak": 4
+        },
+        {
+          "i": 5,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.3,
+          "streak": 5
+        },
+        {
+          "i": 6,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.3,
+          "streak": 6
+        },
+        {
+          "i": 7,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.2999,
+          "streak": 7
+        },
+        {
+          "i": 8,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.2999,
+          "streak": 8
+        },
+        {
+          "i": 9,
+          "articles": 5,
+          "causal": 5,
+          "max_causal": 0.2999,
+          "streak": 9
+        }
+      ]
     },
     {
       "name": "SVT Nyheter",
@@ -101,7 +229,7 @@
       "total_iterations": 9,
       "total_nodes": 739,
       "article_headings_found": 5,
-      "avg_propagation_ms": 36.99447955555556,
+      "avg_propagation_ms": 38.871801777777776,
       "history": [
         {
           "i": 1,
@@ -173,9 +301,9 @@
       "url": "https://www.npr.org/",
       "converged_at": 1,
       "total_iterations": 9,
-      "total_nodes": 1234,
+      "total_nodes": 1266,
       "article_headings_found": 5,
-      "avg_propagation_ms": 68.60975077777778,
+      "avg_propagation_ms": 69.80373877777778,
       "history": [
         {
           "i": 1,
