@@ -2,7 +2,7 @@
   {
     "name": "NPR",
     "url": "https://www.npr.org/",
-    "total_nodes": 1266,
+    "total_nodes": 1229,
     "baseline_ndcg5": 0.6182886,
     "baseline_mrr": 0.33333334,
     "train_avg_ndcg5": 0.750211,
@@ -98,7 +98,7 @@
         "mrr": 1.0,
         "p5": 1.0,
         "causal": 14,
-        "relevant": 14,
+        "relevant": 16,
         "total_returned": 20
       },
       {
@@ -120,7 +120,7 @@
         "mrr": 1.0,
         "p5": 0.4,
         "causal": 14,
-        "relevant": 16,
+        "relevant": 15,
         "total_returned": 20
       }
     ]
@@ -257,11 +257,11 @@
     "total_nodes": 308,
     "baseline_ndcg5": 1.0,
     "baseline_mrr": 1.0,
-    "train_avg_ndcg5": 0.9926383,
+    "train_avg_ndcg5": 0.9841196,
     "test_avg_ndcg5": 1.0,
     "test_avg_mrr": 1.0,
     "test_avg_p5": 1.0,
-    "test_causal_avg": 19.333334,
+    "test_causal_avg": 18.666666,
     "feedback_total": 115,
     "feedback_relevant": 115,
     "iterations": [
@@ -305,7 +305,7 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 17,
+        "causal": 16,
         "relevant": 20,
         "total_returned": 20
       },
@@ -335,7 +335,7 @@
         "i": 7,
         "goal": "federal government help",
         "phase": "TRAIN",
-        "ndcg5": 0.95582956,
+        "ndcg5": 0.9047172,
         "mrr": 1.0,
         "p5": 0.8,
         "causal": 19,
@@ -360,8 +360,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 18,
-        "relevant": 18,
+        "causal": 16,
+        "relevant": 16,
         "total_returned": 20
       },
       {
@@ -509,13 +509,13 @@
     "total_nodes": 763,
     "baseline_ndcg5": 0.9469024,
     "baseline_mrr": 1.0,
-    "train_avg_ndcg5": 0.99457806,
+    "train_avg_ndcg5": 0.9926383,
     "test_avg_ndcg5": 1.0,
     "test_avg_mrr": 1.0,
     "test_avg_p5": 0.73333335,
-    "test_causal_avg": 15.0,
-    "feedback_total": 81,
-    "feedback_relevant": 81,
+    "test_causal_avg": 15.666667,
+    "feedback_total": 85,
+    "feedback_relevant": 85,
     "iterations": [
       {
         "i": 1,
@@ -536,7 +536,7 @@
         "mrr": 1.0,
         "p5": 1.0,
         "causal": 0,
-        "relevant": 12,
+        "relevant": 13,
         "total_returned": 20
       },
       {
@@ -557,8 +557,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.6,
-        "causal": 13,
-        "relevant": 13,
+        "causal": 14,
+        "relevant": 14,
         "total_returned": 20
       },
       {
@@ -568,17 +568,17 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 14,
-        "relevant": 17,
+        "causal": 15,
+        "relevant": 18,
         "total_returned": 20
       },
       {
         "i": 6,
         "goal": "what helps with a cold",
         "phase": "TRAIN",
-        "ndcg5": 0.967468,
+        "ndcg5": 0.95582956,
         "mrr": 1.0,
-        "p5": 0.6,
+        "p5": 0.8,
         "causal": 9,
         "relevant": 9,
         "total_returned": 20
@@ -590,8 +590,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 17,
-        "relevant": 17,
+        "causal": 18,
+        "relevant": 18,
         "total_returned": 20
       },
       {
@@ -601,8 +601,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.6,
-        "causal": 17,
-        "relevant": 17,
+        "causal": 18,
+        "relevant": 18,
         "total_returned": 20
       },
       {
@@ -623,8 +623,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 17,
-        "relevant": 17,
+        "causal": 18,
+        "relevant": 18,
         "total_returned": 20
       }
     ]

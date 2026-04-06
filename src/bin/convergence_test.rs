@@ -428,6 +428,39 @@ async fn main() {
                 }
             }
 
+            // Dump top-5 node content for Q1 (baseline) and Q8 (first test)
+            if qi == 0 || qi == 7 {
+                println!("    TOP-5 CONTENT:");
+                for (rank, r) in top_results.iter().take(5).enumerate() {
+                    let label = node_labels
+                        .get(&r.node_id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
+                    let short: String = label.chars().take(80).collect();
+                    let rel = if rels.get(rank).copied().unwrap_or(0.0) > 0.0 {
+                        "REL"
+                    } else {
+                        "---"
+                    };
+                    println!(
+                        "    #{} [{}] id:{} amp={:.3} role={} \"{}\"",
+                        rank + 1,
+                        rel,
+                        r.node_id,
+                        r.amplitude,
+                        node_labels.get(&r.node_id).map(|_| {
+                            // Get role from tree
+                            flatten_nodes(&tree.nodes)
+                                .iter()
+                                .find(|n| n.id == r.node_id)
+                                .map(|n| n.role.as_str())
+                                .unwrap_or("?")
+                        }).unwrap_or("?"),
+                        short
+                    );
+                }
+            }
+
             let causal_str = if causal > 0 {
                 format!(" caus={}", causal)
             } else {
