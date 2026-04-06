@@ -3,25 +3,25 @@
     "name": "NPR",
     "url": "https://www.npr.org/",
     "total_nodes": 1229,
-    "baseline_ndcg5": 0.6182886,
-    "baseline_mrr": 0.33333334,
+    "baseline_ndcg5": 1.0,
+    "baseline_mrr": 1.0,
     "train_avg_ndcg5": 0.750211,
     "test_avg_ndcg5": 0.6666667,
     "test_avg_mrr": 0.7083333,
     "test_avg_p5": 0.46666667,
-    "test_causal_avg": 13.666667,
-    "feedback_total": 49,
-    "feedback_relevant": 49,
+    "test_causal_avg": 15.333333,
+    "feedback_total": 89,
+    "feedback_relevant": 89,
     "iterations": [
       {
         "i": 1,
         "goal": "latest news stories today",
         "phase": "BASELINE",
-        "ndcg5": 0.6182886,
-        "mrr": 0.33333334,
-        "p5": 0.6,
+        "ndcg5": 1.0,
+        "mrr": 1.0,
+        "p5": 1.0,
         "causal": 0,
-        "relevant": 12,
+        "relevant": 13,
         "total_returned": 20
       },
       {
@@ -32,7 +32,7 @@
         "mrr": 1.0,
         "p5": 1.0,
         "causal": 0,
-        "relevant": 11,
+        "relevant": 19,
         "total_returned": 20
       },
       {
@@ -40,10 +40,10 @@
         "goal": "top articles published today",
         "phase": "TRAIN",
         "ndcg5": 0.0,
-        "mrr": 0.0,
+        "mrr": 0.083333336,
         "p5": 0.0,
-        "causal": 0,
-        "relevant": 0,
+        "causal": 9,
+        "relevant": 9,
         "total_returned": 20
       },
       {
@@ -53,8 +53,8 @@
         "ndcg5": 0.5012659,
         "mrr": 0.25,
         "p5": 0.4,
-        "causal": 11,
-        "relevant": 11,
+        "causal": 16,
+        "relevant": 16,
         "total_returned": 20
       },
       {
@@ -64,8 +64,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.4,
-        "causal": 2,
-        "relevant": 2,
+        "causal": 15,
+        "relevant": 15,
         "total_returned": 20
       },
       {
@@ -75,7 +75,7 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 11,
+        "causal": 13,
         "relevant": 13,
         "total_returned": 20
       },
@@ -86,8 +86,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 11,
-        "relevant": 12,
+        "causal": 15,
+        "relevant": 17,
         "total_returned": 20
       },
       {
@@ -97,7 +97,7 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 14,
+        "causal": 16,
         "relevant": 16,
         "total_returned": 20
       },
@@ -119,8 +119,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.4,
-        "causal": 14,
-        "relevant": 15,
+        "causal": 17,
+        "relevant": 17,
         "total_returned": 20
       }
     ]
@@ -128,16 +128,16 @@
   {
     "name": "ESPN",
     "url": "https://www.espn.com/",
-    "total_nodes": 642,
+    "total_nodes": 632,
     "baseline_ndcg5": 1.0,
     "baseline_mrr": 1.0,
     "train_avg_ndcg5": 0.8851237,
     "test_avg_ndcg5": 0.9942973,
     "test_avg_mrr": 1.0,
     "test_avg_p5": 0.93333334,
-    "test_causal_avg": 14.666667,
-    "feedback_total": 83,
-    "feedback_relevant": 83,
+    "test_causal_avg": 13.666667,
+    "feedback_total": 84,
+    "feedback_relevant": 84,
     "iterations": [
       {
         "i": 1,
@@ -158,7 +158,7 @@
         "mrr": 1.0,
         "p5": 0.4,
         "causal": 0,
-        "relevant": 9,
+        "relevant": 10,
         "total_returned": 20
       },
       {
@@ -201,7 +201,7 @@
         "ndcg5": 0.9047172,
         "mrr": 1.0,
         "p5": 0.8,
-        "causal": 16,
+        "causal": 17,
         "relevant": 19,
         "total_returned": 20
       },
@@ -245,8 +245,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 17,
-        "relevant": 18,
+        "causal": 14,
+        "relevant": 17,
         "total_returned": 20
       }
     ]
@@ -509,13 +509,13 @@
     "total_nodes": 763,
     "baseline_ndcg5": 0.9469024,
     "baseline_mrr": 1.0,
-    "train_avg_ndcg5": 0.9926383,
+    "train_avg_ndcg5": 0.98433757,
     "test_avg_ndcg5": 1.0,
     "test_avg_mrr": 1.0,
     "test_avg_p5": 0.73333335,
-    "test_causal_avg": 15.666667,
-    "feedback_total": 85,
-    "feedback_relevant": 85,
+    "test_causal_avg": 15.0,
+    "feedback_total": 81,
+    "feedback_relevant": 81,
     "iterations": [
       {
         "i": 1,
@@ -536,7 +536,7 @@
         "mrr": 1.0,
         "p5": 1.0,
         "causal": 0,
-        "relevant": 13,
+        "relevant": 12,
         "total_returned": 20
       },
       {
@@ -546,7 +546,7 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.4,
-        "causal": 11,
+        "causal": 12,
         "relevant": 13,
         "total_returned": 20
       },
@@ -557,8 +557,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.6,
-        "causal": 14,
-        "relevant": 14,
+        "causal": 13,
+        "relevant": 13,
         "total_returned": 20
       },
       {
@@ -568,17 +568,17 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 15,
-        "relevant": 18,
+        "causal": 13,
+        "relevant": 17,
         "total_returned": 20
       },
       {
         "i": 6,
         "goal": "what helps with a cold",
         "phase": "TRAIN",
-        "ndcg5": 0.95582956,
+        "ndcg5": 0.90602547,
         "mrr": 1.0,
-        "p5": 0.8,
+        "p5": 0.6,
         "causal": 9,
         "relevant": 9,
         "total_returned": 20
@@ -590,8 +590,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 18,
-        "relevant": 18,
+        "causal": 17,
+        "relevant": 17,
         "total_returned": 20
       },
       {
@@ -601,8 +601,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 0.6,
-        "causal": 18,
-        "relevant": 18,
+        "causal": 17,
+        "relevant": 17,
         "total_returned": 20
       },
       {
@@ -623,8 +623,8 @@
         "ndcg5": 1.0,
         "mrr": 1.0,
         "p5": 1.0,
-        "causal": 18,
-        "relevant": 18,
+        "causal": 17,
+        "relevant": 17,
         "total_returned": 20
       }
     ]

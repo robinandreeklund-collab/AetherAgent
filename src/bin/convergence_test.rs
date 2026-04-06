@@ -448,14 +448,17 @@ async fn main() {
                         rel,
                         r.node_id,
                         r.amplitude,
-                        node_labels.get(&r.node_id).map(|_| {
-                            // Get role from tree
-                            flatten_nodes(&tree.nodes)
-                                .iter()
-                                .find(|n| n.id == r.node_id)
-                                .map(|n| n.role.as_str())
-                                .unwrap_or("?")
-                        }).unwrap_or("?"),
+                        node_labels
+                            .get(&r.node_id)
+                            .map(|_| {
+                                // Get role from tree
+                                flatten_nodes(&tree.nodes)
+                                    .iter()
+                                    .find(|n| n.id == r.node_id)
+                                    .map(|n| n.role.as_str())
+                                    .unwrap_or("?")
+                            })
+                            .unwrap_or("?"),
                         short
                     );
                 }

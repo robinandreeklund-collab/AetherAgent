@@ -415,72 +415,19 @@ fn answer_type_boost(goal: &str, label: &str) -> f32 {
     0.0
 }
 
-/// Goal-role affinity: when the goal semantically implies a certain role,
-/// boost nodes of that role even without keyword overlap.
-/// This is critical for cross-language scenarios (e.g. English goal on Swedish page)
-/// where BM25 gives 0 but the structural intent is clear.
-/// Returns bonus score (0.0-0.5).
-fn goal_role_affinity(goal: &str, role: &str) -> f32 {
-    let g = goal.to_lowercase();
-
-    // Headlines/articles/news goals → boost heading and article roles
-    if g.contains("headline")
-        || g.contains("article")
-        || g.contains("rubrik")
-        || g.contains("nyheter")
-        || g.contains("stories")
-        || g.contains("top stories")
-    {
-        return match role {
-            "heading" => 0.45,
-            "article" => 0.3,
-            "text" | "paragraph" => 0.1,
-            _ => 0.0,
-        };
-    }
-
-    // Product/buy/shop goals → boost price, button, product roles
-    if g.contains("product")
-        || g.contains("price")
-        || g.contains("buy")
-        || g.contains("shop")
-        || g.contains("pris")
-        || g.contains("köp")
-    {
-        return match role {
-            "price" | "data" => 0.4,
-            "button" | "cta" => 0.3,
-            "heading" => 0.15,
-            _ => 0.0,
-        };
-    }
-
-    // Form/login/search goals → boost form elements
-    if g.contains("form")
-        || g.contains("login")
-        || g.contains("search")
-        || g.contains("register")
-        || g.contains("sign")
-    {
-        return match role {
-            "textbox" | "searchbox" => 0.4,
-            "button" => 0.3,
-            "select" => 0.2,
-            _ => 0.0,
-        };
-    }
-
-    // Navigation/menu goals → boost navigation
-    if g.contains("menu") || g.contains("navigate") || g.contains("meny") {
-        return match role {
-            "navigation" => 0.4,
-            "link" => 0.2,
-            _ => 0.0,
-        };
-    }
-
-    0.0
-}
+// goal_role_affinity REMOVED (v18.1)
+//
+// This function was a shortcut that boosted ALL headings +0.45 when the goal
+// mentioned "headlines"/"articles" etc. This inflated metrics by ranking
+// nav-headings like "Savannah Guthrie" above actual content.
+//
+// The correct mechanism is suppression learning (§3.6 in CRFR whitepaper):
+// - Nodes that repeatedly appear but are never marked successful get suppressed
+// - This is learned from feedback, not hardcoded rules
+// - Takes 3-9 iterations but produces genuine, honest convergence
+//
+// The structural cascade bypass (which ensures headings ARE scored even without
+// BM25 match) is kept — that fixes the root cause of headings being excluded.
 
 /// Boilerplate zone penalty: nodes in nav/footer/aside get penalized.
 /// Based on HTML5 landmark roles — not semantics, pure structure.
@@ -1062,12 +1009,7 @@ impl ResonanceField {
                             .get(&nid)
                             .map(|s| if s.hit_count > 0 { 0.5 } else { 0.0 })
                             .unwrap_or(0.0);
-                        let affinity_score = self
-                            .nodes
-                            .get(&nid)
-                            .map(|s| goal_role_affinity(goal, &s.role))
-                            .unwrap_or(0.0);
-                        (nid, bm25 + role_p * 0.3 + causal + affinity_score)
+                        (nid, bm25 + role_p * 0.3 + causal)
                     })
                     .collect();
                 scored.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -1119,15 +1061,10 @@ impl ResonanceField {
                 // #9: Ren roll-prioritet — ingen semantisk HV-matchning
                 let role_boost = role_priority(&state.role);
 
-                // Goal-role affinity: structural intent matching without keyword overlap.
-                // Critical for cross-language queries and generic goals like "find headlines".
-                let affinity = goal_role_affinity(goal, &state.role);
-
                 let base_resonance = BM25_WEIGHT * bm25_score
                     + HDC_TEXT_WEIGHT * hdc_score
                     + ROLE_WEIGHT * role_boost
-                    + concept_boost
-                    + affinity;
+                    + concept_boost;
 
                 let causal_boost = if state.hit_count > 0 {
                     let raw_causal = state.causal_memory.similarity(&goal_hv);
@@ -1145,7 +1082,6 @@ impl ResonanceField {
                     hdc_score > 0.01,
                     role_boost > 0.1,
                     concept_boost > 0.001,
-                    affinity > 0.05,
                 ]
                 .iter()
                 .filter(|&&b| b)
@@ -3275,31 +3211,6 @@ mod tests {
     }
 
     #[test]
-    fn test_goal_role_affinity_headlines() {
-        // Test that "find headlines" boosts heading nodes
-        let affinity = goal_role_affinity("find news article headlines", "heading");
-        assert!(
-            affinity > 0.3,
-            "Heading affinity for headlines goal borde vara > 0.3, fick {affinity}"
-        );
-
-        let nav_affinity = goal_role_affinity("find news article headlines", "navigation");
-        assert!(
-            nav_affinity < 0.01,
-            "Navigation affinity for headlines goal borde vara ~0, fick {nav_affinity}"
-        );
-    }
-
-    #[test]
-    fn test_goal_role_affinity_products() {
-        let price_affinity = goal_role_affinity("find product price", "price");
-        assert!(
-            price_affinity > 0.3,
-            "Price affinity for product goal borde vara > 0.3, fick {price_affinity}"
-        );
-    }
-
-    #[test]
     fn test_dcfr_feedback_builds_regret() {
         // Test that DCFR feedback accumulates positive regret for successful nodes
         let tree = vec![make_node(
@@ -3347,7 +3258,7 @@ mod tests {
         let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
         let results = field.propagate("find article headlines");
 
-        // Heading nodes (10-14) should be in results thanks to structural bypass + affinity
+        // Heading nodes (10-14) should be in results thanks to structural cascade bypass
         let heading_ids: Vec<u32> = (10..15).collect();
         let found = results
             .iter()
