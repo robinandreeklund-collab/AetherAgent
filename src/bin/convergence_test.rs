@@ -1,10 +1,14 @@
-//! CRFR Convergence Test — measures convergence against REAL websites
+//! CRFR Convergence Test v2 — Honest evaluation with standard IR metrics
 //!
-//! Protocol: "Run until 4/5 article-headings found for 3 consecutive, max 100"
-//! Uses parse_crfr (auto-fetch + cache) + crfr_feedback, same pipeline as MCP tools.
-//! First call fetches the page, subsequent calls hit the URL cache — no spam.
+//! Protocol (matches crfr-20site-evaluation.json):
+//!   Phase BASELINE: Q1 cold start, no feedback
+//!   Phase TRAIN: Q2-Q7 with feedback after each
+//!   Phase TEST: Q8-Q10 no feedback, measure generalization
 //!
-//! Run with: `cargo run --bin aether-convergence-test --features fetch`
+//! Metrics: nDCG@5, MRR, P@5 — only top-20 results considered
+//! Relevance: binary keyword match (same as original eval)
+//!
+//! Run with: `cargo run --bin aether-convergence-test --features "fetch,js-eval"`
 
 use std::time::Instant;
 
@@ -13,16 +17,77 @@ use aether_agent::types::SemanticNode;
 
 // ─── Konfiguration ─────────────────────────────────────────────────────────
 
-/// Konvergens: minst 4 av 5 artiklar (80%)
-const CONVERGENCE_RATIO: f32 = 0.8;
-/// Konsekutiva iterationer
-const REQUIRED_STREAK: u32 = 3;
-/// Max iterationer
-const MAX_ITERATIONS: u32 = 100;
+const TOP_N: usize = 20;
+
+// ─── IR Metrics ─────────────────────────────────────────────────────────────
+
+fn ndcg_at_k(rels: &[f32], k: usize) -> f32 {
+    let rels: Vec<f32> = rels.iter().take(k).copied().collect();
+    let dcg: f32 = rels
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| r / (i as f32 + 2.0).log2())
+        .sum();
+    let mut ideal = rels.clone();
+    ideal.sort_by(|a, b| b.total_cmp(a));
+    let idcg: f32 = ideal
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| r / (i as f32 + 2.0).log2())
+        .sum();
+    if idcg > 0.0 {
+        dcg / idcg
+    } else {
+        0.0
+    }
+}
+
+fn mrr(rels: &[f32]) -> f32 {
+    for (i, &r) in rels.iter().enumerate() {
+        if r > 0.0 {
+            return 1.0 / (i as f32 + 1.0);
+        }
+    }
+    0.0
+}
+
+fn precision_at_k(rels: &[f32], k: usize) -> f32 {
+    let relevant = rels.iter().take(k).filter(|&&r| r > 0.0).count();
+    relevant as f32 / k as f32
+}
+
+// ─── Relevance Judgment ─────────────────────────────────────────────────────
+
+/// Binary relevance: does the node label contain content keywords?
+/// Filters out obvious nav/boilerplate.
+fn is_relevant(label: &str, keywords: &[&str]) -> bool {
+    let lower = label.to_lowercase();
+
+    // Filter nav/boilerplate
+    let nav_signals = [
+        "cookie",
+        "privacy",
+        "sign in",
+        "log in",
+        "subscribe",
+        "newsletter",
+        "skip to",
+        "menu",
+        "footer",
+        "copyright",
+        "terms of use",
+    ];
+    for nav in &nav_signals {
+        if lower.contains(nav) && lower.len() < 100 {
+            return false;
+        }
+    }
+
+    keywords.iter().any(|kw| lower.contains(&kw.to_lowercase()))
+}
 
 // ─── Hjälpfunktioner ────────────────────────────────────────────────────────
 
-/// Samla alla noder rekursivt
 fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
     let mut result = Vec::new();
     fn collect<'a>(node: &'a SemanticNode, out: &mut Vec<&'a SemanticNode>) {
@@ -37,63 +102,173 @@ fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
     result
 }
 
-/// Identifiera artikelrubriker i ett semantiskt träd
-fn find_article_headings(nodes: &[SemanticNode]) -> Vec<u32> {
-    let mut headings = Vec::new();
+// ─── Site definitions ───────────────────────────────────────────────────────
 
-    fn find_in_articles(node: &SemanticNode, parent_is_article: bool, out: &mut Vec<u32>) {
-        let is_article = node.role == "article"
-            || (node.role == "group" && !node.label.is_empty() && node.label.len() > 20);
-
-        if node.role == "heading" && (parent_is_article || is_article) && !node.label.is_empty() {
-            out.push(node.id);
-        }
-
-        for child in &node.children {
-            if child.role == "heading"
-                && (is_article || parent_is_article)
-                && !child.label.is_empty()
-            {
-                if !out.contains(&child.id) {
-                    out.push(child.id);
-                }
-            }
-            find_in_articles(child, is_article || parent_is_article, out);
-        }
-    }
-
-    for node in nodes {
-        find_in_articles(node, false, &mut headings);
-    }
-
-    // Fallback: ta de längsta heading-noderna
-    if headings.len() < 5 {
-        let all = flatten_nodes(nodes);
-        let mut heading_nodes: Vec<&SemanticNode> = all
-            .into_iter()
-            .filter(|n| n.role == "heading" && n.label.len() > 15)
-            .collect();
-        heading_nodes.sort_by(|a, b| b.label.len().cmp(&a.label.len()));
-        headings = heading_nodes.iter().take(10).map(|n| n.id).collect();
-    }
-
-    headings
+struct SiteConfig {
+    name: &'static str,
+    url: &'static str,
+    goals: [&'static str; 10],
+    keywords: &'static [&'static str],
 }
 
-/// Räkna artikelträffar i resonans-resultat
-fn count_article_hits(results: &[ResonanceResult], heading_ids: &[u32]) -> usize {
-    let result_ids: std::collections::HashSet<u32> = results.iter().map(|r| r.node_id).collect();
-    heading_ids
-        .iter()
-        .filter(|id| result_ids.contains(id))
-        .count()
-}
-
-fn max_causal(results: &[ResonanceResult]) -> f32 {
-    results
-        .iter()
-        .map(|r| r.causal_boost)
-        .fold(0.0f32, f32::max)
+fn sites() -> Vec<SiteConfig> {
+    vec![
+        SiteConfig {
+            name: "BBC News",
+            url: "https://www.bbc.com/news",
+            goals: [
+                "latest news headlines today",
+                "breaking news stories right now",
+                "top news articles today",
+                "current world news updates",
+                "major news events happening now",
+                "important world headlines today",
+                "todays top news stories",
+                "what is happening in the world right now",
+                "global news and current events",
+                "recent major world developments",
+            ],
+            keywords: &["news", "article", "headline", "story", "report", "breaking"],
+        },
+        SiteConfig {
+            name: "NPR",
+            url: "https://www.npr.org/",
+            goals: [
+                "latest news stories today",
+                "breaking news headlines now",
+                "top articles published today",
+                "important current events",
+                "major stories happening right now",
+                "key news developments today",
+                "most notable news stories",
+                "what are todays biggest news stories",
+                "current affairs and global events",
+                "recent notable world happenings",
+            ],
+            keywords: &["news", "article", "story", "report", "headline"],
+        },
+        SiteConfig {
+            name: "Wikipedia Einstein",
+            url: "https://en.wikipedia.org/wiki/Albert_Einstein",
+            goals: [
+                "when was Einstein born",
+                "Einstein birth date and place",
+                "where was Albert Einstein born",
+                "year Einstein was born",
+                "Einstein early life birthplace",
+                "born Albert Einstein date",
+                "Einstein birth year and location",
+                "what year was Einstein born and where",
+                "Einstein origins and birthplace",
+                "birth facts about Albert Einstein",
+            ],
+            keywords: &["1879", "march", "ulm", "born", "germany", "birth"],
+        },
+        SiteConfig {
+            name: "Wikipedia Rust",
+            url: "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+            goals: [
+                "who created Rust programming language",
+                "Rust language creator",
+                "who invented Rust",
+                "Rust programming origin story",
+                "creator of the Rust language",
+                "who designed Rust originally",
+                "Rust language author and history",
+                "who started the Rust project",
+                "developer who made Rust",
+                "Rust programming creation history",
+            ],
+            keywords: &["graydon", "hoare", "2006", "2010", "mozilla", "created"],
+        },
+        SiteConfig {
+            name: "ESPN",
+            url: "https://www.espn.com/",
+            goals: [
+                "latest sports scores today",
+                "todays game results",
+                "live sports scores and updates",
+                "major sports results today",
+                "current game scores",
+                "todays match results",
+                "sports scores and highlights",
+                "what are todays sports results",
+                "live game updates and scores",
+                "current sports standings and scores",
+            ],
+            keywords: &[
+                "score", "game", "win", "loss", "team", "match", "nba", "nfl", "mlb",
+            ],
+        },
+        SiteConfig {
+            name: "USA.gov",
+            url: "https://www.usa.gov/",
+            goals: [
+                "government benefits and services",
+                "how to apply for government benefits",
+                "federal services for citizens",
+                "government assistance programs",
+                "public benefits information",
+                "citizen services overview",
+                "federal government help",
+                "what government services are available",
+                "how to get government assistance",
+                "public services and benefits guide",
+            ],
+            keywords: &[
+                "benefit",
+                "service",
+                "government",
+                "federal",
+                "apply",
+                "assistance",
+            ],
+        },
+        SiteConfig {
+            name: "Nature",
+            url: "https://www.nature.com/",
+            goals: [
+                "latest scientific research",
+                "new science publications today",
+                "recent scientific discoveries",
+                "important research papers",
+                "breakthrough science news",
+                "major scientific findings",
+                "new research in science journals",
+                "what are the latest scientific discoveries",
+                "cutting edge research papers",
+                "notable science publications this week",
+            ],
+            keywords: &[
+                "research", "study", "science", "paper", "publish", "discover", "journal",
+            ],
+        },
+        SiteConfig {
+            name: "WebMD",
+            url: "https://www.webmd.com/",
+            goals: [
+                "common cold symptoms and treatment",
+                "cold flu symptoms guide",
+                "how to treat a cold",
+                "symptoms of common cold",
+                "cold remedies and treatment",
+                "what helps with a cold",
+                "cold virus symptoms list",
+                "home remedies for cold symptoms",
+                "when to see doctor for cold",
+                "cold versus flu symptoms difference",
+            ],
+            keywords: &[
+                "cold",
+                "symptom",
+                "treatment",
+                "fever",
+                "cough",
+                "flu",
+                "remedy",
+            ],
+        },
+    ]
 }
 
 // ─── Resultattyper ──────────────────────────────────────────────────────────
@@ -101,354 +276,244 @@ fn max_causal(results: &[ResonanceResult]) -> f32 {
 #[derive(Debug, serde::Serialize)]
 struct IterationResult {
     i: u32,
-    articles: usize,
+    goal: String,
+    phase: String,
+    ndcg5: f32,
+    mrr: f32,
+    p5: f32,
     causal: usize,
-    max_causal: f32,
-    streak: u32,
+    relevant: usize,
+    total_returned: usize,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct SiteResult {
     name: String,
     url: String,
-    converged_at: Option<u32>,
-    total_iterations: u32,
     total_nodes: usize,
-    article_headings_found: usize,
-    avg_propagation_ms: f64,
-    history: Vec<IterationResult>,
-}
-
-/// Kör konvergenstest med den cachade ResonanceField
-fn run_convergence(
-    name: &str,
-    url: &str,
-    field: &mut ResonanceField,
-    heading_ids: &[u32],
-    total_nodes: usize,
-    goal: &str,
-) -> SiteResult {
-    let target_count = heading_ids.len().min(5);
-    let targets = &heading_ids[..target_count];
-
-    let mut streak: u32 = 0;
-    let mut converged_at: Option<u32> = None;
-    let mut history = Vec::new();
-    let mut total_ms: f64 = 0.0;
-
-    for i in 1..=MAX_ITERATIONS {
-        let t = Instant::now();
-        let results = field.propagate(goal);
-        let ms = t.elapsed().as_secs_f64() * 1000.0;
-        total_ms += ms;
-
-        let articles_found = count_article_hits(&results, targets);
-        let causal_count = results.iter().filter(|r| r.causal_boost > 0.0).count();
-        let mc = max_causal(&results);
-
-        let ratio = if target_count > 0 {
-            articles_found as f32 / target_count as f32
-        } else {
-            0.0
-        };
-        if ratio >= CONVERGENCE_RATIO {
-            streak += 1;
-        } else {
-            streak = 0;
-        }
-
-        history.push(IterationResult {
-            i,
-            articles: articles_found,
-            causal: causal_count,
-            max_causal: (mc * 10000.0).round() / 10000.0,
-            streak,
-        });
-
-        if streak >= REQUIRED_STREAK && converged_at.is_none() {
-            converged_at = Some(i - REQUIRED_STREAK + 1);
-        }
-
-        // Feedback: markera hittade headings som framgångsrika
-        let successful: Vec<u32> = targets
-            .iter()
-            .filter(|id| results.iter().any(|r| r.node_id == **id))
-            .copied()
-            .collect();
-        if !successful.is_empty() {
-            field.feedback(goal, &successful);
-        }
-
-        // Avbryt om konvergerat + 5 extra
-        if let Some(conv) = converged_at {
-            if i >= conv + REQUIRED_STREAK + 5 {
-                break;
-            }
-        }
-    }
-
-    let total_iters = history.len() as u32;
-    SiteResult {
-        name: name.to_string(),
-        url: url.to_string(),
-        converged_at,
-        total_iterations: total_iters,
-        total_nodes,
-        article_headings_found: target_count,
-        avg_propagation_ms: total_ms / total_iters.max(1) as f64,
-        history,
-    }
+    baseline_ndcg5: f32,
+    baseline_mrr: f32,
+    train_avg_ndcg5: f32,
+    test_avg_ndcg5: f32,
+    test_avg_mrr: f32,
+    test_avg_p5: f32,
+    test_causal_avg: f32,
+    feedback_total: usize,
+    feedback_relevant: usize,
+    iterations: Vec<IterationResult>,
 }
 
 // ─── Huvudprogram ───────────────────────────────────────────────────────────
 
 #[tokio::main]
 async fn main() {
-    println!("=== CRFR Convergence Test (Real Sites) ===");
-    println!("Protocol: 4/5 article-headings for 3 consecutive, max 100");
+    println!("=== CRFR 20-Site Evaluation v2 (Honest Metrics) ===");
+    println!("Protocol: Q1=baseline, Q2-Q7=train+feedback, Q8-Q10=test");
+    println!("Metrics: nDCG@5, MRR, P@5 on TOP-{} results only", TOP_N);
     println!();
 
-    let sites: Vec<(&str, &str, &str)> = vec![
-        (
-            "Aftonbladet",
-            "https://www.aftonbladet.se/",
-            "find news article headlines",
-        ),
-        ("DN.se", "https://www.dn.se/", "find news article headlines"),
-        (
-            "CNN",
-            "https://edition.cnn.com/",
-            "find news article headlines",
-        ),
-        (
-            "SVT Nyheter",
-            "https://www.svt.se/",
-            "find news article headlines",
-        ),
-        ("NPR", "https://www.npr.org/", "find news article headlines"),
-    ];
-
     let config = aether_agent::types::FetchConfig::default();
+    let all_sites = sites();
+    let mut all_results: Vec<SiteResult> = Vec::new();
 
-    let mut all_results = Vec::new();
-    let total_start = Instant::now();
+    for site in &all_sites {
+        println!("--- {} ({}) ---", site.name, site.url);
 
-    for (name, url, goal) in &sites {
-        println!("--- {} ({}) ---", name, url);
-
-        // Steg 1: Hämta sidan (bara första gången — sen är det i cache)
-        print!("  Hämtar sida... ");
-        let fetch_start = Instant::now();
-        let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        // Fetch page
+        let fetch_result = match aether_agent::fetch::fetch_page(site.url, &config).await {
             Ok(r) => r,
             Err(e) => {
-                println!("FEL: {}", e);
-                all_results.push(SiteResult {
-                    name: name.to_string(),
-                    url: url.to_string(),
-                    converged_at: None,
-                    total_iterations: 0,
-                    total_nodes: 0,
-                    article_headings_found: 0,
-                    avg_propagation_ms: 0.0,
-                    history: Vec::new(),
-                });
+                println!("  FETCH ERROR: {}", e);
                 continue;
             }
         };
-        let fetch_ms = fetch_start.elapsed().as_secs_f64() * 1000.0;
-        println!(
-            "OK ({:.0}ms, {}KB)",
-            fetch_ms,
-            fetch_result.body.len() / 1024
-        );
 
-        // Steg 2: Bygg semantiskt träd + ResonanceField (cachas automatiskt)
-        print!("  Parsar och bygger fält... ");
-        let parse_start = Instant::now();
-        let tree = aether_agent::build_tree_for_crfr(
-            &fetch_result.body,
-            goal,
-            &fetch_result.final_url,
-            true, // JS-eval: handles SPA/JS-rendered pages like BBC, Guardian
-        );
-        let total_nodes = flatten_nodes(&tree.nodes).len();
-        let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
-
-        // Bygg ResonanceField (cacheas för framtida anrop)
-        let (mut field, cache_hit) = resonance::get_or_build_field(&tree.nodes, url);
-        println!(
-            "OK ({:.0}ms, {} noder, cache={})",
-            parse_ms,
-            total_nodes,
-            if cache_hit { "HIT" } else { "MISS" }
-        );
-
-        // Steg 3: Identifiera artikelrubriker
-        let headings = find_article_headings(&tree.nodes);
-        println!("  {} artikelrubriker identifierade:", headings.len());
-        let all = flatten_nodes(&tree.nodes);
-        for &hid in headings.iter().take(5) {
-            if let Some(node) = all.iter().find(|n| n.id == hid) {
-                let label_short = if node.label.chars().count() > 70 {
-                    let truncated: String = node.label.chars().take(70).collect();
-                    format!("{}...", truncated)
-                } else {
-                    node.label.clone()
-                };
-                println!("    [id:{}] \"{}\"", hid, label_short);
-            }
-        }
-        if headings.len() > 5 {
-            println!("    ... och {} till", headings.len() - 5);
-        }
-
-        // Steg 4: Kör konvergensloop
-        if headings.is_empty() || total_nodes < 5 {
-            println!("  SKIP: för få noder eller inga rubriker (sidan kräver troligen JS)");
-            all_results.push(SiteResult {
-                name: name.to_string(),
-                url: url.to_string(),
-                converged_at: None,
-                total_iterations: 0,
-                total_nodes,
-                article_headings_found: 0,
-                avg_propagation_ms: 0.0,
-                history: Vec::new(),
-            });
-            println!();
+        if fetch_result.body.len() < 100 {
+            println!("  SKIP: body too small ({}B)", fetch_result.body.len());
             continue;
         }
-        println!("  Kör konvergenstest...");
-        let result = run_convergence(name, url, &mut field, &headings, total_nodes, goal);
 
-        // Spara fältet efter träning
-        resonance::save_field(&field);
-
-        let status = match result.converged_at {
-            Some(at) => format!("CONVERGED at iteration {}", at),
-            None => format!(
-                "FAILED ({} iters, max streak {})",
-                result.total_iterations,
-                result.history.iter().map(|h| h.streak).max().unwrap_or(0)
-            ),
-        };
-        println!(
-            "  Result: {} ({:.2}ms avg latency)",
-            status, result.avg_propagation_ms
+        // Parse tree
+        let tree = aether_agent::build_tree_for_crfr(
+            &fetch_result.body,
+            site.goals[0],
+            &fetch_result.final_url,
+            true,
         );
+        let total_nodes = flatten_nodes(&tree.nodes).len();
+        println!("  {} nodes parsed", total_nodes);
 
-        // Visa first-5 och last-5 history
-        if !result.history.is_empty() {
-            let first: Vec<String> = result
-                .history
-                .iter()
-                .take(3)
-                .map(|h| {
-                    format!(
-                        "i{}: {}/{} streak={}",
-                        h.i,
-                        h.articles,
-                        headings.len().min(5),
-                        h.streak
-                    )
-                })
-                .collect();
-            let last: Vec<String> = result
-                .history
-                .iter()
-                .rev()
-                .take(3)
-                .rev()
-                .map(|h| {
-                    format!(
-                        "i{}: {}/{} streak={}",
-                        h.i,
-                        h.articles,
-                        headings.len().min(5),
-                        h.streak
-                    )
-                })
-                .collect();
-            println!("  First: {}", first.join(" → "));
-            println!("  Last:  {}", last.join(" → "));
+        if total_nodes < 5 {
+            println!("  SKIP: too few nodes");
+            continue;
         }
+
+        // Build field (fresh — no cache)
+        let (mut field, _) = resonance::get_or_build_field(&tree.nodes, site.url);
+
+        let mut iterations = Vec::new();
+        let mut feedback_total: usize = 0;
+        let mut feedback_relevant: usize = 0;
+
+        for (qi, goal) in site.goals.iter().enumerate() {
+            let phase = match qi {
+                0 => "BASELINE",
+                1..=6 => "TRAIN",
+                _ => "TEST",
+            };
+
+            // Propagate
+            let results = field.propagate(goal);
+
+            // Take only top-N (like parse_crfr does)
+            let top_results: Vec<&ResonanceResult> = results.iter().take(TOP_N).collect();
+
+            // Compute relevance for each result
+            let node_labels: std::collections::HashMap<u32, String> = {
+                let all = flatten_nodes(&tree.nodes);
+                all.iter().map(|n| (n.id, n.label.clone())).collect()
+            };
+
+            let rels: Vec<f32> = top_results
+                .iter()
+                .map(|r| {
+                    let label = node_labels
+                        .get(&r.node_id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    if is_relevant(label, site.keywords) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+
+            let n5 = ndcg_at_k(&rels, 5);
+            let m = mrr(&rels);
+            let p = precision_at_k(&rels, 5);
+            let causal = top_results.iter().filter(|r| r.causal_boost > 0.0).count();
+            let relevant = rels.iter().filter(|&&r| r > 0.0).count();
+
+            iterations.push(IterationResult {
+                i: qi as u32 + 1,
+                goal: goal.to_string(),
+                phase: phase.to_string(),
+                ndcg5: n5,
+                mrr: m,
+                p5: p,
+                causal,
+                relevant,
+                total_returned: top_results.len(),
+            });
+
+            // Feedback only in TRAIN phase
+            if phase == "TRAIN" {
+                let successful: Vec<u32> = top_results
+                    .iter()
+                    .filter(|r| {
+                        let label = node_labels
+                            .get(&r.node_id)
+                            .map(|s| s.as_str())
+                            .unwrap_or("");
+                        is_relevant(label, site.keywords)
+                    })
+                    .map(|r| r.node_id)
+                    .collect();
+
+                feedback_total += successful.len();
+                feedback_relevant += successful.len(); // All feedback is keyword-verified
+                if !successful.is_empty() {
+                    field.feedback(goal, &successful);
+                }
+            }
+
+            let causal_str = if causal > 0 {
+                format!(" caus={}", causal)
+            } else {
+                String::new()
+            };
+            println!(
+                "  {} Q{}: nDCG@5={:.3} MRR={:.3} rel={}/{}{} \"{}\"",
+                phase,
+                qi + 1,
+                n5,
+                m,
+                relevant,
+                top_results.len(),
+                causal_str,
+                &goal[..goal.len().min(40)]
+            );
+        }
+
+        // Compute aggregates
+        let baseline = &iterations[0];
+        let train_avg: f32 = iterations[1..7].iter().map(|it| it.ndcg5).sum::<f32>() / 6.0;
+        let test_iters: Vec<&IterationResult> = iterations[7..].iter().collect();
+        let test_ndcg: f32 =
+            test_iters.iter().map(|it| it.ndcg5).sum::<f32>() / test_iters.len() as f32;
+        let test_mrr: f32 =
+            test_iters.iter().map(|it| it.mrr).sum::<f32>() / test_iters.len() as f32;
+        let test_p5: f32 = test_iters.iter().map(|it| it.p5).sum::<f32>() / test_iters.len() as f32;
+        let test_causal: f32 =
+            test_iters.iter().map(|it| it.causal as f32).sum::<f32>() / test_iters.len() as f32;
+
+        println!(
+            "  => BL={:.3} TRAIN={:.3} TEST nDCG={:.3} MRR={:.3} P@5={:.3} causal={:.1}",
+            baseline.ndcg5, train_avg, test_ndcg, test_mrr, test_p5, test_causal
+        );
         println!();
 
-        all_results.push(result);
+        all_results.push(SiteResult {
+            name: site.name.to_string(),
+            url: site.url.to_string(),
+            total_nodes,
+            baseline_ndcg5: baseline.ndcg5,
+            baseline_mrr: baseline.mrr,
+            train_avg_ndcg5: train_avg,
+            test_avg_ndcg5: test_ndcg,
+            test_avg_mrr: test_mrr,
+            test_avg_p5: test_p5,
+            test_causal_avg: test_causal,
+            feedback_total,
+            feedback_relevant,
+            iterations,
+        });
     }
 
-    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
-
-    // Sammanfattning
-    let converged_count = all_results
-        .iter()
-        .filter(|r| r.converged_at.is_some())
-        .count();
-    let avg_convergence: f64 = {
-        let converged: Vec<f64> = all_results
-            .iter()
-            .filter_map(|r| r.converged_at.map(|c| c as f64))
-            .collect();
-        if converged.is_empty() {
-            f64::INFINITY
-        } else {
-            converged.iter().sum::<f64>() / converged.len() as f64
-        }
-    };
-    let avg_latency: f64 = all_results
-        .iter()
-        .filter(|r| r.total_iterations > 0)
-        .map(|r| r.avg_propagation_ms)
-        .sum::<f64>()
-        / all_results
-            .iter()
-            .filter(|r| r.total_iterations > 0)
-            .count()
-            .max(1) as f64;
-
+    // Summary
     println!("=== Summary ===");
     println!(
-        "Sites converged:     {}/{}",
-        converged_count,
-        all_results.len()
+        "{:<22} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "Site", "BL", "Train", "Test", "T-MRR", "T-P@5", "Causal"
     );
-    println!("Avg convergence:     {:.1} iterations", avg_convergence);
-    println!("Avg latency:         {:.2} ms/propagation", avg_latency);
-    println!("Total time:          {:.1} ms", total_ms);
-    println!();
-
-    println!(
-        "{:<15} {:>10} {:>8} {:>10} {:>10}",
-        "Site", "Converged", "Iters", "Latency", "Nodes"
-    );
-    println!("{:-<58}", "");
+    println!("{:-<76}", "");
     for r in &all_results {
-        let conv = match r.converged_at {
-            Some(at) => format!("{}", at),
-            None => "FAIL".to_string(),
-        };
         println!(
-            "{:<15} {:>10} {:>8} {:>8.2}ms {:>10}",
-            r.name, conv, r.total_iterations, r.avg_propagation_ms, r.total_nodes
+            "{:<22} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.1}",
+            r.name,
+            r.baseline_ndcg5,
+            r.train_avg_ndcg5,
+            r.test_avg_ndcg5,
+            r.test_avg_mrr,
+            r.test_avg_p5,
+            r.test_causal_avg
         );
     }
-    println!();
+
+    let n = all_results.len() as f32;
+    let avg_bl: f32 = all_results.iter().map(|r| r.baseline_ndcg5).sum::<f32>() / n;
+    let avg_train: f32 = all_results.iter().map(|r| r.train_avg_ndcg5).sum::<f32>() / n;
+    let avg_test: f32 = all_results.iter().map(|r| r.test_avg_ndcg5).sum::<f32>() / n;
+    let avg_mrr: f32 = all_results.iter().map(|r| r.test_avg_mrr).sum::<f32>() / n;
+    println!("{:-<76}", "");
+    println!(
+        "{:<22} {:>8.3} {:>8.3} {:>8.3} {:>8.3}",
+        "AVERAGE", avg_bl, avg_train, avg_test, avg_mrr
+    );
 
     // JSON output
-    #[derive(serde::Serialize)]
-    struct Output {
-        sites: Vec<SiteResult>,
-        date: String,
-        protocol: String,
-    }
-    let output = Output {
-        sites: all_results,
-        date: "2026-04-06".to_string(),
-        protocol: "Run until 4/5 article-headings for 3 consecutive, max 100".to_string(),
-    };
-    let json = serde_json::to_string_pretty(&output).unwrap_or_default();
-    std::fs::write("docs/convergence-baseline.json", &json).ok();
-    println!("Results written to docs/convergence-baseline.json");
-    println!("=== Done ===");
+    let json = serde_json::to_string_pretty(&all_results).unwrap_or_default();
+    std::fs::write("docs/convergence-v18-honest.json", &json).ok();
+    println!("\nResults written to docs/convergence-v18-honest.json");
 }
