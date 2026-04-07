@@ -98,19 +98,24 @@ footer{padding:1.5rem 2rem;text-align:center;border-top:1px solid var(--border);
   <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
 
   <div class="examples">
-    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="What are the side effects of COVID-19 vaccines?">Wikipedia: COVID-19 vaccine side effects</span>
-    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Gothenburg" data-goal="How many people live in Gothenburg?">Wikipedia: Gothenburg population</span>
-    <span class="example-chip" data-url="https://www.python.org/downloads/" data-goal="What is the latest Python version?">Python.org: latest version</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">Wikipedia: COVID-19 vaccine side effects</span>
+    <span class="example-chip" data-url="https://www.riksbank.se/sv/penningpolitik/styrrantan/" data-goal="styrr&auml;nta r&auml;nta procent Riksbanken penningpolitik repor&auml;nta 2026 interest rate">Riksbanken: Swedish interest rate</span>
+    <span class="example-chip" data-url="https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK" data-goal="currency converter exchange rate USD SEK kronor dollar real-time">XE.com: USD/SEK exchange rate</span>
+    <span class="example-chip" data-url="https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array" data-goal="branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty">Stack Overflow: sorted array performance</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Gothenburg" data-goal="population inhabitants Gothenburg G&ouml;teborg city urban area people">Wikipedia: Gothenburg population</span>
+    <span class="example-chip" data-url="https://www.python.org/downloads/" data-goal="latest Python version release download stable current 2026">Python.org: latest version</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Ibuprofen" data-goal="ibuprofen medicine drug NSAID anti-inflammatory dosage side effects uses">Wikipedia: What is ibuprofen?</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Artificial_Intelligence_Act" data-goal="EU AI Act regulation artificial intelligence law European Union rules 2024">Wikipedia: EU AI Act</span>
   </div>
 
   <div class="form-group">
     <label>URL</label>
-    <input type="url" id="input-url" placeholder="https://en.wikipedia.org/wiki/COVID-19_vaccine" value="https://en.wikipedia.org/wiki/COVID-19_vaccine">
+    <input type="url" id="input-url" placeholder="https://en.wikipedia.org/wiki/COVID-19_vaccine" value="https://en.wikipedia.org/wiki/COVID-19_vaccine" spellcheck="false">
   </div>
   <div class="form-row">
     <div class="form-group" style="margin-bottom:0">
       <label>Question</label>
-      <input type="text" id="input-goal" placeholder="What are the side effects of COVID-19 vaccines?" value="What are the side effects of COVID-19 vaccines?">
+      <input type="text" id="input-goal" placeholder="What are the side effects of COVID-19 vaccines?" value="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">
     </div>
     <button class="btn-run" id="btn-run" onclick="runQuery()">Run</button>
   </div>
