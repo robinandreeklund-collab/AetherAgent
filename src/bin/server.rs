@@ -38,6 +38,10 @@ struct AppState {
     mcp_events: Arc<tokio::sync::broadcast::Sender<String>>,
     /// Ring-buffer med senaste MCP-events för polling-fallback
     mcp_event_log: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    /// Global request counter for live stats
+    request_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Server start time
+    started_at: std::time::Instant,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -6366,6 +6370,16 @@ fn build_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Request counter middleware
+    let counter = state.request_count.clone();
+    let count_layer = axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+        let c = counter.clone();
+        async move {
+            c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            next.run(req).await
+        }
+    });
+
     Router::new()
         // Root = landing page
         .route("/", get(landing_concept_1))
@@ -6374,6 +6388,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
+        .route("/api/live-stats", get(live_stats_handler))
         // Landing pages
         .route("/landing", get(landing_index))
         .route("/landing/1", get(landing_concept_1))
@@ -6590,6 +6605,7 @@ fn build_router(state: AppState) -> Router {
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
+        .layer(count_layer)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
@@ -6660,6 +6676,41 @@ struct MemoryStats {
 async fn memory_stats_handler() -> impl IntoResponse {
     let stats = get_memory_stats();
     (StatusCode::OK, Json(stats))
+}
+
+/// GET /api/live-stats — aggregated stats for landing page live counters
+async fn live_stats_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    let fields = aether_agent::resonance::list_cached_fields();
+    let (cache_entries, cache_capacity) = aether_agent::resonance::cache_stats();
+
+    let sites_profiled = fields.len();
+    let total_queries: u32 = fields.iter().map(|f| f.total_queries).sum();
+    let total_nodes: usize = fields.iter().map(|f| f.node_count).sum();
+    let total_edges: usize = fields.iter().map(|f| f.edge_count).sum();
+    let total_causal_weights: usize = fields.iter().map(|f| f.propagation_weight_count).sum();
+    let total_concepts: usize = fields.iter().map(|f| f.concept_memory_count).sum();
+    let requests = state.request_count.load(std::sync::atomic::Ordering::Relaxed);
+    let uptime_secs = state.started_at.elapsed().as_secs();
+
+    let json = serde_json::json!({
+        "sites_profiled": sites_profiled,
+        "total_queries": total_queries,
+        "total_nodes_indexed": total_nodes,
+        "total_edges": total_edges,
+        "causal_weights_learned": total_causal_weights,
+        "concepts_memorized": total_concepts,
+        "cache_entries": cache_entries,
+        "cache_capacity": cache_capacity,
+        "total_requests": requests,
+        "uptime_secs": uptime_secs,
+    });
+    (
+        StatusCode::OK,
+        [(axum::http::header::CACHE_CONTROL, "no-cache")],
+        Json(json),
+    )
 }
 
 /// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
@@ -6850,6 +6901,8 @@ async fn main() {
         mcp_event_log: Arc::new(std::sync::Mutex::new(
             std::collections::VecDeque::with_capacity(100),
         )),
+        request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        started_at: std::time::Instant::now(),
     };
     log_rss("8. after AppState creation");
 

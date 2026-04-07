@@ -66,6 +66,18 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
 .hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
 
+/* LIVE STATS */
+.live-stats{padding:2rem 2rem 4rem;max-width:1000px;margin:0 auto}
+.live-stats-title{text-align:center;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:1.5rem}
+.live-stats-title .dot{display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;vertical-align:middle;animation:liveDot 2s ease-in-out infinite}
+@keyframes liveDot{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,197,94,0.4)}50%{opacity:.7;box-shadow:0 0 8px 3px rgba(34,197,94,0.15)}}
+.live-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+.live-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem 1rem;text-align:center;transition:border-color .3s}
+.live-card:hover{border-color:rgba(255,255,255,0.12)}
+.live-val{font-size:1.6rem;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.02em;font-family:var(--mono)}
+.live-label{font-size:.7rem;color:var(--muted);margin-top:.25rem;font-weight:500}
+@media(max-width:768px){.live-grid{grid-template-columns:repeat(2,1fr)}}
+
 /* METRICS */
 .metrics{padding:6rem 2rem;max-width:1000px;margin:0 auto}
 .metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem}
@@ -192,6 +204,17 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
       <div class="metric-value" data-target="97.8" data-suffix="%">0%</div>
       <div class="metric-label">Recall accuracy</div>
     </div>
+  </div>
+</section>
+
+<!-- LIVE STATS -->
+<section class="live-stats reveal" id="live-stats">
+  <div class="live-stats-title"><span class="dot"></span>Live from the engine</div>
+  <div class="live-grid">
+    <div class="live-card"><div class="live-val" id="ls-sites">—</div><div class="live-label">Sites profiled</div></div>
+    <div class="live-card"><div class="live-val" id="ls-queries">—</div><div class="live-label">Queries processed</div></div>
+    <div class="live-card"><div class="live-val" id="ls-nodes">—</div><div class="live-label">DOM nodes indexed</div></div>
+    <div class="live-card"><div class="live-val" id="ls-weights">—</div><div class="live-label">Causal weights learned</div></div>
   </div>
 </section>
 
@@ -530,6 +553,54 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
       });
     }, 400);
   }, 1200);
+})();
+
+// ── LIVE STATS — fetch from /api/live-stats and animate counters ──
+(function(){
+  const els = {
+    sites: document.getElementById('ls-sites'),
+    queries: document.getElementById('ls-queries'),
+    nodes: document.getElementById('ls-nodes'),
+    weights: document.getElementById('ls-weights'),
+  };
+  if(!els.sites) return;
+
+  function animateValue(el, target, duration){
+    const start = parseInt(el.textContent) || 0;
+    if(start === target) return;
+    const delta = target - start;
+    const t0 = performance.now();
+    (function tick(now){
+      const p = Math.min((now - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(start + delta * ease).toLocaleString();
+      if(p < 1) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+
+  function fmt(n){
+    if(n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+    if(n >= 1000) return (n/1000).toFixed(1) + 'K';
+    return n.toLocaleString();
+  }
+
+  function update(data){
+    els.sites.textContent = fmt(data.sites_profiled || 0);
+    els.queries.textContent = fmt(data.total_queries || 0);
+    els.nodes.textContent = fmt(data.total_nodes_indexed || 0);
+    els.weights.textContent = fmt(data.causal_weights_learned || 0);
+  }
+
+  async function fetchStats(){
+    try {
+      const r = await fetch('/api/live-stats');
+      if(r.ok){ const d = await r.json(); update(d); }
+    } catch(e){}
+  }
+
+  // Initial fetch + refresh every 10 seconds
+  fetchStats();
+  setInterval(fetchStats, 10000);
 })();
 
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
