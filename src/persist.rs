@@ -107,6 +107,11 @@ pub fn init(db_path: &str) -> Result<(), String> {
 
             CREATE INDEX IF NOT EXISTS idx_fields_updated ON resonance_fields(updated_at);
             CREATE INDEX IF NOT EXISTS idx_domains_updated ON domain_profiles(updated_at);
+
+            CREATE TABLE IF NOT EXISTS global_stats (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
             ",
         )
         .map_err(|e| format!("SQLite schema: {e}"))?;
@@ -448,12 +453,13 @@ pub fn checkpoint() {
         save_domain_profile(*hash, profile);
     }
 
-    // Spara alla cachade resonance fields
-    let fields = crate::resonance::list_cached_fields();
-    // Vi behöver hela fältet, inte bara summary — använd en ny export-funktion
-    // (fields laddas redan i minnet via FIELD_CACHE)
+    // Spara alla cachade resonance fields (full data)
+    let fields = crate::resonance::export_cached_fields();
+    for field in &fields {
+        save_field(field);
+    }
     eprintln!(
-        "[PERSIST] Checkpoint: {} domain profiles, {} field summaries saved",
+        "[PERSIST] Checkpoint: {} domain profiles, {} resonance fields saved",
         profiles.len(),
         fields.len()
     );
@@ -479,6 +485,41 @@ pub fn restore() {
         "[PERSIST] Restored: {} domain profiles, {} resonance fields",
         profile_count, field_count
     );
+}
+
+/// Save a global stat (key-value integer).
+pub fn save_global_stat(key: &str, value: u64) {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO global_stats (key, value) VALUES (?1, ?2)",
+        params![key, value as i64],
+    );
+}
+
+/// Load a global stat.
+pub fn load_global_stat(key: &str) -> u64 {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+        Some(c) => c,
+        None => return 0,
+    };
+    conn.query_row(
+        "SELECT value FROM global_stats WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|v| v as u64)
+    .unwrap_or(0)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────

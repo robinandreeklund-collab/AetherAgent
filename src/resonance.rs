@@ -2723,6 +2723,15 @@ pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
     }
 }
 
+/// Export all cached fields (full data, for checkpoint persistence).
+pub fn export_cached_fields() -> Vec<ResonanceField> {
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    cache.entries.iter().map(|(_, _, field)| field.clone()).collect()
+}
+
 /// Import cached fields from persistence (at startup).
 pub fn import_cached_fields(fields: Vec<ResonanceField>) {
     let mut cache = match FIELD_CACHE.lock() {

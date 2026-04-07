@@ -6788,8 +6788,8 @@ async fn live_stats_handler(
 
 /// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
 /// + periodisk persist-checkpoint (var 60:e sekund)
-fn spawn_memory_monitor() {
-    tokio::spawn(async {
+fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
+    tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         let mut tick_count: u32 = 0;
         loop {
@@ -6799,6 +6799,8 @@ fn spawn_memory_monitor() {
             // Persist checkpoint varannan tick (var 60:e sekund)
             #[cfg(feature = "persist")]
             if tick_count.is_multiple_of(2) {
+                let reqs = request_counter.load(std::sync::atomic::Ordering::Relaxed);
+                aether_agent::persist::save_global_stat("total_requests", reqs);
                 aether_agent::persist::checkpoint();
             }
         }
@@ -6965,8 +6967,6 @@ async fn main() {
 
     log_rss("7. before router build");
     // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
-    spawn_memory_monitor();
-
     let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
@@ -6974,10 +6974,16 @@ async fn main() {
         mcp_event_log: Arc::new(std::sync::Mutex::new(
             std::collections::VecDeque::with_capacity(100),
         )),
-        request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        request_count: Arc::new(std::sync::atomic::AtomicU64::new({
+            #[cfg(feature = "persist")]
+            { aether_agent::persist::load_global_stat("total_requests") }
+            #[cfg(not(feature = "persist"))]
+            { 0 }
+        })),
         started_at: std::time::Instant::now(),
     };
     log_rss("8. after AppState creation");
+    spawn_memory_monitor(state.request_count.clone());
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");
