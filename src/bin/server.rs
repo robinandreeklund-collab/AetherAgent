@@ -6719,6 +6719,14 @@ async fn live_stats_handler(
     let requests = state.request_count.load(std::sync::atomic::Ordering::Relaxed);
     let uptime_secs = state.started_at.elapsed().as_secs();
 
+    // Use SQLite totals as the authoritative numbers (survive deploys)
+    #[cfg(feature = "persist")]
+    let (db_fields, _db_domains, _db_size) = aether_agent::persist::db_stats();
+    #[cfg(not(feature = "persist"))]
+    let db_fields: usize = 0;
+    // Show the larger of cache vs db (db has historical, cache has current session)
+    let sites_total = sites_profiled.max(db_fields);
+
     // Per-site leaderboard (sorted by total_queries desc)
     let mut site_list: Vec<serde_json::Value> = fields
         .iter()
@@ -6776,7 +6784,8 @@ async fn live_stats_handler(
     let db_info = serde_json::json!({"persistent": false});
 
     let json = serde_json::json!({
-        "sites_profiled": sites_profiled,
+        "sites_profiled": sites_total,
+        "sites_in_cache": sites_profiled,
         "total_queries": total_queries,
         "total_nodes_indexed": total_nodes,
         "total_edges": total_edges,
