@@ -368,25 +368,23 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   function createParticles(){
     particles = [];
     const w = canvas.offsetWidth, h = canvas.offsetHeight;
-    const maxR = Math.min(w, h) * 0.42;
-    for(let i=0; i<45; i++){
-      const orbit = 80 + Math.random() * (maxR - 80);
+    const maxR = Math.max(w, h) * 0.55;
+    for(let i=0; i<80; i++){
+      const orbit = 60 + Math.random() * (maxR - 60);
       const angle = Math.random() * Math.PI * 2;
-      // Each particle has its own orbit speed — outer ones slower
-      const speed = (0.0003 + Math.random() * 0.0006) * (1 - orbit / maxR * 0.5);
-      // Alternate direction for some rings
+      const speed = (0.0002 + Math.random() * 0.0005) * (1 - orbit / maxR * 0.4);
       const dir = Math.random() < 0.3 ? -1 : 1;
       particles.push({
         text: fragments[i % fragments.length],
         orbit: orbit,
         angle: angle,
         speed: speed * dir,
-        tilt: 0.3 + Math.random() * 0.4, // ellipse squash (0=line, 1=circle)
-        alpha: 0.06 + Math.random() * 0.1,
-        size: 9 + Math.random() * 3,
+        tilt: 0.35 + Math.random() * 0.5,
+        alpha: 0.10 + Math.random() * 0.14,
+        size: 10 + Math.random() * 4,
         rotationOffset: (Math.random() - 0.5) * 0.4,
-        wobble: Math.random() * Math.PI * 2, // phase for subtle wobble
-        wobbleAmp: 2 + Math.random() * 6
+        wobble: Math.random() * Math.PI * 2,
+        wobbleAmp: 3 + Math.random() * 10
       });
     }
   }
@@ -407,9 +405,9 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
       // Fade particles near center text area (avoid overlap with heading)
       const dx = x - cx, dy = y - cy;
       const distFromCenter = Math.sqrt(dx*dx + dy*dy);
-      const fadeZone = Math.min(w, h) * 0.18;
+      const fadeZone = Math.min(w, h) * 0.10;
       const centerFade = distFromCenter < fadeZone ? distFromCenter / fadeZone : 1;
-      const alpha = p.alpha * centerFade;
+      const alpha = p.alpha * Math.max(centerFade, 0.3);
 
       // Gentle rotation follows orbit direction
       const rot = p.angle * 0.15 + p.rotationOffset;
