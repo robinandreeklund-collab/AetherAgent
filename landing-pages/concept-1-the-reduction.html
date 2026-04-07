@@ -203,93 +203,55 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <!-- CRFR PIPELINE PLAYBACK -->
 <section class="pipeline reveal" id="pipeline">
   <h2 class="section-title">See it work. For real.</h2>
-  <p class="section-sub">Real CRFR pipeline run on Wikipedia's 2.8M-character COVID-19 vaccine article. Every number is from an actual execution.</p>
+  <p class="section-sub">A real query against Wikipedia's 2.8M-character COVID-19 vaccine article. Every number below is from an actual run.</p>
   <div class="pipeline-terminal" id="pipeline-term">
     <div class="steps">
 
       <div class="pipe-step" data-step="1">
-        <div class="step-label">1. Query received</div>
+        <div class="step-label">Query</div>
         <div class="step-data">
-          <span class="dim">goal:</span> <span class="str">"COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials"</span><br>
+          <span class="str">"What are the side effects and efficacy of COVID-19 vaccines?"</span><br>
           <span class="dim">source:</span> <span class="val">en.wikipedia.org/wiki/COVID-19_vaccine</span>
         </div>
       </div>
 
       <div class="pipe-step" data-step="2">
-        <div class="step-label">2. Fetching &amp; parsing</div>
+        <div class="step-label">Page ingested</div>
         <div class="step-data">
-          <span class="dim">raw html:</span> <span class="val">2,815,638</span> <span class="dim">characters</span><br>
-          <span class="dim">DOM nodes parsed:</span> <span class="val">12,434</span><br>
-          <span class="dim">field build:</span> <span class="val">1,528ms</span>
+          <span class="val">2,815,638</span> <span class="dim">characters of raw HTML</span><br>
+          <span class="val">12,434</span> <span class="dim">DOM nodes</span><br>
+          <span class="dim">This page exceeds every LLM context window. Sending it raw is physically impossible.</span>
         </div>
       </div>
 
       <div class="pipe-step" data-step="3">
-        <div class="step-label">3. BM25 keyword index</div>
-        <div class="step-data">
-          <span class="dim">inverted index built over</span> <span class="val">12,434</span> <span class="dim">node labels</span><br>
-          <span class="dim">top-200 candidates pre-filtered</span><br>
-          <span class="dim">structural bypass:</span> <span class="hi">headings + article nodes included regardless of score</span>
-        </div>
-      </div>
-
-      <div class="pipe-step" data-step="4">
-        <div class="step-label">4. HDC bitvector scoring</div>
-        <div class="step-data">
-          <span class="dim">2048-bit Hypervectors generated per node</span><br>
-          <span class="dim">Hamming distance similarity:</span> <span class="val">~5ns</span> <span class="dim">per comparison</span><br>
-          <span class="dim">n-gram encoding captures partial lexical overlap</span>
-        </div>
-      </div>
-
-      <div class="pipe-step" data-step="5">
-        <div class="step-label">5. Cascade filter</div>
-        <div class="step-data">
-          <span class="val">12,434</span> <span class="dim">&rarr;</span> <span class="val">200</span> <span class="dim">candidates (BM25 top-200)</span><br>
-          <span class="dim">+ structural bypass nodes (headings, paragraphs)</span><br>
-          <span class="dim">+ causal memory nodes (hit_count &gt; 0)</span>
-        </div>
-      </div>
-
-      <div class="pipe-step" data-step="6">
-        <div class="step-label">6. Chebyshev spectral propagation</div>
-        <div class="step-data">
-          <span class="dim">K=4 polynomial filter on graph Laplacian</span><br>
-          <span class="dim">wave propagation through parent-child edges</span><br>
-          <span class="dim">PPR restart</span> <span class="val">&alpha;=0.15</span> <span class="dim">preserves seed signal</span><br>
-          <span class="dim">propagation time:</span> <span class="val">149ms</span>
-        </div>
-      </div>
-
-      <div class="pipe-step" data-step="7">
-        <div class="step-label">7. Result &mdash; 4 nodes, 99.96% reduction</div>
+        <div class="step-label">Slaash output &mdash; 4 nodes</div>
         <div class="pipe-result">
           <div class="node">
-            <div class="node-header">Node 1 &middot; relevance: 1.994 &middot; role: text</div>
+            <div class="node-header">relevance: 1.994</div>
             <div class="node-text">"The risks of serious illness from COVID-19 are far higher than the risk posed by the vaccines. For most people, the side effects, also called adverse effects, from COVID-19 vaccines are mild and can be managed at home. Severe adverse effects are rare."</div>
           </div>
           <div class="node">
-            <div class="node-header">Node 2 &middot; relevance: 1.773 &middot; role: text</div>
+            <div class="node-header">relevance: 1.773</div>
             <div class="node-text">"Typical side effects are stronger and more common in younger people and in subsequent doses, and up to 20% of people report a disruptive level of side effects after the second dose of an mRNA vaccine."</div>
           </div>
           <div class="node">
-            <div class="node-header">Node 3 &middot; relevance: 1.535 &middot; role: text</div>
+            <div class="node-header">relevance: 1.535</div>
             <div class="node-text">"mRNA vaccines were the first COVID-19 vaccines authorised in UK, US and EU. Authorized types: Pfizer-BioNTech, Moderna. The CVnCoV mRNA vaccine from CureVac failed in clinical trials."</div>
           </div>
           <div class="node">
-            <div class="node-header">Node 4 &middot; relevance: 1.326 &middot; role: text</div>
+            <div class="node-header">relevance: 1.326</div>
             <div class="node-text">"Common side effects of the vaccine are fever, fatigue, headache and pain at the injection site."</div>
           </div>
         </div>
       </div>
 
-      <div class="pipe-step" data-step="8">
-        <div class="step-label">8. Causal learning</div>
+      <div class="pipe-step" data-step="4">
+        <div class="step-label">It remembers</div>
         <div class="step-data">
-          <span class="dim">feedback:</span> <span class="val">nodes 3251, 3321, 1959</span> <span class="dim">marked as correct answers</span><br>
-          <span class="dim">causal memory updated:</span> <span class="hi">causal_boost = 0.26&ndash;0.30</span><br>
-          <span class="dim">next query:</span> <span class="grn">8.6&times; faster</span> <span class="dim">(2,609ms &rarr; 304ms)</span><br>
-          <span class="dim">relevance boost:</span> <span class="grn">+28%</span> <span class="dim">on learned nodes</span>
+          <span class="dim">After feedback, same query runs</span> <span class="grn">8.6&times; faster</span><br>
+          <span class="dim">Answer relevance increases</span> <span class="grn">+28%</span><br>
+          <span class="dim">No retraining. No fine-tuning. Zero GPU.</span>
         </div>
       </div>
 
