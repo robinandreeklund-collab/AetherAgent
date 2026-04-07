@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slaash — Timeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.35);
+  --green:#22c55e;--amber:#f59e0b;
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:#60a5fa}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.8);border-bottom:1px solid var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500}
+.nav-links a:hover{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .2s;text-decoration:none}
+.btn-accent{background:var(--accent);color:#fff}
+.btn-accent:hover{background:#2563eb;color:#fff}
+.nav-links a.btn-accent{color:#fff}
+
+/* HERO */
+.tl-hero{padding:10rem 2rem 4rem;text-align:center;max-width:700px;margin:0 auto}
+.tl-hero h1{font-size:clamp(2rem,4.5vw,3rem);font-weight:800;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.tl-hero p{color:var(--muted);font-size:1rem}
+
+/* TIMELINE */
+.tl-container{max-width:780px;margin:0 auto;padding:3rem 2rem 6rem}
+.tl-track{position:relative;padding-left:2.5rem}
+.tl-track::before{content:'';position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)}
+
+/* QUARTER GROUP */
+.tl-quarter{margin-bottom:3.5rem}
+.tl-quarter-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:1.5rem;padding-left:.5rem}
+
+/* MILESTONE */
+.tl-item{position:relative;margin-bottom:2rem;opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s ease}
+.tl-item.visible{opacity:1;transform:translateY(0)}
+.tl-item::before{content:'';position:absolute;left:-2.5rem;top:.45rem;width:14px;height:14px;border-radius:50%;border:2px solid var(--bg);z-index:1}
+.tl-item.done::before{background:var(--green)}
+.tl-item.current::before{background:var(--accent);box-shadow:0 0 12px var(--accent-glow)}
+.tl-item.upcoming::before{background:var(--surface);border-color:var(--border)}
+
+.tl-date{font-size:.75rem;font-weight:600;color:var(--muted);margin-bottom:.25rem;text-transform:uppercase;letter-spacing:.05em}
+.tl-item.current .tl-date{color:var(--accent)}
+.tl-title{font-size:1.05rem;font-weight:700;color:#fff;margin-bottom:.35rem}
+.tl-desc{font-size:.875rem;color:#aaa;line-height:1.6}
+.tl-desc strong{color:#ddd}
+
+/* BADGE */
+.tl-badge{display:inline-block;padding:.15rem .6rem;border-radius:20px;font-size:.65rem;font-weight:600;margin-left:.5rem;vertical-align:middle}
+.tl-badge-done{background:rgba(34,197,94,0.15);color:#86efac}
+.tl-badge-live{background:rgba(59,130,246,0.15);color:#93c5fd;animation:livePulse 2s ease-in-out infinite}
+.tl-badge-next{background:rgba(245,158,11,0.15);color:#fcd34d}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* STATS ROW */
+.tl-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:3rem 0;max-width:780px;margin-left:auto;margin-right:auto;padding:0 2rem}
+.tl-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem 1rem;text-align:center}
+.tl-stat .num{font-size:1.5rem;font-weight:700;color:#fff}
+.tl-stat .label{font-size:.7rem;color:var(--muted);margin-top:.2rem}
+
+/* CTA */
+.tl-cta{text-align:center;padding:4rem 2rem 3rem;max-width:500px;margin:0 auto}
+.tl-cta p{color:var(--muted);margin-bottom:1.5rem;font-size:.95rem}
+
+/* FOOTER */
+footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
+
+@media(max-width:768px){
+  .tl-stats{grid-template-columns:repeat(2,1fr)}
+  nav{padding:1rem}
+  .nav-links{gap:1rem}
+}
+@media(max-width:480px){
+  .nav-links a:not(.btn-sm){display:none}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/#docs">Docs</a>
+    <a class="btn-sm btn-accent" href="/try">Try beta</a>
+  </div>
+</nav>
+
+<section class="tl-hero">
+  <h1>Where we are.<br>Where we're going.</h1>
+  <p>Slaash started as a research question in early 2026. Three months and 18 engineering phases later, the beta is live.</p>
+</section>
+
+<div class="tl-stats">
+  <div class="tl-stat"><div class="num">18</div><div class="label">phases shipped</div></div>
+  <div class="tl-stat"><div class="num">91%</div><div class="label">WPT core DOM</div></div>
+  <div class="tl-stat"><div class="num">13</div><div class="label">MCP tools</div></div>
+  <div class="tl-stat"><div class="num">50+</div><div class="label">live sites tested</div></div>
+</div>
+
+<div class="tl-container">
+  <div class="tl-track">
+
+    <div class="tl-quarter"><div class="tl-quarter-label">Q1 2026 — Foundation</div></div>
+
+    <div class="tl-item done">
+      <div class="tl-date">January</div>
+      <div class="tl-title">Core engine <span class="tl-badge tl-badge-done">Shipped</span></div>
+      <div class="tl-desc">HTML parser (html5ever), semantic tree builder, Trust Shield with 40+ injection patterns, WASM build. First proof that <strong>goal-aware extraction</strong> works: HTML in, ranked nodes out.</div>
+    </div>
+
+    <div class="tl-item done">
+      <div class="tl-date">February</div>
+      <div class="tl-title">Agent capabilities <span class="tl-badge tl-badge-done">Shipped</span></div>
+      <div class="tl-desc">Intent API (find_and_click, fill_form, extract_data), HTTP fetch with cookies and robots.txt, semantic DOM diffing (80-95% token savings), goal compiler with topological sort. <strong>HTTP API server</strong> and Python/Node bindings.</div>
+    </div>
+
+    <div class="tl-item done">
+      <div class="tl-date">March</div>
+      <div class="tl-title">Intelligence layer <span class="tl-badge tl-badge-done">Shipped</span></div>
+      <div class="tl-desc">QuickJS sandbox with full DOM bridge (200+ APIs), Arena DOM in Rust, SSR hydration for 10 frameworks (Next.js, Nuxt, SvelteKit, RSC, Qwik), event loop (setTimeout, Promises, MutationObserver), YOLOv8 vision, session management, workflow orchestration. <strong>QuickJS optimized to 2&micro;s per eval (215x faster).</strong></div>
+    </div>
+
+    <div class="tl-quarter"><div class="tl-quarter-label">Q2 2026 — Launch</div></div>
+
+    <div class="tl-item done">
+      <div class="tl-date">March 29</div>
+      <div class="tl-title">CRFR published <span class="tl-badge tl-badge-done">Shipped</span></div>
+      <div class="tl-desc">Causal Resonance Field Retrieval — the core algorithm that makes Slaash possible. <strong>97.8% recall, 99.2% token reduction, 14ms cold start.</strong> No neural networks, no GPU. Learns from feedback. Validated on 50 live websites across 10 domains.</div>
+    </div>
+
+    <div class="tl-item current">
+      <div class="tl-date">April — now</div>
+      <div class="tl-title">Public beta <span class="tl-badge tl-badge-live">Live</span></div>
+      <div class="tl-desc">Landing page, /try playground, MCP server with 13 unified tools. <strong>Anyone can try Slaash on any URL right now.</strong> Deployed on Render with persistent CRFR memory (SQLite). Collecting real-world usage data and edge cases.</div>
+    </div>
+
+    <div class="tl-item upcoming">
+      <div class="tl-date">May</div>
+      <div class="tl-title">Developer experience <span class="tl-badge tl-badge-next">Next</span></div>
+      <div class="tl-desc">Public API with authentication and rate limiting. Developer documentation and quickstart guides. npm and pip packages for direct integration. <strong>Usage dashboard</strong> with per-query analytics and CRFR learning curves.</div>
+    </div>
+
+    <div class="tl-item upcoming">
+      <div class="tl-date">June</div>
+      <div class="tl-title">DOM engine maturity</div>
+      <div class="tl-desc">Push WPT compliance from 91% to <strong>95%+ on core DOM</strong>, 60%+ on CSS selectors. iframe support with per-origin trust levels. Improved SPA coverage for React 19, Next.js 15, and Vue 3 hydration patterns.</div>
+    </div>
+
+    <div class="tl-quarter"><div class="tl-quarter-label">Q3 2026 — Scale</div></div>
+
+    <div class="tl-item upcoming">
+      <div class="tl-date">July–August</div>
+      <div class="tl-title">Enterprise readiness</div>
+      <div class="tl-desc">Self-hosted deployment option (single binary, zero dependencies). Team accounts with shared CRFR memory across agents. <strong>SLA guarantees</strong> on uptime and latency. SOC 2 preparation. Volume pricing for high-throughput customers.</div>
+    </div>
+
+    <div class="tl-item upcoming">
+      <div class="tl-date">September</div>
+      <div class="tl-title">Ecosystem integrations</div>
+      <div class="tl-desc">First-class plugins for LangChain, CrewAI, AutoGPT, and other agent frameworks. <strong>WebSocket streaming API</strong> for real-time extraction. A2A protocol support when spec stabilizes. Webhook notifications for CRFR learning milestones.</div>
+    </div>
+
+    <div class="tl-quarter"><div class="tl-quarter-label">Q4 2026 — Vision</div></div>
+
+    <div class="tl-item upcoming">
+      <div class="tl-date">October–December</div>
+      <div class="tl-title">Slaash 1.0</div>
+      <div class="tl-desc">Full SPA coverage (target: 98%+ WPT core DOM). CRFR v2 with cross-domain transfer learning — knowledge from one site improves extraction on similar sites automatically. <strong>The perception layer that makes every AI agent better at reading the web.</strong></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="tl-cta">
+  <p>We're building in the open. Try the beta today and help shape what comes next.</p>
+  <a class="btn-sm btn-accent" href="/try" style="padding:.85rem 2rem;font-size:.95rem;border-radius:10px">Try beta &rarr;</a>
+</div>
+
+<footer>
+  <span class="wordmark" style="font-size:1rem">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</span> &middot; Distill the web. Slash the tokens.
+</footer>
+
+<script>
+const items = document.querySelectorAll('.tl-item');
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+  });
+}, {threshold: 0.15});
+items.forEach(el => obs.observe(el));
+</script>
+</body>
+</html>
