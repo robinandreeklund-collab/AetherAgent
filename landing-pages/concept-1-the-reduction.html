@@ -42,6 +42,11 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .hero.visible .slash{animation:slashEntry .8s cubic-bezier(0.34,1.56,0.64,1) .4s both}
 .hero .subtitle{font-size:clamp(1.1rem,2.5vw,1.5rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em}
 .hero .subtitle span{color:#fff;font-weight:600}
+.hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em}
+.subtitle-fade-out{animation:subtitleOut .4s ease forwards}
+.subtitle-fade-in{animation:subtitleIn .4s ease forwards}
+@keyframes subtitleOut{to{opacity:0;transform:translateY(-8px)}}
+@keyframes subtitleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
 .hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
 
@@ -147,7 +152,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
     <h1>Distill the web.<br>Slash the tokens<span class="slash">/</span></h1>
-    <p class="subtitle"><span>50,000</span> tokens &rarr; <span>200</span>. In <span>1ms</span>.</p>
+    <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
       <a class="btn-sm btn-ghost" href="#docs">Documentation</a>
@@ -439,6 +444,42 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
+
+// ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
+(function(){
+  const examples = [
+    {site:'Wikipedia COVID-19 vaccine', from:'2,815,638', to:'1,200', time:'149ms'},
+    {site:'riksbanken.se', from:'628,407', to:'486', time:'7ms'},
+    {site:'Wikipedia Gothenburg', from:'1,330,344', to:'388', time:'127ms'},
+    {site:'python.org', from:'335,934', to:'270', time:'19ms'},
+    {site:'XE.com (React SPA)', from:'1,358,050', to:'340', time:'145ms'},
+    {site:'Stack Overflow', from:'879,595', to:'486', time:'181ms'},
+    {site:'Wikipedia ibuprofen', from:'1,044,595', to:'380', time:'96ms'},
+    {site:'BBC RSS', from:'6,300', to:'331', time:'3ms'},
+    {site:'Wikipedia EU AI Act', from:'473,911', to:'490', time:'52ms'},
+    {site:'Wikipedia dark matter', from:'1,339,506', to:'380', time:'146ms'},
+  ];
+  const el = document.getElementById('hero-rotate');
+  let idx = 0;
+
+  function render(i){
+    const e = examples[i];
+    el.innerHTML = '<span>'+e.from+'</span> chars &rarr; <span>'+e.to+'</span>. In <span>'+e.time+'</span>.<br><span class="site">'+e.site+'</span>';
+  }
+
+  render(0);
+
+  setInterval(()=>{
+    el.classList.add('subtitle-fade-out');
+    setTimeout(()=>{
+      idx = (idx + 1) % examples.length;
+      render(idx);
+      el.classList.remove('subtitle-fade-out');
+      el.classList.add('subtitle-fade-in');
+      setTimeout(()=>el.classList.remove('subtitle-fade-in'), 400);
+    }, 400);
+  }, 4000);
+})();
 
 // ── SCROLL REVEAL ──
 const reveals = document.querySelectorAll('.reveal');
