@@ -147,7 +147,13 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     <div class="tl-item current">
       <div class="tl-date">April — now</div>
       <div class="tl-title">Public beta <span class="tl-badge tl-badge-live">Live</span></div>
-      <div class="tl-desc">Landing page, /try playground, MCP server with 13 unified tools. <strong>Anyone can try Slaash on any URL right now.</strong> Deployed on Render with persistent CRFR memory (SQLite). Collecting real-world usage data and edge cases.</div>
+      <div class="tl-desc">Landing page, /try playground, MCP server with 13 unified tools. <strong>Anyone can try Slaash on any URL right now.</strong> Deployed on Render with persistent CRFR memory (SQLite). Currently working on <strong>broad_mode for abstract queries</strong> — a new CRFR mode that auto-detects interpretive questions (tone, arguments, philosophy) and returns wider context for LLM analysis, with mandatory feedback to bootstrap learning on these harder cases.</div>
+    </div>
+
+    <div class="tl-item current">
+      <div class="tl-date">Known limitations</div>
+      <div class="tl-title">What we're honest about</div>
+      <div class="tl-desc"><strong>Abstract queries are hard.</strong> CRFR excels at factual extraction — prices, dates, statistics, specific entities — where keyword matching and structural signals are strong. But interpretive questions like "what is the tone of this article?" or "summarize the philosophical argument" lack specific keywords to anchor on. We've shipped <code>broad_mode</code> as a first step: wider retrieval + LLM feedback + causal learning. The system gets better with use, but the first query on a new abstract topic will return more noise than a factual query. We're actively improving this.</div>
     </div>
 
     <div class="tl-item upcoming">
