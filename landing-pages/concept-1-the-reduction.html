@@ -34,15 +34,13 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
 .hero-content{position:relative;z-index:2;max-width:720px}
-.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* DISTILL LINE — fixed height container, noise stays on one line */
-.distill-line{display:block;height:1.15em;overflow:hidden;white-space:nowrap}
-#distill-target{white-space:nowrap}
-/* DISTILL — cursor blink */
-.distill-cursor{display:inline-block;width:2px;height:.85em;background:#3b82f6;vertical-align:text-bottom;margin-left:1px;animation:cursorBlink .6s step-end infinite}
-.distill-cursor.hidden{display:none}
+/* DISTILL — overlay animation on top of static "web." */
+.distill-anchor{position:relative;display:inline}
+.distill-overlay{position:absolute;left:0;top:0;bottom:0;display:none;white-space:nowrap;background:var(--bg);-webkit-text-fill-color:rgba(255,255,255,0.4);font-family:var(--mono);font-size:.55em;font-weight:400;letter-spacing:0;line-height:2;padding-right:4px;pointer-events:none}
+.distill-overlay .cursor{display:inline-block;width:2px;height:.75em;background:#3b82f6;vertical-align:text-bottom;margin-left:1px;animation:cursorBlink .6s step-end infinite}
 @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
 .hero .subtitle{font-size:clamp(1.1rem,2.5vw,1.5rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em}
 .hero .subtitle span{color:#fff;font-weight:600}
@@ -155,7 +153,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1><span class="distill-line">Distill the <span id="distill-target">web.</span><span class="distill-cursor" id="distill-cursor"></span></span><span style="display:block">Slash the tokens<span class="slash">/</span></span></h1>
+    <h1>Distill the <span class="distill-anchor"><span>web.</span><span class="distill-overlay" id="distill-overlay"></span></span><br>Slash the tokens<span class="slash">/</span></h1>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
@@ -449,55 +447,49 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
-// ── DISTILL MORPH: web. → w<div class="nav">... → web. ──
+// ── DISTILL MORPH ──
+// The word "web." is ALWAYS in the DOM, never moves, never changes.
+// An overlay div sits on top of it showing noise text, then disappears.
+// Zero layout shift. The h1 never reflows.
 (function(){
-  const el = document.getElementById('distill-target');
-  const cursor = document.getElementById('distill-cursor');
-  if(!el) return;
+  const ov = document.getElementById('distill-overlay');
+  if(!ov) return;
 
-  const noise = 'w<div class="nav" id="root">';
-  const final_ = 'web.';
+  const noise = '<div class="nav" id="root">';
+  let text = '';
 
-  // Phase 1: erase "web." to empty
-  function eraseTo(str, cb){
-    let text = str;
-    function step(){
-      if(text.length > 0){
-        text = text.slice(0, -1);
-        el.textContent = text;
-        setTimeout(step, 50);
-      } else { cb(); }
-    }
-    step();
-  }
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function render(){ ov.innerHTML = esc(text) + '<span class="cursor"></span>'; }
 
-  // Phase 2: type noise char by char
-  function typeStr(str, speed, cb){
+  // Type string char by char
+  function type(str, speed, cb){
     let i = 0;
-    function step(){
-      if(i < str.length){
-        el.textContent = str.slice(0, i + 1);
-        i++;
-        setTimeout(step, speed + Math.random() * 15);
-      } else { cb(); }
-    }
-    step();
+    (function step(){
+      if(i < str.length){ text += str[i]; i++; render(); setTimeout(step, speed + Math.random()*15); }
+      else cb();
+    })();
   }
 
-  // Sequence: wait → erase "web." → type noise → pause → erase noise → type "web." → hide cursor
+  // Erase from right
+  function erase(speed, cb){
+    (function step(){
+      if(text.length > 0){ text = text.slice(0,-1); render(); setTimeout(step, speed); }
+      else cb();
+    })();
+  }
+
+  // Show overlay, run sequence, then remove overlay to reveal "web." underneath
   setTimeout(()=>{
-    eraseTo(final_, ()=>{
-      typeStr(noise, 30, ()=>{
-        setTimeout(()=>{
-          eraseTo(noise, ()=>{
-            typeStr(final_, 70, ()=>{
-              cursor.classList.add('hidden');
-            });
-          });
-        }, 900);
-      });
+    ov.style.display = 'inline';
+    type(noise, 35, ()=>{
+      setTimeout(()=>{
+        erase(25, ()=>{
+          // Done — remove overlay, "web." is visible underneath
+          ov.style.display = 'none';
+        });
+      }, 1000);
     });
-  }, 800);
+  }, 1200);
 })();
 
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
