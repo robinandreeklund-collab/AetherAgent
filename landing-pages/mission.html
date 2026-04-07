@@ -109,9 +109,34 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 /* FOOTER */
 footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
 
-/* SCROLL REVEAL */
-.reveal{opacity:0;transform:translateY(20px);transition:opacity .7s ease,transform .7s ease}
+/* SCROLL PROGRESS BAR */
+.scroll-progress{position:fixed;top:0;left:0;height:2px;background:linear-gradient(90deg,var(--accent),#60a5fa);z-index:200;width:0;transition:none}
+
+/* SCROLL REVEAL — enhanced */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .8s cubic-bezier(0.16,1,0.3,1),transform .8s cubic-bezier(0.16,1,0.3,1)}
 .reveal.visible{opacity:1;transform:translateY(0)}
+
+/* STAGGER children within reveal */
+.reveal .stat-card,.reveal .timeline-item,.reveal .bar-row,.reveal .cost-box{opacity:0;transform:translateY(15px);transition:opacity .6s ease,transform .6s ease}
+.reveal.visible .stat-card,.reveal.visible .timeline-item,.reveal.visible .bar-row,.reveal.visible .cost-box{opacity:1;transform:translateY(0)}
+.reveal.visible .stat-card:nth-child(1),.reveal.visible .bar-row:nth-child(1),.reveal.visible .timeline-item:nth-child(1),.reveal.visible .cost-box:nth-child(1){transition-delay:.1s}
+.reveal.visible .stat-card:nth-child(2),.reveal.visible .bar-row:nth-child(2),.reveal.visible .timeline-item:nth-child(2),.reveal.visible .cost-box:nth-child(2){transition-delay:.2s}
+.reveal.visible .stat-card:nth-child(3),.reveal.visible .bar-row:nth-child(3),.reveal.visible .timeline-item:nth-child(3){transition-delay:.3s}
+.reveal.visible .bar-row:nth-child(4){transition-delay:.4s}
+.reveal.visible .bar-row:nth-child(5){transition-delay:.5s}
+.reveal.visible .bar-row:nth-child(6){transition-delay:.6s}
+.reveal.visible .bar-row:nth-child(7){transition-delay:.7s}
+
+/* BAR FILL — animate from 0 on scroll */
+.bar-fill{height:100%;border-radius:6px;display:flex;align-items:center;padding:0 .75rem;font-size:.7rem;font-weight:600;color:#fff;white-space:nowrap;width:0 !important;transition:width 1.2s cubic-bezier(0.25,0.46,0.45,0.94) .3s}
+.reveal.visible .bar-fill{width:var(--w) !important}
+
+/* TEXT HIGHLIGHT on scroll */
+.text-hl{background-size:0 2px;background-position:0 100%;background-repeat:no-repeat;background-image:linear-gradient(var(--accent),var(--accent));transition:background-size .8s ease;padding-bottom:1px}
+.reveal.visible .text-hl{background-size:100% 2px}
+
+/* HERO parallax */
+.mission-hero{will-change:transform}
 
 @media(max-width:768px){
   .stat-row{grid-template-columns:1fr}
@@ -127,6 +152,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 </head>
 <body>
 
+<div class="scroll-progress" id="scroll-progress"></div>
 <nav>
   <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
   <div class="nav-links">
@@ -170,7 +196,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <p>Pages keep getting larger. JavaScript frameworks generate more DOM nodes. The answer is buried deeper. And LLM context windows, while growing, cost more the more you use them.</p>
 
   <h3>The cost is staggering</h3>
-  <p>At current API pricing (Claude Sonnet: $3/Mtok input, GPT-4o: $2.50/Mtok), sending raw HTML to an LLM costs <strong>$0.50&ndash;$3.50 per page</strong>. For an agent processing 1,000 pages per day, that's <strong>$4,000/day</strong> in input tokens alone.</p>
+  <p>At current API pricing (Claude Sonnet: $3/Mtok input, GPT-4o: $2.50/Mtok), sending raw HTML to an LLM costs <strong class="text-hl">$0.50&ndash;$3.50 per page</strong>. For an agent processing 1,000 pages per day, that's <strong>$4,000/day</strong> in input tokens alone.</p>
 
   <div class="cost-compare">
     <div class="cost-box bad">
@@ -193,31 +219,31 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <div class="bar-chart">
     <div class="bar-row">
       <div class="bar-label">Wikipedia: COVID-19 vaccine</div>
-      <div class="bar-track"><div class="bar-fill red" style="width:100%">2,815,638 chars</div></div>
+      <div class="bar-track"><div class="bar-fill red" style="--w:100%">2,815,638 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Wikipedia: Dark matter</div>
-      <div class="bar-track"><div class="bar-fill red" style="width:48%">1,339,506 chars</div></div>
+      <div class="bar-track"><div class="bar-fill red" style="--w:48%">1,339,506 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Wikipedia: Gothenburg</div>
-      <div class="bar-track"><div class="bar-fill red" style="width:47%">1,330,344 chars</div></div>
+      <div class="bar-track"><div class="bar-fill red" style="--w:47%">1,330,344 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">XE.com (React SPA)</div>
-      <div class="bar-track"><div class="bar-fill amber" style="width:48%">1,358,050 chars</div></div>
+      <div class="bar-track"><div class="bar-fill amber" style="--w:48%">1,358,050 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Stack Overflow answer</div>
-      <div class="bar-track"><div class="bar-fill amber" style="width:31%">879,595 chars</div></div>
+      <div class="bar-track"><div class="bar-fill amber" style="--w:31%">879,595 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">GPT-4o context window</div>
-      <div class="bar-track"><div class="bar-fill accent" style="width:18%">~512,000 chars</div></div>
+      <div class="bar-track"><div class="bar-fill accent" style="--w:18%">~512,000 chars</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Claude Haiku context</div>
-      <div class="bar-track"><div class="bar-fill accent" style="width:7%">~200,000 chars</div></div>
+      <div class="bar-track"><div class="bar-fill accent" style="--w:7%">~200,000 chars</div></div>
     </div>
   </div>
 
@@ -319,22 +345,22 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <p>Jina Reader is faster but dumps the full article as plain text with no structure. Neither service understands <strong>what you're looking for</strong>. They convert format; they don't extract answers.</p>
 
   <h3>The fundamental gap</h3>
-  <p>Every tool in the market today does one of two things: render pages faster, or convert HTML to a different format. <strong>None of them answer the question.</strong></p>
+  <p>Every tool in the market today does one of two things: render pages faster, or convert HTML to a different format. <strong class="text-hl">None of them answer the question.</strong></p>
 
   <p>Slaash is different. It doesn't just convert — it understands the goal, scores every node for relevance, and returns only the signal. And it gets better every time you use it.</p>
 
   <div class="bar-chart">
     <div class="bar-row">
       <div class="bar-label">Lightpanda (HN)</div>
-      <div class="bar-track"><div class="bar-fill red" style="width:100%">79,406 tokens</div></div>
+      <div class="bar-track"><div class="bar-fill red" style="--w:100%">79,406 tokens</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Raw HTML (HN)</div>
-      <div class="bar-track"><div class="bar-fill amber" style="width:11%">8,694 tokens</div></div>
+      <div class="bar-track"><div class="bar-fill amber" style="--w:11%">8,694 tokens</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Slaash (HN)</div>
-      <div class="bar-track"><div class="bar-fill green" style="width:0.7%">523 tokens</div></div>
+      <div class="bar-track"><div class="bar-fill green" style="--w:0.7%">523 tokens</div></div>
     </div>
   </div>
 
@@ -401,19 +427,19 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <div class="bar-chart">
     <div class="bar-row">
       <div class="bar-label">riksbanken.se</div>
-      <div class="bar-track"><div class="bar-fill green" style="width:100%">628,407 chars &rarr; 486 chars (99.9%)</div></div>
+      <div class="bar-track"><div class="bar-fill green" style="--w:100%">628,407 chars &rarr; 486 chars (99.9%)</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">Wikipedia EN</div>
-      <div class="bar-track"><div class="bar-fill green" style="width:95%">1,044,595 chars &rarr; 380 chars (100.0%)</div></div>
+      <div class="bar-track"><div class="bar-fill green" style="--w:95%">1,044,595 chars &rarr; 380 chars (100.0%)</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">python.org</div>
-      <div class="bar-track"><div class="bar-fill green" style="width:60%">335,934 chars &rarr; 270 chars (99.9%)</div></div>
+      <div class="bar-track"><div class="bar-fill green" style="--w:60%">335,934 chars &rarr; 270 chars (99.9%)</div></div>
     </div>
     <div class="bar-row">
       <div class="bar-label">BBC RSS</div>
-      <div class="bar-track"><div class="bar-fill green" style="width:10%">6,300 chars &rarr; 331 chars (94.7%)</div></div>
+      <div class="bar-track"><div class="bar-fill green" style="--w:10%">6,300 chars &rarr; 331 chars (94.7%)</div></div>
     </div>
   </div>
 </section>
@@ -607,7 +633,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     </div>
   </div>
 
-  <p>LLM prices dropped ~80% from 2025 to 2026. But page sizes grew. The net effect: raw HTML is still prohibitively expensive at scale. The answer isn't cheaper models — it's <strong>sending less data</strong>.</p>
+  <p>LLM prices dropped ~80% from 2025 to 2026. But page sizes grew. The net effect: raw HTML is still prohibitively expensive at scale. The answer isn't cheaper models — it's <strong class="text-hl">sending less data</strong>.</p>
 </section>
 
 <div class="divider"><hr></div>
@@ -618,7 +644,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 
   <p>The web contains the world's information. AI agents are the new interface to that information. But the bridge between them is broken — agents receive noise when they need signal.</p>
 
-  <p>We believe the right solution is not a bigger model with a longer context window. It's a system that <strong>understands web structure well enough to extract the answer before the LLM ever sees it.</strong></p>
+  <p>We believe the right solution is not a bigger model with a longer context window. It's a system that <strong class="text-hl">understands web structure well enough to extract the answer before the LLM ever sees it.</strong></p>
 
   <p>We believe this system should be:</p>
 
@@ -643,13 +669,66 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 </footer>
 
 <script>
+// ── SCROLL PROGRESS BAR ──
+const progressBar = document.getElementById('scroll-progress');
+let ticking = false;
+window.addEventListener('scroll', () => {
+  if(!ticking){
+    requestAnimationFrame(()=>{
+      const h = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = h > 0 ? (window.scrollY / h) * 100 : 0;
+      progressBar.style.width = pct + '%';
+      ticking = false;
+    });
+    ticking = true;
+  }
+});
+
+// ── SCROLL REVEAL with stagger ──
 const reveals = document.querySelectorAll('.reveal');
-const obs = new IntersectionObserver((entries) => {
+const revealObs = new IntersectionObserver((entries) => {
   entries.forEach(e => {
-    if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+    if(e.isIntersecting){ e.target.classList.add('visible'); revealObs.unobserve(e.target); }
   });
-}, {threshold: 0.1});
-reveals.forEach(el => obs.observe(el));
+}, {threshold: 0.08, rootMargin: '0px 0px -40px 0px'});
+reveals.forEach(el => revealObs.observe(el));
+
+// ── HERO PARALLAX ──
+const hero = document.querySelector('.mission-hero');
+if(hero){
+  window.addEventListener('scroll', ()=>{
+    const y = window.scrollY;
+    if(y < window.innerHeight){
+      hero.style.transform = 'translateY(' + (y * 0.3) + 'px)';
+      hero.style.opacity = Math.max(0, 1 - y / (window.innerHeight * 0.7));
+    }
+  }, {passive: true});
+}
+
+// ── STAT COUNT-UP on scroll ──
+document.querySelectorAll('.stat-card .num').forEach(el => {
+  const obs = new IntersectionObserver(([e]) => {
+    if(!e.isIntersecting) return;
+    obs.unobserve(el);
+    const raw = el.textContent.trim();
+    // Try to parse numeric part
+    const match = raw.match(/^([\d.]+)/);
+    if(!match) return;
+    const target = parseFloat(match[1]);
+    const suffix = raw.replace(match[1], '');
+    const duration = 1200;
+    const t0 = performance.now();
+    const isInt = target % 1 === 0 && !raw.includes('.');
+    (function tick(now){
+      const p = Math.min((now - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - p, 4);
+      const v = ease * target;
+      el.textContent = (isInt ? Math.round(v) : v.toFixed(1)) + suffix;
+      if(p < 1) requestAnimationFrame(tick);
+    })(performance.now());
+  }, {threshold: 0.5});
+  obs.observe(el);
+});
 </script>
 </body>
 </html>
