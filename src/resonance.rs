@@ -250,6 +250,18 @@ pub struct ResonanceField {
     pub created_at_ms: u64,
     /// Totalt antal propagations-anrop
     pub total_queries: u32,
+    /// Totalt antal feedback-anrop (crfr_feedback)
+    #[serde(default)]
+    pub total_feedback: u32,
+    /// Totalt antal noder markerade som successful i feedback
+    #[serde(default)]
+    pub total_successful_nodes: u32,
+    /// Senaste propagation-tid i mikrosekunder
+    #[serde(default)]
+    pub last_propagation_us: u64,
+    /// Senaste antal returnerade noder (after gap filter)
+    #[serde(default)]
+    pub last_result_count: u32,
 }
 
 /// Roll-prioritet: hur sannolikt innehåller rollen relevant data (0.0-1.0)
@@ -645,6 +657,10 @@ impl ResonanceField {
             domain_hash: dh,
             created_at_ms: now_ms(),
             total_queries: 0,
+            total_feedback: 0,
+            total_successful_nodes: 0,
+            last_propagation_us: 0,
+            last_result_count: 0,
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
@@ -1542,8 +1558,12 @@ impl ResonanceField {
     /// consecutive nodes, cut there. Falls back to hard `top_k` limit.
     /// This naturally selects the "resonant cluster" without a fixed threshold.
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
+        let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
-        Self::apply_gap_filter(all, top_k)
+        let results = Self::apply_gap_filter(all, top_k);
+        self.last_propagation_us = t0.elapsed().as_micros() as u64;
+        self.last_result_count = results.len() as u32;
+        results
     }
 
     /// Broad-mode propagation for abstract/interpretive queries.
@@ -1980,6 +2000,10 @@ impl ResonanceField {
     /// 2. Negative signal: beta += (1 - confidence) for non-successful edges
     /// 3. Temporal decay: all stats decay before update (prevents stale bias)
     pub fn feedback(&mut self, goal: &str, successful_node_ids: &[u32]) {
+        // Track feedback metrics
+        self.total_feedback += 1;
+        self.total_successful_nodes += successful_node_ids.len() as u32;
+
         let goal_hv = Hypervector::from_text_ngrams(goal);
         let goal_hash = hash_url(goal);
         let now = now_ms();
@@ -2807,6 +2831,10 @@ pub struct FieldSummary {
     pub url: String,
     pub node_count: usize,
     pub total_queries: u32,
+    pub total_feedback: u32,
+    pub total_successful_nodes: u32,
+    pub last_propagation_us: u64,
+    pub last_result_count: u32,
     pub domain_hash: u64,
     pub created_at_ms: u64,
     pub insert_ms: u64,
@@ -2816,6 +2844,8 @@ pub struct FieldSummary {
     pub structure_hash: u64,
     pub max_depth: u32,
     pub edge_count: usize,
+    /// Antal noder med causal memory (hit_count > 0)
+    pub learned_nodes: usize,
 }
 
 /// List summaries of all cached resonance fields (non-destructive peek).
@@ -2829,11 +2859,16 @@ pub fn list_cached_fields() -> Vec<FieldSummary> {
         .iter()
         .map(|(url_hash, insert_ms, field)| {
             let max_depth = field.nodes.values().map(|s| s.depth).max().unwrap_or(0);
+            let learned_nodes = field.nodes.values().filter(|s| s.hit_count > 0).count();
             FieldSummary {
                 url_hash: *url_hash,
                 url: field.url.clone(),
                 node_count: field.nodes.len(),
                 total_queries: field.total_queries,
+                total_feedback: field.total_feedback,
+                total_successful_nodes: field.total_successful_nodes,
+                last_propagation_us: field.last_propagation_us,
+                last_result_count: field.last_result_count,
                 domain_hash: field.domain_hash,
                 created_at_ms: field.created_at_ms,
                 insert_ms: *insert_ms,
@@ -2843,6 +2878,7 @@ pub fn list_cached_fields() -> Vec<FieldSummary> {
                 structure_hash: field.structure_hash,
                 max_depth,
                 edge_count: field.parent_map.len(),
+                learned_nodes,
             }
         })
         .collect()

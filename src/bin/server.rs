@@ -6704,8 +6704,54 @@ async fn live_stats_handler(
     let total_edges: usize = fields.iter().map(|f| f.edge_count).sum();
     let total_causal_weights: usize = fields.iter().map(|f| f.propagation_weight_count).sum();
     let total_concepts: usize = fields.iter().map(|f| f.concept_memory_count).sum();
+    let total_feedback: u32 = fields.iter().map(|f| f.total_feedback).sum();
+    let total_successful: u32 = fields.iter().map(|f| f.total_successful_nodes).sum();
+    let total_learned: usize = fields.iter().map(|f| f.learned_nodes).sum();
     let requests = state.request_count.load(std::sync::atomic::Ordering::Relaxed);
     let uptime_secs = state.started_at.elapsed().as_secs();
+
+    // Per-site leaderboard (sorted by total_queries desc)
+    let mut site_list: Vec<serde_json::Value> = fields
+        .iter()
+        .map(|f| {
+            // Extract short domain from URL
+            let domain = f.url.split("//").nth(1).unwrap_or(&f.url)
+                .split('/').next().unwrap_or(&f.url)
+                .replace("www.", "");
+            serde_json::json!({
+                "url": f.url,
+                "domain": domain,
+                "nodes": f.node_count,
+                "queries": f.total_queries,
+                "feedback": f.total_feedback,
+                "successful_nodes": f.total_successful_nodes,
+                "learned_nodes": f.learned_nodes,
+                "causal_weights": f.propagation_weight_count,
+                "concepts": f.concept_memory_count,
+                "last_propagation_us": f.last_propagation_us,
+                "last_result_count": f.last_result_count,
+                "max_depth": f.max_depth,
+                "edges": f.edge_count,
+            })
+        })
+        .collect();
+    site_list.sort_by(|a, b| {
+        let aq = a["queries"].as_u64().unwrap_or(0);
+        let bq = b["queries"].as_u64().unwrap_or(0);
+        bq.cmp(&aq)
+    });
+
+    // Avg propagation latency (from sites with data)
+    let sites_with_timing: Vec<u64> = fields
+        .iter()
+        .filter(|f| f.last_propagation_us > 0)
+        .map(|f| f.last_propagation_us)
+        .collect();
+    let avg_propagation_us = if sites_with_timing.is_empty() {
+        0
+    } else {
+        sites_with_timing.iter().sum::<u64>() / sites_with_timing.len() as u64
+    };
 
     let json = serde_json::json!({
         "sites_profiled": sites_profiled,
@@ -6714,10 +6760,15 @@ async fn live_stats_handler(
         "total_edges": total_edges,
         "causal_weights_learned": total_causal_weights,
         "concepts_memorized": total_concepts,
+        "total_feedback": total_feedback,
+        "total_successful_nodes": total_successful,
+        "total_learned_nodes": total_learned,
+        "avg_propagation_us": avg_propagation_us,
         "cache_entries": cache_entries,
         "cache_capacity": cache_capacity,
         "total_requests": requests,
         "uptime_secs": uptime_secs,
+        "sites": site_list,
     });
     (
         StatusCode::OK,
