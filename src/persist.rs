@@ -181,9 +181,9 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
     };
 
     let mut stmt =
-        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 64") {
+        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256") {
             Ok(s) => s,
-            Err(_) => return vec![],
+            Err(e) => { eprintln!("[PERSIST] load_all_fields prepare error: {e}"); return vec![]; }
         };
 
     let rows = match stmt.query_map([], |row| {
@@ -194,9 +194,27 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         Err(_) => return vec![],
     };
 
-    rows.filter_map(|r| r.ok())
-        .filter_map(|data| serde_json::from_slice(&data).ok())
-        .collect()
+    let mut loaded = 0;
+    let mut failed = 0;
+    let result: Vec<ResonanceField> = rows
+        .filter_map(|r| r.ok())
+        .filter_map(|data| {
+            match serde_json::from_slice(&data) {
+                Ok(field) => { loaded += 1; Some(field) }
+                Err(e) => {
+                    failed += 1;
+                    if failed <= 3 {
+                        eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+                    }
+                    None
+                }
+            }
+        })
+        .collect();
+    if failed > 0 {
+        eprintln!("[PERSIST] load_all_fields: {loaded} loaded, {failed} failed deserialization");
+    }
+    result
 }
 
 /// Delete old fields (older than max_age_ms).

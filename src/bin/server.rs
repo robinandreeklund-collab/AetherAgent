@@ -6847,12 +6847,14 @@ async fn main() {
         match aether_agent::persist::init(&db_path) {
             Ok(()) => {
                 eprintln!("[PERSIST] SQLite initialized at {db_path}");
-                aether_agent::persist::restore();
-                let (fields, domains, size) = aether_agent::persist::db_stats();
+                let (fields_before, domains_before, size) = aether_agent::persist::db_stats();
                 eprintln!(
-                    "[PERSIST] DB stats: {fields} fields, {domains} domain profiles, {:.1} KB",
+                    "[PERSIST] DB contains: {fields_before} fields, {domains_before} domains, {:.1} KB",
                     size as f64 / 1024.0
                 );
+                aether_agent::persist::restore();
+                let (ce, _) = aether_agent::resonance::cache_stats();
+                eprintln!("[PERSIST] Restored to cache: {ce} fields loaded");
             }
             Err(e) => {
                 eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
