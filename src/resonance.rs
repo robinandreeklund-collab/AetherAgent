@@ -1546,6 +1546,44 @@ impl ResonanceField {
         Self::apply_gap_filter(all, top_k)
     }
 
+    /// Broad-mode propagation for abstract/interpretive queries.
+    ///
+    /// Skips gap filter, uses higher top_k, returns more context for LLM analysis.
+    /// Auto-detects abstract queries if `auto` is true: checks if top-5 amplitudes
+    /// are clustered (low variance = no clear winner = likely abstract).
+    ///
+    /// Use this when the query is about tone, philosophy, arguments, summaries, or
+    /// when the goal cluster has insufficient causal memory (< 3 feedback cycles).
+    pub fn propagate_broad(
+        &mut self,
+        goal: &str,
+        top_k: usize,
+        auto_detect: bool,
+    ) -> (Vec<ResonanceResult>, bool) {
+        let all = self.propagate(goal);
+
+        // Auto-detect: check if amplitude distribution suggests abstract query
+        let is_abstract = if auto_detect && all.len() >= 5 {
+            let top5: Vec<f32> = all.iter().take(5).map(|r| r.amplitude).collect();
+            let max = top5[0];
+            let min = top5[4];
+            // If top-5 spread is < 25% of max, it's likely abstract (no clear winners)
+            max > 0.01 && (max - min) / max < 0.25
+        } else {
+            !auto_detect // if auto_detect=false, caller explicitly wants broad mode
+        };
+
+        if is_abstract {
+            // Broad mode: no gap filter, return up to top_k
+            let results: Vec<ResonanceResult> = all.into_iter().take(top_k).collect();
+            (results, true)
+        } else {
+            // Normal mode: apply gap filter
+            let results = Self::apply_gap_filter(all, top_k);
+            (results, false)
+        }
+    }
+
     /// Propagate with trace and gap detection
     pub fn propagate_top_k_traced(
         &mut self,

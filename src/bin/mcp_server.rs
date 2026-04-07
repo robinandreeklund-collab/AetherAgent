@@ -103,6 +103,12 @@ struct ParseCrfrParams {
     /// Example: {"Authorization": "Bearer token123"}
     #[serde(default)]
     headers: Option<std::collections::HashMap<String, String>>,
+    /// Broad mode for abstract/interpretive queries.
+    /// "auto" = auto-detect (recommended), "true" = force broad mode, "" or omit = normal mode.
+    /// When active: disables gap filter, returns 50+ nodes for LLM analysis.
+    /// MUST call crfr_feedback after using broad mode to teach the system.
+    #[serde(default)]
+    broad_mode: Option<String>,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -606,20 +612,31 @@ impl AetherMcpServer {
 
     #[tool(
         name = "parse_crfr",
-        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking. Before calling this tool, YOU (the LLM) MUST expand the goal with SPECIFIC synonyms, translations, and expected values. Do NOT add generic words.\n\nExample: User asks 'what is the price?'\n  BAD:  'price information product'\n  GOOD: 'price pris cost £ $ kr amount total fee belopp checkout'\n\nExample: User asks 'vem skrev artikeln?'\n  BAD:  'author article'\n  GOOD: 'author författare writer journalist publicerad by name namn reporter'\n\nCRFR combines BM25 keyword matching with HDC wave propagation. Key advantages:\n- 10-15x FASTER than parse_hybrid (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions\n- Per-URL caching: revisiting same page is near-instant (~300µs)\n- Natural top-k via amplitude-gap detection\n\nParameters:\n- top_n: Max nodes (default 20, gap-detection often returns fewer)\n- run_js: Set true for SPA/dynamic pages — evaluates inline JS via QuickJS sandbox\n- output_format: 'json' (default, structured) or 'markdown' (readable, token-efficient)\n\nEach node includes resonance_type: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
+        description = "Parse HTML using Causal Resonance Field Retrieval (CRFR) — a novel paradigm that treats the DOM as a living resonance field.\n\nIMPORTANT — GOAL EXPANSION: The 'goal' parameter drives ALL ranking. Before calling this tool, YOU (the LLM) MUST expand the goal with SPECIFIC synonyms, translations, and expected values. Do NOT add generic words.\n\nExample: User asks 'what is the price?'\n  BAD:  'price information product'\n  GOOD: 'price pris cost £ $ kr amount total fee belopp checkout'\n\nExample: User asks 'vem skrev artikeln?'\n  BAD:  'author article'\n  GOOD: 'author författare writer journalist publicerad by name namn reporter'\n\nKey advantages:\n- 10-15x FASTER than parse_hybrid (no ONNX embedding inference)\n- LEARNS over time: call crfr_feedback after successful extractions\n- Per-URL caching: revisiting same page is near-instant (~300µs)\n- Natural top-k via amplitude-gap detection\n\nSPECIAL — ABSTRACT/INTERPRETIVE QUERIES:\nFor factual queries (prices, facts, numbers, dates): Use default mode — CRFR excels at these.\nFor abstract queries (tone, philosophy, arguments, summary of ideas, pros/cons, overall message): Set broad_mode='auto' or broad_mode='true'. This disables the gap filter and returns more nodes (50+) so you can analyze the full context. AFTER analyzing, you MUST call crfr_feedback with the node IDs that contributed to your understanding. This teaches the system to handle similar abstract queries efficiently in the future. The response includes 'broad_mode_active: true' and 'suggested_action: provide_feedback' when broad mode activated.\n\nParameters:\n- top_n: Max nodes (default 20, gap-detection often returns fewer)\n- run_js: Set true for SPA/dynamic pages\n- output_format: 'json' or 'markdown'\n- broad_mode: 'auto' (detect abstract queries automatically), 'true' (force broad), '' (normal)\n\nEach node includes resonance_type: Direct (keyword match), Propagated (wave from neighbor), CausalMemory (learned from past success)."
     )]
     fn parse_crfr(&self, Parameters(params): Parameters<ParseCrfrParams>) -> String {
-        // Synkron fallback — async handler i call_tool interceptar alla anrop
-        // men denna finns som backup om interceptorn inte fångar
         let html = params.html.as_deref().unwrap_or("");
-        aether_agent::parse_crfr(
-            html,
-            &params.goal,
-            &params.url,
-            params.top_n,
-            params.run_js,
-            &params.output_format,
-        )
+        let broad = params.broad_mode.as_deref().unwrap_or("");
+        if broad.is_empty() {
+            aether_agent::parse_crfr(
+                html,
+                &params.goal,
+                &params.url,
+                params.top_n,
+                params.run_js,
+                &params.output_format,
+            )
+        } else {
+            aether_agent::parse_crfr_broad(
+                html,
+                &params.goal,
+                &params.url,
+                params.top_n,
+                params.run_js,
+                &params.output_format,
+                broad,
+            )
+        }
     }
 
     #[tool(
