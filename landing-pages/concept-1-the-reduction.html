@@ -34,13 +34,13 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
 .hero-content{position:relative;z-index:2;max-width:720px}
-.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:.5rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* DISTILL TICKER — separate element below h1, shows noise typing */
-.distill-ticker{font-family:var(--mono);font-size:clamp(.7rem,1.5vw,.9rem);color:rgba(255,255,255,0.3);height:1.4em;margin-bottom:1.5rem;white-space:nowrap;overflow:hidden}
-.distill-ticker .cursor{display:inline-block;width:2px;height:.9em;background:#3b82f6;vertical-align:text-bottom;margin-left:1px;animation:cursorBlink .6s step-end infinite}
-.distill-ticker.done{opacity:0;transition:opacity .5s ease}
+/* DISTILL BOX — fixed-width container inside h1 for the animation */
+.distill-box{display:inline-block;vertical-align:baseline;text-align:left;overflow:hidden;white-space:nowrap;transition:width .5s cubic-bezier(0.25,0.46,0.45,0.94)}
+.distill-box .noise{font-family:var(--mono);font-size:.5em;letter-spacing:0;-webkit-text-fill-color:transparent;background:rgba(255,255,255,0.3);-webkit-background-clip:text}
+.distill-box .cursor{display:inline-block;width:2px;height:.55em;-webkit-text-fill-color:transparent;background:#3b82f6;vertical-align:baseline;margin-left:1px;animation:cursorBlink .6s step-end infinite}
 @keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}
 .hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap}
 .hero .subtitle span{color:#fff;font-weight:600}
@@ -155,8 +155,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1>Distill the web.<br>Slash the tokens<span class="slash">/</span></h1>
-    <div class="distill-ticker" id="distill-ticker"></div>
+    <h1>Distill the <span class="distill-box" id="distill-box"><span id="distill-text">web.</span></span><br>Slash the tokens<span class="slash">/</span></h1>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
@@ -450,52 +449,119 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
-// ── DISTILL TICKER — noise typing below h1 ──
+// ── DISTILL ANIMATION — types noise inside h1, then restores "web." ──
+// Uses a fixed-width inline-block box so the centered h1 never reflows.
+// Width transitions smoothly at start and end. During typing: zero shift.
 (function(){
-  const tk = document.getElementById('distill-ticker');
-  if(!tk) return;
+  const box = document.getElementById('distill-box');
+  const textEl = document.getElementById('distill-text');
+  if(!box || !textEl) return;
 
-  const lines = [
-    '&lt;div class="nav-header" id="__next" data-reactroot&gt;',
-    '&lt;script src="/static/chunks/webpack-a9b2c.js"&gt;&lt;/script&gt;',
-    '&lt;meta property="og:site_name" content="..."&gt;',
-    '&lt;link rel="preload" href="/fonts/inter-var.woff2"&gt;',
-    'aria-hidden="true" tabindex="-1" style="display:none"',
-  ];
-  let lineIdx = 0;
-  let text = '';
+  const noise = '<div class="nav" id="root">';
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  function render(){ tk.innerHTML = text + '<span class="cursor"></span>'; }
+  // Step 1: Measure natural width of "web."
+  const webW = box.offsetWidth;
 
-  function type(str, speed, cb){
+  // Step 2: Measure width of noise text at its display size
+  textEl.innerHTML = '<span class="noise">' + esc(noise) + '</span>';
+  const noiseW = box.offsetWidth;
+
+  // Step 3: Reset to "web." and lock width
+  textEl.textContent = 'web.';
+  box.style.width = webW + 'px';
+
+  function showCursor(){
+    // Remove existing cursor if any
+    const old = box.querySelector('.cursor');
+    if(old) old.remove();
+    const c = document.createElement('span');
+    c.className = 'cursor';
+    c.textContent = '\u200B'; // zero-width space so it renders
+    box.appendChild(c);
+  }
+  function hideCursor(){
+    const c = box.querySelector('.cursor');
+    if(c) c.remove();
+  }
+
+  // Type noise char by char into textEl as <span class="noise">
+  function typeNoise(str, speed, cb){
     let i = 0;
+    textEl.innerHTML = '';
+    const span = document.createElement('span');
+    span.className = 'noise';
+    textEl.appendChild(span);
     (function step(){
-      if(i < str.length){ text += str[i]; i++; render(); setTimeout(step, speed + Math.random()*12); }
-      else cb();
+      if(i < str.length){
+        span.textContent = str.slice(0, i+1);
+        showCursor();
+        i++;
+        setTimeout(step, speed + Math.random()*15);
+      } else cb();
     })();
   }
 
-  function erase(speed, cb){
+  // Erase noise from right
+  function eraseNoise(speed, cb){
+    const span = textEl.querySelector('.noise');
+    if(!span){ cb(); return; }
+    let t = span.textContent;
     (function step(){
-      if(text.length > 0){ text = text.slice(0,-1); render(); setTimeout(step, speed); }
-      else cb();
+      if(t.length > 0){
+        t = t.slice(0,-1);
+        span.textContent = t;
+        showCursor();
+        setTimeout(step, speed);
+      } else cb();
     })();
   }
 
-  function loop(){
-    const line = lines[lineIdx % lines.length];
-    lineIdx++;
-    type(line, 25, ()=>{
-      setTimeout(()=>{
-        erase(15, ()=>{
-          setTimeout(loop, 300);
-        });
-      }, 800);
-    });
+  // Type "web." char by char as normal h1 text
+  function typeWeb(speed, cb){
+    const target = 'web.';
+    let i = 0;
+    textEl.textContent = '';
+    (function step(){
+      if(i < target.length){
+        textEl.textContent = target.slice(0, i+1);
+        showCursor();
+        i++;
+        setTimeout(step, speed);
+      } else cb();
+    })();
   }
 
-  // Start after page settles
-  setTimeout(()=>{ render(); loop(); }, 1000);
+  // === SEQUENCE ===
+  setTimeout(()=>{
+    showCursor();
+
+    // Expand box to noise width (smooth CSS transition)
+    box.style.width = noiseW + 'px';
+
+    // Wait for width transition to finish, then type noise
+    setTimeout(()=>{
+      typeNoise(noise, 30, ()=>{
+        // Pause — let visitor read the noise
+        setTimeout(()=>{
+          // Erase noise
+          eraseNoise(20, ()=>{
+            // Contract box back to web width
+            box.style.width = webW + 'px';
+
+            // Wait for contraction, then type "web."
+            setTimeout(()=>{
+              typeWeb(80, ()=>{
+                hideCursor();
+                // Remove inline width so it's fully natural
+                setTimeout(()=>{ box.style.width = ''; }, 100);
+              });
+            }, 500);
+          });
+        }, 1000);
+      });
+    }, 550); // wait for width transition (500ms) + small buffer
+  }, 1200);
 })();
 
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
