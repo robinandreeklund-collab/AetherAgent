@@ -226,58 +226,133 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 
 <div class="divider"><hr></div>
 
-<!-- EXISTING APPROACHES -->
+<!-- THE LANDSCAPE -->
 <section class="section reveal">
-  <h2>What exists today</h2>
-  <p>The industry has tried several approaches. None of them solve the complete problem.</p>
+  <h2>The landscape today</h2>
+  <p>Several tools exist to help AI agents interact with web pages. They fall into two categories: <strong>headless browsers</strong> that render pages faster, and <strong>extraction APIs</strong> that convert HTML to simpler formats. Neither category solves the core problem.</p>
+
+  <h3>Headless browsers</h3>
+  <p>Headless Chrome, Playwright, and newer entries like <strong>Lightpanda</strong> (a Zig-based browser claiming 11x speed over Chrome) give agents a faster way to load and render pages. But they return the <strong>entire DOM</strong> — every navigation link, every tracking script, every footer. The agent still receives tens of thousands of tokens of noise.</p>
 
   <table class="compare-table">
     <thead>
-      <tr><th>Approach</th><th>Speed</th><th>Accuracy</th><th>Limitation</th></tr>
+      <tr><th>Engine</th><th>Parse speed</th><th>Token output (HN)</th><th>Understands goal</th></tr>
     </thead>
     <tbody>
       <tr>
-        <td>Raw HTML to LLM</td>
-        <td><span class="pill pill-green">0ms</span></td>
-        <td><span class="pill pill-green">100%</span></td>
-        <td>Exceeds context, costs $0.50&ndash;$3.50/page</td>
+        <td>Chrome (Playwright)</td>
+        <td><span class="pill pill-red">14ms</span></td>
+        <td><span class="pill pill-red">8,694 tokens</span></td>
+        <td><span class="pill pill-red">No</span></td>
       </tr>
       <tr>
-        <td>BM25 keyword search</td>
-        <td><span class="pill pill-green">1ms</span></td>
-        <td><span class="pill pill-red">~60%</span></td>
-        <td>Vocabulary mismatch, no structure awareness</td>
-      </tr>
-      <tr>
-        <td>Readability extraction</td>
-        <td><span class="pill pill-green">5ms</span></td>
-        <td><span class="pill pill-amber">N/A</span></td>
-        <td>Extracts article body, not specific answers</td>
-      </tr>
-      <tr>
-        <td>Neural reranking (ColBERT)</td>
-        <td><span class="pill pill-amber">90ms</span></td>
-        <td><span class="pill pill-green">~83%</span></td>
-        <td>Requires 23MB ONNX model, GPU recommended</td>
-      </tr>
-      <tr>
-        <td>CSS selector rules</td>
-        <td><span class="pill pill-green">1ms</span></td>
-        <td><span class="pill pill-amber">varies</span></td>
-        <td>Brittle, requires per-site maintenance</td>
+        <td>Lightpanda (CDP)</td>
+        <td><span class="pill pill-amber">4ms</span></td>
+        <td><span class="pill pill-red">79,406 tokens</span></td>
+        <td><span class="pill pill-red">No</span></td>
       </tr>
       <tr class="highlight">
         <td><strong>Slaash</strong></td>
-        <td><span class="pill pill-green">&lt;1ms</span></td>
-        <td><span class="pill pill-green">97.8%</span></td>
-        <td>No GPU, no model files, learns with use</td>
+        <td><span class="pill pill-green">1ms</span></td>
+        <td><span class="pill pill-green">523 tokens</span></td>
+        <td><span class="pill pill-green">Yes</span></td>
       </tr>
     </tbody>
   </table>
 
-  <p>Keyword search is fast but misses answers that use different words than the query. Neural models are accurate but slow and heavy. Readability extractors pull out article text but can't answer specific questions. CSS selectors break when sites update their markup.</p>
+  <p>On the same Hacker News page with the goal <em>"find latest news articles"</em>, Lightpanda returns <strong>79,406 tokens</strong> — 9x more than the raw HTML. It renders JavaScript and expands the DOM, making the problem worse. Slaash returns <strong>523 tokens</strong> — only the relevant articles, ranked by goal match.</p>
 
-  <p>None of these approaches <strong>learn</strong>. Ask the same site the same type of question 100 times, and the 100th query is no better than the first.</p>
+  <p>Benchmark data from identical test conditions (persistent servers, same machine, sequential):</p>
+
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="num green">4x</div>
+      <div class="label">faster than Lightpanda</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">14x</div>
+      <div class="label">faster than Chrome</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">878</div>
+      <div class="label">requests/sec throughput</div>
+    </div>
+  </div>
+
+  <h3>Extraction APIs</h3>
+  <p>Services like <strong>Firecrawl</strong> and <strong>Jina Reader</strong> convert web pages to Markdown or plain text. This reduces token count compared to raw HTML, but introduces different problems:</p>
+
+  <table class="compare-table">
+    <thead>
+      <tr><th>Service</th><th>Speed</th><th>Output</th><th>Limitation</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Firecrawl</td>
+        <td><span class="pill pill-red">2&ndash;15s</span></td>
+        <td>Markdown</td>
+        <td>$0.005&ndash;$0.009/page, no goal awareness, 7&ndash;9 credits/page</td>
+      </tr>
+      <tr>
+        <td>Jina Reader</td>
+        <td><span class="pill pill-amber">1&ndash;5s</span></td>
+        <td>Plain text</td>
+        <td>20 RPM free tier, no ranking, full article dumped</td>
+      </tr>
+      <tr>
+        <td>Crawl4AI</td>
+        <td><span class="pill pill-amber">varies</span></td>
+        <td>Markdown</td>
+        <td>Open-source but requires Python + browser, no goal filtering</td>
+      </tr>
+      <tr class="highlight">
+        <td><strong>Slaash</strong></td>
+        <td><span class="pill pill-green">&lt;1ms</span></td>
+        <td>Ranked nodes</td>
+        <td>Goal-aware, learns with use, 1.8 MB binary</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Firecrawl converts a page to Markdown in 2&ndash;15 seconds. The result is cleaner than raw HTML, but still contains the <strong>entire page</strong> — navigation, sidebars, footers, related articles. The LLM must still find the answer inside thousands of tokens of irrelevant content.</p>
+
+  <p>Jina Reader is faster but dumps the full article as plain text with no structure. Neither service understands <strong>what you're looking for</strong>. They convert format; they don't extract answers.</p>
+
+  <h3>The fundamental gap</h3>
+  <p>Every tool in the market today does one of two things: render pages faster, or convert HTML to a different format. <strong>None of them answer the question.</strong></p>
+
+  <p>Slaash is different. It doesn't just convert — it understands the goal, scores every node for relevance, and returns only the signal. And it gets better every time you use it.</p>
+
+  <div class="bar-chart">
+    <div class="bar-row">
+      <div class="bar-label">Lightpanda (HN)</div>
+      <div class="bar-track"><div class="bar-fill red" style="width:100%">79,406 tokens</div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">Raw HTML (HN)</div>
+      <div class="bar-track"><div class="bar-fill amber" style="width:11%">8,694 tokens</div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">Slaash (HN)</div>
+      <div class="bar-track"><div class="bar-fill green" style="width:0.7%">523 tokens</div></div>
+    </div>
+  </div>
+
+  <table class="compare-table">
+    <thead>
+      <tr><th>Capability</th><th>Slaash</th><th>Lightpanda</th><th>Firecrawl</th><th>Jina Reader</th><th>Chrome</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Understands your goal</td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td></tr>
+      <tr><td>Ranks by relevance</td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td></tr>
+      <tr><td>Learns from feedback</td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td></tr>
+      <tr><td>Detects prompt injection</td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td><td><span class="pill pill-red">No</span></td></tr>
+      <tr><td>JavaScript execution</td><td><span class="pill pill-green">QuickJS</span></td><td><span class="pill pill-green">V8</span></td><td><span class="pill pill-green">Chrome</span></td><td><span class="pill pill-amber">Limited</span></td><td><span class="pill pill-green">V8</span></td></tr>
+      <tr><td>Self-hosted / no API key</td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-green">Yes</span></td><td><span class="pill pill-amber">Cloud</span></td><td><span class="pill pill-amber">Cloud</span></td><td><span class="pill pill-green">Yes</span></td></tr>
+      <tr><td>Binary size</td><td><span class="pill pill-green">1.8 MB</span></td><td><span class="pill pill-amber">~50 MB</span></td><td><span class="pill pill-red">Cloud</span></td><td><span class="pill pill-red">Cloud</span></td><td><span class="pill pill-red">~300 MB</span></td></tr>
+      <tr><td>Parse latency (median)</td><td><span class="pill pill-green">1ms</span></td><td><span class="pill pill-amber">4ms</span></td><td><span class="pill pill-red">2&ndash;15s</span></td><td><span class="pill pill-red">1&ndash;5s</span></td><td><span class="pill pill-amber">14ms</span></td></tr>
+    </tbody>
+  </table>
 </section>
 
 <div class="divider"><hr></div>
