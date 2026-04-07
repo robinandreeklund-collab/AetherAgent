@@ -478,6 +478,311 @@ struct FetchStreamParseParams {
     max_nodes: Option<u32>,
 }
 
+// ─── Consolidated Tool Parameter Types (35 → 12 consolidation) ─────────────
+// Phase A: New consolidated tools alongside existing ones.
+// Old tools remain as-is; new tools route to the same library functions.
+
+/// Unified parse tool — replaces: parse, parse_top, parse_with_js, parse_screenshot,
+/// vision_parse, fetch_parse, fetch_vision, render_with_js, html_to_markdown.
+/// Auto-detects input type from which field is provided.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedParseParams {
+    /// URL to fetch and parse (auto-fetches if provided)
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML string (used directly if provided)
+    #[serde(default)]
+    html: Option<String>,
+    /// Base64-encoded PNG screenshot (triggers YOLO vision if provided)
+    #[serde(default)]
+    screenshot_b64: Option<String>,
+    /// The agent's current goal (e.g. "buy cheapest flight")
+    #[serde(default)]
+    goal: Option<String>,
+    /// Output format: "tree" (default) returns JSON semantic tree, "markdown" returns markdown
+    #[serde(default)]
+    format: Option<String>,
+    /// Max number of nodes to return (e.g. 10-20 for token savings). Omit for full tree.
+    #[serde(default)]
+    top_n: Option<u32>,
+    /// Enable JavaScript evaluation before parsing (default: false)
+    #[serde(default)]
+    js: Option<bool>,
+}
+
+/// Unified act tool — replaces: find_and_click, fill_form, extract_data,
+/// fetch_click, fetch_extract.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedActParams {
+    /// URL to fetch (auto-fetches if provided)
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML string
+    #[serde(default)]
+    html: Option<String>,
+    /// The agent's current goal
+    goal: String,
+    /// Action type: "click", "fill", or "extract"
+    action: String,
+    /// Click target label (for action="click", e.g. "Add to cart")
+    #[serde(default)]
+    target: Option<String>,
+    /// Form fields as key-value map (for action="fill")
+    #[serde(default)]
+    fields: Option<HashMap<String, String>>,
+    /// Keys to extract (for action="extract", e.g. ["price", "title"])
+    #[serde(default)]
+    keys: Option<Vec<String>>,
+}
+
+/// Unified stream tool — replaces: stream_parse, stream_parse_directive, fetch_stream_parse.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedStreamParams {
+    /// URL to fetch (auto-fetches if provided)
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML string
+    #[serde(default)]
+    html: Option<String>,
+    /// The agent's current goal
+    goal: String,
+    /// Nodes per chunk (default: 10)
+    #[serde(default)]
+    top_n: Option<u32>,
+    /// Minimum relevance score (default: 0.3)
+    #[serde(default)]
+    min_relevance: Option<f32>,
+    /// Hard limit on total emitted nodes (default: 50)
+    #[serde(default)]
+    max_nodes: Option<u32>,
+    /// Optional LLM directives: [{"action":"expand","node_id":42}, {"action":"next_branch"}]
+    #[serde(default)]
+    directives: Option<String>,
+}
+
+/// Unified plan tool — replaces: compile_goal, build_causal_graph,
+/// predict_action_outcome, find_safest_path, execute_plan.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedPlanParams {
+    /// The agent's goal
+    goal: String,
+    /// Action: "compile" (default), "predict", "safest_path", "execute"
+    #[serde(default)]
+    action: Option<String>,
+    /// Causal graph JSON (for predict/safest_path)
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    graph_json: Option<String>,
+    /// Action to predict (for action="predict")
+    #[serde(default)]
+    predict_action: Option<String>,
+    /// Snapshots JSON (for building causal graph)
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    snapshots_json: Option<String>,
+    /// Actions JSON (for building causal graph)
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    actions_json: Option<String>,
+    /// HTML for execute
+    #[serde(default)]
+    html: Option<String>,
+    /// URL for execute context
+    #[serde(default)]
+    url: Option<String>,
+}
+
+/// Unified secure tool — replaces: check_injection, classify_request,
+/// classify_request_batch, detect_adversarial.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedSecureParams {
+    /// Text content to scan for injection (auto-detects: text → injection scan)
+    #[serde(default)]
+    content: Option<String>,
+    /// Single URL to classify via firewall
+    #[serde(default)]
+    url: Option<String>,
+    /// Batch of URLs to classify
+    #[serde(default)]
+    urls: Option<Vec<String>>,
+    /// The agent's goal (for firewall relevance scoring)
+    #[serde(default)]
+    goal: Option<String>,
+}
+
+/// Unified vision tool — replaces: tiered_screenshot, parse_screenshot,
+/// ground_semantic_tree, match_bbox_iou, blitz_render.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedVisionParams {
+    /// URL to fetch and render
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML string
+    #[serde(default)]
+    html: Option<String>,
+    /// Base64-encoded PNG screenshot
+    #[serde(default)]
+    screenshot_b64: Option<String>,
+    /// The agent's current goal
+    #[serde(default)]
+    goal: Option<String>,
+    /// Mode: "detect" (default, screenshot+YOLO), "screenshot" (render only),
+    /// "ground" (combine tree with bboxes), "match" (find node for bbox)
+    #[serde(default)]
+    mode: Option<String>,
+    /// Viewport width (default: 1280)
+    #[serde(default)]
+    width: Option<u32>,
+    /// Viewport height (default: 800)
+    #[serde(default)]
+    height: Option<u32>,
+    /// Bbox annotations JSON (for mode="ground")
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    annotations: Option<String>,
+    /// Bounding box JSON to match (for mode="match")
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    bbox: Option<String>,
+    /// Semantic tree JSON (for mode="match")
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    tree_json: Option<String>,
+}
+
+/// Unified discover tool — replaces: discover_webmcp, detect_xhr_urls.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedDiscoverParams {
+    /// URL to fetch and discover from
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML string
+    #[serde(default)]
+    html: Option<String>,
+    /// Mode: "all" (default), "webmcp", "xhr"
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+/// Unified session tool — replaces all 11 session endpoints.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedSessionParams {
+    /// Action: "create", "cookies", "token", "oauth", "status", "detect_login"
+    action: String,
+    /// Session ID (for all actions except "create")
+    #[serde(default)]
+    session_id: Option<String>,
+    /// Domain for cookie operations
+    #[serde(default)]
+    domain: Option<String>,
+    /// Path for cookie operations
+    #[serde(default)]
+    path: Option<String>,
+    /// Cookies JSON to add
+    #[serde(default)]
+    cookies_json: Option<String>,
+    /// Auth token value
+    #[serde(default)]
+    token: Option<String>,
+    /// Token type (e.g. "Bearer")
+    #[serde(default)]
+    token_type: Option<String>,
+    /// HTML for detect_login
+    #[serde(default)]
+    html: Option<String>,
+    /// URL for context
+    #[serde(default)]
+    url: Option<String>,
+}
+
+/// Unified workflow tool — replaces all 8 orchestrator endpoints.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedWorkflowParams {
+    /// Action: "create", "page", "report", "complete", "rollback", "status"
+    action: String,
+    /// The agent's goal (for "create")
+    #[serde(default)]
+    goal: Option<String>,
+    /// Start URL (for "create")
+    #[serde(default)]
+    start_url: Option<String>,
+    /// Workflow ID (for all actions except "create")
+    #[serde(default)]
+    workflow_id: Option<String>,
+    /// HTML content (for "page")
+    #[serde(default)]
+    html: Option<String>,
+    /// Page URL (for "page")
+    #[serde(default)]
+    url: Option<String>,
+    /// Report type for "report": "click", "fill", "extract"
+    #[serde(default)]
+    report_type: Option<String>,
+    /// Report result JSON
+    #[serde(default)]
+    result_json: Option<String>,
+}
+
+/// Unified collab tool — replaces all 4 collab endpoints + tier_stats + memory stats.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ConsolidatedCollabParams {
+    /// Action: "create", "register", "publish", "fetch", "stats"
+    action: String,
+    /// Collab store JSON (for register/publish/fetch)
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    store_json: Option<String>,
+    /// Agent ID
+    #[serde(default)]
+    agent_id: Option<String>,
+    /// Agent's goal (for register)
+    #[serde(default)]
+    goal: Option<String>,
+    /// URL the delta applies to (for publish)
+    #[serde(default)]
+    url: Option<String>,
+    /// Semantic delta JSON (for publish)
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_json_string_or_object"
+    )]
+    delta_json: Option<String>,
+    /// Timestamp in milliseconds since epoch
+    #[serde(default)]
+    timestamp_ms: Option<u64>,
+}
+
+/// Deserializer för optional JSON-fält som accepterar string, object, eller null.
+fn deserialize_optional_json_string_or_object<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(s)),
+        Some(other) => serde_json::to_string(&other)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -1037,6 +1342,479 @@ impl AetherMcpServer {
             "goal": params.goal,
         })
         .to_string()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONSOLIDATED TOOLS (Phase A: 35 → 12 consolidation)
+    // These 12 tools replace the 35 above. Old tools remain for backwards compat.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[tool(
+        name = "c_parse",
+        description = "🔵 CONSOLIDATED: One tool for ALL parsing. Auto-detects input: url → fetch+parse, html → parse directly, screenshot_b64 → YOLO vision. Parameters: top_n limits results (e.g. 20), format='markdown' for LLM-friendly output, js=true for JS-heavy pages. REPLACES: parse, parse_top, parse_with_js, parse_screenshot, vision_parse, fetch_parse, fetch_vision, html_to_markdown. Example: c_parse(url='https://example.com', goal='find prices', top_n=20, format='markdown')"
+    )]
+    fn c_parse(&self, Parameters(params): Parameters<ConsolidatedParseParams>) -> String {
+        let goal = params.goal.as_deref().unwrap_or("");
+
+        // Screenshot → YOLO vision
+        if let Some(ref b64) = params.screenshot_b64 {
+            use base64::Engine;
+            let png_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(b) => b,
+                Err(e) => return format!(r#"{{"error":"Invalid screenshot base64: {e}"}}"#),
+            };
+            if let Some(ref model_bytes) = self.vision_model_bytes {
+                return aether_agent::parse_screenshot(&png_bytes, model_bytes, goal);
+            }
+            return r#"{"error":"Vision model not loaded. Set AETHER_MODEL_PATH."}"#.to_string();
+        }
+
+        // URL → stub for async fetch (handled in call_tool override)
+        if let Some(ref url) = params.url {
+            if params.html.is_none() {
+                return serde_json::json!({
+                    "action": "c_parse_pending",
+                    "url": url,
+                    "goal": goal,
+                    "top_n": params.top_n,
+                    "format": params.format,
+                    "js": params.js,
+                })
+                .to_string();
+            }
+        }
+
+        // HTML → direct parse
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+        let format = params.format.as_deref().unwrap_or("tree");
+        let use_js = params.js.unwrap_or(false);
+
+        let tree_json = if use_js {
+            aether_agent::parse_with_js(html, goal, url)
+        } else if let Some(top_n) = params.top_n {
+            aether_agent::parse_top_nodes(html, goal, url, top_n)
+        } else {
+            aether_agent::parse_to_semantic_tree(html, goal, url)
+        };
+
+        if format == "markdown" {
+            // Konvertera semantiskt träd till markdown
+            aether_agent::semantic_tree_to_markdown(&tree_json)
+        } else {
+            tree_json
+        }
+    }
+
+    #[tool(
+        name = "c_act",
+        description = "🔵 CONSOLIDATED: All DOM interactions in one tool. action='click' finds and clicks elements, action='fill' fills form fields, action='extract' extracts structured data. Provide url OR html. REPLACES: find_and_click, fill_form, extract_data, fetch_click, fetch_extract. Example: c_act(url='...', goal='login', action='fill', fields={\"email\":\"a@b.com\"})"
+    )]
+    fn c_act(&self, Parameters(params): Parameters<ConsolidatedActParams>) -> String {
+        // URL → stub for async fetch
+        if params.url.is_some() && params.html.is_none() {
+            return serde_json::json!({
+                "action": "c_act_pending",
+                "url": params.url,
+                "goal": params.goal,
+                "act_type": params.action,
+                "target": params.target,
+                "fields": params.fields,
+                "keys": params.keys,
+            })
+            .to_string();
+        }
+
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+
+        match params.action.as_str() {
+            "click" => {
+                let target = params.target.as_deref().unwrap_or("");
+                aether_agent::find_and_click(html, &params.goal, url, target)
+            }
+            "fill" => {
+                let fields = params.fields.unwrap_or_default();
+                let fields_json =
+                    serde_json::to_string(&fields).unwrap_or_else(|_| "{}".to_string());
+                aether_agent::fill_form(html, &params.goal, url, &fields_json)
+            }
+            "extract" => {
+                let keys = params.keys.unwrap_or_default();
+                let keys_json = serde_json::to_string(&keys).unwrap_or_else(|_| "[]".to_string());
+                aether_agent::extract_data(html, &params.goal, url, &keys_json)
+            }
+            other => format!(
+                r#"{{"error":"Unknown action: '{other}'. Use 'click', 'fill', or 'extract'."}}"#
+            ),
+        }
+    }
+
+    #[tool(
+        name = "c_stream",
+        description = "🔵 CONSOLIDATED: Adaptive DOM streaming for large pages. Returns only the most goal-relevant nodes (95-99% token savings). Provide url OR html. Optional directives for LLM-driven exploration: [{\"action\":\"expand\",\"node_id\":42}]. REPLACES: stream_parse, stream_parse_directive, fetch_stream_parse. Example: c_stream(url='...', goal='find products', top_n=10)"
+    )]
+    fn c_stream(&self, Parameters(params): Parameters<ConsolidatedStreamParams>) -> String {
+        // URL → stub for async fetch
+        if params.url.is_some() && params.html.is_none() {
+            return serde_json::json!({
+                "action": "c_stream_pending",
+                "url": params.url,
+                "goal": params.goal,
+                "top_n": params.top_n,
+                "min_relevance": params.min_relevance,
+                "max_nodes": params.max_nodes,
+            })
+            .to_string();
+        }
+
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+        let top_n = params.top_n.unwrap_or(10);
+        let min_relevance = params.min_relevance.unwrap_or(0.3);
+        let max_nodes = params.max_nodes.unwrap_or(50);
+
+        if let Some(ref directives) = params.directives {
+            let config = serde_json::json!({
+                "top_n": top_n,
+                "min_relevance": min_relevance,
+                "max_nodes": max_nodes,
+            })
+            .to_string();
+            aether_agent::stream_parse_with_directives(html, &params.goal, url, &config, directives)
+        } else {
+            aether_agent::stream_parse_adaptive(
+                html,
+                &params.goal,
+                url,
+                top_n,
+                min_relevance,
+                max_nodes,
+            )
+        }
+    }
+
+    #[tool(
+        name = "c_plan",
+        description = "🔵 CONSOLIDATED: Goal decomposition + causal reasoning. Default action='compile' breaks a goal into steps. 'predict' predicts action outcome. 'safest_path' finds lowest-risk path. 'build' builds a causal graph from snapshots. REPLACES: compile_goal, build_causal_graph, predict_action_outcome, find_safest_path. Example: c_plan(goal='buy cheapest flight')"
+    )]
+    fn c_plan(&self, Parameters(params): Parameters<ConsolidatedPlanParams>) -> String {
+        let action = params.action.as_deref().unwrap_or("compile");
+
+        match action {
+            "compile" => aether_agent::compile_goal(&params.goal),
+            "build" => {
+                let snapshots = params.snapshots_json.as_deref().unwrap_or("[]");
+                let actions = params.actions_json.as_deref().unwrap_or("[]");
+                aether_agent::build_causal_graph(snapshots, actions)
+            }
+            "predict" => {
+                let graph = params.graph_json.as_deref().unwrap_or("{}");
+                let predict_action = params.predict_action.as_deref().unwrap_or("");
+                aether_agent::predict_action_outcome(graph, predict_action)
+            }
+            "safest_path" => {
+                let graph = params.graph_json.as_deref().unwrap_or("{}");
+                aether_agent::find_safest_path(graph, &params.goal)
+            }
+            other => format!(
+                r#"{{"error":"Unknown plan action: '{other}'. Use 'compile', 'build', 'predict', or 'safest_path'."}}"#
+            ),
+        }
+    }
+
+    #[tool(
+        name = "c_diff",
+        description = "🔵 CONSOLIDATED: Semantic tree diffing — compare two trees and get minimal delta (80-95% token savings). REPLACES: diff_trees. Example: c_diff(old_tree_json='{...}', new_tree_json='{...}')"
+    )]
+    fn c_diff(&self, Parameters(params): Parameters<DiffParams>) -> String {
+        aether_agent::diff_semantic_trees(&params.old_tree_json, &params.new_tree_json)
+    }
+
+    #[tool(
+        name = "c_search",
+        description = "🔵 CONSOLIDATED: Web search via DuckDuckGo. Returns ranked results with title, URL, snippet. deep=true (default) fetches and parses each result page. REPLACES: search, fetch_search. Example: c_search(query='AI news 2026', top_n=5)"
+    )]
+    fn c_search(&self, Parameters(params): Parameters<FetchSearchParams>) -> String {
+        // Alltid deep search — stub for async fetch
+        let url = aether_agent::build_search_url(&params.query);
+        let top_n = params.top_n.unwrap_or(3);
+        let goal = params.goal.clone().unwrap_or_default();
+        let deep = params.deep.unwrap_or(true);
+        serde_json::json!({
+            "action": if deep { "c_search_deep_pending" } else { "c_search_pending" },
+            "ddg_url": url,
+            "query": params.query,
+            "top_n": top_n,
+            "goal": goal,
+            "deep": deep,
+            "max_nodes_per_result": params.max_nodes_per_result.unwrap_or(5),
+        })
+        .to_string()
+    }
+
+    #[tool(
+        name = "c_secure",
+        description = "🔵 CONSOLIDATED: Security checks. Auto-detects: content → injection scan, url → firewall classify, urls → batch classify. NOTE: Security runs automatically inside ALL other tools. Use this only for explicit standalone checks. REPLACES: check_injection, classify_request. Example: c_secure(content='suspicious text...')"
+    )]
+    fn c_secure(&self, Parameters(params): Parameters<ConsolidatedSecureParams>) -> String {
+        // Injection scan
+        if let Some(ref content) = params.content {
+            return aether_agent::check_injection(content);
+        }
+
+        // Batch URL classify
+        if let Some(ref urls) = params.urls {
+            let goal = params.goal.as_deref().unwrap_or("");
+            let results: Vec<String> = urls
+                .iter()
+                .map(|u| aether_agent::classify_request(u, goal, "{}"))
+                .collect();
+            return format!(r#"{{"results":[{}]}}"#, results.join(","));
+        }
+
+        // Single URL classify
+        if let Some(ref url) = params.url {
+            let goal = params.goal.as_deref().unwrap_or("");
+            return aether_agent::classify_request(url, goal, "{}");
+        }
+
+        r#"{"error":"Provide 'content' (injection scan), 'url' (firewall classify), or 'urls' (batch classify)."}"#.to_string()
+    }
+
+    #[tool(
+        name = "c_vision",
+        description = "🔵 CONSOLIDATED: All visual processing. mode='detect' (default) takes screenshot+YOLO. mode='screenshot' renders only. mode='ground' combines tree with bboxes. mode='match' finds node for bbox. Provide url, html, or screenshot_b64. REPLACES: tiered_screenshot, parse_screenshot, ground_semantic_tree, match_bbox_iou. Example: c_vision(url='https://example.com', goal='find buttons')"
+    )]
+    fn c_vision(&self, Parameters(params): Parameters<ConsolidatedVisionParams>) -> String {
+        let goal = params.goal.as_deref().unwrap_or("");
+        let mode = params.mode.as_deref().unwrap_or("detect");
+
+        match mode {
+            "match" => {
+                let tree = params.tree_json.as_deref().unwrap_or("{}");
+                let bbox = params.bbox.as_deref().unwrap_or("{}");
+                return aether_agent::match_bbox_iou(tree, bbox);
+            }
+            "ground" => {
+                let html = params.html.as_deref().unwrap_or("");
+                let url = params.url.as_deref().unwrap_or("");
+                let annotations = params.annotations.as_deref().unwrap_or("[]");
+                return aether_agent::ground_semantic_tree(html, goal, url, annotations);
+            }
+            _ => {}
+        }
+
+        // screenshot or detect modes — need rendering
+        if params.url.is_some() && params.html.is_none() && params.screenshot_b64.is_none() {
+            // Stub for async fetch+render
+            return serde_json::json!({
+                "action": "c_vision_pending",
+                "url": params.url,
+                "goal": goal,
+                "mode": mode,
+                "width": params.width.unwrap_or(1280),
+                "height": params.height.unwrap_or(800),
+            })
+            .to_string();
+        }
+
+        // Screenshot provided — run YOLO
+        if let Some(ref b64) = params.screenshot_b64 {
+            use base64::Engine;
+            let png_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(b) => b,
+                Err(e) => return format!(r#"{{"error":"Invalid screenshot base64: {e}"}}"#),
+            };
+            if mode == "screenshot" {
+                return serde_json::json!({"screenshot_b64": b64, "mode": "screenshot"})
+                    .to_string();
+            }
+            if let Some(ref model_bytes) = self.vision_model_bytes {
+                return aether_agent::parse_screenshot(&png_bytes, model_bytes, goal);
+            }
+            return r#"{"error":"Vision model not loaded. Set AETHER_MODEL_PATH."}"#.to_string();
+        }
+
+        // HTML → tiered screenshot
+        if let Some(ref html) = params.html {
+            let url = params.url.as_deref().unwrap_or("");
+            let width = params.width.unwrap_or(1280);
+            let height = params.height.unwrap_or(800);
+
+            if mode == "screenshot" {
+                return aether_agent::tiered_screenshot(html, url, goal, width, height, true, "[]");
+            }
+            // detect: screenshot + YOLO
+            return aether_agent::tiered_screenshot(html, url, goal, width, height, true, "[]");
+        }
+
+        r#"{"error":"Provide url, html, or screenshot_b64."}"#.to_string()
+    }
+
+    #[tool(
+        name = "c_discover",
+        description = "🔵 CONSOLIDATED: Discover dynamic content sources. mode='all' (default) finds both WebMCP tools and XHR/fetch calls. mode='webmcp' finds only WebMCP tools. mode='xhr' finds only XHR/fetch endpoints. REPLACES: discover_webmcp, detect_xhr_urls. Example: c_discover(url='https://example.com')"
+    )]
+    fn c_discover(&self, Parameters(params): Parameters<ConsolidatedDiscoverParams>) -> String {
+        // URL → stub for async fetch
+        if params.url.is_some() && params.html.is_none() {
+            return serde_json::json!({
+                "action": "c_discover_pending",
+                "url": params.url,
+                "mode": params.mode.as_deref().unwrap_or("all"),
+            })
+            .to_string();
+        }
+
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+        let mode = params.mode.as_deref().unwrap_or("all");
+
+        match mode {
+            "webmcp" => aether_agent::discover_webmcp(html, url),
+            "xhr" => aether_agent::detect_xhr_urls(html),
+            _ => {
+                // All: combine both
+                let webmcp = aether_agent::discover_webmcp(html, url);
+                let xhr = aether_agent::detect_xhr_urls(html);
+                let webmcp_val: serde_json::Value =
+                    serde_json::from_str(&webmcp).unwrap_or(serde_json::Value::Null);
+                let xhr_val: serde_json::Value =
+                    serde_json::from_str(&xhr).unwrap_or(serde_json::Value::Null);
+                serde_json::json!({
+                    "webmcp": webmcp_val,
+                    "xhr": xhr_val,
+                })
+                .to_string()
+            }
+        }
+    }
+
+    #[tool(
+        name = "c_session",
+        description = "🔵 CONSOLIDATED: Session lifecycle management. action='create' creates session, 'cookies' manages cookies, 'token' sets auth token, 'status' checks session state, 'detect_login' finds login forms. REPLACES: all 11 session endpoints. Example: c_session(action='create')"
+    )]
+    fn c_session(&self, Parameters(params): Parameters<ConsolidatedSessionParams>) -> String {
+        match params.action.as_str() {
+            "create" => aether_agent::create_session(),
+            "status" => {
+                let sid = params.session_id.as_deref().unwrap_or("");
+                aether_agent::session_status(sid)
+            }
+            "cookies" => {
+                let sid = params.session_id.as_deref().unwrap_or("");
+                if let Some(ref cookies) = params.cookies_json {
+                    let domain = params.domain.as_deref().unwrap_or("");
+                    aether_agent::session_add_cookies(sid, domain, cookies)
+                } else {
+                    let domain = params.domain.as_deref().unwrap_or("");
+                    let path = params.path.as_deref().unwrap_or("/");
+                    aether_agent::session_get_cookies(sid, domain, path)
+                }
+            }
+            "token" => {
+                let sid = params.session_id.as_deref().unwrap_or("");
+                let token = params.token.as_deref().unwrap_or("");
+                let token_type = params.token_type.as_deref().unwrap_or("");
+                aether_agent::session_set_token(sid, token, token_type, 3600, "[]")
+            }
+            "detect_login" => {
+                let html = params.html.as_deref().unwrap_or("");
+                let url = params.url.as_deref().unwrap_or("");
+                aether_agent::find_and_click(html, "login", url, "login")
+            }
+            other => format!(
+                r#"{{"error":"Unknown session action: '{other}'. Use 'create', 'status', 'cookies', 'token', or 'detect_login'."}}"#
+            ),
+        }
+    }
+
+    #[tool(
+        name = "c_workflow",
+        description = "🔵 CONSOLIDATED: Multi-page workflow orchestration. action='create' starts a workflow, 'page' feeds a page, 'report' reports action result, 'complete' marks step done, 'rollback' undoes step, 'status' checks progress. REPLACES: all 8 orchestrator endpoints. Example: c_workflow(action='create', goal='checkout flow', start_url='https://shop.com')"
+    )]
+    fn c_workflow(&self, Parameters(params): Parameters<ConsolidatedWorkflowParams>) -> String {
+        match params.action.as_str() {
+            "create" => {
+                let goal = params.goal.as_deref().unwrap_or("");
+                let start_url = params.start_url.as_deref().unwrap_or("");
+                aether_agent::create_workflow(goal, start_url, "{}")
+            }
+            "page" => {
+                let wid = params.workflow_id.as_deref().unwrap_or("");
+                let html = params.html.as_deref().unwrap_or("");
+                let url = params.url.as_deref().unwrap_or("");
+                aether_agent::workflow_provide_page(wid, html, url)
+            }
+            "report" => {
+                let wid = params.workflow_id.as_deref().unwrap_or("");
+                let result = params.result_json.as_deref().unwrap_or("{}");
+                match params.report_type.as_deref().unwrap_or("click") {
+                    "click" => aether_agent::workflow_report_click(wid, result),
+                    "fill" => aether_agent::workflow_report_fill(wid, result),
+                    "extract" => aether_agent::workflow_report_extract(wid, result),
+                    other => format!(r#"{{"error":"Unknown report type: '{other}'"}}"#),
+                }
+            }
+            "complete" => {
+                let wid = params.workflow_id.as_deref().unwrap_or("");
+                aether_agent::workflow_complete_step(wid, 0)
+            }
+            "rollback" => {
+                let wid = params.workflow_id.as_deref().unwrap_or("");
+                aether_agent::workflow_rollback_step(wid, 0)
+            }
+            "status" => {
+                let wid = params.workflow_id.as_deref().unwrap_or("");
+                aether_agent::workflow_status(wid)
+            }
+            other => format!(
+                r#"{{"error":"Unknown workflow action: '{other}'. Use 'create', 'page', 'report', 'complete', 'rollback', or 'status'."}}"#
+            ),
+        }
+    }
+
+    #[tool(
+        name = "c_collab",
+        description = "🔵 CONSOLIDATED: Multi-agent collaboration + observability. action='create' creates store, 'register' adds agent, 'publish' shares delta, 'fetch' gets updates, 'stats' returns tier/cache/memory stats. REPLACES: create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas, tier_stats. Example: c_collab(action='create')"
+    )]
+    fn c_collab(&self, Parameters(params): Parameters<ConsolidatedCollabParams>) -> String {
+        match params.action.as_str() {
+            "create" => aether_agent::create_collab_store(),
+            "register" => {
+                let store = params.store_json.as_deref().unwrap_or("{}");
+                let agent_id = params.agent_id.as_deref().unwrap_or("");
+                let goal = params.goal.as_deref().unwrap_or("");
+                let ts = params.timestamp_ms.unwrap_or(0);
+                aether_agent::register_collab_agent(store, agent_id, goal, ts)
+            }
+            "publish" => {
+                let store = params.store_json.as_deref().unwrap_or("{}");
+                let agent_id = params.agent_id.as_deref().unwrap_or("");
+                let url = params.url.as_deref().unwrap_or("");
+                let delta = params.delta_json.as_deref().unwrap_or("{}");
+                let ts = params.timestamp_ms.unwrap_or(0);
+                aether_agent::publish_collab_delta(store, agent_id, url, delta, ts)
+            }
+            "fetch" => {
+                let store = params.store_json.as_deref().unwrap_or("{}");
+                let agent_id = params.agent_id.as_deref().unwrap_or("");
+                aether_agent::fetch_collab_deltas(store, agent_id)
+            }
+            "stats" => {
+                let tier = aether_agent::tier_stats();
+                let tier_val: serde_json::Value =
+                    serde_json::from_str(&tier).unwrap_or(serde_json::Value::Null);
+                serde_json::json!({
+                    "tier_stats": tier_val,
+                })
+                .to_string()
+            }
+            other => format!(
+                r#"{{"error":"Unknown collab action: '{other}'. Use 'create', 'register', 'publish', 'fetch', or 'stats'."}}"#
+            ),
+        }
     }
 }
 
@@ -1782,6 +2560,397 @@ async fn handle_fetch_stream_parse(
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
 }
 
+// ─── Consolidated tool async handlers ──────────────────────────────────────
+
+/// Hanterar c_parse med url: hämta + parsa
+async fn handle_c_parse(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+    cached_model: Option<&[u8]>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "c_parse: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let format = args
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("tree");
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).map(|n| n as u32);
+    let use_js = args.get("js").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    // Kolla om screenshot_b64 finns (vision mode)
+    if let Some(b64) = args.get("screenshot_b64").and_then(|v| v.as_str()) {
+        use base64::Engine;
+        let png_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
+            Ok(b) => b,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!(r#"{{"error":"Invalid screenshot base64: {e}"}}"#),
+                )]);
+            }
+        };
+        if let Some(model_bytes) = cached_model {
+            let result = aether_agent::parse_screenshot(&png_bytes, model_bytes, goal);
+            return rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)]);
+        }
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            "Vision model not loaded. Set AETHER_MODEL_PATH.".to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "c_parse: fetch failed for '{}': {}"}}"#,
+                url, e
+            ))]);
+        }
+    };
+
+    let tree_json = if use_js {
+        aether_agent::parse_with_js(&fetch_result.body, goal, &fetch_result.final_url)
+    } else if let Some(n) = top_n {
+        aether_agent::parse_top_nodes(&fetch_result.body, goal, &fetch_result.final_url, n)
+    } else {
+        aether_agent::parse_to_semantic_tree(&fetch_result.body, goal, &fetch_result.final_url)
+    };
+
+    let output = if format == "markdown" {
+        aether_agent::semantic_tree_to_markdown(&tree_json)
+    } else {
+        tree_json
+    };
+
+    let total_ms = start.elapsed().as_millis() as u64;
+    let result = serde_json::json!({
+        "result": serde_json::from_str::<serde_json::Value>(&output).unwrap_or(serde_json::Value::String(output)),
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar c_act med url: hämta + agera
+async fn handle_c_act(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "c_act: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let act_type = args
+        .get("act_type")
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("action").and_then(|v| v.as_str()))
+        .unwrap_or("click");
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "c_act: fetch failed for '{}': {}"}}"#,
+                url, e
+            ))]);
+        }
+    };
+
+    let result_json = match act_type {
+        "click" => {
+            let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("");
+            aether_agent::find_and_click(&fetch_result.body, goal, &fetch_result.final_url, target)
+        }
+        "fill" => {
+            let fields = args
+                .get("fields")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "{}".to_string());
+            aether_agent::fill_form(&fetch_result.body, goal, &fetch_result.final_url, &fields)
+        }
+        "extract" => {
+            let keys = args
+                .get("keys")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "[]".to_string());
+            aether_agent::extract_data(&fetch_result.body, goal, &fetch_result.final_url, &keys)
+        }
+        other => format!(r#"{{"error":"Unknown action: '{other}'"}}"#),
+    };
+
+    let total_ms = start.elapsed().as_millis() as u64;
+    let act_val: serde_json::Value =
+        serde_json::from_str(&result_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "result": act_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar c_stream med url: hämta + stream-parsa
+async fn handle_c_stream(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "c_stream: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+    let min_relevance = args
+        .get("min_relevance")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.3) as f32;
+    let max_nodes = args.get("max_nodes").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let start = std::time::Instant::now();
+    let config = aether_agent::types::FetchConfig::default();
+
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "c_stream: fetch failed for '{}': {}"}}"#,
+                url, e
+            ))]);
+        }
+    };
+
+    let stream_json = aether_agent::stream_parse_adaptive(
+        &fetch_result.body,
+        goal,
+        &fetch_result.final_url,
+        top_n,
+        min_relevance,
+        max_nodes,
+    );
+    let total_ms = start.elapsed().as_millis() as u64;
+
+    let stream_val: serde_json::Value =
+        serde_json::from_str(&stream_json).unwrap_or(serde_json::Value::Null);
+
+    let result = serde_json::json!({
+        "stream": stream_val,
+        "fetch": {
+            "url": url,
+            "final_url": fetch_result.final_url,
+            "status": fetch_result.status_code,
+        },
+        "total_time_ms": total_ms,
+    });
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar c_discover med url: hämta + upptäck
+async fn handle_c_discover(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "c_discover: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("all");
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter is required"}"#.to_string(),
+        )]);
+    }
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "c_discover: fetch failed: {}"}}"#,
+                e
+            ))]);
+        }
+    };
+
+    let html = &fetch_result.body;
+    let final_url = &fetch_result.final_url;
+
+    let result = match mode {
+        "webmcp" => aether_agent::discover_webmcp(html, final_url),
+        "xhr" => aether_agent::detect_xhr_urls(html),
+        _ => {
+            let webmcp = aether_agent::discover_webmcp(html, final_url);
+            let xhr = aether_agent::detect_xhr_urls(html);
+            let wv: serde_json::Value =
+                serde_json::from_str(&webmcp).unwrap_or(serde_json::Value::Null);
+            let xv: serde_json::Value =
+                serde_json::from_str(&xhr).unwrap_or(serde_json::Value::Null);
+            serde_json::json!({"webmcp": wv, "xhr": xv}).to_string()
+        }
+    };
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
+}
+
+/// Hanterar c_vision med url: hämta + rendera + vision
+async fn handle_c_vision(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+    cached_model: Option<&[u8]>,
+) -> rmcp::model::CallToolResult {
+    use base64::Engine;
+    let b64 = &base64::engine::general_purpose::STANDARD;
+
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "c_vision: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let mode = args
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("detect");
+    let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
+    let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url parameter required"}"#.to_string(),
+        )]);
+    }
+
+    let (png_bytes, tier_used) = match fetch_and_render_tiered(url, width, height, false).await {
+        Ok(result) => result,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                "Rendering failed: {e}"
+            ))]);
+        }
+    };
+
+    if mode == "screenshot" {
+        let png_b64 = b64.encode(&png_bytes);
+        return rmcp::model::CallToolResult::success(vec![
+            rmcp::model::Content::image(&png_b64, "image/png"),
+            rmcp::model::Content::text(
+                serde_json::json!({"tier_used": tier_used, "mode": "screenshot"}).to_string(),
+            ),
+        ]);
+    }
+
+    // detect mode: YOLO
+    let model_bytes_owned;
+    let model_bytes: &[u8] = if let Some(cached) = cached_model {
+        cached
+    } else {
+        let model_path = std::env::var("AETHER_MODEL_PATH").unwrap_or_default();
+        if model_path.is_empty() {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "Vision model not available. Set AETHER_MODEL_PATH.".to_string(),
+            )]);
+        }
+        model_bytes_owned = match std::fs::read(&model_path) {
+            Ok(b) => b,
+            Err(e) => {
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    format!("Failed to load vision model: {e}"),
+                )]);
+            }
+        };
+        &model_bytes_owned
+    };
+
+    let result_json = aether_agent::parse_screenshot(&png_bytes, model_bytes, goal);
+    let enriched_json = match serde_json::from_str::<serde_json::Value>(&result_json) {
+        Ok(mut v) => {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert(
+                    "tier_used".to_string(),
+                    serde_json::Value::String(tier_used),
+                );
+            }
+            serde_json::to_string(&v).unwrap_or(result_json)
+        }
+        Err(_) => result_json,
+    };
+
+    let png_b64 = b64.encode(&png_bytes);
+    build_vision_result(&png_b64, &png_bytes, &enriched_json)
+}
+
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
 async fn handle_fetch_vision(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -2188,7 +3357,7 @@ impl ServerHandler for AetherMcpServer {
                 let result = handle_fetch_vision(args, self.vision_model_bytes.as_deref()).await;
                 Ok(result)
             }
-            "fetch_search" => {
+            "fetch_search" | "c_search" => {
                 let args = request.arguments.as_ref();
                 let result = handle_fetch_search(args).await;
                 Ok(result)
@@ -2218,6 +3387,122 @@ impl ServerHandler for AetherMcpServer {
                 let result = handle_fetch_stream_parse(args).await;
                 Ok(result)
             }
+            // ─── Consolidated tool async handlers ──────────────────────
+            "c_parse" => {
+                let args = request.arguments.as_ref();
+                // Kolla om det är en async (url-based) request
+                let has_url = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_html = args
+                    .and_then(|a| a.get("html"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                if has_url && !has_html {
+                    let result = handle_c_parse(args, self.vision_model_bytes.as_deref()).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "c_act" => {
+                let args = request.arguments.as_ref();
+                let has_url = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_html = args
+                    .and_then(|a| a.get("html"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                if has_url && !has_html {
+                    let result = handle_c_act(args).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "c_stream" => {
+                let args = request.arguments.as_ref();
+                let has_url = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_html = args
+                    .and_then(|a| a.get("html"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                if has_url && !has_html {
+                    let result = handle_c_stream(args).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "c_discover" => {
+                let args = request.arguments.as_ref();
+                let has_url = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_html = args
+                    .and_then(|a| a.get("html"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                if has_url && !has_html {
+                    let result = handle_c_discover(args).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "c_vision" => {
+                let args = request.arguments.as_ref();
+                let has_url = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_html = args
+                    .and_then(|a| a.get("html"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let has_screenshot = args
+                    .and_then(|a| a.get("screenshot_b64"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                if has_url && !has_html && !has_screenshot {
+                    let result = handle_c_vision(args, self.vision_model_bytes.as_deref()).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
             // Alla andra verktyg: delegera till router
             _ => {
                 let ctx = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
@@ -2234,34 +3519,39 @@ impl ServerHandler for AetherMcpServer {
         info.instructions = Some(
             "AetherAgent – LLM-native browser engine for AI agents. Gives you structured, \
              goal-aware understanding of web pages with built-in security.\n\n\
-             QUICK START: For most tasks, start with one of these:\n\
-             • 'parse' or 'parse_top' — understand a page's structure and find relevant elements\n\
-             • 'find_and_click' — locate a button/link to click\n\
-             • 'fill_form' — fill in form fields\n\
-             • 'extract_data' — pull specific data (price, title, etc.)\n\
-             • 'compile_goal' — plan a multi-step workflow\n\n\
-             SAFETY: Always use 'check_injection' on untrusted text before processing, \
-             and 'classify_request' on URLs before fetching. All parsed content includes \
-             trust levels and injection warnings automatically.\n\n\
-             EFFICIENCY: Use 'parse_top' instead of 'parse' to reduce tokens. Use 'diff_trees' \
-             to track page changes without re-processing the full tree.\n\n\
-             ADVANCED: Use causal graph tools (build_causal_graph, predict_action_outcome, \
-             find_safest_path) for complex multi-step navigation. Use collab tools for \
-             multi-agent workflows. Use grounding tools for vision-language integration.\n\n\
-             XHR INTERCEPTION: Use 'detect_xhr_urls' to discover hidden fetch/XHR/AJAX calls \
-             in page scripts — reveals API endpoints for dynamic data like prices and inventory.\n\n\
-             SEARCH: Use 'fetch_search' to search the web via DuckDuckGo — just provide a query. \
-             Returns ranked results with title, URL, snippet, and optional direct answer. \
-             Use this as the first step when you don't know which URL to visit.\n\n\
-             VISION: Use 'fetch_vision' to analyze ANY web page visually — just give a URL and goal. \
-             The server renders the page with Blitz (pure Rust browser engine), runs YOLOv8 detection, \
-             and returns: the original screenshot, annotated image with bounding boxes, and detection JSON. \
-             For pre-captured screenshots, use 'vision_parse' (server model) or 'parse_screenshot' (client model).\n\n\
-             WEBSOCKET: All tools are available via WebSocket for real-time streaming:\n\
-             • ws://host/ws/api — Universal gateway: send {\"method\":\"tool_name\", \"params\":{...}} for any tool\n\
-             • ws://host/ws/stream — Interactive adaptive DOM streaming with bidirectional directives\n\
-             • ws://host/ws/mcp — Full MCP JSON-RPC over WebSocket\n\
-             • ws://host/ws/search — Streaming search with result-by-result delivery"
+             🔵 RECOMMENDED: Use the 12 CONSOLIDATED tools (c_* prefix) for simpler, more \
+             powerful interactions. They auto-detect input types, include smart defaults, and \
+             combine multiple operations into single calls:\n\n\
+             CORE TOOLS:\n\
+             • c_parse — ALL parsing in one tool. Provide url, html, or screenshot_b64. \
+               Set top_n=20 for token savings, format='markdown' for LLM-friendly output, \
+               js=true for JS-heavy pages.\n\
+             • c_act — ALL DOM interactions. action='click'|'fill'|'extract'. \
+               Provide url or html + goal.\n\
+             • c_stream — Adaptive DOM streaming for large pages (95-99% token savings). \
+               Optional LLM directives for exploration.\n\
+             • c_plan — Goal decomposition + causal reasoning. \
+               action='compile'|'predict'|'safest_path'|'build'.\n\
+             • c_diff — Semantic tree diffing (80-95% smaller than full tree).\n\
+             • c_search — Web search via DuckDuckGo with deep page fetching.\n\n\
+             SUPPORT TOOLS:\n\
+             • c_secure — Explicit security checks. Auto-detects: content→injection, \
+               url→firewall. (Security runs automatically in ALL other tools.)\n\
+             • c_vision — All visual processing. mode='detect'|'screenshot'|'ground'|'match'.\n\
+             • c_discover — Find WebMCP tools and XHR/fetch endpoints.\n\
+             • c_session — Session lifecycle: create/cookies/token/status.\n\
+             • c_workflow — Multi-page workflow orchestration.\n\
+             • c_collab — Multi-agent collaboration + stats.\n\n\
+             TYPICAL FLOW:\n\
+             1. c_parse(url, goal, top_n: 20, format: 'markdown') → compact context\n\
+             2. c_act(url, goal, action: 'click', target: 'Add to cart') → interact\n\
+             3. c_diff(old_tree, new_tree) → see changes (token-saving)\n\n\
+             Legacy tools (parse, parse_top, find_and_click, etc.) remain available \
+             for backwards compatibility.\n\n\
+             WEBSOCKET: All tools available via WebSocket for real-time streaming:\n\
+             • ws://host/ws/api — Universal gateway\n\
+             • ws://host/ws/stream — Adaptive DOM streaming with directives\n\
+             • ws://host/ws/mcp — Full MCP JSON-RPC over WebSocket"
                 .to_string(),
         );
         info
@@ -2447,9 +3737,151 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
             let height = u32_or("height", 800);
             aether_agent::render_with_js(s("html"), s("js_code"), s("base_url"), width, height)
         }
+        // ─── Consolidated synkrona verktyg ──────────────────────────────────
+        "c_plan" => {
+            let action = s("action");
+            let action = if action.is_empty() { "compile" } else { action };
+            match action {
+                "compile" => aether_agent::compile_goal(s("goal")),
+                "build" => {
+                    let snapshots = json_str("snapshots_json");
+                    let actions = json_str("actions_json");
+                    let snap = if snapshots.is_empty() {
+                        "[]"
+                    } else {
+                        &snapshots
+                    };
+                    let act = if actions.is_empty() { "[]" } else { &actions };
+                    aether_agent::build_causal_graph(snap, act)
+                }
+                "predict" => {
+                    let graph = json_str("graph_json");
+                    let g = if graph.is_empty() { "{}" } else { &graph };
+                    aether_agent::predict_action_outcome(g, s("predict_action"))
+                }
+                "safest_path" => {
+                    let graph = json_str("graph_json");
+                    let g = if graph.is_empty() { "{}" } else { &graph };
+                    aether_agent::find_safest_path(g, s("goal"))
+                }
+                _ => format!(r#"{{"error":"Unknown plan action: {}"}}"#, action),
+            }
+        }
+        "c_diff" => aether_agent::diff_semantic_trees(
+            &json_str("old_tree_json"),
+            &json_str("new_tree_json"),
+        ),
+        "c_secure" => {
+            let content = s("content");
+            if !content.is_empty() {
+                aether_agent::check_injection(content)
+            } else {
+                let url = s("url");
+                if !url.is_empty() {
+                    aether_agent::classify_request(url, s("goal"), "{}")
+                } else {
+                    r#"{"error":"Provide content, url, or urls"}"#.to_string()
+                }
+            }
+        }
+        "c_session" => {
+            let action = s("action");
+            match action {
+                "create" => aether_agent::create_session(),
+                "status" => aether_agent::session_status(s("session_id")),
+                "cookies" => {
+                    let cj = s("cookies_json");
+                    if !cj.is_empty() {
+                        aether_agent::session_add_cookies(s("session_id"), s("domain"), cj)
+                    } else {
+                        let path = s("path");
+                        let path = if path.is_empty() { "/" } else { path };
+                        aether_agent::session_get_cookies(s("session_id"), s("domain"), path)
+                    }
+                }
+                "token" => aether_agent::session_set_token(
+                    s("session_id"),
+                    s("token"),
+                    s("token_type"),
+                    3600,
+                    "[]",
+                ),
+                _ => format!(r#"{{"error":"Unknown session action: {}"}}"#, action),
+            }
+        }
+        "c_workflow" => {
+            let action = s("action");
+            match action {
+                "create" => aether_agent::create_workflow(s("goal"), s("start_url"), "{}"),
+                "page" => {
+                    aether_agent::workflow_provide_page(s("workflow_id"), s("html"), s("url"))
+                }
+                "complete" => {
+                    aether_agent::workflow_complete_step(s("workflow_id"), u32_or("step_index", 0))
+                }
+                "rollback" => {
+                    aether_agent::workflow_rollback_step(s("workflow_id"), u32_or("step_index", 0))
+                }
+                "status" => aether_agent::workflow_status(s("workflow_id")),
+                "report" => {
+                    let rt = s("report_type");
+                    let rj = s("result_json");
+                    let rj = if rj.is_empty() { "{}" } else { rj };
+                    match rt {
+                        "click" => aether_agent::workflow_report_click(s("workflow_id"), rj),
+                        "fill" => aether_agent::workflow_report_fill(s("workflow_id"), rj),
+                        "extract" => aether_agent::workflow_report_extract(s("workflow_id"), rj),
+                        _ => format!(r#"{{"error":"Unknown report type: {}"}}"#, rt),
+                    }
+                }
+                _ => format!(r#"{{"error":"Unknown workflow action: {}"}}"#, action),
+            }
+        }
+        "c_collab" => {
+            let action = s("action");
+            match action {
+                "create" => aether_agent::create_collab_store(),
+                "register" => {
+                    let ts = obj
+                        .and_then(|o| o.get("timestamp_ms"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    aether_agent::register_collab_agent(
+                        &json_str("store_json"),
+                        s("agent_id"),
+                        s("goal"),
+                        ts,
+                    )
+                }
+                "publish" => {
+                    let ts = obj
+                        .and_then(|o| o.get("timestamp_ms"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    aether_agent::publish_collab_delta(
+                        &json_str("store_json"),
+                        s("agent_id"),
+                        s("url"),
+                        &json_str("delta_json"),
+                        ts,
+                    )
+                }
+                "fetch" => {
+                    aether_agent::fetch_collab_deltas(&json_str("store_json"), s("agent_id"))
+                }
+                "stats" => {
+                    let tier = aether_agent::tier_stats();
+                    let tv: serde_json::Value =
+                        serde_json::from_str(&tier).unwrap_or(serde_json::Value::Null);
+                    serde_json::json!({"tier_stats": tv}).to_string()
+                }
+                _ => format!(r#"{{"error":"Unknown collab action: {}"}}"#, action),
+            }
+        }
         // Async-verktyg hanteras inte här — returnera tom markör
         "fetch_parse" | "fetch_click" | "fetch_extract" | "fetch_stream_parse" | "fetch_search"
-        | "fetch_vision" | "vision_parse" | "parse_screenshot" => String::new(),
+        | "fetch_vision" | "vision_parse" | "parse_screenshot" | "c_parse" | "c_act"
+        | "c_stream" | "c_search" | "c_discover" | "c_vision" => String::new(),
         _ => format!(r#"{{"error":"Unknown tool: {}"}}"#, name),
     }
 }
@@ -2489,6 +3921,31 @@ async fn dispatch_tool_async(
         }
         "vision_parse" | "parse_screenshot" => {
             let result = handle_vision_tool(name, obj, server.vision_model_bytes.as_deref());
+            extract_text_from_call_result(&result)
+        }
+        // ─── Consolidated async tools ──────────────────────────────────
+        "c_parse" => {
+            let result = handle_c_parse(obj, server.vision_model_bytes.as_deref()).await;
+            extract_text_from_call_result(&result)
+        }
+        "c_act" => {
+            let result = handle_c_act(obj).await;
+            extract_text_from_call_result(&result)
+        }
+        "c_stream" => {
+            let result = handle_c_stream(obj).await;
+            extract_text_from_call_result(&result)
+        }
+        "c_search" => {
+            let result = handle_fetch_search(obj).await;
+            extract_text_from_call_result(&result)
+        }
+        "c_discover" => {
+            let result = handle_c_discover(obj).await;
+            extract_text_from_call_result(&result)
+        }
+        "c_vision" => {
+            let result = handle_c_vision(obj, server.vision_model_bytes.as_deref()).await;
             extract_text_from_call_result(&result)
         }
         _ => format!(r#"{{"error":"Unknown async tool: {}"}}"#, name),
@@ -2662,15 +4119,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Starta Chrome i bakgrunden (Tier 2 CDP) — ej blockerande
     aether_agent::vision_backend::warmup_cdp_background();
 
-    eprintln!("Tools: parse, parse_top, find_and_click, fill_form, extract_data,");
+    eprintln!("Consolidated tools (12): c_parse, c_act, c_stream, c_plan, c_diff, c_search,");
     eprintln!(
-        "        check_injection, compile_goal, classify_request, diff_trees, parse_with_js,"
+        "                         c_secure, c_vision, c_discover, c_session, c_workflow, c_collab"
     );
-    eprintln!("        build_causal_graph, predict_action_outcome, find_safest_path,");
-    eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
-    eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
-    eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
-    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js");
+    eprintln!("Legacy tools (35): parse, parse_top, find_and_click, fill_form, extract_data,");
+    eprintln!(
+        "                   check_injection, compile_goal, classify_request, diff_trees, ..."
+    );
+    eprintln!("Total: 47 tools (12 consolidated + 35 legacy)");
 
     if use_ws {
         use axum::{extract::WebSocketUpgrade, routing::get, Router};
