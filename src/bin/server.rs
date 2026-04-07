@@ -6295,6 +6295,14 @@ async fn landing_concept_2() -> impl IntoResponse {
     .await
 }
 
+async fn landing_try() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/try.html",
+        "landing-pages/try.html",
+    ])
+    .await
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6313,6 +6321,7 @@ fn build_router(state: AppState) -> Router {
         .route("/landing", get(landing_index))
         .route("/landing/1", get(landing_concept_1))
         .route("/landing/2", get(landing_concept_2))
+        .route("/try", get(landing_try))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))

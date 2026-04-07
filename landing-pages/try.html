@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Try Slaash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.35);
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* HEADER */
+header{padding:1.25rem 2rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.back-link{font-size:.85rem;color:var(--muted);font-weight:500}
+
+/* MAIN */
+main{flex:1;max-width:800px;width:100%;margin:0 auto;padding:3rem 2rem}
+h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem}
+.intro{color:var(--muted);margin-bottom:2rem;font-size:.95rem}
+
+/* FORM */
+.form-group{margin-bottom:1.25rem}
+.form-group label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem}
+.form-group input,.form-group textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;color:var(--text);font-family:var(--font);font-size:.9rem;outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group textarea:focus{border-color:var(--accent)}
+.form-group textarea{resize:vertical;min-height:60px;font-family:var(--mono);font-size:.82rem}
+.form-row{display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:end}
+.btn-run{padding:.85rem 2rem;border-radius:10px;font-size:.9rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;white-space:nowrap;height:fit-content}
+.btn-run:hover{background:#2563eb;transform:translateY(-1px)}
+.btn-run:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-run:active{transform:translateY(0)}
+
+/* EXAMPLES */
+.examples{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:2rem}
+.example-chip{padding:.4rem .85rem;border-radius:20px;font-size:.75rem;font-weight:500;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#93b4f5;cursor:pointer;transition:all .2s}
+.example-chip:hover{background:rgba(59,130,246,0.2);border-color:rgba(59,130,246,0.4)}
+
+/* RESULTS */
+.results{margin-top:2.5rem;display:none}
+.results.visible{display:block}
+.results-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.results-title{font-size:1rem;font-weight:600}
+.results-meta{display:flex;gap:1.5rem;font-size:.75rem;color:var(--muted)}
+.results-meta .val{color:#79c0ff;font-weight:600}
+
+/* LOADING */
+.loading{text-align:center;padding:3rem 0;display:none}
+.loading.visible{display:block}
+.loading-spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{color:var(--muted);font-size:.85rem}
+
+/* NODES */
+.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7}
+.result-node{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+.result-node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.result-node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.2rem;font-weight:500}
+.result-node-text{color:#e6edf3;font-size:.82rem;line-height:1.5}
+
+/* SUMMARY BAR */
+.summary-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
+.summary-val{font-size:1rem;font-weight:700;color:#fff}
+.summary-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
+
+/* ERROR */
+.error-msg{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:1rem 1.25rem;color:#fca5a5;font-size:.85rem;margin-top:1.5rem;display:none}
+.error-msg.visible{display:block}
+
+/* FOOTER */
+footer{padding:1.5rem 2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.75rem}
+
+@media(max-width:600px){
+  .form-row{grid-template-columns:1fr}
+  .summary-bar{grid-template-columns:repeat(2,1fr)}
+  .results-meta{flex-direction:column;gap:.25rem}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <a href="/" class="back-link">&larr; Back</a>
+</header>
+
+<main>
+  <h1>Try it. Right now.</h1>
+  <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
+
+  <div class="examples">
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="What are the side effects of COVID-19 vaccines?">Wikipedia: COVID-19 vaccine side effects</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Gothenburg" data-goal="How many people live in Gothenburg?">Wikipedia: Gothenburg population</span>
+    <span class="example-chip" data-url="https://www.python.org/downloads/" data-goal="What is the latest Python version?">Python.org: latest version</span>
+  </div>
+
+  <div class="form-group">
+    <label>URL</label>
+    <input type="url" id="input-url" placeholder="https://en.wikipedia.org/wiki/COVID-19_vaccine" value="https://en.wikipedia.org/wiki/COVID-19_vaccine">
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="margin-bottom:0">
+      <label>Question</label>
+      <input type="text" id="input-goal" placeholder="What are the side effects of COVID-19 vaccines?" value="What are the side effects of COVID-19 vaccines?">
+    </div>
+    <button class="btn-run" id="btn-run" onclick="runQuery()">Run</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Fetching and analyzing page&hellip;</div>
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <div class="results" id="results">
+    <div class="results-header">
+      <div class="results-title" id="results-title"></div>
+      <div class="results-meta" id="results-meta"></div>
+    </div>
+    <div class="result-terminal" id="result-nodes"></div>
+    <div class="summary-bar" id="summary-bar"></div>
+  </div>
+</main>
+
+<footer>
+  <span class="wordmark" style="font-size:1rem">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</span> &middot; beta
+</footer>
+
+<script>
+const examples = document.querySelectorAll('.example-chip');
+examples.forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.getElementById('input-url').value = chip.dataset.url;
+    document.getElementById('input-goal').value = chip.dataset.goal;
+  });
+});
+
+async function runQuery() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url || !goal) return;
+
+  const btn = document.getElementById('btn-run');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+  const errorEl = document.getElementById('error-msg');
+
+  btn.disabled = true;
+  btn.textContent = 'Running\u2026';
+  loading.classList.add('visible');
+  results.classList.remove('visible');
+  errorEl.classList.remove('visible');
+
+  const t0 = performance.now();
+
+  try {
+    const res = await fetch('/api/parse-crfr', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
+    });
+
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+
+    if (data.error) throw new Error(data.error);
+
+    renderResults(data, elapsed);
+  } catch (err) {
+    errorEl.textContent = 'Error: ' + err.message;
+    errorEl.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run';
+    loading.classList.remove('visible');
+  }
+}
+
+function renderResults(data, elapsed) {
+  const results = document.getElementById('results');
+  const title = document.getElementById('results-title');
+  const meta = document.getElementById('results-meta');
+  const nodesEl = document.getElementById('result-nodes');
+  const summaryEl = document.getElementById('summary-bar');
+
+  const nodes = data.nodes || [];
+  const totalNodes = data.total_nodes || 0;
+
+  title.textContent = data.title || 'Results';
+  meta.innerHTML =
+    '<span><span class="val">' + nodes.length + '</span> nodes returned</span>' +
+    '<span><span class="val">' + totalNodes.toLocaleString() + '</span> total DOM nodes</span>' +
+    '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+
+  // Render nodes
+  nodesEl.innerHTML = nodes.map((n, i) => {
+    const rel = (n.relevance || 0).toFixed(3);
+    const role = n.role || 'text';
+    const text = (n.label || '').slice(0, 300);
+    return '<div class="result-node">' +
+      '<div class="result-node-header">relevance: ' + rel + ' &middot; ' + role + '</div>' +
+      '<div class="result-node-text">"' + escHtml(text) + '"</div>' +
+      '</div>';
+  }).join('');
+
+  // Estimate raw chars (total_nodes * ~200 avg chars per node)
+  const rawChars = data.crfr && data.crfr.field_build_ms !== undefined
+    ? totalNodes * 226 : totalNodes * 200;
+  const outChars = nodes.reduce((s, n) => s + (n.label || '').length, 0);
+  const reduction = rawChars > 0 ? ((1 - outChars / rawChars) * 100).toFixed(2) : '?';
+  const parseMs = data.parse_time_ms || elapsed;
+
+  summaryEl.innerHTML =
+    '<div><div class="summary-val">' + rawChars.toLocaleString() + '</div><div class="summary-label">chars in (est.)</div></div>' +
+    '<div><div class="summary-val">' + outChars.toLocaleString() + '</div><div class="summary-label">chars out</div></div>' +
+    '<div><div class="summary-val">' + reduction + '%</div><div class="summary-label">reduction</div></div>' +
+    '<div><div class="summary-val">' + parseMs + 'ms</div><div class="summary-label">latency</div></div>';
+
+  results.classList.add('visible');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Allow Enter to submit
+document.getElementById('input-goal').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQuery();
+});
+document.getElementById('input-url').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQuery();
+});
+</script>
+</body>
+</html>
