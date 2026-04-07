@@ -6716,6 +6716,19 @@ async fn live_stats_handler(
     let total_feedback: u32 = fields.iter().map(|f| f.total_feedback).sum();
     let total_successful: u32 = fields.iter().map(|f| f.total_successful_nodes).sum();
     let total_learned: usize = fields.iter().map(|f| f.learned_nodes).sum();
+    let total_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+    let total_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    let token_savings_pct = if total_chars_in > 0 {
+        ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0).max(0.0)
+    } else { 0.0 };
+    // p95 across all sites
+    let all_p95: Vec<u64> = fields.iter().filter(|f| f.p95_latency_us > 0).map(|f| f.p95_latency_us).collect();
+    let global_p95_us = if all_p95.is_empty() { 0 } else {
+        let mut sorted = all_p95;
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    };
     let requests = state.request_count.load(std::sync::atomic::Ordering::Relaxed);
     let uptime_secs = state.started_at.elapsed().as_secs();
 
@@ -6749,6 +6762,9 @@ async fn live_stats_handler(
                 "last_result_count": f.last_result_count,
                 "max_depth": f.max_depth,
                 "edges": f.edge_count,
+                "chars_in": f.total_chars_in,
+                "chars_out": f.total_chars_out,
+                "p95_us": f.p95_latency_us,
             })
         })
         .collect();
@@ -6795,6 +6811,10 @@ async fn live_stats_handler(
         "total_successful_nodes": total_successful,
         "total_learned_nodes": total_learned,
         "avg_propagation_us": avg_propagation_us,
+        "p95_latency_us": global_p95_us,
+        "total_chars_in": total_chars_in,
+        "total_chars_out": total_chars_out,
+        "token_savings_pct": format!("{:.2}", token_savings_pct),
         "cache_entries": cache_entries,
         "cache_capacity": cache_capacity,
         "total_requests": requests,

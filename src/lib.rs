@@ -998,21 +998,20 @@ pub fn parse_crfr_from_tree_broad(
     };
 
     let prop_ms = now_ms().saturating_sub(prop_start);
-    resonance::save_field(&field);
 
-    // Reuse the same node mapping and output logic as parse_crfr_from_tree_js
+    // Reuse the same node mapping and output logic
     let node_map: HashMap<u32, &types::SemanticNode> = {
         let mut m = HashMap::new();
-        fn collect<'a>(
+        fn collect_broad<'a>(
             nodes: &'a [types::SemanticNode],
             m: &mut HashMap<u32, &'a types::SemanticNode>,
         ) {
             for n in nodes {
                 m.insert(n.id, n);
-                collect(&n.children, m);
+                collect_broad(&n.children, m);
             }
         }
-        collect(&tree.nodes, &mut m);
+        collect_broad(&tree.nodes, &mut m);
         m
     };
 
@@ -1020,6 +1019,12 @@ pub fn parse_crfr_from_tree_broad(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+
+    // Record token savings + save
+    let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
+    let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
+    field.record_token_savings(chars_in, chars_out);
+    resonance::save_field(&field);
 
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
@@ -1165,6 +1170,12 @@ pub fn parse_crfr_from_tree_js(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+
+    // Record token savings + save
+    let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
+    let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
+    field.record_token_savings(chars_in, chars_out);
+    resonance::save_field(&field);
 
     let total_ms = now_ms().saturating_sub(start);
     let is_md =

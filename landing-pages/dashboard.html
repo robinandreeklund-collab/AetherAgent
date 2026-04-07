@@ -164,19 +164,21 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 <!-- SECONDARY METRICS -->
 <div class="dash-grid">
   <div class="card">
-    <div class="card-label">Avg propagation</div>
-    <div class="card-value blue" id="m-latency" style="font-size:1.8rem">—</div>
-    <div class="card-sub"><span class="unit">microseconds</span></div>
+    <div class="glow green"></div>
+    <div class="card-label">Token savings</div>
+    <div class="card-value green" id="m-savings" style="font-size:2rem">—</div>
+    <div class="card-sub"><span id="m-chars-in">—</span> in &rarr; <span id="m-chars-out">—</span> <span class="unit">out</span></div>
   </div>
   <div class="card">
-    <div class="card-label">HTTP requests</div>
-    <div class="card-value" id="m-requests" style="font-size:1.8rem;color:#888">—</div>
-    <div class="card-sub"><span class="unit">total since boot</span></div>
+    <div class="glow blue"></div>
+    <div class="card-label">Latency</div>
+    <div class="card-value blue" id="m-latency" style="font-size:2rem">—</div>
+    <div class="card-sub">p95: <span id="m-p95">—</span></div>
   </div>
   <div class="card">
     <div class="card-label">Stored permanently</div>
-    <div class="card-value" id="m-stored" style="font-size:1.8rem;color:#888">—</div>
-    <div class="card-sub"><span id="m-db-size">—</span> <span class="unit">on disk</span></div>
+    <div class="card-value" id="m-stored" style="font-size:2rem;color:#888">—</div>
+    <div class="card-sub"><span id="m-db-size">—</span> <span class="unit">on disk</span> &middot; <span id="m-requests">—</span> <span class="unit">requests</span></div>
   </div>
 </div>
 
@@ -224,7 +226,11 @@ function update(d){
   document.getElementById('m-weights').textContent = fmt(d.causal_weights_learned || 0);
   document.getElementById('m-learned').textContent = d.total_learned_nodes || 0;
   document.getElementById('m-concepts').textContent = d.concepts_memorized || 0;
+  document.getElementById('m-savings').textContent = d.token_savings_pct ? d.token_savings_pct+'%' : '—';
+  document.getElementById('m-chars-in').textContent = fmt(d.total_chars_in || 0);
+  document.getElementById('m-chars-out').textContent = fmt(d.total_chars_out || 0);
   document.getElementById('m-latency').textContent = d.avg_propagation_us ? (d.avg_propagation_us/1000).toFixed(1)+'ms' : '—';
+  document.getElementById('m-p95').textContent = d.p95_latency_us ? (d.p95_latency_us/1000).toFixed(1)+'ms' : '—';
   document.getElementById('m-requests').textContent = fmt(d.total_requests || 0);
   const db = d.db || {};
   document.getElementById('m-stored').textContent = db.fields_stored || 0;

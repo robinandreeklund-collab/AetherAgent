@@ -54,8 +54,6 @@ const CAUSAL_DECAY_LAMBDA: f64 = 0.001_155;
 const GAP_RATIO_THRESHOLD: f32 = 0.30;
 /// Max antal concept entries i field-level concept memory
 const MAX_CONCEPT_ENTRIES: usize = 256;
-/// Max antal fält i LRU-cachen (v18: ökat från 64 till 256 för production scale)
-
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
@@ -265,6 +263,15 @@ pub struct ResonanceField {
     /// Senaste antal returnerade noder (after gap filter)
     #[serde(default)]
     pub last_result_count: u32,
+    /// Cumulative raw characters processed (input HTML size)
+    #[serde(default)]
+    pub total_chars_in: u64,
+    /// Cumulative CRFR output characters (selected node labels)
+    #[serde(default)]
+    pub total_chars_out: u64,
+    /// Latency samples (last 50 propagation times in microseconds) for p95
+    #[serde(default)]
+    pub latency_samples: Vec<u64>,
 }
 
 /// Compute content hash from node labels (FNV-1a over all label text).
@@ -682,6 +689,9 @@ impl ResonanceField {
             total_successful_nodes: 0,
             last_propagation_us: 0,
             last_result_count: 0,
+            total_chars_in: 0,
+            total_chars_out: 0,
+            latency_samples: Vec::new(),
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
@@ -1582,8 +1592,14 @@ impl ResonanceField {
         let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
         let results = Self::apply_gap_filter(all, top_k);
-        self.last_propagation_us = t0.elapsed().as_micros() as u64;
+        let elapsed_us = t0.elapsed().as_micros() as u64;
+        self.last_propagation_us = elapsed_us;
         self.last_result_count = results.len() as u32;
+        // Keep last 50 latency samples for p95
+        self.latency_samples.push(elapsed_us);
+        if self.latency_samples.len() > 50 {
+            self.latency_samples.remove(0);
+        }
         results
     }
 
@@ -2362,6 +2378,23 @@ impl ResonanceField {
         self.nodes.values().filter(|s| s.hit_count > 0).count()
     }
 
+    /// Record token savings for this query.
+    pub fn record_token_savings(&mut self, chars_in: u64, chars_out: u64) {
+        self.total_chars_in += chars_in;
+        self.total_chars_out += chars_out;
+    }
+
+    /// Calculate p95 latency from samples (microseconds).
+    pub fn p95_latency_us(&self) -> u64 {
+        if self.latency_samples.is_empty() {
+            return 0;
+        }
+        let mut sorted = self.latency_samples.clone();
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    }
+
     // ─── Incremental Field Update ───────────────────────────────────────
 
     /// Update a single node's text without rebuilding the entire field.
@@ -2569,6 +2602,9 @@ impl ResonanceField {
         self.total_feedback = old.total_feedback;
         self.total_successful_nodes = old.total_successful_nodes;
         self.total_queries = old.total_queries;
+        self.total_chars_in = old.total_chars_in;
+        self.total_chars_out = old.total_chars_out;
+        self.latency_samples = old.latency_samples.clone();
 
         eprintln!(
             "[CRFR] Migrated: {} node memories, {} prop weights, {} concepts",
@@ -2935,6 +2971,9 @@ pub struct FieldSummary {
     pub edge_count: usize,
     /// Antal noder med causal memory (hit_count > 0)
     pub learned_nodes: usize,
+    pub total_chars_in: u64,
+    pub total_chars_out: u64,
+    pub p95_latency_us: u64,
 }
 
 /// List summaries of all cached resonance fields (non-destructive peek).
@@ -2968,6 +3007,9 @@ pub fn list_cached_fields() -> Vec<FieldSummary> {
                 max_depth,
                 edge_count: field.parent_map.len(),
                 learned_nodes,
+                total_chars_in: field.total_chars_in,
+                total_chars_out: field.total_chars_out,
+                p95_latency_us: field.p95_latency_us(),
             }
         })
         .collect()
