@@ -52,10 +52,10 @@ RUN rm -rf src/ benches/ && \
     rm -f target/server-release/deps/libaether_agent-*
 
 # ── Build our code (fast: only our crate, deps are cached) ───────────────────
+# HTML files are NOT copied here — they are served from disk at runtime via
+# /app/static/. This means HTML-only changes skip Rust recompilation entirely.
 COPY src/ src/
 COPY benches/ benches/
-COPY dashboard.html dashboard.html
-COPY landing-pages/ landing-pages/
 # Stub examples (excluded by .dockerignore but required by Cargo.toml [[example]])
 RUN mkdir -p examples && echo "fn main() {}" > examples/render_demo.rs
 
@@ -90,6 +90,12 @@ ENV CHROME_PATH=/usr/bin/chromium-browser
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
+
+# ── Static HTML assets (served from disk at runtime) ─────────────────────────
+# Changes to these files do NOT trigger Rust recompilation — only this layer
+# is rebuilt, which takes seconds instead of minutes.
+COPY dashboard.html /app/static/dashboard.html
+COPY landing-pages/ /app/static/landing-pages/
 
 ENV PORT=10000
 

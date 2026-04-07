@@ -6243,40 +6243,56 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
     (StatusCode::OK, result)
 }
 
-async fn dashboard_html() -> impl IntoResponse {
-    let html = include_str!("../../dashboard.html");
+/// Serve a static HTML file from disk at runtime.
+/// Files are read from /app/static/ in Docker, or relative paths for local dev.
+/// This decouples HTML from the Rust binary — HTML-only changes skip recompilation.
+async fn serve_html_file(paths: &[&str]) -> impl IntoResponse {
+    for path in paths {
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            return (
+                StatusCode::OK,
+                [("content-type", "text/html; charset=utf-8")],
+                content,
+            );
+        }
+    }
     (
-        StatusCode::OK,
+        StatusCode::NOT_FOUND,
         [("content-type", "text/html; charset=utf-8")],
-        html,
+        "<h1>404 — HTML file not found</h1>".to_string(),
     )
+}
+
+async fn dashboard_html() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/dashboard.html",
+        "dashboard.html",
+    ])
+    .await
 }
 
 async fn landing_index() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/index.html");
-    (
-        StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
-    )
+    serve_html_file(&[
+        "/app/static/landing-pages/index.html",
+        "landing-pages/index.html",
+    ])
+    .await
 }
 
 async fn landing_concept_1() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/concept-1-the-reduction.html");
-    (
-        StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
-    )
+    serve_html_file(&[
+        "/app/static/landing-pages/concept-1-the-reduction.html",
+        "landing-pages/concept-1-the-reduction.html",
+    ])
+    .await
 }
 
 async fn landing_concept_2() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/concept-2-the-signal.html");
-    (
-        StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
-    )
+    serve_html_file(&[
+        "/app/static/landing-pages/concept-2-the-signal.html",
+        "landing-pages/concept-2-the-signal.html",
+    ])
+    .await
 }
 
 fn build_router(state: AppState) -> Router {
