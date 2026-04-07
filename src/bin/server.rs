@@ -62,7 +62,7 @@ struct ParseTopRequest {
 
 #[derive(Deserialize)]
 struct ParseCrfrRequest {
-    html: String,
+    html: Option<String>,
     goal: String,
     url: String,
     #[serde(default = "default_crfr_top_n")]
@@ -1056,12 +1056,36 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
 }
 
 async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
-    let html = req.html;
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
     let run_js = req.run_js;
     let output_format = req.output_format;
+
+    // Resolve HTML: use provided html, or fetch from url
+    let html = if let Some(h) = req.html {
+        if !h.is_empty() { h } else { String::new() }
+    } else {
+        String::new()
+    };
+
+    #[allow(unused_mut)]
+    let mut html = html;
+    #[cfg(feature = "fetch")]
+    if html.is_empty() && !url.is_empty() {
+        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default()).await {
+            Ok(fetched) => html = fetched.body,
+            Err(e) => {
+                let err = serde_json::json!({"error": format!("Fetch failed: {e}")});
+                return (axum::http::StatusCode::BAD_GATEWAY, axum::Json(err)).into_response();
+            }
+        }
+    }
+
+    if html.is_empty() {
+        let err = serde_json::json!({"error": "Provide either 'html' or 'url'"});
+        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(err)).into_response();
+    }
 
     // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
     let goal_clone = goal.clone();
@@ -1130,7 +1154,7 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
 
-    (StatusCode::OK, result)
+    (StatusCode::OK, result).into_response()
 }
 
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
