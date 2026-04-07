@@ -6762,6 +6762,19 @@ async fn live_stats_handler(
         sites_with_timing.iter().sum::<u64>() / sites_with_timing.len() as u64
     };
 
+    #[cfg(feature = "persist")]
+    let db_info = {
+        let (db_fields, db_domains, db_size) = aether_agent::persist::db_stats();
+        serde_json::json!({
+            "fields_stored": db_fields,
+            "domains_stored": db_domains,
+            "size_bytes": db_size,
+            "persistent": true,
+        })
+    };
+    #[cfg(not(feature = "persist"))]
+    let db_info = serde_json::json!({"persistent": false});
+
     let json = serde_json::json!({
         "sites_profiled": sites_profiled,
         "total_queries": total_queries,
@@ -6777,6 +6790,7 @@ async fn live_stats_handler(
         "cache_capacity": cache_capacity,
         "total_requests": requests,
         "uptime_secs": uptime_secs,
+        "db": db_info,
         "sites": site_list,
     });
     (

@@ -131,22 +131,24 @@ pub fn is_initialized() -> bool {
 pub fn save_field(field: &ResonanceField) {
     let pool = match DB.lock() {
         Ok(p) => p,
-        Err(_) => return,
+        Err(e) => { eprintln!("[PERSIST] save_field lock error: {e}"); return; }
     };
     let conn = match pool.writer.as_ref() {
         Some(c) => c,
-        None => return,
+        None => { eprintln!("[PERSIST] save_field: no writer connection"); return; }
     };
 
     let data = match serde_json::to_vec(field) {
         Ok(d) => d,
-        Err(_) => return,
+        Err(e) => { eprintln!("[PERSIST] save_field serialize error: {e}"); return; }
     };
 
-    let _ = conn.execute(
+    if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO resonance_fields (url_hash, url, data, updated_at) VALUES (?1, ?2, ?3, ?4)",
         params![field.url_hash as i64, field.url, data, now_ms() as i64],
-    );
+    ) {
+        eprintln!("[PERSIST] save_field write error: {e}");
+    }
 }
 
 /// Load a resonance field by URL hash (uses reader connection from pool).
