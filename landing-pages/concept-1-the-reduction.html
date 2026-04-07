@@ -40,6 +40,15 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 @keyframes slashPulse{0%,100%{opacity:0.3;transform:scale(1)}50%{opacity:0.7;transform:scale(1.3)}}
 @keyframes slashEntry{0%{opacity:0;transform:translateY(20px) rotate(-15deg)}60%{opacity:1;transform:translateY(-3px) rotate(2deg)}100%{opacity:1;transform:translateY(0) rotate(0deg)}}
 .hero.visible .slash{animation:slashEntry .8s cubic-bezier(0.34,1.56,0.64,1) .4s both}
+
+/* DISTILL MORPH */
+.distill-word{display:inline;position:relative}
+.distill-noise{display:inline-block;-webkit-text-fill-color:rgba(255,255,255,0.35);font-family:var(--mono);font-size:.55em;font-weight:400;letter-spacing:0;vertical-align:baseline;overflow:hidden;white-space:nowrap;transition:max-width 1s cubic-bezier(0.25,0.46,0.45,0.94),opacity .8s ease}
+.distill-noise.collapsing{max-width:0 !important;opacity:0}
+.distill-eb{display:inline;opacity:0;transition:opacity .6s ease .2s}
+.distill-eb.visible{opacity:1}
+.distill-dot{display:inline;opacity:0;transition:opacity .4s ease .5s}
+.distill-dot.visible{opacity:1}
 .hero .subtitle{font-size:clamp(1.1rem,2.5vw,1.5rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em}
@@ -151,7 +160,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1>Distill the web.<br>Slash the tokens<span class="slash">/</span></h1>
+    <h1>Distill the <span class="distill-word">w<span class="distill-noise" id="distill-noise">&lt;div class="nav"&gt;</span><span class="distill-eb" id="distill-eb">eb</span><span class="distill-dot" id="distill-dot">.</span></span><br>Slash the tokens<span class="slash">/</span></h1>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
@@ -444,6 +453,26 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
+
+// ── DISTILL MORPH: w<div class="nav"> → web. ──
+(function(){
+  const noise = document.getElementById('distill-noise');
+  const eb = document.getElementById('distill-eb');
+  const dot = document.getElementById('distill-dot');
+  if(!noise) return;
+
+  // Lock the initial width so CSS transition has a start value
+  requestAnimationFrame(()=>{
+    noise.style.maxWidth = noise.scrollWidth + 'px';
+
+    // After a pause, collapse the noise and reveal "eb."
+    setTimeout(()=>{
+      noise.classList.add('collapsing');
+      eb.classList.add('visible');
+      dot.classList.add('visible');
+    }, 1800);
+  });
+})();
 
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
 (function(){
