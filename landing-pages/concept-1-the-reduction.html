@@ -49,8 +49,12 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero h1,.hero .subtitle,.hero-ctas{transform:translateY(20px)}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* DISTILL — smooth fade, fixed width to prevent centering shift */
-#dw{display:inline-block;text-align:center;transition:opacity .4s ease}
+/* SLASH WORD — animates "Slash" → "Sl/sh" */
+#slash-word{display:inline}
+#slash-word .sw-slash{display:inline;-webkit-text-fill-color:#3b82f6;opacity:0;transition:opacity .5s ease}
+#slash-word .sw-hide{display:inline;transition:opacity .5s ease}
+#slash-word.done .sw-slash{opacity:1}
+#slash-word.done .sw-hide{opacity:0;width:0;overflow:hidden;display:inline-block}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;margin-left:.5em}
 @media(max-width:600px){.hero .subtitle{white-space:normal;text-align:center}}
@@ -191,7 +195,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1>Distill the <span id="dw">web.</span><br>Slash the tokens<span class="slash">/</span></h1>
+    <h1>Distill the web.<br><span id="slash-word">Sl<span class="sw-hide">a</span><span class="sw-slash">/</span><span class="sw-hide">s</span>sh the tokens.</span></h1>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
@@ -390,7 +394,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <div class="footer-glow"></div>
   <div class="footer-inner">
     <div class="footer-left">
-      <div class="tagline">Distill the web. Slash the tokens.</div>
+      <div class="tagline">Kill the noise. Find the signal.</div>
     </div>
     <div class="footer-center">
       <div class="footer-logo">sl<span class="fl-slash">/</span>sh</div>
@@ -523,50 +527,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
-// ── DISTILL — smooth fade, fixed width ──
-(function(){
-  const el = document.getElementById('dw');
-  if(!el) return;
-
-  const all = ['web.','noise.','HTML.','tags.','DOM.'];
-
-  // Measure the widest word and lock the span to that width
-  // so centered h1 never shifts when swapping text.
-  let maxW = 0;
-  const orig = el.textContent;
-  for(const w of all){
-    el.textContent = w;
-    maxW = Math.max(maxW, el.offsetWidth);
-  }
-  el.textContent = orig;
-  el.style.width = maxW + 'px';
-
-  const words = ['noise.','HTML.','tags.','DOM.'];
-  let i = 0;
-
-  function fadeTo(text, cb){
-    el.style.opacity = '0';
-    setTimeout(()=>{
-      el.textContent = text;
-      el.style.opacity = '1';
-      if(cb) setTimeout(cb, 400);
-    }, 400);
-  }
-
-  function cycle(){
-    fadeTo(words[i % words.length], ()=>{
-      i++;
-      setTimeout(()=>{
-        fadeTo('web.', ()=>{
-          setTimeout(cycle, 3000);
-        });
-      }, 2000);
-    });
-  }
-
-  // Start after 3s (let hero settle)
-  setTimeout(cycle, 3000);
-})();
+// ── SLASH ANIMATION: "Slash" → "Sl/sh" after 2s ──
+setTimeout(()=>{
+  const sw = document.getElementById('slash-word');
+  if(sw) sw.classList.add('done');
+}, 2000);
 
 // ── NAV LIVE STATS — minimal counters in header ──
 (function(){
