@@ -55,7 +55,7 @@ const GAP_RATIO_THRESHOLD: f32 = 0.30;
 /// Max antal concept entries i field-level concept memory
 const MAX_CONCEPT_ENTRIES: usize = 256;
 /// Max antal fält i LRU-cachen (v18: ökat från 64 till 256 för production scale)
-const FIELD_CACHE_CAPACITY: usize = 256;
+
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
@@ -2625,17 +2625,18 @@ impl ResonanceField {
     }
 }
 
-// ─── LRU Field Cache ────────────────────────────────────────────────────────
+// ─── Hot Field Cache ────────────────────────────────────────────────────────
 
-/// Default cache TTL (3 minuter)
-const DEFAULT_CACHE_TTL_MS: u64 = 180_000;
-
-/// Global LRU-cache för resonansfält per URL.
+/// Global in-memory cache for resonance fields.
 ///
-/// Sparar fältet (med kausalt minne) så att upprepade besök till samma
-/// sida drar nytta av tidigare lärande. TTL-baserad eviction.
+/// This is a HOT CACHE only — SQLite is the permanent store.
+/// No TTL eviction: fields stay in cache until capacity is reached,
+/// then the least-recently-used field is evicted (but preserved in SQLite).
+/// Capacity is generous (1024) to avoid frequent SQLite reads.
+const FIELD_CACHE_CAPACITY: usize = 1024;
+
 struct FieldCacheInner {
-    /// (url_hash, insert_ms, field)
+    /// (url_hash, last_access_ms, field)
     entries: Vec<(u64, u64, ResonanceField)>,
     capacity: usize,
 }
@@ -2643,22 +2644,14 @@ struct FieldCacheInner {
 impl FieldCacheInner {
     fn new(capacity: usize) -> Self {
         FieldCacheInner {
-            entries: Vec::with_capacity(capacity),
+            entries: Vec::with_capacity(capacity.min(256)),
             capacity,
         }
     }
 
     /// Hämta ett fält via move (tar bort ur cache, noll-klon).
-    /// Returnerar None om TTL expired.
     fn take(&mut self, url_hash: u64) -> Option<ResonanceField> {
-        let now = now_ms();
         if let Some(pos) = self.entries.iter().position(|(h, _, _)| *h == url_hash) {
-            let (_, insert_ms, _) = &self.entries[pos];
-            if now.saturating_sub(*insert_ms) > DEFAULT_CACHE_TTL_MS {
-                // TTL expired — evicta, returnera None (tvingar rebuild)
-                self.entries.remove(pos);
-                return None;
-            }
             let (_, _, field) = self.entries.remove(pos);
             Some(field)
         } else {
@@ -2669,15 +2662,11 @@ impl FieldCacheInner {
     /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
     fn put(&mut self, url_hash: u64, field: ResonanceField) {
         self.entries.retain(|(h, _, _)| *h != url_hash);
-        // Evicta expired entries
-        let now = now_ms();
-        self.entries
-            .retain(|(_, insert_ms, _)| now.saturating_sub(*insert_ms) <= DEFAULT_CACHE_TTL_MS);
-        // Evicta äldsta om fullt
+        // Evicta äldsta om fullt (LRU: position 0 = oldest)
         if self.entries.len() >= self.capacity {
             self.entries.remove(0);
         }
-        self.entries.push((url_hash, now, field));
+        self.entries.push((url_hash, now_ms(), field));
     }
 
     fn len(&self) -> usize {

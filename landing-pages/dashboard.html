@@ -174,9 +174,9 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     <div class="card-sub"><span class="unit">total since boot</span></div>
   </div>
   <div class="card">
-    <div class="card-label">Cache</div>
-    <div class="card-value" id="m-cache" style="font-size:1.8rem;color:#888">—</div>
-    <div class="card-sub"><span id="m-cache-cap">—</span> <span class="unit">capacity</span></div>
+    <div class="card-label">Stored permanently</div>
+    <div class="card-value" id="m-stored" style="font-size:1.8rem;color:#888">—</div>
+    <div class="card-sub"><span id="m-db-size">—</span> <span class="unit">on disk</span></div>
   </div>
 </div>
 
@@ -226,8 +226,11 @@ function update(d){
   document.getElementById('m-concepts').textContent = d.concepts_memorized || 0;
   document.getElementById('m-latency').textContent = d.avg_propagation_us ? (d.avg_propagation_us/1000).toFixed(1)+'ms' : '—';
   document.getElementById('m-requests').textContent = fmt(d.total_requests || 0);
-  document.getElementById('m-cache').textContent = (d.cache_entries||0)+'/'+(d.cache_capacity||0);
-  document.getElementById('m-cache-cap').textContent = d.cache_capacity || 0;
+  const db = d.db || {};
+  document.getElementById('m-stored').textContent = db.fields_stored || 0;
+  const sizeKB = ((db.size_bytes||0)/1024).toFixed(0);
+  const sizeMB = ((db.size_bytes||0)/1048576).toFixed(1);
+  document.getElementById('m-db-size').textContent = (db.size_bytes||0) > 1048576 ? sizeMB+' MB' : sizeKB+' KB';
   document.getElementById('m-uptime').textContent = fmtTime(d.uptime_secs || 0);
   document.getElementById('m-edges').textContent = fmt(d.total_edges || 0);
   document.getElementById('meta').textContent =
