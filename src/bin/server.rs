@@ -1125,8 +1125,10 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
                 "[COOKIE-BRIDGE] Bot challenge on {} — re-fetching with cookies",
                 url
             );
-            let mut rc = aether_agent::types::FetchConfig::default();
-            rc.cookies = tree.js_cookies.clone();
+            let rc = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
             if let Ok(rr) = aether_agent::fetch::fetch_page(&url, &rc).await {
                 eprintln!(
                     "[COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
@@ -6249,8 +6251,10 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
                 "[COOKIE-BRIDGE] Bot challenge detected on {}. Re-fetching with JS cookies...",
                 url
             );
-            let mut refetch_config = aether_agent::types::FetchConfig::default();
-            refetch_config.cookies = tree.js_cookies.clone();
+            let refetch_config = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
 
             if let Ok(refetch_result) = aether_agent::fetch::fetch_page(&url, &refetch_config).await
             {
@@ -6725,7 +6729,7 @@ fn spawn_memory_monitor() {
             tick_count += 1;
             // Persist checkpoint varannan tick (var 60:e sekund)
             #[cfg(feature = "persist")]
-            if tick_count % 2 == 0 {
+            if tick_count.is_multiple_of(2) {
                 aether_agent::persist::checkpoint();
             }
         }

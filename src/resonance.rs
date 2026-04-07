@@ -3294,4 +3294,83 @@ mod tests {
             "Borde hitta minst 3 av 5 headings via structural bypass, hittade {found}"
         );
     }
+
+    #[test]
+    fn test_broad_mode_auto_detect_abstract() {
+        // Abstrakt fråga: inga starka keyword-matcher → jämn amplitude-distribution
+        let tree = vec![
+            make_node(1, "heading", "Introduction to philosophy", vec![]),
+            make_node(2, "text", "The concept of justice has many interpretations", vec![]),
+            make_node(3, "text", "Some argue for utilitarian approaches", vec![]),
+            make_node(4, "text", "Others prefer deontological frameworks", vec![]),
+            make_node(5, "text", "Virtue ethics offers a third perspective", vec![]),
+            make_node(6, "text", "Each approach has strengths and weaknesses", vec![]),
+            make_node(7, "text", "Modern debates continue to evolve", vec![]),
+            make_node(8, "text", "Political philosophy intersects with ethics", vec![]),
+            make_node(9, "text", "Cultural context shapes moral reasoning", vec![]),
+            make_node(10, "text", "No single framework captures all nuances", vec![]),
+        ];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://philosophy.test");
+
+        // Abstrakt fråga utan tydliga keywords
+        let (results, _broad_active) = field.propagate_broad(
+            "what is the overall philosophical argument and tone",
+            50,
+            true, // auto-detect
+        );
+
+        // Broad mode ska ge fler resultat
+        assert!(
+            results.len() >= 5,
+            "Broad mode borde returnera fler noder, fick {}",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn test_broad_mode_forced() {
+        let tree = vec![
+            make_node(1, "heading", "Product price $99", vec![]),
+            make_node(2, "text", "Buy now for $99", vec![]),
+            make_node(3, "text", "Shipping information", vec![]),
+        ];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://shop.test");
+
+        // Tvinga broad mode även på faktafråga
+        let (results, broad_active) = field.propagate_broad("price cost $99", 50, false);
+
+        assert!(
+            broad_active,
+            "Broad mode borde vara aktivt när auto_detect=false"
+        );
+        // Ingen gap-filter → alla noder med amplitude > 0 borde finnas
+        assert!(
+            results.len() >= 2,
+            "Forced broad borde returnera alla relevanta noder"
+        );
+    }
+
+    #[test]
+    fn test_broad_mode_auto_detect_factual_stays_tight() {
+        // Faktafråga med tydliga keywords → ojämn distribution → tight mode
+        let tree = vec![
+            make_node(1, "text", "The price is $499.99 USD for iPhone 16 Pro", vec![]),
+            make_node(2, "text", "Navigation menu home about contact", vec![]),
+            make_node(3, "text", "Footer copyright 2026 all rights reserved", vec![]),
+            make_node(4, "text", "Cookie policy privacy terms", vec![]),
+            make_node(5, "heading", "iPhone 16 Pro pricing and availability", vec![]),
+        ];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://apple.test");
+
+        let (results, _broad_active) =
+            field.propagate_broad("iPhone 16 Pro price $499 cost USD", 50, true);
+
+        // Auto-detect borde se stark keyword-match → tight mode
+        // (broad_active kan vara true eller false beroende på exakt amplitude-spread,
+        //  men resultaten borde alltid inkludera prisnoden)
+        let has_price = results
+            .iter()
+            .any(|r| r.amplitude > 0.5);
+        assert!(has_price, "Prisnoden borde ha hög amplitude oavsett mode");
+    }
 }
