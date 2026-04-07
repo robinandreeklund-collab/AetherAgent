@@ -45,8 +45,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* DISTILL — smooth fade between words */
-#dw{display:inline;transition:opacity .4s ease}
+/* DISTILL — smooth fade, fixed width to prevent centering shift */
+#dw{display:inline-block;text-align:center;transition:opacity .4s ease}
 .hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;margin-left:.5em}
@@ -506,10 +506,23 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
-// ── DISTILL — smooth fade between words ──
+// ── DISTILL — smooth fade, fixed width ──
 (function(){
   const el = document.getElementById('dw');
   if(!el) return;
+
+  const all = ['web.','noise.','HTML.','tags.','DOM.'];
+
+  // Measure the widest word and lock the span to that width
+  // so centered h1 never shifts when swapping text.
+  let maxW = 0;
+  const orig = el.textContent;
+  for(const w of all){
+    el.textContent = w;
+    maxW = Math.max(maxW, el.offsetWidth);
+  }
+  el.textContent = orig;
+  el.style.width = maxW + 'px';
 
   const words = ['noise.','HTML.','tags.','DOM.'];
   let i = 0;
@@ -524,13 +537,10 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
   }
 
   function cycle(){
-    // Fade to alternate word
     fadeTo(words[i % words.length], ()=>{
       i++;
-      // Hold for 2s, then fade back to "web."
       setTimeout(()=>{
         fadeTo('web.', ()=>{
-          // Hold "web." for 3s, then next cycle
           setTimeout(cycle, 3000);
         });
       }, 2000);
