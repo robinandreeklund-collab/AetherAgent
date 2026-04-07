@@ -2352,6 +2352,16 @@ impl ResonanceField {
         self.nodes.len()
     }
 
+    /// Check if a node has causal memory (hit_count > 0).
+    pub fn node_has_learning(&self, node_id: u32) -> bool {
+        self.nodes.get(&node_id).is_some_and(|s| s.hit_count > 0)
+    }
+
+    /// Count nodes with causal memory.
+    pub fn learned_node_count(&self) -> usize {
+        self.nodes.values().filter(|s| s.hit_count > 0).count()
+    }
+
     // ─── Incremental Field Update ───────────────────────────────────────
 
     /// Update a single node's text without rebuilding the entire field.
@@ -3498,5 +3508,143 @@ mod tests {
             .iter()
             .any(|r| r.amplitude > 0.5);
         assert!(has_price, "Prisnoden borde ha hög amplitude oavsett mode");
+    }
+
+    // ── Content Hash & Migration Tests ──────────────────────────────────
+
+    #[test]
+    fn test_compute_content_hash_same_content() {
+        let tree1 = vec![
+            make_node(1, "heading", "Breaking: Major event today", vec![]),
+            make_node(2, "text", "Details about the event", vec![]),
+        ];
+        let tree2 = vec![
+            make_node(1, "heading", "Breaking: Major event today", vec![]),
+            make_node(2, "text", "Details about the event", vec![]),
+        ];
+        let h1 = compute_content_hash(&tree1);
+        let h2 = compute_content_hash(&tree2);
+        assert_eq!(h1, h2, "Identical content should produce identical hash");
+        assert_ne!(h1, 0, "Hash should not be zero");
+    }
+
+    #[test]
+    fn test_compute_content_hash_different_content() {
+        let tree1 = vec![
+            make_node(1, "heading", "Breaking: Major event today", vec![]),
+            make_node(2, "text", "Details about the event", vec![]),
+        ];
+        let tree2 = vec![
+            make_node(1, "heading", "Update: New developments", vec![]),
+            make_node(2, "text", "Fresh information about the situation", vec![]),
+        ];
+        let h1 = compute_content_hash(&tree1);
+        let h2 = compute_content_hash(&tree2);
+        assert_ne!(h1, h2, "Different content should produce different hash");
+    }
+
+    #[test]
+    fn test_migrate_learning_preserves_propagation_stats() {
+        let tree_v1 = vec![
+            make_node(1, "heading", "News headline one", vec![]),
+            make_node(2, "text", "Article body one", vec![]),
+            make_node(3, "text", "Navigation links home about", vec![]),
+        ];
+        let mut old_field = ResonanceField::from_semantic_tree(&tree_v1, "https://news.test");
+
+        // Simulate learning: propagate + feedback
+        let _results = old_field.propagate_top_k("latest news headlines", 10);
+        old_field.feedback("latest news headlines", &[1, 2]);
+        // Add some propagation stats manually
+        old_field.propagation_stats.insert("heading:down:news".to_string(), (0.8, 0.2));
+        old_field.concept_memory.insert("headlines".to_string(), HvData { bits: vec![42; 32] });
+        assert_eq!(old_field.total_feedback, 1, "Should have 1 feedback");
+        assert_eq!(old_field.total_successful_nodes, 2, "Should have 2 successful nodes");
+
+        // New content (same structure: heading + 2 text)
+        let tree_v2 = vec![
+            make_node(1, "heading", "Breaking: Different headline", vec![]),
+            make_node(2, "text", "Completely new article body", vec![]),
+            make_node(3, "text", "Navigation links home about", vec![]),
+        ];
+        let mut new_field = ResonanceField::from_semantic_tree(&tree_v2, "https://news.test");
+
+        // Migrate
+        new_field.migrate_learning_from(&old_field);
+
+        // Verify propagation stats preserved
+        assert!(
+            new_field.propagation_stats.contains_key("heading:down:news"),
+            "Propagation stats should be migrated"
+        );
+
+        // Verify concept memory preserved
+        assert!(
+            new_field.concept_memory.contains_key("headlines"),
+            "Concept memory should be migrated"
+        );
+
+        // Verify counters preserved
+        assert_eq!(new_field.total_feedback, 1, "Feedback count should be migrated");
+        assert_eq!(new_field.total_queries, old_field.total_queries, "Query count should be migrated");
+    }
+
+    #[test]
+    fn test_content_hash_set_on_new_field() {
+        let tree = vec![
+            make_node(1, "heading", "Test page", vec![]),
+            make_node(2, "text", "Some content", vec![]),
+        ];
+        // get_or_build_field_with_variant sets content_hash on new fields
+        let (field, cache_hit) = get_or_build_field_with_variant(&tree, "https://unique-hash-test.test", false);
+        assert!(!cache_hit, "First visit should be a cache miss");
+        assert_ne!(field.content_hash, 0, "Content hash should be set on new fields");
+    }
+
+    #[test]
+    fn test_cache_hit_same_content() {
+        let tree = vec![
+            make_node(1, "heading", "Cached page", vec![]),
+            make_node(2, "text", "Stable content", vec![]),
+        ];
+        // First call — builds field
+        let (field1, hit1) = get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
+        assert!(!hit1, "First call should miss");
+
+        // Save to cache
+        save_field(&field1);
+
+        // Second call — should hit cache (in-memory)
+        let (field2, hit2) = get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
+        assert!(hit2, "Second call should hit cache");
+        assert_eq!(field1.content_hash, field2.content_hash, "Content hash should match");
+    }
+
+    #[test]
+    fn test_learning_survives_same_content_reload() {
+        let tree = vec![
+            make_node(1, "heading", "Persistent learning test", vec![]),
+            make_node(2, "text", "Important answer content here", vec![]),
+            make_node(3, "text", "Irrelevant footer text", vec![]),
+        ];
+        let url = "https://persist-learning-test.test";
+
+        // Build, propagate, feedback
+        let (mut field, _) = get_or_build_field_with_variant(&tree, url, false);
+        let _results = field.propagate_top_k("important answer", 10);
+        field.feedback("important answer", &[2]);
+        save_field(&field);
+
+        // Verify learning exists
+        let node2 = field.nodes.get(&2).expect("Node 2 should exist");
+        assert!(node2.hit_count > 0, "Node 2 should have hit_count > 0 after feedback");
+        let saved_queries = field.total_queries;
+        let saved_feedback = field.total_feedback;
+
+        // Reload with same content — should preserve learning
+        let (reloaded, hit) = get_or_build_field_with_variant(&tree, url, false);
+        assert!(hit, "Same content should be a cache hit");
+        assert_eq!(reloaded.total_queries, saved_queries, "Queries should be preserved");
+        assert_eq!(reloaded.total_feedback, saved_feedback, "Feedback should be preserved");
     }
 }

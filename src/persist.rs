@@ -603,4 +603,69 @@ mod tests {
 
         let _ = std::fs::remove_file(path_str);
     }
+
+    #[test]
+    fn test_field_survives_save_load_cycle() {
+        use crate::resonance::ResonanceField;
+        use crate::types::SemanticNode;
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("aether_test_persist_survive.db");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(path_str);
+
+        init(path_str).expect("DB init borde lyckas");
+
+        // Build a field with learning
+        let tree = vec![SemanticNode {
+            id: 1,
+            role: "heading".into(),
+            label: "Test headline".into(),
+            ..SemanticNode::default()
+        }];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://persist-survive.test");
+        let _results = field.propagate_top_k("test headline", 5);
+        field.feedback("test headline", &[1]);
+        assert_eq!(field.total_feedback, 1);
+        assert!(field.total_queries > 0);
+
+        // Save
+        save_field(&field);
+        let (count, _, _) = db_stats();
+        assert_eq!(count, 1, "Should have 1 field in DB");
+
+        // Load — simulates server restart
+        let loaded = load_field(field.url_hash).expect("Should load saved field");
+        assert_eq!(loaded.total_feedback, 1, "Feedback count should survive");
+        assert_eq!(loaded.total_queries, field.total_queries, "Query count should survive");
+        assert_eq!(loaded.url, field.url, "URL should survive");
+
+        // Verify causal memory survived
+        assert!(loaded.node_has_learning(1), "hit_count should survive save/load");
+
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn test_global_stats_persist() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("aether_test_persist_global.db");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(path_str);
+
+        init(path_str).expect("DB init borde lyckas");
+
+        save_global_stat("total_requests", 12345);
+        let val = load_global_stat("total_requests");
+        assert_eq!(val, 12345, "Global stat should round-trip");
+
+        save_global_stat("total_requests", 99999);
+        let val2 = load_global_stat("total_requests");
+        assert_eq!(val2, 99999, "Global stat should update");
+
+        let missing = load_global_stat("nonexistent");
+        assert_eq!(missing, 0, "Missing stat should return 0");
+
+        let _ = std::fs::remove_file(path_str);
+    }
 }
