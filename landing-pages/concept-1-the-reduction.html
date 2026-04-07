@@ -42,12 +42,15 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
 .hero-content{position:relative;z-index:2;max-width:720px}
-.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;animation:heroFadeUp .8s ease .3s forwards}
+.hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap;opacity:0;animation:heroFadeUp .8s ease .6s forwards}
+.hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;opacity:0;animation:heroFadeUp .8s ease .9s forwards}
+@keyframes heroFadeUp{to{opacity:1;transform:translateY(0)}}
+.hero h1,.hero .subtitle,.hero-ctas{transform:translateY(20px)}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
 /* DISTILL — smooth fade, fixed width to prevent centering shift */
 #dw{display:inline-block;text-align:center;transition:opacity .4s ease}
-.hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;margin-left:.5em}
 @media(max-width:600px){.hero .subtitle{white-space:normal;text-align:center}}
@@ -55,7 +58,6 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .subtitle-fade-in{animation:subtitleIn .4s ease forwards}
 @keyframes subtitleOut{to{opacity:0;transform:translateY(-8px)}}
 @keyframes subtitleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
 .hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
 
 /* NAV LIVE STATS — minimal counters in header */
@@ -77,7 +79,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 /* CODE DEMO */
 .code-section{padding:6rem 2rem;max-width:1100px;margin:0 auto}
 .section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem;text-align:center}
+.section-title em{font-style:normal;-webkit-text-fill-color:transparent;background:linear-gradient(135deg,#3b82f6,#60a5fa);-webkit-background-clip:text}
 .section-sub{color:var(--muted);text-align:center;margin-bottom:3rem;font-size:1.05rem}
+.section-divider{max-width:60px;height:1px;margin:0 auto 6rem;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.4}
 .code-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
 .code-block{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.82rem;line-height:1.7;overflow-x:auto;position:relative}
 .code-block::before{content:attr(data-label);position:absolute;top:.75rem;right:1rem;font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:var(--font)}
@@ -100,9 +104,11 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .feature-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem}
 .feature-card p{font-size:.85rem;color:var(--muted);line-height:1.5}
 
-/* CTA FOOTER */
-.cta-section{padding:8rem 2rem;text-align:center}
-.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:1.5rem}
+/* CTA */
+.cta-section{position:relative;padding:8rem 2rem;text-align:center;overflow:hidden}
+.cta-section::before{content:'';position:absolute;top:50%;left:50%;width:400px;height:400px;background:radial-gradient(circle,rgba(59,130,246,0.06) 0%,transparent 70%);transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}
+.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.5rem}
+.cta-section p{color:var(--muted);font-size:.95rem;margin-bottom:2rem}
 .cta-section .btn-sm{padding:.85rem 2.5rem;font-size:1rem;border-radius:12px}
 /* FOOTER */
 footer{position:relative;overflow:hidden;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
@@ -176,7 +182,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
     <a href="#features">Features</a>
     <a href="/mission">Mission</a>
     <a href="/timeline">Timeline</a>
-    <a href="#docs">Docs</a>
+    <a href="/docs">Docs</a>
     <a class="btn-sm btn-accent" href="/try">Try beta</a>
   </div>
 </nav>
@@ -212,9 +218,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- CODE DEMO -->
 <section class="code-section reveal" id="demo">
-  <h2 class="section-title">One request. Pure signal.</h2>
+  <h2 class="section-title">One request. <em>Pure signal.</em></h2>
   <p class="section-sub">Send a URL and a goal. Get back only what matters.</p>
   <div class="code-grid">
     <div class="code-block" data-label="Request">
@@ -246,9 +254,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- CRFR PIPELINE PLAYBACK -->
 <section class="pipeline reveal" id="pipeline">
-  <h2 class="section-title">See it work. For real.</h2>
+  <h2 class="section-title">See it work. <em>For real.</em></h2>
   <p class="section-sub">A real query against Wikipedia's 2.8M-character COVID-19 vaccine article. Every number below is from an actual run.</p>
   <div class="pipeline-terminal" id="pipeline-term">
     <div class="steps">
@@ -312,9 +322,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- LEARNING -->
 <section class="learning reveal" id="learning">
-  <h2 class="section-title">It learns. Without training data.</h2>
+  <h2 class="section-title">It learns. <em>Without training data.</em></h2>
   <p class="section-sub">CRFR improves with every interaction. No GPU. No fine-tuning.</p>
   <canvas id="chart-canvas"></canvas>
   <div class="learning-stats">
@@ -324,9 +336,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- FEATURES -->
 <section class="features reveal" id="features">
-  <h2 class="section-title">Everything you need</h2>
+  <h2 class="section-title"><em>Everything</em> you need</h2>
   <p class="section-sub">A complete perception layer for AI agents.</p>
   <div class="features-grid">
     <div class="feature-card">
@@ -362,9 +376,12 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- CTA -->
 <section class="cta-section reveal">
   <h2>See for yourself</h2>
+  <p>Enter any URL. Ask any question. Get back only the answer.</p>
   <a class="btn-sm btn-accent" href="/try">Try beta &rarr;</a>
 </section>
 

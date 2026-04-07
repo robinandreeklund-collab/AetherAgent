@@ -6368,6 +6368,14 @@ async fn landing_timeline() -> impl IntoResponse {
     .await
 }
 
+async fn landing_docs() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs.html",
+        "landing-pages/docs.html",
+    ])
+    .await
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6400,6 +6408,7 @@ fn build_router(state: AppState) -> Router {
         .route("/try", get(landing_try))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
+        .route("/docs", get(landing_docs))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))

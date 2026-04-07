@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slaash — Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:#60a5fa}
+
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);background:rgba(10,10,10,0.8);border-bottom:1px solid var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;color:#fff}
+.wordmark .s{color:#3b82f6;font-weight:800}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500}
+.nav-links a:hover{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;text-decoration:none}
+.btn-sm:hover{background:#2563eb;color:#fff}
+.nav-links a.btn-sm{color:#fff}
+
+.docs-hero{padding:8rem 2rem 3rem;text-align:center;max-width:700px;margin:0 auto}
+.docs-hero h1{font-size:clamp(2rem,4vw,2.75rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.docs-hero p{color:var(--muted);font-size:1rem}
+
+.docs-grid{max-width:900px;margin:0 auto;padding:2rem;display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem}
+.doc-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.75rem;transition:border-color .3s,transform .3s}
+.doc-card:hover{border-color:rgba(59,130,246,0.3);transform:translateY(-2px)}
+.doc-card h3{font-size:1rem;font-weight:600;margin-bottom:.4rem;color:#fff}
+.doc-card p{font-size:.85rem;color:var(--muted);line-height:1.5;margin-bottom:.75rem}
+.doc-card .tag{font-size:.65rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.08em}
+
+.docs-section{max-width:900px;margin:0 auto;padding:3rem 2rem}
+.docs-section h2{font-size:1.5rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:1.5rem}
+.code-example{background:#0d1117;border:1px solid var(--border);border-radius:12px;padding:1.25rem;font-family:var(--mono);font-size:.8rem;line-height:1.7;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}
+.code-example .kw{color:#ff7b72}
+.code-example .str{color:#a5d6ff}
+.code-example .comment{color:#555}
+
+footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.75rem;margin-top:4rem}
+
+@media(max-width:600px){.docs-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="wordmark">sl<span class="s">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/docs">Docs</a>
+    <a class="btn-sm" href="/try">Try beta</a>
+  </div>
+</nav>
+
+<section class="docs-hero">
+  <h1>Documentation</h1>
+  <p>Everything you need to integrate Slaash into your agent, API, or workflow.</p>
+</section>
+
+<div class="docs-grid">
+  <div class="doc-card">
+    <h3>Quickstart</h3>
+    <p>Send your first request in under 60 seconds. URL in, answer out.</p>
+    <span class="tag">Getting started</span>
+  </div>
+  <div class="doc-card">
+    <h3>MCP Integration</h3>
+    <p>Connect Slaash to Claude, Cursor, or VS Code via 13 MCP tools.</p>
+    <span class="tag">MCP Server</span>
+  </div>
+  <div class="doc-card">
+    <h3>CRFR Guide</h3>
+    <p>Goal expansion, feedback loops, causal learning, and broad mode for abstract queries.</p>
+    <span class="tag">Core algorithm</span>
+  </div>
+  <div class="doc-card">
+    <h3>REST API</h3>
+    <p>Full endpoint reference — parse, extract, click, search, stream, vision.</p>
+    <span class="tag">API Reference</span>
+  </div>
+  <div class="doc-card">
+    <h3>Trust Shield</h3>
+    <p>How prompt injection detection works. Trust levels, patterns, and customization.</p>
+    <span class="tag">Security</span>
+  </div>
+  <div class="doc-card">
+    <h3>Self-Hosting</h3>
+    <p>Run Slaash as a single binary. Docker, Render, or bare metal deployment.</p>
+    <span class="tag">Deployment</span>
+  </div>
+</div>
+
+<section class="docs-section">
+  <h2>Quick example</h2>
+  <div class="code-example">
+<span class="comment"># Parse any URL with a goal — get ranked nodes back</span>
+<span class="kw">curl</span> -X POST https://www.slaash.ai/api/parse-crfr \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    "goal": "when was Rust first released and who created it",
+    "top_n": 5
+  }'</span>
+  </div>
+
+  <div class="code-example">
+<span class="comment"># Give feedback to improve future queries on same URL</span>
+<span class="kw">curl</span> -X POST https://www.slaash.ai/api/crfr-feedback \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    "goal": "when was Rust first released and who created it",
+    "successful_node_ids": [142, 289]
+  }'</span>
+  </div>
+</section>
+
+<footer>
+  <span class="wordmark" style="font-size:1rem">sl<span class="s">/</span>sh</span> &middot; Distill the web. Slash the tokens.
+</footer>
+
+</body>
+</html>
