@@ -21,7 +21,9 @@ a:hover{color:var(--text)}
 /* HEADER */
 header{padding:1.25rem 2rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
-.back-link{font-size:.85rem;color:var(--muted);font-weight:500}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500;transition:color .2s}
+.nav-links a:hover{color:#fff}
 
 /* MAIN */
 main{flex:1;max-width:800px;width:100%;margin:0 auto;padding:3rem 2rem}
@@ -90,11 +92,17 @@ footer{padding:1.5rem 2rem;text-align:center;border-top:1px solid var(--border);
 
 <header>
   <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
-  <a href="/" class="back-link">&larr; Back</a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/live">Live</a>
+    <a href="/docs">Docs</a>
+  </div>
 </header>
 
 <main>
-  <h1>Try it. Right now.</h1>
+  <h1>Try it. Slaash it<span style="color:#3b82f6">/</span></h1>
   <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
 
   <div class="examples">

@@ -31,9 +31,7 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .nav-links a:not(.btn-sm):hover::after{width:100%}
 .nav-links a.btn-accent{color:#fff}
 .btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .25s ease}
-.btn-accent{background:var(--accent);color:#fff;position:relative;overflow:hidden}
-.btn-accent::before{content:'';position:absolute;top:0;left:-100%;width:60%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);transform:skewX(-20deg);animation:btnShimmer 4s ease-in-out 2s infinite}
-@keyframes btnShimmer{0%,100%{left:-100%}40%{left:150%}41%{left:-100%}}
+.btn-accent{background:var(--accent);color:#fff}
 .btn-accent:hover{background:#2563eb;color:#fff;transform:translateY(-1px);box-shadow:0 4px 16px rgba(59,130,246,0.3)}
 .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
 .btn-ghost:hover{border-color:rgba(255,255,255,0.25);color:#fff}
@@ -58,13 +56,6 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 @keyframes subtitleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
 
-/* NAV LIVE STATS — minimal counters in header */
-.nav-live{display:flex;align-items:center;gap:1rem;font-family:var(--mono);font-size:.65rem;color:#555;margin-right:.5rem}
-.nav-live .dot{display:inline-block;width:5px;height:5px;background:#22c55e;border-radius:50%;margin-right:3px;animation:navDot 2.5s ease-in-out infinite}
-@keyframes navDot{0%,100%{opacity:1}50%{opacity:.4}}
-.nav-live span{color:#666;font-variant-numeric:tabular-nums;transition:color .3s}
-.nav-live .label{color:#444;font-family:var(--font)}
-@media(max-width:768px){.nav-live{display:none}}
 
 /* METRICS */
 .metrics{padding:6rem 2rem;max-width:1000px;margin:0 auto}
@@ -175,7 +166,6 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <!-- NAV -->
 <nav>
   <div class="wordmark">sl<span class="wm-slash">/</span>sh</div>
-  <div class="nav-live"><span class="dot"></span><span id="ls-sites">—</span> <span class="label">sites</span> <span id="ls-queries">—</span> <span class="label">queries</span></div>
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="/mission">Mission</a>
@@ -194,7 +184,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
-      <a class="btn-sm btn-ghost" href="#docs">Documentation</a>
+      <a class="btn-sm btn-ghost" href="/docs">Documentation</a>
     </div>
   </div>
 </section>
@@ -390,7 +380,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <div class="footer-inner">
     <div class="footer-left">
       <div class="tagline">Kill the noise. Find the signal.</div>
-      <a href="mailto:zerotokens@slaash.ai" style="font-size:.7rem;color:#444;transition:color .25s">zerotokens@slaash.ai</a>
+      <a href="mailto:zerotoken@slaash.ai" style="font-size:.7rem;color:#444;transition:color .25s">zerotoken@slaash.ai</a>
     </div>
     <div class="footer-center">
       <div class="footer-logo">sl<span class="fl-slash">/</span>sh</div>
@@ -399,6 +389,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
     <div class="footer-right">
       <a href="/mission">Mission</a>
       <a href="/timeline">Timeline</a>
+      <a href="/live">Live</a>
       <a href="/try">Try beta</a>
     </div>
   </div>
@@ -524,25 +515,6 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
 
-// ── NAV LIVE STATS — minimal counters in header ──
-(function(){
-  const sSites = document.getElementById('ls-sites');
-  const sQueries = document.getElementById('ls-queries');
-  if(!sSites) return;
-
-  async function fetchStats(){
-    try {
-      const r = await fetch('/api/live-stats');
-      if(!r.ok) return;
-      const d = await r.json();
-      sSites.textContent = d.sites_profiled || 0;
-      sQueries.textContent = d.total_queries || 0;
-    } catch(e){}
-  }
-
-  fetchStats();
-  setInterval(fetchStats, 10000);
-})();
 
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
 (function(){
@@ -713,10 +685,11 @@ document.querySelectorAll('.metric-value').forEach(el=>{
   const obs = new IntersectionObserver(([e])=>{
     if(e.isIntersecting && !drawn){
       drawn = true;
-      const duration = 2000;
+      const duration = 2500;
       const start = performance.now();
       function tick(now){
-        const t = Math.min((now-start)/duration, 1);
+        const p = Math.min((now-start)/duration, 1);
+        const t = 1 - Math.pow(1-p, 4); // easeOutQuart
         drawChart(t);
         if(t<1) requestAnimationFrame(tick);
       }
