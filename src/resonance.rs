@@ -241,6 +241,9 @@ pub struct ResonanceField {
     /// Structural fingerprint: hash of top-20 role sequence (for template detection)
     #[serde(default)]
     structure_hash: u64,
+    /// Content fingerprint: hash of all node labels (detects text changes)
+    #[serde(default)]
+    pub content_hash: u64,
     /// URL-hash som identifierar sidan
     pub url_hash: u64,
     /// Domain-hash (för domain-level learning)
@@ -262,6 +265,23 @@ pub struct ResonanceField {
     /// Senaste antal returnerade noder (after gap filter)
     #[serde(default)]
     pub last_result_count: u32,
+}
+
+/// Compute content hash from node labels (FNV-1a over all label text).
+/// Used to detect text-level changes even when DOM structure is identical.
+pub fn compute_content_hash(nodes: &[crate::types::SemanticNode]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    fn walk(nodes: &[crate::types::SemanticNode], h: &mut u64) {
+        for n in nodes {
+            for b in n.label.as_bytes() {
+                *h ^= *b as u64;
+                *h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+            walk(&n.children, h);
+        }
+    }
+    walk(nodes, &mut h);
+    h
 }
 
 /// Roll-prioritet: hur sannolikt innehåller rollen relevant data (0.0-1.0)
@@ -653,6 +673,7 @@ impl ResonanceField {
             propagation_stats: HashMap::new(),
             concept_memory: HashMap::new(),
             structure_hash: 0,
+            content_hash: 0,
             url_hash: hash_url(url),
             domain_hash: dh,
             created_at_ms: now_ms(),
@@ -2513,6 +2534,38 @@ impl ResonanceField {
         transferred
     }
 
+    /// Migrate all learning from an old field to this new one.
+    ///
+    /// Used when content changes but we want to preserve:
+    /// - Causal memory (node-level, matched by HV similarity)
+    /// - Propagation stats (goal-clustered weights)
+    /// - Concept memory (goal-token associations)
+    /// - Feedback counters
+    pub fn migrate_learning_from(&mut self, old: &ResonanceField) {
+        // Transfer causal memory from old nodes to matching new nodes
+        let transferred = self.transfer_from(old, 0.3);
+
+        // Copy propagation stats (goal-clustered, not node-specific)
+        for (key, &(alpha, beta)) in &old.propagation_stats {
+            self.propagation_stats.entry(key.clone()).or_insert((alpha, beta));
+        }
+
+        // Copy concept memory
+        for (token, hv) in &old.concept_memory {
+            self.concept_memory.entry(token.clone()).or_insert_with(|| hv.clone());
+        }
+
+        // Preserve aggregate counters
+        self.total_feedback = old.total_feedback;
+        self.total_successful_nodes = old.total_successful_nodes;
+        self.total_queries = old.total_queries;
+
+        eprintln!(
+            "[CRFR] Migrated: {} node memories, {} prop weights, {} concepts",
+            transferred, old.propagation_stats.len(), old.concept_memory.len()
+        );
+    }
+
     // ─── Confidence Calibration ─────────────────────────────────────────
 
     /// Calibrate raw amplitudes to probability estimates.
@@ -2785,17 +2838,45 @@ pub fn get_or_build_field_with_variant(
     }
     drop(cache);
 
-    // Fallback: försök ladda från SQLite (persist)
+    // Fallback: försök ladda från SQLite (persist) with content hash validation
     #[cfg(feature = "persist")]
     if crate::persist::is_initialized() {
-        if let Some(field) = crate::persist::load_field(url_hash) {
-            return (field, true);
+        if let Some(mut stored) = crate::persist::load_field(url_hash) {
+            // Two-level hash check:
+            // 1. content_hash == 0 means old field without hash → rebuild to get hash
+            // 2. content_hash matches → page unchanged → reuse all learned data
+            // 3. content_hash differs → page content changed → rebuild but migrate learning
+            let new_content_hash = compute_content_hash(tree_nodes);
+
+            if stored.content_hash != 0 && stored.content_hash == new_content_hash {
+                // Content unchanged — full cache hit, reuse everything
+                return (stored, true);
+            }
+
+            if stored.content_hash != 0 && stored.content_hash != new_content_hash {
+                // Content changed — rebuild field but preserve causal memory
+                eprintln!(
+                    "[CRFR] Content changed for {} (hash {} → {}), migrating learning",
+                    url, stored.content_hash, new_content_hash
+                );
+                let mut fresh = ResonanceField::from_semantic_tree(tree_nodes, url);
+                fresh.url_hash = url_hash;
+                fresh.content_hash = new_content_hash;
+                // Migrate: copy causal memory from nodes that still exist
+                fresh.migrate_learning_from(&stored);
+                return (fresh, false);
+            }
+
+            // Old field without content hash — use it but set hash for future checks
+            stored.content_hash = new_content_hash;
+            return (stored, true);
         }
     }
 
+    let new_content_hash = compute_content_hash(tree_nodes);
     let mut field = ResonanceField::from_semantic_tree(tree_nodes, url);
-    // Sätt korrekt url_hash (med variant) för cache-konistens
     field.url_hash = url_hash;
+    field.content_hash = new_content_hash;
     (field, false)
 }
 
