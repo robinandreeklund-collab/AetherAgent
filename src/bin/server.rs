@@ -6368,6 +6368,14 @@ async fn landing_timeline() -> impl IntoResponse {
     .await
 }
 
+async fn landing_live() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/dashboard.html",
+        "landing-pages/dashboard.html",
+    ])
+    .await
+}
+
 async fn landing_docs() -> impl IntoResponse {
     serve_html_file(&[
         "/app/static/landing-pages/docs.html",
@@ -6408,6 +6416,7 @@ fn build_router(state: AppState) -> Router {
         .route("/try", get(landing_try))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
+        .route("/live", get(landing_live))
         .route("/docs", get(landing_docs))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
