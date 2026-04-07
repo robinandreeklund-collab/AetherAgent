@@ -487,6 +487,42 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
       <h4>JavaScript</h4>
       <p>QuickJS sandbox with event loop (setTimeout, Promises, MutationObserver, requestAnimationFrame). Executes inline scripts and framework hydration code.</p>
     </div>
+  </div>
+
+  <h3>QuickJS performance engineering</h3>
+  <p>A sandboxed JS engine is only useful if it's fast enough to run in real-time. We spent 8 optimization rounds making QuickJS competitive with native browser engines for the workloads that matter: evaluating inline scripts, hydrating framework state, and building the DOM.</p>
+
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="num green">215x</div>
+      <div class="label">faster JS eval (431&micro;s &rarr; 2&micro;s)</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">15x</div>
+      <div class="label">faster parse+JS pipeline</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">2&micro;s</div>
+      <div class="label">per JS expression</div>
+    </div>
+  </div>
+
+  <table class="compare-table">
+    <thead>
+      <tr><th>Optimization</th><th>Technique</th><th>Impact</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Compiler tuning</td><td>opt-level 3 + thin LTO profile</td><td><span class="pill pill-green">15&ndash;41%</span></td></tr>
+      <tr><td>Thread elimination</td><td>Deadline-based interrupt replaces thread::spawn per eval</td><td><span class="pill pill-green">13&ndash;17%</span></td></tr>
+      <tr><td>Runtime pooling</td><td>Thread-local Runtime+Context reuse (saves ~280&micro;s/call)</td><td><span class="pill pill-green">44&ndash;72%</span></td></tr>
+      <tr><td>Cleanup elimination</td><td>Allowlist security makes cleanup unnecessary for single evals</td><td><span class="pill pill-green">~98%</span></td></tr>
+      <tr><td>Memory tuning</td><td>Heap limit 64 MB &rarr; 16 MB (sufficient for SPA bundles)</td><td><span class="pill pill-green">2&ndash;7%</span></td></tr>
+    </tbody>
+  </table>
+
+  <p>The result: Slaash evaluates JavaScript expressions in <strong>2 microseconds</strong>. A full parse-with-JS pipeline — HTML parsing, DOM construction, script execution, semantic tree building — completes in <strong>53 microseconds</strong>. That's fast enough to process pages in real-time without the user noticing any delay.</p>
+
+  <div class="timeline">
     <div class="timeline-item">
       <h4>CSS</h4>
       <p>Servo's Stylo engine for selector matching. Live CSSStyleDeclaration with shorthand expansion/aggregation.</p>
