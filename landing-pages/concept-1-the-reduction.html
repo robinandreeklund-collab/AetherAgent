@@ -80,6 +80,32 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
 footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:1rem}
 
+/* CRFR PIPELINE */
+.pipeline{padding:6rem 2rem;max-width:1000px;margin:0 auto}
+.pipeline-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:2rem;font-family:var(--mono);font-size:.78rem;line-height:1.8;overflow:hidden;position:relative}
+.pipeline-terminal::before{content:'CRFR Pipeline — Live playback';position:absolute;top:0;left:0;right:0;padding:.5rem 1rem;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font)}
+.pipeline-terminal .steps{margin-top:2rem}
+.pipe-step{opacity:0;transform:translateY(8px);transition:opacity .5s ease,transform .5s ease;margin-bottom:1.25rem;padding-left:1rem;border-left:2px solid transparent}
+.pipe-step.visible{opacity:1;transform:translateY(0)}
+.pipe-step.active{border-left-color:#3b82f6;box-shadow:-4px 0 12px rgba(59,130,246,0.15)}
+.pipe-step.done{border-left-color:rgba(59,130,246,0.3)}
+.step-label{color:#3b82f6;font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
+.step-data{color:#c9d1d9}
+.step-data .dim{color:#555}
+.step-data .val{color:#79c0ff}
+.step-data .str{color:#a5d6ff}
+.step-data .hi{color:#ffa657}
+.step-data .grn{color:#7ee787}
+.pipe-result{background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:10px;padding:1.25rem;margin-top:.5rem}
+.pipe-result .node{margin-bottom:.75rem;padding-bottom:.75rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+.pipe-result .node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.pipe-result .node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.15rem}
+.pipe-result .node-text{color:#e6edf3;font-size:.8rem;line-height:1.5}
+.pipeline-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:2rem;text-align:center}
+.pipeline-summary .ps-val{font-size:1.1rem;font-weight:700;color:#fff}
+.pipeline-summary .ps-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
+@media(max-width:768px){.pipeline-summary{grid-template-columns:repeat(2,1fr)}}
+
 /* SCROLL REVEAL */
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
 .reveal.visible{opacity:1;transform:translateY(0)}
@@ -101,11 +127,10 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 
 <!-- NAV -->
 <nav>
-  <div class="wordmark">slaash</div>
+  <div class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</div>
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="#docs">Docs</a>
-    <a href="#github">GitHub</a>
     <a class="btn-sm btn-accent" href="#start">Get started</a>
   </div>
 </nav>
@@ -175,6 +200,110 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   </div>
 </section>
 
+<!-- CRFR PIPELINE PLAYBACK -->
+<section class="pipeline reveal" id="pipeline">
+  <h2 class="section-title">See it work. For real.</h2>
+  <p class="section-sub">Real CRFR pipeline run on Wikipedia's 2.8M-character COVID-19 vaccine article. Every number is from an actual execution.</p>
+  <div class="pipeline-terminal" id="pipeline-term">
+    <div class="steps">
+
+      <div class="pipe-step" data-step="1">
+        <div class="step-label">1. Query received</div>
+        <div class="step-data">
+          <span class="dim">goal:</span> <span class="str">"COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials"</span><br>
+          <span class="dim">source:</span> <span class="val">en.wikipedia.org/wiki/COVID-19_vaccine</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="2">
+        <div class="step-label">2. Fetching &amp; parsing</div>
+        <div class="step-data">
+          <span class="dim">raw html:</span> <span class="val">2,815,638</span> <span class="dim">characters</span><br>
+          <span class="dim">DOM nodes parsed:</span> <span class="val">12,434</span><br>
+          <span class="dim">field build:</span> <span class="val">1,528ms</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="3">
+        <div class="step-label">3. BM25 keyword index</div>
+        <div class="step-data">
+          <span class="dim">inverted index built over</span> <span class="val">12,434</span> <span class="dim">node labels</span><br>
+          <span class="dim">top-200 candidates pre-filtered</span><br>
+          <span class="dim">structural bypass:</span> <span class="hi">headings + article nodes included regardless of score</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="4">
+        <div class="step-label">4. HDC bitvector scoring</div>
+        <div class="step-data">
+          <span class="dim">2048-bit Hypervectors generated per node</span><br>
+          <span class="dim">Hamming distance similarity:</span> <span class="val">~5ns</span> <span class="dim">per comparison</span><br>
+          <span class="dim">n-gram encoding captures partial lexical overlap</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="5">
+        <div class="step-label">5. Cascade filter</div>
+        <div class="step-data">
+          <span class="val">12,434</span> <span class="dim">&rarr;</span> <span class="val">200</span> <span class="dim">candidates (BM25 top-200)</span><br>
+          <span class="dim">+ structural bypass nodes (headings, paragraphs)</span><br>
+          <span class="dim">+ causal memory nodes (hit_count &gt; 0)</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="6">
+        <div class="step-label">6. Chebyshev spectral propagation</div>
+        <div class="step-data">
+          <span class="dim">K=4 polynomial filter on graph Laplacian</span><br>
+          <span class="dim">wave propagation through parent-child edges</span><br>
+          <span class="dim">PPR restart</span> <span class="val">&alpha;=0.15</span> <span class="dim">preserves seed signal</span><br>
+          <span class="dim">propagation time:</span> <span class="val">149ms</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="7">
+        <div class="step-label">7. Result &mdash; 4 nodes, 99.96% reduction</div>
+        <div class="pipe-result">
+          <div class="node">
+            <div class="node-header">Node 1 &middot; relevance: 1.994 &middot; role: text</div>
+            <div class="node-text">"The risks of serious illness from COVID-19 are far higher than the risk posed by the vaccines. For most people, the side effects, also called adverse effects, from COVID-19 vaccines are mild and can be managed at home. Severe adverse effects are rare."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">Node 2 &middot; relevance: 1.773 &middot; role: text</div>
+            <div class="node-text">"Typical side effects are stronger and more common in younger people and in subsequent doses, and up to 20% of people report a disruptive level of side effects after the second dose of an mRNA vaccine."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">Node 3 &middot; relevance: 1.535 &middot; role: text</div>
+            <div class="node-text">"mRNA vaccines were the first COVID-19 vaccines authorised in UK, US and EU. Authorized types: Pfizer-BioNTech, Moderna. The CVnCoV mRNA vaccine from CureVac failed in clinical trials."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">Node 4 &middot; relevance: 1.326 &middot; role: text</div>
+            <div class="node-text">"Common side effects of the vaccine are fever, fatigue, headache and pain at the injection site."</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="8">
+        <div class="step-label">8. Causal learning</div>
+        <div class="step-data">
+          <span class="dim">feedback:</span> <span class="val">nodes 3251, 3321, 1959</span> <span class="dim">marked as correct answers</span><br>
+          <span class="dim">causal memory updated:</span> <span class="hi">causal_boost = 0.26&ndash;0.30</span><br>
+          <span class="dim">next query:</span> <span class="grn">8.6&times; faster</span> <span class="dim">(2,609ms &rarr; 304ms)</span><br>
+          <span class="dim">relevance boost:</span> <span class="grn">+28%</span> <span class="dim">on learned nodes</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <div class="pipeline-summary">
+    <div><div class="ps-val">2,815,638</div><div class="ps-label">chars in</div></div>
+    <div><div class="ps-val">1,200</div><div class="ps-label">chars out</div></div>
+    <div><div class="ps-val">99.96%</div><div class="ps-label">reduction</div></div>
+    <div><div class="ps-val">0ms</div><div class="ps-label">GPU time</div></div>
+    <div><div class="ps-val">$0.0003</div><div class="ps-label">vs $1.69 raw</div></div>
+  </div>
+</section>
+
 <!-- LEARNING -->
 <section class="learning reveal" id="learning">
   <h2 class="section-title">It learns. Without training data.</h2>
@@ -220,7 +349,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
     <div class="feature-card">
       <span class="feature-icon">&#x1F50C;</span>
       <h3>MCP Server</h3>
-      <p>30 tools ready for Claude, Cursor, and VS Code. Plug and play.</p>
+      <p>38 tools ready for Claude, Cursor, and VS Code. Plug and play.</p>
     </div>
   </div>
 </section>
@@ -235,10 +364,8 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <footer>
   <div class="footer-links">
     <a href="#">Documentation</a>
-    <a href="#">GitHub</a>
-    <a href="#">Discord</a>
   </div>
-  <p>&copy; 2026 Slaash. MIT Licensed.</p>
+  <p>&copy; 2026 Slaash</p>
 </footer>
 
 <script>
@@ -490,6 +617,35 @@ document.querySelectorAll('.metric-value').forEach(el=>{
   obs.observe(canvas);
 
   window.addEventListener('resize', ()=>{if(drawn) drawChart(1)});
+})();
+
+// ── CRFR PIPELINE PLAYBACK ──
+(function(){
+  const term = document.getElementById('pipeline-term');
+  if(!term) return;
+  const steps = term.querySelectorAll('.pipe-step');
+  let started = false;
+
+  function runPlayback(){
+    if(started) return;
+    started = true;
+    steps.forEach((step, i) => {
+      setTimeout(() => {
+        step.classList.add('visible');
+        step.classList.add('active');
+        if(i > 0) steps[i-1].classList.remove('active');
+        if(i > 0) steps[i-1].classList.add('done');
+        if(i === steps.length - 1){
+          setTimeout(() => { step.classList.remove('active'); step.classList.add('done'); }, 1500);
+        }
+      }, i * 800);
+    });
+  }
+
+  const obs = new IntersectionObserver(([e]) => {
+    if(e.isIntersecting) { runPlayback(); obs.unobserve(term); }
+  }, {threshold: 0.2});
+  obs.observe(term);
 })();
 </script>
 </body>
