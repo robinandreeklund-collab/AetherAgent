@@ -1071,16 +1071,24 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 
     #[allow(unused_mut)]
     let mut html = html;
+    #[allow(unused_mut)]
+    let mut fetch_ms: u64 = 0;
     #[cfg(feature = "fetch")]
     if html.is_empty() && !url.is_empty() {
+        let fetch_start = std::time::Instant::now();
         match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default()).await {
-            Ok(fetched) => html = fetched.body,
+            Ok(fetched) => {
+                fetch_ms = fetch_start.elapsed().as_millis() as u64;
+                html = fetched.body;
+            }
             Err(e) => {
                 let err = serde_json::json!({"error": format!("Fetch failed: {e}")});
                 return (axum::http::StatusCode::BAD_GATEWAY, axum::Json(err)).into_response();
             }
         }
     }
+
+    let raw_html_chars = html.len();
 
     if html.is_empty() {
         let err = serde_json::json!({"error": "Provide either 'html' or 'url'"});
@@ -1153,6 +1161,15 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     })
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    // Inject raw_html_chars and fetch_ms into the JSON response
+    let result = if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&result) {
+        json["raw_html_chars"] = serde_json::json!(raw_html_chars);
+        json["fetch_ms"] = serde_json::json!(fetch_ms);
+        json.to_string()
+    } else {
+        result
+    };
 
     (StatusCode::OK, result).into_response()
 }

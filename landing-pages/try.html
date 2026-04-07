@@ -68,7 +68,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .result-node-text{color:#e6edf3;font-size:.82rem;line-height:1.5}
 
 /* SUMMARY BAR */
-.summary-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
+.summary-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
 .summary-val{font-size:1rem;font-weight:700;color:#fff}
 .summary-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
 
@@ -204,10 +204,12 @@ function renderResults(data, elapsed) {
   const totalNodes = data.total_nodes || 0;
 
   title.textContent = data.title || 'Results';
+  const fMs = data.fetch_ms || 0;
+  const sMs = data.parse_time_ms || 0;
   meta.innerHTML =
     '<span><span class="val">' + nodes.length + '</span> nodes returned</span>' +
-    '<span><span class="val">' + totalNodes.toLocaleString() + '</span> total DOM nodes</span>' +
-    '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+    '<span><span class="val">' + totalNodes.toLocaleString() + '</span> DOM nodes</span>' +
+    '<span><span class="val">' + fMs + 'ms</span> network + <span class="val">' + sMs + 'ms</span> slaash</span>';
 
   // Render nodes
   nodesEl.innerHTML = nodes.map((n, i) => {
@@ -220,18 +222,21 @@ function renderResults(data, elapsed) {
       '</div>';
   }).join('');
 
-  // Estimate raw chars (total_nodes * ~200 avg chars per node)
-  const rawChars = data.crfr && data.crfr.field_build_ms !== undefined
-    ? totalNodes * 226 : totalNodes * 200;
+  // Use real raw_html_chars from API (no estimation)
+  const rawChars = data.raw_html_chars || 0;
   const outChars = nodes.reduce((s, n) => s + (n.label || '').length, 0);
   const reduction = rawChars > 0 ? ((1 - outChars / rawChars) * 100).toFixed(2) : '?';
-  const parseMs = data.parse_time_ms || elapsed;
+
+  // Latency breakdown: network (fetch) vs Slaash (CRFR processing)
+  const fetchMs = data.fetch_ms || 0;
+  const slaashMs = data.parse_time_ms || 0;
 
   summaryEl.innerHTML =
-    '<div><div class="summary-val">' + rawChars.toLocaleString() + '</div><div class="summary-label">chars in (est.)</div></div>' +
+    '<div><div class="summary-val">' + rawChars.toLocaleString() + '</div><div class="summary-label">chars in</div></div>' +
     '<div><div class="summary-val">' + outChars.toLocaleString() + '</div><div class="summary-label">chars out</div></div>' +
     '<div><div class="summary-val">' + reduction + '%</div><div class="summary-label">reduction</div></div>' +
-    '<div><div class="summary-val">' + parseMs + 'ms</div><div class="summary-label">latency</div></div>';
+    '<div><div class="summary-val">' + fetchMs + 'ms</div><div class="summary-label">network</div></div>' +
+    '<div><div class="summary-val">' + slaashMs + 'ms</div><div class="summary-label">slaash</div></div>';
 
   results.classList.add('visible');
 }
