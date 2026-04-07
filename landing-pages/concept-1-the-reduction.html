@@ -46,7 +46,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* DISTILL — simple text swap, same font, same size */
+/* DISTILL — smooth fade between words */
+#dw{display:inline;transition:opacity .4s ease}
 .hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;margin-left:.5em}
@@ -478,20 +479,39 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 // ── HERO SLASH ANIMATION ──
 setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
-// ── DISTILL — simple: swap textContent of one span, same font ──
+// ── DISTILL — smooth fade between words ──
 (function(){
   const el = document.getElementById('dw');
   if(!el) return;
-  // Short words that fit same space as "web." — no layout shift
+
   const words = ['noise.','HTML.','tags.','DOM.'];
   let i = 0;
-  setTimeout(()=>{
-    setInterval(()=>{
-      el.textContent = words[i % words.length];
+
+  function fadeTo(text, cb){
+    el.style.opacity = '0';
+    setTimeout(()=>{
+      el.textContent = text;
+      el.style.opacity = '1';
+      if(cb) setTimeout(cb, 400);
+    }, 400);
+  }
+
+  function cycle(){
+    // Fade to alternate word
+    fadeTo(words[i % words.length], ()=>{
       i++;
-      setTimeout(()=>{ el.textContent = 'web.'; }, 1500);
-    }, 3500);
-  }, 2000);
+      // Hold for 2s, then fade back to "web."
+      setTimeout(()=>{
+        fadeTo('web.', ()=>{
+          // Hold "web." for 3s, then next cycle
+          setTimeout(cycle, 3000);
+        });
+      }, 2000);
+    });
+  }
+
+  // Start after 3s (let hero settle)
+  setTimeout(cycle, 3000);
 })();
 
 // ── NAV LIVE STATS — minimal counters in header ──
