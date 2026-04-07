@@ -1059,7 +1059,9 @@ impl ResonanceField {
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
                     let elapsed_s = (now.saturating_sub(state.last_hit_ms) as f64) / 1000.0;
                     let decay = (-CAUSAL_DECAY_LAMBDA * elapsed_s).exp() as f32;
-                    norm_causal * norm_causal * CAUSAL_WEIGHT * decay
+                    // v18: Removed norm² squashing — linear similarity preserves signal
+                    // strength for moderate matches (sim=0.5 now gives 0.15 instead of 0.075)
+                    norm_causal * CAUSAL_WEIGHT * decay
                 } else {
                     0.0
                 };
@@ -1084,9 +1086,11 @@ impl ResonanceField {
                     goal,
                     self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or(""),
                 );
-                // BUG-04: Soft boost — preserve relative ranking
-                state.amplitude =
-                    base_resonance + causal_boost * (1.0 - base_resonance.min(0.95)) + answer_type;
+                // v18: Causal boost is now purely additive — no dampening by base_resonance.
+                // Previously: causal_boost × (1 - base_resonance) meant BM25-strong nodes
+                // got almost zero causal benefit (0.75 → only 25% of boost applied).
+                // Now causal can meaningfully re-rank nodes regardless of BM25 score.
+                state.amplitude = base_resonance + causal_boost + answer_type;
                 state.amplitude *= combmnz;
 
                 // #19 Template match: extra boost when same page structure detected
