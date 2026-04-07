@@ -192,24 +192,42 @@ Multiple structural signals are applied as multiplicative boosts or penalties:
 When a node has been previously identified as containing the correct answer (via `crfr_feedback`), it accumulates a causal memory HV:
 
 ```
-causal_boost = causal_memory.similarity(goal_hv)² × 0.3 × exp(-λ × elapsed_seconds)
+causal_boost = causal_memory.similarity(goal_hv) × 0.3 × exp(-λ × elapsed_seconds)
 ```
 
 - **Temporal decay:** Half-life of 10 minutes (λ = ln2/600 ≈ 0.00115)
 - **BTSP plasticity:** Quick feedback (<1s) imprints 1.5× stronger (double-bundle)
 - **Concept memory:** Successful goal-tokens are aggregated into field-level HVs, boosting similar future queries by up to 15%
 
+**v18 fix: Removed two dampeners that capped causal boost at ~0.04 effective contribution:**
+
+1. **Removed similarity² squashing.** Previously `similarity²` meant a moderate HDC match (0.5) gave only 0.075 boost. With linear similarity it gives 0.150 — matching the theoretical maximum of `CAUSAL_WEIGHT × similarity`.
+
+2. **Removed `(1 - base_resonance)` dampener in amplitude assembly.** Previously causal_boost was multiplied by `(1 - base)`, meaning a node with strong BM25 (0.75) received only 25% of its causal boost. A node with `causal_boost = 0.15` effectively contributed only `0.15 × 0.25 = 0.037`. This made causal learning decorative — it could never override BM25 ranking.
+
+**Impact (verified, local server, 10-iteration protocol):**
+
+| Metric | Before (v14, capped) | After (v18, uncapped) | Change |
+|--------|:-------------------:|:--------------------:|:------:|
+| ESPN max_cb | 0.110 | **0.187** | +70% |
+| USA.gov max_cb | 0.093 | **0.257** | +176% |
+| USA.gov Q6 effective contribution | ~0.02 | **0.257** | +12× |
+
+At max_cb=0.257, causal boost is now **34% of a typical BM25 score** (0.75), meaning it can meaningfully re-rank nodes after just 2-3 feedback iterations.
+
 ### 3.5 Final Score Assembly
 
 ```
-base = 0.75 × BM25 + 0.20 × HDC + 0.05 × role_priority + concept_boost + depth_boost
-amplitude = (base + causal_boost) × answer_shape × zone × metadata × state × site_name × combmnz
+base = 0.75 × BM25 + 0.20 × HDC + 0.05 × role_priority + concept_boost
+amplitude = (base + causal_boost + answer_type) × answer_shape × zone × metadata × state × site_name × combmnz
 ```
+
+Note: causal_boost is **purely additive** to base — no dampening by base_resonance. This ensures learned nodes can compete with BM25-dominant boilerplate.
 
 
 ### 3.6 Suppression Learning
 
-A critical discovery during empirical testing: BM25-dominant nodes that repeatedly appear in results but are never marked as successful (e.g., BBC's `"openGraph.title: BBC News - Breaking news"`) cannot be overcome by causal memory alone. The causal boost (max ~0.3) cannot override a BM25 score of 0.75.
+A critical discovery during empirical testing: BM25-dominant nodes that repeatedly appear in results but are never marked as successful (e.g., BBC's `"openGraph.title: BBC News - Breaking news"`) need active suppression. While v18's uncapped causal boost (up to ~0.25) can now partially compete with BM25 (0.75), suppression learning remains essential for fully eliminating persistent boilerplate.
 
 **Solution:** Track per-node success history and suppress chronic failures.
 
