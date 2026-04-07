@@ -37,6 +37,9 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
+/* DISTILL LINE — fixed height container, noise stays on one line */
+.distill-line{display:block;height:1.15em;overflow:hidden;white-space:nowrap}
+#distill-target{white-space:nowrap}
 /* DISTILL — cursor blink */
 .distill-cursor{display:inline-block;width:2px;height:.85em;background:#3b82f6;vertical-align:text-bottom;margin-left:1px;animation:cursorBlink .6s step-end infinite}
 .distill-cursor.hidden{display:none}
@@ -152,7 +155,7 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1>Distill the <span id="distill-target">web.</span><span class="distill-cursor" id="distill-cursor"></span><br>Slash the tokens<span class="slash">/</span></h1>
+    <h1><span class="distill-line">Distill the <span id="distill-target">web.</span><span class="distill-cursor" id="distill-cursor"></span></span><span style="display:block">Slash the tokens<span class="slash">/</span></span></h1>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try beta</a>
@@ -452,7 +455,7 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
   const cursor = document.getElementById('distill-cursor');
   if(!el) return;
 
-  const noise = 'w<div class="nav-header" id="root" data-reactroot>';
+  const noise = 'w<div class="nav" id="root">';
   const final_ = 'web.';
 
   // Phase 1: erase "web." to empty
