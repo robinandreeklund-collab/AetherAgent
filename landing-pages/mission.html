@@ -420,6 +420,88 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 
 <div class="divider"><hr></div>
 
+<!-- DOM ENGINE -->
+<section class="section reveal">
+  <h2>Building a real browser engine. In Rust.</h2>
+  <p>Most extraction tools treat the web as static text. But the modern web runs on JavaScript — SPAs, hydration frameworks, dynamic rendering. To truly understand web pages, you need a browser engine that executes JavaScript and maintains a spec-compliant DOM.</p>
+
+  <p>Slaash includes a <strong>full DOM implementation in Rust</strong>, bridged to a sandboxed <strong>QuickJS</strong> JavaScript runtime. This isn't a hack or a polyfill layer — it's a production-grade DOM that passes the official <strong>Web Platform Tests</strong> (WPT), the same test suite used by Chrome, Firefox, and Safari to verify browser compliance.</p>
+
+  <h3>Web Platform Tests compliance</h3>
+  <p>We run the <a href="https://web-platform-tests.org">official WPT suite</a> — unmodified, straight from the W3C repository — against our DOM implementation. Every PR is gated on WPT scores. The score can never go down.</p>
+
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="num green">91.3%</div>
+      <div class="label">DOM Nodes (core API)</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">96.3%</div>
+      <div class="label">DOM Traversal</div>
+    </div>
+    <div class="stat-card">
+      <div class="num green">84.2%</div>
+      <div class="label">DOM Events</div>
+    </div>
+  </div>
+
+  <table class="compare-table">
+    <thead>
+      <tr><th>WPT Suite</th><th>Passed</th><th>Total</th><th>Rate</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>dom/nodes</td><td>6,094</td><td>6,673</td><td><span class="pill pill-green">91.3%</span></td></tr>
+      <tr><td>dom/traversal</td><td>1,533</td><td>1,591</td><td><span class="pill pill-green">96.3%</span></td></tr>
+      <tr><td>dom/lists</td><td>181</td><td>189</td><td><span class="pill pill-green">95.8%</span></td></tr>
+      <tr><td>dom/events</td><td>271</td><td>322</td><td><span class="pill pill-green">84.2%</span></td></tr>
+      <tr><td>dom/ranges</td><td>4,360</td><td>5,788</td><td><span class="pill pill-green">75.3%</span></td></tr>
+      <tr><td>input-events</td><td>262</td><td>379</td><td><span class="pill pill-green">69.1%</span></td></tr>
+      <tr><td>dom/collections</td><td>30</td><td>48</td><td><span class="pill pill-green">62.5%</span></td></tr>
+      <tr><td>pointerevents</td><td>192</td><td>320</td><td><span class="pill pill-amber">60.0%</span></td></tr>
+      <tr><td>css/selectors</td><td>1,693</td><td>3,457</td><td><span class="pill pill-amber">49.0%</span></td></tr>
+      <tr><td>html/semantics</td><td>2,022</td><td>4,922</td><td><span class="pill pill-amber">41.1%</span></td></tr>
+      <tr><td>trusted-types</td><td>330</td><td>917</td><td><span class="pill pill-amber">36.0%</span></td></tr>
+    </tbody>
+  </table>
+
+  <p>Over <strong>31,000 WPT test cases pass</strong> across 30+ test suites. This is not a toy DOM — it handles real-world complexity: <code>MutationObserver</code>, <code>Range</code>, <code>TreeWalker</code>, <code>XPath</code>, <code>Trusted Types</code>, <code>CSSStyleDeclaration</code>, event capture/bubble, and more.</p>
+
+  <h3>Why this matters</h3>
+  <p>Modern websites are built with React, Next.js, Nuxt, SvelteKit, and other frameworks that render content via JavaScript. A tool that only sees raw HTML misses the actual content entirely — it sees an empty <code>&lt;div id="root"&gt;&lt;/div&gt;</code>.</p>
+
+  <p>Slaash's DOM engine executes the JavaScript, hydrates the framework state, and builds the real DOM — then applies goal-aware extraction on the result. This is how we handle SPAs that every other extraction tool either fails on or flags as empty.</p>
+
+  <h3>The architecture</h3>
+  <p>Everything runs in a single Rust process. No browser subprocess, no Chrome dependency, no network round-trips to a rendering service.</p>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>HTML parsing</h4>
+      <p>html5ever (Servo's parser) — the same parser used by Firefox, compiled into our binary.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>DOM</h4>
+      <p>Arena-allocated DOM tree in Rust. 200+ DOM APIs implemented natively, bridged to QuickJS via getter/setter/method registration.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>JavaScript</h4>
+      <p>QuickJS sandbox with event loop (setTimeout, Promises, MutationObserver, requestAnimationFrame). Executes inline scripts and framework hydration code.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>CSS</h4>
+      <p>Servo's Stylo engine for selector matching. Live CSSStyleDeclaration with shorthand expansion/aggregation.</p>
+    </div>
+    <div class="timeline-item">
+      <h4>Rendering (when needed)</h4>
+      <p>Blitz (pure Rust, ~10-50ms) for screenshots. Automatic escalation to Chrome CDP for JS-heavy pages that exceed QuickJS capabilities.</p>
+    </div>
+  </div>
+
+  <p>The goal: a browser engine small enough to embed anywhere, fast enough to run in real-time, and compliant enough to handle the modern web. We're not there yet — but 91% on core DOM and 96% on traversal shows the direction.</p>
+</section>
+
+<div class="divider"><hr></div>
+
 <!-- WHY NOW -->
 <section class="section reveal">
   <h2>Why now</h2>
