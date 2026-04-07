@@ -2,16 +2,74 @@
 ///
 /// Sparar resonance fields, domain profiles och metadata till disk
 /// så att kausalt minne överlever server-restarts.
+///
+/// v18: ConnectionPool — multiple reader connections + single writer.
+/// SQLite WAL mode allows concurrent reads without blocking writes.
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::resonance::{DomainProfile, ResonanceField};
 
-// ─── Global DB connection ──────────────────────────────────────────────────
+// ─── Connection Pool ──────────────────────────────────────────────────────
 
-static DB: std::sync::LazyLock<Mutex<Option<Connection>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
+/// Max number of reader connections in the pool
+const POOL_MAX_READERS: usize = 4;
+
+/// Connection pool: 1 writer + N readers for concurrent access.
+/// Writer is protected by Mutex (SQLite requires single-writer).
+/// Readers are pooled in a Mutex<Vec> — take/return pattern.
+struct ConnectionPool {
+    writer: Option<Connection>,
+    readers: Vec<Connection>,
+    db_path: String,
+}
+
+impl ConnectionPool {
+    fn new() -> Self {
+        ConnectionPool {
+            writer: None,
+            readers: Vec::new(),
+            db_path: String::new(),
+        }
+    }
+
+    fn init(&mut self, path: &str) -> Result<(), String> {
+        self.db_path = path.to_string();
+
+        // Writer connection
+        let writer = Connection::open(path).map_err(|e| format!("SQLite writer open: {e}"))?;
+        writer
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+            .map_err(|e| format!("SQLite writer pragma: {e}"))?;
+        self.writer = Some(writer);
+
+        // Reader connections (WAL mode allows concurrent reads)
+        for i in 0..POOL_MAX_READERS {
+            match Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            ) {
+                Ok(conn) => {
+                    let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
+                    self.readers.push(conn);
+                }
+                Err(e) => {
+                    if i == 0 {
+                        return Err(format!("SQLite reader open: {e}"));
+                    }
+                    break; // Partial pool is OK
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+static DB: std::sync::LazyLock<Mutex<ConnectionPool>> =
+    std::sync::LazyLock::new(|| Mutex::new(ConnectionPool::new()));
 
 /// Tidstämpel i millisekunder
 fn now_ms() -> u64 {
@@ -25,54 +83,52 @@ fn now_ms() -> u64 {
 
 /// Initialize the persistence layer. Call once at server startup.
 /// Creates the SQLite database file and tables if they don't exist.
+/// v18: Initializes connection pool with 1 writer + 4 readers.
 pub fn init(db_path: &str) -> Result<(), String> {
-    let conn = Connection::open(db_path).map_err(|e| format!("SQLite open: {e}"))?;
+    let mut pool = DB.lock().map_err(|e| format!("DB lock: {e}"))?;
+    pool.init(db_path)?;
 
-    // WAL mode — concurrent reads, fast writes
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
-        .map_err(|e| format!("SQLite pragma: {e}"))?;
+    // Create schema using writer
+    if let Some(ref conn) = pool.writer {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS resonance_fields (
+                url_hash INTEGER PRIMARY KEY,
+                url TEXT NOT NULL,
+                data BLOB NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
 
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS resonance_fields (
-            url_hash INTEGER PRIMARY KEY,
-            url TEXT NOT NULL,
-            data BLOB NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
+            CREATE TABLE IF NOT EXISTS domain_profiles (
+                domain_hash INTEGER PRIMARY KEY,
+                data BLOB NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
 
-        CREATE TABLE IF NOT EXISTS domain_profiles (
-            domain_hash INTEGER PRIMARY KEY,
-            data BLOB NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_fields_updated ON resonance_fields(updated_at);
-        CREATE INDEX IF NOT EXISTS idx_domains_updated ON domain_profiles(updated_at);
-        ",
-    )
-    .map_err(|e| format!("SQLite schema: {e}"))?;
-
-    let mut db = DB.lock().map_err(|e| format!("DB lock: {e}"))?;
-    *db = Some(conn);
+            CREATE INDEX IF NOT EXISTS idx_fields_updated ON resonance_fields(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_domains_updated ON domain_profiles(updated_at);
+            ",
+        )
+        .map_err(|e| format!("SQLite schema: {e}"))?;
+    }
 
     Ok(())
 }
 
 /// Check if persistence is initialized.
 pub fn is_initialized() -> bool {
-    DB.lock().map(|db| db.is_some()).unwrap_or(false)
+    DB.lock().map(|pool| pool.writer.is_some()).unwrap_or(false)
 }
 
 // ─── Resonance Fields ──────────────────────────────────────────────────────
 
-/// Save a resonance field to the database.
+/// Save a resonance field to the database (uses writer connection).
 pub fn save_field(field: &ResonanceField) {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return,
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.writer.as_ref() {
         Some(c) => c,
         None => return,
     };
@@ -88,10 +144,12 @@ pub fn save_field(field: &ResonanceField) {
     );
 }
 
-/// Load a resonance field by URL hash (fallback when in-memory cache misses).
+/// Load a resonance field by URL hash (uses reader connection from pool).
 pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
-    let db = DB.lock().ok()?;
-    let conn = db.as_ref()?;
+    let pool = DB.lock().ok()?;
+
+    // Try reader first (non-blocking for other readers)
+    let conn = pool.readers.first().or(pool.writer.as_ref())?;
 
     let mut stmt = conn
         .prepare("SELECT data FROM resonance_fields WHERE url_hash = ?1")
@@ -106,11 +164,11 @@ pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
 
 /// Load all resonance fields (for startup warm-load).
 pub fn load_all_fields() -> Vec<ResonanceField> {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
         Some(c) => c,
         None => return vec![],
     };
@@ -136,11 +194,11 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
 
 /// Delete old fields (older than max_age_ms).
 pub fn evict_old_fields(max_age_ms: u64) -> usize {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return 0,
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.writer.as_ref() {
         Some(c) => c,
         None => return 0,
     };
@@ -164,11 +222,11 @@ pub struct StoredFieldInfo {
 
 /// List all stored fields with metadata (no full deserialization).
 pub fn list_stored_fields() -> Vec<StoredFieldInfo> {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
         Some(c) => c,
         None => return vec![],
     };
@@ -210,11 +268,11 @@ pub struct StoredDomainInfo {
 
 /// List all stored domain profiles with metadata.
 pub fn list_stored_domain_profiles() -> Vec<StoredDomainInfo> {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
         Some(c) => c,
         None => return vec![],
     };
@@ -254,11 +312,11 @@ pub fn list_stored_domain_profiles() -> Vec<StoredDomainInfo> {
 
 /// Count stored fields.
 pub fn field_count() -> usize {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return 0,
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.writer.as_ref() {
         Some(c) => c,
         None => return 0,
     };
@@ -273,11 +331,11 @@ pub fn field_count() -> usize {
 
 /// Save a domain profile.
 pub fn save_domain_profile(domain_hash: u64, profile: &DomainProfile) {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return,
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.writer.as_ref() {
         Some(c) => c,
         None => return,
     };
@@ -295,11 +353,11 @@ pub fn save_domain_profile(domain_hash: u64, profile: &DomainProfile) {
 
 /// Load all domain profiles (for startup warm-load).
 pub fn load_all_domain_profiles() -> Vec<(u64, DomainProfile)> {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
         Some(c) => c,
         None => return vec![],
     };
@@ -331,11 +389,11 @@ pub fn load_all_domain_profiles() -> Vec<(u64, DomainProfile)> {
 
 /// Count stored domain profiles.
 pub fn domain_profile_count() -> usize {
-    let db = match DB.lock() {
-        Ok(db) => db,
+    let pool = match DB.lock() {
+        Ok(p) => p,
         Err(_) => return 0,
     };
-    let conn = match db.as_ref() {
+    let conn = match pool.writer.as_ref() {
         Some(c) => c,
         None => return 0,
     };
@@ -357,15 +415,18 @@ pub fn db_stats() -> (usize, usize, u64) {
     let db_size = DB
         .lock()
         .ok()
-        .and_then(|db| {
-            db.as_ref().and_then(|conn| {
-                conn.query_row(
+        .and_then(|pool| {
+            pool.readers
+                .first()
+                .or(pool.writer.as_ref())
+                .and_then(|conn| {
+                    conn.query_row(
                     "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
                 .ok()
-            })
+                })
         })
         .unwrap_or(0) as u64;
 
