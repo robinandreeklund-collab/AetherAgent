@@ -638,6 +638,19 @@ pub async fn adaptive_crawl(
 
         session.update_link_stats(&final_url, &structural_role, was_useful);
 
+        // CRFR feedback: lär CRFR vilka noder som var relevanta
+        // Alla noder med relevance > 0.3 anses framgångsrika
+        let successful_ids: Vec<u32> = top_nodes
+            .iter()
+            .filter(|n| n.relevance > 0.3)
+            .map(|n| n.id)
+            .collect();
+        if !successful_ids.is_empty() {
+            let ids_json =
+                serde_json::to_string(&successful_ids).unwrap_or_else(|_| "[]".to_string());
+            crate::crfr_feedback(&final_url, goal, &ids_json);
+        }
+
         // Processa: top_nodes för content, full_nodes för link extraction
         session.process_page_with_links(
             &top_nodes,

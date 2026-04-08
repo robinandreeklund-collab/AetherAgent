@@ -461,6 +461,56 @@ struct FetchStreamParseRequest {
 }
 
 #[derive(Deserialize)]
+struct AdaptiveCrawlRequest {
+    url: String,
+    goal: String,
+    #[serde(default = "default_max_crawl_pages")]
+    max_pages: usize,
+    #[serde(default = "default_max_crawl_depth")]
+    max_depth: u32,
+    #[serde(default = "default_top_k_links")]
+    top_k_links: usize,
+    #[serde(default = "default_min_gain")]
+    min_gain: f32,
+    #[serde(default = "default_crawl_top_n")]
+    top_n_per_page: u32,
+}
+
+fn default_max_crawl_pages() -> usize {
+    20
+}
+fn default_max_crawl_depth() -> u32 {
+    3
+}
+fn default_top_k_links() -> usize {
+    5
+}
+fn default_min_gain() -> f32 {
+    0.02
+}
+fn default_crawl_top_n() -> u32 {
+    15
+}
+
+#[derive(Deserialize)]
+struct ExtractLinksRequest {
+    #[serde(default)]
+    html: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default = "default_max_links")]
+    max_links: u32,
+    #[serde(default)]
+    filter_navigation: bool,
+}
+
+fn default_max_links() -> u32 {
+    50
+}
+
+#[derive(Deserialize)]
 struct DirectiveRequest {
     directives: Vec<serde_json::Value>,
     html: String,
@@ -3153,6 +3203,59 @@ async fn fetch_stream_parse(Json(req): Json<FetchStreamParseRequest>) -> impl In
         req.max_nodes as u32,
     );
     (StatusCode::OK, result)
+}
+
+async fn adaptive_crawl_handler(Json(req): Json<AdaptiveCrawlRequest>) -> impl IntoResponse {
+    let config = aether_agent::adaptive::AdaptiveConfig {
+        max_pages: req.max_pages,
+        max_depth: req.max_depth,
+        top_k_links: req.top_k_links,
+        min_gain_threshold: req.min_gain,
+        top_n_per_page: req.top_n_per_page,
+        ..Default::default()
+    };
+
+    let result = aether_agent::adaptive::adaptive_crawl(&req.url, &req.goal, config).await;
+    let json = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
+    (StatusCode::OK, json)
+}
+
+async fn extract_links_handler(Json(req): Json<ExtractLinksRequest>) -> impl IntoResponse {
+    let html = req.html.as_deref().unwrap_or("");
+    let url = req.url.as_deref().unwrap_or("");
+    let goal = req.goal.as_deref().unwrap_or("");
+    let json = aether_agent::extract_links(html, goal, url, req.max_links);
+    (StatusCode::OK, json)
+}
+
+async fn fetch_extract_links_handler(Json(req): Json<ExtractLinksRequest>) -> impl IntoResponse {
+    let url = req.url.as_deref().unwrap_or("");
+    if url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"url required"}"#.to_string(),
+        );
+    }
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let goal = req.goal.as_deref().unwrap_or("");
+    let json = aether_agent::extract_links(
+        &fetch_result.body,
+        goal,
+        &fetch_result.final_url,
+        req.max_links,
+    );
+    (StatusCode::OK, json)
 }
 
 async fn directive_handler(Json(req): Json<DirectiveRequest>) -> impl IntoResponse {
@@ -6538,6 +6641,13 @@ fn build_router(state: AppState) -> Router {
         // Fas 16: Stream Parse
         .route("/api/stream-parse", post(stream_parse_handler))
         .route("/api/fetch/stream-parse", post(fetch_stream_parse))
+        // Fas 19: Adaptive Crawl + Link Extraction
+        .route("/api/adaptive-crawl", post(adaptive_crawl_handler))
+        .route("/api/extract-links", post(extract_links_handler))
+        .route(
+            "/api/fetch/extract-links",
+            post(fetch_extract_links_handler),
+        )
         .route("/api/directive", post(directive_handler))
         .route("/ws/stream", get(ws_stream_handler))
         .route("/ws/api", get(ws_api_handler))
