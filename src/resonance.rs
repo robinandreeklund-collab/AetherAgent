@@ -2860,7 +2860,36 @@ pub fn import_cached_fields(fields: Vec<ResonanceField>) {
     }
 }
 
-/// Get a cached resonance field for a URL, or build a new one.
+/// Get a cached field for feedback purposes — NO content hash validation.
+/// Used by crfr_feedback where we don't have the page HTML, just the URL.
+pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceField> {
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    let url_hash = hash_url(&variant_url);
+
+    // Check RAM cache
+    let mut cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.take(url_hash) {
+        return Some(field);
+    }
+    drop(cache);
+
+    // Check SQLite
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return Some(field);
+        }
+    }
+
+    None
+}
 ///
 /// If a cached field exists, it retains all causal memory from previous
 /// interactions. The caller should call `save_field` after propagation

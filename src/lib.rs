@@ -1269,15 +1269,14 @@ pub fn parse_crfr_from_tree_js(
         let low_rel_warning = !has_causal && top_relevance < 0.5 && !tree.title.is_empty();
 
         // BUG-2 fix: check if top nodes have factual content (not just nav)
+        // BUG-2 fix v2: only count factual content in text/data/cell roles, not nav links
         let has_factual_content = matched.iter().any(|(n, _)| {
+            let is_content_role = matches!(n.role.as_str(), "text" | "data" | "cell" | "heading" | "paragraph");
+            if !is_content_role { return false; }
             let l = &n.label;
             let has_digit = l.chars().any(|c| c.is_ascii_digit());
-            let has_proper_noun = l.split_whitespace().any(|w| {
-                w.len() > 1 && w.chars().next().is_some_and(|c| c.is_uppercase())
-                    && !["Home", "About", "Contact", "Menu", "Search", "Login", "Sign", "News", "Toggle"].contains(&w)
-            });
-            let long_enough = l.len() > 40;
-            has_digit || has_proper_noun || long_enough || n.role == "text" || n.role == "data" || n.role == "cell"
+            let long_enough = l.len() > 60;
+            has_digit || long_enough
         });
 
         let action = if bot_blocked {
@@ -1359,20 +1358,15 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — prova JS-variant FÖRST (parse_crfr med run_js=true
-    // cachar under #__js_eval). Om den inte finns, prova non-JS.
-    // BUG FIX: Tidigare provades non-JS först, vilket ledde till att feedback
-    // hamnade i fel fält när parse kördes med run_js=true.
-    let dummy_nodes: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
-    if !found {
-        // Prova non-JS-variant
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy_nodes, url);
-        if !found_njs {
-            return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
-        }
-        field = field_njs;
-    }
+    // BUG-7/8 fix: use get_field_for_feedback which does NOT do content hash
+    // validation (we don't have the HTML, just the URL). Try JS variant first.
+    let mut field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+        f
+    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+        f
+    } else {
+        return r#"{"status":"no_field","message":"No cached field for this URL. Run parse_crfr first."}"#.to_string();
+    };
 
     field.feedback(goal, &ids);
     resonance::save_field(&field);
@@ -1390,15 +1384,14 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
 #[wasm_bindgen]
 pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> String {
     // Try JS-variant first (most parse_crfr calls use run_js=true)
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
-    if !found {
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
-        if !found_njs {
-            return r#"{"status":"no_field"}"#.to_string();
-        }
-        field = field_njs;
-    }
+    // BUG-7/8 fix: use get_field_for_feedback
+    let mut field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+        f
+    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+        f
+    } else {
+        return r#"{"status":"no_field"}"#.to_string();
+    };
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
     serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
