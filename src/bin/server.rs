@@ -6393,6 +6393,21 @@ async fn favicon_svg() -> impl IntoResponse {
     )
 }
 
+async fn components_js() -> impl IntoResponse {
+    let js = match tokio::fs::read_to_string("/app/static/landing-pages/components.js").await {
+        Ok(c) => c,
+        Err(_) => match tokio::fs::read_to_string("landing-pages/components.js").await {
+            Ok(c) => c,
+            Err(_) => String::from("// components.js not found"),
+        },
+    };
+    (
+        StatusCode::OK,
+        [("content-type", "application/javascript; charset=utf-8")],
+        js,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6413,6 +6428,7 @@ fn build_router(state: AppState) -> Router {
         // Root = landing page
         .route("/", get(landing_concept_1))
         .route("/favicon.svg", get(favicon_svg))
+        .route("/components.js", get(components_js))
         .route("/api-info", get(root))
         .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
