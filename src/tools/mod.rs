@@ -6,8 +6,12 @@
 
 pub mod act_tool;
 pub mod collab_tool;
+#[cfg(feature = "fetch")]
+pub mod crawl_tool;
 pub mod diff_tool;
 pub mod discover_tool;
+#[cfg(feature = "fetch")]
+pub mod links_tool;
 pub mod parse_hybrid_tool;
 pub mod parse_tool;
 pub mod plan_tool;

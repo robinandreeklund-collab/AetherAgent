@@ -1,3 +1,5 @@
+#[cfg(feature = "fetch")]
+pub mod adaptive;
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
@@ -27,6 +29,8 @@ pub(crate) mod intent;
 pub mod intercept;
 pub(crate) mod js_bridge;
 pub(crate) mod js_eval;
+#[cfg(feature = "fetch")]
+pub mod link_extract;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
@@ -4999,6 +5003,39 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
             continue;
         }
         node_to_markdown(child, md, depth + 1);
+    }
+}
+
+// ─── Fas 19: Adaptive Crawl + Link Extraction WASM API ──────────────────────
+
+/// Extract enriched links from HTML with relevance scoring and structural roles.
+///
+/// Returns JSON with links sorted by expected_gain.
+#[wasm_bindgen]
+pub fn extract_links(html: &str, goal: &str, url: &str, max_links: u32) -> String {
+    #[cfg(feature = "fetch")]
+    {
+        let config = link_extract::LinkExtractionConfig {
+            goal: if goal.is_empty() {
+                None
+            } else {
+                Some(goal.to_string())
+            },
+            max_links: max_links as usize,
+            include_context: true,
+            include_structural_role: true,
+            filter_navigation: false,
+            min_relevance: 0.0,
+        };
+
+        let tree = build_tree(html, goal, url);
+        let result = link_extract::extract_links_from_tree(&tree.nodes, url, &config, None);
+        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+    }
+    #[cfg(not(feature = "fetch"))]
+    {
+        let _ = (html, goal, url, max_links);
+        r#"{"error":"fetch feature required"}"#.to_string()
     }
 }
 

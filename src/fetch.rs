@@ -537,13 +537,13 @@ pub async fn fetch_and_inline_external_scripts(html: &str, base_url: &str) -> Js
     #[cfg(not(feature = "js-eval"))]
     {
         let _ = base_url;
-        return JsInlineResult {
+        JsInlineResult {
             html: html.to_string(),
             scripts_found: 0,
             scripts_loaded: 0,
             scripts_failed: 0,
             js_bytes_added: 0,
-        };
+        }
     }
 
     #[cfg(feature = "js-eval")]
