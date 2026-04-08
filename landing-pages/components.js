@@ -64,6 +64,12 @@
   var track=el.parentElement,x=-40,dir=1,speed=.4;
   var nextAction=performance.now()+3e3+Math.random()*4e3;
   var state='walking',stateUntil=0,activeNode=null,jumpStart=0;
+
+  // Ensure smooth bottom transitions
+  el.style.transition='transform .3s ease';
+
+  // Reset crab to ground level
+  function resetBottom(){el.style.bottom='0px';}
   var domNodes=['<div>','<nav>','<span>','<meta>','<script>','<iframe>',
     '<footer>','<aside>','style=""','onclick=""','tracking.js',
     'ads.min.js','<table>','display:none'];
@@ -220,12 +226,12 @@
         el.style.bottom=hop+'px';
         el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(vt*Math.PI*6)*15)+'deg)';
       }else{
-        el.style.bottom='0px';
+        resetBottom();
         el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
         spawnStar();
-        state='walking';nextAction=now+2e3+Math.random()*3e3;
+        state='walking';nextAction=now+1500+Math.random()*2e3;
       }
-      requestAnimationFrame(tick);return;
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // SCARED — running away from big node
@@ -233,12 +239,12 @@
       x+=dir*2.5;
       if(now>speedLineTimer){spawnSpeedLine();speedLineTimer=now+40;}
       if(now>stateUntil){
-        // Turn back and attack!
         dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
         if(scaredNode){activeNode=scaredNode;scaredNode=null;}
         state='hunting';
       }
-      requestAnimationFrame(tick);return;
+      if(x>w+40)x=-40;if(x<-40)x=w+40;
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // EATING — running to token
@@ -253,7 +259,7 @@
         speed=.5+Math.min(tokensEaten*.05,.3);
         state='walking';nextAction=now+1500+Math.random()*2e3;
       }
-      requestAnimationFrame(tick);return;
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // SURFING — riding a DOM node
@@ -262,39 +268,46 @@
       if(st2<1){
         x+=dir*1.2;
         surfNode.el.style.left=x+'px';
-        el.style.bottom=(6+Math.sin(st2*Math.PI*4)*3)+'px';
+        // Smooth bob — use sin wave, crab sits on top of node
+        el.style.bottom=(10+Math.sin(st2*Math.PI*4)*3)+'px';
         el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(st2*Math.PI*4)*5)+'deg)';
       }else{
-        // Fall off
-        el.style.bottom='0px';el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        surfNode.el.classList.add('slashed-r');
-        setTimeout(function(){if(surfNode&&surfNode.el.parentNode)surfNode.el.remove();surfNode=null;},600);
-        state='walking';nextAction=now+2e3+Math.random()*3e3;
+        resetBottom();
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        if(surfNode.el.parentNode){
+          surfNode.el.classList.add('slashed-r');
+          var sn=surfNode;
+          setTimeout(function(){if(sn.el.parentNode)sn.el.remove();},600);
+        }
+        surfNode=null;
+        state='walking';nextAction=now+1500+Math.random()*2e3;
       }
-      requestAnimationFrame(tick);return;
+      if(x>w+40)x=-40;if(x<-40)x=w+40;
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // DIGGING — digging up hidden node
     if(state==='digging'){
-      var dt=(now-digStart)/1200;
-      if(dt<0.5){
-        // Digging motion
-        el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(dt*Math.PI*8)*10)+'deg)';
-        if(dt>.15&&dt<.2)spawnDirt();
-        if(dt>.35&&dt<.4)spawnDirt();
-      }else if(dt<0.7){
-        // Pull up node
+      var dt=(now-digStart)/1500;
+      if(dt<0.4){
+        el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(dt*Math.PI*10)*12)+'deg)';
+        if(dt>.1&&dt<.12)spawnDirt();
+        if(dt>.2&&dt<.22)spawnDirt();
+        if(dt>.3&&dt<.32)spawnDirt();
+      }else if(dt<0.6){
         if(!dugNode){dugNode=spawnHiddenNode();}
         el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-      }else if(dt<1){
-        // Slash it!
-        if(dugNode&&dt>.75&&dt<.8){slashNode(dugNode);dugNode=null;}
+      }else if(dt<0.85){
+        if(dugNode&&dt>.7&&dt<.72){
+          // Jump to slash
+          state='jumping';jumpStart=now;activeNode=dugNode;dugNode=null;
+        }
       }else{
         el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        state='walking';nextAction=now+2e3+Math.random()*3e3;
-        dugNode=null;
+        state='walking';nextAction=now+1500+Math.random()*2e3;
+        if(dugNode){if(dugNode.el.parentNode)dugNode.el.remove();dugNode=null;}
       }
-      requestAnimationFrame(tick);return;
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // SLEEPING — sit still, spawn ZzZ bubbles
@@ -343,11 +356,11 @@
         el.style.bottom=(Math.sin(t*Math.PI)*22)+'px';
         if(t>.4&&t<.5&&activeNode){slashNode(activeNode);activeNode=null;}
       }else{
-        el.style.bottom='0px';
-        // 40% chance of victory dance after slash
+        resetBottom();
         if(Math.random()<.4){state='victory';victoryStart=now;}
-        else{state='walking';nextAction=now+2e3+Math.random()*3e3;}
+        else{state='walking';nextAction=now+1500+Math.random()*2e3;}
       }
+      el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
     // WALKING — normal movement + decisions
@@ -404,7 +417,6 @@
           var snx=x+dir*10;
           surfNode=spawnNodeAt(snx);
           surfStart=now;
-          el.style.bottom='14px';
           state='surfing';
         } else if(chosen==='dig'){
           state='digging';digStart=now;dugNode=null;
