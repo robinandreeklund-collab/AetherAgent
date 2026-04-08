@@ -759,6 +759,8 @@ document.querySelectorAll('.stat-card .num').forEach(el => {
   }, {threshold: 0.5});
   obs.observe(el);
 });
+
+(function(){var e=document.getElementById('ferris');if(!e)return;var t=e.parentElement,x=-40,d=1,s=.4+Math.random()*.3,n=performance.now()+3000+Math.random()*5000,p=false,u=0;function k(now){if(p){if(now>u)p=false;requestAnimationFrame(k);return}if(now>n){var r=Math.random();if(r<.4){d*=-1;e.style.transform=d<0?'scaleX(-1)':'scaleX(1)'}else if(r<.6){p=true;u=now+500+Math.random()*1500}s=.3+Math.random()*.4;n=now+2000+Math.random()*5000}x+=s*d;var w=t.offsetWidth;if(x>w+40)x=-40;if(x<-40)x=w+40;e.style.left=x+'px';requestAnimationFrame(k)}requestAnimationFrame(k)})();
 </script>
 </body>
 </html>
