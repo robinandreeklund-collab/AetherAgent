@@ -47,9 +47,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* SECTIONS */
 .section{max-width:860px;margin:0 auto;padding:5rem 2rem}
-.section h2{font-size:clamp(1.5rem,3.5vw,2.25rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:1rem}
+.section h2{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:1rem}
 .section h3{font-size:1.15rem;font-weight:600;margin:2rem 0 .75rem;color:#fff}
-.section p{color:#bbb;margin-bottom:1.25rem;font-size:.95rem}
+.section p{color:var(--muted);margin-bottom:1.25rem;font-size:.95rem}
 .section strong{color:#fff}
 
 /* DIVIDER */
@@ -57,14 +57,15 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .divider hr{border:none;border-top:1px solid var(--border)}
 
 /* STAT CARDS */
-.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin:2.5rem 0}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem 1.5rem;text-align:center}
-.stat-card .num{font-size:2rem;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin:2.5rem 0}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:transform .3s,border-color .3s}
+.stat-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.stat-card .num{font-size:clamp(2rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums}
 .stat-card .num.red{color:var(--red)}
-.stat-card .num.green{color:var(--green)}
+.stat-card .num.green{background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .stat-card .num.amber{color:var(--amber)}
-.stat-card .num.accent{color:var(--accent)}
-.stat-card .label{font-size:.8rem;color:var(--muted);margin-top:.35rem}
+.stat-card .num.accent{background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat-card .label{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
 
 /* BAR CHART */
 .bar-chart{margin:2.5rem 0}
@@ -80,7 +81,7 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 /* COMPARISON TABLE */
 .compare-table{width:100%;border-collapse:collapse;margin:2rem 0;font-size:.85rem}
 .compare-table th{text-align:left;padding:.75rem 1rem;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
-.compare-table td{padding:.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.03);color:#bbb}
+.compare-table td{padding:.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--muted)}
 .compare-table tr:hover td{background:rgba(255,255,255,0.02)}
 .compare-table .highlight td{color:#fff;font-weight:500}
 .pill{display:inline-block;padding:.15rem .6rem;border-radius:20px;font-size:.7rem;font-weight:600}
@@ -93,8 +94,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .timeline::before{content:'';position:absolute;left:6px;top:0;bottom:0;width:2px;background:var(--border)}
 .timeline-item{position:relative;margin-bottom:2rem;padding-left:1.5rem}
 .timeline-item::before{content:'';position:absolute;left:-2rem;top:.35rem;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
-.timeline-item h4{font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.25rem}
-.timeline-item p{font-size:.85rem;color:var(--muted);margin-bottom:0}
+.timeline-item h4{font-size:1rem;font-weight:600;color:#fff;margin-bottom:.25rem}
+.timeline-item p{font-size:.85rem;color:var(--muted);margin-bottom:0;line-height:1.5}
 
 /* QUOTE */
 .quote{border-left:3px solid var(--accent);padding:1.25rem 1.5rem;margin:2rem 0;background:rgba(59,130,246,0.04);border-radius:0 10px 10px 0}
@@ -103,12 +104,13 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* COST VISUAL */
 .cost-compare{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin:2rem 0}
-.cost-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;text-align:center}
+.cost-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;text-align:center;transition:transform .3s,border-color .3s}
+.cost-box:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
 .cost-box.bad{border-color:rgba(239,68,68,0.2)}
 .cost-box.good{border-color:rgba(34,197,94,0.2)}
-.cost-box .cost-val{font-size:2rem;font-weight:700;margin:.5rem 0}
+.cost-box .cost-val{font-size:clamp(2rem,4vw,2.5rem);font-weight:700;margin:.5rem 0;letter-spacing:-0.03em}
 .cost-box .cost-val.red{color:var(--red)}
-.cost-box .cost-val.green{color:var(--green)}
+.cost-box .cost-val.green{background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .cost-box .cost-label{font-size:.8rem;color:var(--muted)}
 .cost-box .cost-desc{font-size:.75rem;color:#555;margin-top:.25rem}
 
