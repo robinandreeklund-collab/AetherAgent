@@ -145,7 +145,10 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .pipeline-summary .ps-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
 @media(max-width:768px){.pipeline-summary{grid-template-columns:repeat(2,1fr)}}
 
-/* SCROLL REVEAL */
+/* CRAB */
+.crab-track{overflow:hidden;height:40px;position:relative;margin-bottom:-1px}
+.crab{position:absolute;bottom:0;animation:crabWalk 20s linear infinite;image-rendering:pixelated;width:32px;height:32px}
+@keyframes crabWalk{0%{left:-40px}100%{left:100%}}
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
 .reveal.visible{opacity:1;transform:translateY(0)}
 
@@ -374,6 +377,29 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <p>Enter any URL. Ask any question. Get back only the answer.</p>
   <a class="btn-sm btn-accent" href="/try">Try alpha &rarr;</a>
 </section>
+
+<!-- CRAB -->
+<div class="crab-track">
+  <svg class="crab" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
+    <!-- claws -->
+    <rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/>
+    <rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/>
+    <!-- arms -->
+    <rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/>
+    <!-- body -->
+    <rect x="4" y="2" width="8" height="7" rx="1"/>
+    <!-- eyes -->
+    <rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/>
+    <!-- mouth -->
+    <rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/>
+    <!-- legs -->
+    <rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/>
+    <rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/>
+    <!-- feet -->
+    <rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/>
+    <rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/>
+  </svg>
+</div>
 
 <!-- FOOTER -->
 <footer>
