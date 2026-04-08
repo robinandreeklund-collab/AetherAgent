@@ -521,96 +521,80 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   }
   requestAnimationFrame(tick);
 
-  // ── COOKIE CONSENT — Mini Ferris with cookie ──
+  // ── COOKIE CONSENT — The Distillation ──
   if(!localStorage.getItem('slaash-cookies')){
     setTimeout(function(){
-      // Inject cookie CSS
       var ccss=document.createElement('style');
       ccss.textContent=`
-.cookie-banner{position:fixed;bottom:20px;left:20px;z-index:9999;display:flex;align-items:flex-end;gap:12px;animation:cookieSlideIn .6s cubic-bezier(0.16,1,0.3,1) forwards;opacity:0;transform:translateY(40px)}
-@keyframes cookieSlideIn{to{opacity:1;transform:translateY(0)}}
-.cookie-ferris{width:40px;height:40px;image-rendering:pixelated;flex-shrink:0;position:relative}
-.cookie-ferris .cookie-item{position:absolute;top:-4px;right:-6px;font-size:14px;animation:cookieBob 1s ease-in-out infinite alternate}
-@keyframes cookieBob{0%{transform:rotate(-5deg)}100%{transform:rotate(5deg)}}
-.cookie-bubble{background:#111;border:1px solid rgba(59,130,246,0.2);border-radius:14px;padding:14px 18px;max-width:340px;position:relative;box-shadow:0 4px 24px rgba(0,0,0,0.4)}
-.cookie-bubble::before{content:'';position:absolute;left:-6px;bottom:12px;width:12px;height:12px;background:#111;border-left:1px solid rgba(59,130,246,0.2);border-bottom:1px solid rgba(59,130,246,0.2);transform:rotate(45deg)}
-.cookie-bubble p{font-size:13px;color:#bbb;line-height:1.5;margin:0 0 10px;font-family:Inter,system-ui,sans-serif}
-.cookie-bubble .cookie-stats{font-family:'JetBrains Mono',monospace;font-size:11px;color:#3b82f6;margin-bottom:12px}
-.cookie-bubble .cookie-stats .strike{text-decoration:line-through;color:#555}
-.cookie-btns{display:flex;gap:8px}
-.cookie-btn{padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;font-family:Inter,system-ui,sans-serif;transition:all .2s}
-.cookie-accept{background:#3b82f6;color:#fff}
-.cookie-accept:hover{background:#2563eb;transform:translateY(-1px)}
-.cookie-reject{background:transparent;color:#666;border:1px solid rgba(255,255,255,0.08)}
-.cookie-reject:hover{border-color:rgba(255,255,255,0.2);color:#aaa}
-.cookie-nom{position:absolute;font-size:11px;font-weight:700;color:#f59e0b;pointer-events:none;animation:cookieNom .5s ease forwards}
-@keyframes cookieNom{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-20px)}}
-.cookie-banner.bye{animation:cookieSlideOut .4s ease forwards}
-@keyframes cookieSlideOut{to{opacity:0;transform:translateY(30px)}}
-@media(max-width:500px){.cookie-banner{left:10px;right:10px;bottom:10px}.cookie-bubble{max-width:none;flex:1}}
+.cookie-bar{position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#111;border-top:1px solid rgba(255,255,255,0.08);padding:0;transform:translateY(100%);animation:cbSlideIn .5s cubic-bezier(0.16,1,0.3,1) .3s forwards}
+@keyframes cbSlideIn{to{transform:translateY(0)}}
+.cookie-bar.bye{animation:cbSlideOut .4s ease forwards}
+@keyframes cbSlideOut{to{transform:translateY(100%)}}
+.cb-inner{max-width:900px;margin:0 auto;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1.5rem}
+.cb-text{flex:1;min-width:0}
+.cb-title{font-size:.8rem;font-weight:600;color:#fff;margin-bottom:.3rem;font-family:Inter,system-ui,sans-serif}
+.cb-stats{font-family:'JetBrains Mono',monospace;font-size:.75rem;line-height:1.5;color:rgba(255,255,255,0.5)}
+.cb-stats .cb-before{display:inline-block;transition:all .8s ease}
+.cb-stats .cb-before.struck{text-decoration:line-through;color:#555;transform:scale(0.9)}
+.cb-stats .cb-arrow{display:inline-block;color:#3b82f6;margin:0 .3rem;opacity:0;transition:opacity .3s ease .6s}
+.cb-stats .cb-arrow.show{opacity:1}
+.cb-stats .cb-after{display:inline-block;color:#22c55e;font-weight:600;opacity:0;transform:translateX(-8px);transition:all .4s ease .8s}
+.cb-stats .cb-after.show{opacity:1;transform:translateX(0)}
+.cb-stats .cb-pct{display:inline-block;color:#3b82f6;font-weight:600;opacity:0;transition:opacity .4s ease 1.2s}
+.cb-stats .cb-pct.show{opacity:1}
+.cb-btns{display:flex;gap:.5rem;flex-shrink:0}
+.cb-btn{padding:.5rem 1.1rem;border-radius:8px;font-size:.75rem;font-weight:600;border:none;cursor:pointer;font-family:Inter,system-ui,sans-serif;transition:all .2s;white-space:nowrap}
+.cb-accept{background:#3b82f6;color:#fff}
+.cb-accept:hover{background:#2563eb;transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,0.3)}
+.cb-reject{background:transparent;color:#666;border:1px solid rgba(255,255,255,0.08)}
+.cb-reject:hover{border-color:rgba(255,255,255,0.2);color:#aaa}
+@media(max-width:600px){.cb-inner{flex-direction:column;text-align:center;gap:.75rem;padding:1rem}.cb-btns{justify-content:center}}
 `;
       document.head.appendChild(ccss);
 
-      // Create banner
-      var banner=document.createElement('div');
-      banner.className='cookie-banner';
-      banner.innerHTML=`
-<div class="cookie-ferris">
-  <svg viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316" style="width:40px;height:40px">
-    <g><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
-    <g><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g>
-    <rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/>
-    <rect x="4" y="2" width="8" height="7" rx="1"/>
-    <rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/>
-    <rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/>
-    <rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/>
-    <rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/>
-    <rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/>
-    <rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/>
-  </svg>
-  <span class="cookie-item">🍪</span>
-</div>
-<div class="cookie-bubble">
-  <p>I found cookies in the DOM!</p>
-  <div class="cookie-stats"><span class="strike">12 cookies</span> → <strong>3 essential</strong>. 75% cookie reduction.</div>
-  <div class="cookie-btns">
-    <button class="cookie-btn cookie-accept" onclick="acceptCookies()">Accept 3 🍪</button>
-    <button class="cookie-btn cookie-reject" onclick="rejectCookies()">Slash all /</button>
+      var bar=document.createElement('div');
+      bar.className='cookie-bar';
+      bar.innerHTML=`
+<div class="cb-inner">
+  <div class="cb-text">
+    <div class="cb-title">This page uses cookies.</div>
+    <div class="cb-stats">
+      <span class="cb-before">12 cookies</span><span class="cb-arrow">&rarr;</span><span class="cb-after">3 essential</span>
+      <span class="cb-pct">&middot; 75% reduction</span>
+    </div>
+  </div>
+  <div class="cb-btns">
+    <button class="cb-btn cb-accept" id="cb-accept">Accept the 3 that matter</button>
+    <button class="cb-btn cb-reject" id="cb-reject">Reject all 12</button>
   </div>
 </div>`;
-      document.body.appendChild(banner);
+      document.body.appendChild(bar);
 
-      // Accept → nom animation
-      window.acceptCookies=function(){
+      // Trigger distillation animation after bar slides in
+      setTimeout(function(){
+        var b=bar.querySelector('.cb-before');
+        var a=bar.querySelector('.cb-arrow');
+        var af=bar.querySelector('.cb-after');
+        var p=bar.querySelector('.cb-pct');
+        if(b)b.classList.add('struck');
+        if(a)a.classList.add('show');
+        if(af)af.classList.add('show');
+        if(p)p.classList.add('show');
+      },800);
+
+      function dismiss(){
+        bar.classList.add('bye');
+        setTimeout(function(){bar.remove()},400);
+      }
+
+      document.getElementById('cb-accept').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','accepted');
-        var item=banner.querySelector('.cookie-item');
-        if(item) item.style.display='none';
-        var nom=document.createElement('span');
-        nom.className='cookie-nom';
-        nom.textContent='nom!';
-        nom.style.left='30px';nom.style.bottom='44px';
-        banner.querySelector('.cookie-ferris').appendChild(nom);
-        setTimeout(function(){
-          banner.classList.add('bye');
-          setTimeout(function(){banner.remove()},400);
-        },500);
-      };
-
-      // Reject → slash text
-      window.rejectCookies=function(){
+        dismiss();
+      });
+      document.getElementById('cb-reject').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','rejected');
-        var item=banner.querySelector('.cookie-item');
-        if(item){
-          item.textContent='/';
-          item.style.fontSize='18px';
-          item.style.color='#3b82f6';
-          item.style.animation='none';
-        }
-        setTimeout(function(){
-          banner.classList.add('bye');
-          setTimeout(function(){banner.remove()},400);
-        },600);
-      };
-    },2000); // Show after 2s
+        dismiss();
+      });
+    },1500);
   }
 })();
