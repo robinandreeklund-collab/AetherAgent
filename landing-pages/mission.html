@@ -178,7 +178,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <h2>The problem</h2>
   <p>Every time an AI agent visits a web page, it receives the full HTML source. A typical page is 50,000&ndash;500,000 characters. A Wikipedia article can exceed <strong>2.7 million characters</strong>. An e-commerce SPA built with React or Vue can be <strong>1.3 million+</strong>.</p>
 
-  <p>This raw HTML is sent directly to a large language model. The LLM must then find the answer — a single paragraph, a price, a date — somewhere inside millions of characters of navigation menus, JavaScript bundles, tracking pixels, and boilerplate.</p>
+  <p>Today, AI agents either send this raw HTML directly to a large language model — burning through context windows and token budgets — or use extraction tools that strip formatting but still return the entire page. Either way, the LLM receives tens of thousands of tokens when it only needs a few sentences.</p>
 
   <div class="stat-row">
     <div class="stat-card">

@@ -104,10 +104,13 @@ footer{padding:1.5rem 2rem;text-align:center;border-top:1px solid var(--border);
 <main>
   <h1>Try it. Slaash it<span style="color:#3b82f6">/</span></h1>
   <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
+  <div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.12);border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1.5rem;font-size:.78rem;color:#999;line-height:1.6">
+    <strong style="color:#bbb">How Slaash works in production:</strong> Question &rarr; LLM expands query &rarr; Slaash extracts &rarr; Answer &rarr; LLM sends feedback &rarr; Slaash learns. This playground skips the feedback step, so results improve with use in the real pipeline but not here. First queries on a new URL are cold — repeated queries with feedback get significantly better.
+  </div>
 
   <div class="examples">
     <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">Wikipedia: COVID-19 vaccine side effects</span>
-    <span class="example-chip" data-url="https://www.riksbank.se/sv/penningpolitik/styrrantan/" data-goal="styrr&auml;nta r&auml;nta procent Riksbanken penningpolitik repor&auml;nta 2026 interest rate">Riksbanken: Swedish interest rate</span>
+    <span class="example-chip" data-url="https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/" data-goal="styrr&auml;nta r&auml;nta procent Riksbanken penningpolitik repor&auml;nta 2026 interest rate">Riksbanken: Swedish interest rate</span>
     <span class="example-chip" data-url="https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK" data-goal="currency converter exchange rate USD SEK kronor dollar real-time">XE.com: USD/SEK exchange rate</span>
     <span class="example-chip" data-url="https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array" data-goal="branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty">Stack Overflow: sorted array performance</span>
     <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Gothenburg" data-goal="population inhabitants Gothenburg G&ouml;teborg city urban area people">Wikipedia: Gothenburg population</span>
