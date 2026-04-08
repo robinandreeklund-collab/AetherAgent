@@ -70,12 +70,13 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* LEADERBOARD */
 .lb-title{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:1rem}
-.lb-row{display:grid;grid-template-columns:1fr auto auto auto auto auto;gap:.5rem;align-items:center;padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.78rem}
+.lb-row{display:grid;grid-template-columns:1fr 70px 70px 70px 70px 70px;gap:.25rem;align-items:center;padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.78rem;opacity:0;transform:translateY(6px);animation:lbRowIn .4s ease forwards}
 .lb-row:last-child{border-bottom:none}
+@keyframes lbRowIn{to{opacity:1;transform:translateY(0)}}
 .lb-domain{color:#ddd;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lb-stat{text-align:right;font-family:var(--mono);font-size:.7rem;color:#666}
+.lb-stat{text-align:right;font-family:var(--mono);font-size:.72rem;color:#666;font-variant-numeric:tabular-nums}
 .lb-stat.highlight{color:var(--accent)}
-.lb-head{font-size:.6rem;color:#444;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.lb-head{font-size:.6rem;color:#444;font-weight:600;text-transform:uppercase;letter-spacing:.05em;text-align:right}
 .lb-bar{height:3px;border-radius:2px;background:rgba(59,130,246,0.08);margin-top:.15rem}
 .lb-bar-fill{height:100%;border-radius:2px;background:var(--accent);transition:width 1s ease}
 
@@ -353,10 +354,11 @@ function update(d){
     return;
   }
   const maxQ = Math.max(...sites.map(s=>s.queries||1));
-  lbEl.innerHTML = sites.slice(0,15).map(s => {
+  lbEl.innerHTML = sites.slice(0,15).map((s,i) => {
     const pct = ((s.queries||0)/maxQ*100).toFixed(0);
     const lat = s.last_propagation_us ? (s.last_propagation_us/1000).toFixed(1)+'ms' : '—';
-    return '<div class="lb-row">' +
+    const delay = (i * 60) + 'ms';
+    return '<div class="lb-row" style="animation-delay:'+delay+'">' +
       '<div class="lb-domain">'+esc(s.domain)+'<div class="lb-bar"><div class="lb-bar-fill" style="width:'+pct+'%"></div></div></div>' +
       '<div class="lb-stat">'+fmt(s.nodes)+'</div>' +
       '<div class="lb-stat highlight">'+s.queries+'</div>' +
