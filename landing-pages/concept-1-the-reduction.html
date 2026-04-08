@@ -64,7 +64,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .liquid{display:inline;filter:url(#liquid-filter)}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .cv{color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
-.hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;display:block;margin-top:.15rem}
+.hero .subtitle .site{color:#555;font-weight:400;font-size:.75em;display:block;margin-top:.15rem;transition:color .2s}
+.hero .subtitle .site:hover{color:var(--accent)}
 @media(max-width:600px){.hero .subtitle{white-space:normal;text-align:center}}
 .subtitle-fade-out{animation:subtitleOut .4s ease forwards}
 .subtitle-fade-in{animation:subtitleIn .4s ease forwards}
@@ -581,16 +582,16 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
 (function(){
   const examples = [
-    {site:'Wikipedia COVID-19 vaccine', from:2815638, to:1200, timeMs:149},
-    {site:'riksbanken.se', from:628407, to:486, timeMs:7},
-    {site:'Wikipedia Gothenburg', from:1330344, to:388, timeMs:127},
-    {site:'python.org', from:335934, to:270, timeMs:19},
-    {site:'XE.com (React SPA)', from:1358050, to:340, timeMs:145},
-    {site:'Stack Overflow', from:879595, to:486, timeMs:181},
-    {site:'Wikipedia ibuprofen', from:1044595, to:380, timeMs:96},
-    {site:'BBC RSS', from:6300, to:331, timeMs:3},
-    {site:'Wikipedia EU AI Act', from:473911, to:490, timeMs:52},
-    {site:'Wikipedia dark matter', from:1339506, to:380, timeMs:146},
+    {site:'Wikipedia COVID-19 vaccine', url:'https://en.wikipedia.org/wiki/COVID-19_vaccine', from:2815638, to:1200, timeMs:149},
+    {site:'riksbanken.se', url:'https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/', from:628407, to:486, timeMs:7},
+    {site:'Wikipedia Gothenburg', url:'https://en.wikipedia.org/wiki/Gothenburg', from:1330344, to:388, timeMs:127},
+    {site:'python.org', url:'https://www.python.org/downloads/', from:335934, to:270, timeMs:19},
+    {site:'XE.com', url:'https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK', from:1358050, to:340, timeMs:145},
+    {site:'Stack Overflow', url:'https://stackoverflow.com/questions/11227809', from:879595, to:486, timeMs:181},
+    {site:'Wikipedia ibuprofen', url:'https://en.wikipedia.org/wiki/Ibuprofen', from:1044595, to:380, timeMs:96},
+    {site:'BBC RSS', url:'https://feeds.bbci.co.uk/news/technology/rss.xml', from:6300, to:331, timeMs:3},
+    {site:'Wikipedia EU AI Act', url:'https://en.wikipedia.org/wiki/Artificial_Intelligence_Act', from:473911, to:490, timeMs:52},
+    {site:'Wikipedia dark matter', url:'https://en.wikipedia.org/wiki/Dark_matter', from:1339506, to:380, timeMs:146},
   ];
   const el = document.getElementById('hero-rotate');
   let idx = 0;
@@ -608,7 +609,7 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 
   function render(i){
     const e = examples[i];
-    el.innerHTML = '<span class="cv">0</span> chars &rarr; <span class="cv">0</span>. In <span class="cv">0ms</span><br><span class="site">'+e.site+'</span>';
+    el.innerHTML = '<span class="cv">0</span> chars &rarr; <span class="cv">0</span>. In <span class="cv">0ms</span><br><a class="site" href="'+e.url+'" target="_blank" rel="noopener">'+e.site+'</a>';
     const spans = el.querySelectorAll('.cv');
     countTo(spans[0], e.from, 800, '');
     countTo(spans[1], e.to, 800, '');
