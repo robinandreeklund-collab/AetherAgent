@@ -169,8 +169,16 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .contact-card p{font-size:.85rem;color:var(--muted);margin-bottom:1rem;line-height:1.5}
 .contact-card a{color:var(--accent);font-family:var(--mono);font-size:.85rem;font-weight:500;transition:color .2s}
 .contact-card a:hover{color:#60a5fa}
-.crab-track{overflow:hidden;height:40px;position:relative;margin-bottom:-1px}
+.crab-track{overflow:hidden;height:64px;position:relative;margin-bottom:-1px}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
+/* DOM node — falls from top, gets slashed, falls down and fades */
+.slash-node{position:absolute;font-family:var(--mono);font-size:.6rem;color:rgba(255,255,255,0.3);white-space:nowrap;pointer-events:none;padding:.15rem .4rem;border:1px solid rgba(255,255,255,0.08);border-radius:3px;background:rgba(255,255,255,0.03)}
+.slash-node.falling-in{animation:nodeFallIn .6s ease forwards}
+.slash-node.slashed-l{animation:nodeSlashL .7s ease forwards}
+.slash-node.slashed-r{animation:nodeSlashR .7s ease forwards}
+@keyframes nodeFallIn{0%{top:-20px;opacity:0}100%{top:8px;opacity:1}}
+@keyframes nodeSlashL{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(-15px,30px) rotate(-25deg)}}
+@keyframes nodeSlashR{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(15px,30px) rotate(25deg)}}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
 @keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
@@ -835,48 +843,100 @@ document.querySelectorAll('.metric-value').forEach(el=>{
   obs.observe(term);
 })();
 
-// ── FERRIS THE CRAB — random walk ──
+// ── FERRIS THE CRAB — random walk + jump + slash DOM nodes ──
 (function(){
   const el = document.getElementById('ferris');
   if(!el) return;
   const track = el.parentElement;
-  let x = -40;
-  let dir = 1; // 1 = right, -1 = left
-  let speed = 0.4 + Math.random() * 0.3;
-  let nextTurn = performance.now() + 2000 + Math.random() * 6000;
-  let paused = false;
-  let pauseUntil = 0;
+  let x = -40, dir = 1, speed = 0.4 + Math.random() * 0.3;
+  let nextAction = performance.now() + 2000 + Math.random() * 5000;
+  let paused = false, pauseUntil = 0;
+  let jumping = false, jumpStart = 0;
+
+  const domNodes = ['<div>','<nav>','<span>','<meta>','<script>','<iframe>','<footer>','<aside>','style=""','onclick=""','tracking.js','ads.min.js'];
+
+  function spawnNode(){
+    const text = domNodes[Math.floor(Math.random()*domNodes.length)];
+    const posX = x + 4;
+
+    // Node falls in from top
+    const node = document.createElement('span');
+    node.className = 'slash-node falling-in';
+    node.textContent = text;
+    node.style.left = posX + 'px';
+    track.appendChild(node);
+
+    // After landing: Ferris jumps, node splits in two halves falling down
+    setTimeout(()=>{
+      node.remove();
+      const half = Math.ceil(text.length / 2);
+      const leftText = text.slice(0, half);
+      const rightText = text.slice(half);
+
+      const fragL = document.createElement('span');
+      fragL.className = 'slash-node slashed-l';
+      fragL.textContent = leftText;
+      fragL.style.left = posX + 'px';
+      fragL.style.top = '8px';
+      track.appendChild(fragL);
+
+      const fragR = document.createElement('span');
+      fragR.className = 'slash-node slashed-r';
+      fragR.textContent = rightText;
+      fragR.style.left = (posX + 20) + 'px';
+      fragR.style.top = '8px';
+      track.appendChild(fragR);
+
+      setTimeout(()=>{ fragL.remove(); fragR.remove(); }, 700);
+    }, 600);
+  }
 
   function tick(now){
-    // Random pause (stop and look around)
     if(paused){
-      if(now > pauseUntil){ paused = false; }
+      if(now > pauseUntil) paused = false;
       requestAnimationFrame(tick);
       return;
     }
 
-    // Random direction change
-    if(now > nextTurn){
-      // 40% chance to turn, 20% chance to pause, 40% keep going
+    // Jump arc
+    if(jumping){
+      const t = (now - jumpStart) / 400; // 400ms jump
+      if(t < 1){
+        const arc = Math.sin(t * Math.PI) * 20; // 20px height
+        el.style.bottom = arc + 'px';
+      } else {
+        el.style.bottom = '0px';
+        jumping = false;
+      }
+    }
+
+    // Decision point
+    if(now > nextAction){
       const roll = Math.random();
-      if(roll < 0.4){
+      if(roll < 0.25){
+        // Turn around
         dir *= -1;
         el.style.transform = dir < 0 ? 'scaleX(-1)' : 'scaleX(1)';
-      } else if(roll < 0.6){
+      } else if(roll < 0.40){
+        // Pause
         paused = true;
-        pauseUntil = now + 500 + Math.random() * 1500;
+        pauseUntil = now + 400 + Math.random() * 1200;
+      } else if(roll < 0.55){
+        // Jump + slash a DOM node!
+        jumping = true;
+        jumpStart = now;
+        spawnNode();
+      } else {
+        // Just keep walking
       }
       speed = 0.3 + Math.random() * 0.4;
-      nextTurn = now + 2000 + Math.random() * 5000;
+      nextAction = now + 2000 + Math.random() * 4000;
     }
 
     x += speed * dir;
-
-    // Wrap around edges
     const w = track.offsetWidth;
-    if(x > w + 40){ x = -40; }
-    if(x < -40){ x = w + 40; }
-
+    if(x > w + 40) x = -40;
+    if(x < -40) x = w + 40;
     el.style.left = x + 'px';
     requestAnimationFrame(tick);
   }
