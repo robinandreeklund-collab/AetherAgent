@@ -160,7 +160,14 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .pipeline-summary .ps-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
 @media(max-width:768px){.pipeline-summary{grid-template-columns:repeat(2,1fr)}}
 
-/* CRAB */
+/* CONTACT */
+.contact-box{max-width:440px;margin:0 auto;padding:0 2rem 4rem;text-align:center}
+.contact-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem;transition:border-color .3s}
+.contact-card:hover{border-color:rgba(255,255,255,0.15)}
+.contact-card h3{font-size:1rem;font-weight:600;margin-bottom:.35rem}
+.contact-card p{font-size:.85rem;color:var(--muted);margin-bottom:1rem;line-height:1.5}
+.contact-card a{color:var(--accent);font-family:var(--mono);font-size:.85rem;font-weight:500;transition:color .2s}
+.contact-card a:hover{color:#60a5fa}
 .crab-track{overflow:hidden;height:40px;position:relative;margin-bottom:-1px}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
@@ -203,7 +210,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
     <h1>Distill the <span class="liquid">web.</span><br>Slash the tokens<span class="slash">/</span></h1>
-    <svg style="position:absolute;width:0;height:0"><defs><filter id="liquid-filter"><feTurbulence type="turbulence" baseFrequency="0.015" numOctaves="3" seed="2"><animate attributeName="baseFrequency" dur="8s" values="0.015;0.03;0.015" repeatCount="indefinite"/></feTurbulence><feDisplacementMap in="SourceGraphic" scale="4"><animate attributeName="scale" dur="8s" values="3;6;3" repeatCount="indefinite"/></feDisplacementMap></filter></defs></svg>
+    <svg style="position:absolute;width:0;height:0"><defs><filter id="liquid-filter"><feTurbulence type="turbulence" baseFrequency="0.012" numOctaves="2" seed="3" result="noise"><animate attributeName="baseFrequency" dur="10s" values="0.01;0.025;0.01" repeatCount="indefinite"/></feTurbulence><feDisplacementMap in="SourceGraphic" in2="noise" scale="3" xChannelSelector="R" yChannelSelector="G"><animate attributeName="scale" dur="10s" values="2;5;2" repeatCount="indefinite"/></feDisplacementMap></filter></defs></svg>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try alpha</a>
@@ -396,6 +403,15 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <p>Any URL. Any question. Distilled answer.</p>
   <a class="btn-sm btn-accent" href="/try">Try alpha &rarr;</a>
 </section>
+
+<!-- CONTACT -->
+<div class="contact-box">
+  <div class="contact-card">
+    <h3>Get in touch</h3>
+    <p>Questions, partnerships, or early access for your team.</p>
+    <a href="mailto:zerotoken@slaash.ai">zerotoken@slaash.ai</a>
+  </div>
+</div>
 
 <!-- CRAB -->
 <div class="crab-track">
