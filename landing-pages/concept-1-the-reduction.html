@@ -148,8 +148,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 
 /* CRAB */
 .crab-track{overflow:hidden;height:40px;position:relative;margin-bottom:-1px}
-.crab{position:absolute;bottom:0;animation:crabWalk 20s linear infinite;image-rendering:pixelated;width:32px;height:32px}
-@keyframes crabWalk{0%{left:-40px}100%{left:100%}}
+.crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
 @keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
@@ -385,7 +384,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 
 <!-- CRAB -->
 <div class="crab-track">
-  <svg class="crab" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
+  <svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <!-- claws -->
     <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
     <g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g>
@@ -802,6 +801,54 @@ document.querySelectorAll('.metric-value').forEach(el=>{
     if(e.isIntersecting) { runPlayback(); obs.unobserve(term); }
   }, {threshold: 0.2});
   obs.observe(term);
+})();
+
+// ── FERRIS THE CRAB — random walk ──
+(function(){
+  const el = document.getElementById('ferris');
+  if(!el) return;
+  const track = el.parentElement;
+  let x = -40;
+  let dir = 1; // 1 = right, -1 = left
+  let speed = 0.4 + Math.random() * 0.3;
+  let nextTurn = performance.now() + 2000 + Math.random() * 6000;
+  let paused = false;
+  let pauseUntil = 0;
+
+  function tick(now){
+    // Random pause (stop and look around)
+    if(paused){
+      if(now > pauseUntil){ paused = false; }
+      requestAnimationFrame(tick);
+      return;
+    }
+
+    // Random direction change
+    if(now > nextTurn){
+      // 40% chance to turn, 20% chance to pause, 40% keep going
+      const roll = Math.random();
+      if(roll < 0.4){
+        dir *= -1;
+        el.style.transform = dir < 0 ? 'scaleX(-1)' : 'scaleX(1)';
+      } else if(roll < 0.6){
+        paused = true;
+        pauseUntil = now + 500 + Math.random() * 1500;
+      }
+      speed = 0.3 + Math.random() * 0.4;
+      nextTurn = now + 2000 + Math.random() * 5000;
+    }
+
+    x += speed * dir;
+
+    // Wrap around edges
+    const w = track.offsetWidth;
+    if(x > w + 40){ x = -40; }
+    if(x < -40){ x = w + 40; }
+
+    el.style.left = x + 'px';
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 })();
 </script>
 </body>
