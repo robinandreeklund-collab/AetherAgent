@@ -49,7 +49,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
 .hero .subtitle span{color:#fff;font-weight:600}
-.hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;margin-left:.5em}
+.hero .subtitle .cv{color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
+.hero .subtitle .site{color:var(--muted);font-weight:400;font-size:.85em;display:block;margin-top:.15rem}
 @media(max-width:600px){.hero .subtitle{white-space:normal;text-align:center}}
 .subtitle-fade-out{animation:subtitleOut .4s ease forwards}
 .subtitle-fade-in{animation:subtitleIn .4s ease forwards}
@@ -201,16 +202,16 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <section class="metrics reveal">
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="metric-value" data-target="99.2" data-suffix="%">0%</div>
+      <div class="metric-value" id="mv-savings" data-target="99.2" data-suffix="%">0%</div>
       <div class="metric-label">Token reduction</div>
     </div>
     <div class="metric-card">
-      <div class="metric-value" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
-      <div class="metric-label">Parse latency</div>
+      <div class="metric-value" id="mv-latency" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
+      <div class="metric-label">Avg latency</div>
     </div>
     <div class="metric-card">
-      <div class="metric-value" data-target="97.8" data-suffix="%">0%</div>
-      <div class="metric-label">Recall accuracy</div>
+      <div class="metric-value" id="mv-sites" data-target="0">0</div>
+      <div class="metric-label">Sites profiled</div>
     </div>
   </div>
 </section>
@@ -341,32 +342,32 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <p class="section-sub">A complete perception layer for AI agents.</p>
   <div class="features-grid">
     <div class="feature-card">
-      <span class="feature-icon">&#x1F441;</span>
+      <span class="feature-icon" style="color:var(--accent)">/</span>
       <h3>Goal-Aware Extraction</h3>
       <p>Send a URL and a question. Get back only the nodes that answer it, ranked by relevance. 99.9% token reduction.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F6E1;</span>
+      <span class="feature-icon" style="color:#ef4444">&Delta;</span>
       <h3>Trust Shield</h3>
       <p>40+ prompt injection patterns detected at parse time. Hidden instructions, zero-width obfuscation, role hijacking &mdash; neutralized before the LLM sees it.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x26A1;</span>
+      <span class="feature-icon" style="color:#22c55e">&raquo;</span>
       <h3>Adaptive Streaming</h3>
       <p>For pages where even CRFR returns too much: LLM-directed branch expansion explores the DOM incrementally. Send directives to expand, skip, or lower the threshold in real-time.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F4E6;</span>
+      <span class="feature-icon" style="color:#8b5cf6">&lt;/&gt;</span>
       <h3>DOM Engine</h3>
       <p>Full Rust DOM with QuickJS sandbox. 200+ native APIs, 91% WPT compliance on core DOM. Handles SPAs, hydration, and framework-rendered content.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F4F7;</span>
+      <span class="feature-icon" style="color:#f59e0b">&#x25A3;</span>
       <h3>Vision</h3>
       <p>YOLOv8-nano screenshot analysis with pure Rust rendering engine.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F50C;</span>
+      <span class="feature-icon" style="color:var(--accent)">&harr;</span>
       <h3>MCP Server</h3>
       <p>13 tools for Claude, Cursor, and VS Code. Parse, extract, act, search, stream, vision &mdash; one integration.</p>
     </div>
@@ -377,8 +378,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 
 <!-- CTA -->
 <section class="cta-section reveal">
-  <h2>See for yourself</h2>
-  <p>Enter any URL. Ask any question. Get back only the answer.</p>
+  <h2>Distill it yourself</h2>
+  <p>Any URL. Any question. Distilled answer.</p>
   <a class="btn-sm btn-accent" href="/try">Try alpha &rarr;</a>
 </section>
 
@@ -550,23 +551,38 @@ setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
 // ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
 (function(){
   const examples = [
-    {site:'Wikipedia COVID-19 vaccine', from:'2,815,638', to:'1,200', time:'149ms'},
-    {site:'riksbanken.se', from:'628,407', to:'486', time:'7ms'},
-    {site:'Wikipedia Gothenburg', from:'1,330,344', to:'388', time:'127ms'},
-    {site:'python.org', from:'335,934', to:'270', time:'19ms'},
-    {site:'XE.com (React SPA)', from:'1,358,050', to:'340', time:'145ms'},
-    {site:'Stack Overflow', from:'879,595', to:'486', time:'181ms'},
-    {site:'Wikipedia ibuprofen', from:'1,044,595', to:'380', time:'96ms'},
-    {site:'BBC RSS', from:'6,300', to:'331', time:'3ms'},
-    {site:'Wikipedia EU AI Act', from:'473,911', to:'490', time:'52ms'},
-    {site:'Wikipedia dark matter', from:'1,339,506', to:'380', time:'146ms'},
+    {site:'Wikipedia COVID-19 vaccine', from:2815638, to:1200, timeMs:149},
+    {site:'riksbanken.se', from:628407, to:486, timeMs:7},
+    {site:'Wikipedia Gothenburg', from:1330344, to:388, timeMs:127},
+    {site:'python.org', from:335934, to:270, timeMs:19},
+    {site:'XE.com (React SPA)', from:1358050, to:340, timeMs:145},
+    {site:'Stack Overflow', from:879595, to:486, timeMs:181},
+    {site:'Wikipedia ibuprofen', from:1044595, to:380, timeMs:96},
+    {site:'BBC RSS', from:6300, to:331, timeMs:3},
+    {site:'Wikipedia EU AI Act', from:473911, to:490, timeMs:52},
+    {site:'Wikipedia dark matter', from:1339506, to:380, timeMs:146},
   ];
   const el = document.getElementById('hero-rotate');
   let idx = 0;
 
+  // Count-up animation helper
+  function countTo(span, target, duration, suffix){
+    const t0 = performance.now();
+    (function tick(now){
+      const p = Math.min((now-t0)/duration, 1);
+      const ease = 1 - Math.pow(1-p, 3);
+      span.textContent = Math.round(ease * target).toLocaleString() + (suffix||'');
+      if(p<1) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+
   function render(i){
     const e = examples[i];
-    el.innerHTML = '<span>'+e.from+'</span> chars &rarr; <span>'+e.to+'</span>. In <span>'+e.time+'</span>. <span class="site">'+e.site+'</span>';
+    el.innerHTML = '<span class="cv">0</span> chars &rarr; <span class="cv">0</span>. In <span class="cv">0ms</span><br><span class="site">'+e.site+'</span>';
+    const spans = el.querySelectorAll('.cv');
+    countTo(spans[0], e.from, 800, '');
+    countTo(spans[1], e.to, 800, '');
+    countTo(spans[2], e.timeMs, 600, 'ms');
   }
 
   render(0);
@@ -603,6 +619,32 @@ function countUp(el, target, prefix='', suffix='', duration=1500){
   }
   requestAnimationFrame(tick);
 }
+
+// Fetch live data and update metric card targets before count-up
+(async function(){
+  try {
+    const r = await fetch('/api/live-stats');
+    if(r.ok){
+      const d = await r.json();
+      const s = document.getElementById('mv-savings');
+      const l = document.getElementById('mv-latency');
+      const si = document.getElementById('mv-sites');
+      if(d.token_savings_pct && parseFloat(d.token_savings_pct) > 0){
+        s.dataset.target = d.token_savings_pct;
+        s.dataset.suffix = '%';
+      }
+      if(d.avg_propagation_us && d.avg_propagation_us > 0){
+        l.dataset.target = (d.avg_propagation_us / 1000).toFixed(1);
+        l.dataset.suffix = 'ms';
+        l.dataset.prefix = '';
+      }
+      if(d.sites_profiled > 0){
+        si.dataset.target = d.sites_profiled;
+        si.dataset.suffix = '';
+      }
+    }
+  } catch(e){}
+})();
 
 document.querySelectorAll('.metric-value').forEach(el=>{
   const obs = new IntersectionObserver(([e])=>{
