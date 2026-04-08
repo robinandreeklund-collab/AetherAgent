@@ -140,10 +140,16 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .pipeline-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:2rem;font-family:var(--mono);font-size:.78rem;line-height:1.8;overflow:hidden;position:relative}
 .pipeline-terminal::before{content:'sl/sh Pipeline — Live playback';position:absolute;top:0;left:0;right:0;padding:.5rem 1rem;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font)}
 .pipeline-terminal .steps{margin-top:2rem}
-.pipe-step{opacity:0;transform:translateY(8px);transition:opacity .5s ease,transform .5s ease;margin-bottom:1.25rem;padding-left:1rem;border-left:2px solid transparent}
+.pipe-step{opacity:0;transform:translateY(12px);transition:opacity .7s cubic-bezier(0.16,1,0.3,1),transform .7s cubic-bezier(0.16,1,0.3,1),border-color .5s ease,box-shadow .5s ease;margin-bottom:1.25rem;padding-left:1rem;border-left:2px solid transparent}
 .pipe-step.visible{opacity:1;transform:translateY(0)}
-.pipe-step.active{border-left-color:#3b82f6;box-shadow:-4px 0 12px rgba(59,130,246,0.15)}
-.pipe-step.done{border-left-color:rgba(59,130,246,0.3)}
+.pipe-step.active{border-left-color:#3b82f6;box-shadow:-4px 0 16px rgba(59,130,246,0.12)}
+.pipe-step.done{border-left-color:rgba(59,130,246,0.2)}
+.pipe-result .node{opacity:0;transform:translateY(6px);transition:opacity .5s ease,transform .5s ease}
+.pipe-step.visible .pipe-result .node:nth-child(1){transition-delay:.15s}
+.pipe-step.visible .pipe-result .node:nth-child(2){transition-delay:.3s}
+.pipe-step.visible .pipe-result .node:nth-child(3){transition-delay:.45s}
+.pipe-step.visible .pipe-result .node:nth-child(4){transition-delay:.6s}
+.pipe-step.visible .pipe-result .node{opacity:1;transform:translateY(0)}
 .step-label{color:#3b82f6;font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
 .step-data{color:#c9d1d9}
 .step-data .dim{color:#555}
@@ -830,16 +836,25 @@ document.querySelectorAll('.metric-value').forEach(el=>{
   function runPlayback(){
     if(started) return;
     started = true;
+    // Stagger: 1.2s base + extra time for result step
+    var delays = [0, 1200, 2400, 4200];
     steps.forEach((step, i) => {
+      var delay = delays[i] || (i * 1200);
       setTimeout(() => {
         step.classList.add('visible');
         step.classList.add('active');
-        if(i > 0) steps[i-1].classList.remove('active');
-        if(i > 0) steps[i-1].classList.add('done');
-        if(i === steps.length - 1){
-          setTimeout(() => { step.classList.remove('active'); step.classList.add('done'); }, 1500);
+        // Transition previous step from active to done after a beat
+        if(i > 0){
+          setTimeout(()=>{
+            steps[i-1].classList.remove('active');
+            steps[i-1].classList.add('done');
+          }, 400);
         }
-      }, i * 800);
+        // Last step: transition to done after 2s
+        if(i === steps.length - 1){
+          setTimeout(() => { step.classList.remove('active'); step.classList.add('done'); }, 2000);
+        }
+      }, delay);
     });
   }
 
