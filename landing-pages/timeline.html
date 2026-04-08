@@ -23,19 +23,23 @@
 }
 html{scroll-behavior:smooth;font-size:16px}
 body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;overflow-x:hidden}
-a{color:var(--accent);text-decoration:none}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
 a:hover{color:#60a5fa}
 
 /* NAV */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.8);border-bottom:1px solid var(--border)}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease}
+nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}
 .wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
 .nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
-.nav-links a{color:var(--muted);font-weight:500}
-.nav-links a:hover{color:#fff}
-.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .2s;text-decoration:none}
-.btn-accent{background:var(--accent);color:#fff}
-.btn-accent:hover{background:#2563eb;color:#fff}
+.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.nav-links a:not(.btn-sm):hover{color:#fff}
+.nav-links a:not(.btn-sm):hover::after{width:100%}
 .nav-links a.btn-accent{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .25s ease;text-decoration:none}
+.btn-accent{background:var(--accent);color:#fff}
+.btn-accent:hover{background:#2563eb;color:#fff;transform:translateY(-1px)}
 
 /* HERO */
 .tl-hero{padding:10rem 2rem 4rem;text-align:center;max-width:700px;margin:0 auto}
