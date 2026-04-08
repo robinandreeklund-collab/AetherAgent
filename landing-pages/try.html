@@ -81,10 +81,16 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 /* FOOTER */
 footer{padding:1.5rem 2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.75rem}
 
+@media(max-width:768px){
+  header{padding:1rem}
+  .nav-links{gap:1rem;font-size:.8rem}
+}
 @media(max-width:600px){
   .form-row{grid-template-columns:1fr}
   .summary-bar{grid-template-columns:repeat(2,1fr)}
   .results-meta{flex-direction:column;gap:.25rem}
+  .nav-links a{display:none}
+  header{padding:.85rem 1.25rem}
 }
 </style>
 </head>
