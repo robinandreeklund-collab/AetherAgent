@@ -62,7 +62,7 @@
   var el=document.getElementById('ferris');
   if(!el)return;
   var track=el.parentElement,x=-40,dir=1,speed=.4;
-  var nextAction=performance.now()+3e3+Math.random()*4e3;
+  var nextAction=performance.now()+2e3; // First action after 2s
   var state='walking',stateUntil=0,activeNode=null,jumpStart=0;
 
   // Ensure smooth bottom transitions
@@ -214,6 +214,9 @@
   // Dynamic action selection — tracks when each action was last done
   var lastDone={};
   var lastAction='';
+  // Force showcase: first 5 actions cycle through new behaviors
+  var forceQueue=['eat','scared','surf','dig','hunt'];
+  var forceIdx=0;
 
   function tick(now){
     var w=track.offsetWidth;
@@ -380,11 +383,16 @@
           // Peek only near edge
           if(actions[ai]==='peek'&&x>30&&x<w-50) weights[ai]=0;
         }
-        var totalW=weights.reduce(function(a,b){return a+b},0);
-        var r=Math.random()*totalW, cum=0, chosen='turn';
-        for(var ai2=0;ai2<actions.length;ai2++){
-          cum+=weights[ai2];
-          if(r<cum){chosen=actions[ai2];break;}
+        var chosen;
+        if(forceIdx<forceQueue.length){
+          chosen=forceQueue[forceIdx];forceIdx++;
+        }else{
+          var totalW=weights.reduce(function(a,b){return a+b},0);
+          var r=Math.random()*totalW, cum=0; chosen='turn';
+          for(var ai2=0;ai2<actions.length;ai2++){
+            cum+=weights[ai2];
+            if(r<cum){chosen=actions[ai2];break;}
+          }
         }
         lastAction=chosen;
         lastDone[chosen]=now;
