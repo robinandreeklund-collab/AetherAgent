@@ -937,7 +937,17 @@ fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResul
         return false;
     }
     let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
-    data_count as f32 / matched.len() as f32 > 0.7
+    // BUG-3: also detect JSON-like labels (key.path.name patterns)
+    let json_like = matched.iter().filter(|(n, _)| {
+        n.label.contains("__NEXT_DATA__")
+            || n.label.contains("__NUXT__")
+            || n.label.contains("initialState")
+            || n.label.contains("pageProps")
+            || n.label.contains("window.__data")
+            || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
+    }).count();
+    let total = matched.len() as f32;
+    (data_count as f32 / total > 0.5) || (json_like > 0 && data_count as f32 / total > 0.3)
 }
 
 fn goal_title_overlap(goal: &str, title: &str) -> f32 {
@@ -1089,7 +1099,8 @@ pub fn parse_crfr_from_tree_broad(
         let (cache_entries, cache_capacity) = resonance::cache_stats();
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        let spa_flag = total_dom_nodes < 10;
+        // BUG-3 fix
+        let spa_flag = total_dom_nodes < 10 && !ssr_json_flag;
         let overlap = goal_title_overlap(goal, &tree.title);
         // BUG-1 fix
         let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
@@ -1248,7 +1259,8 @@ pub fn parse_crfr_from_tree_js(
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
         let bot_blocked = is_bot_blocked(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        let spa_flag = total_dom_nodes < 10 && !bot_blocked;
+        // BUG-3 fix: ssr_json pages are NOT SPAs — they have data, just in JSON form
+        let spa_flag = total_dom_nodes < 10 && !bot_blocked && !ssr_json_flag;
         let overlap = goal_title_overlap(goal, &tree.title);
 
         // BUG-1 fix: use top-node relevance relative to median, not title overlap
