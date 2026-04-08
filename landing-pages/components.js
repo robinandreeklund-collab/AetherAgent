@@ -8,7 +8,26 @@
     var css=document.createElement('style');
     css.id='slaash-shared-css';
     css.textContent=`
-.crab-track{overflow:visible;height:64px;position:relative;margin-bottom:-1px}
+.crab-track{overflow:hidden;height:64px;position:relative;margin-bottom:-1px;background:var(--bg,#0a0a0a)}
+/* Parallax landscape layers behind the crab */
+.landscape{position:absolute;bottom:0;left:0;width:200%;height:100%;pointer-events:none}
+.mountains{position:absolute;bottom:8px;left:0;width:200%;height:30px;animation:scrollSlow 40s linear infinite}
+.mountains::before,.mountains::after{content:'';position:absolute;bottom:0;width:100%}
+.mountains::before{height:100%;background:
+  conic-gradient(from 220deg at 10% 100%,transparent 40%,rgba(255,255,255,0.02) 41%,rgba(255,255,255,0.02) 50%,transparent 51%) 0 0/120px 30px repeat-x,
+  conic-gradient(from 215deg at 30% 100%,transparent 38%,rgba(255,255,255,0.015) 39%,rgba(255,255,255,0.015) 50%,transparent 51%) 60px 0/180px 25px repeat-x}
+.mountains::after{height:20px;background:
+  conic-gradient(from 218deg at 15% 100%,transparent 40%,rgba(255,255,255,0.025) 41%,rgba(255,255,255,0.025) 50%,transparent 51%) 40px 0/100px 20px repeat-x}
+.hills{position:absolute;bottom:2px;left:0;width:200%;height:18px;animation:scrollMed 25s linear infinite}
+.hills::before{content:'';position:absolute;bottom:0;width:100%;height:100%;background:radial-gradient(ellipse 50px 14px at 25px 100%,rgba(255,255,255,0.02) 0%,transparent 100%) 0 0/60px 14px repeat-x}
+.trees{position:absolute;bottom:0;left:0;width:200%;height:24px;animation:scrollFast 18s linear infinite}
+.trees::before{content:'';position:absolute;bottom:2px;width:100%;height:100%;background:
+  radial-gradient(ellipse 3px 8px at 50% 2px,rgba(59,130,246,0.04) 0%,transparent 100%) 0 0/35px 12px repeat-x,
+  radial-gradient(ellipse 2px 6px at 50% 4px,rgba(59,130,246,0.03) 0%,transparent 100%) 18px 2px/45px 10px repeat-x}
+.ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.04)}
+@keyframes scrollSlow{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@keyframes scrollMed{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@keyframes scrollFast{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
@@ -62,6 +81,10 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   if(footerSlot){
     footerSlot.outerHTML = `
 <div class="crab-track">
+  <div class="mountains"></div>
+  <div class="hills"></div>
+  <div class="trees"></div>
+  <div class="ground-line"></div>
   <svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
     <g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g>
@@ -102,7 +125,13 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   // If crab-track exists but has no ferris SVG, inject it
   var track = document.querySelector('.crab-track');
   if(track && !document.getElementById('ferris')){
-    track.innerHTML = '<svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
+    // Inject landscape + crab
+    if(!track.querySelector('.mountains')){
+      var landscape='<div class="mountains"></div><div class="hills"></div><div class="trees"></div><div class="ground-line"></div>';
+      track.insertAdjacentHTML('afterbegin',landscape);
+    }
+    var crabSvg='<svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
+    track.insertAdjacentHTML('beforeend',crabSvg);
   }
   var el=document.getElementById('ferris');
   if(!el)return;
