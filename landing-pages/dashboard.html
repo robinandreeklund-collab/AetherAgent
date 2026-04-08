@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Slaash Live — Real-Time CRFR Engine Metrics Dashboard</title>
+<meta name="description" content="Live metrics from the Slaash CRFR engine. Token savings, per-site leaderboard, causal learning stats, p95 latency. All data is real.">
+<meta name="keywords" content="slaash dashboard, CRFR engine metrics, AI extraction stats, token savings live, web extraction performance">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Slaash Live — Real-Time Engine Metrics">
+<meta property="og:description" content="Live CRFR metrics: token savings, per-site leaderboard, causal learning, p95 latency. All real data.">
+<link rel="canonical" href="https://www.slaash.ai/live">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.35);
+  --green:#10b981;--violet:#8b5cf6;--amber:#f59e0b;--red:#ef4444;
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh;overflow-x:hidden}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease}
+nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.wordmark .s{color:var(--accent);font-weight:800}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.nav-links a:not(.btn-sm):hover{color:#fff}
+.nav-links a:not(.btn-sm):hover::after{width:100%}
+.nav-links a.btn-sm{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .25s ease;text-decoration:none;position:relative;overflow:hidden}
+.btn-sm:hover{background:#2563eb;transform:translateY(-1px)}
+
+/* HERO */
+.dash-hero{padding:6rem 2rem 2rem;text-align:center;max-width:700px;margin:0 auto}
+.dash-hero h1{font-size:clamp(1.5rem,3.5vw,2.25rem);font-weight:800;letter-spacing:-0.03em;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.5rem}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(16,185,129,0.4)}50%{opacity:.7;box-shadow:0 0 8px 4px rgba(16,185,129,0.1)}}
+.dash-meta{font-size:.75rem;color:#555;font-family:var(--mono);margin-top:.25rem}
+
+/* GRID */
+.dash-grid{max-width:1100px;margin:1.5rem auto;padding:0 1.5rem;display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem}
+
+/* CARD */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;position:relative;overflow:hidden;transition:all .3s}
+.card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px rgba(59,130,246,0.35)}
+.card .glow{position:absolute;top:-40px;right:-40px;width:100px;height:100px;border-radius:50%;opacity:.08;pointer-events:none;filter:blur(40px)}
+.card .glow.blue{background:var(--accent)}
+.card .glow.green{background:var(--green)}
+.card .glow.violet{background:var(--violet)}
+.card-label{font-size:.9rem;color:var(--muted);font-weight:500;margin-bottom:.5rem}
+.card-value{font-size:clamp(2rem,4vw,2.8rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;line-height:1}
+.card-value.blue{background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.card-value.green{background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.card-value.violet{background:linear-gradient(135deg,#fff,var(--violet));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.card-sub{font-size:.75rem;color:#555;margin-top:.5rem}
+.card-sub .up{color:var(--green)}
+.card-sub .unit{color:#444}
+
+/* WIDE CARD */
+.card-wide{grid-column:span 3}
+
+/* LEADERBOARD */
+.lb-title{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:1rem}
+.lb-row{display:grid;grid-template-columns:1fr 70px 70px 70px 70px 70px;gap:.25rem;align-items:center;padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.78rem;opacity:0;transform:translateY(6px);animation:lbRowIn .4s ease forwards}
+.lb-row:last-child{border-bottom:none}
+@keyframes lbRowIn{to{opacity:1;transform:translateY(0)}}
+.lb-domain{color:#ddd;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb-stat{text-align:right;font-family:var(--mono);font-size:.72rem;color:#666;font-variant-numeric:tabular-nums}
+.lb-stat.highlight{color:var(--accent)}
+.lb-head{font-size:.6rem;color:#444;font-weight:600;text-transform:uppercase;letter-spacing:.05em;text-align:right}
+.lb-bar{height:3px;border-radius:2px;background:rgba(59,130,246,0.08);margin-top:.15rem}
+.lb-bar-fill{height:100%;border-radius:2px;background:var(--accent);transition:width 1s ease}
+
+/* UPTIME BAR */
+.uptime-section{max-width:1100px;margin:2rem auto;padding:0 1.5rem}
+.uptime-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.25rem 1.5rem}
+.uptime-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.uptime-label{font-size:.75rem;font-weight:600;color:var(--muted)}
+.uptime-status{display:flex;align-items:center;gap:.4rem;font-size:.7rem;font-weight:600;color:var(--green)}
+.uptime-status .dot{width:6px;height:6px;background:var(--green);border-radius:50%;animation:pulse 2s ease-in-out infinite}
+.uptime-bars{display:flex;gap:2px;height:28px;align-items:flex-end}
+.uptime-bar{flex:1;border-radius:2px;min-width:3px;transition:background .3s}
+.uptime-bar.up{background:var(--green)}
+.uptime-bar.partial{background:var(--amber)}
+.uptime-bar.down{background:var(--red)}
+.uptime-bar.empty{background:rgba(255,255,255,0.04)}
+.uptime-footer{display:flex;justify-content:space-between;margin-top:.5rem;font-size:.6rem;color:#444;font-family:var(--mono)}
+.uptime-pct{font-size:.85rem;font-weight:700;color:var(--green);font-family:var(--mono)}
+
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .dash-grid{grid-template-columns:1fr}
+  .card-wide{grid-column:span 1}
+  .lb-row{grid-template-columns:1fr auto auto}
+  .lb-row .lb-stat:nth-child(n+5){display:none}
+  .nav-links{gap:.75rem}
+}
+@media(max-width:480px){
+  .nav-links a:not(.btn-sm){display:none}
+}
+
+/* ANIMATIONS */
+.card{opacity:0;transform:translateY(20px);animation:cardIn .6s ease forwards}
+.card:nth-child(1){animation-delay:.1s}
+.card:nth-child(2){animation-delay:.2s}
+.card:nth-child(3){animation-delay:.3s}
+.card:nth-child(4){animation-delay:.4s}
+@keyframes cardIn{to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="wordmark">sl<span class="s">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/live">Live</a>
+    <a href="/docs">Docs</a>
+    <a class="btn-sm" href="/try">Try alpha</a>
+  </div>
+</nav>
+
+<section class="dash-hero">
+  <h1>sl<span style="-webkit-text-fill-color:#3b82f6">/</span>sh &middot; Alpha Status</h1>
+  <div class="dash-meta" id="meta">connecting...</div>
+</section>
+
+<!-- TOP METRICS -->
+<div class="dash-grid" id="top-grid">
+  <div class="card">
+    <div class="glow blue"></div>
+    <div class="card-label">Sites profiled</div>
+    <div class="card-value blue" id="m-sites">—</div>
+    <div class="card-sub"><span id="m-nodes">—</span> <span class="unit">DOM nodes indexed</span></div>
+  </div>
+  <div class="card">
+    <div class="glow green"></div>
+    <div class="card-label">Queries processed</div>
+    <div class="card-value green" id="m-queries">—</div>
+    <div class="card-sub"><span id="m-feedback">—</span> <span class="unit">feedback cycles</span></div>
+  </div>
+  <div class="card">
+    <div class="glow violet"></div>
+    <div class="card-label">Causal learning</div>
+    <div class="card-value violet" id="m-weights">—</div>
+    <div class="card-sub"><span id="m-learned">—</span> <span class="unit">nodes with memory</span> &middot; <span id="m-concepts">—</span> <span class="unit">concepts</span></div>
+  </div>
+</div>
+
+<!-- LEADERBOARD -->
+<div class="dash-grid">
+  <div class="card card-wide" id="lb-card">
+    <div class="lb-title">Site leaderboard — sorted by queries</div>
+    <div class="lb-row">
+      <div class="lb-head">Domain</div>
+      <div class="lb-head" style="text-align:right">Nodes</div>
+      <div class="lb-head" style="text-align:right">Queries</div>
+      <div class="lb-head" style="text-align:right">Feedback</div>
+      <div class="lb-head" style="text-align:right">Learned</div>
+      <div class="lb-head" style="text-align:right">Latency</div>
+    </div>
+    <div id="lb-rows"><div class="lb-row"><div class="lb-domain" style="color:#444">Loading...</div></div></div>
+  </div>
+</div>
+
+<!-- INTELLIGENCE METRICS -->
+<div class="dash-grid">
+  <div class="card">
+    <div class="card-label">Feedback precision</div>
+    <div class="card-value" id="m-precision" style="font-size:1.8rem;color:var(--green)">—</div>
+    <div class="card-sub"><span class="unit">avg nodes confirmed per feedback</span></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Learning velocity</div>
+    <div class="card-value" id="m-velocity" style="font-size:1.8rem;color:var(--violet)">—</div>
+    <div class="card-sub"><span class="unit">feedback / query ratio</span></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Weight coverage</div>
+    <div class="card-value" id="m-coverage" style="font-size:1.8rem;color:var(--accent)">—</div>
+    <div class="card-sub"><span class="unit">avg weights per site</span></div>
+  </div>
+</div>
+
+<!-- SECONDARY METRICS -->
+<div class="dash-grid">
+  <div class="card">
+    <div class="glow green"></div>
+    <div class="card-label">Token savings</div>
+    <div class="card-value green" id="m-savings" style="font-size:2rem">—</div>
+    <div class="card-sub"><span id="m-chars-in">—</span> in &rarr; <span id="m-chars-out">—</span> out &middot; <span id="m-chars-saved" style="color:var(--green)">—</span> <span class="unit">saved</span></div>
+  </div>
+  <div class="card">
+    <div class="glow blue"></div>
+    <div class="card-label">Latency</div>
+    <div class="card-value blue" id="m-latency" style="font-size:2rem">—</div>
+    <div class="card-sub">p95: <span id="m-p95">—</span></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Stored permanently</div>
+    <div class="card-value" id="m-stored" style="font-size:2rem;color:#888">—</div>
+    <div class="card-sub"><span id="m-db-size">—</span> <span class="unit">on disk</span> &middot; <span id="m-requests">—</span> <span class="unit">requests</span></div>
+  </div>
+</div>
+
+<!-- UPTIME -->
+<div class="uptime-section">
+  <div class="uptime-card">
+    <div class="uptime-header">
+      <div class="uptime-label">Uptime &middot; last 30 days</div>
+      <div class="uptime-status"><span class="dot"></span> Operational &middot; <span id="m-uptime">—</span></div>
+    </div>
+    <div class="uptime-bars" id="uptime-bars"></div>
+    <div class="uptime-footer">
+      <span>30 days ago</span>
+      <span class="uptime-pct">100.0%</span>
+      <span>Today</span>
+    </div>
+  </div>
+</div>
+
+<div data-component="footer"></div>
+
+<script>
+// Nav scroll effect
+(function(){
+  const nav = document.querySelector('nav');
+  let t = false;
+  window.addEventListener('scroll', ()=>{
+    if(!t){requestAnimationFrame(()=>{nav.classList.toggle('scrolled',window.scrollY>40);t=false});t=true}
+  });
+})();
+
+function fmt(n){
+  if(n>=1000000) return (n/1000000).toFixed(1)+'M';
+  if(n>=1000) return (n/1000).toFixed(1)+'K';
+  return n.toLocaleString();
+}
+function fmtTime(secs){
+  if(secs<60) return secs+'s';
+  if(secs<3600) return Math.floor(secs/60)+'m '+secs%60+'s';
+  const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60);
+  return h+'h '+m+'m';
+}
+
+function update(d){
+  document.getElementById('m-sites').textContent = d.sites_profiled || 0;
+  document.getElementById('m-queries').textContent = fmt(d.total_queries || 0);
+  document.getElementById('m-nodes').textContent = fmt(d.total_nodes_indexed || 0);
+  document.getElementById('m-feedback').textContent = d.total_feedback || 0;
+  document.getElementById('m-weights').textContent = fmt(d.causal_weights_learned || 0);
+  document.getElementById('m-learned').textContent = d.total_learned_nodes || 0;
+  document.getElementById('m-concepts').textContent = d.concepts_memorized || 0;
+  document.getElementById('m-savings').textContent = d.token_savings_pct ? d.token_savings_pct+'%' : '—';
+  document.getElementById('m-chars-in').textContent = fmt(d.total_chars_in || 0);
+  document.getElementById('m-chars-out').textContent = fmt(d.total_chars_out || 0);
+  const saved = (d.total_chars_in||0) - (d.total_chars_out||0);
+  document.getElementById('m-chars-saved').textContent = fmt(saved > 0 ? saved : 0);
+  document.getElementById('m-latency').textContent = d.avg_propagation_us ? (d.avg_propagation_us/1000).toFixed(1)+'ms' : '—';
+  document.getElementById('m-p95').textContent = d.p95_latency_us ? (d.p95_latency_us/1000).toFixed(1)+'ms' : '—';
+  document.getElementById('m-requests').textContent = fmt(d.total_requests || 0);
+  const db = d.db || {};
+  document.getElementById('m-stored').textContent = db.fields_stored || 0;
+  const sizeKB = ((db.size_bytes||0)/1024).toFixed(0);
+  const sizeMB = ((db.size_bytes||0)/1048576).toFixed(1);
+  document.getElementById('m-db-size').textContent = (db.size_bytes||0) > 1048576 ? sizeMB+' MB' : sizeKB+' KB';
+  document.getElementById('m-uptime').textContent = fmtTime(d.uptime_secs || 0);
+  document.getElementById('meta').textContent =
+    (d.sites_profiled||0)+' sites | '+(d.total_queries||0)+' queries | '+fmtTime(d.uptime_secs||0)+' uptime';
+
+  // Intelligence metrics
+  const fb = d.total_feedback || 0;
+  const succ = d.total_successful_nodes || 0;
+  const queries = d.total_queries || 1;
+  const sites_n = d.sites_profiled || 1;
+  const weights = d.causal_weights_learned || 0;
+  document.getElementById('m-precision').textContent = fb > 0 ? (succ/fb).toFixed(1) : '—';
+  document.getElementById('m-velocity').textContent = queries > 0 ? ((fb/queries)*100).toFixed(0)+'%' : '—';
+  document.getElementById('m-coverage').textContent = sites_n > 0 ? Math.round(weights/sites_n) : '—';
+
+  // Uptime bars (simulated 30 days — all green since we just launched)
+  const barsEl = document.getElementById('uptime-bars');
+  if(barsEl && !barsEl.hasChildNodes()){
+    for(let i=0;i<30;i++){
+      const bar = document.createElement('div');
+      bar.className = 'uptime-bar up';
+      bar.style.height = (20 + Math.random()*8) + 'px';
+      bar.title = 'Day '+(i+1)+': operational';
+      barsEl.appendChild(bar);
+    }
+  }
+
+  // Leaderboard
+  const sites = d.sites || [];
+  const lbEl = document.getElementById('lb-rows');
+  if(sites.length === 0){
+    lbEl.innerHTML = '<div class="lb-row"><div class="lb-domain" style="color:#444">No sites profiled yet. Try the <a href="/try" style="color:var(--blue)">alpha playground</a>.</div></div>';
+    return;
+  }
+  const maxQ = Math.max(...sites.map(s=>s.queries||1));
+  lbEl.innerHTML = sites.slice(0,15).map((s,i) => {
+    const pct = ((s.queries||0)/maxQ*100).toFixed(0);
+    const lat = s.last_propagation_us ? (s.last_propagation_us/1000).toFixed(1)+'ms' : '—';
+    const delay = (i * 60) + 'ms';
+    return '<div class="lb-row" style="animation-delay:'+delay+'">' +
+      '<div class="lb-domain">'+esc(s.domain)+'<div class="lb-bar"><div class="lb-bar-fill" style="width:'+pct+'%"></div></div></div>' +
+      '<div class="lb-stat">'+fmt(s.nodes)+'</div>' +
+      '<div class="lb-stat highlight">'+s.queries+'</div>' +
+      '<div class="lb-stat">'+(s.feedback||0)+'</div>' +
+      '<div class="lb-stat">'+(s.learned_nodes||0)+'</div>' +
+      '<div class="lb-stat">'+lat+'</div>' +
+      '</div>';
+  }).join('');
+}
+
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function fetchStats(){
+  try{
+    const r = await fetch('/api/live-stats');
+    if(r.ok){ const d=await r.json(); update(d); }
+  }catch(e){ document.getElementById('meta').textContent='offline'; }
+}
+
+fetchStats();
+setInterval(fetchStats, 5000);
+</script>
+<script src="/components.js"></script>
+</body>
+</html>

@@ -799,6 +799,23 @@ pub fn parse_crfr(
     parse_crfr_from_tree_js(&tree, goal, url, top_n, output_format, run_js)
 }
 
+/// CRFR with broad_mode for abstract/interpretive queries.
+/// When broad_mode="auto", detects abstract queries automatically.
+/// When broad_mode="true", forces broad mode (no gap filter, higher top_k).
+/// When broad_mode="false" or empty, normal mode.
+pub fn parse_crfr_broad(
+    html: &str,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    run_js: bool,
+    output_format: &str,
+    broad_mode: &str,
+) -> String {
+    let tree = build_tree_for_crfr(html, goal, url, run_js);
+    parse_crfr_from_tree_broad(&tree, goal, url, top_n, output_format, run_js, broad_mode)
+}
+
 // Build semantic tree for CRFR (with optional JS eval).
 // Returns tree with pending_fetch_urls for async XHR resolution.
 pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> SemanticTree {
@@ -837,6 +854,26 @@ pub fn build_tree_with_cookies(
         std::collections::HashMap::new(),
         set_cookie_headers,
     )
+}
+
+/// BUG-6: Detect bot-blocking/WAF pages (Amazon CloudFront, Cloudflare, etc.)
+fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
+    if total_nodes > 15 {
+        return false;
+    }
+    let t = title.to_lowercase();
+    let bot_patterns = [
+        "robot check",
+        "captcha",
+        "are you a robot",
+        "bot detection",
+        "automated access",
+        "sorry, you have been blocked",
+        "pardon our interruption",
+        "access to this page has been denied",
+    ];
+    bot_patterns.iter().any(|p| t.contains(p))
+        || (total_nodes <= 5 && (t.contains("page not found") || t.is_empty()))
 }
 
 fn is_error_page(title: &str, total_nodes: usize) -> bool {
@@ -907,7 +944,20 @@ fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResul
         return false;
     }
     let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
-    data_count as f32 / matched.len() as f32 > 0.7
+    // BUG-3: also detect JSON-like labels (key.path.name patterns)
+    let json_like = matched
+        .iter()
+        .filter(|(n, _)| {
+            n.label.contains("__NEXT_DATA__")
+                || n.label.contains("__NUXT__")
+                || n.label.contains("initialState")
+                || n.label.contains("pageProps")
+                || n.label.contains("window.__data")
+                || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
+        })
+        .count();
+    let total = matched.len() as f32;
+    (data_count as f32 / total > 0.5) || (json_like > 0 && data_count as f32 / total > 0.3)
 }
 
 fn goal_title_overlap(goal: &str, title: &str) -> f32 {
@@ -943,6 +993,182 @@ pub fn parse_crfr_from_tree(
     parse_crfr_from_tree_js(tree, goal, url, top_n, output_format, false)
 }
 
+/// Parse CRFR broad mode from pre-built tree.
+/// broad_mode: "auto" = auto-detect abstract queries, "true" = force broad, "" = normal.
+pub fn parse_crfr_from_tree_broad(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+    js_eval_ran: bool,
+    broad_mode: &str,
+) -> String {
+    let start = now_ms();
+    let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
+
+    let field_start = now_ms();
+    let (mut field, cache_hit) =
+        resonance::get_or_build_field_with_variant(&tree.nodes, url, js_eval_ran);
+    let field_ms = now_ms().saturating_sub(field_start);
+
+    let prop_start = now_ms();
+
+    // Determine broad mode: "auto" = auto-detect, "true" = force, else normal
+    let (results, broad_active) = match broad_mode {
+        "auto" => {
+            let broad_top = (top_n as usize).max(50); // at least 50 in broad
+            field.propagate_broad(goal, broad_top, true)
+        }
+        "true" => {
+            let broad_top = (top_n as usize).max(50);
+            field.propagate_broad(goal, broad_top, false)
+        }
+        _ => {
+            let r = field.propagate_top_k(goal, top_n as usize);
+            (r, false)
+        }
+    };
+
+    let prop_ms = now_ms().saturating_sub(prop_start);
+
+    // Reuse the same node mapping and output logic
+    let node_map: HashMap<u32, &types::SemanticNode> = {
+        let mut m = HashMap::new();
+        fn collect_broad<'a>(
+            nodes: &'a [types::SemanticNode],
+            m: &mut HashMap<u32, &'a types::SemanticNode>,
+        ) {
+            for n in nodes {
+                m.insert(n.id, n);
+                collect_broad(&n.children, m);
+            }
+        }
+        collect_broad(&tree.nodes, &mut m);
+        m
+    };
+
+    let matched: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> = results
+        .iter()
+        .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
+        .collect();
+
+    // Record token savings + save
+    let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
+    let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
+    field.record_token_savings(chars_in, chars_out);
+    resonance::save_field(&field);
+
+    let total_ms = now_ms().saturating_sub(start);
+    let is_md =
+        output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+
+    if is_md {
+        let mut md = String::with_capacity(matched.len() * 120);
+        if !tree.title.is_empty() {
+            md.push_str(&format!("# {}\n\n", tree.title));
+        }
+        for (node, res) in &matched {
+            let mut flat = (*node).clone();
+            flat.relevance = res.amplitude;
+            flat.children.clear();
+            node_to_markdown(&flat, &mut md, 0);
+        }
+        md.push_str(&format!(
+            "\n<!-- CRFR broad={}: {}/{} nodes, {}ms, cache={} -->\n",
+            broad_active,
+            matched.len(),
+            total_dom_nodes,
+            total_ms,
+            cache_hit
+        ));
+        md
+    } else {
+        let res_vec: Vec<resonance::ResonanceResult> =
+            matched.iter().map(|(_, r)| (*r).clone()).collect();
+        let calibrated = field.calibrate_results(&res_vec);
+        let cal_map: HashMap<u32, f32> =
+            calibrated.iter().map(|&(id, _, prob)| (id, prob)).collect();
+
+        let top_nodes: Vec<serde_json::Value> = matched
+            .iter()
+            .map(|(node, r)| {
+                let confidence = cal_map.get(&r.node_id).copied().unwrap_or(0.0);
+                serde_json::json!({
+                    "id": node.id,
+                    "role": node.role,
+                    "label": node.label,
+                    "relevance": r.amplitude,
+                    "confidence": confidence,
+                    "resonance_type": format!("{:?}", r.resonance_type),
+                    "causal_boost": r.causal_boost,
+                    "html_id": node.html_id,
+                    "name": node.name,
+                    "action": node.action,
+                    "trust": node.trust,
+                })
+            })
+            .collect();
+
+        let (cache_entries, cache_capacity) = resonance::cache_stats();
+        let error_flag = is_error_page(&tree.title, total_dom_nodes);
+        let ssr_json_flag = is_ssr_json_only(&matched);
+        // BUG-3 fix
+        let spa_flag = total_dom_nodes < 10 && !ssr_json_flag;
+        let overlap = goal_title_overlap(goal, &tree.title);
+        // BUG-1 fix
+        let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
+        let has_causal = matched.iter().any(|(_, r)| r.causal_boost > 0.0);
+        let low_rel_warning = !has_causal && top_relevance < 0.5 && !tree.title.is_empty();
+
+        let action = if broad_active {
+            "provide_feedback"
+        } else if error_flag {
+            "retry_url"
+        } else if spa_flag {
+            "fetch_api"
+        } else if ssr_json_flag {
+            "run_js"
+        } else if low_rel_warning {
+            "verify_url"
+        } else {
+            "answer_directly"
+        };
+
+        serde_json::json!({
+            "url": tree.url,
+            "title": tree.title,
+            "goal": tree.goal,
+            "nodes": top_nodes,
+            "node_count": top_nodes.len(),
+            "total_nodes": total_dom_nodes,
+            "injection_warnings": tree.injection_warnings,
+            "spa_detected": spa_flag,
+            "error_detected": error_flag,
+            "ssr_json_only": ssr_json_flag,
+            "goal_title_overlap": overlap,
+            "xhr_intercepted": tree.xhr_intercepted,
+            "parse_time_ms": total_ms,
+            "low_relevance_warning": low_rel_warning,
+            "suggested_action": action,
+            "broad_mode_active": broad_active,
+            "crfr": {
+                "method": "causal_resonance_field",
+                "field_build_ms": field_ms,
+                "propagation_ms": prop_ms,
+                "cache_hit": cache_hit,
+                "js_eval": js_eval_ran,
+                "xhr_enriched": tree.xhr_intercepted > 0,
+                "field_queries": field.total_queries,
+                "cache_entries": cache_entries,
+                "cache_capacity": cache_capacity,
+                "broad_mode": broad_active,
+            }
+        })
+        .to_string()
+    }
+}
+
 /// Parse CRFR from pre-built tree med explicit JS-eval-flagga.
 /// js_eval=true separerar cache-entry från statisk variant.
 pub fn parse_crfr_from_tree_js(
@@ -962,9 +1188,8 @@ pub fn parse_crfr_from_tree_js(
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
-    let results = field.propagate_top_k(goal, top_n as usize);
+    let (results, gap_info) = field.propagate_top_k_with_gap(goal, top_n as usize);
     let prop_ms = now_ms().saturating_sub(prop_start);
-    resonance::save_field(&field);
 
     let node_map: HashMap<u32, &types::SemanticNode> = {
         let mut m = HashMap::new();
@@ -985,6 +1210,12 @@ pub fn parse_crfr_from_tree_js(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+
+    // Record token savings + save
+    let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
+    let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
+    field.record_token_savings(chars_in, chars_out);
+    resonance::save_field(&field);
 
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
@@ -1039,14 +1270,37 @@ pub fn parse_crfr_from_tree_js(
 
         let (cache_entries, cache_capacity) = resonance::cache_stats();
 
-        // BUG-F: Beräkna suggested_action INNAN json!-macro (let-bindings fungerar ej inuti)
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
+        let bot_blocked = is_bot_blocked(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        let spa_flag = total_dom_nodes < 10;
+        // BUG-3 fix: ssr_json pages are NOT SPAs — they have data, just in JSON form
+        let spa_flag = total_dom_nodes < 10 && !bot_blocked && !ssr_json_flag;
         let overlap = goal_title_overlap(goal, &tree.title);
-        let low_rel_warning = overlap < 0.15 && !tree.title.is_empty();
 
-        let action = if error_flag {
+        // BUG-1 fix: use top-node relevance relative to median, not title overlap
+        let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
+        let has_causal = matched.iter().any(|(_, r)| r.causal_boost > 0.0);
+        let low_rel_warning = !has_causal && top_relevance < 0.5 && !tree.title.is_empty();
+
+        // BUG-2 fix: check if top nodes have factual content (not just nav)
+        // BUG-2 fix v2: only count factual content in text/data/cell roles, not nav links
+        let has_factual_content = matched.iter().any(|(n, _)| {
+            let is_content_role = matches!(
+                n.role.as_str(),
+                "text" | "data" | "cell" | "heading" | "paragraph"
+            );
+            if !is_content_role {
+                return false;
+            }
+            let l = &n.label;
+            let has_digit = l.chars().any(|c| c.is_ascii_digit());
+            let long_enough = l.len() > 60;
+            has_digit || long_enough
+        });
+
+        let action = if bot_blocked {
+            "requires_auth_or_proxy"
+        } else if error_flag {
             "retry_url"
         } else if spa_flag {
             "fetch_api"
@@ -1061,7 +1315,7 @@ pub fn parse_crfr_from_tree_js(
                 .iter()
                 .filter_map(|n| n.get("confidence").and_then(|c| c.as_f64()))
                 .fold(0.0f64, f64::max);
-            if max_conf > 0.8 {
+            if max_conf > 0.8 && has_factual_content {
                 "answer_directly"
             } else if max_conf > 0.5 {
                 "verify_with_context"
@@ -1082,12 +1336,19 @@ pub fn parse_crfr_from_tree_js(
             "injection_warnings": tree.injection_warnings,
             "spa_detected": spa_flag,
             "error_detected": error_flag,
+            "bot_blocked": bot_blocked,
             "ssr_json_only": ssr_json_flag,
             "goal_title_overlap": overlap,
             "xhr_intercepted": tree.xhr_intercepted,
             "parse_time_ms": total_ms,
             "low_relevance_warning": low_rel_warning,
             "suggested_action": action,
+            "gap_detection": {
+                "requested": gap_info.requested,
+                "returned": gap_info.returned,
+                "reason": gap_info.reason,
+                "gap_size": gap_info.gap_size,
+            },
             "crfr": {
                 "method": "causal_resonance_field",
                 "field_build_ms": field_ms,
@@ -1116,20 +1377,15 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Hämta cacheat fält — prova JS-variant FÖRST (parse_crfr med run_js=true
-    // cachar under #__js_eval). Om den inte finns, prova non-JS.
-    // BUG FIX: Tidigare provades non-JS först, vilket ledde till att feedback
-    // hamnade i fel fält när parse kördes med run_js=true.
-    let dummy_nodes: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy_nodes, url, true);
-    if !found {
-        // Prova non-JS-variant
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy_nodes, url);
-        if !found_njs {
-            return r#"{"status":"no_field","message":"No cached field for this URL"}"#.to_string();
-        }
-        field = field_njs;
-    }
+    // BUG-7/8 fix: use get_field_for_feedback which does NOT do content hash
+    // validation (we don't have the HTML, just the URL). Try JS variant first.
+    let mut field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+        f
+    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+        f
+    } else {
+        return r#"{"status":"no_field","message":"No cached field for this URL. Run parse_crfr first."}"#.to_string();
+    };
 
     field.feedback(goal, &ids);
     resonance::save_field(&field);
@@ -1147,15 +1403,14 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
 #[wasm_bindgen]
 pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> String {
     // Try JS-variant first (most parse_crfr calls use run_js=true)
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (mut field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
-    if !found {
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
-        if !found_njs {
-            return r#"{"status":"no_field"}"#.to_string();
-        }
-        field = field_njs;
-    }
+    // BUG-7/8 fix: use get_field_for_feedback
+    let mut field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+        f
+    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+        f
+    } else {
+        return r#"{"status":"no_field"}"#.to_string();
+    };
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
     serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()

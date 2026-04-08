@@ -107,6 +107,11 @@ pub fn init(db_path: &str) -> Result<(), String> {
 
             CREATE INDEX IF NOT EXISTS idx_fields_updated ON resonance_fields(updated_at);
             CREATE INDEX IF NOT EXISTS idx_domains_updated ON domain_profiles(updated_at);
+
+            CREATE TABLE IF NOT EXISTS global_stats (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
             ",
         )
         .map_err(|e| format!("SQLite schema: {e}"))?;
@@ -126,22 +131,33 @@ pub fn is_initialized() -> bool {
 pub fn save_field(field: &ResonanceField) {
     let pool = match DB.lock() {
         Ok(p) => p,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[PERSIST] save_field lock error: {e}");
+            return;
+        }
     };
     let conn = match pool.writer.as_ref() {
         Some(c) => c,
-        None => return,
+        None => {
+            eprintln!("[PERSIST] save_field: no writer connection");
+            return;
+        }
     };
 
     let data = match serde_json::to_vec(field) {
         Ok(d) => d,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[PERSIST] save_field serialize error: {e}");
+            return;
+        }
     };
 
-    let _ = conn.execute(
+    if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO resonance_fields (url_hash, url, data, updated_at) VALUES (?1, ?2, ?3, ?4)",
         params![field.url_hash as i64, field.url, data, now_ms() as i64],
-    );
+    ) {
+        eprintln!("[PERSIST] save_field write error: {e}");
+    }
 }
 
 /// Load a resonance field by URL hash (uses reader connection from pool).
@@ -173,11 +189,15 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         None => return vec![],
     };
 
-    let mut stmt =
-        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 64") {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
+    let mut stmt = match conn
+        .prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256")
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[PERSIST] load_all_fields prepare error: {e}");
+            return vec![];
+        }
+    };
 
     let rows = match stmt.query_map([], |row| {
         let data: Vec<u8> = row.get(0)?;
@@ -187,9 +207,28 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         Err(_) => return vec![],
     };
 
-    rows.filter_map(|r| r.ok())
-        .filter_map(|data| serde_json::from_slice(&data).ok())
-        .collect()
+    let mut loaded = 0;
+    let mut failed = 0;
+    let result: Vec<ResonanceField> = rows
+        .filter_map(|r| r.ok())
+        .filter_map(|data| match serde_json::from_slice(&data) {
+            Ok(field) => {
+                loaded += 1;
+                Some(field)
+            }
+            Err(e) => {
+                failed += 1;
+                if failed <= 3 {
+                    eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+                }
+                None
+            }
+        })
+        .collect();
+    if failed > 0 {
+        eprintln!("[PERSIST] load_all_fields: {loaded} loaded, {failed} failed deserialization");
+    }
+    result
 }
 
 /// Delete old fields (older than max_age_ms).
@@ -448,12 +487,13 @@ pub fn checkpoint() {
         save_domain_profile(*hash, profile);
     }
 
-    // Spara alla cachade resonance fields
-    let fields = crate::resonance::list_cached_fields();
-    // Vi behöver hela fältet, inte bara summary — använd en ny export-funktion
-    // (fields laddas redan i minnet via FIELD_CACHE)
+    // Spara alla cachade resonance fields (full data)
+    let fields = crate::resonance::export_cached_fields();
+    for field in &fields {
+        save_field(field);
+    }
     eprintln!(
-        "[PERSIST] Checkpoint: {} domain profiles, {} field summaries saved",
+        "[PERSIST] Checkpoint: {} domain profiles, {} resonance fields saved",
         profiles.len(),
         fields.len()
     );
@@ -479,6 +519,41 @@ pub fn restore() {
         "[PERSIST] Restored: {} domain profiles, {} resonance fields",
         profile_count, field_count
     );
+}
+
+/// Save a global stat (key-value integer).
+pub fn save_global_stat(key: &str, value: u64) {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO global_stats (key, value) VALUES (?1, ?2)",
+        params![key, value as i64],
+    );
+}
+
+/// Load a global stat.
+pub fn load_global_stat(key: &str) -> u64 {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+        Some(c) => c,
+        None => return 0,
+    };
+    conn.query_row(
+        "SELECT value FROM global_stats WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|v| v as u64)
+    .unwrap_or(0)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -557,6 +632,77 @@ mod tests {
         // Inget att evicta
         let evicted = evict_old_fields(1000);
         assert_eq!(evicted, 0, "Borde evicta 0 från tom DB");
+
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn test_field_survives_save_load_cycle() {
+        use crate::resonance::ResonanceField;
+        use crate::types::SemanticNode;
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("aether_test_persist_survive.db");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(path_str);
+
+        init(path_str).expect("DB init borde lyckas");
+
+        // Build a field with learning
+        let tree = vec![SemanticNode {
+            id: 1,
+            role: "heading".into(),
+            label: "Test headline".into(),
+            ..SemanticNode::default()
+        }];
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://persist-survive.test");
+        let _results = field.propagate_top_k("test headline", 5);
+        field.feedback("test headline", &[1]);
+        assert_eq!(field.total_feedback, 1);
+        assert!(field.total_queries > 0);
+
+        // Save
+        save_field(&field);
+        let (count, _, _) = db_stats();
+        assert_eq!(count, 1, "Should have 1 field in DB");
+
+        // Load — simulates server restart
+        let loaded = load_field(field.url_hash).expect("Should load saved field");
+        assert_eq!(loaded.total_feedback, 1, "Feedback count should survive");
+        assert_eq!(
+            loaded.total_queries, field.total_queries,
+            "Query count should survive"
+        );
+        assert_eq!(loaded.url, field.url, "URL should survive");
+
+        // Verify causal memory survived
+        assert!(
+            loaded.node_has_learning(1),
+            "hit_count should survive save/load"
+        );
+
+        let _ = std::fs::remove_file(path_str);
+    }
+
+    #[test]
+    fn test_global_stats_persist() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("aether_test_persist_global.db");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(path_str);
+
+        init(path_str).expect("DB init borde lyckas");
+
+        save_global_stat("total_requests", 12345);
+        let val = load_global_stat("total_requests");
+        assert_eq!(val, 12345, "Global stat should round-trip");
+
+        save_global_stat("total_requests", 99999);
+        let val2 = load_global_stat("total_requests");
+        assert_eq!(val2, 99999, "Global stat should update");
+
+        let missing = load_global_stat("nonexistent");
+        assert_eq!(missing, 0, "Missing stat should return 0");
 
         let _ = std::fs::remove_file(path_str);
     }

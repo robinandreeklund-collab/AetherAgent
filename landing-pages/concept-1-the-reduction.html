@@ -3,9 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Slaash — The web, distilled.</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Slaash — Distill the web. Slash the tokens.</title>
+<meta name="description" content="Slaash distills web pages to the 1% that answers your question. 99.9% token reduction, sub-millisecond latency, zero GPU. The perception layer for AI agents.">
+<meta name="keywords" content="AI web extraction, token reduction, LLM web browsing, AI agent tools, web scraping AI, semantic extraction, MCP server, prompt injection detection, DOM parsing, Rust browser engine, CRFR, web distillation">
+<meta name="author" content="Slaash">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Slaash — Distill the web. Slash the tokens.">
+<meta property="og:description" content="99.9% token reduction for AI agents. Send a URL and a question, get back only the answer. No GPU, no model files, sub-ms latency.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.slaash.ai">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Slaash — Distill the web. Slash the tokens.">
+<meta name="twitter:description" content="99.9% token reduction for AI agents. The perception layer between the raw web and the LLM.">
+<link rel="canonical" href="https://www.slaash.ai">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -19,13 +32,20 @@ a{color:var(--muted);text-decoration:none;transition:color .2s}
 a:hover{color:var(--text)}
 
 /* NAV */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.7);border-bottom:1px solid var(--border)}
-.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease;transform:translateY(-100%);animation:navSlideIn .6s cubic-bezier(0.16,1,0.3,1) .2s forwards}
+nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}
+@keyframes navSlideIn{to{transform:translateY(0)}}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff;display:flex;align-items:center}
+.wordmark .wm-slash{color:#3b82f6;font-weight:800;display:inline-block}
 .nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
-.nav-links a{color:var(--muted);font-weight:500}
-.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .2s}
+.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.nav-links a:not(.btn-sm):hover{color:#fff}
+.nav-links a:not(.btn-sm):hover::after{width:100%}
+.nav-links a.btn-accent{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .25s ease}
 .btn-accent{background:var(--accent);color:#fff}
-.btn-accent:hover{background:#2563eb;color:#fff;transform:translateY(-1px)}
+.btn-accent:hover{background:#2563eb;color:#fff;transform:translateY(-1px);box-shadow:0 4px 16px rgba(59,130,246,0.3)}
 .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
 .btn-ghost:hover{border-color:rgba(255,255,255,0.25);color:#fff}
 
@@ -33,24 +53,41 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
 .hero-content{position:relative;z-index:2;max-width:720px}
-.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.hero .subtitle{font-size:clamp(1.1rem,2.5vw,1.5rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em}
+.hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;animation:heroFadeUp .8s ease .3s forwards}
+.hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap;opacity:0;animation:heroFadeUp .8s ease .6s forwards}
+.hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;opacity:0;animation:heroFadeUp .8s ease .9s forwards}
+@keyframes heroFadeUp{to{opacity:1;transform:translateY(0)}}
+.hero h1,.hero .subtitle,.hero-ctas{transform:translateY(20px)}
+/* HERO SLASH — static blue / */
+.hero h1 .slash{-webkit-text-fill-color:#3b82f6}
+/* LIQUID WEB — SVG displacement on isolated layer */
+.liquid{display:inline-block;position:relative;filter:url(#liquid);-webkit-text-fill-color:transparent;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text}
 .hero .subtitle span{color:#fff;font-weight:600}
-.hero-ctas{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap}
+.hero .subtitle .cv{color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
+.hero .subtitle .site{color:#555;font-weight:400;font-size:.75em;display:block;margin-top:.15rem;transition:color .2s}
+.hero .subtitle .site:hover{color:var(--accent)}
+@media(max-width:600px){.hero .subtitle{white-space:normal;text-align:center}}
+.subtitle-fade-out{animation:subtitleOut .4s ease forwards}
+.subtitle-fade-in{animation:subtitleIn .4s ease forwards}
+@keyframes subtitleOut{to{opacity:0;transform:translateY(-8px)}}
+@keyframes subtitleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .hero-ctas .btn-sm{padding:.75rem 2rem;font-size:.9rem;border-radius:10px}
+
 
 /* METRICS */
 .metrics{padding:6rem 2rem;max-width:1000px;margin:0 auto}
 .metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem}
-.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:transform .3s,border-color .3s}
-.metric-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:all .3s}
+.metric-card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px var(--accent-glow)}
 .metric-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .metric-label{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
 
 /* CODE DEMO */
 .code-section{padding:6rem 2rem;max-width:1100px;margin:0 auto}
 .section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem;text-align:center}
+.section-title em{font-style:normal;-webkit-text-fill-color:transparent;background:linear-gradient(135deg,#3b82f6,#60a5fa);-webkit-background-clip:text}
 .section-sub{color:var(--muted);text-align:center;margin-bottom:3rem;font-size:1.05rem}
+.section-divider{max-width:60px;height:1px;margin:0 auto 6rem;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.4}
 .code-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
 .code-block{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.82rem;line-height:1.7;overflow-x:auto;position:relative}
 .code-block::before{content:attr(data-label);position:absolute;top:.75rem;right:1rem;font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:var(--font)}
@@ -73,14 +110,53 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:fl
 .feature-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem}
 .feature-card p{font-size:.85rem;color:var(--muted);line-height:1.5}
 
-/* CTA FOOTER */
-.cta-section{padding:8rem 2rem;text-align:center}
-.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:1.5rem}
-.cta-section .btn-sm{padding:.85rem 2.5rem;font-size:1rem;border-radius:12px}
-footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
-footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:1rem}
 
-/* SCROLL REVEAL */
+/* CRFR PIPELINE */
+.pipeline{padding:6rem 2rem;max-width:1000px;margin:0 auto}
+.pipeline-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:2rem;font-family:var(--mono);font-size:.78rem;line-height:1.8;overflow:hidden;position:relative}
+.pipeline-terminal::before{content:'sl/sh Pipeline — Live playback';position:absolute;top:0;left:0;right:0;padding:.5rem 1rem;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font)}
+.pipeline-terminal .steps{margin-top:2rem}
+.pipe-step{opacity:0;transform:translateY(12px);transition:opacity .7s cubic-bezier(0.16,1,0.3,1),transform .7s cubic-bezier(0.16,1,0.3,1),border-color .5s ease,box-shadow .5s ease;margin-bottom:1.25rem;padding-left:1rem;border-left:2px solid transparent}
+.pipe-step.visible{opacity:1;transform:translateY(0)}
+.pipe-step.active{border-left-color:#3b82f6;box-shadow:-4px 0 16px rgba(59,130,246,0.12)}
+.pipe-step.done{border-left-color:rgba(59,130,246,0.2)}
+.pipe-result .node{opacity:0;transform:translateY(6px);transition:opacity .5s ease,transform .5s ease}
+.pipe-step.visible .pipe-result .node:nth-child(1){transition-delay:.15s}
+.pipe-step.visible .pipe-result .node:nth-child(2){transition-delay:.3s}
+.pipe-step.visible .pipe-result .node:nth-child(3){transition-delay:.45s}
+.pipe-step.visible .pipe-result .node:nth-child(4){transition-delay:.6s}
+.pipe-step.visible .pipe-result .node{opacity:1;transform:translateY(0)}
+.step-label{color:#3b82f6;font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.25rem}
+.step-data{color:#c9d1d9}
+.step-data .dim{color:#555}
+.step-data .val{color:#79c0ff}
+.step-data .str{color:#a5d6ff}
+.step-data .hi{color:#ffa657}
+.step-data .grn{color:#7ee787}
+.pipe-result{background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:10px;padding:1.25rem;margin-top:.5rem}
+.pipe-result .node{margin-bottom:.75rem;padding-bottom:.75rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+.pipe-result .node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.pipe-result .node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.15rem}
+.pipe-result .node-text{color:#e6edf3;font-size:.8rem;line-height:1.5}
+.pipeline-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:2rem;text-align:center}
+.pipeline-summary .ps-val{font-size:1.1rem;font-weight:700;color:#fff}
+.pipeline-summary .ps-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
+@media(max-width:768px){.pipeline-summary{grid-template-columns:repeat(2,1fr)}}
+
+/* CONTACT */
+.contact-box{max-width:600px;margin:0 auto;padding:0 2rem 5rem;text-align:center}
+.contact-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:3rem 2.5rem;position:relative;overflow:hidden;transition:all .4s cubic-bezier(0.25,0.46,0.45,0.94)}
+.contact-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(59,130,246,0.08) 0%,transparent 60%);opacity:0;transition:opacity .4s ease}
+.contact-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 8px 40px rgba(59,130,246,0.15)}
+.contact-card:hover::before{opacity:1}
+.contact-icon{font-size:1.5rem;margin-bottom:1rem;display:block;opacity:.5;transition:all .4s ease}
+.contact-card:hover .contact-icon{opacity:1;transform:scale(1.1)}
+.contact-card h3{font-size:1.25rem;font-weight:700;margin-bottom:.5rem;letter-spacing:-0.02em;position:relative}
+.contact-card p{font-size:.9rem;color:var(--muted);margin-bottom:1.5rem;line-height:1.6;max-width:360px;margin-left:auto;margin-right:auto;position:relative}
+.contact-email{display:inline-flex;align-items:center;gap:.5rem;color:var(--accent);font-family:var(--mono);font-size:.9rem;font-weight:500;padding:.6rem 1.5rem;border:1px solid rgba(59,130,246,0.2);border-radius:8px;transition:all .3s ease;position:relative;background:rgba(59,130,246,0.04)}
+.contact-email:hover{background:rgba(59,130,246,0.1);border-color:var(--accent);color:#fff;transform:translateY(-1px)}
+.contact-email .arrow{transition:transform .3s ease;display:inline-block}
+.contact-email:hover .arrow{transform:translateX(3px)}
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
 .reveal.visible{opacity:1;transform:translateY(0)}
 
@@ -101,12 +177,13 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 
 <!-- NAV -->
 <nav>
-  <div class="wordmark">slaash</div>
+  <div class="wordmark">sl<span class="wm-slash">/</span>sh</div>
   <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#docs">Docs</a>
-    <a href="#github">GitHub</a>
-    <a class="btn-sm btn-accent" href="#start">Get started</a>
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/live">Live</a>
+    <a href="/docs">Docs</a>
+    <a class="btn-sm btn-accent" href="/try">Try alpha</a>
   </div>
 </nav>
 
@@ -114,11 +191,12 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="hero">
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
-    <h1>The web, distilled.</h1>
-    <p class="subtitle"><span>50,000</span> tokens &rarr; <span>200</span>. In <span>1ms</span>.</p>
+    <h1>Distill the <span class="liquid">web.</span><br>Slash the tokens<span class="slash">/</span></h1>
+    <svg style="position:absolute;width:0;height:0"><defs><filter id="liquid"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="2" seed="5" result="n"><animate attributeName="baseFrequency" dur="12s" values="0.012;0.025;0.012" repeatCount="indefinite"/></feTurbulence><feDisplacementMap in="SourceGraphic" in2="n" scale="3" xChannelSelector="R" yChannelSelector="G"><animate attributeName="scale" dur="12s" values="2;5;2" repeatCount="indefinite"/></feDisplacementMap></filter></defs></svg>
+    <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
-      <a class="btn-sm btn-accent" href="#start">Get started</a>
-      <a class="btn-sm btn-ghost" href="#docs">Documentation</a>
+      <a class="btn-sm btn-accent" href="/try">Try alpha</a>
+      <a class="btn-sm btn-ghost" href="/docs">Documentation</a>
     </div>
   </div>
 </section>
@@ -127,23 +205,25 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
 <section class="metrics reveal">
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="metric-value" data-target="99.2" data-suffix="%">0%</div>
+      <div class="metric-value" id="mv-savings" data-target="99.2" data-suffix="%">0%</div>
       <div class="metric-label">Token reduction</div>
     </div>
     <div class="metric-card">
-      <div class="metric-value" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
-      <div class="metric-label">Parse latency</div>
+      <div class="metric-value" id="mv-latency" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
+      <div class="metric-label">Avg latency</div>
     </div>
     <div class="metric-card">
-      <div class="metric-value" data-target="97.8" data-suffix="%">0%</div>
-      <div class="metric-label">Recall accuracy</div>
+      <div class="metric-value" id="mv-sites" data-target="0">0</div>
+      <div class="metric-label">Sites profiled</div>
     </div>
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- CODE DEMO -->
 <section class="code-section reveal" id="demo">
-  <h2 class="section-title">One request. Pure signal.</h2>
+  <h2 class="section-title">One request. <em>Pure signal.</em></h2>
   <p class="section-sub">Send a URL and a goal. Get back only what matters.</p>
   <div class="code-grid">
     <div class="code-block" data-label="Request">
@@ -175,9 +255,79 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   </div>
 </section>
 
+<div class="section-divider"></div>
+
+<!-- CRFR PIPELINE PLAYBACK -->
+<section class="pipeline reveal" id="pipeline">
+  <h2 class="section-title">Experience <em>the difference.</em></h2>
+  <p class="section-sub">A real query against Wikipedia's 2.8M-character COVID-19 vaccine article. Every number below is from an actual run.</p>
+  <div class="pipeline-terminal" id="pipeline-term">
+    <div class="steps">
+
+      <div class="pipe-step" data-step="1">
+        <div class="step-label">Query</div>
+        <div class="step-data">
+          <span class="str">"What are the side effects and efficacy of COVID-19 vaccines?"</span><br>
+          <span class="dim">source:</span> <span class="val">en.wikipedia.org/wiki/COVID-19_vaccine</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="2">
+        <div class="step-label">Page ingested</div>
+        <div class="step-data">
+          <span class="val">2,815,638</span> <span class="dim">characters of raw HTML</span><br>
+          <span class="val">12,434</span> <span class="dim">DOM nodes</span><br>
+          <span class="dim">This page exceeds every LLM context window. Sending it raw is physically impossible.</span>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="3">
+        <div class="step-label">Slaash output &mdash; 4 nodes</div>
+        <div class="pipe-result">
+          <div class="node">
+            <div class="node-header">relevance: 1.994</div>
+            <div class="node-text">"The risks of serious illness from COVID-19 are far higher than the risk posed by the vaccines. For most people, the side effects, also called adverse effects, from COVID-19 vaccines are mild and can be managed at home. Severe adverse effects are rare."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">relevance: 1.773</div>
+            <div class="node-text">"Typical side effects are stronger and more common in younger people and in subsequent doses, and up to 20% of people report a disruptive level of side effects after the second dose of an mRNA vaccine."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">relevance: 1.535</div>
+            <div class="node-text">"mRNA vaccines were the first COVID-19 vaccines authorised in UK, US and EU. Authorized types: Pfizer-BioNTech, Moderna. The CVnCoV mRNA vaccine from CureVac failed in clinical trials."</div>
+          </div>
+          <div class="node">
+            <div class="node-header">relevance: 1.326</div>
+            <div class="node-text">"Common side effects of the vaccine are fever, fatigue, headache and pain at the injection site."</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pipe-step" data-step="4">
+        <div class="step-label">It remembers</div>
+        <div class="step-data">
+          <span class="dim">After feedback, same query runs</span> <span class="grn">8.6&times; faster</span><br>
+          <span class="dim">Answer relevance increases</span> <span class="grn">+28%</span><br>
+          <span class="dim">No retraining. No fine-tuning. Zero GPU.</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <div class="pipeline-summary">
+    <div><div class="ps-val">2,815,638</div><div class="ps-label">chars in</div></div>
+    <div><div class="ps-val">1,200</div><div class="ps-label">chars out</div></div>
+    <div><div class="ps-val">99.96%</div><div class="ps-label">reduction</div></div>
+    <div><div class="ps-val">0ms</div><div class="ps-label">GPU time</div></div>
+    <div><div class="ps-val">$0.0003</div><div class="ps-label">vs $1.69 raw</div></div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
 <!-- LEARNING -->
 <section class="learning reveal" id="learning">
-  <h2 class="section-title">It learns. Without training data.</h2>
+  <h2 class="section-title">It learns. <em>Without training data.</em></h2>
   <p class="section-sub">CRFR improves with every interaction. No GPU. No fine-tuning.</p>
   <canvas id="chart-canvas"></canvas>
   <div class="learning-stats">
@@ -187,59 +337,57 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   </div>
 </section>
 
+<div class="section-divider"></div>
+
 <!-- FEATURES -->
 <section class="features reveal" id="features">
-  <h2 class="section-title">Everything you need</h2>
+  <h2 class="section-title"><em>Everything</em> you need</h2>
   <p class="section-sub">A complete perception layer for AI agents.</p>
   <div class="features-grid">
     <div class="feature-card">
-      <span class="feature-icon">&#x1F441;</span>
-      <h3>Semantic Perception</h3>
-      <p>HTML &rarr; accessibility tree with goal-relevance scores for every node.</p>
+      <span class="feature-icon" style="color:var(--accent)">/</span>
+      <h3>Goal-Aware Extraction</h3>
+      <p>Send a URL and a question. Get back only the nodes that answer it, ranked by relevance. 99.9% token reduction.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F6E1;</span>
+      <span class="feature-icon" style="color:#ef4444">&Delta;</span>
       <h3>Trust Shield</h3>
-      <p>20+ prompt injection patterns detected and neutralized at parse time.</p>
+      <p>40+ prompt injection patterns detected at parse time. Hidden instructions, zero-width obfuscation, role hijacking &mdash; neutralized before the LLM sees it.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x26A1;</span>
+      <span class="feature-icon" style="color:#22c55e">&raquo;</span>
       <h3>Adaptive Streaming</h3>
-      <p>LLM-directed DOM exploration. 95&ndash;99% further token savings.</p>
+      <p>For pages where even CRFR returns too much: LLM-directed branch expansion explores the DOM incrementally. Send directives to expand, skip, or lower the threshold in real-time.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F4E6;</span>
-      <h3>JS Sandbox</h3>
-      <p>QuickJS with 55+ DOM methods. Sandboxed execution, zero escape risk.</p>
+      <span class="feature-icon" style="color:#8b5cf6">&lt;/&gt;</span>
+      <h3>DOM Engine</h3>
+      <p>Full Rust DOM with QuickJS sandbox. 200+ native APIs, 91% WPT compliance on core DOM. Handles SPAs, hydration, and framework-rendered content.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F4F7;</span>
+      <span class="feature-icon" style="color:#f59e0b">&#x25A3;</span>
       <h3>Vision</h3>
       <p>YOLOv8-nano screenshot analysis with pure Rust rendering engine.</p>
     </div>
     <div class="feature-card">
-      <span class="feature-icon">&#x1F50C;</span>
+      <span class="feature-icon" style="color:var(--accent)">&harr;</span>
       <h3>MCP Server</h3>
-      <p>30 tools ready for Claude, Cursor, and VS Code. Plug and play.</p>
+      <p>13 tools for Claude, Cursor, and VS Code. Parse, extract, act, search, stream, vision &mdash; one integration.</p>
     </div>
   </div>
 </section>
 
-<!-- CTA -->
-<section class="cta-section reveal">
-  <h2>Start building with Slaash</h2>
-  <a class="btn-sm btn-accent" href="#start">Get started &rarr;</a>
-</section>
-
-<!-- FOOTER -->
-<footer>
-  <div class="footer-links">
-    <a href="#">Documentation</a>
-    <a href="#">GitHub</a>
-    <a href="#">Discord</a>
+<!-- CONTACT -->
+<div class="contact-box">
+  <div class="contact-card">
+    <span class="contact-icon" style="color:var(--accent)">/</span>
+    <h3>Let's talk</h3>
+    <p>Building with AI agents? We'd love to hear what you're working on. Partnerships, integrations, or early access.</p>
+    <a class="contact-email" href="mailto:zerotoken@slaash.ai">zerotoken@slaash.ai <span class="arrow">&rarr;</span></a>
   </div>
-  <p>&copy; 2026 Slaash. MIT Licensed.</p>
-</footer>
+</div>
+
+<div data-component="footer"></div>
 
 <script>
 // ── HERO PARTICLE ANIMATION ──
@@ -272,25 +420,23 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   function createParticles(){
     particles = [];
     const w = canvas.offsetWidth, h = canvas.offsetHeight;
-    const maxR = Math.min(w, h) * 0.42;
-    for(let i=0; i<45; i++){
-      const orbit = 80 + Math.random() * (maxR - 80);
+    const maxR = Math.max(w, h) * 0.55;
+    for(let i=0; i<80; i++){
+      const orbit = 60 + Math.random() * (maxR - 60);
       const angle = Math.random() * Math.PI * 2;
-      // Each particle has its own orbit speed — outer ones slower
-      const speed = (0.0003 + Math.random() * 0.0006) * (1 - orbit / maxR * 0.5);
-      // Alternate direction for some rings
+      const speed = (0.0002 + Math.random() * 0.0005) * (1 - orbit / maxR * 0.4);
       const dir = Math.random() < 0.3 ? -1 : 1;
       particles.push({
         text: fragments[i % fragments.length],
         orbit: orbit,
         angle: angle,
         speed: speed * dir,
-        tilt: 0.3 + Math.random() * 0.4, // ellipse squash (0=line, 1=circle)
-        alpha: 0.06 + Math.random() * 0.1,
-        size: 9 + Math.random() * 3,
+        tilt: 0.35 + Math.random() * 0.5,
+        alpha: 0.10 + Math.random() * 0.14,
+        size: 10 + Math.random() * 4,
         rotationOffset: (Math.random() - 0.5) * 0.4,
-        wobble: Math.random() * Math.PI * 2, // phase for subtle wobble
-        wobbleAmp: 2 + Math.random() * 6
+        wobble: Math.random() * Math.PI * 2,
+        wobbleAmp: 3 + Math.random() * 10
       });
     }
   }
@@ -311,9 +457,9 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
       // Fade particles near center text area (avoid overlap with heading)
       const dx = x - cx, dy = y - cy;
       const distFromCenter = Math.sqrt(dx*dx + dy*dy);
-      const fadeZone = Math.min(w, h) * 0.18;
+      const fadeZone = Math.min(w, h) * 0.10;
       const centerFade = distFromCenter < fadeZone ? distFromCenter / fadeZone : 1;
-      const alpha = p.alpha * centerFade;
+      const alpha = p.alpha * Math.max(centerFade, 0.3);
 
       // Gentle rotation follows orbit direction
       const rot = p.angle * 0.15 + p.rotationOffset;
@@ -343,6 +489,77 @@ footer .footer-links{display:flex;gap:2rem;justify-content:center;margin-bottom:
   resize(); createParticles(); animate();
 })();
 
+// ── NAV SCROLL EFFECT ──
+(function(){
+  const nav = document.querySelector('nav');
+  let ticking = false;
+  window.addEventListener('scroll', ()=>{
+    if(!ticking){
+      requestAnimationFrame(()=>{
+        nav.classList.toggle('scrolled', window.scrollY > 60);
+        ticking = false;
+      });
+      ticking = true;
+    }
+  });
+})();
+
+// ── HERO SLASH ANIMATION ──
+setTimeout(()=>document.querySelector('.hero').classList.add('visible'), 300);
+
+
+
+// ── HERO ROTATING EXAMPLES (real data from CRFR whitepaper) ──
+(function(){
+  const examples = [
+    {site:'Wikipedia COVID-19 vaccine', url:'https://en.wikipedia.org/wiki/COVID-19_vaccine', from:2815638, to:1200, timeMs:149},
+    {site:'riksbanken.se', url:'https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/', from:628407, to:486, timeMs:7},
+    {site:'Wikipedia Gothenburg', url:'https://en.wikipedia.org/wiki/Gothenburg', from:1330344, to:388, timeMs:127},
+    {site:'python.org', url:'https://www.python.org/downloads/', from:335934, to:270, timeMs:19},
+    {site:'XE.com', url:'https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK', from:1358050, to:340, timeMs:145},
+    {site:'Stack Overflow', url:'https://stackoverflow.com/questions/11227809', from:879595, to:486, timeMs:181},
+    {site:'Wikipedia ibuprofen', url:'https://en.wikipedia.org/wiki/Ibuprofen', from:1044595, to:380, timeMs:96},
+    {site:'BBC RSS', url:'https://feeds.bbci.co.uk/news/technology/rss.xml', from:6300, to:331, timeMs:3},
+    {site:'Wikipedia EU AI Act', url:'https://en.wikipedia.org/wiki/Artificial_Intelligence_Act', from:473911, to:490, timeMs:52},
+    {site:'Wikipedia dark matter', url:'https://en.wikipedia.org/wiki/Dark_matter', from:1339506, to:380, timeMs:146},
+  ];
+  const el = document.getElementById('hero-rotate');
+  let idx = 0;
+
+  // Count-up animation helper
+  function countTo(span, target, duration, suffix){
+    const t0 = performance.now();
+    (function tick(now){
+      const p = Math.min((now-t0)/duration, 1);
+      const ease = 1 - Math.pow(1-p, 3);
+      span.textContent = Math.round(ease * target).toLocaleString() + (suffix||'');
+      if(p<1) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+
+  function render(i){
+    const e = examples[i];
+    el.innerHTML = '<span class="cv">0</span> chars &rarr; <span class="cv">0</span>. In <span class="cv">0ms</span><br><a class="site" href="'+e.url+'" target="_blank" rel="noopener">'+e.site+'</a>';
+    const spans = el.querySelectorAll('.cv');
+    countTo(spans[0], e.from, 800, '');
+    countTo(spans[1], e.to, 800, '');
+    countTo(spans[2], e.timeMs, 600, 'ms');
+  }
+
+  render(0);
+
+  setInterval(()=>{
+    el.classList.add('subtitle-fade-out');
+    setTimeout(()=>{
+      idx = (idx + 1) % examples.length;
+      render(idx);
+      el.classList.remove('subtitle-fade-out');
+      el.classList.add('subtitle-fade-in');
+      setTimeout(()=>el.classList.remove('subtitle-fade-in'), 400);
+    }, 400);
+  }, 4000);
+})();
+
 // ── SCROLL REVEAL ──
 const reveals = document.querySelectorAll('.reveal');
 const revealObs = new IntersectionObserver((entries)=>{
@@ -363,6 +580,32 @@ function countUp(el, target, prefix='', suffix='', duration=1500){
   }
   requestAnimationFrame(tick);
 }
+
+// Fetch live data and update metric card targets before count-up
+(async function(){
+  try {
+    const r = await fetch('/api/live-stats');
+    if(r.ok){
+      const d = await r.json();
+      const s = document.getElementById('mv-savings');
+      const l = document.getElementById('mv-latency');
+      const si = document.getElementById('mv-sites');
+      if(d.token_savings_pct && parseFloat(d.token_savings_pct) > 0){
+        s.dataset.target = d.token_savings_pct;
+        s.dataset.suffix = '%';
+      }
+      if(d.avg_propagation_us && d.avg_propagation_us > 0){
+        l.dataset.target = (d.avg_propagation_us / 1000).toFixed(1);
+        l.dataset.suffix = 'ms';
+        l.dataset.prefix = '';
+      }
+      if(d.sites_profiled > 0){
+        si.dataset.target = d.sites_profiled;
+        si.dataset.suffix = '';
+      }
+    }
+  } catch(e){}
+})();
 
 document.querySelectorAll('.metric-value').forEach(el=>{
   const obs = new IntersectionObserver(([e])=>{
@@ -476,10 +719,11 @@ document.querySelectorAll('.metric-value').forEach(el=>{
   const obs = new IntersectionObserver(([e])=>{
     if(e.isIntersecting && !drawn){
       drawn = true;
-      const duration = 2000;
+      const duration = 2500;
       const start = performance.now();
       function tick(now){
-        const t = Math.min((now-start)/duration, 1);
+        const p = Math.min((now-start)/duration, 1);
+        const t = 1 - Math.pow(1-p, 4); // easeOutQuart
         drawChart(t);
         if(t<1) requestAnimationFrame(tick);
       }
@@ -491,6 +735,46 @@ document.querySelectorAll('.metric-value').forEach(el=>{
 
   window.addEventListener('resize', ()=>{if(drawn) drawChart(1)});
 })();
+
+// ── CRFR PIPELINE PLAYBACK ──
+(function(){
+  const term = document.getElementById('pipeline-term');
+  if(!term) return;
+  const steps = term.querySelectorAll('.pipe-step');
+  let started = false;
+
+  function runPlayback(){
+    if(started) return;
+    started = true;
+    // Stagger: 1.2s base + extra time for result step
+    var delays = [0, 1200, 2400, 4200];
+    steps.forEach((step, i) => {
+      var delay = delays[i] || (i * 1200);
+      setTimeout(() => {
+        step.classList.add('visible');
+        step.classList.add('active');
+        // Transition previous step from active to done after a beat
+        if(i > 0){
+          setTimeout(()=>{
+            steps[i-1].classList.remove('active');
+            steps[i-1].classList.add('done');
+          }, 400);
+        }
+        // Last step: transition to done after 2s
+        if(i === steps.length - 1){
+          setTimeout(() => { step.classList.remove('active'); step.classList.add('done'); }, 2000);
+        }
+      }, delay);
+    });
+  }
+
+  const obs = new IntersectionObserver(([e]) => {
+    if(e.isIntersecting) { runPlayback(); obs.unobserve(term); }
+  }, {threshold: 0.2});
+  obs.observe(term);
+})();
+
 </script>
+<script src="/components.js"></script>
 </body>
 </html>

@@ -38,6 +38,10 @@ struct AppState {
     mcp_events: Arc<tokio::sync::broadcast::Sender<String>>,
     /// Ring-buffer med senaste MCP-events för polling-fallback
     mcp_event_log: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    /// Global request counter for live stats
+    request_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Server start time
+    started_at: std::time::Instant,
 }
 
 // ─── Request/Response types ──────────────────────────────────────────────────
@@ -62,7 +66,7 @@ struct ParseTopRequest {
 
 #[derive(Deserialize)]
 struct ParseCrfrRequest {
-    html: String,
+    html: Option<String>,
     goal: String,
     url: String,
     #[serde(default = "default_crfr_top_n")]
@@ -1056,12 +1060,50 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
 }
 
 async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
-    let html = req.html;
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
     let run_js = req.run_js;
     let output_format = req.output_format;
+
+    // Resolve HTML: use provided html, or fetch from url
+    let html = if let Some(h) = req.html {
+        if !h.is_empty() {
+            h
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    #[allow(unused_mut)]
+    let mut html = html;
+    #[allow(unused_mut)]
+    let mut fetch_ms: u64 = 0;
+    #[cfg(feature = "fetch")]
+    if html.is_empty() && !url.is_empty() {
+        let fetch_start = std::time::Instant::now();
+        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default())
+            .await
+        {
+            Ok(fetched) => {
+                fetch_ms = fetch_start.elapsed().as_millis() as u64;
+                html = fetched.body;
+            }
+            Err(e) => {
+                let err = serde_json::json!({"error": format!("Fetch failed: {e}")});
+                return (axum::http::StatusCode::BAD_GATEWAY, axum::Json(err)).into_response();
+            }
+        }
+    }
+
+    let raw_html_chars = html.len();
+
+    if html.is_empty() {
+        let err = serde_json::json!({"error": "Provide either 'html' or 'url'"});
+        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(err)).into_response();
+    }
 
     // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
     let goal_clone = goal.clone();
@@ -1089,8 +1131,10 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
                 "[COOKIE-BRIDGE] Bot challenge on {} — re-fetching with cookies",
                 url
             );
-            let mut rc = aether_agent::types::FetchConfig::default();
-            rc.cookies = tree.js_cookies.clone();
+            let rc = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
             if let Ok(rr) = aether_agent::fetch::fetch_page(&url, &rc).await {
                 eprintln!(
                     "[COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
@@ -1130,7 +1174,16 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
 
-    (StatusCode::OK, result)
+    // Inject raw_html_chars and fetch_ms into the JSON response
+    let result = if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&result) {
+        json["raw_html_chars"] = serde_json::json!(raw_html_chars);
+        json["fetch_ms"] = serde_json::json!(fetch_ms);
+        json.to_string()
+    } else {
+        result
+    };
+
+    (StatusCode::OK, result).into_response()
 }
 
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
@@ -6204,8 +6257,10 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
                 "[COOKIE-BRIDGE] Bot challenge detected on {}. Re-fetching with JS cookies...",
                 url
             );
-            let mut refetch_config = aether_agent::types::FetchConfig::default();
-            refetch_config.cookies = tree.js_cookies.clone();
+            let refetch_config = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
 
             if let Ok(refetch_result) = aether_agent::fetch::fetch_page(&url, &refetch_config).await
             {
@@ -6243,39 +6298,114 @@ async fn dashboard_explore_handler(Json(req): Json<DashboardExploreRequest>) -> 
     (StatusCode::OK, result)
 }
 
-async fn dashboard_html() -> impl IntoResponse {
-    let html = include_str!("../../dashboard.html");
+/// Serve a static HTML file from disk at runtime.
+/// Files are read from /app/static/ in Docker, or relative paths for local dev.
+/// This decouples HTML from the Rust binary — HTML-only changes skip recompilation.
+async fn serve_html_file(paths: &[&str]) -> impl IntoResponse {
+    for path in paths {
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            return (
+                StatusCode::OK,
+                [("content-type", "text/html; charset=utf-8")],
+                content,
+            );
+        }
+    }
     (
-        StatusCode::OK,
+        StatusCode::NOT_FOUND,
         [("content-type", "text/html; charset=utf-8")],
-        html,
+        "<h1>404 — HTML file not found</h1>".to_string(),
     )
+}
+
+async fn dashboard_html() -> impl IntoResponse {
+    serve_html_file(&["/app/static/dashboard.html", "dashboard.html"]).await
 }
 
 async fn landing_index() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/index.html");
-    (
-        StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
-    )
+    serve_html_file(&[
+        "/app/static/landing-pages/index.html",
+        "landing-pages/index.html",
+    ])
+    .await
 }
 
 async fn landing_concept_1() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/concept-1-the-reduction.html");
-    (
-        StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
-    )
+    serve_html_file(&[
+        "/app/static/landing-pages/concept-1-the-reduction.html",
+        "landing-pages/concept-1-the-reduction.html",
+    ])
+    .await
 }
 
 async fn landing_concept_2() -> impl IntoResponse {
-    let html = include_str!("../../landing-pages/concept-2-the-signal.html");
+    serve_html_file(&[
+        "/app/static/landing-pages/concept-2-the-signal.html",
+        "landing-pages/concept-2-the-signal.html",
+    ])
+    .await
+}
+
+async fn landing_try() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/try.html",
+        "landing-pages/try.html",
+    ])
+    .await
+}
+
+async fn landing_mission() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/mission.html",
+        "landing-pages/mission.html",
+    ])
+    .await
+}
+
+async fn landing_timeline() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/timeline.html",
+        "landing-pages/timeline.html",
+    ])
+    .await
+}
+
+async fn landing_live() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/dashboard.html",
+        "landing-pages/dashboard.html",
+    ])
+    .await
+}
+
+async fn landing_docs() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs.html",
+        "landing-pages/docs.html",
+    ])
+    .await
+}
+
+async fn favicon_svg() -> impl IntoResponse {
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><text x=\"8\" y=\"26\" font-family=\"Inter,system-ui,sans-serif\" font-weight=\"800\" font-size=\"28\" fill=\"#3b82f6\">/</text></svg>";
+    (StatusCode::OK, [("content-type", "image/svg+xml")], svg)
+}
+
+async fn components_js() -> impl IntoResponse {
+    let js = match tokio::fs::read_to_string("/app/static/landing-pages/components.js").await {
+        Ok(c) => c,
+        Err(_) => match tokio::fs::read_to_string("landing-pages/components.js").await {
+            Ok(c) => c,
+            Err(_) => String::from("// components.js not found"),
+        },
+    };
     (
         StatusCode::OK,
-        [("content-type", "text/html; charset=utf-8")],
-        html,
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "no-cache, must-revalidate"),
+        ],
+        js,
     )
 }
 
@@ -6285,18 +6415,38 @@ fn build_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Request counter middleware
+    let counter = state.request_count.clone();
+    let count_layer = axum::middleware::from_fn(
+        move |req: axum::extract::Request, next: axum::middleware::Next| {
+            let c = counter.clone();
+            async move {
+                c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                next.run(req).await
+            }
+        },
+    );
+
     Router::new()
         // Root = landing page
         .route("/", get(landing_concept_1))
+        .route("/favicon.svg", get(favicon_svg))
+        .route("/components.js", get(components_js))
         .route("/api-info", get(root))
         .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
         .route("/health", get(health))
         .route("/api/memory-stats", get(memory_stats_handler))
+        .route("/api/live-stats", get(live_stats_handler))
         // Landing pages
         .route("/landing", get(landing_index))
         .route("/landing/1", get(landing_concept_1))
         .route("/landing/2", get(landing_concept_2))
+        .route("/try", get(landing_try))
+        .route("/mission", get(landing_mission))
+        .route("/timeline", get(landing_timeline))
+        .route("/live", get(landing_live))
+        .route("/docs", get(landing_docs))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
@@ -6506,6 +6656,7 @@ fn build_router(state: AppState) -> Router {
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
+        .layer(count_layer)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
@@ -6578,10 +6729,155 @@ async fn memory_stats_handler() -> impl IntoResponse {
     (StatusCode::OK, Json(stats))
 }
 
+/// GET /api/live-stats — aggregated stats for landing page live counters
+async fn live_stats_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    let fields = aether_agent::resonance::list_cached_fields();
+    let (cache_entries, cache_capacity) = aether_agent::resonance::cache_stats();
+
+    let sites_profiled = fields.len();
+    let total_queries: u32 = fields.iter().map(|f| f.total_queries).sum();
+    let total_nodes: usize = fields.iter().map(|f| f.node_count).sum();
+    let total_edges: usize = fields.iter().map(|f| f.edge_count).sum();
+    let total_causal_weights: usize = fields.iter().map(|f| f.propagation_weight_count).sum();
+    let total_concepts: usize = fields.iter().map(|f| f.concept_memory_count).sum();
+    let total_feedback: u32 = fields.iter().map(|f| f.total_feedback).sum();
+    let total_successful: u32 = fields.iter().map(|f| f.total_successful_nodes).sum();
+    let total_learned: usize = fields.iter().map(|f| f.learned_nodes).sum();
+    let total_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+    let total_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    let token_savings_pct = if total_chars_in > 0 {
+        ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0).max(0.0)
+    } else {
+        0.0
+    };
+    // p95 across all sites
+    let all_p95: Vec<u64> = fields
+        .iter()
+        .filter(|f| f.p95_latency_us > 0)
+        .map(|f| f.p95_latency_us)
+        .collect();
+    let global_p95_us = if all_p95.is_empty() {
+        0
+    } else {
+        let mut sorted = all_p95;
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    };
+    let requests = state
+        .request_count
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let uptime_secs = state.started_at.elapsed().as_secs();
+
+    // Use SQLite totals as the authoritative numbers (survive deploys)
+    #[cfg(feature = "persist")]
+    let (db_fields, _db_domains, _db_size) = aether_agent::persist::db_stats();
+    #[cfg(not(feature = "persist"))]
+    let db_fields: usize = 0;
+    // Show the larger of cache vs db (db has historical, cache has current session)
+    let sites_total = sites_profiled.max(db_fields);
+
+    // Per-site leaderboard (sorted by total_queries desc)
+    let mut site_list: Vec<serde_json::Value> = fields
+        .iter()
+        .map(|f| {
+            // Extract short domain from URL
+            let domain = f
+                .url
+                .split("//")
+                .nth(1)
+                .unwrap_or(&f.url)
+                .split('/')
+                .next()
+                .unwrap_or(&f.url)
+                .replace("www.", "");
+            serde_json::json!({
+                "url": f.url,
+                "domain": domain,
+                "nodes": f.node_count,
+                "queries": f.total_queries,
+                "feedback": f.total_feedback,
+                "successful_nodes": f.total_successful_nodes,
+                "learned_nodes": f.learned_nodes,
+                "causal_weights": f.propagation_weight_count,
+                "concepts": f.concept_memory_count,
+                "last_propagation_us": f.last_propagation_us,
+                "last_result_count": f.last_result_count,
+                "max_depth": f.max_depth,
+                "edges": f.edge_count,
+                "chars_in": f.total_chars_in,
+                "chars_out": f.total_chars_out,
+                "p95_us": f.p95_latency_us,
+            })
+        })
+        .collect();
+    site_list.sort_by(|a, b| {
+        let aq = a["queries"].as_u64().unwrap_or(0);
+        let bq = b["queries"].as_u64().unwrap_or(0);
+        bq.cmp(&aq)
+    });
+
+    // Avg propagation latency (from sites with data)
+    let sites_with_timing: Vec<u64> = fields
+        .iter()
+        .filter(|f| f.last_propagation_us > 0)
+        .map(|f| f.last_propagation_us)
+        .collect();
+    let avg_propagation_us = if sites_with_timing.is_empty() {
+        0
+    } else {
+        sites_with_timing.iter().sum::<u64>() / sites_with_timing.len() as u64
+    };
+
+    #[cfg(feature = "persist")]
+    let db_info = {
+        let (db_fields, db_domains, db_size) = aether_agent::persist::db_stats();
+        serde_json::json!({
+            "fields_stored": db_fields,
+            "domains_stored": db_domains,
+            "size_bytes": db_size,
+            "persistent": true,
+        })
+    };
+    #[cfg(not(feature = "persist"))]
+    let db_info = serde_json::json!({"persistent": false});
+
+    let json = serde_json::json!({
+        "sites_profiled": sites_total,
+        "sites_in_cache": sites_profiled,
+        "total_queries": total_queries,
+        "total_nodes_indexed": total_nodes,
+        "total_edges": total_edges,
+        "causal_weights_learned": total_causal_weights,
+        "concepts_memorized": total_concepts,
+        "total_feedback": total_feedback,
+        "total_successful_nodes": total_successful,
+        "total_learned_nodes": total_learned,
+        "avg_propagation_us": avg_propagation_us,
+        "p95_latency_us": global_p95_us,
+        "total_chars_in": total_chars_in,
+        "total_chars_out": total_chars_out,
+        "token_savings_pct": format!("{:.2}", token_savings_pct),
+        "cache_entries": cache_entries,
+        "cache_capacity": cache_capacity,
+        "total_requests": requests,
+        "uptime_secs": uptime_secs,
+        "db": db_info,
+        "sites": site_list,
+    });
+    (
+        StatusCode::OK,
+        [(axum::http::header::CACHE_CONTROL, "no-cache")],
+        Json(json),
+    )
+}
+
 /// Starta bakgrundsloggning av minnesanvändning (var 30:e sekund)
 /// + periodisk persist-checkpoint (var 60:e sekund)
-fn spawn_memory_monitor() {
-    tokio::spawn(async {
+fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
+    tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         let mut tick_count: u32 = 0;
         loop {
@@ -6590,7 +6886,9 @@ fn spawn_memory_monitor() {
             tick_count += 1;
             // Persist checkpoint varannan tick (var 60:e sekund)
             #[cfg(feature = "persist")]
-            if tick_count % 2 == 0 {
+            if tick_count.is_multiple_of(2) {
+                let reqs = request_counter.load(std::sync::atomic::Ordering::Relaxed);
+                aether_agent::persist::save_global_stat("total_requests", reqs);
                 aether_agent::persist::checkpoint();
             }
         }
@@ -6614,12 +6912,14 @@ async fn main() {
         match aether_agent::persist::init(&db_path) {
             Ok(()) => {
                 eprintln!("[PERSIST] SQLite initialized at {db_path}");
-                aether_agent::persist::restore();
-                let (fields, domains, size) = aether_agent::persist::db_stats();
+                let (fields_before, domains_before, size) = aether_agent::persist::db_stats();
                 eprintln!(
-                    "[PERSIST] DB stats: {fields} fields, {domains} domain profiles, {:.1} KB",
+                    "[PERSIST] DB contains: {fields_before} fields, {domains_before} domains, {:.1} KB",
                     size as f64 / 1024.0
                 );
+                aether_agent::persist::restore();
+                let (ce, _) = aether_agent::resonance::cache_stats();
+                eprintln!("[PERSIST] Restored to cache: {ce} fields loaded");
             }
             Err(e) => {
                 eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
@@ -6757,8 +7057,6 @@ async fn main() {
 
     log_rss("7. before router build");
     // Starta periodisk minnesmonitor (loggar var 30:e sek till stderr)
-    spawn_memory_monitor();
-
     let (mcp_tx, _) = tokio::sync::broadcast::channel::<String>(128);
     let state = AppState {
         vision_model: Arc::new(std::sync::Mutex::new(vision_model)),
@@ -6766,8 +7064,20 @@ async fn main() {
         mcp_event_log: Arc::new(std::sync::Mutex::new(
             std::collections::VecDeque::with_capacity(100),
         )),
+        request_count: Arc::new(std::sync::atomic::AtomicU64::new({
+            #[cfg(feature = "persist")]
+            {
+                aether_agent::persist::load_global_stat("total_requests")
+            }
+            #[cfg(not(feature = "persist"))]
+            {
+                0
+            }
+        })),
+        started_at: std::time::Instant::now(),
     };
     log_rss("8. after AppState creation");
+    spawn_memory_monitor(state.request_count.clone());
 
     println!("AetherAgent API server starting on http://{}", addr);
     println!("Endpoints:");

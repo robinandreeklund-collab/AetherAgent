@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Try Slaash — Live AI Web Extraction Playground</title>
+<meta name="description" content="Try Slaash on any URL. Enter a web page and a question, get back only the answer. Live CRFR extraction with real-time token savings.">
+<meta name="keywords" content="AI web extraction demo, try slaash, token reduction playground, web scraping AI, LLM web browsing tool">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Try Slaash — Live AI Web Extraction">
+<meta property="og:description" content="Enter any URL and a question. Get back only the answer. Try it live.">
+<link rel="canonical" href="https://www.slaash.ai/try">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.35);
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease}
+nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.nav-links a:not(.btn-sm):hover{color:#fff}
+.nav-links a:not(.btn-sm):hover::after{width:100%}
+
+/* MAIN */
+main{flex:1;max-width:800px;width:100%;margin:0 auto;padding:5rem 2rem 3rem}
+h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem}
+.intro{color:var(--muted);margin-bottom:2rem;font-size:.95rem}
+
+/* INFO BOX */
+.info-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.5rem;margin-bottom:2rem;transition:border-color .3s}
+.info-box:hover{border-color:rgba(255,255,255,0.12)}
+.info-box h4{font-size:.9rem;font-weight:600;color:#fff;margin-bottom:.5rem}
+.info-box p{font-size:.85rem;color:var(--muted);line-height:1.6;margin:0}
+.info-box .flow{display:flex;flex-wrap:wrap;gap:.35rem;margin:.75rem 0;align-items:center}
+.info-box .flow-step{font-size:.75rem;font-weight:500;color:var(--accent);font-family:var(--mono);padding:.2rem .5rem;background:rgba(59,130,246,0.06);border-radius:4px}
+.info-box .flow-arrow{color:#444;font-size:.7rem}
+
+/* FORM */
+.form-group{margin-bottom:1.25rem}
+.form-group label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem}
+.form-group input,.form-group textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;color:var(--text);font-family:var(--font);font-size:.9rem;outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group textarea:focus{border-color:var(--accent)}
+.form-group textarea{resize:vertical;min-height:60px;font-family:var(--mono);font-size:.82rem}
+.form-row{display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:end}
+.btn-run{padding:.85rem 2rem;border-radius:10px;font-size:.9rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;white-space:nowrap;height:fit-content}
+.btn-run:hover{background:#2563eb;transform:translateY(-1px)}
+.btn-run:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-run:active{transform:translateY(0)}
+
+/* EXAMPLES */
+.examples{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:2rem}
+.example-chip{padding:.4rem .85rem;border-radius:20px;font-size:.75rem;font-weight:500;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#93b4f5;cursor:pointer;transition:all .2s}
+.example-chip:hover{background:rgba(59,130,246,0.2);border-color:rgba(59,130,246,0.4)}
+
+/* RESULTS */
+.results{margin-top:2.5rem;display:none}
+.results.visible{display:block}
+.results-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.results-title{font-size:1rem;font-weight:600}
+.results-meta{display:flex;gap:1.5rem;font-size:.75rem;color:var(--muted)}
+.results-meta .val{color:#79c0ff;font-weight:600}
+
+/* LOADING — Funny Candle Pure CSS Animation (by kevin_David_k, adapted) */
+.loading{text-align:center;padding:1rem 0;display:none}
+.loading.visible{display:block}
+.loading-text{color:var(--muted);font-size:.85rem}
+.candle-wrapper{position:relative;width:250px;height:150px;margin:0 auto;transform:scale(0.5);transform-origin:center bottom}
+.candle-wrapper .floor{position:absolute;left:50%;top:50%;width:350px;height:5px;background:#3b82f6;transform:translate(-50%,-50%);box-shadow:0px 2px 5px #111;z-index:2}
+.candles{position:absolute;left:50%;top:50%;width:250px;height:150px;transform:translate(-50%,-100%);z-index:1}
+.candle1{position:absolute;left:50%;top:50%;width:35px;height:100px;background:var(--surface,#111);border:3px solid #3b82f6;border-bottom:0px;border-radius:3px;transform-origin:center right;transform:translate(60%,-25%);box-shadow:-2px 0px 0px #1e3a5f inset;animation:expand-body 3s infinite linear}
+.candle1__stick,.candle2__stick{position:absolute;left:50%;top:0%;width:3px;height:15px;background:#3b82f6;border-radius:8px;transform:translate(-50%,-100%)}
+.candle2__stick{height:12px;transform-origin:bottom center;animation:stick-animation 3s infinite linear}
+.candle1__eyes,.candle2__eyes{position:absolute;left:50%;top:0%;width:35px;height:30px;transform:translate(-50%,0%)}
+.candle1__eyes-one{position:absolute;left:30%;top:20%;width:5px;height:5px;border-radius:100%;background:#3b82f6;transform:translate(-70%,0%);animation:blink-eyes 3s infinite linear}
+.candle1__eyes-two{position:absolute;left:70%;top:20%;width:5px;height:5px;border-radius:100%;background:#3b82f6;transform:translate(-70%,0%);animation:blink-eyes 3s infinite linear}
+.candle1__mouth{position:absolute;left:40%;top:20%;width:0px;height:0px;border-radius:20px;background:#3b82f6;transform:translate(-50%,-50%);animation:uff 3s infinite linear}
+.candle__smoke-one{position:absolute;left:30%;top:50%;width:30px;height:3px;background:#555;transform:translate(-50%,-50%);animation:move-left 3s infinite linear}
+.candle__smoke-two{position:absolute;left:30%;top:40%;width:10px;height:10px;border-radius:10px;background:#555;transform:translate(-50%,-50%);animation:move-top 3s infinite linear}
+.candle2{position:absolute;left:20%;top:65%;width:42px;height:60px;background:var(--surface,#111);border:3px solid #3b82f6;border-bottom:0px;border-radius:3px;transform:translate(60%,-15%);transform-origin:center right;box-shadow:-2px 0px 0px #1e3a5f inset;animation:shake-left 3s infinite linear}
+.candle2__eyes-one{position:absolute;left:30%;top:50%;width:5px;height:5px;display:inline-block;border:0px solid #3b82f6;border-radius:100%;float:left;background:#3b82f6;transform:translate(-80%,0%);animation:changeto-lower 3s infinite linear}
+.candle2__eyes-two{position:absolute;left:70%;top:50%;width:5px;height:5px;display:inline-block;border:0px solid #3b82f6;border-radius:100%;float:left;background:#3b82f6;transform:translate(-80%,0%);animation:changeto-greater 3s infinite linear}
+.light__wave{position:absolute;top:35%;left:35%;width:75px;height:75px;border-radius:100%;z-index:0;transform:translate(-25%,-50%) scale(2.5,2.5);border:2px solid rgba(59,130,246,0.2);animation:expand-light 3s infinite linear}
+.candle2__fire{position:absolute;top:50%;left:40%;display:block;width:16px;height:20px;background-color:#3b82f6;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:#60a5fa;transform:translate(-50%,-50%);animation:dance-fire 3s infinite linear}
+@keyframes blink-eyes{0%,35%{opacity:1;transform:translate(-70%,0%)}36%,39%{opacity:0;transform:translate(-70%,0%)}40%{opacity:1;transform:translate(-70%,0%)}50%,65%{transform:translate(-140%,0%)}66%{transform:translate(-70%,0%)}}
+@keyframes expand-body{0%,40%{transform:scale(1,1) translate(60%,-25%)}45%,55%{transform:scale(1.1,1.1) translate(60%,-28%)}60%{transform:scale(0.89,0.89) translate(60%,-25%)}65%{transform:scale(1,1) translate(60%,-25%)}70%{transform:scale(0.95,0.95) translate(60%,-25%)}75%{transform:scale(1,1) translate(60%,-25%)}}
+@keyframes uff{0%,40%{width:0px;height:0px}50%,54%{width:15px;height:15px;left:30%}59%{width:5px;height:5px;left:20%}62%{width:2px;height:2px;left:20%}67%{width:0px;height:0px;left:30%}}
+@keyframes move-left{0%,59%,100%{width:0px;left:40%}60%{width:30px;left:30%}68%{width:0px;left:20%}}
+@keyframes move-top{0%,64%,100%{width:0px;height:0px;top:0%}65%{width:10px;height:10px;top:40%;left:40%}80%{width:0px;height:0px;top:20%}}
+@keyframes shake-left{0%,40%{left:20%;transform:translate(60%,-15%)}50%,54%{left:20%;transform:translate(60%,-15%)}59%{left:20%;transform:translate(60%,-15%)}62%{left:18%;transform:translate(60%,-15%)}65%{left:21%;transform:translate(60%,-15%)}67%{left:20%;transform:translate(60%,-15%)}75%{left:20%;transform:scale(1.15,0.85) translate(60%,-15%);background:var(--surface,#111);border-color:#3b82f6}91%{left:20%;transform:scale(1.18,0.82) translate(60%,-10%);background:#ef4444;border-color:#ef4444;box-shadow:-2px 0px 0px #ef4444 inset}92%{left:20%;transform:scale(0.85,1.15) translate(60%,-15%)}95%{left:20%;transform:scale(1.05,0.95) translate(60%,-15%)}97%{left:20%;transform:scale(1,1) translate(60%,-15%)}}
+@keyframes stick-animation{0%,40%{left:50%;top:0%;transform:translate(-50%,-100%)}50%,54%{left:50%;top:0%;transform:translate(-50%,-100%)}59%{left:50%;top:0%;transform:translate(-50%,-100%)}62%{left:50%;top:0%;transform:rotateZ(-15deg) translate(-50%,-100%)}65%{left:50%;top:0%;transform:rotateZ(15deg) translate(-50%,-100%)}70%{left:50%;top:0%;transform:rotateZ(-5deg) translate(-50%,-100%)}72%{left:50%;top:0%;transform:rotateZ(5deg) translate(-50%,-100%)}74%,84%{left:50%;top:0%;transform:rotateZ(0deg) translate(-50%,-100%)}85%{transform:rotateZ(180deg) translate(0%,120%)}92%{left:50%;top:0%;transform:translate(-50%,-100%)}}
+@keyframes expand-light{10%,29%,59%,89%{transform:translate(-25%,-50%) scale(0,0);border:2px solid rgba(59,130,246,0)}90%,20%,50%{transform:translate(-25%,-50%) scale(1,1)}95%,96%,26%,27%,56%,57%{transform:translate(-25%,-50%) scale(2,2);border:2px solid rgba(59,130,246,0.5)}0%,28%,58%,100%{transform:translate(-25%,-50%) scale(2.5,2.5);border:2px solid rgba(59,130,246,0.2)}}
+@keyframes dance-fire{59%,89%{left:40%;width:0px;height:0px}90%,0%,7%,15%,23%,31%,39%,47%,55%{left:40.8%;width:16px;height:20px;background:#60a5fa}94%,3%,11%,19%,27%,35%,43%,51%,58%{left:41.2%;width:16px;height:20px;background:#3b82f6}}
+@keyframes changeto-lower{0%,70%,90%{padding:0px;display:inline-block;border-radius:100%;background:#3b82f6;border-width:0 0 0 0;border:0px solid #3b82f6;transform:translate(-90%,0%)}71%,89%{background:none;border:solid #3b82f6;border-radius:0px;border-width:0 2px 2px 0;display:inline-block;padding:1px;float:left;transform-origin:bottom left;transform:rotate(-45deg) translate(-50%,-65%)}}
+@keyframes changeto-greater{0%,70%,90%{top:50%;padding:0px;display:inline-block;border-radius:100%;background:#3b82f6;border-width:0 0 0 0;border:0px solid #3b82f6;transform:translate(-80%,0%)}71%,89%{top:30%;background:none;border:solid #3b82f6;border-radius:0px;border-width:0 2px 2px 0;display:inline-block;padding:1px;float:left;transform-origin:bottom left;transform:rotate(135deg) translate(-80%,20%)}}
+
+/* NODES */
+.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7}
+.result-node{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+.result-node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.result-node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.2rem;font-weight:500}
+.result-node-text{color:#e6edf3;font-size:.82rem;line-height:1.5}
+
+/* VIEW TOGGLE */
+.view-toggle{display:flex;gap:0;margin-bottom:1rem;border:1px solid var(--border);border-radius:8px;overflow:hidden;width:fit-content}
+.view-btn{padding:.4rem 1rem;font-size:.75rem;font-weight:600;background:transparent;color:var(--muted);border:none;cursor:pointer;transition:all .2s}
+.view-btn.active{background:var(--accent);color:#fff}
+.view-btn:hover:not(.active){background:rgba(255,255,255,0.04)}
+
+/* MARKDOWN VIEW */
+.result-markdown{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-size:.85rem;line-height:1.7;color:#e6edf3;white-space:pre-wrap;display:none}
+
+/* SUMMARY BAR */
+.summary-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
+.summary-val{font-size:1rem;font-weight:700;color:#fff}
+.summary-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
+
+/* ERROR */
+.error-msg{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:1rem 1.25rem;color:#fca5a5;font-size:.85rem;margin-top:1.5rem;display:none}
+.error-msg.visible{display:block}
+
+
+@media(max-width:768px){
+  header{padding:1rem}
+  .nav-links{gap:1rem;font-size:.8rem}
+}
+@media(max-width:600px){
+  .form-row{grid-template-columns:1fr}
+  .summary-bar{grid-template-columns:repeat(2,1fr)}
+  .results-meta{flex-direction:column;gap:.25rem}
+  .nav-links a{display:none}
+  nav{padding:.85rem 1.25rem}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/live">Live</a>
+    <a href="/docs">Docs</a>
+  </div>
+</nav>
+
+<main>
+  <h1>Try it. Slaash it<span style="color:#3b82f6">/</span></h1>
+  <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
+  <div class="info-box">
+    <h4>How Slaash works in production</h4>
+    <div class="flow">
+      <span class="flow-step">Question</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">LLM expands</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Slaash extracts</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Answer</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">LLM feedback</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Slaash learns</span>
+    </div>
+    <p>This playground skips the feedback step. In the real pipeline, results improve with every query. First runs on a new URL are cold.</p>
+  </div>
+
+  <div class="examples">
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">Wikipedia: COVID-19 vaccine side effects</span>
+    <span class="example-chip" data-url="https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/" data-goal="styrr&auml;nta r&auml;nta procent Riksbanken penningpolitik repor&auml;nta 2026 interest rate">Riksbanken: Swedish interest rate</span>
+    <span class="example-chip" data-url="https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK" data-goal="currency converter exchange rate USD SEK kronor dollar real-time">XE.com: USD/SEK exchange rate</span>
+    <span class="example-chip" data-url="https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array" data-goal="branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty">Stack Overflow: sorted array performance</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Gothenburg" data-goal="population inhabitants Gothenburg G&ouml;teborg city urban area people">Wikipedia: Gothenburg population</span>
+    <span class="example-chip" data-url="https://www.python.org/downloads/" data-goal="latest Python version release download stable current 2026">Python.org: latest version</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Ibuprofen" data-goal="ibuprofen medicine drug NSAID anti-inflammatory dosage side effects uses">Wikipedia: What is ibuprofen?</span>
+    <span class="example-chip" data-url="https://en.wikipedia.org/wiki/Artificial_Intelligence_Act" data-goal="EU AI Act regulation artificial intelligence law European Union rules 2024">Wikipedia: EU AI Act</span>
+    <span class="example-chip" data-url="https://www.npmjs.com/package/langchain" data-goal="npm downloads weekly package registry stats version latest">npm: langchain stats</span>
+    <span class="example-chip" data-url="https://github.com/langchain-ai/langchain" data-goal="stars forks contributors open issues license programming language repository description">GitHub: langchain repo</span>
+    <span class="example-chip" data-url="https://coinmarketcap.com/currencies/bitcoin/" data-goal="bitcoin price USD current BTC value market cap 24h change crypto">CoinMarketCap: Bitcoin price</span>
+    <span class="example-chip" data-url="https://www.nasa.gov/mars/" data-goal="NASA Mars mission latest news rover discovery finding surface science">NASA: Mars mission</span>
+    <span class="example-chip" data-url="https://docs.python.org/3/" data-goal="Python documentation version release what's new changelog latest stable">Python docs: latest version</span>
+    <span class="example-chip" data-url="https://openai.com/news/" data-goal="OpenAI GPT model release announcement latest news product update API">OpenAI: latest news</span>
+    <span class="example-chip" data-url="https://survey.stackoverflow.co/2024/" data-goal="Stack Overflow survey developer programming language most popular used loved dreaded">SO Survey: popular languages</span>
+    <span class="example-chip" data-url="https://forecast.weather.gov/MapClick.php?CityName=New+York&amp;state=NY&amp;site=OKX&amp;textField1=40.7198&amp;textField2=-73.993" data-goal="weather forecast temperature today tomorrow rain wind humidity celsius fahrenheit">Weather.gov: NYC forecast</span>
+    <span class="example-chip" data-url="https://arxiv.org/list/cs.AI/recent" data-goal="arxiv paper AI machine learning latest submission abstract title authors 2025 2026">arXiv: latest AI papers</span>
+    <span class="example-chip" data-url="https://finance.yahoo.com/quote/%5EGSPC/" data-goal="S&amp;P 500 index value points today gain loss percent change stock market">Yahoo Finance: S&amp;P 500</span>
+    <span class="example-chip" data-url="https://www.bbc.com/sport/football/premier-league/table" data-goal="Premier League table standings points goals wins losses team position top">BBC: Premier League table</span>
+    <span class="example-chip" data-url="https://climate.nasa.gov/vital-signs/global-temperature/" data-goal="global temperature CO2 climate change sea level rise record anomaly celsius latest data">NASA: climate data</span>
+    <span class="example-chip" data-url="https://www.rust-lang.org/" data-goal="Rust programming language crate version download release stable edition 2024">Rust-lang.org</span>
+  </div>
+
+  <div class="form-group">
+    <label>URL</label>
+    <input type="url" id="input-url" placeholder="https://en.wikipedia.org/wiki/COVID-19_vaccine" value="https://en.wikipedia.org/wiki/COVID-19_vaccine" spellcheck="false">
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="margin-bottom:0">
+      <label>Question</label>
+      <input type="text" id="input-goal" placeholder="What are the side effects of COVID-19 vaccines?" value="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">
+      <div style="font-size:.72rem;color:#555;margin-top:.4rem;line-height:1.4">Why so many keywords? In production, the AI agent auto-expands your question with synonyms, translations, and expected values to catch every relevant node. Here you see the raw expanded query.</div>
+    </div>
+    <button class="btn-run" id="btn-run" onclick="runQuery()">Run</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="candle-wrapper">
+      <div class="candles">
+        <div class="light__wave"></div>
+        <div class="candle1">
+          <div class="candle1__body">
+            <div class="candle1__eyes">
+              <span class="candle1__eyes-one"></span>
+              <span class="candle1__eyes-two"></span>
+            </div>
+            <div class="candle1__mouth"></div>
+          </div>
+          <div class="candle1__stick"></div>
+        </div>
+        <div class="candle2">
+          <div class="candle2__body">
+            <div class="candle2__eyes">
+              <div class="candle2__eyes-one"></div>
+              <div class="candle2__eyes-two"></div>
+            </div>
+          </div>
+          <div class="candle2__stick"></div>
+        </div>
+        <div class="candle2__fire"></div>
+        <div class="sparkles-one"></div>
+        <div class="sparkles-two"></div>
+        <div class="candle__smoke-one"></div>
+        <div class="candle__smoke-two"></div>
+      </div>
+      <div class="floor"></div>
+    </div>
+    <div class="loading-text">Distilling&hellip;</div>
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <div class="results" id="results">
+    <div class="results-header">
+      <div class="results-title" id="results-title"></div>
+      <div class="results-meta" id="results-meta"></div>
+    </div>
+    <div class="view-toggle">
+      <button class="view-btn active" onclick="switchView('nodes')">Nodes</button>
+      <button class="view-btn" onclick="switchView('markdown')">Markdown</button>
+    </div>
+    <div class="result-terminal" id="result-nodes"></div>
+    <div class="result-markdown" id="result-markdown"></div>
+    <div class="summary-bar" id="summary-bar"></div>
+  </div>
+</main>
+
+<div data-component="footer"></div>
+
+<script>
+// Nav scroll
+(function(){var n=document.querySelector('nav');if(!n)return;var t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){n.classList.toggle('scrolled',window.scrollY>40);t=false});t=true}})})();
+
+const examples = document.querySelectorAll('.example-chip');
+examples.forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.getElementById('input-url').value = chip.dataset.url;
+    document.getElementById('input-goal').value = chip.dataset.goal;
+  });
+});
+
+async function runQuery() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url || !goal) return;
+
+  const btn = document.getElementById('btn-run');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+  const errorEl = document.getElementById('error-msg');
+
+  btn.disabled = true;
+  btn.textContent = 'Running\u2026';
+  loading.classList.add('visible');
+  results.classList.remove('visible');
+  errorEl.classList.remove('visible');
+
+  const t0 = performance.now();
+
+  try {
+    // Fetch both JSON and Markdown in parallel
+    const [resJson, resMd] = await Promise.all([
+      fetch('/api/parse-crfr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
+      }),
+      fetch('/api/parse-crfr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'markdown'})
+      })
+    ]);
+
+    if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
+
+    const data = await resJson.json();
+    const mdText = await resMd.text();
+    const elapsed = Math.round(performance.now() - t0);
+
+    if (data.error) throw new Error(data.error);
+
+    // Store markdown for toggle
+    document.getElementById('result-markdown').textContent = mdText;
+    renderResults(data, elapsed);
+  } catch (err) {
+    errorEl.textContent = 'Error: ' + err.message;
+    errorEl.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run';
+    loading.classList.remove('visible');
+  }
+}
+
+function renderResults(data, elapsed) {
+  const results = document.getElementById('results');
+  const title = document.getElementById('results-title');
+  const meta = document.getElementById('results-meta');
+  const nodesEl = document.getElementById('result-nodes');
+  const summaryEl = document.getElementById('summary-bar');
+
+  const nodes = data.nodes || [];
+  const totalNodes = data.total_nodes || 0;
+
+  title.textContent = data.title || 'Results';
+  const fMs = data.fetch_ms || 0;
+  const sMs = data.parse_time_ms || 0;
+  meta.innerHTML =
+    '<span><span class="val">' + nodes.length + '</span> nodes returned</span>' +
+    '<span><span class="val">' + totalNodes.toLocaleString() + '</span> DOM nodes</span>' +
+    '<span><span class="val">' + fMs + 'ms</span> network + <span class="val">' + sMs + 'ms</span> slaash</span>';
+
+  // Render nodes
+  nodesEl.innerHTML = nodes.map((n, i) => {
+    const rel = (n.relevance || 0).toFixed(3);
+    const role = n.role || 'text';
+    const text = (n.label || '').slice(0, 300);
+    return '<div class="result-node">' +
+      '<div class="result-node-header">relevance: ' + rel + ' &middot; ' + role + '</div>' +
+      '<div class="result-node-text">"' + escHtml(text) + '"</div>' +
+      '</div>';
+  }).join('');
+
+  // Use real raw_html_chars from API (no estimation)
+  const rawChars = data.raw_html_chars || 0;
+  const outChars = nodes.reduce((s, n) => s + (n.label || '').length, 0);
+  const reduction = rawChars > 0 ? ((1 - outChars / rawChars) * 100).toFixed(2) : '?';
+
+  // Latency breakdown: network (fetch) vs Slaash (CRFR processing)
+  const fetchMs = data.fetch_ms || 0;
+  const slaashMs = data.parse_time_ms || 0;
+
+  summaryEl.innerHTML =
+    '<div><div class="summary-val">' + rawChars.toLocaleString() + '</div><div class="summary-label">chars in</div></div>' +
+    '<div><div class="summary-val">' + outChars.toLocaleString() + '</div><div class="summary-label">chars out</div></div>' +
+    '<div><div class="summary-val">' + reduction + '%</div><div class="summary-label">reduction</div></div>' +
+    '<div><div class="summary-val">' + fetchMs + 'ms</div><div class="summary-label">network</div></div>' +
+    '<div><div class="summary-val">' + slaashMs + 'ms</div><div class="summary-label">slaash</div></div>';
+
+  results.classList.add('visible');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Allow Enter to submit
+document.getElementById('input-goal').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQuery();
+});
+document.getElementById('input-url').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQuery();
+});
+// View toggle
+function switchView(view){
+  const nodesEl = document.getElementById('result-nodes');
+  const mdEl = document.getElementById('result-markdown');
+  const btns = document.querySelectorAll('.view-btn');
+  btns.forEach(b => b.classList.remove('active'));
+  if(view === 'markdown'){
+    nodesEl.style.display = 'none';
+    mdEl.style.display = 'block';
+    btns[1].classList.add('active');
+  } else {
+    nodesEl.style.display = 'block';
+    mdEl.style.display = 'none';
+    btns[0].classList.add('active');
+  }
+}
+
+</script>
+<script src="/components.js"></script>
+</body>
+</html>
