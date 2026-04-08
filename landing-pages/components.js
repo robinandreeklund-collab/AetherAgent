@@ -69,6 +69,38 @@
     '<footer>','<aside>','style=""','onclick=""','tracking.js',
     'ads.min.js','<table>','display:none'];
 
+  // Spawn ZzZ sleep bubbles
+  function spawnZzz(){
+    var z=document.createElement('span');
+    z.textContent='z';
+    z.style.cssText='position:absolute;left:'+(x+14)+'px;bottom:28px;font-size:.5rem;color:rgba(255,255,255,0.25);pointer-events:none;animation:zzFloat 1.5s ease forwards';
+    track.appendChild(z);
+    setTimeout(function(){
+      var z2=document.createElement('span');
+      z2.textContent='Z';
+      z2.style.cssText='position:absolute;left:'+(x+18)+'px;bottom:32px;font-size:.6rem;color:rgba(255,255,255,0.3);pointer-events:none;animation:zzFloat 1.5s ease .3s forwards;opacity:0';
+      track.appendChild(z2);
+      setTimeout(function(){z2.remove()},1800);
+    },400);
+    setTimeout(function(){z.remove()},1500);
+  }
+
+  // Spawn speed lines behind crab
+  function spawnSpeedLine(){
+    var line=document.createElement('span');
+    line.style.cssText='position:absolute;left:'+(x-(dir*8))+'px;bottom:'+(4+Math.random()*16)+'px;width:'+(6+Math.random()*10)+'px;height:1px;background:rgba(255,255,255,0.15);pointer-events:none;animation:speedFade .3s ease forwards';
+    track.appendChild(line);
+    setTimeout(function(){line.remove()},300);
+  }
+
+  // Inject keyframes if not already present
+  if(!document.getElementById('ferris-extra-css')){
+    var style=document.createElement('style');
+    style.id='ferris-extra-css';
+    style.textContent='@keyframes zzFloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-18px) translateX(6px)}}@keyframes speedFade{0%{opacity:.3;transform:scaleX(1)}100%{opacity:0;transform:scaleX(0.3)}}';
+    document.head.appendChild(style);
+  }
+
   function spawnNodeAt(nx){
     var text=domNodes[Math.floor(Math.random()*domNodes.length)];
     var node=document.createElement('span');
@@ -97,20 +129,53 @@
     setTimeout(function(){fL.remove();fR.remove()},700);
   }
 
+  var sleepZzzTimer=0;
+  var peekSide=0; // 0=not peeking, -1=left edge, 1=right edge
+  var speedLineTimer=0;
+
   function tick(now){
     var w=track.offsetWidth;
+
+    // SLEEPING — sit still, spawn ZzZ bubbles
+    if(state==='sleeping'){
+      if(now>stateUntil){
+        state='walking';
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+      } else if(now>sleepZzzTimer){
+        spawnZzz();
+        sleepZzzTimer=now+800+Math.random()*600;
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // PEEKING — hide at edge, only eyes visible
+    if(state==='peeking'){
+      if(now>stateUntil){
+        state='walking';
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        x=peekSide<0?4:w-36;
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // PAUSED
     if(state==='paused'){
       if(now>stateUntil)state='walking';
       requestAnimationFrame(tick);return;
     }
+
+    // HUNTING — run to node with speed lines
     if(state==='hunting'&&activeNode){
       var dx=activeNode.x-x;
       if(Math.abs(dx)>5){
         dir=dx>0?1:-1;
         el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        x+=dir*1.2;
+        x+=dir*1.5;
+        if(now>speedLineTimer){spawnSpeedLine();speedLineTimer=now+60;}
       }else{state='jumping';jumpStart=now;}
     }
+
+    // JUMPING
     if(state==='jumping'){
       var t=(now-jumpStart)/350;
       if(t<1){
@@ -121,18 +186,43 @@
         nextAction=now+2e3+Math.random()*3e3;
       }
     }
+
+    // WALKING — normal movement + decisions
     if(state==='walking'){
       x+=speed*dir;
       if(now>nextAction){
         var roll=Math.random();
-        if(roll<.2){dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';}
-        else if(roll<.35){state='paused';stateUntil=now+400+Math.random()*1e3;}
-        else if(roll<.55){var nx=40+Math.random()*(w-80);activeNode=spawnNodeAt(nx);state='hunting';}
+        if(roll<.15){
+          // Turn around
+          dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        } else if(roll<.25){
+          // Pause
+          state='paused';stateUntil=now+400+Math.random()*1e3;
+        } else if(roll<.42){
+          // Hunt a DOM node!
+          var nx=40+Math.random()*(w-80);
+          activeNode=spawnNodeAt(nx);state='hunting';
+        } else if(roll<.52){
+          // Fall asleep ZzZ
+          state='sleeping';stateUntil=now+2500+Math.random()*2e3;
+          sleepZzzTimer=now+300;
+        } else if(roll<.60){
+          // Peek from edge
+          state='peeking';stateUntil=now+1500+Math.random()*1500;
+          peekSide=Math.random()<.5?-1:1;
+          x=peekSide<0?-20:w-12;
+          el.style.left=x+'px';
+          el.style.transform=peekSide<0?'scaleX(1) rotate(-15deg)':'scaleX(-1) rotate(15deg)';
+        }
         speed=.3+Math.random()*.35;
         nextAction=now+2500+Math.random()*4e3;
       }
     }
-    if(x>w+40)x=-40;if(x<-40)x=w+40;
+
+    // Wrap edges (only when walking)
+    if(state==='walking'||state==='hunting'){
+      if(x>w+40)x=-40;if(x<-40)x=w+40;
+    }
     el.style.left=x+'px';
     requestAnimationFrame(tick);
   }
