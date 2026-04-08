@@ -167,7 +167,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     <div class="glow green"></div>
     <div class="card-label">Token savings</div>
     <div class="card-value green" id="m-savings" style="font-size:2rem">—</div>
-    <div class="card-sub"><span id="m-chars-in">—</span> in &rarr; <span id="m-chars-out">—</span> <span class="unit">out</span></div>
+    <div class="card-sub"><span id="m-chars-in">—</span> in &rarr; <span id="m-chars-out">—</span> out &middot; <span id="m-chars-saved" style="color:var(--green)">—</span> <span class="unit">saved</span></div>
   </div>
   <div class="card">
     <div class="glow blue"></div>
@@ -229,6 +229,8 @@ function update(d){
   document.getElementById('m-savings').textContent = d.token_savings_pct ? d.token_savings_pct+'%' : '—';
   document.getElementById('m-chars-in').textContent = fmt(d.total_chars_in || 0);
   document.getElementById('m-chars-out').textContent = fmt(d.total_chars_out || 0);
+  const saved = (d.total_chars_in||0) - (d.total_chars_out||0);
+  document.getElementById('m-chars-saved').textContent = fmt(saved > 0 ? saved : 0);
   document.getElementById('m-latency').textContent = d.avg_propagation_us ? (d.avg_propagation_us/1000).toFixed(1)+'ms' : '—';
   document.getElementById('m-p95').textContent = d.p95_latency_us ? (d.p95_latency_us/1000).toFixed(1)+'ms' : '—';
   document.getElementById('m-requests').textContent = fmt(d.total_requests || 0);
