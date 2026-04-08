@@ -33,7 +33,7 @@
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
 @keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
 @keyframes clawSnipR{0%{transform:rotate(0deg)}100%{transform:rotate(25deg)}}
-.slash-node{position:absolute;font-family:var(--mono,monospace);font-size:.65rem;color:rgba(255,255,255,0.5);white-space:nowrap;pointer-events:none;padding:.2rem .5rem;border:1px solid rgba(59,130,246,0.2);border-radius:4px;background:rgba(59,130,246,0.06)}
+.slash-node{position:absolute;font-family:var(--mono,monospace);font-size:.65rem;color:rgba(255,255,255,0.5);white-space:nowrap;pointer-events:none;padding:.2rem .5rem;border:1px solid rgba(59,130,246,0.2);border-radius:4px;background:rgba(59,130,246,0.06);z-index:1;max-height:20px}
 .slash-node.falling-in{animation:nodeFallIn .5s ease forwards}
 .slash-node.slashed-l{animation:nodeSlashL .6s ease forwards}
 .slash-node.slashed-r{animation:nodeSlashR .6s ease forwards}
@@ -85,7 +85,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   <div class="hills"></div>
   <div class="trees"></div>
   <div class="ground-line"></div>
-  <svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
+  <svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
     <g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g>
     <rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/>
@@ -130,7 +130,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
       var landscape='<div class="mountains"></div><div class="hills"></div><div class="trees"></div><div class="ground-line"></div>';
       track.insertAdjacentHTML('afterbegin',landscape);
     }
-    var crabSvg='<svg class="crab" id="ferris" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
+    var crabSvg='<svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
     track.insertAdjacentHTML('beforeend',crabSvg);
   }
   var el=document.getElementById('ferris');
