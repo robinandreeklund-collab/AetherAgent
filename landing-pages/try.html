@@ -40,6 +40,15 @@ main{flex:1;max-width:800px;width:100%;margin:0 auto;padding:5rem 2rem 3rem}
 h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem}
 .intro{color:var(--muted);margin-bottom:2rem;font-size:.95rem}
 
+/* INFO BOX */
+.info-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.5rem;margin-bottom:2rem;transition:border-color .3s}
+.info-box:hover{border-color:rgba(255,255,255,0.12)}
+.info-box h4{font-size:.9rem;font-weight:600;color:#fff;margin-bottom:.5rem}
+.info-box p{font-size:.85rem;color:var(--muted);line-height:1.6;margin:0}
+.info-box .flow{display:flex;flex-wrap:wrap;gap:.35rem;margin:.75rem 0;align-items:center}
+.info-box .flow-step{font-size:.75rem;font-weight:500;color:var(--accent);font-family:var(--mono);padding:.2rem .5rem;background:rgba(59,130,246,0.06);border-radius:4px}
+.info-box .flow-arrow{color:#444;font-size:.7rem}
+
 /* FORM */
 .form-group{margin-bottom:1.25rem}
 .form-group label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem}
@@ -157,8 +166,17 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <main>
   <h1>Try it. Slaash it<span style="color:#3b82f6">/</span></h1>
   <p class="intro">Enter any URL and a question. Slaash will distill the page to just the answer.</p>
-  <div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.12);border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1.5rem;font-size:.78rem;color:#999;line-height:1.6">
-    <strong style="color:#bbb">How Slaash works in production:</strong> Question &rarr; LLM expands query &rarr; Slaash extracts &rarr; Answer &rarr; LLM sends feedback &rarr; Slaash learns. This playground skips the feedback step, so results improve with use in the real pipeline but not here. First queries on a new URL are cold — repeated queries with feedback get significantly better.
+  <div class="info-box">
+    <h4>How Slaash works in production</h4>
+    <div class="flow">
+      <span class="flow-step">Question</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">LLM expands</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Slaash extracts</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Answer</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">LLM feedback</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-step">Slaash learns</span>
+    </div>
+    <p>This playground skips the feedback step. In the real pipeline, results improve with every query. First runs on a new URL are cold.</p>
   </div>
 
   <div class="examples">
