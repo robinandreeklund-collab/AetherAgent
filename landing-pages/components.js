@@ -205,6 +205,9 @@
   var sleepZzzTimer=0;
   var peekSide=0;
   var speedLineTimer=0;
+  // Dynamic action selection — tracks when each action was last done
+  var lastDone={};
+  var lastAction='';
 
   function tick(now){
     var w=track.offsetWidth;
@@ -351,52 +354,63 @@
     if(state==='walking'){
       x+=speed*dir;
       if(now>nextAction){
-        var roll=Math.random();
-        if(roll<.10){
-          // Turn around
+        // Dynamic probability — boost actions not done recently
+        var actions=['turn','pause','hunt','sleep','peek','scared','eat','surf','dig'];
+        // Weight: base + recency bonus (higher = longer since last done)
+        var weights=[8,5,15,6,4,10,10,10,10];
+        for(var ai=0;ai<actions.length;ai++){
+          var since=now-(lastDone[actions[ai]]||0);
+          // Boost by 1 point per 3 seconds since last done (max +15)
+          weights[ai]+=Math.min(Math.floor(since/3000),15);
+          // Never repeat same action twice
+          if(actions[ai]===lastAction) weights[ai]=0;
+          // Peek only near edge
+          if(actions[ai]==='peek'&&x>30&&x<w-50) weights[ai]=0;
+        }
+        var totalW=weights.reduce(function(a,b){return a+b},0);
+        var r=Math.random()*totalW, cum=0, chosen='turn';
+        for(var ai2=0;ai2<actions.length;ai2++){
+          cum+=weights[ai2];
+          if(r<cum){chosen=actions[ai2];break;}
+        }
+        lastAction=chosen;
+        lastDone[chosen]=now;
+
+        if(chosen==='turn'){
           dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        } else if(roll<.17){
-          // Pause
+        } else if(chosen==='pause'){
           state='paused';stateUntil=now+400+Math.random()*1e3;
-        } else if(roll<.32){
-          // Hunt a DOM node!
+        } else if(chosen==='hunt'){
           var nx=40+Math.random()*(w-80);
           activeNode=spawnNodeAt(nx);state='hunting';
-        } else if(roll<.40){
-          // Fall asleep ZzZ
+        } else if(chosen==='sleep'){
           state='sleeping';stateUntil=now+2500+Math.random()*2e3;
           sleepZzzTimer=now+300;
-        } else if(roll<.47 && (x < 30 || x > w - 50)){
-          // Peek from edge
+        } else if(chosen==='peek'){
           state='peeking';stateUntil=now+1500+Math.random()*1500;
           if(x<30){el.style.transform='scaleX(1) rotate(-12deg)';dir=1;}
           else{el.style.transform='scaleX(-1) rotate(12deg)';dir=-1;}
-        } else if(roll<.55){
-          // Scared of big DOM node!
+        } else if(chosen==='scared'){
           var bnx=40+Math.random()*(w-80);
           scaredNode=spawnBigNode(bnx);
-          scaredFrom=bnx;
-          dir=x<bnx?-1:1; // run away
+          dir=x<bnx?-1:1;
           el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
           state='scared';stateUntil=now+1200+Math.random()*800;
-        } else if(roll<.63){
-          // Eat a token
+        } else if(chosen==='eat'){
           var tnx=40+Math.random()*(w-80);
           tokenEl=spawnToken(tnx);
           state='eating';
-        } else if(roll<.70){
-          // Surf a DOM node
+        } else if(chosen==='surf'){
           var snx=x+dir*10;
           surfNode=spawnNodeAt(snx);
           surfStart=now;
           el.style.bottom='14px';
           state='surfing';
-        } else if(roll<.77){
-          // Dig up hidden node
+        } else if(chosen==='dig'){
           state='digging';digStart=now;dugNode=null;
         }
         speed=.3+Math.random()*.35;
-        nextAction=now+2000+Math.random()*3500;
+        nextAction=now+1500+Math.random()*2500;
       }
     }
 
