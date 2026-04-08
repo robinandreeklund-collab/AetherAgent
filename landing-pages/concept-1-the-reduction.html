@@ -110,12 +110,6 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .feature-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem}
 .feature-card p{font-size:.85rem;color:var(--muted);line-height:1.5}
 
-/* CTA */
-.cta-section{position:relative;padding:8rem 2rem;text-align:center;overflow:hidden}
-.cta-section::before{content:'';position:absolute;top:50%;left:50%;width:400px;height:400px;background:radial-gradient(circle,rgba(59,130,246,0.06) 0%,transparent 70%);transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}
-.cta-section h2{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.5rem}
-.cta-section p{color:var(--muted);font-size:.95rem;margin-bottom:2rem}
-.cta-section .btn-sm{padding:.85rem 2.5rem;font-size:1rem;border-radius:12px}
 /* FOOTER */
 footer{position:relative;overflow:hidden;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem}
 .footer-glow{position:absolute;top:-1px;left:50%;width:200px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);transform:translateX(-50%);animation:footerGlow 6s ease-in-out infinite}
@@ -124,9 +118,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .footer-left{display:flex;flex-direction:column;gap:.5rem}
 .footer-left .tagline{font-size:.75rem;color:#444;letter-spacing:.02em;max-width:220px;line-height:1.5}
 .footer-center{text-align:center}
-.footer-logo{font-size:1.8rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.footer-logo{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
 .footer-logo .fl-slash{color:#3b82f6;font-weight:800}
-.footer-year{font-size:.65rem;color:#333;margin-top:.25rem;letter-spacing:.08em}
 .footer-right{display:flex;flex-direction:column;align-items:flex-end;gap:.4rem}
 .footer-right a{color:#555;font-size:.8rem;font-weight:500;transition:color .25s ease;position:relative}
 .footer-right a:hover{color:#fff}
@@ -415,15 +408,6 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 </section>
 
-<div class="section-divider"></div>
-
-<!-- CTA -->
-<section class="cta-section reveal">
-  <h2>Distill it yourself</h2>
-  <p>Any URL. Any question. Distilled answer.</p>
-  <a class="btn-sm btn-accent" href="/try">Try alpha &rarr;</a>
-</section>
-
 <!-- CONTACT -->
 <div class="contact-box">
   <div class="contact-card">
@@ -466,14 +450,15 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
       <a href="mailto:zerotoken@slaash.ai" style="font-size:.7rem;color:#444;transition:color .25s">zerotoken@slaash.ai</a>
     </div>
     <div class="footer-center">
-      <div class="footer-logo">sl<span class="fl-slash">/</span>sh</div>
-      <div class="footer-year">&copy; 2026</div>
+      <div style="font-size:1.15rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.35rem">Distill it yourself</div>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">Any URL. Any question.</div>
+      <a class="btn-sm btn-accent" href="/try" style="font-size:.75rem;padding:.45rem 1.25rem">Try alpha &rarr;</a>
     </div>
     <div class="footer-right">
+      <div class="footer-logo" style="margin-bottom:.5rem">sl<span class="fl-slash">/</span>sh</div>
       <a href="/mission">Mission</a>
       <a href="/timeline">Timeline</a>
       <a href="/live">Live</a>
-      <a href="/try">Try alpha</a>
     </div>
   </div>
   <div class="footer-bottom">Built in Rust. No GPU. No model files. Just signal.</div>

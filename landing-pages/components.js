@@ -44,14 +44,15 @@
       <a href="mailto:zerotoken@slaash.ai" style="font-size:.7rem;color:#444;transition:color .25s">zerotoken@slaash.ai</a>
     </div>
     <div class="footer-center">
-      <div class="footer-logo">sl<span class="fl-slash">/</span>sh</div>
-      <div class="footer-year">&copy; 2026</div>
+      <div style="font-size:1.15rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.35rem">Distill it yourself</div>
+      <div style="font-size:.8rem;color:#888;margin-bottom:.75rem">Any URL. Any question.</div>
+      <a class="btn-sm btn-accent" href="/try" style="font-size:.75rem;padding:.45rem 1.25rem;border-radius:8px;background:#3b82f6;color:#fff;text-decoration:none;display:inline-block">Try alpha &rarr;</a>
     </div>
     <div class="footer-right">
+      <div class="footer-logo" style="margin-bottom:.5rem">sl<span class="fl-slash">/</span>sh</div>
       <a href="/mission">Mission</a>
       <a href="/timeline">Timeline</a>
       <a href="/live">Live</a>
-      <a href="/try">Try alpha</a>
     </div>
   </div>
   <div class="footer-bottom">Built in Rust. No GPU. No model files. Just signal.</div>
