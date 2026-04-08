@@ -149,6 +149,10 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .crab-track{overflow:hidden;height:40px;position:relative;margin-bottom:-1px}
 .crab{position:absolute;bottom:0;animation:crabWalk 20s linear infinite;image-rendering:pixelated;width:32px;height:32px}
 @keyframes crabWalk{0%{left:-40px}100%{left:100%}}
+.claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
+.claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
+@keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
+@keyframes clawSnipR{0%{transform:rotate(0deg)}100%{transform:rotate(25deg)}}
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
 .reveal.visible{opacity:1;transform:translateY(0)}
 
@@ -382,8 +386,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <div class="crab-track">
   <svg class="crab" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <!-- claws -->
-    <rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/>
-    <rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/>
+    <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
+    <g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g>
     <!-- arms -->
     <rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/>
     <!-- body -->
