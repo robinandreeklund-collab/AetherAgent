@@ -6384,6 +6384,15 @@ async fn landing_docs() -> impl IntoResponse {
     .await
 }
 
+async fn favicon_svg() -> impl IntoResponse {
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><text x=\"8\" y=\"26\" font-family=\"Inter,system-ui,sans-serif\" font-weight=\"800\" font-size=\"28\" fill=\"#3b82f6\">/</text></svg>";
+    (
+        StatusCode::OK,
+        [("content-type", "image/svg+xml")],
+        svg,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -6403,6 +6412,7 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         // Root = landing page
         .route("/", get(landing_concept_1))
+        .route("/favicon.svg", get(favicon_svg))
         .route("/api-info", get(root))
         .route("/tools", get(tool_explorer))
         .route("/api/endpoints", get(api_endpoints))
