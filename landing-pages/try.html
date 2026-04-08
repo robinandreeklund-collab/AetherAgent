@@ -74,12 +74,33 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .results-meta{display:flex;gap:1.5rem;font-size:.75rem;color:var(--muted)}
 .results-meta .val{color:#79c0ff;font-weight:600}
 
-/* LOADING */
-.loading{text-align:center;padding:3rem 0;display:none}
+/* LOADING — Candle animation */
+.loading{text-align:center;padding:2rem 0;display:none}
 .loading.visible{display:block}
-.loading-crab{width:48px;height:48px;margin:0 auto 1rem;image-rendering:pixelated;animation:crabBounce .6s ease-in-out infinite alternate}
-@keyframes crabBounce{0%{transform:translateY(0) scaleX(1)}50%{transform:translateY(-4px) scaleX(-1)}100%{transform:translateY(0) scaleX(1)}}
-.loading-text{color:var(--muted);font-size:.85rem}
+.loading-text{color:var(--muted);font-size:.85rem;margin-top:.75rem}
+.candle-loader{position:relative;width:120px;height:90px;margin:0 auto;transform:scale(0.7)}
+.candle-loader .cl-floor{position:absolute;bottom:0;left:50%;width:120px;height:2px;background:var(--border);transform:translateX(-50%)}
+.cl-c1{position:absolute;left:55%;bottom:2px;width:22px;height:55px;background:var(--surface);border:2px solid var(--accent);border-bottom:0;border-radius:2px;animation:cl-expand 3s infinite linear}
+.cl-c1 .cl-stick{position:absolute;left:50%;top:0;width:2px;height:10px;background:var(--accent);border-radius:4px;transform:translate(-50%,-100%)}
+.cl-c1 .cl-eye{position:absolute;top:8px;width:3px;height:3px;border-radius:50%;background:var(--accent);animation:cl-blink 3s infinite linear}
+.cl-c1 .cl-eye-l{left:25%}.cl-c1 .cl-eye-r{left:65%}
+.cl-c1 .cl-mouth{position:absolute;top:16px;left:35%;width:0;height:0;border-radius:10px;background:var(--accent);animation:cl-uff 3s infinite linear}
+.cl-c2{position:absolute;left:22%;bottom:2px;width:28px;height:38px;background:var(--surface);border:2px solid var(--accent);border-bottom:0;border-radius:2px;animation:cl-shake 3s infinite linear}
+.cl-c2 .cl-stick{position:absolute;left:50%;top:0;width:2px;height:8px;background:var(--accent);border-radius:4px;transform:translate(-50%,-100%);animation:cl-stick-anim 3s infinite linear}
+.cl-c2 .cl-eye{position:absolute;top:12px;width:3px;height:3px;border-radius:50%;background:var(--accent)}
+.cl-c2 .cl-eye-l{left:22%;animation:cl-look-down 3s infinite linear}
+.cl-c2 .cl-eye-r{left:62%;animation:cl-look-up 3s infinite linear}
+.cl-fire{position:absolute;left:38%;bottom:42px;width:10px;height:14px;background:var(--accent);border-radius:50% 50% 50% 50%/60% 60% 40% 40%;animation:cl-dance 3s infinite linear}
+.cl-smoke{position:absolute;left:30%;bottom:55px;width:0;height:0;border-radius:10px;background:rgba(255,255,255,0.1);animation:cl-smoke-move 3s infinite linear}
+@keyframes cl-expand{0%,40%{transform:scale(1,1)}45%,55%{transform:scale(1.08,1.08)}60%{transform:scale(0.92,0.92)}65%,100%{transform:scale(1,1)}}
+@keyframes cl-blink{0%,35%{opacity:1}36%,39%{opacity:0}40%,100%{opacity:1}}
+@keyframes cl-uff{0%,40%{width:0;height:0}50%,54%{width:10px;height:10px;left:25%}62%{width:2px;height:2px;left:20%}67%,100%{width:0;height:0;left:35%}}
+@keyframes cl-shake{0%,59%{transform:translate(0,0)}62%{transform:translate(-2px,0)}65%{transform:translate(2px,0)}67%,74%{transform:translate(0,0)}75%{transform:scale(1.12,0.88);border-color:var(--accent)}91%{transform:scale(1.15,0.85);background:#ef4444;border-color:#ef4444}92%{transform:scale(0.88,1.12)}97%,100%{transform:scale(1,1)}}
+@keyframes cl-stick-anim{0%,59%{transform:translate(-50%,-100%) rotate(0)}62%{transform:translate(-50%,-100%) rotate(-15deg)}65%{transform:translate(-50%,-100%) rotate(15deg)}70%{transform:translate(-50%,-100%) rotate(-5deg)}74%,84%{transform:translate(-50%,-100%) rotate(0)}85%{transform:translate(0%,120%) rotate(180deg)}92%,100%{transform:translate(-50%,-100%) rotate(0)}}
+@keyframes cl-dance{59%,89%{width:0;height:0}90%,0%,7%,15%,23%,31%,39%,47%,55%{left:38.5%;width:10px;height:14px;background:#60a5fa}94%,3%,11%,19%,27%,35%,43%,51%,58%{left:39%;width:10px;height:14px;background:var(--accent)}}
+@keyframes cl-smoke-move{0%,64%,100%{width:0;height:0;bottom:55px}65%{width:8px;height:8px;bottom:60px;left:35%}80%{width:0;height:0;bottom:70px}}
+@keyframes cl-look-down{0%,70%,90%,100%{border-radius:50%;background:var(--accent)}71%,89%{background:none;border:solid var(--accent);border-radius:0;border-width:0 2px 2px 0;padding:1px;transform:rotate(-45deg) translate(-50%,-65%)}}
+@keyframes cl-look-up{0%,70%,90%,100%{border-radius:50%;background:var(--accent)}71%,89%{top:5px;background:none;border:solid var(--accent);border-radius:0;border-width:0 2px 2px 0;padding:1px;transform:rotate(135deg) translate(-80%,20%)}}
 
 /* NODES */
 .result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7}
@@ -186,7 +207,22 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
   </div>
 
   <div class="loading" id="loading">
-    <svg class="loading-crab" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>
+    <div class="candle-loader">
+      <div class="cl-fire"></div>
+      <div class="cl-smoke"></div>
+      <div class="cl-c1">
+        <div class="cl-stick"></div>
+        <div class="cl-eye cl-eye-l"></div>
+        <div class="cl-eye cl-eye-r"></div>
+        <div class="cl-mouth"></div>
+      </div>
+      <div class="cl-c2">
+        <div class="cl-stick"></div>
+        <div class="cl-eye cl-eye-l"></div>
+        <div class="cl-eye cl-eye-r"></div>
+      </div>
+      <div class="cl-floor"></div>
+    </div>
     <div class="loading-text">Distilling&hellip;</div>
   </div>
 
