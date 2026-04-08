@@ -176,6 +176,11 @@ path = "src/bin/convergence_test.rs"
 required-features = ["fetch", "js-eval"]
 
 [[bin]]
+name = "adaptive-e2e"
+path = "src/bin/adaptive_e2e.rs"
+required-features = ["fetch"]
+
+[[bin]]
 name = "aether-crfr-bench"
 path = "src/bin/crfr_benchmark.rs"
 

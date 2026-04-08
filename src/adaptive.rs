@@ -324,10 +324,55 @@ impl CrawlSession {
         self.term_hits.len() as f32 / self.goal_words.len() as f32
     }
 
+    /// Processa med separata nod-set: top_nodes för content, full_nodes för links
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_page_with_links(
+        &mut self,
+        top_nodes: &[SemanticNode],
+        full_nodes: &[SemanticNode],
+        url: &str,
+        title: &str,
+        depth: u32,
+        fetch_time_ms: u64,
+        parse_time_ms: u64,
+    ) {
+        self.process_page_inner(
+            top_nodes,
+            Some(full_nodes),
+            url,
+            title,
+            depth,
+            fetch_time_ms,
+            parse_time_ms,
+        );
+    }
+
     /// Processa en hämtad sida: extrahera noder + links, uppdatera saturation
     pub fn process_page(
         &mut self,
         tree_nodes: &[SemanticNode],
+        url: &str,
+        title: &str,
+        depth: u32,
+        fetch_time_ms: u64,
+        parse_time_ms: u64,
+    ) {
+        self.process_page_inner(
+            tree_nodes,
+            None,
+            url,
+            title,
+            depth,
+            fetch_time_ms,
+            parse_time_ms,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_page_inner(
+        &mut self,
+        tree_nodes: &[SemanticNode],
+        full_nodes_for_links: Option<&[SemanticNode]>,
         url: &str,
         title: &str,
         depth: u32,
@@ -390,8 +435,9 @@ impl CrawlSession {
             filter_navigation: false,
             min_relevance: 0.0,
         };
+        let link_source = full_nodes_for_links.unwrap_or(tree_nodes);
         let link_result = link_extract::extract_links_from_tree(
-            tree_nodes,
+            link_source,
             url,
             &link_config,
             Some(&self.accumulated_hv),
@@ -567,9 +613,15 @@ pub async fn adaptive_crawl(
             }
         };
 
-        // Parse med CRFR
+        // Parse: full tree för link extraction + CRFR top-N för content
         let parse_start = std::time::Instant::now();
-        let tree_json = crate::parse_crfr(
+
+        // Full tree (alla noder, inklusive links)
+        let full_tree_json = crate::parse_to_semantic_tree(&html, goal, &final_url);
+        let full_nodes = parse_crfr_nodes(&full_tree_json);
+
+        // CRFR top-N (content-filtrerade noder)
+        let crfr_json = crate::parse_crfr(
             &html,
             goal,
             &final_url,
@@ -577,19 +629,19 @@ pub async fn adaptive_crawl(
             false,
             "json",
         );
+        let top_nodes = parse_crfr_nodes(&crfr_json);
+
         let parse_time_ms = parse_start.elapsed().as_millis() as u64;
 
-        // Deserialisera noder från JSON
-        let tree_nodes = parse_crfr_nodes(&tree_json);
-
         // Avgör om sidan var användbar (har relevanta noder)
-        let was_useful = tree_nodes.iter().any(|n| n.relevance > 0.3);
+        let was_useful = top_nodes.iter().any(|n| n.relevance > 0.3);
 
         session.update_link_stats(&final_url, &structural_role, was_useful);
 
-        // Processa sidan (extract links, update saturation, etc.)
-        session.process_page(
-            &tree_nodes,
+        // Processa: top_nodes för content, full_nodes för link extraction
+        session.process_page_with_links(
+            &top_nodes,
+            &full_nodes,
             &final_url,
             &title,
             depth,
