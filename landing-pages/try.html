@@ -76,6 +76,15 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .result-node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.2rem;font-weight:500}
 .result-node-text{color:#e6edf3;font-size:.82rem;line-height:1.5}
 
+/* VIEW TOGGLE */
+.view-toggle{display:flex;gap:0;margin-bottom:1rem;border:1px solid var(--border);border-radius:8px;overflow:hidden;width:fit-content}
+.view-btn{padding:.4rem 1rem;font-size:.75rem;font-weight:600;background:transparent;color:var(--muted);border:none;cursor:pointer;transition:all .2s}
+.view-btn.active{background:var(--accent);color:#fff}
+.view-btn:hover:not(.active){background:rgba(255,255,255,0.04)}
+
+/* MARKDOWN VIEW */
+.result-markdown{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-size:.85rem;line-height:1.7;color:#e6edf3;white-space:pre-wrap;display:none}
+
 /* SUMMARY BAR */
 .summary-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
 .summary-val{font-size:1rem;font-weight:700;color:#fff}
@@ -192,7 +201,12 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
       <div class="results-title" id="results-title"></div>
       <div class="results-meta" id="results-meta"></div>
     </div>
+    <div class="view-toggle">
+      <button class="view-btn active" onclick="switchView('nodes')">Nodes</button>
+      <button class="view-btn" onclick="switchView('markdown')">Markdown</button>
+    </div>
     <div class="result-terminal" id="result-nodes"></div>
+    <div class="result-markdown" id="result-markdown"></div>
     <div class="summary-bar" id="summary-bar"></div>
   </div>
 </main>
@@ -247,19 +261,30 @@ async function runQuery() {
   const t0 = performance.now();
 
   try {
-    const res = await fetch('/api/parse-crfr', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
-    });
+    // Fetch both JSON and Markdown in parallel
+    const [resJson, resMd] = await Promise.all([
+      fetch('/api/parse-crfr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
+      }),
+      fetch('/api/parse-crfr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'markdown'})
+      })
+    ]);
 
-    if (!res.ok) throw new Error('Server returned ' + res.status);
+    if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
 
-    const data = await res.json();
+    const data = await resJson.json();
+    const mdText = await resMd.text();
     const elapsed = Math.round(performance.now() - t0);
 
     if (data.error) throw new Error(data.error);
 
+    // Store markdown for toggle
+    document.getElementById('result-markdown').textContent = mdText;
     renderResults(data, elapsed);
   } catch (err) {
     errorEl.textContent = 'Error: ' + err.message;
@@ -330,6 +355,23 @@ document.getElementById('input-goal').addEventListener('keydown', e => {
 document.getElementById('input-url').addEventListener('keydown', e => {
   if (e.key === 'Enter') runQuery();
 });
+// View toggle
+function switchView(view){
+  const nodesEl = document.getElementById('result-nodes');
+  const mdEl = document.getElementById('result-markdown');
+  const btns = document.querySelectorAll('.view-btn');
+  btns.forEach(b => b.classList.remove('active'));
+  if(view === 'markdown'){
+    nodesEl.style.display = 'none';
+    mdEl.style.display = 'block';
+    btns[1].classList.add('active');
+  } else {
+    nodesEl.style.display = 'block';
+    mdEl.style.display = 'none';
+    btns[0].classList.add('active');
+  }
+}
+
 // Ferris
 (function(){var e=document.getElementById('ferris');if(!e)return;var t=e.parentElement,x=-40,d=1,s=.4+Math.random()*.3,n=performance.now()+3000+Math.random()*5000,p=false,u=0;function k(now){if(p){if(now>u)p=false;requestAnimationFrame(k);return}if(now>n){var r=Math.random();if(r<.4){d*=-1;e.style.transform=d<0?'scaleX(-1)':'scaleX(1)'}else if(r<.6){p=true;u=now+500+Math.random()*1500}s=.3+Math.random()*.4;n=now+2000+Math.random()*5000}x+=s*d;var w=t.offsetWidth;if(x>w+40)x=-40;if(x<-40)x=w+40;e.style.left=x+'px';requestAnimationFrame(k)}requestAnimationFrame(k)})();
 </script>
