@@ -60,9 +60,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .hero h1,.hero .subtitle,.hero-ctas{transform:translateY(20px)}
 /* HERO SLASH — static blue / */
 .hero h1 .slash{-webkit-text-fill-color:#3b82f6}
-/* LIQUID WEB — subtle glow pulse */
-.liquid{display:inline;animation:liquidGlow 4s ease-in-out infinite}
-@keyframes liquidGlow{0%,100%{text-shadow:0 0 0 transparent}50%{text-shadow:0 0 12px rgba(59,130,246,0.3),0 0 30px rgba(59,130,246,0.1)}}
+/* LIQUID WEB — SVG displacement on isolated layer */
+.liquid{display:inline-block;position:relative;filter:url(#liquid);-webkit-text-fill-color:transparent;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text}
 .hero .subtitle span{color:#fff;font-weight:600}
 .hero .subtitle .cv{color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
 .hero .subtitle .site{color:#555;font-weight:400;font-size:.75em;display:block;margin-top:.15rem;transition:color .2s}
@@ -212,6 +211,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   <canvas id="hero-canvas"></canvas>
   <div class="hero-content">
     <h1>Distill the <span class="liquid">web.</span><br>Slash the tokens<span class="slash">/</span></h1>
+    <svg style="position:absolute;width:0;height:0"><defs><filter id="liquid"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="2" seed="5" result="n"><animate attributeName="baseFrequency" dur="12s" values="0.012;0.025;0.012" repeatCount="indefinite"/></feTurbulence><feDisplacementMap in="SourceGraphic" in2="n" scale="3" xChannelSelector="R" yChannelSelector="G"><animate attributeName="scale" dur="12s" values="2;5;2" repeatCount="indefinite"/></feDisplacementMap></filter></defs></svg>
     <p class="subtitle" id="hero-rotate"></p>
     <div class="hero-ctas">
       <a class="btn-sm btn-accent" href="/try">Try alpha</a>
