@@ -162,13 +162,19 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 @media(max-width:768px){.pipeline-summary{grid-template-columns:repeat(2,1fr)}}
 
 /* CONTACT */
-.contact-box{max-width:440px;margin:0 auto;padding:0 2rem 4rem;text-align:center}
-.contact-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem;transition:border-color .3s}
-.contact-card:hover{border-color:rgba(255,255,255,0.15)}
-.contact-card h3{font-size:1rem;font-weight:600;margin-bottom:.35rem}
-.contact-card p{font-size:.85rem;color:var(--muted);margin-bottom:1rem;line-height:1.5}
-.contact-card a{color:var(--accent);font-family:var(--mono);font-size:.85rem;font-weight:500;transition:color .2s}
-.contact-card a:hover{color:#60a5fa}
+.contact-box{max-width:600px;margin:0 auto;padding:0 2rem 5rem;text-align:center}
+.contact-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:3rem 2.5rem;position:relative;overflow:hidden;transition:all .4s cubic-bezier(0.25,0.46,0.45,0.94)}
+.contact-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(59,130,246,0.08) 0%,transparent 60%);opacity:0;transition:opacity .4s ease}
+.contact-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 8px 40px rgba(59,130,246,0.15)}
+.contact-card:hover::before{opacity:1}
+.contact-icon{font-size:1.5rem;margin-bottom:1rem;display:block;opacity:.5;transition:all .4s ease}
+.contact-card:hover .contact-icon{opacity:1;transform:scale(1.1)}
+.contact-card h3{font-size:1.25rem;font-weight:700;margin-bottom:.5rem;letter-spacing:-0.02em;position:relative}
+.contact-card p{font-size:.9rem;color:var(--muted);margin-bottom:1.5rem;line-height:1.6;max-width:360px;margin-left:auto;margin-right:auto;position:relative}
+.contact-email{display:inline-flex;align-items:center;gap:.5rem;color:var(--accent);font-family:var(--mono);font-size:.9rem;font-weight:500;padding:.6rem 1.5rem;border:1px solid rgba(59,130,246,0.2);border-radius:8px;transition:all .3s ease;position:relative;background:rgba(59,130,246,0.04)}
+.contact-email:hover{background:rgba(59,130,246,0.1);border-color:var(--accent);color:#fff;transform:translateY(-1px)}
+.contact-email .arrow{transition:transform .3s ease;display:inline-block}
+.contact-email:hover .arrow{transform:translateX(3px)}
 .crab-track{overflow:visible;height:64px;position:relative;margin-bottom:-1px}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 /* DOM node — falls from top, gets slashed into halves */
@@ -415,9 +421,10 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 <!-- CONTACT -->
 <div class="contact-box">
   <div class="contact-card">
-    <h3>Get in touch</h3>
-    <p>Questions, partnerships, or early access for your team.</p>
-    <a href="mailto:zerotoken@slaash.ai">zerotoken@slaash.ai</a>
+    <span class="contact-icon" style="color:var(--accent)">/</span>
+    <h3>Let's talk</h3>
+    <p>Building with AI agents? We'd love to hear what you're working on. Partnerships, integrations, or early access.</p>
+    <a class="contact-email" href="mailto:zerotoken@slaash.ai">zerotoken@slaash.ai <span class="arrow">&rarr;</span></a>
   </div>
 </div>
 
