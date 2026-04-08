@@ -4,7 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<title>Try Slaash</title>
+<title>Try Slaash — Live AI Web Extraction Playground</title>
+<meta name="description" content="Try Slaash on any URL. Enter a web page and a question, get back only the answer. Live CRFR extraction with real-time token savings.">
+<meta name="keywords" content="AI web extraction demo, try slaash, token reduction playground, web scraping AI, LLM web browsing tool">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Try Slaash — Live AI Web Extraction">
+<meta property="og:description" content="Enter any URL and a question. Get back only the answer. Try it live.">
+<link rel="canonical" href="https://www.slaash.ai/try">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -59,8 +65,8 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 /* LOADING */
 .loading{text-align:center;padding:3rem 0;display:none}
 .loading.visible{display:block}
-.loading-spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1rem}
-@keyframes spin{to{transform:rotate(360deg)}}
+.loading-crab{width:48px;height:48px;margin:0 auto 1rem;image-rendering:pixelated;animation:crabBounce .6s ease-in-out infinite alternate}
+@keyframes crabBounce{0%{transform:translateY(0) scaleX(1)}50%{transform:translateY(-4px) scaleX(-1)}100%{transform:translateY(0) scaleX(1)}}
 .loading-text{color:var(--muted);font-size:.85rem}
 
 /* NODES */
@@ -162,8 +168,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
   </div>
 
   <div class="loading" id="loading">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">Fetching and analyzing page&hellip;</div>
+    <svg class="loading-crab" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>
+    <div class="loading-text">Distilling&hellip;</div>
   </div>
 
   <div class="error-msg" id="error-msg"></div>
