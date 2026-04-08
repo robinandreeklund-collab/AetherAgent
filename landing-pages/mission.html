@@ -161,7 +161,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     <a href="/timeline">Timeline</a>
     <a href="/live">Live</a>
     <a href="/docs">Docs</a>
-    <a class="btn-sm btn-accent" href="/try">Try beta</a>
+    <a class="btn-sm btn-accent" href="/try">Try alpha</a>
   </div>
 </nav>
 
@@ -394,7 +394,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
   <h3>Three principles</h3>
 
   <div class="quote">
-    <p>"Can we reduce web page content to the 0.1% that actually answers the user's question, in under 15 milliseconds, without neural networks?"</p>
+    <p>&ldquo;Can we reduce a web page to the 1% that actually answers the question &mdash; in under 15 milliseconds, without a GPU &mdash; and cut the compute cost and carbon footprint by 99%?&rdquo;</p>
     <div class="attr">The question that started Slaash</div>
   </div>
 
@@ -535,20 +535,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
     </div>
   </div>
 
-  <table class="compare-table">
-    <thead>
-      <tr><th>Optimization</th><th>Technique</th><th>Impact</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Compiler tuning</td><td>opt-level 3 + thin LTO profile</td><td><span class="pill pill-green">15&ndash;41%</span></td></tr>
-      <tr><td>Thread elimination</td><td>Deadline-based interrupt replaces thread::spawn per eval</td><td><span class="pill pill-green">13&ndash;17%</span></td></tr>
-      <tr><td>Runtime pooling</td><td>Thread-local Runtime+Context reuse (saves ~280&micro;s/call)</td><td><span class="pill pill-green">44&ndash;72%</span></td></tr>
-      <tr><td>Cleanup elimination</td><td>Allowlist security makes cleanup unnecessary for single evals</td><td><span class="pill pill-green">~98%</span></td></tr>
-      <tr><td>Memory tuning</td><td>Heap limit 64 MB &rarr; 16 MB (sufficient for SPA bundles)</td><td><span class="pill pill-green">2&ndash;7%</span></td></tr>
-    </tbody>
-  </table>
-
-  <p>The result: Slaash evaluates JavaScript expressions in <strong>2 microseconds</strong>. A full parse-with-JS pipeline — HTML parsing, DOM construction, script execution, semantic tree building — completes in <strong>53 microseconds</strong>. That's fast enough to process pages in real-time without the user noticing any delay.</p>
+  <p>After 8 optimization rounds, Slaash evaluates JavaScript expressions in <strong>2 microseconds</strong>. A full parse-with-JS pipeline — HTML parsing, DOM construction, script execution, semantic tree building — completes in <strong>53 microseconds</strong>. That's fast enough to process pages in real-time without the user noticing any delay.</p>
 
   <div class="timeline">
     <div class="timeline-item">
@@ -663,7 +650,7 @@ footer{padding:2rem;text-align:center;border-top:1px solid var(--border);color:v
 <section class="mission-cta reveal">
   <h2>See for yourself</h2>
   <p>Try Slaash on any web page. Enter a URL and a question. Get back only the answer.</p>
-  <a class="btn-sm btn-accent" href="/try" style="padding:.85rem 2.5rem;font-size:1rem;border-radius:12px">Try beta &rarr;</a>
+  <a class="btn-sm btn-accent" href="/try" style="padding:.85rem 2.5rem;font-size:1rem;border-radius:12px">Try alpha &rarr;</a>
 </section>
 
 <footer>
