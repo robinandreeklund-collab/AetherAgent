@@ -270,14 +270,19 @@
       el.style.left=x+'px';requestAnimationFrame(tick);return;
     }
 
-    // SURFING — riding a DOM node
+    // SURFING — riding ON TOP of a DOM node
     if(state==='surfing'&&surfNode){
       var st2=(now-surfStart)/2000;
       if(st2<1){
         x+=dir*1.2;
-        surfNode.el.style.left=x+'px';
-        // Smooth bob — use sin wave, crab sits on top of node
-        el.style.bottom=(10+Math.sin(st2*Math.PI*4)*3)+'px';
+        // Node slides along the ground
+        surfNode.el.style.left=(x-10)+'px';
+        surfNode.el.style.top='';
+        surfNode.el.style.bottom='2px';
+        surfNode.el.style.animation='none';
+        surfNode.el.style.opacity='1';
+        // Crab sits on top of the node, bobbing
+        el.style.bottom=(24+Math.sin(st2*Math.PI*4)*3)+'px';
         el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(st2*Math.PI*4)*5)+'deg)';
       }else{
         resetBottom();
@@ -391,7 +396,6 @@
         var chosen;
         if(forceIdx<forceQueue.length){
           chosen=forceQueue[forceIdx];forceIdx++;
-          console.log('[FERRIS] FORCED action: '+chosen+' ('+forceIdx+'/'+forceQueue.length+')');
         }else{
           var totalW=weights.reduce(function(a,b){return a+b},0);
           var r=Math.random()*totalW, cum=0; chosen='turn';
@@ -404,44 +408,35 @@
         lastDone[chosen]=now;
 
         if(chosen==='turn'){
-          console.log('[FERRIS] turn');
           dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
         } else if(chosen==='pause'){
-          console.log('[FERRIS] pause');
           state='paused';stateUntil=now+400+Math.random()*1e3;
         } else if(chosen==='hunt'){
-          console.log('[FERRIS] hunt');
           var nx=40+Math.random()*(w-80);
           activeNode=spawnNodeAt(nx);state='hunting';
         } else if(chosen==='sleep'){
-          console.log('[FERRIS] sleep');
           state='sleeping';stateUntil=now+2500+Math.random()*2e3;
           sleepZzzTimer=now+300;
         } else if(chosen==='peek'){
-          console.log('[FERRIS] peek');
           state='peeking';stateUntil=now+1500+Math.random()*1500;
           if(x<30){el.style.transform='scaleX(1) rotate(-12deg)';dir=1;}
           else{el.style.transform='scaleX(-1) rotate(12deg)';dir=-1;}
         } else if(chosen==='scared'){
-          console.log('[FERRIS] scared at x='+x+' w='+w);
           var bnx=40+Math.random()*(w-80);
           scaredNode=spawnBigNode(bnx);
           dir=x<bnx?-1:1;
           el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
           state='scared';stateUntil=now+1200+Math.random()*800;
         } else if(chosen==='eat'){
-          console.log('[FERRIS] eat');
           var tnx=40+Math.random()*(w-80);
           tokenEl=spawnToken(tnx);
           state='eating';
         } else if(chosen==='surf'){
-          console.log('[FERRIS] surf');
           var snx=x+dir*10;
           surfNode=spawnNodeAt(snx);
           surfStart=now;
           state='surfing';
         } else if(chosen==='dig'){
-          console.log('[FERRIS] dig');
           state='digging';digStart=now;dugNode=null;
         }
         speed=.3+Math.random()*.35;
