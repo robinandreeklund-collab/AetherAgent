@@ -171,14 +171,14 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border);colo
 .contact-card a:hover{color:#60a5fa}
 .crab-track{overflow:hidden;height:64px;position:relative;margin-bottom:-1px}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
-/* DOM node — falls from top, gets slashed, falls down and fades */
-.slash-node{position:absolute;font-family:var(--mono);font-size:.6rem;color:rgba(255,255,255,0.3);white-space:nowrap;pointer-events:none;padding:.15rem .4rem;border:1px solid rgba(255,255,255,0.08);border-radius:3px;background:rgba(255,255,255,0.03)}
-.slash-node.falling-in{animation:nodeFallIn .6s ease forwards}
-.slash-node.slashed-l{animation:nodeSlashL .7s ease forwards}
-.slash-node.slashed-r{animation:nodeSlashR .7s ease forwards}
-@keyframes nodeFallIn{0%{top:-20px;opacity:0}100%{top:8px;opacity:1}}
-@keyframes nodeSlashL{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(-15px,30px) rotate(-25deg)}}
-@keyframes nodeSlashR{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(15px,30px) rotate(25deg)}}
+/* DOM node — falls from top, gets slashed into halves */
+.slash-node{position:absolute;font-family:var(--mono);font-size:.65rem;color:rgba(255,255,255,0.5);white-space:nowrap;pointer-events:none;padding:.2rem .5rem;border:1px solid rgba(59,130,246,0.2);border-radius:4px;background:rgba(59,130,246,0.06)}
+.slash-node.falling-in{animation:nodeFallIn .5s ease forwards}
+.slash-node.slashed-l{animation:nodeSlashL .6s ease forwards}
+.slash-node.slashed-r{animation:nodeSlashR .6s ease forwards}
+@keyframes nodeFallIn{0%{top:-20px;opacity:0}100%{top:6px;opacity:1}}
+@keyframes nodeSlashL{0%{opacity:1;transform:translate(0,0) rotate(0);border-color:rgba(239,68,68,0.5)}50%{opacity:.8}100%{opacity:0;transform:translate(-20px,35px) rotate(-30deg)}}
+@keyframes nodeSlashR{0%{opacity:1;transform:translate(0,0) rotate(0);border-color:rgba(239,68,68,0.5)}50%{opacity:.8}100%{opacity:0;transform:translate(20px,35px) rotate(30deg)}}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
 @keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
