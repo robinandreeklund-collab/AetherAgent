@@ -9,7 +9,6 @@
     nav.innerHTML = `
       <a href="/" class="wordmark">sl<span class="wm-slash">/</span>sh</a>
       <div class="nav-links">
-        <a href="/#features">Features</a>
         <a href="/mission"${current==='mission'?' class="active"':''}>Mission</a>
         <a href="/timeline"${current==='timeline'?' class="active"':''}>Timeline</a>
         <a href="/live"${current==='live'?' class="active"':''}>Live</a>
@@ -87,17 +86,19 @@
 
   // Spawn speed lines behind crab
   function spawnSpeedLine(){
+    var lx = x - (dir * 10);
+    if(lx < 0 || lx > track.offsetWidth) return;
     var line=document.createElement('span');
-    line.style.cssText='position:absolute;left:'+(x-(dir*8))+'px;bottom:'+(4+Math.random()*16)+'px;width:'+(6+Math.random()*10)+'px;height:1px;background:rgba(255,255,255,0.15);pointer-events:none;animation:speedFade .3s ease forwards';
+    line.style.cssText='position:absolute;left:'+lx+'px;bottom:'+(6+Math.random()*14)+'px;width:'+(8+Math.random()*12)+'px;height:1.5px;background:rgba(59,130,246,0.3);pointer-events:none;border-radius:1px;animation:speedFade .4s ease forwards';
     track.appendChild(line);
-    setTimeout(function(){line.remove()},300);
+    setTimeout(function(){line.remove()},400);
   }
 
   // Inject keyframes if not already present
   if(!document.getElementById('ferris-extra-css')){
     var style=document.createElement('style');
     style.id='ferris-extra-css';
-    style.textContent='@keyframes zzFloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-18px) translateX(6px)}}@keyframes speedFade{0%{opacity:.3;transform:scaleX(1)}100%{opacity:0;transform:scaleX(0.3)}}';
+    style.textContent='@keyframes zzFloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-18px) translateX(6px)}}@keyframes speedFade{0%{opacity:.5;transform:scaleX(1)}100%{opacity:0;transform:scaleX(0.2)}}';
     document.head.appendChild(style);
   }
 
@@ -148,12 +149,12 @@
       requestAnimationFrame(tick);return;
     }
 
-    // PEEKING — hide at edge, only eyes visible
+    // PEEKING — hiding at edge, slowly peek out
     if(state==='peeking'){
       if(now>stateUntil){
+        // Slide back in smoothly
         state='walking';
         el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        x=peekSide<0?4:w-36;
       }
       requestAnimationFrame(tick);return;
     }
@@ -206,13 +207,17 @@
           // Fall asleep ZzZ
           state='sleeping';stateUntil=now+2500+Math.random()*2e3;
           sleepZzzTimer=now+300;
-        } else if(roll<.60){
-          // Peek from edge
+        } else if(roll<.60 && (x < 30 || x > w - 50)){
+          // Peek from edge — only if already near an edge
           state='peeking';stateUntil=now+1500+Math.random()*1500;
-          peekSide=Math.random()<.5?-1:1;
-          x=peekSide<0?-20:w-12;
-          el.style.left=x+'px';
-          el.style.transform=peekSide<0?'scaleX(1) rotate(-15deg)':'scaleX(-1) rotate(15deg)';
+          // Tilt slightly to peek
+          if(x < 30){
+            el.style.transform='scaleX(1) rotate(-12deg)';
+            dir=1;
+          } else {
+            el.style.transform='scaleX(-1) rotate(12deg)';
+            dir=-1;
+          }
         }
         speed=.3+Math.random()*.35;
         nextAction=now+2500+Math.random()*4e3;
