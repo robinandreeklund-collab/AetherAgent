@@ -2,6 +2,45 @@
 // Include on every page: <script src="/components.js"></script>
 
 (function(){
+
+  // ── INJECT SHARED CSS (footer + crab) ──
+  if(!document.getElementById('slaash-shared-css')){
+    var css=document.createElement('style');
+    css.id='slaash-shared-css';
+    css.textContent=`
+.crab-track{overflow:visible;height:64px;position:relative;margin-bottom:-1px}
+.crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
+.claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
+.claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
+@keyframes clawSnip{0%{transform:rotate(0deg)}100%{transform:rotate(-25deg)}}
+@keyframes clawSnipR{0%{transform:rotate(0deg)}100%{transform:rotate(25deg)}}
+.slash-node{position:absolute;font-family:var(--mono,monospace);font-size:.65rem;color:rgba(255,255,255,0.5);white-space:nowrap;pointer-events:none;padding:.2rem .5rem;border:1px solid rgba(59,130,246,0.2);border-radius:4px;background:rgba(59,130,246,0.06)}
+.slash-node.falling-in{animation:nodeFallIn .5s ease forwards}
+.slash-node.slashed-l{animation:nodeSlashL .6s ease forwards}
+.slash-node.slashed-r{animation:nodeSlashR .6s ease forwards}
+@keyframes nodeFallIn{0%{top:-20px;opacity:0}100%{top:6px;opacity:1}}
+@keyframes nodeSlashL{0%{opacity:1;transform:translate(0,0) rotate(0);border-color:rgba(239,68,68,0.5)}50%{opacity:.8}100%{opacity:0;transform:translate(-20px,35px) rotate(-30deg)}}
+@keyframes nodeSlashR{0%{opacity:1;transform:translate(0,0) rotate(0);border-color:rgba(239,68,68,0.5)}50%{opacity:.8}100%{opacity:0;transform:translate(20px,35px) rotate(30deg)}}
+footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(255,255,255,0.08));color:var(--muted,#888);font-size:.8rem}
+.footer-glow{position:absolute;top:-1px;left:50%;width:200px;height:1px;background:linear-gradient(90deg,transparent,#3b82f6,transparent);transform:translateX(-50%);animation:footerGlow 6s ease-in-out infinite}
+@keyframes footerGlow{0%,100%{opacity:0;width:100px}50%{opacity:1;width:300px}}
+.footer-inner{max-width:900px;margin:0 auto;padding:3rem 2rem 2rem;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:2rem}
+.footer-left{display:flex;flex-direction:column;gap:.5rem}
+.footer-left .tagline{font-size:.75rem;color:#444;letter-spacing:.02em;max-width:220px;line-height:1.5}
+.footer-center{text-align:center}
+.footer-logo{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.footer-logo .fl-slash{color:#3b82f6;font-weight:800}
+.footer-right{display:flex;flex-direction:column;align-items:flex-end;gap:.4rem}
+.footer-right a{color:#555;font-size:.8rem;font-weight:500;transition:color .25s ease;position:relative;text-decoration:none}
+.footer-right a:hover{color:#fff}
+.footer-right a::after{content:'';position:absolute;left:0;bottom:-2px;width:0;height:1px;background:#3b82f6;transition:width .3s ease}
+.footer-right a:hover::after{width:100%}
+.footer-bottom{text-align:center;padding:.75rem 2rem 1.5rem;font-size:.6rem;color:#2a2a2a;letter-spacing:.05em}
+@media(max-width:600px){.footer-inner{grid-template-columns:1fr;text-align:center;gap:1.5rem}.footer-left{align-items:center}.footer-right{align-items:center}}
+`;
+    document.head.appendChild(css);
+  }
+
   // ── NAV ──
   const nav = document.querySelector('nav[data-component="nav"]');
   if(nav){
