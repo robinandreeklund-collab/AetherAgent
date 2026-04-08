@@ -10,21 +10,20 @@
     css.textContent=`
 .crab-track{overflow:hidden;height:64px;position:relative;margin-bottom:-1px;background:var(--bg,#0a0a0a)}
 /* Parallax landscape layers behind the crab */
-.landscape{position:absolute;bottom:0;left:0;width:200%;height:100%;pointer-events:none}
-.mountains{position:absolute;bottom:8px;left:0;width:200%;height:30px;animation:scrollSlow 40s linear infinite}
+.mountains{position:absolute;bottom:6px;left:0;width:200%;height:32px;animation:scrollSlow 40s linear infinite;pointer-events:none}
 .mountains::before,.mountains::after{content:'';position:absolute;bottom:0;width:100%}
 .mountains::before{height:100%;background:
-  conic-gradient(from 220deg at 10% 100%,transparent 40%,rgba(255,255,255,0.02) 41%,rgba(255,255,255,0.02) 50%,transparent 51%) 0 0/120px 30px repeat-x,
-  conic-gradient(from 215deg at 30% 100%,transparent 38%,rgba(255,255,255,0.015) 39%,rgba(255,255,255,0.015) 50%,transparent 51%) 60px 0/180px 25px repeat-x}
-.mountains::after{height:20px;background:
-  conic-gradient(from 218deg at 15% 100%,transparent 40%,rgba(255,255,255,0.025) 41%,rgba(255,255,255,0.025) 50%,transparent 51%) 40px 0/100px 20px repeat-x}
-.hills{position:absolute;bottom:2px;left:0;width:200%;height:18px;animation:scrollMed 25s linear infinite}
-.hills::before{content:'';position:absolute;bottom:0;width:100%;height:100%;background:radial-gradient(ellipse 50px 14px at 25px 100%,rgba(255,255,255,0.02) 0%,transparent 100%) 0 0/60px 14px repeat-x}
-.trees{position:absolute;bottom:0;left:0;width:200%;height:24px;animation:scrollFast 18s linear infinite}
+  conic-gradient(from 220deg at 10% 100%,transparent 40%,rgba(255,255,255,0.1) 41%,rgba(255,255,255,0.1) 50%,transparent 51%) 0 0/120px 30px repeat-x,
+  conic-gradient(from 215deg at 30% 100%,transparent 38%,rgba(255,255,255,0.07) 39%,rgba(255,255,255,0.07) 50%,transparent 51%) 60px 0/180px 25px repeat-x}
+.mountains::after{height:22px;background:
+  conic-gradient(from 218deg at 15% 100%,transparent 40%,rgba(255,255,255,0.12) 41%,rgba(255,255,255,0.12) 50%,transparent 51%) 40px 0/100px 22px repeat-x}
+.hills{position:absolute;bottom:2px;left:0;width:200%;height:18px;animation:scrollMed 25s linear infinite;pointer-events:none}
+.hills::before{content:'';position:absolute;bottom:0;width:100%;height:100%;background:radial-gradient(ellipse 50px 14px at 25px 100%,rgba(255,255,255,0.08) 0%,transparent 100%) 0 0/60px 14px repeat-x}
+.trees{position:absolute;bottom:0;left:0;width:200%;height:26px;animation:scrollFast 18s linear infinite;pointer-events:none}
 .trees::before{content:'';position:absolute;bottom:2px;width:100%;height:100%;background:
-  radial-gradient(ellipse 3px 8px at 50% 2px,rgba(59,130,246,0.04) 0%,transparent 100%) 0 0/35px 12px repeat-x,
-  radial-gradient(ellipse 2px 6px at 50% 4px,rgba(59,130,246,0.03) 0%,transparent 100%) 18px 2px/45px 10px repeat-x}
-.ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.04)}
+  radial-gradient(ellipse 4px 10px at 50% 0px,rgba(59,130,246,0.15) 0%,transparent 100%) 0 0/30px 14px repeat-x,
+  radial-gradient(ellipse 3px 8px at 50% 2px,rgba(59,130,246,0.12) 0%,transparent 100%) 16px 2px/40px 12px repeat-x}
+.ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.1)}
 @keyframes scrollSlow{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 @keyframes scrollMed{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 @keyframes scrollFast{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
