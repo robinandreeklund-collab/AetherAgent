@@ -98,7 +98,7 @@
   if(!document.getElementById('ferris-extra-css')){
     var style=document.createElement('style');
     style.id='ferris-extra-css';
-    style.textContent='@keyframes zzFloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-18px) translateX(6px)}}@keyframes speedFade{0%{opacity:.5;transform:scaleX(1)}100%{opacity:0;transform:scaleX(0.2)}}';
+    style.textContent='@keyframes zzFloat{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-18px) translateX(6px)}}@keyframes speedFade{0%{opacity:.5;transform:scaleX(1)}100%{opacity:0;transform:scaleX(0.2)}}@keyframes tokenFloat{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-22px) scale(1.3)}}@keyframes nomPop{0%{opacity:1;transform:scale(0.5)}40%{transform:scale(1.2)}100%{opacity:0;transform:scale(0.8) translateY(-10px)}}@keyframes starPop{0%{opacity:1;transform:scale(0) rotate(0)}50%{opacity:1;transform:scale(1.2) rotate(180deg)}100%{opacity:0;transform:scale(0.5) rotate(360deg) translateY(-15px)}}@keyframes dirtPop{0%{opacity:.6;transform:translate(0,0)}100%{opacity:0;transform:translate(var(--dx),var(--dy))}}@keyframes surfBob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-3px) rotate(2deg)}}';
     document.head.appendChild(style);
   }
 
@@ -130,12 +130,169 @@
     setTimeout(function(){fL.remove();fR.remove()},700);
   }
 
+  // ── VICTORY DANCE — 3 mini hops + star ──
+  var victoryHop=0, victoryStart=0;
+  function spawnStar(){
+    var s=document.createElement('span');
+    s.textContent='★';
+    s.style.cssText='position:absolute;left:'+(x+12)+'px;bottom:30px;font-size:.7rem;color:#f59e0b;pointer-events:none;animation:starPop .6s ease forwards';
+    track.appendChild(s);
+    setTimeout(function(){s.remove()},600);
+  }
+
+  // ── SCARED — run away from big node ──
+  var scaredFrom=0, scaredNode=null;
+  var bigDomNodes=['<div class="mega-bundle-39f2a.min.js">','<script src="analytics-tracker.js">','<iframe src="ads.doubleclick.net">'];
+  function spawnBigNode(nx){
+    var text=bigDomNodes[Math.floor(Math.random()*bigDomNodes.length)];
+    var node=document.createElement('span');
+    node.className='slash-node falling-in';
+    node.textContent=text;
+    node.style.left=nx+'px';
+    node.style.fontSize='.75rem';
+    node.style.padding='.25rem .6rem';
+    node.style.borderColor='rgba(239,68,68,0.3)';
+    node.style.background='rgba(239,68,68,0.06)';
+    track.appendChild(node);
+    return{el:node,text:text,x:nx};
+  }
+
+  // ── EATING TOKENS ──
+  var tokenEl=null, tokensEaten=0;
+  function spawnToken(nx){
+    var t=document.createElement('span');
+    t.textContent='T';
+    t.style.cssText='position:absolute;left:'+nx+'px;top:10px;font-family:var(--mono);font-size:.7rem;font-weight:700;color:#f59e0b;pointer-events:none;border:1px solid rgba(245,158,11,0.3);border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;background:rgba(245,158,11,0.08)';
+    track.appendChild(t);
+    return{el:t,x:nx};
+  }
+  function eatToken(info){
+    if(info.el.parentNode)info.el.remove();
+    var nom=document.createElement('span');
+    nom.textContent='nom';
+    nom.style.cssText='position:absolute;left:'+(x+8)+'px;bottom:28px;font-size:.5rem;color:#f59e0b;font-weight:700;pointer-events:none;animation:nomPop .5s ease forwards';
+    track.appendChild(nom);
+    setTimeout(function(){nom.remove()},500);
+  }
+
+  // ── SURFING ──
+  var surfNode=null, surfStart=0;
+
+  // ── DIGGING ──
+  var digStart=0, dugNode=null;
+  var hiddenNodes=['<script type="tracking">','<pixel src="spy.gif">','<div hidden>'];
+  function spawnDirt(){
+    for(var i=0;i<5;i++){
+      var d=document.createElement('span');
+      d.textContent='·';
+      var dx=(Math.random()-.5)*20, dy=-(5+Math.random()*12);
+      d.style.cssText='position:absolute;left:'+(x+12+Math.random()*8)+'px;bottom:4px;font-size:.5rem;color:rgba(245,158,11,0.5);pointer-events:none;--dx:'+dx+'px;--dy:'+dy+'px;animation:dirtPop .5s ease '+(i*60)+'ms forwards';
+      track.appendChild(d);
+      setTimeout((function(e){return function(){e.remove()}})(d),600);
+    }
+  }
+  function spawnHiddenNode(){
+    var text=hiddenNodes[Math.floor(Math.random()*hiddenNodes.length)];
+    var node=document.createElement('span');
+    node.className='slash-node';
+    node.textContent=text;
+    node.style.cssText='position:absolute;left:'+(x+4)+'px;top:12px;opacity:0;font-family:var(--mono);font-size:.6rem;color:rgba(239,68,68,0.5);padding:.15rem .4rem;border:1px dashed rgba(239,68,68,0.3);border-radius:3px;pointer-events:none;transition:opacity .3s';
+    track.appendChild(node);
+    setTimeout(function(){node.style.opacity='1'},50);
+    return{el:node,text:text,x:x+4};
+  }
+
   var sleepZzzTimer=0;
-  var peekSide=0; // 0=not peeking, -1=left edge, 1=right edge
+  var peekSide=0;
   var speedLineTimer=0;
 
   function tick(now){
     var w=track.offsetWidth;
+
+    // VICTORY DANCE — 3 mini hops after a slash
+    if(state==='victory'){
+      var vt=(now-victoryStart)/600;
+      if(vt<1){
+        var hop=Math.abs(Math.sin(vt*Math.PI*3))*12;
+        el.style.bottom=hop+'px';
+        el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(vt*Math.PI*6)*15)+'deg)';
+      }else{
+        el.style.bottom='0px';
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        spawnStar();
+        state='walking';nextAction=now+2e3+Math.random()*3e3;
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // SCARED — running away from big node
+    if(state==='scared'){
+      x+=dir*2.5;
+      if(now>speedLineTimer){spawnSpeedLine();speedLineTimer=now+40;}
+      if(now>stateUntil){
+        // Turn back and attack!
+        dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        if(scaredNode){activeNode=scaredNode;scaredNode=null;}
+        state='hunting';
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // EATING — running to token
+    if(state==='eating'&&tokenEl){
+      var dx2=tokenEl.x-x;
+      if(Math.abs(dx2)>5){
+        dir=dx2>0?1:-1;
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        x+=dir*1;
+      }else{
+        eatToken(tokenEl);tokenEl=null;tokensEaten++;
+        speed=.5+Math.min(tokensEaten*.05,.3);
+        state='walking';nextAction=now+1500+Math.random()*2e3;
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // SURFING — riding a DOM node
+    if(state==='surfing'&&surfNode){
+      var st2=(now-surfStart)/2000;
+      if(st2<1){
+        x+=dir*1.2;
+        surfNode.el.style.left=x+'px';
+        el.style.bottom=(6+Math.sin(st2*Math.PI*4)*3)+'px';
+        el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(st2*Math.PI*4)*5)+'deg)';
+      }else{
+        // Fall off
+        el.style.bottom='0px';el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        surfNode.el.classList.add('slashed-r');
+        setTimeout(function(){if(surfNode&&surfNode.el.parentNode)surfNode.el.remove();surfNode=null;},600);
+        state='walking';nextAction=now+2e3+Math.random()*3e3;
+      }
+      requestAnimationFrame(tick);return;
+    }
+
+    // DIGGING — digging up hidden node
+    if(state==='digging'){
+      var dt=(now-digStart)/1200;
+      if(dt<0.5){
+        // Digging motion
+        el.style.transform='scaleX('+(dir<0?-1:1)+') rotate('+(Math.sin(dt*Math.PI*8)*10)+'deg)';
+        if(dt>.15&&dt<.2)spawnDirt();
+        if(dt>.35&&dt<.4)spawnDirt();
+      }else if(dt<0.7){
+        // Pull up node
+        if(!dugNode){dugNode=spawnHiddenNode();}
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+      }else if(dt<1){
+        // Slash it!
+        if(dugNode&&dt>.75&&dt<.8){slashNode(dugNode);dugNode=null;}
+      }else{
+        el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+        state='walking';nextAction=now+2e3+Math.random()*3e3;
+        dugNode=null;
+      }
+      requestAnimationFrame(tick);return;
+    }
 
     // SLEEPING — sit still, spawn ZzZ bubbles
     if(state==='sleeping'){
@@ -183,8 +340,10 @@
         el.style.bottom=(Math.sin(t*Math.PI)*22)+'px';
         if(t>.4&&t<.5&&activeNode){slashNode(activeNode);activeNode=null;}
       }else{
-        el.style.bottom='0px';state='walking';
-        nextAction=now+2e3+Math.random()*3e3;
+        el.style.bottom='0px';
+        // 40% chance of victory dance after slash
+        if(Math.random()<.4){state='victory';victoryStart=now;}
+        else{state='walking';nextAction=now+2e3+Math.random()*3e3;}
       }
     }
 
@@ -193,34 +352,51 @@
       x+=speed*dir;
       if(now>nextAction){
         var roll=Math.random();
-        if(roll<.15){
+        if(roll<.10){
           // Turn around
           dir*=-1;el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
-        } else if(roll<.25){
+        } else if(roll<.17){
           // Pause
           state='paused';stateUntil=now+400+Math.random()*1e3;
-        } else if(roll<.42){
+        } else if(roll<.32){
           // Hunt a DOM node!
           var nx=40+Math.random()*(w-80);
           activeNode=spawnNodeAt(nx);state='hunting';
-        } else if(roll<.52){
+        } else if(roll<.40){
           // Fall asleep ZzZ
           state='sleeping';stateUntil=now+2500+Math.random()*2e3;
           sleepZzzTimer=now+300;
-        } else if(roll<.60 && (x < 30 || x > w - 50)){
-          // Peek from edge — only if already near an edge
+        } else if(roll<.47 && (x < 30 || x > w - 50)){
+          // Peek from edge
           state='peeking';stateUntil=now+1500+Math.random()*1500;
-          // Tilt slightly to peek
-          if(x < 30){
-            el.style.transform='scaleX(1) rotate(-12deg)';
-            dir=1;
-          } else {
-            el.style.transform='scaleX(-1) rotate(12deg)';
-            dir=-1;
-          }
+          if(x<30){el.style.transform='scaleX(1) rotate(-12deg)';dir=1;}
+          else{el.style.transform='scaleX(-1) rotate(12deg)';dir=-1;}
+        } else if(roll<.55){
+          // Scared of big DOM node!
+          var bnx=40+Math.random()*(w-80);
+          scaredNode=spawnBigNode(bnx);
+          scaredFrom=bnx;
+          dir=x<bnx?-1:1; // run away
+          el.style.transform=dir<0?'scaleX(-1)':'scaleX(1)';
+          state='scared';stateUntil=now+1200+Math.random()*800;
+        } else if(roll<.63){
+          // Eat a token
+          var tnx=40+Math.random()*(w-80);
+          tokenEl=spawnToken(tnx);
+          state='eating';
+        } else if(roll<.70){
+          // Surf a DOM node
+          var snx=x+dir*10;
+          surfNode=spawnNodeAt(snx);
+          surfStart=now;
+          el.style.bottom='14px';
+          state='surfing';
+        } else if(roll<.77){
+          // Dig up hidden node
+          state='digging';digStart=now;dugNode=null;
         }
         speed=.3+Math.random()*.35;
-        nextAction=now+2500+Math.random()*4e3;
+        nextAction=now+2000+Math.random()*3500;
       }
     }
 
