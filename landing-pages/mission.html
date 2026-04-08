@@ -58,8 +58,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* STAT CARDS */
 .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin:2.5rem 0}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:transform .3s,border-color .3s}
-.stat-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:all .3s}
+.stat-card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px rgba(59,130,246,0.35)}
 .stat-card .num{font-size:clamp(2rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums}
 .stat-card .num.red{color:var(--red)}
 .stat-card .num.green{background:linear-gradient(135deg,#fff,var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -104,8 +104,8 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* COST VISUAL */
 .cost-compare{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin:2rem 0}
-.cost-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;text-align:center;transition:transform .3s,border-color .3s}
-.cost-box:hover{transform:translateY(-4px);border-color:rgba(255,255,255,0.15)}
+.cost-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;text-align:center;transition:all .3s}
+.cost-box:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px rgba(59,130,246,0.35)}
 .cost-box.bad{border-color:rgba(239,68,68,0.2)}
 .cost-box.good{border-color:rgba(34,197,94,0.2)}
 .cost-box .cost-val{font-size:clamp(2rem,4vw,2.5rem);font-weight:700;margin:.5rem 0;letter-spacing:-0.03em}
