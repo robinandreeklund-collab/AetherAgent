@@ -6403,7 +6403,10 @@ async fn components_js() -> impl IntoResponse {
     };
     (
         StatusCode::OK,
-        [("content-type", "application/javascript; charset=utf-8")],
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "no-cache, must-revalidate"),
+        ],
         js,
     )
 }
