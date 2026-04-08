@@ -131,16 +131,25 @@ pub fn is_initialized() -> bool {
 pub fn save_field(field: &ResonanceField) {
     let pool = match DB.lock() {
         Ok(p) => p,
-        Err(e) => { eprintln!("[PERSIST] save_field lock error: {e}"); return; }
+        Err(e) => {
+            eprintln!("[PERSIST] save_field lock error: {e}");
+            return;
+        }
     };
     let conn = match pool.writer.as_ref() {
         Some(c) => c,
-        None => { eprintln!("[PERSIST] save_field: no writer connection"); return; }
+        None => {
+            eprintln!("[PERSIST] save_field: no writer connection");
+            return;
+        }
     };
 
     let data = match serde_json::to_vec(field) {
         Ok(d) => d,
-        Err(e) => { eprintln!("[PERSIST] save_field serialize error: {e}"); return; }
+        Err(e) => {
+            eprintln!("[PERSIST] save_field serialize error: {e}");
+            return;
+        }
     };
 
     if let Err(e) = conn.execute(
@@ -180,11 +189,15 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         None => return vec![],
     };
 
-    let mut stmt =
-        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256") {
-            Ok(s) => s,
-            Err(e) => { eprintln!("[PERSIST] load_all_fields prepare error: {e}"); return vec![]; }
-        };
+    let mut stmt = match conn
+        .prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256")
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[PERSIST] load_all_fields prepare error: {e}");
+            return vec![];
+        }
+    };
 
     let rows = match stmt.query_map([], |row| {
         let data: Vec<u8> = row.get(0)?;
@@ -198,16 +211,17 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
     let mut failed = 0;
     let result: Vec<ResonanceField> = rows
         .filter_map(|r| r.ok())
-        .filter_map(|data| {
-            match serde_json::from_slice(&data) {
-                Ok(field) => { loaded += 1; Some(field) }
-                Err(e) => {
-                    failed += 1;
-                    if failed <= 3 {
-                        eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
-                    }
-                    None
+        .filter_map(|data| match serde_json::from_slice(&data) {
+            Ok(field) => {
+                loaded += 1;
+                Some(field)
+            }
+            Err(e) => {
+                failed += 1;
+                if failed <= 3 {
+                    eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
                 }
+                None
             }
         })
         .collect();
@@ -655,11 +669,17 @@ mod tests {
         // Load — simulates server restart
         let loaded = load_field(field.url_hash).expect("Should load saved field");
         assert_eq!(loaded.total_feedback, 1, "Feedback count should survive");
-        assert_eq!(loaded.total_queries, field.total_queries, "Query count should survive");
+        assert_eq!(
+            loaded.total_queries, field.total_queries,
+            "Query count should survive"
+        );
         assert_eq!(loaded.url, field.url, "URL should survive");
 
         // Verify causal memory survived
-        assert!(loaded.node_has_learning(1), "hit_count should survive save/load");
+        assert!(
+            loaded.node_has_learning(1),
+            "hit_count should survive save/load"
+        );
 
         let _ = std::fs::remove_file(path_str);
     }

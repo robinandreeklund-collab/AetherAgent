@@ -1603,7 +1603,11 @@ impl ResonanceField {
     }
 
     /// Propagate with gap detection info (BUG-5)
-    pub fn propagate_top_k_with_gap(&mut self, goal: &str, top_k: usize) -> (Vec<ResonanceResult>, GapInfo) {
+    pub fn propagate_top_k_with_gap(
+        &mut self,
+        goal: &str,
+        top_k: usize,
+    ) -> (Vec<ResonanceResult>, GapInfo) {
         let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
         let (results, gap) = Self::apply_gap_filter(all, top_k);
@@ -2022,10 +2026,21 @@ impl ResonanceField {
     /// om nod[i+1].amplitude < nod[i].amplitude * (1 - GAP_RATIO_THRESHOLD)
     /// klipps output vid position i+1 (men minst 3 noder, max top_k).
     /// BUG-5: returns (filtered_results, gap_info)
-    fn apply_gap_filter(results: Vec<ResonanceResult>, top_k: usize) -> (Vec<ResonanceResult>, GapInfo) {
+    fn apply_gap_filter(
+        results: Vec<ResonanceResult>,
+        top_k: usize,
+    ) -> (Vec<ResonanceResult>, GapInfo) {
         let total = results.len();
         if total <= 3 {
-            return (results, GapInfo { requested: top_k, returned: total, reason: "too_few_candidates", gap_size: 0.0 });
+            return (
+                results,
+                GapInfo {
+                    requested: top_k,
+                    returned: total,
+                    reason: "too_few_candidates",
+                    gap_size: 0.0,
+                },
+            );
         }
 
         let limit = total.min(top_k);
@@ -2043,8 +2058,17 @@ impl ResonanceField {
             }
         }
 
-        let reason = if cut_at < limit { "relevance_gap" } else { "top_k_limit" };
-        let info = GapInfo { requested: top_k, returned: cut_at, reason, gap_size };
+        let reason = if cut_at < limit {
+            "relevance_gap"
+        } else {
+            "top_k_limit"
+        };
+        let info = GapInfo {
+            requested: top_k,
+            returned: cut_at,
+            reason,
+            gap_size,
+        };
         (results.into_iter().take(cut_at).collect(), info)
     }
 
@@ -2610,12 +2634,16 @@ impl ResonanceField {
 
         // Copy propagation stats (goal-clustered, not node-specific)
         for (key, &(alpha, beta)) in &old.propagation_stats {
-            self.propagation_stats.entry(key.clone()).or_insert((alpha, beta));
+            self.propagation_stats
+                .entry(key.clone())
+                .or_insert((alpha, beta));
         }
 
         // Copy concept memory
         for (token, hv) in &old.concept_memory {
-            self.concept_memory.entry(token.clone()).or_insert_with(|| hv.clone());
+            self.concept_memory
+                .entry(token.clone())
+                .or_insert_with(|| hv.clone());
         }
 
         // Preserve aggregate counters
@@ -2628,7 +2656,9 @@ impl ResonanceField {
 
         eprintln!(
             "[CRFR] Migrated: {} node memories, {} prop weights, {} concepts",
-            transferred, old.propagation_stats.len(), old.concept_memory.len()
+            transferred,
+            old.propagation_stats.len(),
+            old.concept_memory.len()
         );
     }
 
@@ -2837,7 +2867,11 @@ pub fn export_cached_fields() -> Vec<ResonanceField> {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
-    cache.entries.iter().map(|(_, _, field)| field.clone()).collect()
+    cache
+        .entries
+        .iter()
+        .map(|(_, _, field)| field.clone())
+        .collect()
 }
 
 /// Import cached fields from persistence (at startup).
@@ -3527,15 +3561,40 @@ mod tests {
         // Abstrakt fråga: inga starka keyword-matcher → jämn amplitude-distribution
         let tree = vec![
             make_node(1, "heading", "Introduction to philosophy", vec![]),
-            make_node(2, "text", "The concept of justice has many interpretations", vec![]),
+            make_node(
+                2,
+                "text",
+                "The concept of justice has many interpretations",
+                vec![],
+            ),
             make_node(3, "text", "Some argue for utilitarian approaches", vec![]),
             make_node(4, "text", "Others prefer deontological frameworks", vec![]),
-            make_node(5, "text", "Virtue ethics offers a third perspective", vec![]),
-            make_node(6, "text", "Each approach has strengths and weaknesses", vec![]),
+            make_node(
+                5,
+                "text",
+                "Virtue ethics offers a third perspective",
+                vec![],
+            ),
+            make_node(
+                6,
+                "text",
+                "Each approach has strengths and weaknesses",
+                vec![],
+            ),
             make_node(7, "text", "Modern debates continue to evolve", vec![]),
-            make_node(8, "text", "Political philosophy intersects with ethics", vec![]),
+            make_node(
+                8,
+                "text",
+                "Political philosophy intersects with ethics",
+                vec![],
+            ),
             make_node(9, "text", "Cultural context shapes moral reasoning", vec![]),
-            make_node(10, "text", "No single framework captures all nuances", vec![]),
+            make_node(
+                10,
+                "text",
+                "No single framework captures all nuances",
+                vec![],
+            ),
         ];
         let mut field = ResonanceField::from_semantic_tree(&tree, "https://philosophy.test");
 
@@ -3581,11 +3640,26 @@ mod tests {
     fn test_broad_mode_auto_detect_factual_stays_tight() {
         // Faktafråga med tydliga keywords → ojämn distribution → tight mode
         let tree = vec![
-            make_node(1, "text", "The price is $499.99 USD for iPhone 16 Pro", vec![]),
+            make_node(
+                1,
+                "text",
+                "The price is $499.99 USD for iPhone 16 Pro",
+                vec![],
+            ),
             make_node(2, "text", "Navigation menu home about contact", vec![]),
-            make_node(3, "text", "Footer copyright 2026 all rights reserved", vec![]),
+            make_node(
+                3,
+                "text",
+                "Footer copyright 2026 all rights reserved",
+                vec![],
+            ),
             make_node(4, "text", "Cookie policy privacy terms", vec![]),
-            make_node(5, "heading", "iPhone 16 Pro pricing and availability", vec![]),
+            make_node(
+                5,
+                "heading",
+                "iPhone 16 Pro pricing and availability",
+                vec![],
+            ),
         ];
         let mut field = ResonanceField::from_semantic_tree(&tree, "https://apple.test");
 
@@ -3595,9 +3669,7 @@ mod tests {
         // Auto-detect borde se stark keyword-match → tight mode
         // (broad_active kan vara true eller false beroende på exakt amplitude-spread,
         //  men resultaten borde alltid inkludera prisnoden)
-        let has_price = results
-            .iter()
-            .any(|r| r.amplitude > 0.5);
+        let has_price = results.iter().any(|r| r.amplitude > 0.5);
         assert!(has_price, "Prisnoden borde ha hög amplitude oavsett mode");
     }
 
@@ -3647,10 +3719,17 @@ mod tests {
         let _results = old_field.propagate_top_k("latest news headlines", 10);
         old_field.feedback("latest news headlines", &[1, 2]);
         // Add some propagation stats manually
-        old_field.propagation_stats.insert("heading:down:news".to_string(), (0.8, 0.2));
-        old_field.concept_memory.insert("headlines".to_string(), HvData { bits: vec![42; 32] });
+        old_field
+            .propagation_stats
+            .insert("heading:down:news".to_string(), (0.8, 0.2));
+        old_field
+            .concept_memory
+            .insert("headlines".to_string(), HvData { bits: vec![42; 32] });
         assert_eq!(old_field.total_feedback, 1, "Should have 1 feedback");
-        assert_eq!(old_field.total_successful_nodes, 2, "Should have 2 successful nodes");
+        assert_eq!(
+            old_field.total_successful_nodes, 2,
+            "Should have 2 successful nodes"
+        );
 
         // New content (same structure: heading + 2 text)
         let tree_v2 = vec![
@@ -3665,7 +3744,9 @@ mod tests {
 
         // Verify propagation stats preserved
         assert!(
-            new_field.propagation_stats.contains_key("heading:down:news"),
+            new_field
+                .propagation_stats
+                .contains_key("heading:down:news"),
             "Propagation stats should be migrated"
         );
 
@@ -3676,8 +3757,14 @@ mod tests {
         );
 
         // Verify counters preserved
-        assert_eq!(new_field.total_feedback, 1, "Feedback count should be migrated");
-        assert_eq!(new_field.total_queries, old_field.total_queries, "Query count should be migrated");
+        assert_eq!(
+            new_field.total_feedback, 1,
+            "Feedback count should be migrated"
+        );
+        assert_eq!(
+            new_field.total_queries, old_field.total_queries,
+            "Query count should be migrated"
+        );
     }
 
     #[test]
@@ -3687,9 +3774,13 @@ mod tests {
             make_node(2, "text", "Some content", vec![]),
         ];
         // get_or_build_field_with_variant sets content_hash on new fields
-        let (field, cache_hit) = get_or_build_field_with_variant(&tree, "https://unique-hash-test.test", false);
+        let (field, cache_hit) =
+            get_or_build_field_with_variant(&tree, "https://unique-hash-test.test", false);
         assert!(!cache_hit, "First visit should be a cache miss");
-        assert_ne!(field.content_hash, 0, "Content hash should be set on new fields");
+        assert_ne!(
+            field.content_hash, 0,
+            "Content hash should be set on new fields"
+        );
     }
 
     #[test]
@@ -3699,16 +3790,21 @@ mod tests {
             make_node(2, "text", "Stable content", vec![]),
         ];
         // First call — builds field
-        let (field1, hit1) = get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
+        let (field1, hit1) =
+            get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
         assert!(!hit1, "First call should miss");
 
         // Save to cache
         save_field(&field1);
 
         // Second call — should hit cache (in-memory)
-        let (field2, hit2) = get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
+        let (field2, hit2) =
+            get_or_build_field_with_variant(&tree, "https://cache-hit-test.test", false);
         assert!(hit2, "Second call should hit cache");
-        assert_eq!(field1.content_hash, field2.content_hash, "Content hash should match");
+        assert_eq!(
+            field1.content_hash, field2.content_hash,
+            "Content hash should match"
+        );
     }
 
     #[test]
@@ -3728,14 +3824,23 @@ mod tests {
 
         // Verify learning exists
         let node2 = field.nodes.get(&2).expect("Node 2 should exist");
-        assert!(node2.hit_count > 0, "Node 2 should have hit_count > 0 after feedback");
+        assert!(
+            node2.hit_count > 0,
+            "Node 2 should have hit_count > 0 after feedback"
+        );
         let saved_queries = field.total_queries;
         let saved_feedback = field.total_feedback;
 
         // Reload with same content — should preserve learning
         let (reloaded, hit) = get_or_build_field_with_variant(&tree, url, false);
         assert!(hit, "Same content should be a cache hit");
-        assert_eq!(reloaded.total_queries, saved_queries, "Queries should be preserved");
-        assert_eq!(reloaded.total_feedback, saved_feedback, "Feedback should be preserved");
+        assert_eq!(
+            reloaded.total_queries, saved_queries,
+            "Queries should be preserved"
+        );
+        assert_eq!(
+            reloaded.total_feedback, saved_feedback,
+            "Feedback should be preserved"
+        );
     }
 }

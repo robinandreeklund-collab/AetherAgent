@@ -858,12 +858,19 @@ pub fn build_tree_with_cookies(
 
 /// BUG-6: Detect bot-blocking/WAF pages (Amazon CloudFront, Cloudflare, etc.)
 fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
-    if total_nodes > 15 { return false; }
+    if total_nodes > 15 {
+        return false;
+    }
     let t = title.to_lowercase();
     let bot_patterns = [
-        "robot check", "captcha", "are you a robot", "bot detection",
-        "automated access", "sorry, you have been blocked",
-        "pardon our interruption", "access to this page has been denied",
+        "robot check",
+        "captcha",
+        "are you a robot",
+        "bot detection",
+        "automated access",
+        "sorry, you have been blocked",
+        "pardon our interruption",
+        "access to this page has been denied",
     ];
     bot_patterns.iter().any(|p| t.contains(p))
         || (total_nodes <= 5 && (t.contains("page not found") || t.is_empty()))
@@ -938,14 +945,17 @@ fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResul
     }
     let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
     // BUG-3: also detect JSON-like labels (key.path.name patterns)
-    let json_like = matched.iter().filter(|(n, _)| {
-        n.label.contains("__NEXT_DATA__")
-            || n.label.contains("__NUXT__")
-            || n.label.contains("initialState")
-            || n.label.contains("pageProps")
-            || n.label.contains("window.__data")
-            || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
-    }).count();
+    let json_like = matched
+        .iter()
+        .filter(|(n, _)| {
+            n.label.contains("__NEXT_DATA__")
+                || n.label.contains("__NUXT__")
+                || n.label.contains("initialState")
+                || n.label.contains("pageProps")
+                || n.label.contains("window.__data")
+                || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
+        })
+        .count();
     let total = matched.len() as f32;
     (data_count as f32 / total > 0.5) || (json_like > 0 && data_count as f32 / total > 0.3)
 }
@@ -1066,7 +1076,11 @@ pub fn parse_crfr_from_tree_broad(
         }
         md.push_str(&format!(
             "\n<!-- CRFR broad={}: {}/{} nodes, {}ms, cache={} -->\n",
-            broad_active, matched.len(), total_dom_nodes, total_ms, cache_hit
+            broad_active,
+            matched.len(),
+            total_dom_nodes,
+            total_ms,
+            cache_hit
         ));
         md
     } else {
@@ -1271,8 +1285,13 @@ pub fn parse_crfr_from_tree_js(
         // BUG-2 fix: check if top nodes have factual content (not just nav)
         // BUG-2 fix v2: only count factual content in text/data/cell roles, not nav links
         let has_factual_content = matched.iter().any(|(n, _)| {
-            let is_content_role = matches!(n.role.as_str(), "text" | "data" | "cell" | "heading" | "paragraph");
-            if !is_content_role { return false; }
+            let is_content_role = matches!(
+                n.role.as_str(),
+                "text" | "data" | "cell" | "heading" | "paragraph"
+            );
+            if !is_content_role {
+                return false;
+            }
             let l = &n.label;
             let has_digit = l.chars().any(|c| c.is_ascii_digit());
             let long_enough = l.len() > 60;

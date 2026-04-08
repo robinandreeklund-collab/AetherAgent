@@ -1068,7 +1068,11 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 
     // Resolve HTML: use provided html, or fetch from url
     let html = if let Some(h) = req.html {
-        if !h.is_empty() { h } else { String::new() }
+        if !h.is_empty() {
+            h
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
@@ -1080,7 +1084,9 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     #[cfg(feature = "fetch")]
     if html.is_empty() && !url.is_empty() {
         let fetch_start = std::time::Instant::now();
-        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default()).await {
+        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default())
+            .await
+        {
             Ok(fetched) => {
                 fetch_ms = fetch_start.elapsed().as_millis() as u64;
                 html = fetched.body;
@@ -6313,11 +6319,7 @@ async fn serve_html_file(paths: &[&str]) -> impl IntoResponse {
 }
 
 async fn dashboard_html() -> impl IntoResponse {
-    serve_html_file(&[
-        "/app/static/dashboard.html",
-        "dashboard.html",
-    ])
-    .await
+    serve_html_file(&["/app/static/dashboard.html", "dashboard.html"]).await
 }
 
 async fn landing_index() -> impl IntoResponse {
@@ -6386,11 +6388,7 @@ async fn landing_docs() -> impl IntoResponse {
 
 async fn favicon_svg() -> impl IntoResponse {
     let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><text x=\"8\" y=\"26\" font-family=\"Inter,system-ui,sans-serif\" font-weight=\"800\" font-size=\"28\" fill=\"#3b82f6\">/</text></svg>";
-    (
-        StatusCode::OK,
-        [("content-type", "image/svg+xml")],
-        svg,
-    )
+    (StatusCode::OK, [("content-type", "image/svg+xml")], svg)
 }
 
 async fn components_js() -> impl IntoResponse {
@@ -6419,13 +6417,15 @@ fn build_router(state: AppState) -> Router {
 
     // Request counter middleware
     let counter = state.request_count.clone();
-    let count_layer = axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
-        let c = counter.clone();
-        async move {
-            c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            next.run(req).await
-        }
-    });
+    let count_layer = axum::middleware::from_fn(
+        move |req: axum::extract::Request, next: axum::middleware::Next| {
+            let c = counter.clone();
+            async move {
+                c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                next.run(req).await
+            }
+        },
+    );
 
     Router::new()
         // Root = landing page
@@ -6749,16 +6749,26 @@ async fn live_stats_handler(
     let total_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
     let token_savings_pct = if total_chars_in > 0 {
         ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0).max(0.0)
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     // p95 across all sites
-    let all_p95: Vec<u64> = fields.iter().filter(|f| f.p95_latency_us > 0).map(|f| f.p95_latency_us).collect();
-    let global_p95_us = if all_p95.is_empty() { 0 } else {
+    let all_p95: Vec<u64> = fields
+        .iter()
+        .filter(|f| f.p95_latency_us > 0)
+        .map(|f| f.p95_latency_us)
+        .collect();
+    let global_p95_us = if all_p95.is_empty() {
+        0
+    } else {
         let mut sorted = all_p95;
         sorted.sort_unstable();
         let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
         sorted[idx.min(sorted.len() - 1)]
     };
-    let requests = state.request_count.load(std::sync::atomic::Ordering::Relaxed);
+    let requests = state
+        .request_count
+        .load(std::sync::atomic::Ordering::Relaxed);
     let uptime_secs = state.started_at.elapsed().as_secs();
 
     // Use SQLite totals as the authoritative numbers (survive deploys)
@@ -6774,8 +6784,14 @@ async fn live_stats_handler(
         .iter()
         .map(|f| {
             // Extract short domain from URL
-            let domain = f.url.split("//").nth(1).unwrap_or(&f.url)
-                .split('/').next().unwrap_or(&f.url)
+            let domain = f
+                .url
+                .split("//")
+                .nth(1)
+                .unwrap_or(&f.url)
+                .split('/')
+                .next()
+                .unwrap_or(&f.url)
                 .replace("www.", "");
             serde_json::json!({
                 "url": f.url,
@@ -7050,9 +7066,13 @@ async fn main() {
         )),
         request_count: Arc::new(std::sync::atomic::AtomicU64::new({
             #[cfg(feature = "persist")]
-            { aether_agent::persist::load_global_stat("total_requests") }
+            {
+                aether_agent::persist::load_global_stat("total_requests")
+            }
             #[cfg(not(feature = "persist"))]
-            { 0 }
+            {
+                0
+            }
         })),
         started_at: std::time::Instant::now(),
     };
