@@ -102,6 +102,15 @@ pub struct NodeScoreBreakdown {
     pub final_amplitude: f32,
 }
 
+/// BUG-5: Gap detection info for response transparency
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GapInfo {
+    pub requested: usize,
+    pub returned: usize,
+    pub reason: &'static str,
+    pub gap_size: f32,
+}
+
 /// Full propagation trace for dashboard visualization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropagationTrace {
@@ -1589,18 +1598,23 @@ impl ResonanceField {
     /// consecutive nodes, cut there. Falls back to hard `top_k` limit.
     /// This naturally selects the "resonant cluster" without a fixed threshold.
     pub fn propagate_top_k(&mut self, goal: &str, top_k: usize) -> Vec<ResonanceResult> {
+        let (results, _gap) = self.propagate_top_k_with_gap(goal, top_k);
+        results
+    }
+
+    /// Propagate with gap detection info (BUG-5)
+    pub fn propagate_top_k_with_gap(&mut self, goal: &str, top_k: usize) -> (Vec<ResonanceResult>, GapInfo) {
         let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
-        let results = Self::apply_gap_filter(all, top_k);
+        let (results, gap) = Self::apply_gap_filter(all, top_k);
         let elapsed_us = t0.elapsed().as_micros() as u64;
         self.last_propagation_us = elapsed_us;
         self.last_result_count = results.len() as u32;
-        // Keep last 50 latency samples for p95
         self.latency_samples.push(elapsed_us);
         if self.latency_samples.len() > 50 {
             self.latency_samples.remove(0);
         }
-        results
+        (results, gap)
     }
 
     /// Broad-mode propagation for abstract/interpretive queries.
@@ -1636,7 +1650,7 @@ impl ResonanceField {
             (results, true)
         } else {
             // Normal mode: apply gap filter
-            let results = Self::apply_gap_filter(all, top_k);
+            let (results, _gap) = Self::apply_gap_filter(all, top_k);
             (results, false)
         }
     }
@@ -1649,7 +1663,7 @@ impl ResonanceField {
     ) -> (Vec<ResonanceResult>, PropagationTrace) {
         let (all, mut trace) = self.propagate_traced(goal);
         let total = all.len();
-        let filtered = Self::apply_gap_filter(all, top_k);
+        let (filtered, _gap) = Self::apply_gap_filter(all, top_k);
         let gap_pos = if filtered.len() < total.min(top_k) {
             Some(filtered.len())
         } else {
@@ -1719,7 +1733,8 @@ impl ResonanceField {
                 .then_with(|| a.node_id.cmp(&b.node_id))
         });
 
-        Self::apply_gap_filter(merged, top_k)
+        let (results, _gap) = Self::apply_gap_filter(merged, top_k);
+        results
     }
 
     /// v18 Batch propagation: 10 queries → 1 Chebyshev pass.
@@ -1787,7 +1802,8 @@ impl ResonanceField {
                 .then_with(|| a.node_id.cmp(&b.node_id))
         });
 
-        Self::apply_gap_filter(merged, top_k)
+        let (results, _gap) = Self::apply_gap_filter(merged, top_k);
+        results
     }
 
     // ─── Chebyshev Spectral Filter ────────────────────────────────────────
@@ -2005,27 +2021,31 @@ impl ResonanceField {
     /// Hittar naturliga "klyftor" i sorterad amplitud-sekvens:
     /// om nod[i+1].amplitude < nod[i].amplitude * (1 - GAP_RATIO_THRESHOLD)
     /// klipps output vid position i+1 (men minst 3 noder, max top_k).
-    fn apply_gap_filter(results: Vec<ResonanceResult>, top_k: usize) -> Vec<ResonanceResult> {
-        if results.len() <= 3 {
-            return results;
+    /// BUG-5: returns (filtered_results, gap_info)
+    fn apply_gap_filter(results: Vec<ResonanceResult>, top_k: usize) -> (Vec<ResonanceResult>, GapInfo) {
+        let total = results.len();
+        if total <= 3 {
+            return (results, GapInfo { requested: top_k, returned: total, reason: "too_few_candidates", gap_size: 0.0 });
         }
 
-        let limit = results.len().min(top_k);
+        let limit = total.min(top_k);
         let mut cut_at = limit;
+        let mut gap_size: f32 = 0.0;
 
-        // Sök efter amplitud-gap (börja efter position 2 för att garantera minst 3)
         for i in 2..limit {
             let prev = results[i - 1].amplitude;
             let curr = results[i].amplitude;
 
-            // Relativ drop: om current < prev * 0.7 → klipp här
             if prev > 0.001 && curr < prev * (1.0 - GAP_RATIO_THRESHOLD) {
                 cut_at = i;
+                gap_size = (prev - curr) / prev;
                 break;
             }
         }
 
-        results.into_iter().take(cut_at).collect()
+        let reason = if cut_at < limit { "relevance_gap" } else { "top_k_limit" };
+        let info = GapInfo { requested: top_k, returned: cut_at, reason, gap_size };
+        (results.into_iter().take(cut_at).collect(), info)
     }
 
     /// Provide feedback about which nodes successfully matched a goal.
@@ -2868,8 +2888,19 @@ pub fn get_or_build_field_with_variant(
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(field) = cache.take(url_hash) {
-        return (field, true);
+    if let Some(cached) = cache.take(url_hash) {
+        // BUG-4 fix: verify content hasn't changed since cached
+        let new_hash = compute_content_hash(tree_nodes);
+        if cached.content_hash != 0 && cached.content_hash != new_hash {
+            // Content changed while in cache — migrate learning to fresh field
+            drop(cache);
+            let mut fresh = ResonanceField::from_semantic_tree(tree_nodes, url);
+            fresh.url_hash = url_hash;
+            fresh.content_hash = new_hash;
+            fresh.migrate_learning_from(&cached);
+            return (fresh, false);
+        }
+        return (cached, true);
     }
     drop(cache);
 

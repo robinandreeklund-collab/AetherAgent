@@ -856,6 +856,19 @@ pub fn build_tree_with_cookies(
     )
 }
 
+/// BUG-6: Detect bot-blocking/WAF pages (Amazon CloudFront, Cloudflare, etc.)
+fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
+    if total_nodes > 15 { return false; }
+    let t = title.to_lowercase();
+    let bot_patterns = [
+        "robot check", "captcha", "are you a robot", "bot detection",
+        "automated access", "sorry, you have been blocked",
+        "pardon our interruption", "access to this page has been denied",
+    ];
+    bot_patterns.iter().any(|p| t.contains(p))
+        || (total_nodes <= 5 && (t.contains("page not found") || t.is_empty()))
+}
+
 fn is_error_page(title: &str, total_nodes: usize) -> bool {
     let t = title.to_lowercase();
     if t.contains("404")
@@ -1078,7 +1091,10 @@ pub fn parse_crfr_from_tree_broad(
         let ssr_json_flag = is_ssr_json_only(&matched);
         let spa_flag = total_dom_nodes < 10;
         let overlap = goal_title_overlap(goal, &tree.title);
-        let low_rel_warning = overlap < 0.15 && !tree.title.is_empty();
+        // BUG-1 fix
+        let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
+        let has_causal = matched.iter().any(|(_, r)| r.causal_boost > 0.0);
+        let low_rel_warning = !has_causal && top_relevance < 0.5 && !tree.title.is_empty();
 
         let action = if broad_active {
             "provide_feedback"
@@ -1147,9 +1163,8 @@ pub fn parse_crfr_from_tree_js(
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
-    let results = field.propagate_top_k(goal, top_n as usize);
+    let (results, gap_info) = field.propagate_top_k_with_gap(goal, top_n as usize);
     let prop_ms = now_ms().saturating_sub(prop_start);
-    resonance::save_field(&field);
 
     let node_map: HashMap<u32, &types::SemanticNode> = {
         let mut m = HashMap::new();
@@ -1230,14 +1245,32 @@ pub fn parse_crfr_from_tree_js(
 
         let (cache_entries, cache_capacity) = resonance::cache_stats();
 
-        // BUG-F: Beräkna suggested_action INNAN json!-macro (let-bindings fungerar ej inuti)
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
+        let bot_blocked = is_bot_blocked(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        let spa_flag = total_dom_nodes < 10;
+        let spa_flag = total_dom_nodes < 10 && !bot_blocked;
         let overlap = goal_title_overlap(goal, &tree.title);
-        let low_rel_warning = overlap < 0.15 && !tree.title.is_empty();
 
-        let action = if error_flag {
+        // BUG-1 fix: use top-node relevance relative to median, not title overlap
+        let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
+        let has_causal = matched.iter().any(|(_, r)| r.causal_boost > 0.0);
+        let low_rel_warning = !has_causal && top_relevance < 0.5 && !tree.title.is_empty();
+
+        // BUG-2 fix: check if top nodes have factual content (not just nav)
+        let has_factual_content = matched.iter().any(|(n, _)| {
+            let l = &n.label;
+            let has_digit = l.chars().any(|c| c.is_ascii_digit());
+            let has_proper_noun = l.split_whitespace().any(|w| {
+                w.len() > 1 && w.chars().next().is_some_and(|c| c.is_uppercase())
+                    && !["Home", "About", "Contact", "Menu", "Search", "Login", "Sign", "News", "Toggle"].contains(&w)
+            });
+            let long_enough = l.len() > 40;
+            has_digit || has_proper_noun || long_enough || n.role == "text" || n.role == "data" || n.role == "cell"
+        });
+
+        let action = if bot_blocked {
+            "requires_auth_or_proxy"
+        } else if error_flag {
             "retry_url"
         } else if spa_flag {
             "fetch_api"
@@ -1252,7 +1285,7 @@ pub fn parse_crfr_from_tree_js(
                 .iter()
                 .filter_map(|n| n.get("confidence").and_then(|c| c.as_f64()))
                 .fold(0.0f64, f64::max);
-            if max_conf > 0.8 {
+            if max_conf > 0.8 && has_factual_content {
                 "answer_directly"
             } else if max_conf > 0.5 {
                 "verify_with_context"
@@ -1273,12 +1306,19 @@ pub fn parse_crfr_from_tree_js(
             "injection_warnings": tree.injection_warnings,
             "spa_detected": spa_flag,
             "error_detected": error_flag,
+            "bot_blocked": bot_blocked,
             "ssr_json_only": ssr_json_flag,
             "goal_title_overlap": overlap,
             "xhr_intercepted": tree.xhr_intercepted,
             "parse_time_ms": total_ms,
             "low_relevance_warning": low_rel_warning,
             "suggested_action": action,
+            "gap_detection": {
+                "requested": gap_info.requested,
+                "returned": gap_info.returned,
+                "reason": gap_info.reason,
+                "gap_size": gap_info.gap_size,
+            },
             "crfr": {
                 "method": "causal_resonance_field",
                 "field_build_ms": field_ms,
