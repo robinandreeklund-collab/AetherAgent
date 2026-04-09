@@ -520,7 +520,9 @@ impl TieredBackend {
                 {
                     let html = req.html.as_deref().unwrap_or("");
                     if !html.is_empty() {
-                        match crate::taffy_render::render_to_png(html, req.width, req.height) {
+                        match crate::taffy_render::render_to_png(
+                            html, &req.url, req.width, req.height, false,
+                        ) {
                             Ok(cpu_png) => {
                                 let sz = cpu_png.len();
                                 return Ok(ScreenshotResult {
