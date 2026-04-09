@@ -332,7 +332,7 @@ impl CrawlSession {
         self.term_hits.len() as f32 / self.goal_words.len() as f32
     }
 
-    /// Processa med separata nod-set: top_nodes för content, full_nodes för links
+    /// Processa med separata nod-set. Returnerar extraherade links för async HEAD-enrichment.
     #[allow(clippy::too_many_arguments)]
     pub fn process_page_with_links(
         &mut self,
@@ -343,7 +343,7 @@ impl CrawlSession {
         depth: u32,
         fetch_time_ms: u64,
         parse_time_ms: u64,
-    ) {
+    ) -> link_extract::LinkExtractionResult {
         self.process_page_inner(
             top_nodes,
             Some(full_nodes),
@@ -352,10 +352,10 @@ impl CrawlSession {
             depth,
             fetch_time_ms,
             parse_time_ms,
-        );
+        )
     }
 
-    /// Processa en hämtad sida: extrahera noder + links, uppdatera saturation
+    /// Processa en hämtad sida. Returnerar links. Anropa push_enriched_links() efteråt.
     pub fn process_page(
         &mut self,
         tree_nodes: &[SemanticNode],
@@ -364,8 +364,8 @@ impl CrawlSession {
         depth: u32,
         fetch_time_ms: u64,
         parse_time_ms: u64,
-    ) {
-        self.process_page_inner(
+    ) -> link_extract::LinkExtractionResult {
+        let result = self.process_page_inner(
             tree_nodes,
             None,
             url,
@@ -374,6 +374,9 @@ impl CrawlSession {
             fetch_time_ms,
             parse_time_ms,
         );
+        // Sync path: pusha links direkt (utan HEAD-enrichment)
+        self.push_enriched_links(&result.links, depth);
+        result
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -386,7 +389,7 @@ impl CrawlSession {
         depth: u32,
         fetch_time_ms: u64,
         parse_time_ms: u64,
-    ) {
+    ) -> link_extract::LinkExtractionResult {
         self.visited.insert(url.to_string());
         self.pages_crawled += 1;
 
@@ -434,7 +437,7 @@ impl CrawlSession {
             self.consecutive_low_gain = 0;
         }
 
-        // Extrahera links
+        // Extrahera links (returneras för async HEAD-enrichment)
         let link_config = LinkExtractionConfig {
             goal: Some(self.goal.clone()),
             max_links: self.config.top_k_links * 3,
@@ -452,34 +455,42 @@ impl CrawlSession {
             Some(&self.accumulated_hv),
         );
 
-        // Scora och pusha top-K links till frontier
-        let mut scored_links = self.score_links(&link_result.links, depth);
-        scored_links.truncate(self.config.top_k_links);
-        let links_followed = scored_links.len() as u32;
-        for sl in scored_links {
-            if !self.visited.contains(&sl.url) && sl.depth <= self.config.max_depth {
-                self.frontier.push(sl);
-            }
-        }
-
         // Beräkna chars out
         let out_chars: usize = top_nodes.iter().map(|n| n.label.len()).sum();
 
-        // Spara resultat
+        // Spara resultat (links_followed uppdateras efter HEAD-enrichment)
         self.results.push(CrawlPageResult {
             url: url.to_string(),
             title: title.to_string(),
             top_nodes,
             links_found: link_result.total_found,
-            links_followed,
+            links_followed: 0, // Uppdateras av push_enriched_links
             marginal_gain,
             page_number: self.pages_crawled,
             depth,
             fetch_time_ms,
             parse_time_ms,
-            raw_html_chars: 0, // Sätts av anroparen (adaptive_crawl)
+            raw_html_chars: 0,
             out_chars,
         });
+
+        link_result
+    }
+
+    /// Pusha berikade links till frontier (anropas efter async HEAD-enrichment)
+    pub fn push_enriched_links(&mut self, links: &[EnrichedLink], depth: u32) {
+        let mut scored = self.score_links(links, depth);
+        scored.truncate(self.config.top_k_links);
+        let followed = scored.len() as u32;
+        for sl in scored {
+            if !self.visited.contains(&sl.url) && sl.depth <= self.config.max_depth {
+                self.frontier.push(sl);
+            }
+        }
+        // Uppdatera senaste sidans links_followed
+        if let Some(last) = self.results.last_mut() {
+            last.links_followed = followed;
+        }
     }
 
     /// Thompson Sampling: scora links med Beta-distribution
@@ -663,7 +674,7 @@ pub async fn adaptive_crawl(
 
         // Processa: top_nodes för content, full_nodes för link extraction
         let html_len = html.len();
-        session.process_page_with_links(
+        let mut link_result = session.process_page_with_links(
             &top_nodes,
             &full_nodes,
             &final_url,
@@ -672,10 +683,24 @@ pub async fn adaptive_crawl(
             fetch_time_ms,
             parse_time_ms,
         );
-        // Sätt raw_html_chars på senast pushade resultat
+        // Sätt raw_html_chars
         if let Some(last) = session.results.last_mut() {
             last.raw_html_chars = html_len;
         }
+
+        // HEAD-enrich links innan vi väljer vilka att följa
+        // Ger bättre scoring: title + meta description matchar mot goal
+        if !link_result.links.is_empty() {
+            crate::link_extract::enrich_links_with_head(
+                &mut link_result.links,
+                &session.goal_words,
+                6, // Begränsad concurrency per sida (inte 8 — vi crawlar redan)
+            )
+            .await;
+        }
+
+        // Pusha berikade links till frontier
+        session.push_enriched_links(&link_result.links, depth);
     }
 }
 
