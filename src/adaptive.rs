@@ -148,6 +148,10 @@ pub struct CrawlPageResult {
     pub fetch_time_ms: u64,
     /// Parse-tid i ms
     pub parse_time_ms: u64,
+    /// Rå HTML-storlek i tecken
+    pub raw_html_chars: usize,
+    /// Extraherad text-storlek i tecken
+    pub out_chars: usize,
 }
 
 /// Slutresultat från en adaptive crawl
@@ -169,6 +173,10 @@ pub struct AdaptiveCrawlResult {
     pub total_time_ms: u64,
     /// Totalt antal extraherade noder
     pub total_nodes_extracted: u32,
+    /// Totalt raw HTML chars (alla sidor)
+    pub total_raw_chars: usize,
+    /// Totalt extraherade chars (alla sidor)
+    pub total_out_chars: usize,
 }
 
 // ─── Frontier (prioritetskö) ────────────────────────────────────────────────
@@ -453,6 +461,9 @@ impl CrawlSession {
             }
         }
 
+        // Beräkna chars out
+        let out_chars: usize = top_nodes.iter().map(|n| n.label.len()).sum();
+
         // Spara resultat
         self.results.push(CrawlPageResult {
             url: url.to_string(),
@@ -465,6 +476,8 @@ impl CrawlSession {
             depth,
             fetch_time_ms,
             parse_time_ms,
+            raw_html_chars: 0, // Sätts av anroparen (adaptive_crawl)
+            out_chars,
         });
     }
 
@@ -521,6 +534,8 @@ impl CrawlSession {
     /// Bygg slutresultat
     pub fn finish(self, stop_reason: StopReason) -> AdaptiveCrawlResult {
         let total_nodes: u32 = self.results.iter().map(|p| p.top_nodes.len() as u32).sum();
+        let total_raw: usize = self.results.iter().map(|p| p.raw_html_chars).sum();
+        let total_out: usize = self.results.iter().map(|p| p.out_chars).sum();
         let total_time = now_ms().saturating_sub(self.start_time_ms);
         let coverage = self.coverage();
         AdaptiveCrawlResult {
@@ -532,6 +547,8 @@ impl CrawlSession {
             final_ema_gain: self.ema_gain,
             total_time_ms: total_time,
             total_nodes_extracted: total_nodes,
+            total_raw_chars: total_raw,
+            total_out_chars: total_out,
         }
     }
 }
@@ -644,6 +661,7 @@ pub async fn adaptive_crawl(
         // Auto-feedback vore cirkulärt (vi matar tillbaka vår egen scoring).
 
         // Processa: top_nodes för content, full_nodes för link extraction
+        let html_len = html.len();
         session.process_page_with_links(
             &top_nodes,
             &full_nodes,
@@ -653,6 +671,10 @@ pub async fn adaptive_crawl(
             fetch_time_ms,
             parse_time_ms,
         );
+        // Sätt raw_html_chars på senast pushade resultat
+        if let Some(last) = session.results.last_mut() {
+            last.raw_html_chars = html_len;
+        }
     }
 }
 

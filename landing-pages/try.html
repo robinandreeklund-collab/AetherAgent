@@ -599,6 +599,9 @@ function renderCrawlResults(data, elapsed) {
   pagesEl.innerHTML = pages.map((p, i) => {
     const gainPct = Math.round((p.marginal_gain || 0) * 100);
     const nodes = p.top_nodes || [];
+    const rawC = p.raw_html_chars || 0;
+    const outC = p.out_chars || nodes.reduce((s,n) => s + (n.label||'').length, 0);
+    const redPct = rawC > 0 ? ((1 - outC/rawC)*100).toFixed(1) : '?';
     const nodesHtml = nodes.slice(0, 5).map(n =>
       '<div class="result-node">' +
       '<div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' &middot; ' + (n.role||'text') + '</div>' +
@@ -611,20 +614,37 @@ function renderCrawlResults(data, elapsed) {
           '<span><span class="val">' + nodes.length + '</span> nodes</span>' +
           '<span><span class="val">' + (p.links_found||0) + '</span> links</span>' +
           '<span><span class="val">' + (p.fetch_time_ms||0) + 'ms</span> fetch</span>' +
+          '<span><span class="val">' + (p.parse_time_ms||0) + 'ms</span> parse</span>' +
         '</div>' +
       '</div>' +
       '<div class="crawl-gain-bar"><div class="crawl-gain-fill" style="width:' + gainPct + '%"></div></div>' +
-      '<div style="font-size:.65rem;color:var(--muted);margin-bottom:.5rem">HDC gain: ' + (p.marginal_gain||0).toFixed(4) + '</div>' +
+      '<div style="font-size:.65rem;color:var(--muted);margin-bottom:.5rem;display:flex;gap:1.2rem">' +
+        '<span>HDC gain: ' + (p.marginal_gain||0).toFixed(4) + '</span>' +
+        '<span>' + rawC.toLocaleString() + ' chars in</span>' +
+        '<span>' + outC.toLocaleString() + ' chars out</span>' +
+        '<span>' + redPct + '% reduction</span>' +
+      '</div>' +
       '<div class="result-terminal" style="font-size:.75rem;padding:1rem">' + nodesHtml + '</div>' +
     '</div>';
   }).join('');
 
+  // Aggregerade totaler
+  const totalRaw = data.total_raw_chars || pages.reduce((s,p) => s + (p.raw_html_chars||0), 0);
+  const totalOut = data.total_out_chars || pages.reduce((s,p) => s + (p.out_chars || p.top_nodes.reduce((ss,n) => ss+(n.label||'').length, 0)), 0);
+  const totalReduction = totalRaw > 0 ? ((1 - totalOut/totalRaw)*100).toFixed(1) : '?';
+  const totalFetch = pages.reduce((s,p) => s + (p.fetch_time_ms||0), 0);
+  const totalParse = pages.reduce((s,p) => s + (p.parse_time_ms||0), 0);
   const covPct = ((data.coverage||0)*100).toFixed(1);
+
+  summaryEl.style.gridTemplateColumns = 'repeat(8,1fr)';
   summaryEl.innerHTML =
-    '<div><div class="summary-val">' + pages.length + '</div><div class="summary-label">pages crawled</div></div>' +
-    '<div><div class="summary-val">' + (data.total_nodes_extracted||0) + '</div><div class="summary-label">total nodes</div></div>' +
-    '<div><div class="summary-val">' + covPct + '%</div><div class="summary-label">term coverage</div></div>' +
-    '<div><div class="summary-val">' + (data.final_ema_gain||0).toFixed(4) + '</div><div class="summary-label">final EMA gain</div></div>' +
+    '<div><div class="summary-val">' + pages.length + '</div><div class="summary-label">pages</div></div>' +
+    '<div><div class="summary-val">' + (data.total_nodes_extracted||0) + '</div><div class="summary-label">nodes</div></div>' +
+    '<div><div class="summary-val">' + totalRaw.toLocaleString() + '</div><div class="summary-label">chars in</div></div>' +
+    '<div><div class="summary-val">' + totalOut.toLocaleString() + '</div><div class="summary-label">chars out</div></div>' +
+    '<div><div class="summary-val">' + totalReduction + '%</div><div class="summary-label">reduction</div></div>' +
+    '<div><div class="summary-val">' + totalFetch + 'ms</div><div class="summary-label">network</div></div>' +
+    '<div><div class="summary-val">' + totalParse + 'ms</div><div class="summary-label">slaash</div></div>' +
     '<div><div class="summary-val"><span class="crawl-stop ' + stopClass + '">' + stopLabel + '</span></div><div class="summary-label">stop reason</div></div>';
 
   el.classList.add('visible');
@@ -666,11 +686,20 @@ function renderLinksResults(data, elapsed) {
 
   const internal = links.filter(l => l.is_internal).length;
   const external = links.length - internal;
+  const avgGain = links.length > 0 ? (links.reduce((s,l) => s + (l.expected_gain||0), 0) / links.length).toFixed(3) : '0';
+  const avgRel = links.length > 0 ? (links.reduce((s,l) => s + (l.relevance_score||0), 0) / links.length).toFixed(3) : '0';
+  const contentLinks = links.filter(l => l.structural_role === 'content' || l.structural_role === 'card').length;
+  const navLinks = links.filter(l => l.structural_role === 'navigation').length;
+
+  summaryEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   summaryEl.innerHTML =
-    '<div><div class="summary-val">' + (data.total_found||0) + '</div><div class="summary-label">total links</div></div>' +
-    '<div><div class="summary-val">' + internal + '</div><div class="summary-label">internal</div></div>' +
-    '<div><div class="summary-val">' + external + '</div><div class="summary-label">external</div></div>' +
-    '<div><div class="summary-val">' + (data.extract_time_ms||0) + 'ms</div><div class="summary-label">extract time</div></div>';
+    '<div><div class="summary-val">' + (data.total_found||0) + '</div><div class="summary-label">total found</div></div>' +
+    '<div><div class="summary-val">' + links.length + '</div><div class="summary-label">returned</div></div>' +
+    '<div><div class="summary-val">' + internal + ' / ' + external + '</div><div class="summary-label">int / ext</div></div>' +
+    '<div><div class="summary-val">' + contentLinks + ' / ' + navLinks + '</div><div class="summary-label">content / nav</div></div>' +
+    '<div><div class="summary-val">' + avgGain + '</div><div class="summary-label">avg gain</div></div>' +
+    '<div><div class="summary-val">' + avgRel + '</div><div class="summary-label">avg relevance</div></div>' +
+    '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
 
   el.classList.add('visible');
 }
