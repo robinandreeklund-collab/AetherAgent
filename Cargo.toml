@@ -81,8 +81,8 @@ png = { version = "0.17", optional = true }
 
 # Taffy+Vello fallback rendering (matchar blitz main deps)
 taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "4b6687da0ca1e9d71da4e48b4c659f5c45060707", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size", "calc", "detailed_layout_info"], optional = true }
-parley = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", default-features = false, features = ["std"], optional = true }
-fontique = { version = "0.6", optional = true }
+parley = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", default-features = false, features = ["std", "system"], optional = true }
+fontique = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", features = ["system", "fontconfig-dlopen"], optional = true }
 skrifa = { version = "0.40", optional = true }
 vello_cpu = { version = "0.0.7", features = ["text", "u8_pipeline"], optional = true }
 

@@ -76,6 +76,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Fonts for Blitz rendering (system fallback fonts)
     fonts-liberation \
     fonts-noto-color-emoji \
+    fonts-noto-core \
     fonts-dejavu-core \
     # Fontconfig runtime library (required by Blitz for font discovery)
     libfontconfig1 \
