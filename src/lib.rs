@@ -4459,6 +4459,56 @@ pub fn screenshot_with_tier(
     Ok((result.png_bytes, result.tier_used))
 }
 
+/// Kör inline-JavaScript via QuickJS på HTML och returnerar DOM-muterat HTML.
+///
+/// Avsett att anropas INNAN CSS-inlining i render-pipelinen, på den lilla
+/// original-HTML:en (inte den CSS-inlinerade versionen som kan vara 5–10 MB).
+/// Exekverar DOMContentLoaded/load-lifecycle → applicerar klassby ten, stil-ändringar
+/// och visibility-toggling som JS normalt gör i en riktig browser.
+///
+/// Hjälper sajter som python.org (hamburger-meny), traditionella jQuery-sajter
+/// och sidor som lägger till klasser dynamiskt vid sidladdning.
+///
+/// Kräver feature `js-eval`.
+#[cfg(feature = "js-eval")]
+pub fn apply_js_mutations(html: &str, width: u32, height: u32) -> String {
+    // Säkerhetsgräns: ArenaDom-parsing av >2 MB original-HTML är för kostsamt
+    const MAX_HTML: usize = 2 * 1024 * 1024; // 2 MB
+                                             // Script-gräns: mer än 500 KB inline-scripts tar för lång tid i QuickJS
+    const MAX_SCRIPTS: usize = 500 * 1024; // 500 KB
+
+    if html.len() > MAX_HTML {
+        return html.to_string();
+    }
+
+    let scripts = js_eval::extract_ordered_scripts(html);
+    if scripts.is_empty() {
+        return html.to_string();
+    }
+
+    let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
+    if total_script_bytes > MAX_SCRIPTS {
+        return html.to_string();
+    }
+
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    let eval_result =
+        dom_bridge::eval_js_with_lifecycle_and_arena_viewport(&scripts, arena, width, height);
+
+    if eval_result.result.mutations.is_empty() {
+        return html.to_string();
+    }
+
+    let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
+    // Säkerhetskontroll: serialisering ska aldrig producera tom output
+    if serialized.len() > 20 {
+        serialized
+    } else {
+        html.to_string()
+    }
+}
+
 /// Get tier statistics for monitoring
 ///
 /// Returns JSON with TierStats: blitz_count, cdp_count, escalation_count, etc.
