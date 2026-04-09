@@ -511,85 +511,82 @@ async function runDistill() {
   const url = document.getElementById('input-url').value.trim();
   const goal = document.getElementById('input-goal').value.trim();
   if (!url || !goal) return;
-  showLoading('Connecting\u2026');
+  showLoading('Running\u2026');
   const t0 = performance.now();
-  const meta = document.getElementById('results-meta');
-
-  wsCall('fetch_stream_parse', { url, goal, top_n: 10, max_nodes: 10 }, {
-    onProgress: function(stage, msg) {
-      document.getElementById('btn-run').textContent = progressText(stage, msg);
-      if(meta) meta.innerHTML = '<span style="color:var(--accent)">' + progressText(stage, msg) + '</span>';
-      // Show results container early with status
-      document.getElementById('results').classList.add('visible');
-    },
-    onResult: function(data) {
-      const elapsed = Math.round(performance.now() - t0);
-      // Fetch markdown separately (quick, cache hit)
+  try {
+    const [resJson, resMd] = await Promise.all([
       fetch('/api/parse-crfr', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({url, goal, top_n: 10, output_format:'markdown'})
-      }).then(r => r.text()).then(md => {
-        document.getElementById('result-markdown').textContent = md;
-      }).catch(() => {});
-      renderResults(data, elapsed);
-    },
-    onError: function(msg) { showError(msg); }
-  });
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
+      }),
+      fetch('/api/parse-crfr', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, goal, top_n: 10, output_format: 'markdown'})
+      })
+    ]);
+    if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
+    const data = await resJson.json();
+    const mdText = await resMd.text();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    document.getElementById('result-markdown').textContent = mdText;
+    renderResults(data, elapsed);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    hideLoading();
+  }
 }
 
 async function runCrawl() {
   const url = document.getElementById('input-url').value.trim();
   const goal = document.getElementById('input-goal').value.trim();
   if (!url || !goal) return;
-  showLoading('Connecting\u2026');
+  showLoading('Crawling\u2026');
   const t0 = performance.now();
-  const meta = document.getElementById('crawl-meta');
-
-  wsCall('adaptive_crawl', {
-    url, goal,
-    max_pages: parseInt(document.getElementById('cfg-max-pages').value) || 8,
-    max_depth: parseInt(document.getElementById('cfg-max-depth').value) || 2,
-    top_k_links: parseInt(document.getElementById('cfg-top-k').value) || 3,
-    top_n_per_page: 10,
-  }, {
-    onProgress: function(stage, msg) {
-      document.getElementById('btn-run').textContent = progressText(stage, msg);
-      document.getElementById('crawl-results').classList.add('visible');
-      if(meta) meta.innerHTML = '<span style="color:var(--accent)">' + progressText(stage, msg) + '</span>';
-    },
-    onResult: function(data) {
-      const elapsed = Math.round(performance.now() - t0);
-      if(data.error) { showError(data.error); return; }
-      renderCrawlResults(data, elapsed);
-    },
-    onError: function(msg) { showError(msg); }
-  });
+  try {
+    const res = await fetch('/api/adaptive-crawl', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        max_pages: parseInt(document.getElementById('cfg-max-pages').value) || 8,
+        max_depth: parseInt(document.getElementById('cfg-max-depth').value) || 2,
+        top_k_links: parseInt(document.getElementById('cfg-top-k').value) || 3,
+        top_n_per_page: 10,
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    renderCrawlResults(data, elapsed);
+  } catch (err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 async function runLinks() {
   const url = document.getElementById('input-url').value.trim();
   const goal = document.getElementById('input-goal').value.trim();
   if (!url) return;
-  showLoading('Connecting\u2026');
+  showLoading('Extracting\u2026');
   const t0 = performance.now();
-
-  wsCall('fetch_extract_links', {
-    url, goal: goal || '',
-    max_links: parseInt(document.getElementById('cfg-max-links').value) || 20,
-  }, {
-    onProgress: function(stage, msg) {
-      document.getElementById('btn-run').textContent = progressText(stage, msg);
-      document.getElementById('links-results').classList.add('visible');
-      var m = document.getElementById('links-meta');
-      if(m) m.innerHTML = '<span style="color:var(--accent)">' + progressText(stage, msg) + '</span>';
-    },
-    onResult: function(data) {
-      const elapsed = Math.round(performance.now() - t0);
-      if(data.error) { showError(data.error); return; }
-      renderLinksResults(data, elapsed);
-    },
-    onError: function(msg) { showError(msg); }
-  });
+  try {
+    const res = await fetch('/api/fetch/extract-links', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal: goal || null,
+        max_links: parseInt(document.getElementById('cfg-max-links').value) || 20,
+        filter_navigation: document.getElementById('cfg-filter-nav').value === 'true',
+        include_head_data: document.getElementById('cfg-head-data').value === 'true',
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    renderLinksResults(data, elapsed);
+  } catch (err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 function renderResults(data, elapsed) {
@@ -780,47 +777,47 @@ async function runSearch() {
   const query = document.getElementById('cfg-search-query').value.trim();
   const goal = document.getElementById('input-goal').value.trim() || query;
   if (!query) { showError('Enter a search query'); return; }
-  showLoading('Connecting\u2026');
+  showLoading('Searching\u2026');
   const t0 = performance.now();
-
-  wsCall('fetch_search', { query, goal: goal || query, top_n: 8, deep: true }, {
-    onProgress: function(stage, msg) {
-      document.getElementById('btn-run').textContent = progressText(stage, msg);
-      var m = document.getElementById('search-meta');
-      if(m) m.innerHTML = '<span style="color:var(--accent)">' + progressText(stage, msg) + '</span>';
-      document.getElementById('search-results').classList.add('visible');
-    },
-    onResult: function(data) {
-      const elapsed = Math.round(performance.now() - t0);
-      if(data.error) { showError(data.error); return; }
-      const el = document.getElementById('search-results');
-      document.getElementById('search-title').textContent = 'Search: ' + query;
-      const results = data.results || [];
-      document.getElementById('search-meta').innerHTML =
-        '<span><span class="val">' + results.length + '</span> results</span>' +
-        '<span><span class="val">' + elapsed + 'ms</span> total</span>';
-      document.getElementById('search-nodes').innerHTML = results.map((r, i) => {
-        const nodes = (r.nodes || []).slice(0, 3);
-        const nodesHtml = nodes.map(n =>
-          '<div class="result-node"><div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' \u00b7 ' + (n.role||'text') +
-          '</div><div class="result-node-text">"' + escHtml((n.label||'').slice(0,200)) + '"</div></div>'
-        ).join('');
-        return '<div class="search-item">' +
-          '<div class="search-item-title">' + (i+1) + '. ' + escHtml(r.title || 'Untitled') + '</div>' +
-          '<div class="search-item-url">' + escHtml(r.url || '') + '</div>' +
-          (r.snippet ? '<div class="search-item-snippet">' + escHtml(r.snippet) + '</div>' : '') +
-          (nodesHtml ? '<div style="margin-top:.5rem">' + nodesHtml + '</div>' : '') + '</div>';
-      }).join('');
-      const summaryEl = document.getElementById('search-summary');
-      summaryEl.style.gridTemplateColumns = 'repeat(3,1fr)';
-      summaryEl.innerHTML =
-        '<div><div class="summary-val">' + results.length + '</div><div class="summary-label">results</div></div>' +
-        '<div><div class="summary-val">' + results.reduce((s,r) => s + (r.nodes||[]).length, 0) + '</div><div class="summary-label">nodes</div></div>' +
-        '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total</div></div>';
-      el.classList.add('visible');
-    },
-    onError: function(msg) { showError(msg); }
-  });
+  try {
+    const res = await fetch('/api/fetch/search', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query, goal: goal || query, top_n: 8, deep: true, max_nodes_per_result: 5 })
+    });
+    if (!res.ok) {
+      if (res.status === 502) throw new Error('Search provider blocked the request. Try again.');
+      throw new Error('Server returned ' + res.status);
+    }
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const el = document.getElementById('search-results');
+    document.getElementById('search-title').textContent = 'Search: ' + query;
+    const results = data.results || [];
+    document.getElementById('search-meta').innerHTML =
+      '<span><span class="val">' + results.length + '</span> results</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+    document.getElementById('search-nodes').innerHTML = results.map((r, i) => {
+      const nodes = (r.nodes || []).slice(0, 3);
+      const nodesHtml = nodes.map(n =>
+        '<div class="result-node"><div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' \u00b7 ' + (n.role||'text') +
+        '</div><div class="result-node-text">"' + escHtml((n.label||'').slice(0,200)) + '"</div></div>'
+      ).join('');
+      return '<div class="search-item">' +
+        '<div class="search-item-title">' + (i+1) + '. ' + escHtml(r.title || 'Untitled') + '</div>' +
+        '<div class="search-item-url">' + escHtml(r.url || '') + '</div>' +
+        (r.snippet ? '<div class="search-item-snippet">' + escHtml(r.snippet) + '</div>' : '') +
+        (nodesHtml ? '<div style="margin-top:.5rem">' + nodesHtml + '</div>' : '') + '</div>';
+    }).join('');
+    const summaryEl = document.getElementById('search-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(3,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val">' + results.length + '</div><div class="summary-label">results</div></div>' +
+      '<div><div class="summary-val">' + results.reduce((s,r) => s + (r.nodes||[]).length, 0) + '</div><div class="summary-label">nodes</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total</div></div>';
+    el.classList.add('visible');
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 // ─── STREAM ──────────────────────────────────────────────────────────────
@@ -1013,38 +1010,35 @@ async function runDiff() {
 async function runRender() {
   const url = document.getElementById('input-url').value.trim();
   if (!url) return;
-  showLoading('Connecting\u2026');
+  showLoading('Rendering\u2026');
   const t0 = performance.now();
   const w = parseInt(document.getElementById('cfg-render-w').value) || 1280;
   const h = parseInt(document.getElementById('cfg-render-h').value) || 800;
-
-  wsCall('fetch_render', { url, width: w, height: h }, {
-    onProgress: function(stage, msg) {
-      document.getElementById('btn-run').textContent = progressText(stage, msg);
-      document.getElementById('render-results').classList.add('visible');
-      var m = document.getElementById('render-meta');
-      if(m) m.innerHTML = '<span style="color:var(--accent)">' + progressText(stage, msg) + '</span>';
-    },
-    onResult: function(data) {
-      const elapsed = Math.round(performance.now() - t0);
-      if(data.error) { showError(data.error); return; }
-      const b64 = data.png_base64;
-      if(!b64) { showError('No image returned'); return; }
-      const el = document.getElementById('render-results');
-      const tier = data.tier_used || 'blitz';
-      const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
-      document.getElementById('render-title').textContent = 'Render: ' + url.split('/').slice(0,3).join('/');
-      document.getElementById('render-meta').innerHTML =
-        '<span><span class="val">' + w + 'x' + h + '</span> viewport</span>' +
-        '<span><span class="val">' + elapsed + 'ms</span> render</span>' +
-        '<span><span class="val">' + tier + '</span> engine</span>' +
-        '<span><span class="val">' + sizeKb + '</span> PNG</span>';
-      document.getElementById('render-img').innerHTML =
-        '<div class="render-frame"><img src="data:image/png;base64,' + b64 + '" alt="Rendered page" style="max-height:600px;object-fit:contain"></div>';
-      el.classList.add('visible');
-    },
-    onError: function(msg) { showError(msg); }
-  });
+  try {
+    const res = await fetch('/api/fetch/render', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, width: w, height: h })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const b64 = data.png_base64;
+    if (!b64) throw new Error('No image returned');
+    const el = document.getElementById('render-results');
+    const tier = data.tier_used || 'blitz';
+    const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
+    document.getElementById('render-title').textContent = 'Render: ' + url.split('/').slice(0,3).join('/');
+    document.getElementById('render-meta').innerHTML =
+      '<span><span class="val">' + w + 'x' + h + '</span> viewport</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> render</span>' +
+      '<span><span class="val">' + tier + '</span> engine</span>' +
+      '<span><span class="val">' + sizeKb + '</span> PNG</span>';
+    document.getElementById('render-img').innerHTML =
+      '<div class="render-frame"><img src="data:image/png;base64,' + b64 + '" alt="Rendered page" style="max-height:600px;object-fit:contain"></div>';
+    el.classList.add('visible');
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 // ─── Shared WebSocket helper ─────────────────────────────────────────────
