@@ -3271,7 +3271,7 @@ pub fn render_html_to_png(
 
     // Säkerhetsgräns: Blitz/Vello kraschar på extremt stora CSS-gradienter.
     // Kontrollera storleken EFTER script-stripping och CSS-kompilering.
-    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB
+    const MAX_HTML_FOR_BLITZ: usize = 10 * 1024 * 1024; // 10 MB
     let check_size = if use_compiled {
         compiled_html.len()
     } else {
