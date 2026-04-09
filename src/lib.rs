@@ -5018,6 +5018,7 @@ pub fn extract_links(html: &str, goal: &str, url: &str, max_links: u32) -> Strin
             include_structural_role: true,
             filter_navigation: false,
             min_relevance: 0.0,
+            ..Default::default()
         };
 
         let tree = build_tree(html, goal, url);

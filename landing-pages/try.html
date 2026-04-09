@@ -276,6 +276,10 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
       <label>Filter nav</label>
       <select id="cfg-filter-nav"><option value="false">Show all</option><option value="true">Hide nav links</option></select>
     </div>
+    <div class="config-field">
+      <label>Head metadata</label>
+      <select id="cfg-head-data"><option value="false">Off (fast)</option><option value="true">On (richer)</option></select>
+    </div>
   </div>
 
   <div class="loading" id="loading">
@@ -514,6 +518,7 @@ async function runLinks() {
         goal: goal || null,
         max_links: parseInt(document.getElementById('cfg-max-links').value) || 20,
         filter_navigation: document.getElementById('cfg-filter-nav').value === 'true',
+        include_head_data: document.getElementById('cfg-head-data').value === 'true',
       })
     });
     if (!res.ok) throw new Error('Server returned ' + res.status);
@@ -668,13 +673,23 @@ function renderLinksResults(data, elapsed) {
   listEl.innerHTML = links.map((l, i) => {
     const roleColors = {content:'#22c55e',navigation:'#eab308',footer:'#888',sidebar:'#a78bfa',card:'#3b82f6'};
     const roleColor = roleColors[l.structural_role] || '#888';
-    return '<div class="link-card">' +
+    const hasHead = l.head_title || l.meta_description;
+    const headHtml = hasHead
+      ? '<div style="margin-top:.35rem;padding:.4rem .6rem;background:rgba(255,255,255,0.03);border-radius:6px;font-size:.7rem;line-height:1.5">' +
+        (l.head_title ? '<div style="color:#e6edf3;font-weight:500">' + escHtml(l.head_title) + '</div>' : '') +
+        (l.meta_description ? '<div style="color:var(--muted);margin-top:.15rem">' + escHtml(l.meta_description.slice(0,150)) + (l.meta_description.length>150?'...':'') + '</div>' : '') +
+        '</div>'
+      : '';
+    return '<div class="link-card" style="' + (hasHead ? 'grid-template-rows:auto auto;grid-template-columns:auto 1fr auto' : '') + '">' +
       '<div class="link-rank">' + (i+1) + '</div>' +
       '<div class="link-body">' +
         '<div class="link-anchor">' + escHtml(l.anchor_text || '(no text)') + '</div>' +
         '<div class="link-url">' + escHtml(l.absolute_url || l.href || '') + '</div>' +
         '<div class="link-role"><span style="color:' + roleColor + '">' + (l.structural_role||'?') + '</span>' +
-          (l.is_internal ? ' &middot; internal' : ' &middot; external') + '</div>' +
+          (l.is_internal ? ' &middot; internal' : ' &middot; external') +
+          (l.context_snippet ? ' &middot; <span style="color:#555">' + escHtml(l.context_snippet.slice(0,60)) + '</span>' : '') +
+        '</div>' +
+        headHtml +
       '</div>' +
       '<div class="link-scores">' +
         '<div class="link-score"><span class="s-val s-gain">' + (l.expected_gain||0).toFixed(2) + '</span> gain</div>' +

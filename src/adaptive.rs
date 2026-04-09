@@ -437,11 +437,12 @@ impl CrawlSession {
         // Extrahera links
         let link_config = LinkExtractionConfig {
             goal: Some(self.goal.clone()),
-            max_links: self.config.top_k_links * 3, // Extrahera fler, välj bästa
+            max_links: self.config.top_k_links * 3,
             include_context: true,
             include_structural_role: true,
             filter_navigation: false,
             min_relevance: 0.0,
+            ..Default::default()
         };
         let link_source = full_nodes_for_links.unwrap_or(tree_nodes);
         let link_result = link_extract::extract_links_from_tree(

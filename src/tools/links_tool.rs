@@ -86,6 +86,7 @@ pub fn execute_with_html(html: &str, req: &LinksRequest, url: &str) -> ToolResul
         include_structural_role: true,
         filter_navigation: req.filter_navigation,
         min_relevance: req.min_relevance,
+        ..Default::default()
     };
 
     let result = crate::link_extract::extract_links_from_tree(&tree_nodes, url, &config, None);

@@ -74,6 +74,16 @@ pub struct LinkExtractionConfig {
     /// Minimum relevance (0.0 = alla)
     #[serde(default)]
     pub min_relevance: f32,
+    /// Hämta <head> metadata (title + meta description) per link (async, opt-in)
+    #[serde(default)]
+    pub include_head_data: bool,
+    /// Max concurrent HEAD-fetches
+    #[serde(default = "default_head_concurrency")]
+    pub head_concurrency: usize,
+}
+
+fn default_head_concurrency() -> usize {
+    8
 }
 
 fn default_max_links() -> usize {
@@ -92,6 +102,8 @@ impl Default for LinkExtractionConfig {
             include_structural_role: true,
             filter_navigation: false,
             min_relevance: 0.0,
+            include_head_data: false,
+            head_concurrency: default_head_concurrency(),
         }
     }
 }
@@ -445,6 +457,207 @@ fn truncate_context(text: &str, max_len: usize) -> String {
         end -= 1;
     }
     format!("{}...", &text[..end])
+}
+
+// ─── Async HEAD Fetch ────────────────────────────────────────────────────────
+
+/// Metadata extraherad från en sidas <head>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadMeta {
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Fetcha bara <head> från en URL.
+/// Använder Range-header eller avbryter tidigt efter </head>.
+/// Timeout: 5 sekunder. Max body: 32KB (tillräckligt för <head>).
+pub async fn fetch_head_meta(url: &str) -> Option<HeadMeta> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .build()
+        .ok()?;
+
+    let resp = client
+        .get(url)
+        .header("User-Agent", "Slaash/1.0 (head-check)")
+        .header("Accept", "text/html")
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    // Läs max 32KB — tillräckligt för <head> på de flesta sajter
+    let body = resp.text().await.ok()?;
+    let head_section = extract_head_section(&body)?;
+
+    let title = extract_tag_content(&head_section, "title");
+    let description = extract_meta_description(&head_section);
+
+    if title.is_none() && description.is_none() {
+        return None;
+    }
+
+    Some(HeadMeta { title, description })
+}
+
+/// Extrahera <head>...</head> sektionen ur HTML
+fn extract_head_section(html: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let start = lower.find("<head")?;
+    let start_end = lower[start..].find('>')? + start + 1;
+    let end = lower[start_end..].find("</head>")? + start_end;
+    Some(html[start_end..end].to_string())
+}
+
+/// Extrahera textinnehåll i en HTML-tagg
+fn extract_tag_content(html: &str, tag: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let open = format!("<{}", tag);
+    let close = format!("</{}>", tag);
+    let start = lower.find(&open)?;
+    let tag_end = lower[start..].find('>')? + start + 1;
+    let end = lower[tag_end..].find(&close)? + tag_end;
+    let content = html[tag_end..end].trim();
+    if content.is_empty() {
+        None
+    } else {
+        // Dekoda vanliga HTML-entities
+        Some(decode_basic_entities(content))
+    }
+}
+
+/// Extrahera <meta name="description" content="...">
+fn extract_meta_description(head: &str) -> Option<String> {
+    let lower = head.to_lowercase();
+    // Hitta meta-tagg med name="description"
+    let mut search_from = 0;
+    while let Some(pos) = lower[search_from..].find("<meta") {
+        let abs_pos = search_from + pos;
+        let tag_end = match lower[abs_pos..].find('>') {
+            Some(e) => abs_pos + e + 1,
+            None => break,
+        };
+        let tag = &lower[abs_pos..tag_end];
+
+        if tag.contains("name=\"description\"") || tag.contains("name='description'") {
+            // Extrahera content="..."
+            let orig_tag = &head[abs_pos..tag_end];
+            if let Some(content) = extract_attr_value(orig_tag, "content") {
+                if !content.is_empty() {
+                    return Some(decode_basic_entities(&content));
+                }
+            }
+        }
+        search_from = tag_end;
+    }
+    None
+}
+
+/// Extrahera ett attributvärde från en HTML-tagg
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let pattern = format!("{}=\"", attr);
+    if let Some(start) = lower.find(&pattern) {
+        let val_start = start + pattern.len();
+        if let Some(end) = tag[val_start..].find('"') {
+            return Some(tag[val_start..val_start + end].to_string());
+        }
+    }
+    // Prova med enkla citattecken
+    let pattern_sq = format!("{}='", attr);
+    if let Some(start) = lower.find(&pattern_sq) {
+        let val_start = start + pattern_sq.len();
+        if let Some(end) = tag[val_start..].find('\'') {
+            return Some(tag[val_start..val_start + end].to_string());
+        }
+    }
+    None
+}
+
+/// Dekoda vanliga HTML-entities
+fn decode_basic_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+}
+
+/// Berika links med HEAD-metadata parallellt.
+///
+/// Hämtar <head> från varje link-URL, extraherar title + description,
+/// och uppdaterar relevance_score baserat på metadata-matchning mot goal.
+pub async fn enrich_links_with_head(
+    links: &mut [EnrichedLink],
+    goal_words: &[String],
+    concurrency: usize,
+) {
+    let max_conc = concurrency.clamp(1, 20);
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_conc));
+
+    // Spawna parallella fetches med semaphore-begränsning
+    let mut handles = Vec::with_capacity(links.len());
+    for link in links.iter() {
+        let url = link.absolute_url.clone();
+        let sem = semaphore.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.ok()?;
+            fetch_head_meta(&url).await
+        }));
+    }
+
+    // Samla resultat
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await.ok().flatten());
+    }
+
+    // Applicera metadata + uppdatera relevance
+    for (link, meta_opt) in links.iter_mut().zip(results.into_iter()) {
+        if let Some(meta) = meta_opt {
+            link.head_title = meta.title.clone();
+            link.meta_description = meta.description.clone();
+
+            // Boost relevance baserat på metadata-matchning mot goal
+            if !goal_words.is_empty() {
+                let meta_text = format!(
+                    "{} {}",
+                    meta.title.as_deref().unwrap_or(""),
+                    meta.description.as_deref().unwrap_or("")
+                )
+                .to_lowercase();
+
+                let meta_matches = goal_words
+                    .iter()
+                    .filter(|w| meta_text.contains(w.as_str()))
+                    .count();
+                let meta_relevance = meta_matches as f32 / goal_words.len().max(1) as f32;
+
+                // Vägt snitt: 60% original relevance + 40% meta relevance
+                link.relevance_score = link.relevance_score * 0.6 + meta_relevance * 0.4;
+
+                // Uppdatera expected_gain med ny relevance
+                let structural_bonus = match link.structural_role.as_str() {
+                    "content" | "card" => 1.0,
+                    "sidebar" => 0.6,
+                    "navigation" => 0.3,
+                    "footer" => 0.2,
+                    _ => 0.5,
+                };
+                link.expected_gain = 0.4 * link.novelty_score
+                    + 0.35 * link.relevance_score
+                    + 0.25 * structural_bonus;
+            }
+        }
+    }
+
+    // Re-sortera efter uppdaterad expected_gain
+    links.sort_by(|a, b| b.expected_gain.total_cmp(&a.expected_gain));
 }
 
 // ─── Tester ─────────────────────────────────────────────────────────────────

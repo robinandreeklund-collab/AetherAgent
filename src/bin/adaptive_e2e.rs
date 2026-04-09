@@ -242,6 +242,7 @@ async fn main() {
                 include_structural_role: true,
                 filter_navigation: false,
                 min_relevance: 0.0,
+                ..Default::default()
             };
 
             let start = Instant::now();

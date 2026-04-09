@@ -504,6 +504,8 @@ struct ExtractLinksRequest {
     max_links: u32,
     #[serde(default)]
     filter_navigation: bool,
+    #[serde(default)]
+    include_head_data: bool,
 }
 
 fn default_max_links() -> u32 {
@@ -3264,13 +3266,49 @@ async fn fetch_extract_links_handler(Json(req): Json<ExtractLinksRequest>) -> im
         }
     };
 
-    let goal = req.goal.as_deref().unwrap_or("");
-    let json = aether_agent::extract_links(
-        &fetch_result.body,
-        goal,
-        &fetch_result.final_url,
-        req.max_links,
+    let goal_str = req.goal.as_deref().unwrap_or("").to_string();
+    let final_url = fetch_result.final_url.clone();
+    let body = fetch_result.body;
+    let max_links = req.max_links as usize;
+    let filter_nav = req.filter_navigation;
+    let include_head = req.include_head_data;
+
+    // Sync: parse + extract links
+    let link_config = aether_agent::link_extract::LinkExtractionConfig {
+        goal: if goal_str.is_empty() {
+            None
+        } else {
+            Some(goal_str.clone())
+        },
+        max_links,
+        include_context: true,
+        include_structural_role: true,
+        filter_navigation: filter_nav,
+        min_relevance: 0.0,
+        include_head_data: include_head,
+        head_concurrency: 8,
+    };
+
+    let tree = aether_agent::build_tree_for_crfr(&body, &goal_str, &final_url, false);
+    let mut result = aether_agent::link_extract::extract_links_from_tree(
+        &tree.nodes,
+        &final_url,
+        &link_config,
+        None,
     );
+
+    // Async: HEAD-fetch metadata om begärt
+    if include_head {
+        let goal_words: Vec<String> = goal_str
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 2)
+            .map(String::from)
+            .collect();
+        aether_agent::link_extract::enrich_links_with_head(&mut result.links, &goal_words, 8).await;
+    }
+
+    let json = serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
     (StatusCode::OK, json)
 }
 
