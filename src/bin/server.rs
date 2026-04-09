@@ -1252,9 +1252,25 @@ async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl Int
 
 async fn parse_crfr_multi_handler(Json(req): Json<ParseCrfrMultiRequest>) -> impl IntoResponse {
     let goals_json = serde_json::to_string(&req.goals).unwrap_or_else(|_| "[]".to_string());
-    let html = req.html;
-    let url = req.url;
+    let url = req.url.clone();
     let top_n = req.top_n;
+
+    // Om html är tom men url finns → fetcha
+    let html = if req.html.is_empty() && !req.url.is_empty() {
+        let config = aether_agent::types::FetchConfig::default();
+        match aether_agent::fetch::fetch_page(&req.url, &config).await {
+            Ok(r) => r.body,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+                );
+            }
+        }
+    } else {
+        req.html
+    };
+
     let result = tokio::task::spawn_blocking(move || {
         aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
     })
@@ -5591,9 +5607,17 @@ async fn mcp_dispatch_tool(
                 })
                 .unwrap_or_default();
             let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
-            let html = args["html"].as_str().unwrap_or("").to_string();
+            let mut html = args["html"].as_str().unwrap_or("").to_string();
             let url = args["url"].as_str().unwrap_or("").to_string();
             let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            // Om html tom men url finns → fetcha
+            if html.is_empty() && !url.is_empty() {
+                let config = aether_agent::types::FetchConfig::default();
+                match aether_agent::fetch::fetch_page(&url, &config).await {
+                    Ok(r) => html = r.body,
+                    Err(e) => return text_ok(format!(r#"{{"error":"fetch failed: {e}"}}"#)),
+                }
+            }
             let result = tokio::task::spawn_blocking(move || {
                 aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
             })
