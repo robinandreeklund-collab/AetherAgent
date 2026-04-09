@@ -643,6 +643,23 @@ fn metadata_penalty(label: &str) -> f32 {
     {
         return 0.5;
     }
+    // Wikipedia citation/footnote pattern: "^ Author (YYYY)..."
+    if label.starts_with("^ ")
+        && (lower.contains("retrieved 20") || lower.contains("archived from"))
+    {
+        return 0.3;
+    }
+    // Search placeholder text (GitHub, etc.)
+    if lower.starts_with("search ") && lower.contains("...") && lower.len() > 40 {
+        return 0.3;
+    }
+    // Cookie consent / privacy boilerplate
+    if lower.contains("we use cookies") && lower.len() > 80 {
+        return 0.2;
+    }
+    if lower.contains("cookie settings") && lower.contains("accept all") {
+        return 0.2;
+    }
     1.0 // No penalty
 }
 

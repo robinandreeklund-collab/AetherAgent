@@ -426,6 +426,104 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Truncate label to max_len characters, respecting UTF-8 boundaries.
+fn truncate_label(label: &str, max_len: usize) -> String {
+    if label.len() <= max_len {
+        return label.to_string();
+    }
+    let mut end = max_len;
+    while end > 0 && !label.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &label[..end])
+}
+
+/// Post-processing filter for CRFR output.
+/// Removes noise: OG/meta tags, cookie consent, search placeholders,
+/// Wikipedia footnotes, duplicate substrings. Caps label length.
+fn crfr_post_filter<'a>(
+    matched: Vec<(&'a types::SemanticNode, &'a resonance::ResonanceResult)>,
+) -> Vec<(&'a types::SemanticNode, &'a resonance::ResonanceResult)> {
+    let filtered: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> = matched
+        .into_iter()
+        .filter(|(node, _)| {
+            let label = &node.label;
+            let lower = label.to_lowercase();
+
+            // 1. OG/meta tags — maskindata, inte content
+            if let Some(ref name) = node.name {
+                let nl = name.to_lowercase();
+                if nl.starts_with("opengraph.")
+                    || nl.starts_with("og:")
+                    || nl.starts_with("twitter.")
+                    || nl.starts_with("fb:")
+                    || nl.starts_with("article:")
+                {
+                    return false;
+                }
+            }
+
+            // 2. Cookie consent / privacy boilerplate
+            if (lower.contains("cookie") && lower.contains("consent"))
+                || (lower.contains("we use cookies") && lower.len() > 100)
+                || (lower.contains("cookie settings") && lower.contains("analytics"))
+                || (lower.contains("reject all cookies") && lower.contains("accept all"))
+                || (lower.contains("privacy choices") && lower.contains("cookie"))
+            {
+                return false;
+            }
+
+            // 3. Search placeholder text
+            if (lower.starts_with("search or jump to")
+                || lower.starts_with("search code, repositories"))
+                && lower.contains("...")
+            {
+                return false;
+            }
+
+            // 4. Wikipedia citation/footnote (^-prefix with "Retrieved")
+            if label.starts_with("^ ") && lower.contains("retrieved 20") {
+                return false;
+            }
+            // Also filter bare footnote markers
+            if label.starts_with("^ \"") && lower.contains(". retrieved") {
+                return false;
+            }
+
+            // 5. JS placeholder text
+            if lower == "loading..."
+                || lower == "loading contributors"
+                || lower == "just a moment..."
+            {
+                return false;
+            }
+
+            true
+        })
+        .collect();
+
+    // 6. Dedup: remove nodes whose label is a substring of a higher-ranked node
+    let mut deduped: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> =
+        Vec::with_capacity(filtered.len());
+    for (node, res) in filtered.iter() {
+        let dominated = deduped.iter().any(|(existing, _)| {
+            let el = &existing.label;
+            let nl = &node.label;
+            // Skip if too short (avoid deduping "Pricing" against "Pricing Overview")
+            if nl.len() < 20 {
+                return false;
+            }
+            // node.label is substring of a higher-ranked existing node
+            el.contains(nl.as_str()) && el.len() > nl.len()
+        });
+        if !dominated {
+            deduped.push((node, res));
+        }
+    }
+
+    deduped
+}
+
 fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode> {
     let mut result = vec![];
     for node in nodes {
@@ -1056,6 +1154,7 @@ pub fn parse_crfr_from_tree_broad(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+    let matched = crfr_post_filter(matched);
 
     // Record token savings + save
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
@@ -1101,7 +1200,7 @@ pub fn parse_crfr_from_tree_broad(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": node.label,
+                    "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1117,8 +1216,18 @@ pub fn parse_crfr_from_tree_broad(
         let (cache_entries, cache_capacity) = resonance::cache_stats();
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        // BUG-3 fix
-        let spa_flag = total_dom_nodes < 10 && !ssr_json_flag;
+        // BUG-3 fix + improved SPA detection
+        let content_nodes_count_b = matched
+            .iter()
+            .filter(|(n, _)| {
+                matches!(
+                    n.role.as_str(),
+                    "text" | "data" | "cell" | "heading" | "paragraph" | "price"
+                ) && n.label.len() > 30
+            })
+            .count();
+        let spa_flag = !ssr_json_flag
+            && (total_dom_nodes < 10 || (total_dom_nodes > 50 && content_nodes_count_b == 0));
         let overlap = goal_title_overlap(goal, &tree.title);
         // BUG-1 fix
         let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
@@ -1214,6 +1323,7 @@ pub fn parse_crfr_from_tree_js(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+    let matched = crfr_post_filter(matched);
 
     // Record token savings + save
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
@@ -1259,7 +1369,7 @@ pub fn parse_crfr_from_tree_js(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": node.label,
+                    "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1278,7 +1388,20 @@ pub fn parse_crfr_from_tree_js(
         let bot_blocked = is_bot_blocked(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
         // BUG-3 fix: ssr_json pages are NOT SPAs — they have data, just in JSON form
-        let spa_flag = total_dom_nodes < 10 && !bot_blocked && !ssr_json_flag;
+        // Improved SPA detection: also flag pages with many DOM nodes but zero
+        // factual content (React/Vue shell with JS-rendered content)
+        let content_nodes_count = matched
+            .iter()
+            .filter(|(n, _)| {
+                matches!(
+                    n.role.as_str(),
+                    "text" | "data" | "cell" | "heading" | "paragraph" | "price"
+                ) && n.label.len() > 30
+            })
+            .count();
+        let spa_flag = !ssr_json_flag
+            && !bot_blocked
+            && (total_dom_nodes < 10 || (total_dom_nodes > 50 && content_nodes_count == 0));
         let overlap = goal_title_overlap(goal, &tree.title);
 
         // BUG-1 fix: use top-node relevance relative to median, not title overlap
@@ -1458,7 +1581,7 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
         .filter_map(|r| {
             node_map.get(&r.node_id).map(|node| {
                 serde_json::json!({
-                    "id": node.id, "role": node.role, "label": node.label,
+                    "id": node.id, "role": node.role, "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude, "resonance_type": format!("{:?}", r.resonance_type),
                 })
             })

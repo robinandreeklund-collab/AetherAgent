@@ -71,6 +71,19 @@ const SPA_MARKERS: &[&str] = &[
     "nuxt",
     "gatsby",
     "remix",
+    // Extra: React script bundles (Anthropic, Vercel, etc.)
+    "react-dom",
+    "react.production",
+    "react.development",
+    "_buildmanifest.js",
+    "_ssgmanifest.js",
+    // Vue/Nuxt
+    "__vue_ssr_context",
+    "__nuxt",
+    // Generic SPA: empty body + heavy JS
+    "\"use client\"",
+    "createroot",
+    "hydrateroot",
 ];
 
 /// CSS-patterns som kräver layout-beräkning (Tier 3+)
