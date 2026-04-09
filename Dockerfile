@@ -94,11 +94,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Chromium sökväg för headless_chrome crate
 ENV CHROME_PATH=/usr/bin/chromium-browser
-# Force wgpu to use software rendering — no GPU needed
-# Lavapipe (software Vulkan) is preferred, GL as fallback
-ENV WGPU_BACKEND=vulkan,gl
+# Force wgpu to use software Vulkan (lavapipe) — no GPU needed
+# Lavapipe provides a full Vulkan 1.3 adapter via mesa
+ENV WGPU_BACKEND=vulkan
 ENV LIBGL_ALWAYS_SOFTWARE=1
-ENV MESA_GL_VERSION_OVERRIDE=4.5
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
