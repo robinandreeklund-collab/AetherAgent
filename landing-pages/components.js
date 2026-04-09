@@ -17,11 +17,13 @@
 .uptime-landscape .ubar.down{background:#ef4444}
 .uptime-landscape .ubar.empty{background:rgba(255,255,255,0.06)}
 .uptime-landscape:hover .ubar{opacity:.25}
-.uptime-meta{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:0 2rem;font-family:var(--mono,monospace);pointer-events:none;z-index:2}
-.uptime-meta span{font-size:.5rem;color:rgba(255,255,255,0.15);letter-spacing:.03em}
-.uptime-meta .uptime-pct{font-size:.6rem;font-weight:600;color:rgba(34,197,94,0.3)}
-.uptime-meta .uptime-dot{width:5px;height:5px;border-radius:50%;background:rgba(34,197,94,0.3);display:inline-block;margin-right:4px;animation:pulse 2s ease-in-out infinite}
-@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.8}}
+.uptime-strip{display:flex;justify-content:space-between;align-items:center;max-width:900px;margin:0 auto;padding:.6rem 2rem .4rem;font-family:var(--mono,monospace)}
+.uptime-strip .up-label{font-size:.7rem;color:#555;letter-spacing:.02em}
+.uptime-strip .up-center{display:flex;align-items:center;gap:.5rem}
+.uptime-strip .up-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;animation:pulse 2s ease-in-out infinite}
+.uptime-strip .up-status{font-size:.75rem;font-weight:600;color:#888}
+.uptime-strip .up-pct{font-size:.85rem;font-weight:700;color:#22c55e}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.06)}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
@@ -77,7 +79,6 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
     footerSlot.outerHTML = `
 <div class="crab-track">
   <div class="uptime-landscape" id="footer-uptime-bars"></div>
-  <div class="uptime-meta"><span>30d ago</span><span><span class="uptime-dot"></span><span class="uptime-pct" id="footer-uptime-pct">—</span></span><span>today</span></div>
   <div class="ground-line"></div>
   <svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
@@ -94,6 +95,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
 </div>
 <footer>
   <div class="footer-glow"></div>
+  <div class="uptime-strip">
+    <span class="up-label">30 days ago</span>
+    <span class="up-center"><span class="up-dot"></span><span class="up-status">Operational</span><span class="up-pct" id="footer-uptime-pct">&mdash;</span></span>
+    <span class="up-label">Today</span>
+  </div>
   <div class="footer-inner">
     <div class="footer-left">
       <div class="tagline">Kill the noise. Find the signal.</div>
@@ -121,7 +127,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   if(track && !document.getElementById('ferris')){
     // Inject landscape + crab
     if(!track.querySelector('.uptime-landscape')){
-      track.insertAdjacentHTML('afterbegin','<div class="uptime-landscape" id="footer-uptime-bars"></div><div class="uptime-meta"><span>30d ago</span><span><span class="uptime-dot"></span><span class="uptime-pct" id="footer-uptime-pct">\u2014</span></span><span>today</span></div><div class="ground-line"></div>');
+      track.insertAdjacentHTML('afterbegin','<div class="uptime-landscape" id="footer-uptime-bars"></div><div class="ground-line"></div>');
     }
     var crabSvg='<svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
     track.insertAdjacentHTML('beforeend',crabSvg);
