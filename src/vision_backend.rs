@@ -515,6 +515,36 @@ impl TieredBackend {
                     cdp_result.escalation_reason = Some(format!("Blitz failed: {}", e));
                     return Ok(cdp_result);
                 }
+                // Tier 3: CPU fallback via taffy_render (no GPU needed)
+                #[cfg(feature = "blitz")]
+                {
+                    let html = req.html.as_deref().unwrap_or("");
+                    if !html.is_empty() {
+                        match crate::taffy_render::render_to_png(html, req.width, req.height) {
+                            Ok(cpu_png) => {
+                                let sz = cpu_png.len();
+                                return Ok(ScreenshotResult {
+                                    png_bytes: cpu_png,
+                                    width: req.width,
+                                    height: req.height,
+                                    latency_ms: blitz_start.elapsed().as_millis() as u64,
+                                    size_bytes: sz,
+                                    tier_used: ScreenshotTier::Blitz,
+                                    escalation_reason: Some(format!(
+                                        "Blitz GPU failed ({}), used CPU fallback",
+                                        e
+                                    )),
+                                });
+                            }
+                            Err(cpu_err) => {
+                                return Err(format!(
+                                    "All renderers failed — Blitz: {}, CPU: {}",
+                                    e, cpu_err
+                                ));
+                            }
+                        }
+                    }
+                }
                 Err(format!("Blitz failed and CDP unavailable: {}", e))
             }
         }
