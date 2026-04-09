@@ -90,6 +90,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium-browser \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -fv
 
