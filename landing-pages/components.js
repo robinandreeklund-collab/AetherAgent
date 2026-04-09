@@ -97,7 +97,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   <div class="footer-glow"></div>
   <div class="uptime-strip">
     <span class="up-label">30 days ago</span>
-    <span class="up-center"><span class="up-dot"></span><span class="up-status">Operational</span><span class="up-pct" id="footer-uptime-pct">&mdash;</span></span>
+    <span class="up-center"><span class="up-dot"></span><span class="up-status">Operational &middot; <span id="footer-uptime-dur">&mdash;</span></span><span class="up-pct" id="footer-uptime-pct">&mdash;</span></span>
     <span class="up-label">Today</span>
   </div>
   <div class="footer-inner">
@@ -525,7 +525,17 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   (function initUptimeBars(){
     var barsEl = document.getElementById('footer-uptime-bars');
     var pctEl = document.getElementById('footer-uptime-pct');
+    var durEl = document.getElementById('footer-uptime-dur');
     if(!barsEl) return;
+
+    function fmtUptime(secs){
+      if(!secs || secs<60) return (secs||0)+'s';
+      if(secs<3600) return Math.floor(secs/60)+'m '+secs%60+'s';
+      var h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60);
+      if(h<24) return h+'h '+m+'m';
+      var d=Math.floor(h/24); h=h%24;
+      return d+'d '+h+'h';
+    }
 
     // Render 30 placeholder bars immediately
     for(var i=0;i<30;i++){
@@ -535,12 +545,13 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
       barsEl.appendChild(b);
     }
 
-    // Fetch live stats and update bars
+    // Fetch live stats and update bars + text
     function updateBars(){
       fetch('/api/live-stats').then(function(r){return r.json()}).then(function(d){
         if(!barsEl.children.length) return;
         var uptime = d.uptime_pct || 100;
         if(pctEl) pctEl.textContent = uptime.toFixed(1)+'%';
+        if(durEl) durEl.textContent = fmtUptime(d.uptime_secs);
         // Update bar classes based on uptime
         var bars = barsEl.children;
         for(var j=0;j<bars.length;j++){
