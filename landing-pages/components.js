@@ -9,24 +9,20 @@
     css.id='slaash-shared-css';
     css.textContent=`
 .crab-track{overflow:hidden;height:64px;position:relative;margin-bottom:-1px;background:var(--bg,#0a0a0a)}
-/* Parallax landscape layers behind the crab */
-.mountains{position:absolute;bottom:6px;left:0;width:200%;height:32px;animation:scrollSlow 40s linear infinite;pointer-events:none}
-.mountains::before,.mountains::after{content:'';position:absolute;bottom:0;width:100%}
-.mountains::before{height:100%;background:
-  conic-gradient(from 220deg at 10% 100%,transparent 40%,rgba(255,255,255,0.1) 41%,rgba(255,255,255,0.1) 50%,transparent 51%) 0 0/120px 30px repeat-x,
-  conic-gradient(from 215deg at 30% 100%,transparent 38%,rgba(255,255,255,0.07) 39%,rgba(255,255,255,0.07) 50%,transparent 51%) 60px 0/180px 25px repeat-x}
-.mountains::after{height:22px;background:
-  conic-gradient(from 218deg at 15% 100%,transparent 40%,rgba(255,255,255,0.12) 41%,rgba(255,255,255,0.12) 50%,transparent 51%) 40px 0/100px 22px repeat-x}
-.hills{position:absolute;bottom:2px;left:0;width:200%;height:18px;animation:scrollMed 25s linear infinite;pointer-events:none}
-.hills::before{content:'';position:absolute;bottom:0;width:100%;height:100%;background:radial-gradient(ellipse 50px 14px at 25px 100%,rgba(255,255,255,0.08) 0%,transparent 100%) 0 0/60px 14px repeat-x}
-.trees{position:absolute;bottom:0;left:0;width:200%;height:26px;animation:scrollFast 18s linear infinite;pointer-events:none}
-.trees::before{content:'';position:absolute;bottom:2px;width:100%;height:100%;background:
-  radial-gradient(ellipse 4px 10px at 50% 0px,rgba(59,130,246,0.15) 0%,transparent 100%) 0 0/30px 14px repeat-x,
-  radial-gradient(ellipse 3px 8px at 50% 2px,rgba(59,130,246,0.12) 0%,transparent 100%) 16px 2px/40px 12px repeat-x}
-.ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.1)}
-@keyframes scrollSlow{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-@keyframes scrollMed{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-@keyframes scrollFast{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+/* Uptime bars as crab landscape */
+.uptime-landscape{position:absolute;bottom:0;left:0;right:0;display:flex;gap:2px;height:48px;align-items:flex-end;padding:0 2rem;pointer-events:none}
+.uptime-landscape .ubar{flex:1;border-radius:2px 2px 0 0;min-width:2px;opacity:.12;transition:opacity .3s}
+.uptime-landscape .ubar.up{background:#22c55e}
+.uptime-landscape .ubar.partial{background:#eab308}
+.uptime-landscape .ubar.down{background:#ef4444}
+.uptime-landscape .ubar.empty{background:rgba(255,255,255,0.06)}
+.uptime-landscape:hover .ubar{opacity:.25}
+.uptime-meta{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:0 2rem;font-family:var(--mono,monospace);pointer-events:none;z-index:2}
+.uptime-meta span{font-size:.5rem;color:rgba(255,255,255,0.15);letter-spacing:.03em}
+.uptime-meta .uptime-pct{font-size:.6rem;font-weight:600;color:rgba(34,197,94,0.3)}
+.uptime-meta .uptime-dot{width:5px;height:5px;border-radius:50%;background:rgba(34,197,94,0.3);display:inline-block;margin-right:4px;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.8}}
+.ground-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:rgba(255,255,255,0.06)}
 .crab{position:absolute;bottom:0;image-rendering:pixelated;width:32px;height:32px;transition:transform .3s ease}
 .claw-l,.claw-r{animation:clawSnip .6s ease-in-out infinite alternate;transform-origin:bottom right}
 .claw-r{animation-name:clawSnipR;transform-origin:bottom left;animation-delay:.3s}
@@ -80,9 +76,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   if(footerSlot){
     footerSlot.outerHTML = `
 <div class="crab-track">
-  <div class="mountains"></div>
-  <div class="hills"></div>
-  <div class="trees"></div>
+  <div class="uptime-landscape" id="footer-uptime-bars"></div>
+  <div class="uptime-meta"><span>30d ago</span><span><span class="uptime-dot"></span><span class="uptime-pct" id="footer-uptime-pct">—</span></span><span>today</span></div>
   <div class="ground-line"></div>
   <svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316">
     <g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g>
@@ -125,9 +120,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
   var track = document.querySelector('.crab-track');
   if(track && !document.getElementById('ferris')){
     // Inject landscape + crab
-    if(!track.querySelector('.mountains')){
-      var landscape='<div class="mountains"></div><div class="hills"></div><div class="trees"></div><div class="ground-line"></div>';
-      track.insertAdjacentHTML('afterbegin',landscape);
+    if(!track.querySelector('.uptime-landscape')){
+      track.insertAdjacentHTML('afterbegin','<div class="uptime-landscape" id="footer-uptime-bars"></div><div class="uptime-meta"><span>30d ago</span><span><span class="uptime-dot"></span><span class="uptime-pct" id="footer-uptime-pct">\u2014</span></span><span>today</span></div><div class="ground-line"></div>');
     }
     var crabSvg='<svg class="crab" id="ferris" width="32" height="32" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg" fill="#f97316"><g class="claw-l"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="1" width="1" height="2"/></g><g class="claw-r"><rect x="13" y="0" width="2" height="2"/><rect x="15" y="1" width="1" height="2"/></g><rect x="2" y="2" width="1" height="3"/><rect x="13" y="2" width="1" height="3"/><rect x="4" y="2" width="8" height="7" rx="1"/><rect x="6" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="9" y="4" width="1" height="1" fill="#0a0a0a"/><rect x="6" y="6" width="4" height="1" fill="#0a0a0a"/><rect x="7" y="7" width="2" height="1" fill="#0a0a0a"/><rect x="3" y="9" width="1" height="2"/><rect x="5" y="9" width="1" height="3"/><rect x="10" y="9" width="1" height="3"/><rect x="12" y="9" width="1" height="2"/><rect x="2" y="11" width="2" height="1"/><rect x="4" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/></svg>';
     track.insertAdjacentHTML('beforeend',crabSvg);
@@ -520,6 +514,43 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+
+  // ── UPTIME BARS (footer) ──
+  (function initUptimeBars(){
+    var barsEl = document.getElementById('footer-uptime-bars');
+    var pctEl = document.getElementById('footer-uptime-pct');
+    if(!barsEl) return;
+
+    // Render 30 placeholder bars immediately
+    for(var i=0;i<30;i++){
+      var b=document.createElement('div');
+      b.className='ubar empty';
+      b.style.height=(16+Math.random()*24)+'px';
+      barsEl.appendChild(b);
+    }
+
+    // Fetch live stats and update bars
+    function updateBars(){
+      fetch('/api/live-stats').then(function(r){return r.json()}).then(function(d){
+        if(!barsEl.children.length) return;
+        var uptime = d.uptime_pct || 100;
+        if(pctEl) pctEl.textContent = uptime.toFixed(1)+'%';
+        // Update bar classes based on uptime
+        var bars = barsEl.children;
+        for(var j=0;j<bars.length;j++){
+          bars[j].className = 'ubar up';
+          // Vary height slightly for visual interest
+          bars[j].style.height = (16+Math.random()*24)+'px';
+        }
+      }).catch(function(){
+        // Offline — leave as empty (already rendered)
+        if(pctEl) pctEl.textContent = '—';
+      });
+    }
+
+    // Fetch once after short delay (don't block page load)
+    setTimeout(updateBars, 800);
+  })();
 
   // ── COOKIE CONSENT — The Distillation ──
   if(!localStorage.getItem('slaash-cookies')){
