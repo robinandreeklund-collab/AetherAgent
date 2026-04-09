@@ -2598,18 +2598,20 @@ async fn ws_api_dispatch(
                 )
                 .await;
             let config = aether_agent::types::FetchConfig::default();
-            let fetch_result = aether_agent::fetch::fetch_page(&url, &config)
-                .await
-                .map_err(|e| format!("Fetch: {e}"))?;
-            let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"extracting","bytes_fetched":fetch_result.body.len()}).to_string()).await;
-            let max_links = params["max_links"].as_u64().unwrap_or(50) as u32;
-            let json = aether_agent::extract_links(
-                &fetch_result.body,
-                &goal,
-                &fetch_result.final_url,
-                max_links,
-            );
-            serde_json::from_str(&json).map_err(|e| e.to_string())
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(fetch_result) => {
+                    let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"extracting","bytes_fetched":fetch_result.body.len()}).to_string()).await;
+                    let max_links = params["max_links"].as_u64().unwrap_or(50) as u32;
+                    let json = aether_agent::extract_links(
+                        &fetch_result.body,
+                        &goal,
+                        &fetch_result.final_url,
+                        max_links,
+                    );
+                    serde_json::from_str(&json).map_err(|e| e.to_string())
+                }
+                Err(e) => Err(format!("Fetch: {e}")),
+            }
         }
         // ─── Search via WS ───────────────────────────────────
         "fetch_search" | "search" => {
@@ -2617,19 +2619,22 @@ async fn ws_api_dispatch(
             let goal = params["goal"].as_str().unwrap_or(&query).to_string();
             let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"searching","query":query}).to_string()).await;
             let top_n = params["top_n"].as_u64().unwrap_or(8) as usize;
-            let deep = params["deep"].as_bool().unwrap_or(true);
             let ddg_url = aether_agent::build_search_url(&query);
             let config = aether_agent::types::FetchConfig::default();
-            let ddg_html = aether_agent::fetch::fetch_page(&ddg_url, &config)
-                .await
-                .map_err(|e| format!("Search fetch: {e}"))?;
-            let _ = tx
-                .send(
-                    serde_json::json!({"id": id, "type":"progress","stage":"parsing"}).to_string(),
-                )
-                .await;
-            let search_json = aether_agent::search_from_html(&query, &ddg_html.body, top_n, &goal);
-            serde_json::from_str(&search_json).map_err(|e| e.to_string())
+            match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+                Ok(ddg_html) => {
+                    let _ = tx
+                        .send(
+                            serde_json::json!({"id": id, "type":"progress","stage":"parsing"})
+                                .to_string(),
+                        )
+                        .await;
+                    let search_json =
+                        aether_agent::search_from_html(&query, &ddg_html.body, top_n, &goal);
+                    serde_json::from_str(&search_json).map_err(|e| e.to_string())
+                }
+                Err(e) => Err(format!("Search fetch: {e}")),
+            }
         }
         // ─── Render via WS ───────────────────────────────────
         "fetch_render" | "render" => {
@@ -2642,36 +2647,36 @@ async fn ws_api_dispatch(
                 .await;
             let w = params["width"].as_u64().unwrap_or(1280) as u32;
             let h = params["height"].as_u64().unwrap_or(800) as u32;
-            // Fetch page
             let config = aether_agent::types::FetchConfig::default();
-            let fetch_result = aether_agent::fetch::fetch_page(&url, &config)
-                .await
-                .map_err(|e| format!("Fetch: {e}"))?;
-            let _ = tx
-                .send(
-                    serde_json::json!({"id": id, "type":"progress","stage":"rendering"})
-                        .to_string(),
-                )
-                .await;
-            // Render with Blitz (blocking thread)
-            let body = fetch_result.body;
-            let final_url = fetch_result.final_url;
-            let render_result = tokio::task::spawn_blocking(move || {
-                aether_agent::screenshot_with_tier(&body, &final_url, w, h, true)
-            })
-            .await
-            .map_err(|e| format!("Render task: {e}"))?;
-            match render_result {
-                Ok((png_bytes, tier)) => {
-                    use base64::Engine;
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                    Ok(serde_json::json!({
-                        "png_base64": b64,
-                        "png_size_bytes": png_bytes.len(),
-                        "tier_used": format!("{:?}", tier),
-                    }))
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(fetch_result) => {
+                    let _ = tx
+                        .send(
+                            serde_json::json!({"id": id, "type":"progress","stage":"rendering"})
+                                .to_string(),
+                        )
+                        .await;
+                    let body = fetch_result.body;
+                    let final_url = fetch_result.final_url;
+                    match tokio::task::spawn_blocking(move || {
+                        aether_agent::screenshot_with_tier(&body, &final_url, w, h, true)
+                    })
+                    .await
+                    {
+                        Ok(Ok((png_bytes, tier))) => {
+                            use base64::Engine;
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                            Ok(serde_json::json!({
+                                "png_base64": b64,
+                                "png_size_bytes": png_bytes.len(),
+                                "tier_used": format!("{:?}", tier),
+                            }))
+                        }
+                        Ok(Err(e)) => Err(format!("Render failed: {e}")),
+                        Err(e) => Err(format!("Render task: {e}")),
+                    }
                 }
-                Err(e) => Err(format!("Render failed: {e}")),
+                Err(e) => Err(format!("Fetch: {e}")),
             }
         }
         other => Err(format!("Unknown method: {other}")),
