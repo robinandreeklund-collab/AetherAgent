@@ -4097,10 +4097,8 @@ fn render_html_to_png_inner(
     // Strippa <noscript> — Blitz kör ingen JS
     let html = &strip_noscript(html);
 
-    // Strippa <link rel="stylesheet"> — CSS är redan inlinad av css_compiler.
-    // Om kvar: Blitz registrerar dem som pending_critical_resources → paint_scene
-    // returnerar blank (FOUC-protection). Strippning löser det.
-    let html = &strip_external_stylesheets(html);
+    // NOTE: Do NOT strip <link rel="stylesheet"> — Blitz's net_provider loads them.
+    // The pending_critical_resources issue is handled by the resource loading loop below.
 
     // Always use net_provider (even for fast_render) — without it, Blitz marks
     // <link rel=stylesheet> as pending_critical_resources and paint_scene returns blank.
@@ -4117,9 +4115,11 @@ fn render_html_to_png_inner(
                 ..Default::default()
             },
         );
-        // Quick resolve loop — let net_provider handle critical resources
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        // Resource loading loop — let net_provider fetch stylesheets, fonts, images
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        doc.as_mut().resolve(0.0);
         loop {
+            doc.as_mut().handle_messages();
             doc.as_mut().resolve(0.0);
             if net.is_empty() {
                 break;
