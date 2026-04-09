@@ -388,7 +388,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div class="summary-bar" id="links-summary" style="grid-template-columns:repeat(4,1fr)"></div>
   </div>
 
-  <div class="results" id="search-results" style="display:none">
+  <div class="results" id="search-results">
     <div class="results-header">
       <div class="results-title" id="search-title"></div>
       <div class="results-meta" id="search-meta"></div>
@@ -397,7 +397,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div class="summary-bar" id="search-summary"></div>
   </div>
 
-  <div class="results" id="stream-results" style="display:none">
+  <div class="results" id="stream-results">
     <div class="results-header">
       <div class="results-title" id="stream-title"></div>
       <div class="results-meta" id="stream-meta"></div>
@@ -406,7 +406,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div class="summary-bar" id="stream-summary"></div>
   </div>
 
-  <div class="results" id="diff-results" style="display:none">
+  <div class="results" id="diff-results">
     <div class="results-header">
       <div class="results-title" id="diff-title"></div>
       <div class="results-meta" id="diff-meta"></div>
@@ -415,7 +415,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div class="summary-bar" id="diff-summary"></div>
   </div>
 
-  <div class="results" id="render-results" style="display:none">
+  <div class="results" id="render-results">
     <div class="results-header">
       <div class="results-title" id="render-title"></div>
       <div class="results-meta" id="render-meta"></div>
@@ -446,7 +446,7 @@ function setMode(mode) {
   });
   allResults.forEach(id => {
     const el = document.getElementById(id);
-    if(el) { el.style.display = 'none'; el.classList.remove('visible'); }
+    if(el) { el.style.display = ''; el.classList.remove('visible'); }
   });
   document.getElementById('btn-run').textContent = modeLabels[mode] || 'Run';
 
@@ -481,7 +481,7 @@ async function runQuery() {
 function hideAllResults() {
   allResults.forEach(id => {
     const el = document.getElementById(id);
-    if(el) { el.style.display = 'none'; el.classList.remove('visible'); }
+    if(el) { el.style.display = ''; el.classList.remove('visible'); }
   });
   document.getElementById('error-msg').classList.remove('visible');
 }
