@@ -120,6 +120,21 @@ fn default_json_format() -> String {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ParseCrfrMultiParams {
+    /// URL to fetch (provide url or html)
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML (provide url or html)
+    #[serde(default)]
+    html: Option<String>,
+    /// Array of goal variants to try (synonyms, translations)
+    goals: Vec<String>,
+    /// Max nodes to return (default: 20)
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CrfrFeedbackParams {
     /// The page URL (must match a previous parse_crfr call)
     url: String,
@@ -671,6 +686,28 @@ impl AetherMcpServer {
                 broad,
             )
         }
+    }
+
+    #[tool(
+        name = "parse_crfr_multi",
+        description = "Run multiple goal variants through CRFR and merge results. Uses sub-ms cache so trying 3-5 synonyms/translations costs ~2ms total.\n\nUseful when: the answer might use different terms than the query (e.g. 'price' vs 'kr', 'cost', 'belopp').\n\nPass goals as array of strings. Each goal is run independently, results merged (highest amplitude per node wins).\n\nProvide EITHER url (server fetches for you) OR html (raw HTML string)."
+    )]
+    fn parse_crfr_multi(&self, Parameters(params): Parameters<ParseCrfrMultiParams>) -> String {
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+
+        // Om html tom + url finns → stub för async fetch i call_tool override
+        if html.is_empty() && !url.is_empty() {
+            return serde_json::json!({
+                "action": "fetch_parse_crfr_multi_pending",
+                "url": url,
+                "goals": params.goals,
+            })
+            .to_string();
+        }
+
+        let goals_json = serde_json::to_string(&params.goals).unwrap_or_else(|_| "[]".to_string());
+        aether_agent::parse_crfr_multi(html, &goals_json, url, params.top_n)
     }
 
     #[tool(
@@ -1967,6 +2004,60 @@ async fn handle_fetch_extract_links(
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(json)])
 }
 
+/// Hanterar parse_crfr_multi med URL-fetch
+async fn handle_fetch_parse_crfr_multi(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "parse_crfr_multi: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goals: Vec<String> = args
+        .get("goals")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url is required when html is not provided"}"#.to_string(),
+        )]);
+    }
+
+    // Fetch
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
+    let html = fetch_result.body;
+    let final_url = fetch_result.final_url;
+    let json = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr_multi(&html, &goals_json, &final_url, top_n)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(json)])
+}
+
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
 async fn handle_fetch_vision(
     args: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -2424,6 +2515,29 @@ impl ServerHandler for AetherMcpServer {
                     Ok(result)
                 } else {
                     // HTML tillhandahållen → synkron hantering via router
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "parse_crfr_multi" => {
+                // Kolla om URL behöver fetchas
+                let args = request.arguments.as_ref();
+                let needs_fetch = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|u| !u.is_empty())
+                    && args
+                        .and_then(|a| a.get("html"))
+                        .and_then(|v| v.as_str())
+                        .map_or(true, |h| h.is_empty());
+                if needs_fetch {
+                    let result = handle_fetch_parse_crfr_multi(args).await;
+                    Ok(result)
+                } else {
                     let ctx =
                         rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
                     self.tool_router
