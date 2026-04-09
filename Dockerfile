@@ -7,8 +7,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     pkg-config libssl-dev python3 \
-    # Blitz rendering deps: fontconfig for font discovery
+    # Blitz rendering deps: fontconfig for font discovery + mesa for wgpu software backend
     libfontconfig1-dev \
+    libgl1-mesa-dev libegl1-mesa-dev libgbm-dev \
     # ORT (ONNX Runtime) kräver libstdc++ vid länkning
     g++ \
     # Build essentials for cc linker
@@ -77,6 +78,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     # Fontconfig runtime library (required by Blitz for font discovery)
     libfontconfig1 \
+    # Mesa software rendering (wgpu needs a GPU device — mesa provides llvmpipe/swrast)
+    libgl1-mesa-dri \
+    libegl1-mesa \
+    libgbm1 \
     # curl for health checks
     curl \
     # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
