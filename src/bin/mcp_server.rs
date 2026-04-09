@@ -1546,6 +1546,15 @@ async fn handle_parse_crfr(
     let mut current_url = final_url;
 
     let result = if run_js {
+        // Inline externa <script src="..."> INNAN JS-eval
+        // (Anthropic, Next.js etc levererar React-bundles som externa filer)
+        let js_inline =
+            aether_agent::fetch::fetch_and_inline_external_scripts(&current_html, &current_url)
+                .await;
+        if js_inline.scripts_loaded > 0 {
+            current_html = js_inline.html;
+        }
+
         let api_responses = aether_agent::prefetch_api_urls_with_auth(
             &current_html,
             &current_url,

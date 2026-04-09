@@ -1157,6 +1157,15 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
         return (axum::http::StatusCode::BAD_REQUEST, axum::Json(err)).into_response();
     }
 
+    // Inline externa scripts om run_js=true (React/Next.js bundles)
+    #[cfg(feature = "fetch")]
+    if run_js && !html.is_empty() {
+        let js_inline = aether_agent::fetch::fetch_and_inline_external_scripts(&html, &url).await;
+        if js_inline.scripts_loaded > 0 {
+            html = js_inline.html;
+        }
+    }
+
     // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
     let goal_clone = goal.clone();
     let url_clone = url.clone();
