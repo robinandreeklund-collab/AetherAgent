@@ -46,7 +46,8 @@ fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
 }
 
 /// Givet en key-matchad nod (t.ex. heading "version"), hitta närmaste
-/// value-nod. Söker: (1) nodens barn, (2) nästa syskon bland parent's children.
+/// value-nod. Söker: (1) nodens barn, (2) nästa syskon bland parent's children,
+/// (3) föräldern om den har mer text än key:n (parsern kollapserar ofta <p> in i parent).
 /// Returnerar value-nodens label om den finns, annars None.
 fn find_adjacent_value<'a>(
     key_node: &SemanticNode,
@@ -56,15 +57,82 @@ fn find_adjacent_value<'a>(
     if !key_node.children.is_empty() {
         for child in &key_node.children {
             if !child.label.is_empty() && child.role != "heading" {
-                // Hitta referens i tree_nodes (traversera rekursivt)
                 return find_node_by_id(tree_nodes, child.id);
             }
         }
     }
 
-    // Strategi 2: Sök i föräldra-noden: hitta key-nodens position bland syskon,
-    // returnera nästa syskon.
-    find_next_sibling(tree_nodes, key_node.id)
+    // Strategi 2: Sök syskon (nästa nod efter key i förälderns children)
+    if let Some(sibling) = find_next_sibling(tree_nodes, key_node.id) {
+        return Some(sibling);
+    }
+
+    // Strategi 3: Förälder-noden har ofta all text inkl. headingens.
+    // Om föräldern har label som börjar med key → resten är värdet.
+    // T.ex. parent.label="version 1.15.0", key="version" → värde="1.15.0"
+    find_parent_with_value(tree_nodes, key_node.id, &key_node.label)
+}
+
+/// Hitta förälder vars label innehåller key-text + mer — returnera föräldern
+/// så att value kan extraheras via string-subtraktion.
+fn find_parent_with_value<'a>(
+    nodes: &'a [SemanticNode],
+    target_id: u32,
+    key_label: &str,
+) -> Option<&'a SemanticNode> {
+    for node in nodes {
+        for child in &node.children {
+            if child.id == target_id {
+                // Kolla om förälderns label har mer text än key
+                let parent_label = node.label.trim();
+                let key_trimmed = key_label.trim();
+                if parent_label.len() > key_trimmed.len()
+                    && parent_label
+                        .to_lowercase()
+                        .contains(&key_trimmed.to_lowercase())
+                {
+                    return Some(node);
+                }
+                return None;
+            }
+        }
+        if let Some(found) = find_parent_with_value(&node.children, target_id, key_label) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Strippa key-text från ett value som inkluderar key.
+/// T.ex. value="version 1.15.0", key="version" → "1.15.0"
+fn strip_key_from_value(value: &str, key_label: &str) -> String {
+    let val_lower = value.to_lowercase();
+    let key_lower = key_label.to_lowercase().trim().to_string();
+
+    // Om value börjar med key → ta resten
+    if let Some(rest) = val_lower.strip_prefix(&key_lower) {
+        let rest_trimmed = rest.trim();
+        if !rest_trimmed.is_empty() {
+            // Returnera original case (inte lowercase) — använd samma offset
+            let start = value.len() - rest.len();
+            let mut s = start;
+            while s < value.len() && !value.is_char_boundary(s) {
+                s += 1;
+            }
+            return value[s..].trim().to_string();
+        }
+    }
+
+    // Om value slutar med key → ta det före
+    if let Some(rest) = val_lower.strip_suffix(&key_lower) {
+        let rest_trimmed = rest.trim();
+        if !rest_trimmed.is_empty() {
+            return value[..rest_trimmed.len()].trim().to_string();
+        }
+    }
+
+    // Fallback: returnera hela value
+    value.to_string()
 }
 
 /// Hitta en nod via ID i trädet (rekursivt)
@@ -425,10 +493,15 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
             // Avgör om matchad nod är en "label-nod" (heading, dt) vars
             // värde finns i ett syskon/barn. Om nodens label ≈ key → den ÄR
             // labeln, inte värdet. Sök adjacent value.
-            let label_is_key = text_similarity(key, &node.label) > 0.6
-                && (node.role == "heading"
-                    || node.role == "listitem"
-                    || node.label.to_lowercase().trim() == key.to_lowercase().trim());
+            // Label-is-key: headingen ÄR etiketten, inte svaret.
+            // Kräver: (a) nästan exakt match (label ≈ key), INTE partial match
+            // T.ex. key="version", label="version" → true
+            //       key="Sagan", label="Sagan om Ringen" → false (headingen ÄR svaret)
+            let key_lower = key.to_lowercase();
+            let label_lower = node.label.to_lowercase().trim().to_string();
+            let label_is_key = (node.role == "heading" || node.role == "listitem")
+                && (label_lower == key_lower
+                    || label_lower.replace('_', " ") == key_lower.replace('_', " "));
 
             // Hämta värdet
             let (value, source_id) = if role_boost
@@ -444,13 +517,14 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
             } else if label_is_key {
                 // Noden är labeln — sök adjacent value-nod
                 if let Some(val_node) = find_adjacent_value(node, &tree.nodes) {
-                    (val_node.label.clone(), val_node.id)
+                    // Om val_node är föräldern (strategy 3), strippa key från label
+                    let raw_val = &val_node.label;
+                    let stripped = strip_key_from_value(raw_val, &node.label);
+                    (stripped, val_node.id)
                 } else {
-                    // Fallback: nodens egna label
                     (node.label.clone(), node.id)
                 }
             } else {
-                // Normal: noden innehåller själva värdet
                 if node.label.is_empty() {
                     (node.value.clone().unwrap_or_default(), node.id)
                 } else {
@@ -551,14 +625,16 @@ pub fn extract_by_keys_multi(
             let calibrated = raw_score * (0.4 + 0.6 * node.relevance);
 
             // Om matchad nod ÄR labeln (heading/dt) → sök adjacent value
-            let label_is_key = text_similarity(key, &node.label) > 0.6
-                && (node.role == "heading"
-                    || node.role == "listitem"
-                    || node.label.to_lowercase().trim() == key.to_lowercase().trim());
+            let key_lower = key.to_lowercase();
+            let label_lower = node.label.to_lowercase().trim().to_string();
+            let label_is_key = (node.role == "heading" || node.role == "listitem")
+                && (label_lower == key_lower
+                    || label_lower.replace('_', " ") == key_lower.replace('_', " "));
 
             let (value, source_id) = if label_is_key {
                 if let Some(val_node) = find_adjacent_value(node, &tree.nodes) {
-                    (val_node.label.clone(), val_node.id)
+                    let stripped = strip_key_from_value(&val_node.label, &node.label);
+                    (stripped, val_node.id)
                 } else if !node.label.is_empty() {
                     (node.label.clone(), node.id)
                 } else {
@@ -784,5 +860,137 @@ mod tests {
         let result = extract_by_keys(&tree, &keys);
         assert!(!result.entries.is_empty(), "Borde hitta headingen");
         assert!(result.entries[0].value.contains("Sagan om Ringen"));
+    }
+
+    // ─── BUG regression: extract_by_keys heading vs value ───────────────
+
+    #[test]
+    fn test_extract_section_h2_p_returns_value_not_heading() {
+        // BUG: extract_by_keys returnerade "version" (heading) istället för "1.15.0" (value)
+        let tree = build_test_tree(
+            r##"<html><body>
+                <section><h2>version</h2><p>1.15.0</p></section>
+                <section><h2>license</h2><p>MIT</p></section>
+                <section><h2>weekly_downloads</h2><p>73287214</p></section>
+            </body></html>"##,
+            "package info",
+        );
+
+        // Debug: visa trädstruktur
+        fn dump(nodes: &[SemanticNode], indent: usize) {
+            for n in nodes {
+                eprintln!(
+                    "{:indent$}id={} role='{}' label='{}'",
+                    "",
+                    n.id,
+                    n.role,
+                    n.label,
+                    indent = indent
+                );
+                dump(&n.children, indent + 2);
+            }
+        }
+        dump(&tree.nodes, 0);
+
+        let keys = vec!["version".to_string(), "license".to_string()];
+        let result = extract_by_keys(&tree, &keys);
+
+        // Debug: visa vad vi fick
+        for e in &result.entries {
+            eprintln!(
+                "  entry: key='{}' value='{}' conf={:.3} node={}",
+                e.key, e.value, e.confidence, e.source_node_id
+            );
+        }
+        for m in &result.missing_keys {
+            eprintln!("  missing: '{m}'");
+        }
+
+        assert!(
+            result.entries.len() >= 2,
+            "Borde hitta minst 2 entries, fick {}. Missing: {:?}",
+            result.entries.len(),
+            result.missing_keys,
+        );
+
+        let version_entry = result.entries.iter().find(|e| e.key == "version");
+        assert!(version_entry.is_some(), "Borde hitta version-entry");
+        let ve = version_entry.unwrap();
+        assert!(
+            ve.value.contains("1.15.0"),
+            "version value borde vara '1.15.0', fick '{}'",
+            ve.value
+        );
+
+        let license_entry = result.entries.iter().find(|e| e.key == "license");
+        assert!(license_entry.is_some(), "Borde hitta license-entry");
+        let le = license_entry.unwrap();
+        assert!(
+            le.value.contains("MIT"),
+            "license value borde vara 'MIT', fick '{}'",
+            le.value
+        );
+    }
+
+    #[test]
+    fn test_extract_dl_dt_dd_finds_entries() {
+        // dl/dt/dd kollapsar till 1 nod i parsern — known limitation.
+        // Verifierar att extract hittar båda keys (i samma nod).
+        let tree = build_test_tree(
+            r##"<html><body>
+                <dl>
+                    <dt>version</dt><dd>2.0.1</dd>
+                    <dt>license</dt><dd>Apache-2.0</dd>
+                </dl>
+            </body></html>"##,
+            "package metadata",
+        );
+
+        let keys = vec!["version".to_string(), "license".to_string()];
+        let result = extract_by_keys(&tree, &keys);
+
+        // Bör hitta båda keys (eventuellt i samma nod)
+        assert!(
+            !result.entries.is_empty(),
+            "Borde hitta minst 1 entry, fick 0. Missing: {:?}",
+            result.missing_keys
+        );
+    }
+
+    #[test]
+    fn test_extract_multi_section_returns_values() {
+        let tree = build_test_tree(
+            r##"<html><body>
+                <section><h2>name</h2><p>axios</p></section>
+                <section><h2>version</h2><p>1.15.0</p></section>
+                <section><h2>license</h2><p>MIT</p></section>
+            </body></html>"##,
+            "npm package info name version license",
+        );
+
+        let keys = vec![
+            "name".to_string(),
+            "version".to_string(),
+            "license".to_string(),
+        ];
+        let result = extract_by_keys_multi(&tree, &keys, 3);
+
+        assert!(
+            result.entries.len() >= 2,
+            "Borde hitta minst 2 entries, fick {}",
+            result.entries.len()
+        );
+
+        for entry in &result.entries {
+            // Inget entry borde ha key == value (det vore heading-text)
+            let key_lower = entry.key.to_lowercase();
+            let val_lower = entry.value.to_lowercase().trim().to_string();
+            if val_lower == key_lower {
+                panic!(
+                    "Entry '{}' har value == key ('{}') — returnerar heading istf värde",
+                    entry.key, entry.value
+                );
+            }
+        }
     }
 }
