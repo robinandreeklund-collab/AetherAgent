@@ -2516,7 +2516,7 @@ async fn ws_api_dispatch(
             let goal = params["goal"].as_str().unwrap_or("").to_string();
             let width = params["width"].as_u64().unwrap_or(1280) as u32;
             let height = params["height"].as_u64().unwrap_or(800) as u32;
-            let fast_render = params["fast_render"].as_bool().unwrap_or(true);
+            let fast_render = params["fast_render"].as_bool().unwrap_or(false);
             let xhr_json = params["xhr_captures_json"]
                 .as_str()
                 .unwrap_or("[]")
@@ -2659,7 +2659,7 @@ async fn ws_api_dispatch(
                     let body = fetch_result.body;
                     let final_url = fetch_result.final_url;
                     match tokio::task::spawn_blocking(move || {
-                        aether_agent::screenshot_with_tier(&body, &final_url, w, h, true)
+                        aether_agent::screenshot_with_tier(&body, &final_url, w, h, false)
                     })
                     .await
                     {
@@ -3526,7 +3526,7 @@ fn default_height() -> u32 {
     800
 }
 fn default_fast_render() -> bool {
-    true
+    false
 }
 
 async fn tiered_screenshot_handler(Json(req): Json<TieredScreenshotRequest>) -> impl IntoResponse {
