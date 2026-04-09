@@ -45,6 +45,64 @@ fn flatten_nodes(nodes: &[SemanticNode]) -> Vec<&SemanticNode> {
     result
 }
 
+/// Givet en key-matchad nod (t.ex. heading "version"), hitta närmaste
+/// value-nod. Söker: (1) nodens barn, (2) nästa syskon bland parent's children.
+/// Returnerar value-nodens label om den finns, annars None.
+fn find_adjacent_value<'a>(
+    key_node: &SemanticNode,
+    tree_nodes: &'a [SemanticNode],
+) -> Option<&'a SemanticNode> {
+    // Strategi 1: Om key-noden har barn med text → returnera första barnet
+    if !key_node.children.is_empty() {
+        for child in &key_node.children {
+            if !child.label.is_empty() && child.role != "heading" {
+                // Hitta referens i tree_nodes (traversera rekursivt)
+                return find_node_by_id(tree_nodes, child.id);
+            }
+        }
+    }
+
+    // Strategi 2: Sök i föräldra-noden: hitta key-nodens position bland syskon,
+    // returnera nästa syskon.
+    find_next_sibling(tree_nodes, key_node.id)
+}
+
+/// Hitta en nod via ID i trädet (rekursivt)
+fn find_node_by_id(nodes: &[SemanticNode], id: u32) -> Option<&SemanticNode> {
+    for node in nodes {
+        if node.id == id {
+            return Some(node);
+        }
+        if let Some(found) = find_node_by_id(&node.children, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Hitta nästa syskon efter en given nod-ID (söker rekursivt i trädet)
+fn find_next_sibling(nodes: &[SemanticNode], target_id: u32) -> Option<&SemanticNode> {
+    for node in nodes {
+        // Kolla bland barn
+        for (i, child) in node.children.iter().enumerate() {
+            if child.id == target_id {
+                // Hitta nästa syskon med text
+                for sibling in node.children.iter().skip(i + 1) {
+                    if !sibling.label.is_empty() && sibling.role != "heading" {
+                        return Some(sibling);
+                    }
+                }
+                return None;
+            }
+        }
+        // Sök djupare
+        if let Some(found) = find_next_sibling(&node.children, target_id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Bygg en CSS-liknande selector hint från en nod
 fn build_selector_hint(node: &SemanticNode) -> String {
     let tag = match node.role.as_str() {
@@ -362,27 +420,41 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
         if let Some((node, raw_score)) = best_match {
             found_keys.push(key.clone());
 
-            // Kalibrerad confidence: textuell matchning viktad med goal-relevans.
-            // Noder som matchar text men är irrelevanta för goal får lägre confidence.
-            // Formel: raw_score * (0.4 + 0.6 * goal_relevance)
-            // Ex: text_match=1.0, relevance=0.1 → 1.0 * 0.46 = 0.46 (inte 1.0!)
-            // Ex: text_match=1.0, relevance=0.8 → 1.0 * 0.88 = 0.88
             let calibrated_confidence = raw_score * (0.4 + 0.6 * node.relevance);
 
-            // Hämta värdet: för URL-keys på links, returnera value (href)
-            let value = if role_boost
+            // Avgör om matchad nod är en "label-nod" (heading, dt) vars
+            // värde finns i ett syskon/barn. Om nodens label ≈ key → den ÄR
+            // labeln, inte värdet. Sök adjacent value.
+            let label_is_key = text_similarity(key, &node.label) > 0.6
+                && (node.role == "heading"
+                    || node.role == "listitem"
+                    || node.label.to_lowercase().trim() == key.to_lowercase().trim());
+
+            // Hämta värdet
+            let (value, source_id) = if role_boost
                 .as_ref()
                 .map(|(r, _)| *r == "link")
                 .unwrap_or(false)
             {
-                // Föredra href (value) för URL-nycklar, falla tillbaka på label
-                node.value.clone().unwrap_or_else(|| node.label.clone())
-            } else {
-                // Föredra label för textnycklar, falla tillbaka på value
-                if node.label.is_empty() {
-                    node.value.clone().unwrap_or_default()
+                // Föredra href (value) för URL-nycklar
+                (
+                    node.value.clone().unwrap_or_else(|| node.label.clone()),
+                    node.id,
+                )
+            } else if label_is_key {
+                // Noden är labeln — sök adjacent value-nod
+                if let Some(val_node) = find_adjacent_value(node, &tree.nodes) {
+                    (val_node.label.clone(), val_node.id)
                 } else {
-                    node.label.clone()
+                    // Fallback: nodens egna label
+                    (node.label.clone(), node.id)
+                }
+            } else {
+                // Normal: noden innehåller själva värdet
+                if node.label.is_empty() {
+                    (node.value.clone().unwrap_or_default(), node.id)
+                } else {
+                    (node.label.clone(), node.id)
                 }
             };
 
@@ -391,7 +463,7 @@ pub fn extract_by_keys(tree: &SemanticTree, keys: &[String]) -> ExtractDataResul
                 entries.push(ExtractedEntry {
                     key: key.clone(),
                     value,
-                    source_node_id: node.id,
+                    source_node_id: source_id,
                     confidence: clamped,
                 });
             }
@@ -477,16 +549,31 @@ pub fn extract_by_keys_multi(
 
         for (node, raw_score) in scored {
             let calibrated = raw_score * (0.4 + 0.6 * node.relevance);
-            let value = if !node.label.is_empty() {
-                node.label.clone()
+
+            // Om matchad nod ÄR labeln (heading/dt) → sök adjacent value
+            let label_is_key = text_similarity(key, &node.label) > 0.6
+                && (node.role == "heading"
+                    || node.role == "listitem"
+                    || node.label.to_lowercase().trim() == key.to_lowercase().trim());
+
+            let (value, source_id) = if label_is_key {
+                if let Some(val_node) = find_adjacent_value(node, &tree.nodes) {
+                    (val_node.label.clone(), val_node.id)
+                } else if !node.label.is_empty() {
+                    (node.label.clone(), node.id)
+                } else {
+                    (node.value.clone().unwrap_or_default(), node.id)
+                }
+            } else if !node.label.is_empty() {
+                (node.label.clone(), node.id)
             } else {
-                node.value.clone().unwrap_or_default()
+                (node.value.clone().unwrap_or_default(), node.id)
             };
             entries.push(ExtractedEntry {
                 key: key.clone(),
                 value,
                 confidence: calibrated.clamp(0.0, 1.0),
-                source_node_id: node.id,
+                source_node_id: source_id,
             });
         }
     }
