@@ -561,9 +561,6 @@ async function runCrawl() {
       const elapsed = Math.round(performance.now() - t0);
       if(data.error) { showError(data.error); return; }
       renderCrawlResults(data, elapsed);
-  } catch (err) {
-    errorEl.textContent = 'Error: ' + err.message;
-    errorEl.classList.add('visible');
     },
     onError: function(msg) { showError(msg); }
   });
@@ -941,8 +938,6 @@ async function runStream() {
     hideLoading();
   };
 }
-  } catch(err) { showError(err.message); }
-  finally { hideLoading(); }
 }
 
 // ─── DIFF ────────────────────────────────────────────────────────────────
