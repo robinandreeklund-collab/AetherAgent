@@ -3297,7 +3297,7 @@ pub fn render_html_to_png(
             Ok(Ok(compiled_png)) => {
                 // Blank-detection: en helt vit 1280x900 sida ≈ 25-28KB.
                 // Om compiled-PNG:en är liten, testa om fallback ger bättre resultat.
-                const BLANK_THRESHOLD: usize = 30_000;
+                const BLANK_THRESHOLD: usize = 5_000;
                 if compiled_png.len() >= BLANK_THRESHOLD {
                     return Ok(compiled_png);
                 }
