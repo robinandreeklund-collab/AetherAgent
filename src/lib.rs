@@ -3403,12 +3403,29 @@ fn strip_css_gradients(html: &str) -> String {
                 let is_conic = lower[pos..].starts_with("conic");
                 let is_repeating_conic = lower[pos..].starts_with("repeating-conic");
 
-                // Strippa ALLA gradienter → fallback-färg
+                // Strippa ALLA gradienter → fallback-värde
                 // Vello GradientLut har edge-case buggar med diverse stop-kombinationer
                 // som kraschar processen trots catch_unwind (panik i tokio worker thread)
                 {
                     let _ = (is_conic, is_repeating_conic); // undvik unused warnings
-                    let fallback = extract_gradient_fallback_color(gradient_body);
+
+                    // Kolla om gradienten är värdet till en image-property.
+                    // background-image/border-image/mask-image accepterar INTE färgvärden —
+                    // bara <image> (url(), gradient, none). Att sätta t.ex.
+                    // "background-image: #ff0000" är ogiltig CSS och kan krascha Blitz.
+                    let ctx_start = result.len().saturating_sub(128);
+                    let ctx = result[ctx_start..].to_ascii_lowercase();
+                    let in_image_property = ctx.contains("background-image")
+                        || ctx.contains("border-image")
+                        || ctx.contains("mask-image")
+                        || ctx.contains("-webkit-mask-image")
+                        || ctx.contains("list-style-image");
+
+                    let fallback = if in_image_property {
+                        "none".to_string()
+                    } else {
+                        extract_gradient_fallback_color(gradient_body)
+                    };
                     result.push_str(&fallback);
                 }
 

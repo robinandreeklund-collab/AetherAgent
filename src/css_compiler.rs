@@ -53,7 +53,7 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
     let start = std::time::Instant::now();
 
     // Säkerhetsgräns — skip för extremt stor HTML
-    const MAX_HTML_FOR_COMPILE: usize = 5 * 1024 * 1024; // 5 MB
+    const MAX_HTML_FOR_COMPILE: usize = 8 * 1024 * 1024; // 8 MB
     if html.len() > MAX_HTML_FOR_COMPILE {
         return CssCompilerResult {
             html: html.to_string(),
