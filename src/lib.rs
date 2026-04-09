@@ -343,10 +343,26 @@ fn run_lifecycle_parse_with_cookies(
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
             }
 
-            // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
+            // Bygg pre-JS träd (referens)
+            let pre_js_tree = build_tree(html, goal, url);
+            let pre_js_content = count_content_chars(&pre_js_tree.nodes);
+
+            // Om JS muterade DOM:en — serialisera och jämför med pre-JS
             if !eval_result.mutations.is_empty() {
                 let modified_html = eval_arena.serialize_html(eval_arena.document);
-                let mut tree = build_tree(&modified_html, goal, url);
+                let mut js_tree = build_tree(&modified_html, goal, url);
+                let js_content = count_content_chars(&js_tree.nodes);
+
+                // Kvalitetscheck: JS-resultatet ska ha MER content, inte mindre.
+                // Om JS reducerade content (skriver in timestamps, tar bort artiklar)
+                // → behåll pre-JS trädet.
+                if js_content >= pre_js_content || pre_js_content < 100 {
+                    attach_pending_urls(&mut js_tree, html, &runtime_urls);
+                    js_tree.js_cookies = js_cookies;
+                    return js_tree;
+                }
+                // JS förstörde content → fallback till pre-JS
+                let mut tree = pre_js_tree;
                 attach_pending_urls(&mut tree, html, &runtime_urls);
                 tree.js_cookies = js_cookies;
                 return tree;
@@ -356,7 +372,16 @@ fn run_lifecycle_parse_with_cookies(
             if eval_result.error.is_none() {
                 let arena_html = eval_arena.serialize_html(eval_arena.document);
                 if arena_html.len() > 10 && arena_html != html {
-                    let mut tree = build_tree(&arena_html, goal, url);
+                    let mut js_tree = build_tree(&arena_html, goal, url);
+                    let js_content = count_content_chars(&js_tree.nodes);
+
+                    if js_content >= pre_js_content || pre_js_content < 100 {
+                        attach_pending_urls(&mut js_tree, html, &runtime_urls);
+                        js_tree.js_cookies = js_cookies;
+                        return js_tree;
+                    }
+                    // JS förstörde content → fallback
+                    let mut tree = pre_js_tree;
                     attach_pending_urls(&mut tree, html, &runtime_urls);
                     tree.js_cookies = js_cookies;
                     return tree;
@@ -364,7 +389,7 @@ fn run_lifecycle_parse_with_cookies(
             }
 
             // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
-            let mut tree = build_tree(html, goal, url);
+            let mut tree = pre_js_tree;
             attach_pending_urls(&mut tree, html, &runtime_urls);
             tree.js_cookies = js_cookies;
             return tree;
@@ -424,6 +449,23 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Räkna totalt antal content-tecken i ett semantiskt träd.
+/// Används för att jämföra pre-JS vs post-JS content-kvalitet.
+#[cfg(feature = "js-eval")]
+fn count_content_chars(nodes: &[types::SemanticNode]) -> usize {
+    let mut total = 0usize;
+    for node in nodes {
+        if matches!(
+            node.role.as_str(),
+            "text" | "heading" | "paragraph" | "listitem" | "cell" | "data" | "price" | "link"
+        ) {
+            total += node.label.len();
+        }
+        total += count_content_chars(&node.children);
+    }
+    total
 }
 
 /// Truncate label to max_len characters, respecting UTF-8 boundaries.
