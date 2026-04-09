@@ -4148,6 +4148,24 @@ fn render_html_to_png_inner(
         &mut buffer,
     );
 
+    // Kvalitetscheck: om Blitz+anyrender producerade en helt vit bild
+    // → fallback till taffy_render (enklare men renderar text)
+    let non_white = buffer
+        .chunks(4)
+        .filter(|px| px[0] != 255 || px[1] != 255 || px[2] != 255)
+        .count();
+    if non_white < 10 {
+        eprintln!(
+            "[RENDER] Blitz produced blank image ({}x{}, {} non-white px) — trying taffy fallback",
+            width, height, non_white
+        );
+        if let Ok(taffy_png) =
+            taffy_render::render_to_png(html, base_url, width, height, fast_render)
+        {
+            return Ok(taffy_png);
+        }
+    }
+
     let mut png_bytes = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
@@ -6001,9 +6019,10 @@ mod tests {
     #[cfg(feature = "blitz")]
     #[test]
     fn test_blitz_cpu_render_produces_image() {
-        let html = r#"<html><head><style>body{background:#1a1a2e;color:white}h1{color:#e94560}</style></head>
-<body><h1>Hello</h1><p>World</p></body></html>"#;
-        let result = render_html_to_png_inner(html, "https://test.com", 400, 300, true);
+        // Test 1: Blitz render
+        let html = r#"<html><head><style>body{font-family:serif;padding:20px}h1{font-size:48px;color:red}p{color:blue}</style></head>
+<body><h1>HELLO WORLD</h1><p>Text here.</p></body></html>"#;
+        let result = render_html_to_png_inner(html, "https://test.com", 800, 600, true);
         assert!(result.is_ok(), "Blitz render failed: {:?}", result.err());
         let png = result.unwrap();
         assert!(

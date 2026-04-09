@@ -482,20 +482,13 @@ impl TieredBackend {
     /// 1. Om TierHint::RequiresJs → CDP direkt (om tillgänglig)
     /// 2. Annars: Blitz först → validera → eskalera vid behov
     pub fn screenshot(&self, req: &ScreenshotRequest) -> Result<ScreenshotResult, String> {
-        // Prefer CDP when available — gives pixel-perfect rendering with fonts
-        if self.is_cdp_available() {
-            match self.screenshot_cdp(req) {
-                Ok(result) => {
-                    self.update_stats_skip_blitz();
-                    return Ok(result);
-                }
-                Err(e) => {
-                    eprintln!("[TIER] CDP failed ({}), falling back to Blitz", e);
-                }
-            }
+        // Om XHR/HTML-hints indikerar JS → skippa Blitz
+        if matches!(req.tier_hint, TierHint::RequiresJs { .. }) && self.is_cdp_available() {
+            self.update_stats_skip_blitz();
+            return self.screenshot_cdp(req);
         }
 
-        // Fallback: Blitz (CPU rendering — may lack fonts)
+        // Tier 1: Blitz
         let blitz_start = Instant::now();
         match self.screenshot_blitz(req) {
             Ok(result) => {
