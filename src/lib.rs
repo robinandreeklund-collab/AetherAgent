@@ -1476,21 +1476,13 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
 /// Save CRFR field for a URL to a JSON string (for persistent storage).
 #[wasm_bindgen]
 pub fn crfr_save_field(url: &str) -> String {
-    // Try JS-variant first, then non-JS
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
-    if !found {
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
-        if !found_njs {
-            return r#"{"error":"no cached field for this URL"}"#.to_string();
-        }
-        return field_njs
+    // Read-only peek — does NOT remove from cache or corrupt content_hash
+    match resonance::peek_field(url) {
+        Some(field) => field
             .to_json()
-            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
+            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#)),
+        None => r#"{"error":"no cached field for this URL"}"#.to_string(),
     }
-    field
-        .to_json()
-        .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
 }
 
 /// Load a previously saved CRFR field back into the cache.

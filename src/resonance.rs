@@ -2745,6 +2745,15 @@ impl FieldCacheInner {
         }
     }
 
+    /// Peek: klona fältet utan att ta bort det ur cache.
+    /// Används av crfr_save för read-only access.
+    fn peek(&self, url_hash: u64) -> Option<ResonanceField> {
+        self.entries
+            .iter()
+            .find(|(h, _, _)| *h == url_hash)
+            .map(|(_, _, field)| field.clone())
+    }
+
     /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
     fn put(&mut self, url_hash: u64, field: ResonanceField) {
         self.entries.retain(|(h, _, _)| *h != url_hash);
@@ -3033,6 +3042,28 @@ pub fn save_field(field: &ResonanceField) {
             }
         }
     }
+}
+
+/// Peek at a cached field without removing it. Returns None if not in cache.
+/// Used by crfr_save to export without destroying the cache entry.
+pub fn peek_field(url: &str) -> Option<ResonanceField> {
+    let url_hash = hash_url(url);
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.peek(url_hash) {
+        return Some(field);
+    }
+    drop(cache);
+
+    // Prova JS-variant
+    let js_hash = hash_url(&format!("{url}#__js_eval"));
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.peek(js_hash)
 }
 
 /// Get cache statistics (entries, capacity).
