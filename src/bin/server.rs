@@ -2563,6 +2563,102 @@ async fn ws_api_dispatch(
             let goal = params["goal"].as_str().unwrap_or("").to_string();
             ws_api_fetch_op(&id, &url, &goal, "stream_parse", &params, &tx).await
         }
+        // ─── Adaptive Crawl via WS ──────────────────────────
+        "adaptive_crawl" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"crawling","url":url})
+                        .to_string(),
+                )
+                .await;
+            let max_pages = params["max_pages"].as_u64().unwrap_or(20) as usize;
+            let max_depth = params["max_depth"].as_u64().unwrap_or(3) as u32;
+            let top_k = params["top_k_links"].as_u64().unwrap_or(5) as usize;
+            let top_n = params["top_n_per_page"].as_u64().unwrap_or(10) as u32;
+            let config = aether_agent::adaptive::AdaptiveConfig {
+                max_pages,
+                max_depth,
+                top_k_links: top_k,
+                top_n_per_page: top_n,
+                ..Default::default()
+            };
+            let result = aether_agent::adaptive::adaptive_crawl(&url, &goal, config).await;
+            serde_json::to_value(&result).map_err(|e| e.to_string())
+        }
+        // ─── Extract Links via WS ────────────────────────────
+        "fetch_extract_links" | "extract_links" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"fetching","url":url})
+                        .to_string(),
+                )
+                .await;
+            let config = aether_agent::types::FetchConfig::default();
+            let fetch_result = aether_agent::fetch::fetch_page(&url, &config)
+                .await
+                .map_err(|e| format!("Fetch: {e}"))?;
+            let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"extracting","bytes_fetched":fetch_result.body.len()}).to_string()).await;
+            let max_links = params["max_links"].as_u64().unwrap_or(50) as u32;
+            let json = aether_agent::extract_links(
+                &fetch_result.body,
+                &goal,
+                &fetch_result.final_url,
+                max_links,
+            );
+            serde_json::from_str(&json).map_err(|e| e.to_string())
+        }
+        // ─── Search via WS ───────────────────────────────────
+        "fetch_search" | "search" => {
+            let query = params["query"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or(&query).to_string();
+            let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"searching","query":query}).to_string()).await;
+            let top_n = params["top_n"].as_u64().unwrap_or(8) as usize;
+            let deep = params["deep"].as_bool().unwrap_or(true);
+            let ddg_url = aether_agent::build_search_url(&query);
+            let config = aether_agent::types::FetchConfig::default();
+            let ddg_html = aether_agent::fetch::fetch_page(&ddg_url, &config)
+                .await
+                .map_err(|e| format!("Search fetch: {e}"))?;
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"parsing"}).to_string(),
+                )
+                .await;
+            let search_json = aether_agent::search_from_html(&query, &ddg_html.body, top_n, &goal);
+            serde_json::from_str(&search_json).map_err(|e| e.to_string())
+        }
+        // ─── Render via WS ───────────────────────────────────
+        "fetch_render" | "render" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"fetching","url":url})
+                        .to_string(),
+                )
+                .await;
+            let w = params["width"].as_u64().unwrap_or(1280) as u32;
+            let h = params["height"].as_u64().unwrap_or(800) as u32;
+            // Delegate to HTTP handler via internal fetch (avoids duplicating render logic)
+            let client = reqwest::Client::new();
+            let render_res = client
+                .post(format!(
+                    "http://127.0.0.1:{}/api/fetch/render",
+                    std::env::var("PORT").unwrap_or_else(|_| "8080".to_string())
+                ))
+                .json(&serde_json::json!({"url": url, "width": w, "height": h}))
+                .send()
+                .await
+                .map_err(|e| format!("Render: {e}"))?;
+            let data: serde_json::Value = render_res
+                .json()
+                .await
+                .map_err(|e| format!("Render JSON: {e}"))?;
+            Ok(data)
+        }
         other => Err(format!("Unknown method: {other}")),
     };
 
