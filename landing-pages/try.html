@@ -108,7 +108,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 @keyframes changeto-greater{0%,70%,90%{top:50%;padding:0px;display:inline-block;border-radius:100%;background:#3b82f6;border-width:0 0 0 0;border:0px solid #3b82f6;transform:translate(-80%,0%)}71%,89%{top:30%;background:none;border:solid #3b82f6;border-radius:0px;border-width:0 2px 2px 0;display:inline-block;padding:1px;float:left;transform-origin:bottom left;transform:rotate(135deg) translate(-80%,20%)}}
 
 /* NODES */
-.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7}
+.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7;max-height:600px;overflow-y:auto;scroll-behavior:smooth}
 .result-node{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.04)}
 .result-node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
 .result-node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.2rem;font-weight:500}
@@ -893,47 +893,116 @@ async function runStream() {
   const url = document.getElementById('input-url').value.trim();
   const goal = document.getElementById('input-goal').value.trim();
   if (!url || !goal) return;
-  showLoading('Streaming\u2026');
+  showLoading('Connecting\u2026');
   const t0 = performance.now();
-  try {
-    const res = await fetch('/api/fetch/stream-parse', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        url, goal,
-        top_n: parseInt(document.getElementById('cfg-stream-max').value) || 30,
-        min_relevance: parseFloat(document.getElementById('cfg-stream-rel').value) || 0.1,
-        max_nodes: parseInt(document.getElementById('cfg-stream-max').value) || 30,
-      })
-    });
-    if (!res.ok) throw new Error('Server returned ' + res.status);
-    const data = JSON.parse(await res.text());
-    const elapsed = Math.round(performance.now() - t0);
 
-    const el = document.getElementById('stream-results');
-    document.getElementById('stream-title').textContent = 'Stream: ' + (data.goal || goal);
-    const nodes = data.nodes || [];
-    const total = data.total_dom_nodes || 0;
-    const savings = data.token_savings_ratio ? (data.token_savings_ratio * 100).toFixed(1) : '?';
-    document.getElementById('stream-meta').innerHTML =
-      '<span><span class="val">' + nodes.length + '</span> streamed</span>' +
-      '<span><span class="val">' + total.toLocaleString() + '</span> DOM nodes</span>' +
-      '<span><span class="val">' + savings + '%</span> saved</span>';
+  const el = document.getElementById('stream-results');
+  const nodesEl = document.getElementById('stream-nodes');
+  const metaEl = document.getElementById('stream-meta');
+  const summaryEl = document.getElementById('stream-summary');
+  nodesEl.innerHTML = '';
+  el.classList.add('visible');
+  el.style.display = 'block';
 
-    document.getElementById('stream-nodes').innerHTML = nodes.map((n, i) => {
+  const maxNodes = parseInt(document.getElementById('cfg-stream-max').value) || 30;
+  const threshold = parseFloat(document.getElementById('cfg-stream-rel').value) || 0.1;
+
+  // WebSocket-based real streaming
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/api');
+  let nodeCount = 0;
+  let totalDom = 0;
+  let savings = 0;
+
+  ws.onopen = function() {
+    document.getElementById('stream-title').textContent = 'Streaming: ' + url.split('/').slice(0,3).join('/');
+    metaEl.innerHTML = '<span style="color:var(--accent)">Connected — fetching page\u2026</span>';
+    ws.send(JSON.stringify({
+      id: 'stream-1',
+      method: 'fetch_stream_parse',
+      params: { url, goal, top_n: maxNodes, threshold, max_nodes: maxNodes }
+    }));
+  };
+
+  ws.onmessage = function(e) {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'progress') {
+      if (msg.stage === 'fetching') {
+        metaEl.innerHTML = '<span style="color:var(--accent)">Fetching ' + escHtml(msg.url || url) + '\u2026</span>';
+        document.getElementById('btn-run').textContent = 'Fetching\u2026';
+      } else if (msg.stage === 'parsing') {
+        metaEl.innerHTML = '<span style="color:var(--accent)">Parsing ' + (msg.bytes_fetched||0).toLocaleString() + ' bytes\u2026</span>';
+        document.getElementById('btn-run').textContent = 'Streaming\u2026';
+      }
+    }
+
+    if (msg.type === 'stream_start') {
+      totalDom = msg.total_dom_nodes || 0;
+      savings = msg.token_savings_ratio || 0;
+      metaEl.innerHTML =
+        '<span><span class="val">0</span> / ' + (msg.total_nodes||0) + ' nodes</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span style="color:var(--accent)">streaming\u2026</span>';
+    }
+
+    if (msg.type === 'stream_node') {
+      nodeCount++;
+      const n = msg.node || {};
       const rel = (n.relevance || 0).toFixed(3);
-      return '<div class="result-node">' +
-        '<div class="result-node-header">' + (i+1) + '. relevance: ' + rel + ' · ' + (n.role||'text') + '</div>' +
-        '<div class="result-node-text">"' + escHtml((n.label||'').slice(0,300)) + '"</div></div>';
-    }).join('');
+      const div = document.createElement('div');
+      div.className = 'result-node';
+      div.style.opacity = '0';
+      div.style.transform = 'translateY(8px)';
+      div.style.transition = 'opacity .3s ease, transform .3s ease';
+      div.innerHTML =
+        '<div class="result-node-header">' + nodeCount + '. relevance: ' + rel + ' \u00b7 ' + (n.role||'text') + '</div>' +
+        '<div class="result-node-text">"' + escHtml((n.label||'').slice(0,300)) + '"</div>';
+      nodesEl.appendChild(div);
+      // Trigger animation
+      requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translateY(0)'; });
+      // Update counter
+      metaEl.innerHTML =
+        '<span><span class="val">' + nodeCount + '</span> nodes</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span style="color:var(--accent)">streaming\u2026</span>';
+      // Auto-scroll to bottom
+      nodesEl.scrollTop = nodesEl.scrollHeight;
+    }
 
-    const summaryEl = document.getElementById('stream-summary');
-    summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
-    summaryEl.innerHTML =
-      '<div><div class="summary-val">' + nodes.length + '</div><div class="summary-label">nodes</div></div>' +
-      '<div><div class="summary-val">' + total.toLocaleString() + '</div><div class="summary-label">DOM total</div></div>' +
-      '<div><div class="summary-val">' + savings + '%</div><div class="summary-label">token savings</div></div>' +
-      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
-    el.style.display = 'block';
+    if (msg.type === 'result' || msg.type === 'stream_complete') {
+      const elapsed = Math.round(performance.now() - t0);
+      const savPct = (savings * 100).toFixed(1);
+      metaEl.innerHTML =
+        '<span><span class="val">' + nodeCount + '</span> streamed</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span><span class="val">' + savPct + '%</span> saved</span>';
+      summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
+      summaryEl.innerHTML =
+        '<div><div class="summary-val">' + nodeCount + '</div><div class="summary-label">nodes</div></div>' +
+        '<div><div class="summary-val">' + totalDom.toLocaleString() + '</div><div class="summary-label">DOM total</div></div>' +
+        '<div><div class="summary-val">' + savPct + '%</div><div class="summary-label">token savings</div></div>' +
+        '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+      hideLoading();
+      ws.close();
+    }
+
+    if (msg.type === 'error') {
+      showError(msg.message || 'Stream error');
+      hideLoading();
+      ws.close();
+    }
+  };
+
+  ws.onerror = function() {
+    showError('WebSocket connection failed');
+    hideLoading();
+  };
+
+  ws.onclose = function() {
+    hideLoading();
+  };
+}
   } catch(err) { showError(err.message); }
   finally { hideLoading(); }
 }

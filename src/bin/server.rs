@@ -2651,19 +2651,64 @@ async fn ws_api_fetch_op(
             let top_n = params_clone["top_n"].as_u64().unwrap_or(10) as u32;
             let threshold = params_clone["threshold"].as_f64().unwrap_or(0.0) as f32;
             let max_nodes = params_clone["max_nodes"].as_u64().unwrap_or(50) as u32;
-            tokio::task::spawn_blocking(move || {
-                let r = aether_agent::stream_parse_adaptive(
+            let tx_stream = tx.clone();
+            let id_stream = id.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::stream_parse_adaptive(
                     &body,
                     &goal_owned,
                     &final_url,
                     top_n,
                     threshold,
                     max_nodes,
-                );
-                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+                )
             })
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+
+            // Parse result and stream nodes one by one
+            let parsed: serde_json::Value =
+                serde_json::from_str(&result).unwrap_or(serde_json::json!({"nodes":[]}));
+            let nodes = parsed["nodes"].as_array().cloned().unwrap_or_default();
+            let total = parsed["total_dom_nodes"].as_u64().unwrap_or(0);
+            let savings = parsed["token_savings_ratio"].as_f64().unwrap_or(0.0);
+
+            // Send header
+            let _ = tx_stream
+                .send(
+                    serde_json::json!({
+                        "id": id_stream, "type": "stream_start",
+                        "total_dom_nodes": total,
+                        "total_nodes": nodes.len(),
+                        "token_savings_ratio": savings,
+                    })
+                    .to_string(),
+                )
+                .await;
+
+            // Stream each node individually
+            for (i, node) in nodes.iter().enumerate() {
+                let _ = tx_stream
+                    .send(
+                        serde_json::json!({
+                            "id": id_stream, "type": "stream_node",
+                            "index": i,
+                            "node": node,
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                // Small delay for visual streaming effect (10ms per node)
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+
+            // Send completion
+            Ok(serde_json::json!({
+                "type": "stream_complete",
+                "total_nodes": nodes.len(),
+                "total_dom_nodes": total,
+                "token_savings_ratio": savings,
+            }))
         }
         _ => Err(format!("Unknown fetch op: {op}")),
     }
