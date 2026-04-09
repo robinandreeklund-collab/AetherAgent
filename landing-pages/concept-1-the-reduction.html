@@ -82,6 +82,28 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .metric-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .metric-label{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
 
+/* HERO METRIC — full-width token savings */
+.hero-metric{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:3rem 2.5rem 2rem;text-align:center;transition:all .4s;position:relative;overflow:hidden}
+.hero-metric:hover{border-color:rgba(34,197,94,0.3);box-shadow:0 0 60px rgba(34,197,94,0.08)}
+.hero-metric-inner{position:relative;z-index:2}
+.hero-metric-number{margin-bottom:.25rem}
+.hero-metric-number .metric-value{font-size:clamp(4rem,8vw,6rem);background:linear-gradient(135deg,#22c55e,#86efac);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-metric-title{font-size:1.15rem;font-weight:600;color:#fff;letter-spacing:-0.01em;margin-bottom:.75rem}
+.hero-metric-detail{font-family:var(--mono,'JetBrains Mono',monospace);font-size:.85rem;color:var(--muted);margin-bottom:.5rem;display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap}
+.hd-in{color:#ef4444;font-weight:600}
+.hd-out{color:#22c55e;font-weight:600}
+.hd-saved{color:#86efac;font-weight:700}
+.hero-metric-sub{font-size:.85rem;color:#555;max-width:500px;margin:0 auto .75rem;line-height:1.6}
+.hero-metric-queries{font-family:var(--mono,monospace);font-size:.8rem;color:#444}
+.hero-metric-queries span{color:#79c0ff;font-weight:600}
+
+/* Token savings bar */
+.hero-metric-bar{position:relative;height:8px;background:rgba(239,68,68,0.15);border-radius:4px;margin-top:1.5rem;overflow:hidden}
+.hero-bar-fill{height:100%;background:linear-gradient(90deg,#22c55e,#86efac);border-radius:4px;transition:width 2s cubic-bezier(0.16,1,0.3,1)}
+.hero-bar-label-saved{position:absolute;left:1rem;top:-1.4rem;font-size:.6rem;color:#22c55e;font-weight:600;font-family:var(--mono,monospace)}
+.hero-bar-label-kept{position:absolute;right:.5rem;top:-1.4rem;font-size:.6rem;color:#ef4444;font-weight:500;font-family:var(--mono,monospace)}
+@media(max-width:600px){.hero-metric{padding:2rem 1.5rem}.hero-metric-number .metric-value{font-size:3.5rem}}
+
 /* CODE DEMO */
 .code-section{padding:6rem 2rem;max-width:1100px;margin:0 auto}
 .section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem;text-align:center}
@@ -201,20 +223,40 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
   </div>
 </section>
 
-<!-- METRICS -->
-<section class="metrics reveal">
-  <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="metric-value" id="mv-savings" data-target="99.2" data-suffix="%">0%</div>
-      <div class="metric-label">Token reduction</div>
+<!-- HERO METRIC — TOKEN SAVINGS (MOAT) -->
+<section class="metrics reveal" style="padding-bottom:2rem">
+  <div class="hero-metric" id="hero-savings">
+    <div class="hero-metric-inner">
+      <div class="hero-metric-number">
+        <span class="metric-value" id="mv-savings" data-target="98.7" data-suffix="%">0%</span>
+      </div>
+      <div class="hero-metric-title">Tokens distilled away</div>
+      <div class="hero-metric-detail" id="hero-detail">
+        <span class="hd-in" id="hd-chars-in">—</span> in &rarr; <span class="hd-out" id="hd-chars-out">—</span> out &middot; <span class="hd-saved" id="hd-chars-saved">—</span> saved
+      </div>
+      <div class="hero-metric-sub">Every token you don't send is money you don't spend. We keep the signal. The rest never reaches the model.</div>
+      <div class="hero-metric-queries"><span id="hd-queries">—</span> queries processed</div>
     </div>
+    <div class="hero-metric-bar">
+      <div class="hero-bar-fill" id="hero-bar-fill" style="width:0%"></div>
+      <div class="hero-bar-label-saved">distilled</div>
+      <div class="hero-bar-label-kept" id="hero-bar-kept">kept</div>
+    </div>
+  </div>
+</section>
+
+<!-- SECONDARY METRICS -->
+<section class="metrics reveal" style="padding-top:0">
+  <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
     <div class="metric-card">
       <div class="metric-value" id="mv-latency" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
-      <div class="metric-label">Avg latency</div>
+      <div class="metric-label">Avg CRFR latency</div>
+      <div style="font-size:.7rem;color:#444;margin-top:.3rem">Resonance propagation only — no GPU, no inference</div>
     </div>
     <div class="metric-card">
       <div class="metric-value" id="mv-sites" data-target="0">0</div>
       <div class="metric-label">Sites profiled</div>
+      <div style="font-size:.7rem;color:#444;margin-top:.3rem">Each site gets its own causal memory that improves over time</div>
     </div>
   </div>
 </section>
@@ -603,6 +645,33 @@ function countUp(el, target, prefix='', suffix='', duration=1500){
         si.dataset.target = d.sites_profiled;
         si.dataset.suffix = '';
       }
+
+      // Hero detail: chars in/out/saved
+      function fmtChars(n) {
+        if(n >= 1e9) return (n/1e9).toFixed(1) + 'B';
+        if(n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+        if(n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+        return n.toString();
+      }
+      var ci = d.total_chars_in || 0;
+      var co = d.total_chars_out || 0;
+      var cs = ci - co;
+      if(ci > 0) {
+        document.getElementById('hd-chars-in').textContent = fmtChars(ci);
+        document.getElementById('hd-chars-out').textContent = fmtChars(co);
+        document.getElementById('hd-chars-saved').textContent = fmtChars(cs);
+      }
+      if(d.total_queries > 0) {
+        document.getElementById('hd-queries').textContent = d.total_queries.toLocaleString();
+      }
+      // Animate bar
+      var pct = parseFloat(d.token_savings_pct) || 98;
+      setTimeout(function(){
+        var bar = document.getElementById('hero-bar-fill');
+        if(bar) bar.style.width = pct + '%';
+        var kept = document.getElementById('hero-bar-kept');
+        if(kept) kept.textContent = (100 - pct).toFixed(1) + '% kept';
+      }, 500);
     }
   } catch(e){}
 })();

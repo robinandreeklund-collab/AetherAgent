@@ -176,6 +176,23 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .link-score .s-nov{color:#f59e0b}
 .link-score .s-gain{color:#3b82f6}
 
+/* DIFF */
+.diff-added{background:rgba(34,197,94,0.08);border-left:3px solid #22c55e;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#e6edf3}
+.diff-removed{background:rgba(239,68,68,0.08);border-left:3px solid #ef4444;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#fca5a5;text-decoration:line-through;opacity:.7}
+.diff-modified{background:rgba(234,179,8,0.08);border-left:3px solid #eab308;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#e6edf3}
+.diff-section{margin-bottom:1rem}
+.diff-section-title{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.4rem}
+
+/* RENDER */
+.render-frame{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff}
+.render-frame img{display:block;width:100%;height:auto}
+
+/* SEARCH RESULT */
+.search-item{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;margin-bottom:.5rem}
+.search-item-title{font-size:.9rem;font-weight:500;color:var(--text);margin-bottom:.2rem}
+.search-item-url{font-family:var(--mono);font-size:.7rem;color:#79c0ff;margin-bottom:.4rem}
+.search-item-snippet{font-size:.8rem;color:var(--muted);line-height:1.5}
+
 /* ERROR */
 .error-msg{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:1rem 1.25rem;color:#fca5a5;font-size:.85rem;margin-top:1.5rem;display:none}
 .error-msg.visible{display:block}
@@ -224,8 +241,12 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 
   <div class="mode-selector">
     <button class="mode-btn active" onclick="setMode('distill')">Distill</button>
-    <button class="mode-btn" onclick="setMode('crawl')">Crawl<span class="mode-tag">new</span></button>
-    <button class="mode-btn" onclick="setMode('links')">Links<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('crawl')">Crawl</button>
+    <button class="mode-btn" onclick="setMode('links')">Links</button>
+    <button class="mode-btn" onclick="setMode('search')">Search<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('stream')">Stream<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('diff')">Diff<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('render')">Render<span class="mode-tag">new</span></button>
   </div>
 
   <div class="examples">
@@ -280,6 +301,21 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
       <label>Head metadata</label>
       <select id="cfg-head-data"><option value="false">Off (fast)</option><option value="true">On (richer)</option></select>
     </div>
+  </div>
+  <div class="mode-config" id="search-config">
+    <div class="config-field"><label>Search query</label><input type="text" id="cfg-search-query" placeholder="AI agent frameworks 2026" style="width:280px"></div>
+    <div class="config-field"><label>Deep crawl top</label><input type="number" id="cfg-search-crawl" value="0" min="0" max="5" title="0 = search only, 1-5 = crawl top results"></div>
+  </div>
+  <div class="mode-config" id="stream-config">
+    <div class="config-field"><label>Max nodes</label><input type="number" id="cfg-stream-max" value="30" min="5" max="100"></div>
+    <div class="config-field"><label>Min relevance</label><input type="number" id="cfg-stream-rel" value="0.1" min="0" max="1" step="0.05" style="width:80px"></div>
+  </div>
+  <div class="mode-config" id="diff-config">
+    <div class="config-field" style="flex:1"><label>Compare URL (optional — leave empty to diff same page over time)</label><input type="url" id="cfg-diff-url" placeholder="https://..." style="width:100%"></div>
+  </div>
+  <div class="mode-config" id="render-config">
+    <div class="config-field"><label>Width</label><input type="number" id="cfg-render-w" value="1280" min="320" max="1920"></div>
+    <div class="config-field"><label>Height</label><input type="number" id="cfg-render-h" value="800" min="200" max="1200"></div>
   </div>
 
   <div class="loading" id="loading">
@@ -349,6 +385,41 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div id="links-list"></div>
     <div class="summary-bar" id="links-summary" style="grid-template-columns:repeat(4,1fr)"></div>
   </div>
+
+  <div class="results" id="search-results" style="display:none">
+    <div class="results-header">
+      <div class="results-title" id="search-title"></div>
+      <div class="results-meta" id="search-meta"></div>
+    </div>
+    <div class="result-terminal" id="search-nodes"></div>
+    <div class="summary-bar" id="search-summary"></div>
+  </div>
+
+  <div class="results" id="stream-results" style="display:none">
+    <div class="results-header">
+      <div class="results-title" id="stream-title"></div>
+      <div class="results-meta" id="stream-meta"></div>
+    </div>
+    <div class="result-terminal" id="stream-nodes"></div>
+    <div class="summary-bar" id="stream-summary"></div>
+  </div>
+
+  <div class="results" id="diff-results" style="display:none">
+    <div class="results-header">
+      <div class="results-title" id="diff-title"></div>
+      <div class="results-meta" id="diff-meta"></div>
+    </div>
+    <div id="diff-content" style="font-family:var(--mono);font-size:.8rem"></div>
+    <div class="summary-bar" id="diff-summary"></div>
+  </div>
+
+  <div class="results" id="render-results" style="display:none">
+    <div class="results-header">
+      <div class="results-title" id="render-title"></div>
+      <div class="results-meta" id="render-meta"></div>
+    </div>
+    <div id="render-img" style="text-align:center"></div>
+  </div>
 </main>
 
 <div data-component="footer"></div>
@@ -359,20 +430,23 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 
 let currentMode = 'distill';
 
+const allResults = ['results','crawl-results','links-results','search-results','stream-results','diff-results','render-results'];
+const allConfigs = ['crawl-config','links-config','search-config','stream-config','diff-config','render-config'];
+const modeLabels = {distill:'Run',crawl:'Crawl',links:'Extract',search:'Search',stream:'Stream',diff:'Compare',render:'Render'};
+
 function setMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('.mode-btn[onclick*="' + mode + '"]').classList.add('active');
-  // Toggle config panels
-  document.getElementById('crawl-config').classList.toggle('visible', mode === 'crawl');
-  document.getElementById('links-config').classList.toggle('visible', mode === 'links');
-  // Hide all results
-  document.getElementById('results').classList.remove('visible');
-  document.getElementById('crawl-results').classList.remove('visible');
-  document.getElementById('links-results').classList.remove('visible');
-  // Update button text
-  const labels = {distill:'Run', crawl:'Crawl', links:'Extract'};
-  document.getElementById('btn-run').textContent = labels[mode] || 'Run';
+  allConfigs.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('visible', id.startsWith(mode));
+  });
+  allResults.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) { el.style.display = 'none'; el.classList.remove('visible'); }
+  });
+  document.getElementById('btn-run').textContent = modeLabels[mode] || 'Run';
 }
 
 const examples = document.querySelectorAll('.example-chip');
@@ -387,7 +461,40 @@ examples.forEach(chip => {
 async function runQuery() {
   if (currentMode === 'crawl') return runCrawl();
   if (currentMode === 'links') return runLinks();
+  if (currentMode === 'search') return runSearch();
+  if (currentMode === 'stream') return runStream();
+  if (currentMode === 'diff') return runDiff();
+  if (currentMode === 'render') return runRender();
   return runDistill();
+}
+
+function hideAllResults() {
+  allResults.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) { el.style.display = 'none'; el.classList.remove('visible'); }
+  });
+  document.getElementById('error-msg').classList.remove('visible');
+}
+
+function showLoading(label) {
+  const btn = document.getElementById('btn-run');
+  btn.disabled = true;
+  btn.textContent = label;
+  document.getElementById('loading').classList.add('visible');
+  hideAllResults();
+}
+
+function hideLoading() {
+  const btn = document.getElementById('btn-run');
+  btn.disabled = false;
+  btn.textContent = modeLabels[currentMode] || 'Run';
+  document.getElementById('loading').classList.remove('visible');
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = 'Error: ' + msg;
+  el.classList.add('visible');
 }
 
 async function runDistill() {
@@ -717,6 +824,208 @@ function renderLinksResults(data, elapsed) {
     '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
 
   el.classList.add('visible');
+}
+
+// ─── SEARCH ──────────────────────────────────────────────────────────────
+async function runSearch() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  const query = document.getElementById('cfg-search-query').value.trim() || goal;
+  if (!query) return;
+  showLoading('Searching\u2026');
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/fetch/search', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query, goal: goal || query, top_n: 8, deep: true, max_nodes_per_result: 5 })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+
+    const el = document.getElementById('search-results');
+    document.getElementById('search-title').textContent = 'Search: ' + query;
+    const results = data.results || [];
+    document.getElementById('search-meta').innerHTML =
+      '<span><span class="val">' + results.length + '</span> results</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+
+    document.getElementById('search-nodes').innerHTML = results.map((r, i) => {
+      const nodes = (r.nodes || []).slice(0, 3);
+      const nodesHtml = nodes.map(n =>
+        '<div class="result-node"><div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' · ' + (n.role||'text') +
+        '</div><div class="result-node-text">"' + escHtml((n.label||'').slice(0,200)) + '"</div></div>'
+      ).join('');
+      return '<div class="search-item">' +
+        '<div class="search-item-title">' + (i+1) + '. ' + escHtml(r.title || 'Untitled') + '</div>' +
+        '<div class="search-item-url">' + escHtml(r.url || '') + '</div>' +
+        (r.snippet ? '<div class="search-item-snippet">' + escHtml(r.snippet) + '</div>' : '') +
+        (nodesHtml ? '<div style="margin-top:.5rem">' + nodesHtml + '</div>' : '') +
+      '</div>';
+    }).join('');
+
+    const summaryEl = document.getElementById('search-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(3,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val">' + results.length + '</div><div class="summary-label">results</div></div>' +
+      '<div><div class="summary-val">' + results.reduce((s,r) => s + (r.nodes||[]).length, 0) + '</div><div class="summary-label">nodes extracted</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+    el.style.display = 'block';
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── STREAM ──────────────────────────────────────────────────────────────
+async function runStream() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url || !goal) return;
+  showLoading('Streaming\u2026');
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/fetch/stream-parse', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        top_n: parseInt(document.getElementById('cfg-stream-max').value) || 30,
+        min_relevance: parseFloat(document.getElementById('cfg-stream-rel').value) || 0.1,
+        max_nodes: parseInt(document.getElementById('cfg-stream-max').value) || 30,
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = JSON.parse(await res.text());
+    const elapsed = Math.round(performance.now() - t0);
+
+    const el = document.getElementById('stream-results');
+    document.getElementById('stream-title').textContent = 'Stream: ' + (data.goal || goal);
+    const nodes = data.nodes || [];
+    const total = data.total_dom_nodes || 0;
+    const savings = data.token_savings_ratio ? (data.token_savings_ratio * 100).toFixed(1) : '?';
+    document.getElementById('stream-meta').innerHTML =
+      '<span><span class="val">' + nodes.length + '</span> streamed</span>' +
+      '<span><span class="val">' + total.toLocaleString() + '</span> DOM nodes</span>' +
+      '<span><span class="val">' + savings + '%</span> saved</span>';
+
+    document.getElementById('stream-nodes').innerHTML = nodes.map((n, i) => {
+      const rel = (n.relevance || 0).toFixed(3);
+      return '<div class="result-node">' +
+        '<div class="result-node-header">' + (i+1) + '. relevance: ' + rel + ' · ' + (n.role||'text') + '</div>' +
+        '<div class="result-node-text">"' + escHtml((n.label||'').slice(0,300)) + '"</div></div>';
+    }).join('');
+
+    const summaryEl = document.getElementById('stream-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val">' + nodes.length + '</div><div class="summary-label">nodes</div></div>' +
+      '<div><div class="summary-val">' + total.toLocaleString() + '</div><div class="summary-label">DOM total</div></div>' +
+      '<div><div class="summary-val">' + savings + '%</div><div class="summary-label">token savings</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+    el.style.display = 'block';
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── DIFF ────────────────────────────────────────────────────────────────
+async function runDiff() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  const url2 = document.getElementById('cfg-diff-url').value.trim() || url;
+  if (!url || !goal) return;
+  showLoading('Comparing\u2026');
+  const t0 = performance.now();
+  try {
+    // Fetch both pages as semantic trees
+    const [r1, r2] = await Promise.all([
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url, goal, top_n: 30, output_format:'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url: url2, goal, top_n: 30, output_format:'json'}) }),
+    ]);
+    const d1 = await r1.json();
+    const d2 = await r2.json();
+    const elapsed = Math.round(performance.now() - t0);
+
+    const nodes1 = d1.nodes || [];
+    const nodes2 = d2.nodes || [];
+    const labels1 = new Set(nodes1.map(n => n.label));
+    const labels2 = new Set(nodes2.map(n => n.label));
+
+    const added = nodes2.filter(n => !labels1.has(n.label));
+    const removed = nodes1.filter(n => !labels2.has(n.label));
+    const kept = nodes1.filter(n => labels2.has(n.label));
+
+    const el = document.getElementById('diff-results');
+    document.getElementById('diff-title').textContent = 'Diff' + (url !== url2 ? ': ' + url.split('/').pop() + ' vs ' + url2.split('/').pop() : ' (same page)');
+    document.getElementById('diff-meta').innerHTML =
+      '<span><span class="val" style="color:#22c55e">+' + added.length + '</span> added</span>' +
+      '<span><span class="val" style="color:#ef4444">-' + removed.length + '</span> removed</span>' +
+      '<span><span class="val">' + kept.length + '</span> unchanged</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span></span>';
+
+    let html = '';
+    if (added.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Added (' + added.length + ')</div>';
+      html += added.map(n => '<div class="diff-added">+ ' + escHtml((n.label||'').slice(0,200)) + ' <span style="color:#22c55e;font-size:.7rem">(' + n.role + ')</span></div>').join('');
+      html += '</div>';
+    }
+    if (removed.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Removed (' + removed.length + ')</div>';
+      html += removed.map(n => '<div class="diff-removed">- ' + escHtml((n.label||'').slice(0,200)) + '</div>').join('');
+      html += '</div>';
+    }
+    if (kept.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Unchanged (' + kept.length + ')</div>';
+      html += kept.slice(0,5).map(n => '<div style="padding:.3rem .8rem;font-size:.75rem;color:#555">' + escHtml((n.label||'').slice(0,150)) + '</div>').join('');
+      if (kept.length > 5) html += '<div style="padding:.3rem .8rem;font-size:.7rem;color:#444">... and ' + (kept.length-5) + ' more</div>';
+      html += '</div>';
+    }
+    document.getElementById('diff-content').innerHTML = html || '<div style="color:#555;text-align:center;padding:2rem">No differences found</div>';
+
+    const summaryEl = document.getElementById('diff-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val" style="color:#22c55e">+' + added.length + '</div><div class="summary-label">added</div></div>' +
+      '<div><div class="summary-val" style="color:#ef4444">-' + removed.length + '</div><div class="summary-label">removed</div></div>' +
+      '<div><div class="summary-val">' + kept.length + '</div><div class="summary-label">unchanged</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+    el.style.display = 'block';
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────
+async function runRender() {
+  const url = document.getElementById('input-url').value.trim();
+  if (!url) return;
+  showLoading('Rendering\u2026');
+  const t0 = performance.now();
+  try {
+    const w = parseInt(document.getElementById('cfg-render-w').value) || 1280;
+    const h = parseInt(document.getElementById('cfg-render-h').value) || 800;
+    const res = await fetch('/api/fetch/render', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, width: w, height: h })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const elapsed = Math.round(performance.now() - t0);
+
+    // Response is PNG binary
+    const blob = await res.blob();
+    const imgUrl = URL.createObjectURL(blob);
+
+    const el = document.getElementById('render-results');
+    document.getElementById('render-title').textContent = 'Render: ' + url.split('/').slice(0,3).join('/');
+    document.getElementById('render-meta').innerHTML =
+      '<span><span class="val">' + w + 'x' + h + '</span> viewport</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> render time</span>' +
+      '<span><span class="val">Blitz</span> engine</span>';
+
+    document.getElementById('render-img').innerHTML =
+      '<div class="render-frame"><img src="' + imgUrl + '" alt="Rendered page" style="max-height:600px;object-fit:contain"></div>';
+    el.style.display = 'block';
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 function escHtml(s) {
