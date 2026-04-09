@@ -4097,12 +4097,14 @@ fn render_html_to_png_inner(
     // Strippa <noscript> — Blitz kör ingen JS
     let html = &strip_noscript(html);
 
-    // NOTE: Do NOT strip <link rel="stylesheet"> — Blitz's net_provider loads them.
-    // The pending_critical_resources issue is handled by the resource loading loop below.
+    // Strippa <link rel="stylesheet"> — CSS MUST be pre-inlined by the caller.
+    // net_provider can't fetch CSS inside spawn_blocking (no async runtime).
+    // Without stripping, Blitz marks them as pending_critical_resources → blank render.
+    let html = &strip_external_stylesheets(html);
+    // The pending_critical_resources issue is handled by stripping <link> above.
 
-    // Always use net_provider (even for fast_render) — without it, Blitz marks
-    // <link rel=stylesheet> as pending_critical_resources and paint_scene returns blank.
-    // This matches the official Blitz screenshot example.
+    // Use net_provider for image loading. <link> stylesheets are already stripped
+    // so no pending_critical_resources issue. CSS is pre-inlined by caller.
     let mut document = if fast_render {
         let net = std::sync::Arc::new(blitz_net::Provider::new(None));
         let mut doc = HtmlDocument::from_html(
