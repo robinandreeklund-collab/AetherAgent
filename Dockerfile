@@ -93,6 +93,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Chromium sökväg för headless_chrome crate
 ENV CHROME_PATH=/usr/bin/chromium-browser
+# Force wgpu to use mesa software renderer (llvmpipe) — no GPU needed
+ENV WGPU_BACKEND=gl
+ENV MESA_GL_VERSION_OVERRIDE=4.5
+ENV LIBGL_ALWAYS_SOFTWARE=1
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
