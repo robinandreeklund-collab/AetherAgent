@@ -90,7 +90,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium-browser \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 # Chromium sökväg för headless_chrome crate
 ENV CHROME_PATH=/usr/bin/chromium-browser

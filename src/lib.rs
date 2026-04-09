@@ -4182,7 +4182,9 @@ fn render_html_to_png_inner(
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer =
-        <anyrender_vello_cpu::VelloImageRenderer as anyrender::ImageRenderer>::new(width, height);
+        <anyrender_vello_cpu::VelloCpuImageRenderer as anyrender::ImageRenderer>::new(
+            width, height,
+        );
     let mut buffer = Vec::with_capacity((width * height * 4) as usize);
     renderer.render_to_vec(
         |scene| {
@@ -6050,18 +6052,127 @@ mod tests {
 
     #[cfg(feature = "blitz")]
     #[test]
-    #[ignore] // Requires wgpu device (GPU or lavapipe) — run with: cargo test -- --ignored
     fn test_blitz_cpu_render_produces_image() {
-        // Test 1: Blitz render
         let html = r#"<html><head><style>body{font-family:serif;padding:20px}h1{font-size:48px;color:red}p{color:blue}</style></head>
 <body><h1>HELLO WORLD</h1><p>Text here.</p></body></html>"#;
-        let result = render_html_to_png_inner(html, "https://test.com", 800, 600, true);
+        let result = render_html_to_png_inner(html, "https://test.com", 800, 600, false);
         assert!(result.is_ok(), "Blitz render failed: {:?}", result.err());
         let png = result.unwrap();
-        assert!(
-            png.len() > 1000,
-            "PNG too small ({}b) — likely blank",
-            png.len()
+        let _ = std::fs::write("/tmp/blitz_text_test.png", &png);
+        eprintln!("[BLITZ] {} bytes", png.len());
+        assert!(png.len() > 1000, "PNG too small ({}b)", png.len());
+    }
+
+    #[cfg(feature = "blitz")]
+    #[test]
+    fn test_vello_cpu_direct_text() {
+        // Test direct vello_cpu glyph rendering with a real system font
+        use peniko::kurbo::Shape;
+
+        let w: u16 = 400;
+        let h: u16 = 200;
+        let mut ctx = vello_cpu::RenderContext::new(w, h);
+
+        // White background
+        ctx.set_paint(vello_cpu::PaintType::Solid(peniko::Color::new([
+            1.0, 1.0, 1.0, 1.0,
+        ])));
+        ctx.set_fill_rule(peniko::Fill::NonZero);
+        let bg = peniko::kurbo::Rect::new(0.0, 0.0, w as f64, h as f64);
+        ctx.fill_path(&bg.into_path(0.1));
+
+        // Load a system font
+        let font_path = if std::path::Path::new("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+            .exists()
+        {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        } else if std::path::Path::new("/usr/share/fonts/truetype/freefont/FreeSans.ttf").exists() {
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+        } else {
+            eprintln!("[VELLO TEXT] No system font found, skipping");
+            return;
+        };
+
+        let font_bytes = std::fs::read(font_path).expect("Failed to read font");
+        eprintln!(
+            "[VELLO TEXT] Loaded {} ({} bytes)",
+            font_path,
+            font_bytes.len()
         );
+
+        let font_data = peniko::FontData {
+            data: peniko::Blob::new(std::sync::Arc::new(font_bytes)),
+            index: 0,
+        };
+
+        // Draw text glyphs directly
+        ctx.set_paint(vello_cpu::PaintType::Solid(peniko::Color::new([
+            0.0, 0.0, 0.0, 1.0,
+        ])));
+        ctx.set_fill_rule(peniko::Fill::NonZero);
+        ctx.set_transform(peniko::kurbo::Affine::IDENTITY);
+
+        // Use skrifa to get glyph IDs
+        use skrifa::MetadataProvider;
+        let font_ref = skrifa::FontRef::from_index(font_data.data.as_ref(), 0).expect("Bad font");
+        let charmap = font_ref.charmap();
+        let text = "Hello World";
+        let glyphs: Vec<vello_cpu::Glyph> = text
+            .chars()
+            .enumerate()
+            .map(|(i, ch)| {
+                let gid = charmap.map(ch).map(|g| g.to_u32()).unwrap_or(0);
+                vello_cpu::Glyph {
+                    id: gid as u32,
+                    x: 20.0 + (i as f32) * 24.0,
+                    y: 80.0,
+                }
+            })
+            .collect();
+
+        eprintln!(
+            "[VELLO TEXT] Glyphs: {:?}",
+            glyphs.iter().map(|g| g.id).collect::<Vec<_>>()
+        );
+
+        ctx.glyph_run(&font_data)
+            .font_size(48.0)
+            .hint(true) // Same as Blitz
+            .normalized_coords(&[])
+            .glyph_transform(peniko::kurbo::Affine::default())
+            .fill_glyphs(glyphs.into_iter());
+
+        ctx.flush();
+        let mut buf = vec![0u8; w as usize * h as usize * 4];
+        ctx.render_to_buffer(&mut buf, w, h, vello_cpu::RenderMode::OptimizeSpeed);
+
+        // Check for non-white pixels (text should be black on white)
+        let non_white = buf
+            .chunks(4)
+            .filter(|p| p[0] < 250 || p[1] < 250 || p[2] < 250)
+            .count();
+        eprintln!(
+            "[VELLO TEXT] non-white pixels: {} / {}",
+            non_white,
+            (w as usize * h as usize)
+        );
+
+        // Write test image
+        let _ = std::fs::write("/tmp/vello_text_test.raw", &buf);
+
+        // Encode as PNG for visual inspection
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_bytes, w as u32, h as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&buf).unwrap();
+            writer.finish().unwrap();
+        }
+        let _ = std::fs::write("/tmp/vello_text_test.png", &png_bytes);
+        eprintln!("[VELLO TEXT] PNG written: {} bytes", png_bytes.len());
+
+        assert!(non_white > 50, "Expected text pixels but got {}", non_white);
     }
 }
