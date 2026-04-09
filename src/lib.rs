@@ -5997,4 +5997,19 @@ mod tests {
             assert!(result.contains(">C<"), "Vanligt innehåll ska bevaras");
         }
     }
+
+    #[cfg(feature = "blitz")]
+    #[test]
+    fn test_blitz_cpu_render_produces_image() {
+        let html = r#"<html><head><style>body{background:#1a1a2e;color:white}h1{color:#e94560}</style></head>
+<body><h1>Hello</h1><p>World</p></body></html>"#;
+        let result = render_html_to_png_inner(html, "https://test.com", 400, 300, true);
+        assert!(result.is_ok(), "Blitz render failed: {:?}", result.err());
+        let png = result.unwrap();
+        assert!(
+            png.len() > 1000,
+            "PNG too small ({}b) — likely blank",
+            png.len()
+        );
+    }
 }

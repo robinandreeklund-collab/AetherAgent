@@ -84,7 +84,7 @@ taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "4b6687da0ca1e9d71d
 parley = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", default-features = false, features = ["std"], optional = true }
 fontique = { version = "0.6", optional = true }
 skrifa = { version = "0.40", optional = true }
-vello_cpu = { version = "0.0.3", features = ["text"], optional = true }
+vello_cpu = { version = "0.0.7", features = ["text"], optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
