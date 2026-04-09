@@ -4130,7 +4130,9 @@ fn render_html_to_png_inner(
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer =
-        <anyrender_vello_cpu::VelloImageRenderer as anyrender::ImageRenderer>::new(width, height);
+        <anyrender_vello_cpu::VelloCpuImageRenderer as anyrender::ImageRenderer>::new(
+            width, height,
+        );
     let mut buffer = Vec::with_capacity((width * height * 4) as usize);
     renderer.render_to_vec(
         |scene| {

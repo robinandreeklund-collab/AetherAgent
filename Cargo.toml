@@ -75,7 +75,7 @@ blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820d
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
 style_traits = { version = "0.14", package = "stylo_traits", optional = true }
 anyrender = { version = "0.8", optional = true }
-anyrender_vello_cpu = { version = "0.8", package = "anyrender_vello", optional = true }
+anyrender_vello_cpu = { version = "0.10", optional = true }
 peniko = { version = "0.6", optional = true }
 png = { version = "0.17", optional = true }
 
