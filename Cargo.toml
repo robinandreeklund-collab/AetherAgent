@@ -75,7 +75,7 @@ blitz-net = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820d
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git", rev = "4c9fb2820dc74860d3b2d972493fa4e9fa83eb48", optional = true }
 style_traits = { version = "0.14", package = "stylo_traits", optional = true }
 anyrender = { version = "0.8", optional = true }
-anyrender_vello_cpu = { version = "0.10", optional = true }
+anyrender_vello_cpu = { version = "0.8", package = "anyrender_vello", optional = true }
 peniko = { version = "0.6", optional = true }
 png = { version = "0.17", optional = true }
 
@@ -84,7 +84,7 @@ taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "4b6687da0ca1e9d71d
 parley = { git = "https://github.com/linebender/parley", rev = "d7df17aa32637e95b64c1f804fb7ef7ea1981bd3", default-features = false, features = ["std"], optional = true }
 fontique = { version = "0.6", optional = true }
 skrifa = { version = "0.40", optional = true }
-vello_cpu = { version = "0.0.7", features = ["text", "u8_pipeline"], optional = true }
+vello_cpu = { version = "0.0.3", features = ["text"], optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

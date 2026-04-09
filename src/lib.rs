@@ -3944,6 +3944,33 @@ fn strip_noscript(html: &str) -> String {
     result
 }
 
+/// Strippa <link rel="stylesheet"> taggar.
+/// CSS är redan inlinad av css_compiler — externa stylesheet-refs orsakar
+/// Blitz pending_critical_resources → blank render.
+#[cfg(feature = "blitz")]
+fn strip_external_stylesheets(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.to_lowercase().find("<link") {
+        result.push_str(&rest[..start]);
+        if let Some(end) = rest[start..].find('>') {
+            let tag = &rest[start..start + end + 1];
+            let tag_lower = tag.to_lowercase();
+            if tag_lower.contains("rel=\"stylesheet\"") || tag_lower.contains("rel='stylesheet'") {
+                // Skip this tag entirely
+            } else {
+                result.push_str(tag);
+            }
+            rest = &rest[start + end + 1..];
+        } else {
+            result.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    result.push_str(rest);
+    result
+}
+
 /// Strippa <noscript>-element
 #[cfg(feature = "blitz")]
 fn strip_noscript_tags(html: &str) -> String {
@@ -4070,6 +4097,11 @@ fn render_html_to_png_inner(
     // Strippa <noscript> — Blitz kör ingen JS
     let html = &strip_noscript(html);
 
+    // Strippa <link rel="stylesheet"> — CSS är redan inlinad av css_compiler.
+    // Om kvar: Blitz registrerar dem som pending_critical_resources → paint_scene
+    // returnerar blank (FOUC-protection). Strippning löser det.
+    let html = &strip_external_stylesheets(html);
+
     let mut document = if fast_render {
         HtmlDocument::from_html(
             html,
@@ -4130,9 +4162,7 @@ fn render_html_to_png_inner(
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer =
-        <anyrender_vello_cpu::VelloCpuImageRenderer as anyrender::ImageRenderer>::new(
-            width, height,
-        );
+        <anyrender_vello_cpu::VelloImageRenderer as anyrender::ImageRenderer>::new(width, height);
     let mut buffer = Vec::with_capacity((width * height * 4) as usize);
     renderer.render_to_vec(
         |scene| {
@@ -4147,24 +4177,6 @@ fn render_html_to_png_inner(
         },
         &mut buffer,
     );
-
-    // Kvalitetscheck: om Blitz+anyrender producerade en helt vit bild
-    // → fallback till taffy_render (enklare men renderar text)
-    let non_white = buffer
-        .chunks(4)
-        .filter(|px| px[0] != 255 || px[1] != 255 || px[2] != 255)
-        .count();
-    if non_white < 10 {
-        eprintln!(
-            "[RENDER] Blitz produced blank image ({}x{}, {} non-white px) — trying taffy fallback",
-            width, height, non_white
-        );
-        if let Ok(taffy_png) =
-            taffy_render::render_to_png(html, base_url, width, height, fast_render)
-        {
-            return Ok(taffy_png);
-        }
-    }
 
     let mut png_bytes = Vec::new();
     {
