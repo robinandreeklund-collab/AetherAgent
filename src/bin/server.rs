@@ -2642,22 +2642,37 @@ async fn ws_api_dispatch(
                 .await;
             let w = params["width"].as_u64().unwrap_or(1280) as u32;
             let h = params["height"].as_u64().unwrap_or(800) as u32;
-            // Delegate to HTTP handler via internal fetch (avoids duplicating render logic)
-            let client = reqwest::Client::new();
-            let render_res = client
-                .post(format!(
-                    "http://127.0.0.1:{}/api/fetch/render",
-                    std::env::var("PORT").unwrap_or_else(|_| "8080".to_string())
-                ))
-                .json(&serde_json::json!({"url": url, "width": w, "height": h}))
-                .send()
+            // Fetch page
+            let config = aether_agent::types::FetchConfig::default();
+            let fetch_result = aether_agent::fetch::fetch_page(&url, &config)
                 .await
-                .map_err(|e| format!("Render: {e}"))?;
-            let data: serde_json::Value = render_res
-                .json()
-                .await
-                .map_err(|e| format!("Render JSON: {e}"))?;
-            Ok(data)
+                .map_err(|e| format!("Fetch: {e}"))?;
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"rendering"})
+                        .to_string(),
+                )
+                .await;
+            // Render with Blitz (blocking thread)
+            let body = fetch_result.body;
+            let final_url = fetch_result.final_url;
+            let render_result = tokio::task::spawn_blocking(move || {
+                aether_agent::screenshot_with_tier(&body, &final_url, w, h, true)
+            })
+            .await
+            .map_err(|e| format!("Render task: {e}"))?;
+            match render_result {
+                Ok((png_bytes, tier)) => {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    Ok(serde_json::json!({
+                        "png_base64": b64,
+                        "png_size_bytes": png_bytes.len(),
+                        "tier_used": format!("{:?}", tier),
+                    }))
+                }
+                Err(e) => Err(format!("Render failed: {e}")),
+            }
         }
         other => Err(format!("Unknown method: {other}")),
     };
