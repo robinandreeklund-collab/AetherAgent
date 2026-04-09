@@ -79,10 +79,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     # Fontconfig runtime library (required by Blitz for font discovery)
     libfontconfig1 \
-    # Mesa software rendering (wgpu needs a GPU device — mesa provides llvmpipe/swrast)
+    # Mesa software rendering (wgpu needs a GPU device — mesa provides llvmpipe/lavapipe)
     libgl1-mesa-dri \
     libegl-mesa0 \
     libgbm1 \
+    mesa-vulkan-drivers \
     # curl for health checks
     curl \
     # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
@@ -93,10 +94,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Chromium sökväg för headless_chrome crate
 ENV CHROME_PATH=/usr/bin/chromium-browser
-# Force wgpu to use mesa software renderer (llvmpipe) — no GPU needed
-ENV WGPU_BACKEND=gl
-ENV MESA_GL_VERSION_OVERRIDE=4.5
+# Force wgpu to use software rendering — no GPU needed
+# Lavapipe (software Vulkan) is preferred, GL as fallback
+ENV WGPU_BACKEND=vulkan,gl
 ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV MESA_GL_VERSION_OVERRIDE=4.5
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp

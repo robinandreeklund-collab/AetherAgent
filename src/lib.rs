@@ -4102,15 +4102,35 @@ fn render_html_to_png_inner(
     // returnerar blank (FOUC-protection). Strippning löser det.
     let html = &strip_external_stylesheets(html);
 
+    // Always use net_provider (even for fast_render) — without it, Blitz marks
+    // <link rel=stylesheet> as pending_critical_resources and paint_scene returns blank.
+    // This matches the official Blitz screenshot example.
     let mut document = if fast_render {
-        HtmlDocument::from_html(
+        let net = std::sync::Arc::new(blitz_net::Provider::new(None));
+        let mut doc = HtmlDocument::from_html(
             html,
             DocumentConfig {
                 viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
                 base_url: Some(base_url.to_string()),
+                net_provider: Some(std::sync::Arc::clone(&net)
+                    as std::sync::Arc<dyn blitz_traits::net::NetProvider>),
                 ..Default::default()
             },
-        )
+        );
+        // Quick resolve loop — let net_provider handle critical resources
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            doc.as_mut().resolve(0.0);
+            if net.is_empty() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        doc.as_mut().resolve(0.0);
+        doc
     } else {
         let net = std::sync::Arc::new(blitz_net::Provider::new(None));
 
@@ -4162,7 +4182,9 @@ fn render_html_to_png_inner(
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer =
-        <anyrender_vello_cpu::VelloImageRenderer as anyrender::ImageRenderer>::new(width, height);
+        <anyrender_vello_cpu::VelloCpuImageRenderer as anyrender::ImageRenderer>::new(
+            width, height,
+        );
     let mut buffer = Vec::with_capacity((width * height * 4) as usize);
     renderer.render_to_vec(
         |scene| {
