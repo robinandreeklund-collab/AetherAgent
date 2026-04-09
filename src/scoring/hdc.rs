@@ -146,11 +146,11 @@ impl Hypervector {
                 let threshold = hvs.len() / 2;
                 // Processera per u64-ord (64 bits åt gången)
                 for (word_idx, result_word) in result.iter_mut().enumerate() {
-                    let mut counts = [0u8; 64];
+                    let mut counts = [0u16; 64];
                     for hv in hvs {
                         let w = hv.bits[word_idx];
                         for (bit_pos, count) in counts.iter_mut().enumerate() {
-                            *count += ((w >> bit_pos) & 1) as u8;
+                            *count += ((w >> bit_pos) & 1) as u16;
                         }
                     }
                     let mut word: u64 = 0;

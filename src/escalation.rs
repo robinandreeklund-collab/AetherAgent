@@ -71,6 +71,19 @@ const SPA_MARKERS: &[&str] = &[
     "nuxt",
     "gatsby",
     "remix",
+    // Extra: React script bundles (Anthropic, Vercel, etc.)
+    "react-dom",
+    "react.production",
+    "react.development",
+    "_buildmanifest.js",
+    "_ssgmanifest.js",
+    // Vue/Nuxt
+    "__vue_ssr_context",
+    "__nuxt",
+    // Generic SPA: empty body + heavy JS
+    "\"use client\"",
+    "createroot",
+    "hydrateroot",
 ];
 
 /// CSS-patterns som kräver layout-beräkning (Tier 3+)
@@ -135,6 +148,21 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
             tier: ParseTier::StaticParse,
             reason: "Ingen JS detekterad — statisk parse räcker".to_string(),
             confidence: 0.95,
+            analysis_time_us: start.elapsed().as_micros() as u64,
+        };
+    }
+
+    // ─── Content sufficiency check ────────────────────────────────────────
+    // Om body har ≥5 substantiella text-element OCH inga SPA-markörer,
+    // klassificera som StaticParse. JS-eval körs fortfarande om anroparen
+    // explicit sätter run_js=true, men kvalitetschecken i lifecycle-parse
+    // säkerställer att JS-resultatet inte är sämre.
+    let static_content_sufficient = has_sufficient_static_content(&html_lower);
+    if static_content_sufficient && !is_spa_shell(&html_lower) && !js_info.has_framework {
+        return TierDecision {
+            tier: ParseTier::StaticParse,
+            reason: "Statisk HTML har tillräckligt content — JS-eval rekommenderas ej".to_string(),
+            confidence: 0.85,
             analysis_time_us: start.elapsed().as_micros() as u64,
         };
     }
@@ -237,6 +265,48 @@ fn check_layout_dependency(html_lower: &str) -> bool {
     }
     // Minst 3 layout-patterns tyder på layout-beroende sida
     layout_count >= 3
+}
+
+/// Kolla om statisk HTML redan har tillräckligt med content.
+/// Räknar substantiella text-element i body (inte scripts/styles/nav).
+/// Returnerar true om ≥5 content-element hittas — JS-eval är då onödig.
+fn has_sufficient_static_content(html_lower: &str) -> bool {
+    let body_start = match html_lower.find("<body") {
+        Some(s) => s,
+        None => return false,
+    };
+    let body_end = html_lower.find("</body>").unwrap_or(html_lower.len());
+    let body = match html_lower.get(body_start..body_end) {
+        Some(b) => b,
+        None => return false,
+    };
+
+    // Räkna content-tags som typiskt innehåller text
+    let content_tags = [
+        "<p>",
+        "<p ",
+        "<h1",
+        "<h2",
+        "<h3",
+        "<h4",
+        "<li>",
+        "<li ",
+        "<td>",
+        "<td ",
+        "<th>",
+        "<th ",
+        "<article",
+        "<figcaption",
+        "<blockquote",
+    ];
+    let mut content_count: usize = 0;
+    for tag in content_tags {
+        content_count += body.matches(tag).count();
+    }
+
+    // Om det finns ≥5 content-element har sidan tillräcklig statisk content
+    // Undantag: om body har en SPA-mount och väldigt lite content runt den
+    content_count >= 5
 }
 
 /// Detektera SPA-skelett (tom body med bara en mount-point)

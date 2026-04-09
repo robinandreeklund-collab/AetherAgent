@@ -7,8 +7,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     pkg-config libssl-dev python3 \
-    # Blitz rendering deps: fontconfig for font discovery
+    # Blitz rendering deps: fontconfig for font discovery + mesa for wgpu software backend
     libfontconfig1-dev \
+    libgl1-mesa-dev libegl-dev libgbm-dev \
     # ORT (ONNX Runtime) kräver libstdc++ vid länkning
     g++ \
     # Build essentials for cc linker
@@ -19,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Installera Rust via rustup (CACHE_BUST forces rebuild when version changes)
 ARG RUST_VERSION=1.94.1
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
+RUN rm -f /root/.rustup/settings.toml && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
@@ -74,19 +76,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Fonts for Blitz rendering (system fallback fonts)
     fonts-liberation \
     fonts-noto-color-emoji \
+    fonts-noto-core \
     fonts-dejavu-core \
     # Fontconfig runtime library (required by Blitz for font discovery)
     libfontconfig1 \
+    # Mesa software rendering (wgpu needs a GPU device — mesa provides llvmpipe/lavapipe)
+    libgl1-mesa-dri \
+    libegl-mesa0 \
+    libgbm1 \
+    mesa-vulkan-drivers \
     # curl for health checks
     curl \
     # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
     chromium-browser \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 # Chromium sökväg för headless_chrome crate
 ENV CHROME_PATH=/usr/bin/chromium-browser
+# Force wgpu to use software Vulkan (lavapipe) — no GPU needed
+# Lavapipe provides a full Vulkan 1.3 adapter via mesa
+ENV WGPU_BACKEND=vulkan
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp

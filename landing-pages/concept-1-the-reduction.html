@@ -82,6 +82,47 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .metric-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .metric-label{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
 
+/* HERO METRIC — follows metric-card design language */
+.hero-metric{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:all .3s}
+.hero-metric:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px var(--accent-glow)}
+.hero-metric-inner{position:relative;z-index:2}
+.hero-metric-number .metric-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-metric-title{font-size:.9rem;color:var(--muted);margin-top:.5rem;font-weight:500}
+.hero-metric-detail{font-family:var(--mono,'JetBrains Mono',monospace);font-size:.75rem;color:#555;margin-top:.75rem;display:flex;justify-content:center;gap:.4rem;flex-wrap:wrap}
+.hd-in{color:#ef4444;font-weight:600}
+.hd-out{color:#22c55e;font-weight:600}
+.hd-saved{color:#79c0ff;font-weight:600}
+.hero-metric-sub{font-size:.78rem;color:#444;max-width:460px;margin:.5rem auto 0;line-height:1.5}
+.hero-metric-queries{font-family:var(--mono,monospace);font-size:.72rem;color:#444;margin-top:.35rem}
+.hero-metric-queries span{color:#79c0ff;font-weight:600}
+.hero-metric-bar{position:relative;height:4px;background:rgba(255,255,255,0.04);border-radius:2px;margin-top:1.25rem;overflow:hidden}
+.hero-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#60a5fa);border-radius:2px;transition:width 2s cubic-bezier(0.16,1,0.3,1)}
+.hero-bar-label-saved{position:absolute;left:.75rem;top:-1.1rem;font-size:.55rem;color:var(--accent);font-weight:600;font-family:var(--mono,monospace)}
+.hero-bar-label-kept{position:absolute;right:.5rem;top:-1.1rem;font-size:.55rem;color:#555;font-weight:500;font-family:var(--mono,monospace)}
+
+/* CO2 SAVINGS — same card style */
+.co2-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;transition:all .3s}
+.co2-card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 0 30px var(--accent-glow)}
+.co2-header{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:.75rem}
+.co2-main{display:flex;align-items:baseline;justify-content:center;gap:.5rem;margin-bottom:.25rem}
+.co2-value{font-size:clamp(2.5rem,5vw,3.5rem);font-weight:700;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#fff,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.co2-unit{font-size:.9rem;color:var(--muted);font-weight:500}
+.co2-subtitle{font-size:.9rem;color:var(--muted);font-weight:500;margin-bottom:1.25rem}
+
+/* Road — minimal, precise */
+.co2-road{position:relative;height:20px;margin:0 auto;max-width:500px}
+.co2-road-line{position:absolute;top:9px;left:0;right:0;height:2px;background:#1a1a1a}
+.co2-road-marks{position:absolute;top:9px;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#282828 0,#282828 3px,transparent 3px,transparent 9px)}
+.co2-road-fill{position:absolute;top:8px;left:0;height:4px;background:var(--accent);border-radius:2px;transition:width 2.5s cubic-bezier(0.16,1,0.3,1);box-shadow:0 0 8px var(--accent-glow)}
+.co2-dot{position:absolute;top:5px;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);transition:left 2.5s cubic-bezier(0.16,1,0.3,1);box-shadow:0 0 12px var(--accent-glow)}
+.co2-endpoints{display:flex;justify-content:space-between;font-family:var(--mono,monospace);font-size:.6rem;color:#444;margin-top:.5rem;max-width:500px;margin-left:auto;margin-right:auto}
+.co2-km{font-size:.75rem;font-weight:600;color:var(--accent);font-family:var(--mono,monospace);margin-top:.75rem}
+
+.co2-quote{font-size:.78rem;color:#444;line-height:1.5;margin-top:.75rem;font-style:italic}
+.co2-footnote{font-size:.55rem;color:#2a2a2a;line-height:1.5;margin-top:1rem;border-top:1px solid rgba(255,255,255,0.04);padding-top:.5rem}
+
+@media(max-width:600px){.co2-road{max-width:100%}}
+
 /* CODE DEMO */
 .code-section{padding:6rem 2rem;max-width:1100px;margin:0 auto}
 .section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:700;letter-spacing:-0.02em;margin-bottom:.75rem;text-align:center}
@@ -201,21 +242,67 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
   </div>
 </section>
 
-<!-- METRICS -->
-<section class="metrics reveal">
-  <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="metric-value" id="mv-savings" data-target="99.2" data-suffix="%">0%</div>
-      <div class="metric-label">Token reduction</div>
+<!-- HERO METRIC — TOKEN SAVINGS -->
+<section class="metrics reveal" style="padding-bottom:2rem">
+  <div class="hero-metric">
+    <div class="hero-metric-inner">
+      <div class="hero-metric-number">
+        <span class="metric-value" id="mv-savings" data-target="98.7" data-suffix="%">0%</span>
+      </div>
+      <div class="hero-metric-title">Token reduction</div>
+      <div class="hero-metric-detail">
+        <span class="hd-in" id="hd-chars-in">&mdash;</span> in &rarr; <span class="hd-out" id="hd-chars-out">&mdash;</span> out &middot; <span class="hd-saved" id="hd-chars-saved">&mdash;</span> saved
+      </div>
+      <div class="hero-metric-sub">Every token you don&rsquo;t send is money you don&rsquo;t spend.</div>
+      <div class="hero-metric-queries"><span id="hd-queries">&mdash;</span> queries processed</div>
     </div>
+    <div class="hero-metric-bar">
+      <div class="hero-bar-fill" id="hero-bar-fill" style="width:0%"></div>
+      <div class="hero-bar-label-saved">distilled</div>
+      <div class="hero-bar-label-kept" id="hero-bar-kept"></div>
+    </div>
+  </div>
+</section>
+
+<!-- SECONDARY METRICS -->
+<section class="metrics reveal" style="padding-top:0">
+  <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
     <div class="metric-card">
       <div class="metric-value" id="mv-latency" data-target="1" data-prefix="<" data-suffix="ms">0ms</div>
-      <div class="metric-label">Avg latency</div>
+      <div class="metric-label">Avg CRFR latency</div>
+      <div style="font-size:.7rem;color:#444;margin-top:.3rem">Resonance propagation only — no GPU, no inference</div>
     </div>
     <div class="metric-card">
       <div class="metric-value" id="mv-sites" data-target="0">0</div>
       <div class="metric-label">Sites profiled</div>
+      <div style="font-size:.7rem;color:#444;margin-top:.3rem">Each site gets its own causal memory that improves over time</div>
     </div>
+  </div>
+</section>
+
+<!-- CO2 SAVINGS -->
+<section class="metrics reveal" style="padding-top:0;padding-bottom:4rem">
+  <div class="co2-card">
+    <div class="co2-header">Compute footprint</div>
+    <div class="co2-main">
+      <span class="co2-value" id="co2-kg">0</span>
+      <span class="co2-unit">kg CO&#x2082; saved</span>
+    </div>
+    <div class="co2-subtitle">Equivalent to <span id="co2-km" style="color:var(--accent);font-weight:600;font-family:var(--mono)">0 km</span> not driven</div>
+
+    <div class="co2-road">
+      <div class="co2-road-line"></div>
+      <div class="co2-road-marks"></div>
+      <div class="co2-road-fill" id="co2-road-fill" style="width:0"></div>
+      <div class="co2-dot" id="co2-dot" style="left:0"></div>
+    </div>
+    <div class="co2-endpoints">
+      <span>Stockholm</span>
+      <span>G&ouml;teborg &middot; 470 km</span>
+    </div>
+
+    <div class="co2-quote">&ldquo;The tokens that never reach the GPU never burn energy.&rdquo;</div>
+    <div class="co2-footnote">* ~0.5 kWh/1M tokens (Patterson 2022) &middot; 0.4 kg CO&#x2082;/kWh (EPA 2024) &middot; EU vehicle 120g CO&#x2082;/km</div>
   </div>
 </section>
 
@@ -603,6 +690,59 @@ function countUp(el, target, prefix='', suffix='', duration=1500){
         si.dataset.target = d.sites_profiled;
         si.dataset.suffix = '';
       }
+
+      // Hero detail: chars in/out/saved
+      function fmtChars(n) {
+        if(n >= 1e9) return (n/1e9).toFixed(1) + 'B';
+        if(n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+        if(n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+        return n.toString();
+      }
+      var ci = d.total_chars_in || 0;
+      var co = d.total_chars_out || 0;
+      var cs = ci - co;
+      if(ci > 0) {
+        document.getElementById('hd-chars-in').textContent = fmtChars(ci);
+        document.getElementById('hd-chars-out').textContent = fmtChars(co);
+        document.getElementById('hd-chars-saved').textContent = fmtChars(cs);
+      }
+      if(d.total_queries > 0) {
+        document.getElementById('hd-queries').textContent = d.total_queries.toLocaleString();
+      }
+      // Animate bar
+      var pct = parseFloat(d.token_savings_pct) || 98;
+      setTimeout(function(){
+        var bar = document.getElementById('hero-bar-fill');
+        if(bar) bar.style.width = pct + '%';
+        var kept = document.getElementById('hero-bar-kept');
+        if(kept) kept.textContent = (100 - pct).toFixed(1) + '% kept';
+      }, 500);
+
+      // CO2 calculation:
+      // tokens_saved ÷ 4 chars/token = chars_saved (we have chars directly)
+      // tokens_saved = cs / 4 (rough)
+      // kWh = tokens_saved / 1e6 * 0.5
+      // kg_co2 = kWh * 0.4
+      // km = kg_co2 / 0.12
+      var tokensSaved = cs / 4; // approx tokens from chars
+      var kwhSaved = (tokensSaved / 1e6) * 0.5;
+      var kgCo2 = kwhSaved * 0.4;
+      var km = kgCo2 / 0.12;
+      var routeKm = 470; // Stockholm → Göteborg
+
+      var co2El = document.getElementById('co2-kg');
+      if(co2El) co2El.textContent = kgCo2 < 10 ? kgCo2.toFixed(2) : kgCo2.toFixed(1);
+      var kmEl = document.getElementById('co2-km');
+      if(kmEl) kmEl.textContent = km < 1 ? km.toFixed(2) + ' km' : Math.round(km) + ' km';
+
+      // Animate car + road fill
+      setTimeout(function(){
+        var roadPct = Math.min(km / routeKm * 100, 100);
+        var roadFill = document.getElementById('co2-road-fill');
+        if(roadFill) roadFill.style.width = roadPct + '%';
+        var dot = document.getElementById('co2-dot');
+        if(dot) dot.style.left = 'calc(' + roadPct + '% - 5px)';
+      }, 800);
     }
   } catch(e){}
 })();

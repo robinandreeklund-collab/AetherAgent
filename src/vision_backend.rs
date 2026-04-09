@@ -515,7 +515,10 @@ impl TieredBackend {
                     cdp_result.escalation_reason = Some(format!("Blitz failed: {}", e));
                     return Ok(cdp_result);
                 }
-                Err(format!("Blitz failed and CDP unavailable: {}", e))
+                Err(format!(
+                    "Blitz failed and CDP unavailable: {}. Try setting WGPU_BACKEND=gl MESA_GL_VERSION_OVERRIDE=4.5 LIBGL_ALWAYS_SOFTWARE=1",
+                    e
+                ))
             }
         }
     }

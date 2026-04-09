@@ -643,6 +643,23 @@ fn metadata_penalty(label: &str) -> f32 {
     {
         return 0.5;
     }
+    // Wikipedia citation/footnote pattern: "^ Author (YYYY)..."
+    if label.starts_with("^ ")
+        && (lower.contains("retrieved 20") || lower.contains("archived from"))
+    {
+        return 0.3;
+    }
+    // Search placeholder text (GitHub, etc.)
+    if lower.starts_with("search ") && lower.contains("...") && lower.len() > 40 {
+        return 0.3;
+    }
+    // Cookie consent / privacy boilerplate
+    if lower.contains("we use cookies") && lower.len() > 80 {
+        return 0.2;
+    }
+    if lower.contains("cookie settings") && lower.contains("accept all") {
+        return 0.2;
+    }
     1.0 // No penalty
 }
 
@@ -2745,6 +2762,15 @@ impl FieldCacheInner {
         }
     }
 
+    /// Peek: klona fältet utan att ta bort det ur cache.
+    /// Används av crfr_save för read-only access.
+    fn peek(&self, url_hash: u64) -> Option<ResonanceField> {
+        self.entries
+            .iter()
+            .find(|(h, _, _)| *h == url_hash)
+            .map(|(_, _, field)| field.clone())
+    }
+
     /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
     fn put(&mut self, url_hash: u64, field: ResonanceField) {
         self.entries.retain(|(h, _, _)| *h != url_hash);
@@ -3033,6 +3059,28 @@ pub fn save_field(field: &ResonanceField) {
             }
         }
     }
+}
+
+/// Peek at a cached field without removing it. Returns None if not in cache.
+/// Used by crfr_save to export without destroying the cache entry.
+pub fn peek_field(url: &str) -> Option<ResonanceField> {
+    let url_hash = hash_url(url);
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.peek(url_hash) {
+        return Some(field);
+    }
+    drop(cache);
+
+    // Prova JS-variant
+    let js_hash = hash_url(&format!("{url}#__js_eval"));
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.peek(js_hash)
 }
 
 /// Get cache statistics (entries, capacity).
@@ -3841,6 +3889,45 @@ mod tests {
         assert_eq!(
             reloaded.total_feedback, saved_feedback,
             "Feedback should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_peek_field_does_not_destroy_cache() {
+        // BUG regression: crfr_save used get_or_build_field with empty nodes,
+        // which called cache.take() (destructive) → content_hash mismatch
+        // → field permanently lost from cache.
+        let tree = vec![
+            make_node(1, "heading", "Peek test page", vec![]),
+            make_node(2, "text", "Important content here", vec![]),
+        ];
+        let url = "https://peek-regression-test.test";
+
+        // Bygg och spara fält
+        let (field, _) = get_or_build_field_with_variant(&tree, url, false);
+        save_field(&field);
+
+        // peek_field borde returnera fältet UTAN att förstöra det
+        let peeked = peek_field(url);
+        assert!(peeked.is_some(), "peek_field ska hitta cacheat fält");
+        assert_eq!(
+            peeked.unwrap().content_hash,
+            field.content_hash,
+            "Content hash ska matcha"
+        );
+
+        // Fältet ska fortfarande finnas i cache efter peek
+        let peeked_again = peek_field(url);
+        assert!(
+            peeked_again.is_some(),
+            "peek_field ska INTE förstöra cache-entry (andra anropet)"
+        );
+
+        // get_or_build_field ska fortfarande ge cache hit
+        let (_, hit) = get_or_build_field_with_variant(&tree, url, false);
+        assert!(
+            hit,
+            "get_or_build_field ska ge cache hit efter peek (fältet ska finnas kvar)"
         );
     }
 }

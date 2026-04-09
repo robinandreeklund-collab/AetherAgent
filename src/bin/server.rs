@@ -461,6 +461,58 @@ struct FetchStreamParseRequest {
 }
 
 #[derive(Deserialize)]
+struct AdaptiveCrawlRequest {
+    url: String,
+    goal: String,
+    #[serde(default = "default_max_crawl_pages")]
+    max_pages: usize,
+    #[serde(default = "default_max_crawl_depth")]
+    max_depth: u32,
+    #[serde(default = "default_top_k_links")]
+    top_k_links: usize,
+    #[serde(default = "default_min_gain")]
+    min_gain: f32,
+    #[serde(default = "default_crawl_top_n")]
+    top_n_per_page: u32,
+}
+
+fn default_max_crawl_pages() -> usize {
+    20
+}
+fn default_max_crawl_depth() -> u32 {
+    3
+}
+fn default_top_k_links() -> usize {
+    5
+}
+fn default_min_gain() -> f32 {
+    0.02
+}
+fn default_crawl_top_n() -> u32 {
+    15
+}
+
+#[derive(Deserialize)]
+struct ExtractLinksRequest {
+    #[serde(default)]
+    html: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default = "default_max_links")]
+    max_links: u32,
+    #[serde(default)]
+    filter_navigation: bool,
+    #[serde(default)]
+    include_head_data: bool,
+}
+
+fn default_max_links() -> u32 {
+    50
+}
+
+#[derive(Deserialize)]
 struct DirectiveRequest {
     directives: Vec<serde_json::Value>,
     html: String,
@@ -1105,6 +1157,15 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
         return (axum::http::StatusCode::BAD_REQUEST, axum::Json(err)).into_response();
     }
 
+    // Inline externa scripts om run_js=true (React/Next.js bundles)
+    #[cfg(feature = "fetch")]
+    if run_js && !html.is_empty() {
+        let js_inline = aether_agent::fetch::fetch_and_inline_external_scripts(&html, &url).await;
+        if js_inline.scripts_loaded > 0 {
+            html = js_inline.html;
+        }
+    }
+
     // Pass 1: Statisk CRFR (+ JS eval om run_js=true)
     let goal_clone = goal.clone();
     let url_clone = url.clone();
@@ -1202,9 +1263,25 @@ async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl Int
 
 async fn parse_crfr_multi_handler(Json(req): Json<ParseCrfrMultiRequest>) -> impl IntoResponse {
     let goals_json = serde_json::to_string(&req.goals).unwrap_or_else(|_| "[]".to_string());
-    let html = req.html;
-    let url = req.url;
+    let url = req.url.clone();
     let top_n = req.top_n;
+
+    // Om html är tom men url finns → fetcha
+    let html = if req.html.is_empty() && !req.url.is_empty() {
+        let config = aether_agent::types::FetchConfig::default();
+        match aether_agent::fetch::fetch_page(&req.url, &config).await {
+            Ok(r) => r.body,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+                );
+            }
+        }
+    } else {
+        req.html
+    };
+
     let result = tokio::task::spawn_blocking(move || {
         aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
     })
@@ -2439,7 +2516,7 @@ async fn ws_api_dispatch(
             let goal = params["goal"].as_str().unwrap_or("").to_string();
             let width = params["width"].as_u64().unwrap_or(1280) as u32;
             let height = params["height"].as_u64().unwrap_or(800) as u32;
-            let fast_render = params["fast_render"].as_bool().unwrap_or(true);
+            let fast_render = params["fast_render"].as_bool().unwrap_or(false);
             let xhr_json = params["xhr_captures_json"]
                 .as_str()
                 .unwrap_or("[]")
@@ -2485,6 +2562,122 @@ async fn ws_api_dispatch(
             let url = params["url"].as_str().unwrap_or("").to_string();
             let goal = params["goal"].as_str().unwrap_or("").to_string();
             ws_api_fetch_op(&id, &url, &goal, "stream_parse", &params, &tx).await
+        }
+        // ─── Adaptive Crawl via WS ──────────────────────────
+        "adaptive_crawl" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"crawling","url":url})
+                        .to_string(),
+                )
+                .await;
+            let max_pages = params["max_pages"].as_u64().unwrap_or(20) as usize;
+            let max_depth = params["max_depth"].as_u64().unwrap_or(3) as u32;
+            let top_k = params["top_k_links"].as_u64().unwrap_or(5) as usize;
+            let top_n = params["top_n_per_page"].as_u64().unwrap_or(10) as u32;
+            let config = aether_agent::adaptive::AdaptiveConfig {
+                max_pages,
+                max_depth,
+                top_k_links: top_k,
+                top_n_per_page: top_n,
+                ..Default::default()
+            };
+            let result = aether_agent::adaptive::adaptive_crawl(&url, &goal, config).await;
+            serde_json::to_value(&result).map_err(|e| e.to_string())
+        }
+        // ─── Extract Links via WS ────────────────────────────
+        "fetch_extract_links" | "extract_links" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"fetching","url":url})
+                        .to_string(),
+                )
+                .await;
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(fetch_result) => {
+                    let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"extracting","bytes_fetched":fetch_result.body.len()}).to_string()).await;
+                    let max_links = params["max_links"].as_u64().unwrap_or(50) as u32;
+                    let json = aether_agent::extract_links(
+                        &fetch_result.body,
+                        &goal,
+                        &fetch_result.final_url,
+                        max_links,
+                    );
+                    serde_json::from_str(&json).map_err(|e| e.to_string())
+                }
+                Err(e) => Err(format!("Fetch: {e}")),
+            }
+        }
+        // ─── Search via WS ───────────────────────────────────
+        "fetch_search" | "search" => {
+            let query = params["query"].as_str().unwrap_or("").to_string();
+            let goal = params["goal"].as_str().unwrap_or(&query).to_string();
+            let _ = tx.send(serde_json::json!({"id": id, "type":"progress","stage":"searching","query":query}).to_string()).await;
+            let top_n = params["top_n"].as_u64().unwrap_or(8) as usize;
+            let ddg_url = aether_agent::build_search_url(&query);
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&ddg_url, &config).await {
+                Ok(ddg_html) => {
+                    let _ = tx
+                        .send(
+                            serde_json::json!({"id": id, "type":"progress","stage":"parsing"})
+                                .to_string(),
+                        )
+                        .await;
+                    let search_json =
+                        aether_agent::search_from_html(&query, &ddg_html.body, top_n, &goal);
+                    serde_json::from_str(&search_json).map_err(|e| e.to_string())
+                }
+                Err(e) => Err(format!("Search fetch: {e}")),
+            }
+        }
+        // ─── Render via WS ───────────────────────────────────
+        "fetch_render" | "render" => {
+            let url = params["url"].as_str().unwrap_or("").to_string();
+            let _ = tx
+                .send(
+                    serde_json::json!({"id": id, "type":"progress","stage":"fetching","url":url})
+                        .to_string(),
+                )
+                .await;
+            let w = params["width"].as_u64().unwrap_or(1280) as u32;
+            let h = params["height"].as_u64().unwrap_or(800) as u32;
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(fetch_result) => {
+                    let _ = tx
+                        .send(
+                            serde_json::json!({"id": id, "type":"progress","stage":"rendering"})
+                                .to_string(),
+                        )
+                        .await;
+                    let body = fetch_result.body;
+                    let final_url = fetch_result.final_url;
+                    match tokio::task::spawn_blocking(move || {
+                        aether_agent::screenshot_with_tier(&body, &final_url, w, h, false)
+                    })
+                    .await
+                    {
+                        Ok(Ok((png_bytes, tier))) => {
+                            use base64::Engine;
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                            Ok(serde_json::json!({
+                                "png_base64": b64,
+                                "png_size_bytes": png_bytes.len(),
+                                "tier_used": format!("{:?}", tier),
+                            }))
+                        }
+                        Ok(Err(e)) => Err(format!("Render failed: {e}")),
+                        Err(e) => Err(format!("Render task: {e}")),
+                    }
+                }
+                Err(e) => Err(format!("Fetch: {e}")),
+            }
         }
         other => Err(format!("Unknown method: {other}")),
     };
@@ -2574,19 +2767,64 @@ async fn ws_api_fetch_op(
             let top_n = params_clone["top_n"].as_u64().unwrap_or(10) as u32;
             let threshold = params_clone["threshold"].as_f64().unwrap_or(0.0) as f32;
             let max_nodes = params_clone["max_nodes"].as_u64().unwrap_or(50) as u32;
-            tokio::task::spawn_blocking(move || {
-                let r = aether_agent::stream_parse_adaptive(
+            let tx_stream = tx.clone();
+            let id_stream = id.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                aether_agent::stream_parse_adaptive(
                     &body,
                     &goal_owned,
                     &final_url,
                     top_n,
                     threshold,
                     max_nodes,
-                );
-                serde_json::from_str(&r).unwrap_or(serde_json::json!({"raw": r}))
+                )
             })
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+
+            // Parse result and stream nodes one by one
+            let parsed: serde_json::Value =
+                serde_json::from_str(&result).unwrap_or(serde_json::json!({"nodes":[]}));
+            let nodes = parsed["nodes"].as_array().cloned().unwrap_or_default();
+            let total = parsed["total_dom_nodes"].as_u64().unwrap_or(0);
+            let savings = parsed["token_savings_ratio"].as_f64().unwrap_or(0.0);
+
+            // Send header
+            let _ = tx_stream
+                .send(
+                    serde_json::json!({
+                        "id": id_stream, "type": "stream_start",
+                        "total_dom_nodes": total,
+                        "total_nodes": nodes.len(),
+                        "token_savings_ratio": savings,
+                    })
+                    .to_string(),
+                )
+                .await;
+
+            // Stream each node individually
+            for (i, node) in nodes.iter().enumerate() {
+                let _ = tx_stream
+                    .send(
+                        serde_json::json!({
+                            "id": id_stream, "type": "stream_node",
+                            "index": i,
+                            "node": node,
+                        })
+                        .to_string(),
+                    )
+                    .await;
+                // Small delay for visual streaming effect (10ms per node)
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+
+            // Send completion
+            Ok(serde_json::json!({
+                "type": "stream_complete",
+                "total_nodes": nodes.len(),
+                "total_dom_nodes": total,
+                "token_savings_ratio": savings,
+            }))
         }
         _ => Err(format!("Unknown fetch op: {op}")),
     }
@@ -3155,6 +3393,95 @@ async fn fetch_stream_parse(Json(req): Json<FetchStreamParseRequest>) -> impl In
     (StatusCode::OK, result)
 }
 
+async fn adaptive_crawl_handler(Json(req): Json<AdaptiveCrawlRequest>) -> impl IntoResponse {
+    let config = aether_agent::adaptive::AdaptiveConfig {
+        max_pages: req.max_pages,
+        max_depth: req.max_depth,
+        top_k_links: req.top_k_links,
+        min_gain_threshold: req.min_gain,
+        top_n_per_page: req.top_n_per_page,
+        ..Default::default()
+    };
+
+    let result = aether_agent::adaptive::adaptive_crawl(&req.url, &req.goal, config).await;
+    let json = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
+    (StatusCode::OK, json)
+}
+
+async fn extract_links_handler(Json(req): Json<ExtractLinksRequest>) -> impl IntoResponse {
+    let html = req.html.as_deref().unwrap_or("");
+    let url = req.url.as_deref().unwrap_or("");
+    let goal = req.goal.as_deref().unwrap_or("");
+    let json = aether_agent::extract_links(html, goal, url, req.max_links);
+    (StatusCode::OK, json)
+}
+
+async fn fetch_extract_links_handler(Json(req): Json<ExtractLinksRequest>) -> impl IntoResponse {
+    let url = req.url.as_deref().unwrap_or("");
+    if url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"url required"}"#.to_string(),
+        );
+    }
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            );
+        }
+    };
+
+    let goal_str = req.goal.as_deref().unwrap_or("").to_string();
+    let final_url = fetch_result.final_url.clone();
+    let body = fetch_result.body;
+    let max_links = req.max_links as usize;
+    let filter_nav = req.filter_navigation;
+    let include_head = req.include_head_data;
+
+    // Sync: parse + extract links
+    let link_config = aether_agent::link_extract::LinkExtractionConfig {
+        goal: if goal_str.is_empty() {
+            None
+        } else {
+            Some(goal_str.clone())
+        },
+        max_links,
+        include_context: true,
+        include_structural_role: true,
+        filter_navigation: filter_nav,
+        min_relevance: 0.0,
+        include_head_data: include_head,
+        head_concurrency: 8,
+    };
+
+    let tree = aether_agent::build_tree_for_crfr(&body, &goal_str, &final_url, false);
+    let mut result = aether_agent::link_extract::extract_links_from_tree(
+        &tree.nodes,
+        &final_url,
+        &link_config,
+        None,
+    );
+
+    // Async: HEAD-fetch metadata om begärt
+    if include_head {
+        let goal_words: Vec<String> = goal_str
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 2)
+            .map(String::from)
+            .collect();
+        aether_agent::link_extract::enrich_links_with_head(&mut result.links, &goal_words, 8).await;
+    }
+
+    let json = serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
+    (StatusCode::OK, json)
+}
+
 async fn directive_handler(Json(req): Json<DirectiveRequest>) -> impl IntoResponse {
     let config_json = serde_json::json!({
         "top_n": req.top_n,
@@ -3199,7 +3526,7 @@ fn default_height() -> u32 {
     800
 }
 fn default_fast_render() -> bool {
-    true
+    false
 }
 
 async fn tiered_screenshot_handler(Json(req): Json<TieredScreenshotRequest>) -> impl IntoResponse {
@@ -5488,9 +5815,17 @@ async fn mcp_dispatch_tool(
                 })
                 .unwrap_or_default();
             let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
-            let html = args["html"].as_str().unwrap_or("").to_string();
+            let mut html = args["html"].as_str().unwrap_or("").to_string();
             let url = args["url"].as_str().unwrap_or("").to_string();
             let top_n = args["top_n"].as_u64().unwrap_or(20) as u32;
+            // Om html tom men url finns → fetcha
+            if html.is_empty() && !url.is_empty() {
+                let config = aether_agent::types::FetchConfig::default();
+                match aether_agent::fetch::fetch_page(&url, &config).await {
+                    Ok(r) => html = r.body,
+                    Err(e) => return text_ok(format!(r#"{{"error":"fetch failed: {e}"}}"#)),
+                }
+            }
             let result = tokio::task::spawn_blocking(move || {
                 aether_agent::parse_crfr_multi(&html, &goals_json, &url, top_n)
             })
@@ -6538,6 +6873,13 @@ fn build_router(state: AppState) -> Router {
         // Fas 16: Stream Parse
         .route("/api/stream-parse", post(stream_parse_handler))
         .route("/api/fetch/stream-parse", post(fetch_stream_parse))
+        // Fas 19: Adaptive Crawl + Link Extraction
+        .route("/api/adaptive-crawl", post(adaptive_crawl_handler))
+        .route("/api/extract-links", post(extract_links_handler))
+        .route(
+            "/api/fetch/extract-links",
+            post(fetch_extract_links_handler),
+        )
         .route("/api/directive", post(directive_handler))
         .route("/ws/stream", get(ws_stream_handler))
         .route("/ws/api", get(ws_api_handler))

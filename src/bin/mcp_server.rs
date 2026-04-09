@@ -120,6 +120,21 @@ fn default_json_format() -> String {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ParseCrfrMultiParams {
+    /// URL to fetch (provide url or html)
+    #[serde(default)]
+    url: Option<String>,
+    /// Raw HTML (provide url or html)
+    #[serde(default)]
+    html: Option<String>,
+    /// Array of goal variants to try (synonyms, translations)
+    goals: Vec<String>,
+    /// Max nodes to return (default: 20)
+    #[serde(default = "default_crfr_top_n")]
+    top_n: u32,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct CrfrFeedbackParams {
     /// The page URL (must match a previous parse_crfr call)
     url: String,
@@ -484,6 +499,42 @@ struct FetchStreamParseParams {
     max_nodes: Option<u32>,
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct AdaptiveCrawlParams {
+    /// Start URL to crawl from
+    url: String,
+    /// The agent's goal (drives relevance scoring and stopping)
+    goal: String,
+    /// Max pages to crawl (default: 20)
+    max_pages: Option<usize>,
+    /// Max link depth from start page (default: 3)
+    max_depth: Option<u32>,
+    /// Top-K links to follow per page (default: 5)
+    top_k_links: Option<usize>,
+    /// HDC saturation threshold — lower = crawl more (default: 0.02)
+    min_gain: Option<f32>,
+    /// Top-N content nodes per page (default: 15)
+    top_n_per_page: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct ExtractLinksParams {
+    /// Raw HTML string (provide html OR url)
+    html: Option<String>,
+    /// URL to fetch (provide html OR url)
+    url: Option<String>,
+    /// Goal for relevance scoring (optional)
+    goal: Option<String>,
+    /// Max links to return (default: 50)
+    max_links: Option<usize>,
+    /// Filter out navigation links
+    filter_navigation: Option<bool>,
+    /// Minimum relevance score (default: 0.0 = all)
+    min_relevance: Option<f32>,
+    /// Fetch <head> from each link URL to get title + meta description (slower but richer)
+    include_head_data: Option<bool>,
+}
+
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 struct AetherMcpServer {
@@ -637,6 +688,28 @@ impl AetherMcpServer {
                 broad,
             )
         }
+    }
+
+    #[tool(
+        name = "parse_crfr_multi",
+        description = "Run multiple goal variants through CRFR and merge results. Uses sub-ms cache so trying 3-5 synonyms/translations costs ~2ms total.\n\nUseful when: the answer might use different terms than the query (e.g. 'price' vs 'kr', 'cost', 'belopp').\n\nPass goals as array of strings. Each goal is run independently, results merged (highest amplitude per node wins).\n\nProvide EITHER url (server fetches for you) OR html (raw HTML string)."
+    )]
+    fn parse_crfr_multi(&self, Parameters(params): Parameters<ParseCrfrMultiParams>) -> String {
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+
+        // Om html tom + url finns → stub för async fetch i call_tool override
+        if html.is_empty() && !url.is_empty() {
+            return serde_json::json!({
+                "action": "fetch_parse_crfr_multi_pending",
+                "url": url,
+                "goals": params.goals,
+            })
+            .to_string();
+        }
+
+        let goals_json = serde_json::to_string(&params.goals).unwrap_or_else(|_| "[]".to_string());
+        aether_agent::parse_crfr_multi(html, &goals_json, url, params.top_n)
     }
 
     #[tool(
@@ -1055,6 +1128,43 @@ impl AetherMcpServer {
         })
         .to_string()
     }
+
+    #[tool(
+        name = "adaptive_crawl",
+        description = "MULTI-PAGE ADAPTIVE CRAWL — intelligently crawl multiple pages starting from a URL.\n\nUses Contextual Thompson Sampling for link selection and HDC Bundle Saturation for stopping.\nAutomatically follows the most relevant links and stops when enough information is gathered.\n\nStops when: HDC saturation detected (diminishing returns), all goal terms found (term coverage), 3 consecutive low-gain pages (satisficing), or max_pages reached.\n\nEach page is parsed with CRFR and CRFR feedback is sent automatically to improve future crawls on the same domain.\n\nReturns: pages with top nodes, stop reason, coverage, and HDC saturation curve.\n\nNOTE: This is an async operation — the server handles the fetch loop."
+    )]
+    fn adaptive_crawl(&self, Parameters(params): Parameters<AdaptiveCrawlParams>) -> String {
+        // Stub — async crawl hanteras i call_tool override
+        serde_json::json!({
+            "action": "adaptive_crawl_pending",
+            "url": params.url,
+            "goal": params.goal,
+            "max_pages": params.max_pages.unwrap_or(20),
+        })
+        .to_string()
+    }
+
+    #[tool(
+        name = "extract_links",
+        description = "Extract enriched links from a page with relevance scoring, HDC novelty, and structural role classification.\n\nReturns links sorted by expected_gain with metadata: anchor text, absolute URL, relevance score (BM25 vs goal), novelty score (HDC distance from accumulated knowledge), structural role (navigation/content/footer/card), and context snippet.\n\nUse WITHOUT goal for a full link inventory. Use WITH goal to find the most relevant links to follow."
+    )]
+    fn extract_links(&self, Parameters(params): Parameters<ExtractLinksParams>) -> String {
+        let html = params.html.as_deref().unwrap_or("");
+        let url = params.url.as_deref().unwrap_or("");
+        let goal = params.goal.as_deref().unwrap_or("");
+
+        if html.is_empty() && !url.is_empty() {
+            // URL-input → async fetch krävs
+            return serde_json::json!({
+                "action": "fetch_extract_links_pending",
+                "url": url,
+                "goal": goal,
+            })
+            .to_string();
+        }
+
+        aether_agent::extract_links(html, goal, url, params.max_links.unwrap_or(50) as u32)
+    }
 }
 
 /// Hämta URL + rendera till PNG med Blitz (ren Rust, MCP-version)
@@ -1436,6 +1546,15 @@ async fn handle_parse_crfr(
     let mut current_url = final_url;
 
     let result = if run_js {
+        // Inline externa <script src="..."> INNAN JS-eval
+        // (Anthropic, Next.js etc levererar React-bundles som externa filer)
+        let js_inline =
+            aether_agent::fetch::fetch_and_inline_external_scripts(&current_html, &current_url)
+                .await;
+        if js_inline.scripts_loaded > 0 {
+            current_html = js_inline.html;
+        }
+
         let api_responses = aether_agent::prefetch_api_urls_with_auth(
             &current_html,
             &current_url,
@@ -1797,6 +1916,200 @@ async fn handle_fetch_stream_parse(
     });
 
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result.to_string())])
+}
+
+/// Hanterar adaptive_crawl: intelligent multi-page crawling
+async fn handle_adaptive_crawl(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "adaptive_crawl: arguments required. Expected: {url, goal, max_pages?, max_depth?}"
+                    .to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let max_pages = args.get("max_pages").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+    let top_k = args
+        .get("top_k_links")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5) as usize;
+    let min_gain = args
+        .get("min_gain")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.02) as f32;
+    let top_n = args
+        .get("top_n_per_page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(15) as u32;
+
+    if url.is_empty() || goal.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url and goal are required"}"#.to_string(),
+        )]);
+    }
+
+    let config = aether_agent::adaptive::AdaptiveConfig {
+        max_pages,
+        max_depth,
+        top_k_links: top_k,
+        min_gain_threshold: min_gain,
+        top_n_per_page: top_n,
+        ..Default::default()
+    };
+
+    let result = aether_agent::adaptive::adaptive_crawl(url, goal, config).await;
+    let json = serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(json)])
+}
+
+/// Hanterar extract_links med URL-fetch
+async fn handle_fetch_extract_links(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "extract_links: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let max_links = args.get("max_links").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url is required"}"#.to_string(),
+        )]);
+    }
+
+    // Fetch
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let include_head = args
+        .get("include_head_data")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let goal_str = goal.to_string();
+    let body = fetch_result.body;
+    let final_url = fetch_result.final_url;
+
+    // Sync: parse + extract
+    let link_config = aether_agent::link_extract::LinkExtractionConfig {
+        goal: if goal_str.is_empty() {
+            None
+        } else {
+            Some(goal_str.clone())
+        },
+        max_links: max_links as usize,
+        include_context: true,
+        include_structural_role: true,
+        filter_navigation: false,
+        min_relevance: 0.0,
+        include_head_data: include_head,
+        head_concurrency: 8,
+    };
+
+    let tree = aether_agent::build_tree_for_crfr(&body, &goal_str, &final_url, false);
+    let mut result = aether_agent::link_extract::extract_links_from_tree(
+        &tree.nodes,
+        &final_url,
+        &link_config,
+        None,
+    );
+
+    // Async: HEAD-fetch om begärt
+    if include_head {
+        let goal_words: Vec<String> = goal_str
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| s.len() > 2)
+            .map(String::from)
+            .collect();
+        aether_agent::link_extract::enrich_links_with_head(&mut result.links, &goal_words, 8).await;
+    }
+
+    let json = serde_json::to_string(&result).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(json)])
+}
+
+/// Hanterar parse_crfr_multi med URL-fetch
+async fn handle_fetch_parse_crfr_multi(
+    args: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> rmcp::model::CallToolResult {
+    let args = match args {
+        Some(a) => a,
+        None => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                "parse_crfr_multi: arguments required".to_string(),
+            )]);
+        }
+    };
+
+    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    let goals: Vec<String> = args
+        .get("goals")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+
+    if url.is_empty() {
+        return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+            r#"{"error": "url is required when html is not provided"}"#.to_string(),
+        )]);
+    }
+
+    // Fetch
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(format!(
+                r#"{{"error": "fetch failed: {e}"}}"#
+            ))]);
+        }
+    };
+
+    let goals_json = serde_json::to_string(&goals).unwrap_or_else(|_| "[]".to_string());
+    let html = fetch_result.body;
+    let final_url = fetch_result.final_url;
+    let json = tokio::task::spawn_blocking(move || {
+        aether_agent::parse_crfr_multi(&html, &goals_json, &final_url, top_n)
+    })
+    .await
+    .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(json)])
 }
 
 /// Hanterar fetch_vision: hämta URL, rendera med tiered backend, kör vision, returnera bilder
@@ -2234,6 +2547,58 @@ impl ServerHandler for AetherMcpServer {
                 let args = request.arguments.as_ref();
                 let result = handle_fetch_stream_parse(args).await;
                 Ok(result)
+            }
+            "adaptive_crawl" => {
+                let args = request.arguments.as_ref();
+                let result = handle_adaptive_crawl(args).await;
+                Ok(result)
+            }
+            "extract_links" => {
+                // Kolla om URL behöver fetchas
+                let args = request.arguments.as_ref();
+                let needs_fetch = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|u| !u.is_empty())
+                    && args
+                        .and_then(|a| a.get("html"))
+                        .and_then(|v| v.as_str())
+                        .map_or(true, |h| h.is_empty());
+                if needs_fetch {
+                    let result = handle_fetch_extract_links(args).await;
+                    Ok(result)
+                } else {
+                    // HTML tillhandahållen → synkron hantering via router
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
+            }
+            "parse_crfr_multi" => {
+                // Kolla om URL behöver fetchas
+                let args = request.arguments.as_ref();
+                let needs_fetch = args
+                    .and_then(|a| a.get("url"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|u| !u.is_empty())
+                    && args
+                        .and_then(|a| a.get("html"))
+                        .and_then(|v| v.as_str())
+                        .map_or(true, |h| h.is_empty());
+                if needs_fetch {
+                    let result = handle_fetch_parse_crfr_multi(args).await;
+                    Ok(result)
+                } else {
+                    let ctx =
+                        rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+                    self.tool_router
+                        .call(ctx)
+                        .await
+                        .map_err(|e| rmcp::ErrorData::new(e.code, e.message, e.data))
+                }
             }
             // Alla andra verktyg: delegera till router
             _ => {

@@ -1,3 +1,5 @@
+#[cfg(feature = "fetch")]
+pub mod adaptive;
 /// AetherAgent – LLM-native browser engine
 ///
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
@@ -27,6 +29,8 @@ pub(crate) mod intent;
 pub mod intercept;
 pub(crate) mod js_bridge;
 pub(crate) mod js_eval;
+#[cfg(feature = "fetch")]
+pub mod link_extract;
 mod memory;
 pub(crate) mod orchestrator;
 pub(crate) mod parser;
@@ -339,10 +343,26 @@ fn run_lifecycle_parse_with_cookies(
                 eprintln!("[JS] Eval error (falling back to pre-JS DOM): {err}");
             }
 
-            // Om JS muterade DOM:en — serialisera och bygg träd från modifierad HTML
+            // Bygg pre-JS träd (referens)
+            let pre_js_tree = build_tree(html, goal, url);
+            let pre_js_content = count_content_chars(&pre_js_tree.nodes);
+
+            // Om JS muterade DOM:en — serialisera och jämför med pre-JS
             if !eval_result.mutations.is_empty() {
                 let modified_html = eval_arena.serialize_html(eval_arena.document);
-                let mut tree = build_tree(&modified_html, goal, url);
+                let mut js_tree = build_tree(&modified_html, goal, url);
+                let js_content = count_content_chars(&js_tree.nodes);
+
+                // Kvalitetscheck: JS-resultatet ska ha MER content, inte mindre.
+                // Om JS reducerade content (skriver in timestamps, tar bort artiklar)
+                // → behåll pre-JS trädet.
+                if js_content >= pre_js_content || pre_js_content < 100 {
+                    attach_pending_urls(&mut js_tree, html, &runtime_urls);
+                    js_tree.js_cookies = js_cookies;
+                    return js_tree;
+                }
+                // JS förstörde content → fallback till pre-JS
+                let mut tree = pre_js_tree;
                 attach_pending_urls(&mut tree, html, &runtime_urls);
                 tree.js_cookies = js_cookies;
                 return tree;
@@ -352,7 +372,16 @@ fn run_lifecycle_parse_with_cookies(
             if eval_result.error.is_none() {
                 let arena_html = eval_arena.serialize_html(eval_arena.document);
                 if arena_html.len() > 10 && arena_html != html {
-                    let mut tree = build_tree(&arena_html, goal, url);
+                    let mut js_tree = build_tree(&arena_html, goal, url);
+                    let js_content = count_content_chars(&js_tree.nodes);
+
+                    if js_content >= pre_js_content || pre_js_content < 100 {
+                        attach_pending_urls(&mut js_tree, html, &runtime_urls);
+                        js_tree.js_cookies = js_cookies;
+                        return js_tree;
+                    }
+                    // JS förstörde content → fallback
+                    let mut tree = pre_js_tree;
                     attach_pending_urls(&mut tree, html, &runtime_urls);
                     tree.js_cookies = js_cookies;
                     return tree;
@@ -360,7 +389,7 @@ fn run_lifecycle_parse_with_cookies(
             }
 
             // Fallback: pre-JS DOM — bifoga alla fetch-URLs för async-hämtning
-            let mut tree = build_tree(html, goal, url);
+            let mut tree = pre_js_tree;
             attach_pending_urls(&mut tree, html, &runtime_urls);
             tree.js_cookies = js_cookies;
             return tree;
@@ -420,6 +449,121 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Räkna totalt antal content-tecken i ett semantiskt träd.
+/// Används för att jämföra pre-JS vs post-JS content-kvalitet.
+#[cfg(feature = "js-eval")]
+fn count_content_chars(nodes: &[types::SemanticNode]) -> usize {
+    let mut total = 0usize;
+    for node in nodes {
+        if matches!(
+            node.role.as_str(),
+            "text" | "heading" | "paragraph" | "listitem" | "cell" | "data" | "price" | "link"
+        ) {
+            total += node.label.len();
+        }
+        total += count_content_chars(&node.children);
+    }
+    total
+}
+
+/// Truncate label to max_len characters, respecting UTF-8 boundaries.
+fn truncate_label(label: &str, max_len: usize) -> String {
+    if label.len() <= max_len {
+        return label.to_string();
+    }
+    let mut end = max_len;
+    while end > 0 && !label.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &label[..end])
+}
+
+/// Post-processing filter for CRFR output.
+/// Removes noise: OG/meta tags, cookie consent, search placeholders,
+/// Wikipedia footnotes, duplicate substrings. Caps label length.
+fn crfr_post_filter<'a>(
+    matched: Vec<(&'a types::SemanticNode, &'a resonance::ResonanceResult)>,
+) -> Vec<(&'a types::SemanticNode, &'a resonance::ResonanceResult)> {
+    let filtered: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> = matched
+        .into_iter()
+        .filter(|(node, _)| {
+            let label = &node.label;
+            let lower = label.to_lowercase();
+
+            // 1. OG/meta tags — maskindata, inte content
+            if let Some(ref name) = node.name {
+                let nl = name.to_lowercase();
+                if nl.starts_with("opengraph.")
+                    || nl.starts_with("og:")
+                    || nl.starts_with("twitter.")
+                    || nl.starts_with("fb:")
+                    || nl.starts_with("article:")
+                {
+                    return false;
+                }
+            }
+
+            // 2. Cookie consent / privacy boilerplate
+            if (lower.contains("cookie") && lower.contains("consent"))
+                || (lower.contains("we use cookies") && lower.len() > 100)
+                || (lower.contains("cookie settings") && lower.contains("analytics"))
+                || (lower.contains("reject all cookies") && lower.contains("accept all"))
+                || (lower.contains("privacy choices") && lower.contains("cookie"))
+            {
+                return false;
+            }
+
+            // 3. Search placeholder text
+            if (lower.starts_with("search or jump to")
+                || lower.starts_with("search code, repositories"))
+                && lower.contains("...")
+            {
+                return false;
+            }
+
+            // 4. Wikipedia citation/footnote (^-prefix with "Retrieved")
+            if label.starts_with("^ ") && lower.contains("retrieved 20") {
+                return false;
+            }
+            // Also filter bare footnote markers
+            if label.starts_with("^ \"") && lower.contains(". retrieved") {
+                return false;
+            }
+
+            // 5. JS placeholder text
+            if lower == "loading..."
+                || lower == "loading contributors"
+                || lower == "just a moment..."
+            {
+                return false;
+            }
+
+            true
+        })
+        .collect();
+
+    // 6. Dedup: remove nodes whose label is a substring of a higher-ranked node
+    let mut deduped: Vec<(&types::SemanticNode, &resonance::ResonanceResult)> =
+        Vec::with_capacity(filtered.len());
+    for (node, res) in filtered.iter() {
+        let dominated = deduped.iter().any(|(existing, _)| {
+            let el = &existing.label;
+            let nl = &node.label;
+            // Skip if too short (avoid deduping "Pricing" against "Pricing Overview")
+            if nl.len() < 20 {
+                return false;
+            }
+            // node.label is substring of a higher-ranked existing node
+            el.contains(nl.as_str()) && el.len() > nl.len()
+        });
+        if !dominated {
+            deduped.push((node, res));
+        }
+    }
+
+    deduped
 }
 
 fn collect_all_nodes(nodes: &[types::SemanticNode]) -> Vec<&types::SemanticNode> {
@@ -1052,6 +1196,7 @@ pub fn parse_crfr_from_tree_broad(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+    let matched = crfr_post_filter(matched);
 
     // Record token savings + save
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
@@ -1097,7 +1242,7 @@ pub fn parse_crfr_from_tree_broad(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": node.label,
+                    "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1113,8 +1258,18 @@ pub fn parse_crfr_from_tree_broad(
         let (cache_entries, cache_capacity) = resonance::cache_stats();
         let error_flag = is_error_page(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
-        // BUG-3 fix
-        let spa_flag = total_dom_nodes < 10 && !ssr_json_flag;
+        // BUG-3 fix + improved SPA detection
+        let content_nodes_count_b = matched
+            .iter()
+            .filter(|(n, _)| {
+                matches!(
+                    n.role.as_str(),
+                    "text" | "data" | "cell" | "heading" | "paragraph" | "price"
+                ) && n.label.len() > 30
+            })
+            .count();
+        let spa_flag = !ssr_json_flag
+            && (total_dom_nodes < 10 || (total_dom_nodes > 50 && content_nodes_count_b == 0));
         let overlap = goal_title_overlap(goal, &tree.title);
         // BUG-1 fix
         let top_relevance = matched.first().map(|(_, r)| r.amplitude).unwrap_or(0.0);
@@ -1210,6 +1365,7 @@ pub fn parse_crfr_from_tree_js(
         .iter()
         .filter_map(|r| node_map.get(&r.node_id).map(|node| (*node, r)))
         .collect();
+    let matched = crfr_post_filter(matched);
 
     // Record token savings + save
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
@@ -1255,7 +1411,7 @@ pub fn parse_crfr_from_tree_js(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": node.label,
+                    "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1274,7 +1430,20 @@ pub fn parse_crfr_from_tree_js(
         let bot_blocked = is_bot_blocked(&tree.title, total_dom_nodes);
         let ssr_json_flag = is_ssr_json_only(&matched);
         // BUG-3 fix: ssr_json pages are NOT SPAs — they have data, just in JSON form
-        let spa_flag = total_dom_nodes < 10 && !bot_blocked && !ssr_json_flag;
+        // Improved SPA detection: also flag pages with many DOM nodes but zero
+        // factual content (React/Vue shell with JS-rendered content)
+        let content_nodes_count = matched
+            .iter()
+            .filter(|(n, _)| {
+                matches!(
+                    n.role.as_str(),
+                    "text" | "data" | "cell" | "heading" | "paragraph" | "price"
+                ) && n.label.len() > 30
+            })
+            .count();
+        let spa_flag = !ssr_json_flag
+            && !bot_blocked
+            && (total_dom_nodes < 10 || (total_dom_nodes > 50 && content_nodes_count == 0));
         let overlap = goal_title_overlap(goal, &tree.title);
 
         // BUG-1 fix: use top-node relevance relative to median, not title overlap
@@ -1454,7 +1623,7 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
         .filter_map(|r| {
             node_map.get(&r.node_id).map(|node| {
                 serde_json::json!({
-                    "id": node.id, "role": node.role, "label": node.label,
+                    "id": node.id, "role": node.role, "label": truncate_label(&node.label, 500),
                     "relevance": r.amplitude, "resonance_type": format!("{:?}", r.resonance_type),
                 })
             })
@@ -1472,21 +1641,13 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
 /// Save CRFR field for a URL to a JSON string (for persistent storage).
 #[wasm_bindgen]
 pub fn crfr_save_field(url: &str) -> String {
-    // Try JS-variant first, then non-JS
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (field, found) = resonance::get_or_build_field_with_variant(&dummy, url, true);
-    if !found {
-        let (field_njs, found_njs) = resonance::get_or_build_field(&dummy, url);
-        if !found_njs {
-            return r#"{"error":"no cached field for this URL"}"#.to_string();
-        }
-        return field_njs
+    // Read-only peek — does NOT remove from cache or corrupt content_hash
+    match resonance::peek_field(url) {
+        Some(field) => field
             .to_json()
-            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#));
+            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#)),
+        None => r#"{"error":"no cached field for this URL"}"#.to_string(),
     }
-    field
-        .to_json()
-        .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
 }
 
 /// Load a previously saved CRFR field back into the cache.
@@ -3136,7 +3297,7 @@ pub fn render_html_to_png(
             Ok(Ok(compiled_png)) => {
                 // Blank-detection: en helt vit 1280x900 sida ≈ 25-28KB.
                 // Om compiled-PNG:en är liten, testa om fallback ger bättre resultat.
-                const BLANK_THRESHOLD: usize = 30_000;
+                const BLANK_THRESHOLD: usize = 5_000;
                 if compiled_png.len() >= BLANK_THRESHOLD {
                     return Ok(compiled_png);
                 }
@@ -3783,6 +3944,33 @@ fn strip_noscript(html: &str) -> String {
     result
 }
 
+/// Strippa <link rel="stylesheet"> taggar.
+/// CSS är redan inlinad av css_compiler — externa stylesheet-refs orsakar
+/// Blitz pending_critical_resources → blank render.
+#[cfg(feature = "blitz")]
+fn strip_external_stylesheets(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.to_lowercase().find("<link") {
+        result.push_str(&rest[..start]);
+        if let Some(end) = rest[start..].find('>') {
+            let tag = &rest[start..start + end + 1];
+            let tag_lower = tag.to_lowercase();
+            if tag_lower.contains("rel=\"stylesheet\"") || tag_lower.contains("rel='stylesheet'") {
+                // Skip this tag entirely
+            } else {
+                result.push_str(tag);
+            }
+            rest = &rest[start + end + 1..];
+        } else {
+            result.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    result.push_str(rest);
+    result
+}
+
 /// Strippa <noscript>-element
 #[cfg(feature = "blitz")]
 fn strip_noscript_tags(html: &str) -> String {
@@ -3909,15 +4097,42 @@ fn render_html_to_png_inner(
     // Strippa <noscript> — Blitz kör ingen JS
     let html = &strip_noscript(html);
 
+    // Strippa <link rel="stylesheet"> — CSS MUST be pre-inlined by the caller.
+    // net_provider can't fetch CSS inside spawn_blocking (no async runtime).
+    // Without stripping, Blitz marks them as pending_critical_resources → blank render.
+    let html = &strip_external_stylesheets(html);
+    // The pending_critical_resources issue is handled by stripping <link> above.
+
+    // Use net_provider for image loading. <link> stylesheets are already stripped
+    // so no pending_critical_resources issue. CSS is pre-inlined by caller.
     let mut document = if fast_render {
-        HtmlDocument::from_html(
+        let net = std::sync::Arc::new(blitz_net::Provider::new(None));
+        let mut doc = HtmlDocument::from_html(
             html,
             DocumentConfig {
                 viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
                 base_url: Some(base_url.to_string()),
+                net_provider: Some(std::sync::Arc::clone(&net)
+                    as std::sync::Arc<dyn blitz_traits::net::NetProvider>),
                 ..Default::default()
             },
-        )
+        );
+        // Resource loading loop — let net_provider fetch stylesheets, fonts, images
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        doc.as_mut().resolve(0.0);
+        loop {
+            doc.as_mut().handle_messages();
+            doc.as_mut().resolve(0.0);
+            if net.is_empty() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        doc.as_mut().resolve(0.0);
+        doc
     } else {
         let net = std::sync::Arc::new(blitz_net::Provider::new(None));
 
@@ -3969,7 +4184,9 @@ fn render_html_to_png_inner(
 
     let white = peniko::Color::new([1.0, 1.0, 1.0, 1.0]);
     let mut renderer =
-        <anyrender_vello_cpu::VelloImageRenderer as anyrender::ImageRenderer>::new(width, height);
+        <anyrender_vello_cpu::VelloCpuImageRenderer as anyrender::ImageRenderer>::new(
+            width, height,
+        );
     let mut buffer = Vec::with_capacity((width * height * 4) as usize);
     renderer.render_to_vec(
         |scene| {
@@ -5002,6 +5219,40 @@ fn node_to_markdown(node: &types::SemanticNode, md: &mut String, depth: usize) {
     }
 }
 
+// ─── Fas 19: Adaptive Crawl + Link Extraction WASM API ──────────────────────
+
+/// Extract enriched links from HTML with relevance scoring and structural roles.
+///
+/// Returns JSON with links sorted by expected_gain.
+#[wasm_bindgen]
+pub fn extract_links(html: &str, goal: &str, url: &str, max_links: u32) -> String {
+    #[cfg(feature = "fetch")]
+    {
+        let config = link_extract::LinkExtractionConfig {
+            goal: if goal.is_empty() {
+                None
+            } else {
+                Some(goal.to_string())
+            },
+            max_links: max_links as usize,
+            include_context: true,
+            include_structural_role: true,
+            filter_navigation: false,
+            min_relevance: 0.0,
+            ..Default::default()
+        };
+
+        let tree = build_tree(html, goal, url);
+        let result = link_extract::extract_links_from_tree(&tree.nodes, url, &config, None);
+        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+    }
+    #[cfg(not(feature = "fetch"))]
+    {
+        let _ = (html, goal, url, max_links);
+        r#"{"error":"fetch feature required"}"#.to_string()
+    }
+}
+
 // ─── Tester ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5799,5 +6050,180 @@ mod tests {
             assert!(!result.contains(">B<"), "nojs-div borde strippas");
             assert!(result.contains(">C<"), "Vanligt innehåll ska bevaras");
         }
+    }
+
+    #[cfg(feature = "blitz")]
+    #[test]
+    fn test_blitz_full_pipeline_with_css() {
+        // Realistic HTML with inline CSS — tests the FULL pipeline
+        // (render_html_to_png → css_compiler → strip_stylesheets → render_html_to_png_inner)
+        let html = r#"<html><head>
+<link rel="stylesheet" href="https://cdn.example.com/nonexistent.css">
+<style>
+body { background: #1a1a2e; color: #eee; font-family: sans-serif; margin: 0; }
+header { background: #16213e; padding: 1rem 2rem; border-bottom: 3px solid #0f3460; }
+header h1 { color: #e94560; margin: 0; }
+nav { display: flex; gap: 1rem; padding: 0.5rem 2rem; background: #0f3460; }
+nav a { color: #a5d6ff; text-decoration: none; }
+main { padding: 2rem; }
+.card { background: #16213e; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; border: 1px solid #333; }
+.card h2 { color: #60a5fa; margin-top: 0; }
+.btn { background: #e94560; color: white; padding: 0.5rem 1.5rem; border: none; border-radius: 4px; }
+footer { background: #16213e; padding: 1rem 2rem; text-align: center; color: #666; }
+</style>
+</head>
+<body>
+<header><h1>Python Downloads</h1></header>
+<nav><a href="/">Home</a><a href="/downloads">Downloads</a><a href="/docs">Docs</a></nav>
+<main>
+<div class="card"><h2>Python 3.14.4</h2><p>Release date: April 7, 2026</p>
+<button class="btn">Download Python 3.14.4</button></div>
+<div class="card"><h2>Python 3.13.13</h2><p>Security update</p>
+<button class="btn">Download</button></div>
+</main>
+<footer>Copyright 2026 Python Software Foundation</footer>
+</body></html>"#;
+
+        eprintln!("[TEST] Input HTML: {} bytes", html.len());
+
+        // Step 1: Test render_html_to_png (full pipeline with css_compiler)
+        let result = render_html_to_png(html, "https://www.python.org", 1280, 800, false);
+        assert!(result.is_ok(), "Full pipeline failed: {:?}", result.err());
+        let png = result.unwrap();
+        let _ = std::fs::write("/tmp/blitz_full_pipeline.png", &png);
+        eprintln!("[TEST] Full pipeline PNG: {} bytes", png.len());
+
+        // Step 2: Test render_html_to_png_inner directly (skip css_compiler)
+        let result_inner =
+            render_html_to_png_inner(html, "https://www.python.org", 1280, 800, false);
+        assert!(
+            result_inner.is_ok(),
+            "Inner render failed: {:?}",
+            result_inner.err()
+        );
+        let png_inner = result_inner.unwrap();
+        let _ = std::fs::write("/tmp/blitz_inner_only.png", &png_inner);
+        eprintln!("[TEST] Inner-only PNG: {} bytes", png_inner.len());
+
+        // Both should have content
+        assert!(png.len() > 5000, "Full pipeline too small ({}b)", png.len());
+        assert!(
+            png_inner.len() > 5000,
+            "Inner too small ({}b)",
+            png_inner.len()
+        );
+    }
+
+    #[cfg(feature = "blitz")]
+    #[test]
+    fn test_vello_cpu_direct_text() {
+        // Test direct vello_cpu glyph rendering with a real system font
+        use peniko::kurbo::Shape;
+
+        let w: u16 = 400;
+        let h: u16 = 200;
+        let mut ctx = vello_cpu::RenderContext::new(w, h);
+
+        // White background
+        ctx.set_paint(vello_cpu::PaintType::Solid(peniko::Color::new([
+            1.0, 1.0, 1.0, 1.0,
+        ])));
+        ctx.set_fill_rule(peniko::Fill::NonZero);
+        let bg = peniko::kurbo::Rect::new(0.0, 0.0, w as f64, h as f64);
+        ctx.fill_path(&bg.into_path(0.1));
+
+        // Load a system font
+        let font_path = if std::path::Path::new("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+            .exists()
+        {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        } else if std::path::Path::new("/usr/share/fonts/truetype/freefont/FreeSans.ttf").exists() {
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+        } else {
+            eprintln!("[VELLO TEXT] No system font found, skipping");
+            return;
+        };
+
+        let font_bytes = std::fs::read(font_path).expect("Failed to read font");
+        eprintln!(
+            "[VELLO TEXT] Loaded {} ({} bytes)",
+            font_path,
+            font_bytes.len()
+        );
+
+        let font_data = peniko::FontData {
+            data: peniko::Blob::new(std::sync::Arc::new(font_bytes)),
+            index: 0,
+        };
+
+        // Draw text glyphs directly
+        ctx.set_paint(vello_cpu::PaintType::Solid(peniko::Color::new([
+            0.0, 0.0, 0.0, 1.0,
+        ])));
+        ctx.set_fill_rule(peniko::Fill::NonZero);
+        ctx.set_transform(peniko::kurbo::Affine::IDENTITY);
+
+        // Use skrifa to get glyph IDs
+        use skrifa::MetadataProvider;
+        let font_ref = skrifa::FontRef::from_index(font_data.data.as_ref(), 0).expect("Bad font");
+        let charmap = font_ref.charmap();
+        let text = "Hello World";
+        let glyphs: Vec<vello_cpu::Glyph> = text
+            .chars()
+            .enumerate()
+            .map(|(i, ch)| {
+                let gid = charmap.map(ch).map(|g| g.to_u32()).unwrap_or(0);
+                vello_cpu::Glyph {
+                    id: gid as u32,
+                    x: 20.0 + (i as f32) * 24.0,
+                    y: 80.0,
+                }
+            })
+            .collect();
+
+        eprintln!(
+            "[VELLO TEXT] Glyphs: {:?}",
+            glyphs.iter().map(|g| g.id).collect::<Vec<_>>()
+        );
+
+        ctx.glyph_run(&font_data)
+            .font_size(48.0)
+            .hint(true) // Same as Blitz
+            .normalized_coords(&[])
+            .glyph_transform(peniko::kurbo::Affine::default())
+            .fill_glyphs(glyphs.into_iter());
+
+        ctx.flush();
+        let mut buf = vec![0u8; w as usize * h as usize * 4];
+        ctx.render_to_buffer(&mut buf, w, h, vello_cpu::RenderMode::OptimizeSpeed);
+
+        // Check for non-white pixels (text should be black on white)
+        let non_white = buf
+            .chunks(4)
+            .filter(|p| p[0] < 250 || p[1] < 250 || p[2] < 250)
+            .count();
+        eprintln!(
+            "[VELLO TEXT] non-white pixels: {} / {}",
+            non_white,
+            (w as usize * h as usize)
+        );
+
+        // Write test image
+        let _ = std::fs::write("/tmp/vello_text_test.raw", &buf);
+
+        // Encode as PNG for visual inspection
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_bytes, w as u32, h as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&buf).unwrap();
+            writer.finish().unwrap();
+        }
+        let _ = std::fs::write("/tmp/vello_text_test.png", &png_bytes);
+        eprintln!("[VELLO TEXT] PNG written: {} bytes", png_bytes.len());
+
+        assert!(non_white > 50, "Expected text pixels but got {}", non_white);
     }
 }

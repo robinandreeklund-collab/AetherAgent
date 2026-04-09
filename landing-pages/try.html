@@ -108,7 +108,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 @keyframes changeto-greater{0%,70%,90%{top:50%;padding:0px;display:inline-block;border-radius:100%;background:#3b82f6;border-width:0 0 0 0;border:0px solid #3b82f6;transform:translate(-80%,0%)}71%,89%{top:30%;background:none;border:solid #3b82f6;border-radius:0px;border-width:0 2px 2px 0;display:inline-block;padding:1px;float:left;transform-origin:bottom left;transform:rotate(135deg) translate(-80%,20%)}}
 
 /* NODES */
-.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7}
+.result-terminal{background:#0d1117;border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-family:var(--mono);font-size:.8rem;line-height:1.7;max-height:600px;overflow-y:auto;scroll-behavior:smooth}
 .result-node{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.04)}
 .result-node:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
 .result-node-header{color:#3b82f6;font-size:.7rem;margin-bottom:.2rem;font-weight:500}
@@ -127,6 +127,71 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .summary-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-top:1.5rem;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;text-align:center}
 .summary-val{font-size:1rem;font-weight:700;color:#fff}
 .summary-label{font-size:.7rem;color:var(--muted);margin-top:.15rem}
+
+/* MODE SELECTOR */
+.mode-selector{display:flex;gap:0;margin-bottom:2rem;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:fit-content}
+.mode-btn{padding:.55rem 1.3rem;font-size:.8rem;font-weight:600;background:transparent;color:var(--muted);border:none;cursor:pointer;transition:all .2s;position:relative}
+.mode-btn.active{background:var(--accent);color:#fff}
+.mode-btn:hover:not(.active){background:rgba(255,255,255,0.04);color:var(--text)}
+.mode-btn .mode-tag{font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#22c55e;position:absolute;top:2px;right:6px}
+
+/* MODE CONFIG */
+.mode-config{display:none;margin-bottom:1.25rem;gap:1rem}
+.mode-config.visible{display:flex;flex-wrap:wrap}
+.config-field{display:flex;flex-direction:column;gap:.3rem}
+.config-field label{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.config-field input,.config-field select{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.5rem .7rem;color:var(--text);font-family:var(--mono);font-size:.8rem;width:100px;outline:none;transition:border-color .2s}
+.config-field input:focus,.config-field select:focus{border-color:var(--accent)}
+
+/* CRAWL RESULTS */
+.crawl-results{display:none}
+.crawl-results.visible{display:block}
+.crawl-page{background:#0d1117;border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:1rem}
+.crawl-page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.crawl-page-url{font-family:var(--mono);font-size:.75rem;color:#79c0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}
+.crawl-page-meta{font-size:.7rem;color:var(--muted);display:flex;gap:.75rem}
+.crawl-page-meta .val{color:#79c0ff;font-weight:600}
+.crawl-gain-bar{height:4px;border-radius:2px;background:rgba(59,130,246,0.15);margin-bottom:.5rem;overflow:hidden}
+.crawl-gain-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#3b82f6,#22c55e);transition:width .4s ease}
+.crawl-stop{display:inline-block;padding:.25rem .6rem;border-radius:6px;font-size:.7rem;font-weight:600;font-family:var(--mono);margin-top:.5rem}
+.crawl-stop.saturation{background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.2)}
+.crawl-stop.coverage{background:rgba(59,130,246,0.1);color:#3b82f6;border:1px solid rgba(59,130,246,0.2)}
+.crawl-stop.maxpages{background:rgba(234,179,8,0.1);color:#eab308;border:1px solid rgba(234,179,8,0.2)}
+.crawl-stop.other{background:rgba(255,255,255,0.05);color:var(--muted);border:1px solid var(--border)}
+
+/* LINKS RESULTS */
+.links-results{display:none}
+.links-results.visible{display:block}
+.link-card{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;margin-bottom:.5rem;display:grid;grid-template-columns:auto 1fr auto;gap:.75rem;align-items:center;transition:border-color .2s}
+.link-card:hover{border-color:rgba(59,130,246,0.3)}
+.link-rank{font-size:.85rem;font-weight:700;color:var(--accent);font-family:var(--mono);min-width:1.8rem;text-align:center}
+.link-body{overflow:hidden}
+.link-anchor{font-size:.85rem;font-weight:500;color:var(--text);margin-bottom:.15rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.link-url{font-family:var(--mono);font-size:.7rem;color:#79c0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.link-role{font-size:.65rem;color:var(--muted);margin-top:.15rem}
+.link-scores{display:flex;flex-direction:column;gap:.15rem;text-align:right;min-width:5rem}
+.link-score{font-family:var(--mono);font-size:.7rem}
+.link-score .s-val{font-weight:600}
+.link-score .s-rel{color:#22c55e}
+.link-score .s-nov{color:#f59e0b}
+.link-score .s-gain{color:#3b82f6}
+
+/* DIFF */
+.diff-added{background:rgba(34,197,94,0.08);border-left:3px solid #22c55e;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#e6edf3}
+.diff-removed{background:rgba(239,68,68,0.08);border-left:3px solid #ef4444;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#fca5a5;text-decoration:line-through;opacity:.7}
+.diff-modified{background:rgba(234,179,8,0.08);border-left:3px solid #eab308;padding:.4rem .8rem;margin:.25rem 0;border-radius:0 6px 6px 0;font-size:.8rem;color:#e6edf3}
+.diff-section{margin-bottom:1rem}
+.diff-section-title{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.4rem}
+
+/* RENDER */
+.render-frame{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff}
+.render-frame img{display:block;width:100%;height:auto}
+
+/* SEARCH RESULT */
+.search-item{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;margin-bottom:.5rem}
+.search-item-title{font-size:.9rem;font-weight:500;color:var(--text);margin-bottom:.2rem}
+.search-item-url{font-family:var(--mono);font-size:.7rem;color:#79c0ff;margin-bottom:.4rem}
+.search-item-snippet{font-size:.8rem;color:var(--muted);line-height:1.5}
 
 /* ERROR */
 .error-msg{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:1rem 1.25rem;color:#fca5a5;font-size:.85rem;margin-top:1.5rem;display:none}
@@ -174,6 +239,16 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <p>This playground skips the feedback step. In the real pipeline, results improve with every query. First runs on a new URL are cold.</p>
   </div>
 
+  <div class="mode-selector">
+    <button class="mode-btn active" onclick="setMode('distill')">Distill</button>
+    <button class="mode-btn" onclick="setMode('crawl')">Crawl</button>
+    <button class="mode-btn" onclick="setMode('links')">Links</button>
+    <button class="mode-btn" onclick="setMode('search')">Search<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('stream')">Stream<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('diff')">Diff<span class="mode-tag">new</span></button>
+    <button class="mode-btn" onclick="setMode('render')">Render<span class="mode-tag">new</span></button>
+  </div>
+
   <div class="examples">
     <span class="example-chip" data-url="https://en.wikipedia.org/wiki/COVID-19_vaccine" data-goal="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">Wikipedia: COVID-19 vaccine side effects</span>
     <span class="example-chip" data-url="https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/" data-goal="styrr&auml;nta r&auml;nta procent Riksbanken penningpolitik repor&auml;nta 2026 interest rate">Riksbanken: Swedish interest rate</span>
@@ -198,17 +273,51 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <span class="example-chip" data-url="https://www.rust-lang.org/" data-goal="Rust programming language crate version download release stable edition 2024">Rust-lang.org</span>
   </div>
 
-  <div class="form-group">
+  <div class="form-group" id="fg-url">
     <label>URL</label>
     <input type="url" id="input-url" placeholder="https://en.wikipedia.org/wiki/COVID-19_vaccine" value="https://en.wikipedia.org/wiki/COVID-19_vaccine" spellcheck="false">
   </div>
+  <div class="form-group" id="fg-url2" style="display:none">
+    <label>Compare URL</label>
+    <input type="url" id="input-url2" placeholder="https://... (leave empty to diff same page over time)" spellcheck="false">
+  </div>
   <div class="form-row">
-    <div class="form-group" style="margin-bottom:0">
+    <div class="form-group" id="fg-goal" style="margin-bottom:0">
       <label>Question</label>
       <input type="text" id="input-goal" placeholder="What are the side effects of COVID-19 vaccines?" value="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">
       <div style="font-size:.72rem;color:#555;margin-top:.4rem;line-height:1.4">Why so many keywords? In production, the AI agent auto-expands your question with synonyms, translations, and expected values to catch every relevant node. Here you see the raw expanded query.</div>
     </div>
     <button class="btn-run" id="btn-run" onclick="runQuery()">Run</button>
+  </div>
+
+  <div class="mode-config" id="crawl-config">
+    <div class="config-field"><label>Max pages</label><input type="number" id="cfg-max-pages" value="8" min="1" max="50"></div>
+    <div class="config-field"><label>Max depth</label><input type="number" id="cfg-max-depth" value="2" min="1" max="5"></div>
+    <div class="config-field"><label>Top links/page</label><input type="number" id="cfg-top-k" value="3" min="1" max="10"></div>
+  </div>
+  <div class="mode-config" id="links-config">
+    <div class="config-field"><label>Max links</label><input type="number" id="cfg-max-links" value="20" min="5" max="100"></div>
+    <div class="config-field">
+      <label>Filter nav</label>
+      <select id="cfg-filter-nav"><option value="false">Show all</option><option value="true">Hide nav links</option></select>
+    </div>
+    <div class="config-field">
+      <label>Head metadata</label>
+      <select id="cfg-head-data"><option value="false">Off (fast)</option><option value="true">On (richer)</option></select>
+    </div>
+  </div>
+  <div class="mode-config" id="search-config">
+    <div class="config-field"><label>Search query</label><input type="text" id="cfg-search-query" placeholder="AI agent frameworks 2026" style="width:280px"></div>
+    <div class="config-field"><label>Deep crawl top</label><input type="number" id="cfg-search-crawl" value="0" min="0" max="5" title="0 = search only, 1-5 = crawl top results"></div>
+  </div>
+  <div class="mode-config" id="stream-config">
+    <div class="config-field"><label>Max nodes</label><input type="number" id="cfg-stream-max" value="30" min="5" max="100"></div>
+    <div class="config-field"><label>Min relevance</label><input type="number" id="cfg-stream-rel" value="0.1" min="0" max="1" step="0.05" style="width:80px"></div>
+  </div>
+  <div class="mode-config" id="diff-config" style="display:none"></div>
+  <div class="mode-config" id="render-config">
+    <div class="config-field"><label>Width</label><input type="number" id="cfg-render-w" value="1280" min="320" max="1920"></div>
+    <div class="config-field"><label>Height</label><input type="number" id="cfg-render-h" value="800" min="200" max="1200"></div>
   </div>
 
   <div class="loading" id="loading">
@@ -260,6 +369,59 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
     <div class="result-markdown" id="result-markdown"></div>
     <div class="summary-bar" id="summary-bar"></div>
   </div>
+
+  <div class="crawl-results" id="crawl-results">
+    <div class="results-header">
+      <div class="results-title" id="crawl-title"></div>
+      <div class="results-meta" id="crawl-meta"></div>
+    </div>
+    <div id="crawl-pages"></div>
+    <div class="summary-bar" id="crawl-summary"></div>
+  </div>
+
+  <div class="links-results" id="links-results">
+    <div class="results-header">
+      <div class="results-title" id="links-title"></div>
+      <div class="results-meta" id="links-meta"></div>
+    </div>
+    <div id="links-list"></div>
+    <div class="summary-bar" id="links-summary" style="grid-template-columns:repeat(4,1fr)"></div>
+  </div>
+
+  <div class="results" id="search-results">
+    <div class="results-header">
+      <div class="results-title" id="search-title"></div>
+      <div class="results-meta" id="search-meta"></div>
+    </div>
+    <div class="result-terminal" id="search-nodes"></div>
+    <div class="summary-bar" id="search-summary"></div>
+  </div>
+
+  <div class="results" id="stream-results">
+    <div class="results-header">
+      <div class="results-title" id="stream-title"></div>
+      <div class="results-meta" id="stream-meta"></div>
+    </div>
+    <div class="result-terminal" id="stream-nodes"></div>
+    <div class="summary-bar" id="stream-summary"></div>
+  </div>
+
+  <div class="results" id="diff-results">
+    <div class="results-header">
+      <div class="results-title" id="diff-title"></div>
+      <div class="results-meta" id="diff-meta"></div>
+    </div>
+    <div id="diff-content" style="font-family:var(--mono);font-size:.8rem"></div>
+    <div class="summary-bar" id="diff-summary"></div>
+  </div>
+
+  <div class="results" id="render-results">
+    <div class="results-header">
+      <div class="results-title" id="render-title"></div>
+      <div class="results-meta" id="render-meta"></div>
+    </div>
+    <div id="render-img" style="text-align:center"></div>
+  </div>
 </main>
 
 <div data-component="footer"></div>
@@ -268,66 +430,163 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 // Nav scroll
 (function(){var n=document.querySelector('nav');if(!n)return;var t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){n.classList.toggle('scrolled',window.scrollY>40);t=false});t=true}})})();
 
+let currentMode = 'distill';
+
+const allResults = ['results','crawl-results','links-results','search-results','stream-results','diff-results','render-results'];
+const allConfigs = ['crawl-config','links-config','search-config','stream-config','diff-config','render-config'];
+const modeLabels = {distill:'Run',crawl:'Crawl',links:'Extract',search:'Search',stream:'Stream',diff:'Compare',render:'Render'};
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.mode-btn[onclick*="' + mode + '"]').classList.add('active');
+  allConfigs.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('visible', id.startsWith(mode));
+  });
+  allResults.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) { el.style.display = ''; el.classList.remove('visible'); }
+  });
+  document.getElementById('btn-run').textContent = modeLabels[mode] || 'Run';
+
+  // Show/hide form fields per mode
+  const needsUrl = mode !== 'search';
+  const needsGoal = mode !== 'render';
+  const needsUrl2 = mode === 'diff';
+  document.getElementById('fg-url').style.display = needsUrl ? '' : 'none';
+  document.getElementById('fg-goal').style.display = needsGoal ? '' : 'none';
+  document.getElementById('fg-url2').style.display = needsUrl2 ? '' : 'none';
+}
+
 const examples = document.querySelectorAll('.example-chip');
 examples.forEach(chip => {
   chip.addEventListener('click', () => {
     document.getElementById('input-url').value = chip.dataset.url;
     document.getElementById('input-goal').value = chip.dataset.goal;
+    if (chip.dataset.mode) setMode(chip.dataset.mode);
   });
 });
 
 async function runQuery() {
+  if (currentMode === 'crawl') return runCrawl();
+  if (currentMode === 'links') return runLinks();
+  if (currentMode === 'search') return runSearch();
+  if (currentMode === 'stream') return runStream();
+  if (currentMode === 'diff') return runDiff();
+  if (currentMode === 'render') return runRender();
+  return runDistill();
+}
+
+function hideAllResults() {
+  allResults.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) { el.style.display = ''; el.classList.remove('visible'); }
+  });
+  document.getElementById('error-msg').classList.remove('visible');
+}
+
+function showLoading(label) {
+  const btn = document.getElementById('btn-run');
+  btn.disabled = true;
+  btn.textContent = label;
+  document.getElementById('loading').classList.add('visible');
+  hideAllResults();
+}
+
+function hideLoading() {
+  const btn = document.getElementById('btn-run');
+  btn.disabled = false;
+  btn.textContent = modeLabels[currentMode] || 'Run';
+  document.getElementById('loading').classList.remove('visible');
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = 'Error: ' + msg;
+  el.classList.add('visible');
+}
+
+async function runDistill() {
   const url = document.getElementById('input-url').value.trim();
   const goal = document.getElementById('input-goal').value.trim();
   if (!url || !goal) return;
-
-  const btn = document.getElementById('btn-run');
-  const loading = document.getElementById('loading');
-  const results = document.getElementById('results');
-  const errorEl = document.getElementById('error-msg');
-
-  btn.disabled = true;
-  btn.textContent = 'Running\u2026';
-  loading.classList.add('visible');
-  results.classList.remove('visible');
-  errorEl.classList.remove('visible');
-
+  showLoading('Running\u2026');
   const t0 = performance.now();
-
   try {
-    // Fetch both JSON and Markdown in parallel
     const [resJson, resMd] = await Promise.all([
       fetch('/api/parse-crfr', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
       }),
       fetch('/api/parse-crfr', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url, goal, top_n: 10, output_format: 'markdown'})
       })
     ]);
-
     if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
-
     const data = await resJson.json();
     const mdText = await resMd.text();
     const elapsed = Math.round(performance.now() - t0);
-
     if (data.error) throw new Error(data.error);
-
-    // Store markdown for toggle
     document.getElementById('result-markdown').textContent = mdText;
     renderResults(data, elapsed);
   } catch (err) {
-    errorEl.textContent = 'Error: ' + err.message;
-    errorEl.classList.add('visible');
+    showError(err.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Run';
-    loading.classList.remove('visible');
+    hideLoading();
   }
+}
+
+async function runCrawl() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url || !goal) return;
+  showLoading('Crawling\u2026');
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/adaptive-crawl', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        max_pages: parseInt(document.getElementById('cfg-max-pages').value) || 8,
+        max_depth: parseInt(document.getElementById('cfg-max-depth').value) || 2,
+        top_k_links: parseInt(document.getElementById('cfg-top-k').value) || 3,
+        top_n_per_page: 10,
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    renderCrawlResults(data, elapsed);
+  } catch (err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+async function runLinks() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url) return;
+  showLoading('Extracting\u2026');
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/fetch/extract-links', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal: goal || null,
+        max_links: parseInt(document.getElementById('cfg-max-links').value) || 20,
+        filter_navigation: document.getElementById('cfg-filter-nav').value === 'true',
+        include_head_data: document.getElementById('cfg-head-data').value === 'true',
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    renderLinksResults(data, elapsed);
+  } catch (err) { showError(err.message); }
+  finally { hideLoading(); }
 }
 
 function renderResults(data, elapsed) {
@@ -376,6 +635,467 @@ function renderResults(data, elapsed) {
     '<div><div class="summary-val">' + slaashMs + 'ms</div><div class="summary-label">slaash</div></div>';
 
   results.classList.add('visible');
+}
+
+function renderCrawlResults(data, elapsed) {
+  const el = document.getElementById('crawl-results');
+  const title = document.getElementById('crawl-title');
+  const meta = document.getElementById('crawl-meta');
+  const pagesEl = document.getElementById('crawl-pages');
+  const summaryEl = document.getElementById('crawl-summary');
+
+  const pages = data.pages || [];
+  const stopClass = {HdcSaturation:'saturation',TermCoverage:'coverage',MaxPages:'maxpages'}[data.stop_reason] || 'other';
+  const stopLabel = {HdcSaturation:'HDC Saturated',TermCoverage:'All terms found',MaxPages:'Max pages',Satisficing:'Satisficing',NoMoreLinks:'No more links',Timeout:'Timeout'}[data.stop_reason] || data.stop_reason;
+
+  title.textContent = 'Adaptive Crawl';
+  meta.innerHTML =
+    '<span><span class="val">' + pages.length + '</span> pages</span>' +
+    '<span><span class="val">' + (data.total_nodes_extracted||0) + '</span> nodes</span>' +
+    '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+
+  pagesEl.innerHTML = pages.map((p, i) => {
+    const gainPct = Math.round((p.marginal_gain || 0) * 100);
+    const nodes = p.top_nodes || [];
+    const rawC = p.raw_html_chars || 0;
+    const outC = p.out_chars || nodes.reduce((s,n) => s + (n.label||'').length, 0);
+    const redPct = rawC > 0 ? ((1 - outC/rawC)*100).toFixed(1) : '?';
+    const nodesHtml = nodes.slice(0, 5).map(n =>
+      '<div class="result-node">' +
+      '<div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' &middot; ' + (n.role||'text') + '</div>' +
+      '<div class="result-node-text">"' + escHtml((n.label||'').slice(0,200)) + '"</div></div>'
+    ).join('');
+    return '<div class="crawl-page">' +
+      '<div class="crawl-page-header">' +
+        '<div class="crawl-page-url">' + escHtml(p.url || '') + '</div>' +
+        '<div class="crawl-page-meta">' +
+          '<span><span class="val">' + nodes.length + '</span> nodes</span>' +
+          '<span><span class="val">' + (p.links_found||0) + '</span> links</span>' +
+          '<span><span class="val">' + (p.fetch_time_ms||0) + 'ms</span> fetch</span>' +
+          '<span><span class="val">' + (p.parse_time_ms||0) + 'ms</span> parse</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="crawl-gain-bar"><div class="crawl-gain-fill" style="width:' + gainPct + '%"></div></div>' +
+      '<div style="font-size:.65rem;color:var(--muted);margin-bottom:.5rem;display:flex;gap:1.2rem">' +
+        '<span>HDC gain: ' + (p.marginal_gain||0).toFixed(4) + '</span>' +
+        '<span>' + rawC.toLocaleString() + ' chars in</span>' +
+        '<span>' + outC.toLocaleString() + ' chars out</span>' +
+        '<span>' + redPct + '% reduction</span>' +
+      '</div>' +
+      '<div class="result-terminal" style="font-size:.75rem;padding:1rem">' + nodesHtml + '</div>' +
+    '</div>';
+  }).join('');
+
+  // Aggregerade totaler
+  const totalRaw = data.total_raw_chars || pages.reduce((s,p) => s + (p.raw_html_chars||0), 0);
+  const totalOut = data.total_out_chars || pages.reduce((s,p) => s + (p.out_chars || p.top_nodes.reduce((ss,n) => ss+(n.label||'').length, 0)), 0);
+  const totalReduction = totalRaw > 0 ? ((1 - totalOut/totalRaw)*100).toFixed(1) : '?';
+  const totalFetch = pages.reduce((s,p) => s + (p.fetch_time_ms||0), 0);
+  const totalParse = pages.reduce((s,p) => s + (p.parse_time_ms||0), 0);
+  const covPct = ((data.coverage||0)*100).toFixed(1);
+
+  summaryEl.style.gridTemplateColumns = 'repeat(8,1fr)';
+  summaryEl.innerHTML =
+    '<div><div class="summary-val">' + pages.length + '</div><div class="summary-label">pages</div></div>' +
+    '<div><div class="summary-val">' + (data.total_nodes_extracted||0) + '</div><div class="summary-label">nodes</div></div>' +
+    '<div><div class="summary-val">' + totalRaw.toLocaleString() + '</div><div class="summary-label">chars in</div></div>' +
+    '<div><div class="summary-val">' + totalOut.toLocaleString() + '</div><div class="summary-label">chars out</div></div>' +
+    '<div><div class="summary-val">' + totalReduction + '%</div><div class="summary-label">reduction</div></div>' +
+    '<div><div class="summary-val">' + totalFetch + 'ms</div><div class="summary-label">network</div></div>' +
+    '<div><div class="summary-val">' + totalParse + 'ms</div><div class="summary-label">slaash</div></div>' +
+    '<div><div class="summary-val"><span class="crawl-stop ' + stopClass + '">' + stopLabel + '</span></div><div class="summary-label">stop reason</div></div>';
+
+  el.classList.add('visible');
+}
+
+function renderLinksResults(data, elapsed) {
+  const el = document.getElementById('links-results');
+  const title = document.getElementById('links-title');
+  const meta = document.getElementById('links-meta');
+  const listEl = document.getElementById('links-list');
+  const summaryEl = document.getElementById('links-summary');
+
+  const links = data.links || [];
+  title.textContent = 'Extracted Links';
+  meta.innerHTML =
+    '<span><span class="val">' + (data.total_found||0) + '</span> found</span>' +
+    '<span><span class="val">' + links.length + '</span> returned</span>' +
+    '<span><span class="val">' + (data.filtered||0) + '</span> filtered</span>' +
+    '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+
+  listEl.innerHTML = links.map((l, i) => {
+    const roleColors = {content:'#22c55e',navigation:'#eab308',footer:'#888',sidebar:'#a78bfa',card:'#3b82f6'};
+    const roleColor = roleColors[l.structural_role] || '#888';
+    const hasHead = l.head_title || l.meta_description;
+    const headHtml = hasHead
+      ? '<div style="margin-top:.35rem;padding:.4rem .6rem;background:rgba(255,255,255,0.03);border-radius:6px;font-size:.7rem;line-height:1.5">' +
+        (l.head_title ? '<div style="color:#e6edf3;font-weight:500">' + escHtml(l.head_title) + '</div>' : '') +
+        (l.meta_description ? '<div style="color:var(--muted);margin-top:.15rem">' + escHtml(l.meta_description.slice(0,150)) + (l.meta_description.length>150?'...':'') + '</div>' : '') +
+        '</div>'
+      : '';
+    return '<div class="link-card" style="' + (hasHead ? 'grid-template-rows:auto auto;grid-template-columns:auto 1fr auto' : '') + '">' +
+      '<div class="link-rank">' + (i+1) + '</div>' +
+      '<div class="link-body">' +
+        '<div class="link-anchor">' + escHtml(l.anchor_text || '(no text)') + '</div>' +
+        '<div class="link-url">' + escHtml(l.absolute_url || l.href || '') + '</div>' +
+        '<div class="link-role"><span style="color:' + roleColor + '">' + (l.structural_role||'?') + '</span>' +
+          (l.is_internal ? ' &middot; internal' : ' &middot; external') +
+          (l.context_snippet ? ' &middot; <span style="color:#555">' + escHtml(l.context_snippet.slice(0,60)) + '</span>' : '') +
+        '</div>' +
+        headHtml +
+      '</div>' +
+      '<div class="link-scores">' +
+        '<div class="link-score"><span class="s-val s-gain">' + (l.expected_gain||0).toFixed(2) + '</span> gain</div>' +
+        '<div class="link-score"><span class="s-val s-rel">' + (l.relevance_score||0).toFixed(2) + '</span> rel</div>' +
+        '<div class="link-score"><span class="s-val s-nov">' + (l.novelty_score||0).toFixed(2) + '</span> nov</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  const internal = links.filter(l => l.is_internal).length;
+  const external = links.length - internal;
+  const avgGain = links.length > 0 ? (links.reduce((s,l) => s + (l.expected_gain||0), 0) / links.length).toFixed(3) : '0';
+  const avgRel = links.length > 0 ? (links.reduce((s,l) => s + (l.relevance_score||0), 0) / links.length).toFixed(3) : '0';
+  const contentLinks = links.filter(l => l.structural_role === 'content' || l.structural_role === 'card').length;
+  const navLinks = links.filter(l => l.structural_role === 'navigation').length;
+
+  summaryEl.style.gridTemplateColumns = 'repeat(7,1fr)';
+  summaryEl.innerHTML =
+    '<div><div class="summary-val">' + (data.total_found||0) + '</div><div class="summary-label">total found</div></div>' +
+    '<div><div class="summary-val">' + links.length + '</div><div class="summary-label">returned</div></div>' +
+    '<div><div class="summary-val">' + internal + ' / ' + external + '</div><div class="summary-label">int / ext</div></div>' +
+    '<div><div class="summary-val">' + contentLinks + ' / ' + navLinks + '</div><div class="summary-label">content / nav</div></div>' +
+    '<div><div class="summary-val">' + avgGain + '</div><div class="summary-label">avg gain</div></div>' +
+    '<div><div class="summary-val">' + avgRel + '</div><div class="summary-label">avg relevance</div></div>' +
+    '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+
+  el.classList.add('visible');
+}
+
+// ─── SEARCH ──────────────────────────────────────────────────────────────
+async function runSearch() {
+  const query = document.getElementById('cfg-search-query').value.trim();
+  const goal = document.getElementById('input-goal').value.trim() || query;
+  if (!query) { showError('Enter a search query'); return; }
+  showLoading('Searching\u2026');
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/fetch/search', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query, goal: goal || query, top_n: 8, deep: true, max_nodes_per_result: 5 })
+    });
+    if (!res.ok) {
+      if (res.status === 502) throw new Error('Search provider blocked the request. Try again.');
+      throw new Error('Server returned ' + res.status);
+    }
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const el = document.getElementById('search-results');
+    document.getElementById('search-title').textContent = 'Search: ' + query;
+    const results = data.results || [];
+    document.getElementById('search-meta').innerHTML =
+      '<span><span class="val">' + results.length + '</span> results</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> total</span>';
+    document.getElementById('search-nodes').innerHTML = results.map((r, i) => {
+      const nodes = (r.nodes || []).slice(0, 3);
+      const nodesHtml = nodes.map(n =>
+        '<div class="result-node"><div class="result-node-header">relevance: ' + (n.relevance||0).toFixed(3) + ' \u00b7 ' + (n.role||'text') +
+        '</div><div class="result-node-text">"' + escHtml((n.label||'').slice(0,200)) + '"</div></div>'
+      ).join('');
+      return '<div class="search-item">' +
+        '<div class="search-item-title">' + (i+1) + '. ' + escHtml(r.title || 'Untitled') + '</div>' +
+        '<div class="search-item-url">' + escHtml(r.url || '') + '</div>' +
+        (r.snippet ? '<div class="search-item-snippet">' + escHtml(r.snippet) + '</div>' : '') +
+        (nodesHtml ? '<div style="margin-top:.5rem">' + nodesHtml + '</div>' : '') + '</div>';
+    }).join('');
+    const summaryEl = document.getElementById('search-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(3,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val">' + results.length + '</div><div class="summary-label">results</div></div>' +
+      '<div><div class="summary-val">' + results.reduce((s,r) => s + (r.nodes||[]).length, 0) + '</div><div class="summary-label">nodes</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total</div></div>';
+    el.classList.add('visible');
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── STREAM ──────────────────────────────────────────────────────────────
+async function runStream() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!url || !goal) return;
+  showLoading('Connecting\u2026');
+  const t0 = performance.now();
+
+  const el = document.getElementById('stream-results');
+  const nodesEl = document.getElementById('stream-nodes');
+  const metaEl = document.getElementById('stream-meta');
+  const summaryEl = document.getElementById('stream-summary');
+  nodesEl.innerHTML = '';
+  el.classList.add('visible');
+  el.style.display = 'block';
+
+  const maxNodes = parseInt(document.getElementById('cfg-stream-max').value) || 30;
+  const threshold = parseFloat(document.getElementById('cfg-stream-rel').value) || 0.1;
+
+  // WebSocket-based real streaming
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/api');
+  let nodeCount = 0;
+  let totalDom = 0;
+  let savings = 0;
+
+  ws.onopen = function() {
+    document.getElementById('stream-title').textContent = 'Streaming: ' + url.split('/').slice(0,3).join('/');
+    metaEl.innerHTML = '<span style="color:var(--accent)">Connected — fetching page\u2026</span>';
+    ws.send(JSON.stringify({
+      id: 'stream-1',
+      method: 'fetch_stream_parse',
+      params: { url, goal, top_n: maxNodes, threshold, max_nodes: maxNodes }
+    }));
+  };
+
+  ws.onmessage = function(e) {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'progress') {
+      if (msg.stage === 'fetching') {
+        metaEl.innerHTML = '<span style="color:var(--accent)">Fetching ' + escHtml(msg.url || url) + '\u2026</span>';
+        document.getElementById('btn-run').textContent = 'Fetching\u2026';
+      } else if (msg.stage === 'parsing') {
+        metaEl.innerHTML = '<span style="color:var(--accent)">Parsing ' + (msg.bytes_fetched||0).toLocaleString() + ' bytes\u2026</span>';
+        document.getElementById('btn-run').textContent = 'Streaming\u2026';
+      }
+    }
+
+    if (msg.type === 'stream_start') {
+      totalDom = msg.total_dom_nodes || 0;
+      savings = msg.token_savings_ratio || 0;
+      metaEl.innerHTML =
+        '<span><span class="val">0</span> / ' + (msg.total_nodes||0) + ' nodes</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span style="color:var(--accent)">streaming\u2026</span>';
+    }
+
+    if (msg.type === 'stream_node') {
+      nodeCount++;
+      const n = msg.node || {};
+      const rel = (n.relevance || 0).toFixed(3);
+      const div = document.createElement('div');
+      div.className = 'result-node';
+      div.style.opacity = '0';
+      div.style.transform = 'translateY(8px)';
+      div.style.transition = 'opacity .3s ease, transform .3s ease';
+      div.innerHTML =
+        '<div class="result-node-header">' + nodeCount + '. relevance: ' + rel + ' \u00b7 ' + (n.role||'text') + '</div>' +
+        '<div class="result-node-text">"' + escHtml((n.label||'').slice(0,300)) + '"</div>';
+      nodesEl.appendChild(div);
+      // Trigger animation
+      requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translateY(0)'; });
+      // Update counter
+      metaEl.innerHTML =
+        '<span><span class="val">' + nodeCount + '</span> nodes</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span style="color:var(--accent)">streaming\u2026</span>';
+      // Auto-scroll to bottom
+      nodesEl.scrollTop = nodesEl.scrollHeight;
+    }
+
+    if (msg.type === 'result' || msg.type === 'stream_complete') {
+      const elapsed = Math.round(performance.now() - t0);
+      const savPct = (savings * 100).toFixed(1);
+      metaEl.innerHTML =
+        '<span><span class="val">' + nodeCount + '</span> streamed</span>' +
+        '<span><span class="val">' + totalDom.toLocaleString() + '</span> DOM</span>' +
+        '<span><span class="val">' + savPct + '%</span> saved</span>';
+      summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
+      summaryEl.innerHTML =
+        '<div><div class="summary-val">' + nodeCount + '</div><div class="summary-label">nodes</div></div>' +
+        '<div><div class="summary-val">' + totalDom.toLocaleString() + '</div><div class="summary-label">DOM total</div></div>' +
+        '<div><div class="summary-val">' + savPct + '%</div><div class="summary-label">token savings</div></div>' +
+        '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+      hideLoading();
+      ws.close();
+    }
+
+    if (msg.type === 'error') {
+      showError(msg.message || 'Stream error');
+      hideLoading();
+      ws.close();
+    }
+  };
+
+  ws.onerror = function() {
+    showError('WebSocket connection failed');
+    hideLoading();
+  };
+
+  ws.onclose = function() {
+    hideLoading();
+  };
+}
+
+// ─── DIFF ────────────────────────────────────────────────────────────────
+async function runDiff() {
+  const url = document.getElementById('input-url').value.trim();
+  const goal = document.getElementById('input-goal').value.trim();
+  const url2 = document.getElementById('input-url2').value.trim() || url;
+  if (!url || !goal) return;
+  showLoading('Fetching page A\u2026');
+  const t0 = performance.now();
+  const diffMeta = document.getElementById('diff-meta');
+  document.getElementById('diff-results').classList.add('visible');
+  if(diffMeta) diffMeta.innerHTML = '<span style="color:var(--accent)">Fetching both pages\u2026</span>';
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url, goal, top_n: 30, output_format:'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url: url2, goal, top_n: 30, output_format:'json'}) }),
+    ]);
+    const d1 = await r1.json();
+    const d2 = await r2.json();
+    const elapsed = Math.round(performance.now() - t0);
+
+    const nodes1 = d1.nodes || [];
+    const nodes2 = d2.nodes || [];
+    const labels1 = new Set(nodes1.map(n => n.label));
+    const labels2 = new Set(nodes2.map(n => n.label));
+
+    const added = nodes2.filter(n => !labels1.has(n.label));
+    const removed = nodes1.filter(n => !labels2.has(n.label));
+    const kept = nodes1.filter(n => labels2.has(n.label));
+
+    const el = document.getElementById('diff-results');
+    document.getElementById('diff-title').textContent = 'Diff' + (url !== url2 ? ': ' + url.split('/').pop() + ' vs ' + url2.split('/').pop() : ' (same page)');
+    document.getElementById('diff-meta').innerHTML =
+      '<span><span class="val" style="color:#22c55e">+' + added.length + '</span> added</span>' +
+      '<span><span class="val" style="color:#ef4444">-' + removed.length + '</span> removed</span>' +
+      '<span><span class="val">' + kept.length + '</span> unchanged</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span></span>';
+
+    let html = '';
+    if (added.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Added (' + added.length + ')</div>';
+      html += added.map(n => '<div class="diff-added">+ ' + escHtml((n.label||'').slice(0,200)) + ' <span style="color:#22c55e;font-size:.7rem">(' + n.role + ')</span></div>').join('');
+      html += '</div>';
+    }
+    if (removed.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Removed (' + removed.length + ')</div>';
+      html += removed.map(n => '<div class="diff-removed">- ' + escHtml((n.label||'').slice(0,200)) + '</div>').join('');
+      html += '</div>';
+    }
+    if (kept.length > 0) {
+      html += '<div class="diff-section"><div class="diff-section-title">Unchanged (' + kept.length + ')</div>';
+      html += kept.slice(0,5).map(n => '<div style="padding:.3rem .8rem;font-size:.75rem;color:#555">' + escHtml((n.label||'').slice(0,150)) + '</div>').join('');
+      if (kept.length > 5) html += '<div style="padding:.3rem .8rem;font-size:.7rem;color:#444">... and ' + (kept.length-5) + ' more</div>';
+      html += '</div>';
+    }
+    document.getElementById('diff-content').innerHTML = html || '<div style="color:#555;text-align:center;padding:2rem">No differences found</div>';
+
+    const summaryEl = document.getElementById('diff-summary');
+    summaryEl.style.gridTemplateColumns = 'repeat(4,1fr)';
+    summaryEl.innerHTML =
+      '<div><div class="summary-val" style="color:#22c55e">+' + added.length + '</div><div class="summary-label">added</div></div>' +
+      '<div><div class="summary-val" style="color:#ef4444">-' + removed.length + '</div><div class="summary-label">removed</div></div>' +
+      '<div><div class="summary-val">' + kept.length + '</div><div class="summary-label">unchanged</div></div>' +
+      '<div><div class="summary-val">' + elapsed + 'ms</div><div class="summary-label">total time</div></div>';
+    el.style.display = 'block';
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────
+async function runRender() {
+  const url = document.getElementById('input-url').value.trim();
+  if (!url) return;
+  showLoading('Rendering\u2026');
+  const t0 = performance.now();
+  const w = parseInt(document.getElementById('cfg-render-w').value) || 1280;
+  const h = parseInt(document.getElementById('cfg-render-h').value) || 800;
+  try {
+    const res = await fetch('/api/fetch/render', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, width: w, height: h })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const b64 = data.png_base64;
+    if (!b64) throw new Error('No image returned');
+    const el = document.getElementById('render-results');
+    const tier = data.tier_used || 'blitz';
+    const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
+    document.getElementById('render-title').textContent = 'Render: ' + url.split('/').slice(0,3).join('/');
+    document.getElementById('render-meta').innerHTML =
+      '<span><span class="val">' + w + 'x' + h + '</span> viewport</span>' +
+      '<span><span class="val">' + elapsed + 'ms</span> render</span>' +
+      '<span><span class="val">' + tier + '</span> engine</span>' +
+      '<span><span class="val">' + sizeKb + '</span> PNG</span>';
+    document.getElementById('render-img').innerHTML =
+      '<div class="render-frame"><img src="data:image/png;base64,' + b64 + '" alt="Rendered page" style="max-height:600px;object-fit:contain"></div>';
+    el.classList.add('visible');
+  } catch(err) { showError(err.message); }
+  finally { hideLoading(); }
+}
+
+// ─── Shared WebSocket helper ─────────────────────────────────────────────
+// All tabs use this for real-time progress (fetching → parsing → result)
+function wsCall(method, params, opts) {
+  // opts: { onProgress, onResult, onError, onStreamNode, onStreamStart }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/api');
+  const id = 'req-' + Date.now();
+
+  ws.onopen = function() {
+    if(opts.onProgress) opts.onProgress('connecting', {});
+    ws.send(JSON.stringify({ id, method, params }));
+  };
+
+  ws.onmessage = function(e) {
+    const msg = JSON.parse(e.data);
+    if(msg.type === 'progress' && opts.onProgress) {
+      opts.onProgress(msg.stage, msg);
+    }
+    if(msg.type === 'stream_start' && opts.onStreamStart) {
+      opts.onStreamStart(msg);
+    }
+    if(msg.type === 'stream_node' && opts.onStreamNode) {
+      opts.onStreamNode(msg);
+    }
+    if(msg.type === 'result') {
+      if(opts.onResult) opts.onResult(msg.data);
+      ws.close();
+    }
+    if(msg.type === 'stream_complete') {
+      if(opts.onResult) opts.onResult(msg);
+      ws.close();
+    }
+    if(msg.type === 'error') {
+      if(opts.onError) opts.onError(msg.message || 'Unknown error');
+      ws.close();
+    }
+  };
+
+  ws.onerror = function() {
+    if(opts.onError) opts.onError('WebSocket connection failed');
+  };
+
+  ws.onclose = function() {
+    hideLoading();
+  };
+
+  return ws;
+}
+
+// Progress text helper
+function progressText(stage, msg) {
+  if(stage === 'connecting') return 'Connecting\u2026';
+  if(stage === 'fetching') return 'Fetching ' + escHtml((msg.url||'').slice(0,50)) + '\u2026';
+  if(stage === 'parsing') return 'Parsing ' + ((msg.bytes_fetched||0)/1024).toFixed(0) + 'KB\u2026';
+  return stage + '\u2026';
 }
 
 function escHtml(s) {
