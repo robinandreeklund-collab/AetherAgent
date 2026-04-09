@@ -6054,15 +6054,64 @@ mod tests {
 
     #[cfg(feature = "blitz")]
     #[test]
-    fn test_blitz_cpu_render_produces_image() {
-        let html = r#"<html><head><style>body{font-family:serif;padding:20px}h1{font-size:48px;color:red}p{color:blue}</style></head>
-<body><h1>HELLO WORLD</h1><p>Text here.</p></body></html>"#;
-        let result = render_html_to_png_inner(html, "https://test.com", 800, 600, false);
-        assert!(result.is_ok(), "Blitz render failed: {:?}", result.err());
+    fn test_blitz_full_pipeline_with_css() {
+        // Realistic HTML with inline CSS — tests the FULL pipeline
+        // (render_html_to_png → css_compiler → strip_stylesheets → render_html_to_png_inner)
+        let html = r#"<html><head>
+<link rel="stylesheet" href="https://cdn.example.com/nonexistent.css">
+<style>
+body { background: #1a1a2e; color: #eee; font-family: sans-serif; margin: 0; }
+header { background: #16213e; padding: 1rem 2rem; border-bottom: 3px solid #0f3460; }
+header h1 { color: #e94560; margin: 0; }
+nav { display: flex; gap: 1rem; padding: 0.5rem 2rem; background: #0f3460; }
+nav a { color: #a5d6ff; text-decoration: none; }
+main { padding: 2rem; }
+.card { background: #16213e; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; border: 1px solid #333; }
+.card h2 { color: #60a5fa; margin-top: 0; }
+.btn { background: #e94560; color: white; padding: 0.5rem 1.5rem; border: none; border-radius: 4px; }
+footer { background: #16213e; padding: 1rem 2rem; text-align: center; color: #666; }
+</style>
+</head>
+<body>
+<header><h1>Python Downloads</h1></header>
+<nav><a href="/">Home</a><a href="/downloads">Downloads</a><a href="/docs">Docs</a></nav>
+<main>
+<div class="card"><h2>Python 3.14.4</h2><p>Release date: April 7, 2026</p>
+<button class="btn">Download Python 3.14.4</button></div>
+<div class="card"><h2>Python 3.13.13</h2><p>Security update</p>
+<button class="btn">Download</button></div>
+</main>
+<footer>Copyright 2026 Python Software Foundation</footer>
+</body></html>"#;
+
+        eprintln!("[TEST] Input HTML: {} bytes", html.len());
+
+        // Step 1: Test render_html_to_png (full pipeline with css_compiler)
+        let result = render_html_to_png(html, "https://www.python.org", 1280, 800, false);
+        assert!(result.is_ok(), "Full pipeline failed: {:?}", result.err());
         let png = result.unwrap();
-        let _ = std::fs::write("/tmp/blitz_text_test.png", &png);
-        eprintln!("[BLITZ] {} bytes", png.len());
-        assert!(png.len() > 1000, "PNG too small ({}b)", png.len());
+        let _ = std::fs::write("/tmp/blitz_full_pipeline.png", &png);
+        eprintln!("[TEST] Full pipeline PNG: {} bytes", png.len());
+
+        // Step 2: Test render_html_to_png_inner directly (skip css_compiler)
+        let result_inner =
+            render_html_to_png_inner(html, "https://www.python.org", 1280, 800, false);
+        assert!(
+            result_inner.is_ok(),
+            "Inner render failed: {:?}",
+            result_inner.err()
+        );
+        let png_inner = result_inner.unwrap();
+        let _ = std::fs::write("/tmp/blitz_inner_only.png", &png_inner);
+        eprintln!("[TEST] Inner-only PNG: {} bytes", png_inner.len());
+
+        // Both should have content
+        assert!(png.len() > 5000, "Full pipeline too small ({}b)", png.len());
+        assert!(
+            png_inner.len() > 5000,
+            "Inner too small ({}b)",
+            png_inner.len()
+        );
     }
 
     #[cfg(feature = "blitz")]
