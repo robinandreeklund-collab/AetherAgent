@@ -185,6 +185,10 @@ name = "aether-crfr-bench"
 path = "src/bin/crfr_benchmark.rs"
 
 [[bin]]
+name = "aether-crfr-live-test"
+path = "src/bin/crfr_live_test.rs"
+
+[[bin]]
 name = "msmarco-eval"
 path = "benches/msmarco_eval.rs"
 

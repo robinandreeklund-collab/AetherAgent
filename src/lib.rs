@@ -1641,11 +1641,9 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
 /// Save CRFR field for a URL to a JSON string (for persistent storage).
 #[wasm_bindgen]
 pub fn crfr_save_field(url: &str) -> String {
-    // Read-only peek — does NOT remove from cache or corrupt content_hash
-    match resonance::peek_field(url) {
-        Some(field) => field
-            .to_json()
-            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#)),
+    // OPT-8: serialize in-place without cloning the full field
+    match resonance::peek_field_json(url) {
+        Some(json) => json,
         None => r#"{"error":"no cached field for this URL"}"#.to_string(),
     }
 }
@@ -1698,15 +1696,25 @@ pub fn crfr_update_node(
 /// Use for cross-site learning (e.g., SVT → Expressen, Amazon → Zalando).
 #[wasm_bindgen]
 pub fn crfr_transfer(donor_url: &str, recipient_url: &str, min_similarity: f32) -> String {
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (donor, donor_found) = resonance::get_or_build_field(&dummy, donor_url);
-    if !donor_found {
-        return r#"{"error":"no cached donor field"}"#.to_string();
-    }
-    let (mut recipient, recipient_found) = resonance::get_or_build_field(&dummy, recipient_url);
-    if !recipient_found {
-        return r#"{"error":"no cached recipient field"}"#.to_string();
-    }
+    // BUG-FIX: get_or_build_field() does content-hash validation against the provided
+    // tree nodes. When called with an empty dummy tree (no HTML available), it always
+    // detects a "content change" and returns a fresh empty field with found=false —
+    // making transfer impossible even when the donor is cached.
+    // Fix: use peek_field() which reads directly from cache/SQLite without hash checks.
+    let donor = match resonance::peek_field(donor_url) {
+        Some(f) => f,
+        None => return r#"{"error":"no cached donor field"}"#.to_string(),
+    };
+    // For recipient: use peek_field when cached to preserve existing learning,
+    // otherwise build a new empty field to receive the transferred data.
+    let mut recipient = if let Some(f) = resonance::peek_field(recipient_url) {
+        f
+    } else {
+        // Recipient not cached: build empty field with correct url_hash
+        let dummy: Vec<types::SemanticNode> = vec![];
+        let (f, _) = resonance::get_or_build_field(&dummy, recipient_url);
+        f
+    };
     let transferred = recipient.transfer_from(&donor, min_similarity);
     resonance::save_field(&recipient);
     serde_json::json!({
@@ -3271,7 +3279,7 @@ pub fn render_html_to_png(
 
     // Säkerhetsgräns: Blitz/Vello kraschar på extremt stora CSS-gradienter.
     // Kontrollera storleken EFTER script-stripping och CSS-kompilering.
-    const MAX_HTML_FOR_BLITZ: usize = 5 * 1024 * 1024; // 5 MB
+    const MAX_HTML_FOR_BLITZ: usize = 10 * 1024 * 1024; // 10 MB
     let check_size = if use_compiled {
         compiled_html.len()
     } else {
@@ -3403,12 +3411,29 @@ fn strip_css_gradients(html: &str) -> String {
                 let is_conic = lower[pos..].starts_with("conic");
                 let is_repeating_conic = lower[pos..].starts_with("repeating-conic");
 
-                // Strippa ALLA gradienter → fallback-färg
+                // Strippa ALLA gradienter → fallback-värde
                 // Vello GradientLut har edge-case buggar med diverse stop-kombinationer
                 // som kraschar processen trots catch_unwind (panik i tokio worker thread)
                 {
                     let _ = (is_conic, is_repeating_conic); // undvik unused warnings
-                    let fallback = extract_gradient_fallback_color(gradient_body);
+
+                    // Kolla om gradienten är värdet till en image-property.
+                    // background-image/border-image/mask-image accepterar INTE färgvärden —
+                    // bara <image> (url(), gradient, none). Att sätta t.ex.
+                    // "background-image: #ff0000" är ogiltig CSS och kan krascha Blitz.
+                    let ctx_start = result.len().saturating_sub(128);
+                    let ctx = result[ctx_start..].to_ascii_lowercase();
+                    let in_image_property = ctx.contains("background-image")
+                        || ctx.contains("border-image")
+                        || ctx.contains("mask-image")
+                        || ctx.contains("-webkit-mask-image")
+                        || ctx.contains("list-style-image");
+
+                    let fallback = if in_image_property {
+                        "none".to_string()
+                    } else {
+                        extract_gradient_fallback_color(gradient_body)
+                    };
                     result.push_str(&fallback);
                 }
 
@@ -4440,6 +4465,56 @@ pub fn screenshot_with_tier(
 
     let result = backend.screenshot(&req)?;
     Ok((result.png_bytes, result.tier_used))
+}
+
+/// Kör inline-JavaScript via QuickJS på HTML och returnerar DOM-muterat HTML.
+///
+/// Avsett att anropas INNAN CSS-inlining i render-pipelinen, på den lilla
+/// original-HTML:en (inte den CSS-inlinerade versionen som kan vara 5–10 MB).
+/// Exekverar DOMContentLoaded/load-lifecycle → applicerar klassby ten, stil-ändringar
+/// och visibility-toggling som JS normalt gör i en riktig browser.
+///
+/// Hjälper sajter som python.org (hamburger-meny), traditionella jQuery-sajter
+/// och sidor som lägger till klasser dynamiskt vid sidladdning.
+///
+/// Kräver feature `js-eval`.
+#[cfg(feature = "js-eval")]
+pub fn apply_js_mutations(html: &str, width: u32, height: u32) -> String {
+    // Säkerhetsgräns: ArenaDom-parsing av >2 MB original-HTML är för kostsamt
+    const MAX_HTML: usize = 2 * 1024 * 1024; // 2 MB
+                                             // Script-gräns: mer än 500 KB inline-scripts tar för lång tid i QuickJS
+    const MAX_SCRIPTS: usize = 500 * 1024; // 500 KB
+
+    if html.len() > MAX_HTML {
+        return html.to_string();
+    }
+
+    let scripts = js_eval::extract_ordered_scripts(html);
+    if scripts.is_empty() {
+        return html.to_string();
+    }
+
+    let total_script_bytes: usize = scripts.iter().map(|s| s.len()).sum();
+    if total_script_bytes > MAX_SCRIPTS {
+        return html.to_string();
+    }
+
+    let rcdom = parser::parse_html(html);
+    let arena = arena_dom::ArenaDom::from_rcdom(&rcdom);
+    let eval_result =
+        dom_bridge::eval_js_with_lifecycle_and_arena_viewport(&scripts, arena, width, height);
+
+    if eval_result.result.mutations.is_empty() {
+        return html.to_string();
+    }
+
+    let serialized = eval_result.arena.serialize_html(eval_result.arena.document);
+    // Säkerhetskontroll: serialisering ska aldrig producera tom output
+    if serialized.len() > 20 {
+        serialized
+    } else {
+        html.to_string()
+    }
 }
 
 /// Get tier statistics for monitoring

@@ -42,20 +42,22 @@ pub struct TierDecision {
 
 // ─── Tier-detektorer ────────────────────────────────────────────────────────
 
-/// Mönster som indikerar att sidan behöver full browser (Tier 4)
+/// Mönster som verkligen kräver full GPU-browser (Tier 4).
+///
+/// Kortad från den ursprungliga listan: WebSocket, Workers, IndexedDB
+/// och URL.createObjectURL har alla no-op-stubs i QuickJS-sandboxen
+/// och kräver INTE CDP för att extrahera sidans semantiska innehåll.
+/// WebGL kräver verklig GPU-rendering. WebAssembly.instantiate kräver
+/// att binären faktiskt körs — utan det finns inget content att extrahera.
+/// Alla mönster kontrolleras BARA i inline-scriptinnehåll (inte sidtext).
 const HEAVY_JS_PATTERNS: &[&str] = &[
     "webgl",
-    "canvas.getcontext",
-    "web worker",
-    "new worker",
-    "serviceworker",
-    "webassembly",
-    "wasm",
-    "indexeddb",
-    "createobjecturl",
-    "websocket",
-    "webrtc",
-    "rtcpeerconnection",
+    // canvas.getcontext('webgl') — GPU-rendering
+    "getcontext('webgl",
+    "getcontext(\"webgl",
+    // WebAssembly execution (inte bara type-check/validate)
+    "webassembly.instantiate",
+    "webassembly.compile(",
 ];
 
 /// SPA-ramverk som typiskt kräver JS-exekvering
@@ -123,10 +125,13 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
 
     let js_info = js_eval::detect_js_snippets(html);
 
-    // ─── Tier 4: Tung JS check ──────────────────────────────────────────
+    // ─── Tier 4: Tung JS check (GPU-required only) ──────────────────────
+    // Kontrollerar bara inline-scriptinnehåll (inte sidtext) för att undvika
+    // att artiklar som *nämner* WebGL/WebRTC felaktigt eskaleras till CDP.
 
+    let script_text = extract_inline_script_text(&html_lower);
     for pattern in HEAVY_JS_PATTERNS {
-        if html_lower.contains(pattern) {
+        if script_text.contains(pattern) {
             return TierDecision {
                 tier: ParseTier::ChromeCdp {
                     reason: format!("heavy JS: {}", pattern),
@@ -177,8 +182,11 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
     let has_content_affecting_js = js_info.snippets.iter().any(|s| s.affects_content);
 
     if has_content_affecting_js && !needs_layout {
-        // SPA-check: om det är ett SPA-ramverk med tom body, behövs kanske CDP
-        if is_spa_shell(&html_lower) {
+        // SPA-check: om det är ett SPA-ramverk med tom body OCH inga statiska text-element
+        // → CDP (ingen data att extrahera utan att köra bundeln).
+        // Men om sidan har tillräckligt SSR-content trots SPA-markörer (t.ex. Yahoo Finance,
+        // SSR-renderade React-sidor) → QuickJsLifecycle räcker.
+        if is_spa_shell(&html_lower) && !static_content_sufficient {
             return TierDecision {
                 tier: ParseTier::ChromeCdp {
                     reason: "SPA shell with empty body".to_string(),
@@ -242,16 +250,49 @@ pub fn select_tier(html: &str, url: &str) -> TierDecision {
         };
     }
 
-    // Layout + JS → CDP
+    // Layout + content-affecting JS → QuickJsLifecycle (inte CDP).
+    // QuickJS+ArenaDom+EventLoop hanterar detta — CDP behövs bara för WebGL/GPU.
     let _url = url; // Undvik unused-varning
     TierDecision {
-        tier: ParseTier::ChromeCdp {
-            reason: "layout + content JS".to_string(),
+        tier: ParseTier::QuickJsLifecycle {
+            script_count: js_info.total_inline_scripts,
         },
-        reason: "Kräver både CSS-layout och JS-exekvering".to_string(),
-        confidence: 0.7,
+        reason: "CSS-layout + JS-innehåll — QuickJS+lifecycle hanterar detta".to_string(),
+        confidence: 0.75,
         analysis_time_us: start.elapsed().as_micros() as u64,
     }
+}
+
+/// Extrahera text från inline `<script>` taggar (exkl. externa script-tags och JSON-blocks).
+/// Används för att kontrollera HEAVY_JS_PATTERNS utan att trigga på sidtext.
+fn extract_inline_script_text(html_lower: &str) -> String {
+    let mut result = String::new();
+    let mut pos = 0;
+    while let Some(tag_start) = html_lower[pos..].find("<script") {
+        let abs_start = pos + tag_start;
+        // Hitta slut på öppningstaggen
+        let tag_end = match html_lower[abs_start..].find('>') {
+            Some(e) => abs_start + e + 1,
+            None => break,
+        };
+        let tag_header = &html_lower[abs_start..tag_end];
+        // Skippa externa scripts och JSON/LD-JSON
+        let is_external = tag_header.contains("src=");
+        let is_json = tag_header.contains("application/json")
+            || tag_header.contains("application/ld+json")
+            || tag_header.contains("importmap");
+        // Hitta </script>
+        let close = match html_lower[tag_end..].find("</script>") {
+            Some(c) => c,
+            None => break,
+        };
+        if !is_external && !is_json {
+            result.push(' ');
+            result.push_str(&html_lower[tag_end..tag_end + close]);
+        }
+        pos = tag_end + close + "</script>".len();
+    }
+    result
 }
 
 /// Kontrollera om sidan har CSS-mönster som kräver layout-beräkning
@@ -424,6 +465,30 @@ mod tests {
     }
 
     #[test]
+    fn test_webgl_in_page_text_not_cdp() {
+        // "webgl" i artikeltext (inte i script-tag) ska INTE trigga CDP
+        let html = r#"
+        <html><body>
+            <h1>Om WebGL och canvas-rendering</h1>
+            <p>WebGL är ett JavaScript API för 3D-grafik i webbläsaren.</p>
+            <p>Mer text om WebGL och canvas.getContext('webgl').</p>
+            <p>Ytterligare information om 3D-grafik och webgl-tekniken.</p>
+            <p>Femte paragrafen för att uppfylla content-threshold.</p>
+            <script>
+                var views = document.querySelectorAll('p').length;
+            </script>
+        </body></html>
+        "#;
+
+        let decision = select_tier(html, "https://example.com");
+        assert!(
+            !matches!(decision.tier, ParseTier::ChromeCdp { .. }),
+            "WebGL i artikeltext borde INTE ge CDP, fick {:?}",
+            decision.tier
+        );
+    }
+
+    #[test]
     fn test_tier4_spa_shell() {
         let html = r#"
         <html><head></head>
@@ -440,6 +505,111 @@ mod tests {
         assert!(
             matches!(decision.tier, ParseTier::ChromeCdp { .. }),
             "SPA-skelett borde ge Tier 4, fick {:?}",
+            decision.tier
+        );
+    }
+
+    /// Yahoo Finance-scenario: SSR-renderad sida med React + WebSocket för live-priser.
+    /// Trots WebSocket och react-dom ska sidan INTE eskaleras till CDP eftersom
+    /// den har tillräckligt server-renderat innehåll.
+    #[test]
+    fn test_finance_site_with_websocket_not_cdp() {
+        let html = r##"
+        <html><head>
+            <script src="https://cdn.example.com/react-dom.min.js"></script>
+        </head><body>
+            <div id="root">
+                <h1>AAPL Stock Price</h1>
+                <p class="price">$175.42</p>
+                <p class="change">+2.3% today</p>
+                <p class="volume">Volume: 45.2M</p>
+                <p class="mktcap">Market Cap: $2.7T</p>
+                <table>
+                    <tr><td>Open</td><td>$173.10</td></tr>
+                    <tr><td>High</td><td>$176.20</td></tr>
+                    <tr><td>Low</td><td>$172.80</td></tr>
+                </table>
+            </div>
+            <script>
+                var ws = new WebSocket('wss://stream.finance.example.com/quotes');
+                ws.onmessage = function(e) {
+                    var data = JSON.parse(e.data);
+                    document.querySelector('.price').textContent = data.price;
+                };
+            </script>
+        </body></html>
+        "##;
+
+        let decision = select_tier(html, "https://finance.example.com");
+        assert!(
+            !matches!(decision.tier, ParseTier::ChromeCdp { .. }),
+            "Finanssida med SSR-content + WebSocket borde INTE ge CDP, fick {:?}",
+            decision.tier
+        );
+    }
+
+    /// SSR-renderad React-sida (t.ex. Yahoo Finance / Next.js) med mängder av content.
+    /// Ska gå till QuickJsLifecycle, inte CDP.
+    #[test]
+    fn test_ssr_react_with_content_not_cdp() {
+        let html = r##"
+        <html><head>
+            <script src="/static/react-dom.production.min.js"></script>
+        </head><body>
+            <div id="app" data-reactroot="">
+                <h1>Nyheter</h1>
+                <p>Artikel 1 — serverrenderad text</p>
+                <p>Artikel 2 — mer serverrenderad text</p>
+                <p>Artikel 3 — ytterligare text</p>
+                <p>Artikel 4 — sjätte paragrafen</p>
+                <p>Artikel 5 — sjunde paragrafen</p>
+            </div>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    ReactDOM.hydrate(window.__SSR_DATA__, document.getElementById('app'));
+                });
+            </script>
+        </body></html>
+        "##;
+
+        let decision = select_tier(html, "https://news.example.com");
+        assert!(
+            !matches!(decision.tier, ParseTier::ChromeCdp { .. }),
+            "SSR-renderad React-sida borde INTE ge CDP, fick {:?}",
+            decision.tier
+        );
+    }
+
+    /// Layout + JS → QuickJsLifecycle (inte CDP).
+    /// CSS-layout + JS-innehåll ska hanteras av QuickJS+EventLoop.
+    #[test]
+    fn test_layout_and_js_not_cdp() {
+        let html = r##"<html><head>
+            <style>
+                .container { display:flex; position:absolute; transform: translateX(0); }
+                @media (max-width:768px) { .container { display:grid; } }
+                .card { transition: opacity 0.3s; animation: fade 1s; }
+            </style>
+        </head><body>
+            <div class="container">
+                <div class="card" id="content">Loading...</div>
+            </div>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.getElementById('content').textContent = 'Loaded content';
+                });
+            </script>
+        </body></html>"##;
+
+        let decision = select_tier(html, "https://example.com");
+        assert!(
+            !matches!(decision.tier, ParseTier::ChromeCdp { .. }),
+            "Layout+JS borde ge QuickJsLifecycle (inte CDP), fick {:?}",
+            decision.tier
+        );
+        assert!(
+            matches!(decision.tier, ParseTier::QuickJsLifecycle { .. }),
+            "Layout+JS borde ge QuickJsLifecycle, fick {:?}",
             decision.tier
         );
     }
@@ -542,5 +712,53 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn test_extract_inline_script_text_basic() {
+        let html = r#"<html><body>
+            <p>WebGL är coolt men detta är inte script</p>
+            <script>var x = 1; document.body.textContent = 'hello';</script>
+            <script src="https://cdn.example.com/lib.js"></script>
+            <script type="application/json">{"webgl": true}</script>
+        </body></html>"#;
+        let text = extract_inline_script_text(&html.to_lowercase());
+        assert!(
+            text.contains("document.body.textcontent"),
+            "Borde innehålla inline-scriptinnehåll"
+        );
+        assert!(
+            !text.contains("webgl är coolt"),
+            "Borde INTE innehålla sidtext utanför script-taggar"
+        );
+        assert!(
+            !text.contains("cdn.example.com"),
+            "Borde INTE innehålla URL från extern script-tag"
+        );
+        assert!(
+            !text.contains("\"webgl\": true"),
+            "Borde INTE innehålla JSON-LD/application/json script"
+        );
+    }
+
+    #[test]
+    fn test_extract_inline_script_text_no_scripts() {
+        let html = "<html><body><p>Ren HTML utan scripts</p></body></html>";
+        let text = extract_inline_script_text(&html.to_lowercase());
+        assert!(
+            text.is_empty() || text.trim().is_empty(),
+            "Borde returnera tom sträng utan scripts"
+        );
+    }
+
+    #[test]
+    fn test_extract_inline_script_text_multiple() {
+        let html = r#"<html><body>
+            <script>var a = 1;</script>
+            <script>var b = 2;</script>
+        </body></html>"#;
+        let text = extract_inline_script_text(&html.to_lowercase());
+        assert!(text.contains("var a = 1"), "Borde innehålla första script");
+        assert!(text.contains("var b = 2"), "Borde innehålla andra script");
     }
 }

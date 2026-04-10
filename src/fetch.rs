@@ -379,7 +379,15 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
         let client = SHARED_CLIENT.clone();
         let url = link.url.clone();
         handles.push(tokio::spawn(async move {
-            match client.get(&url).send().await {
+            match client
+                .get(&url)
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AetherAgent/0.2",
+                )
+                .send()
+                .await
+            {
                 Ok(resp) => {
                     let status = resp.status();
                     if !status.is_success() {
@@ -433,7 +441,9 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
     for (i, css_result) in results.iter().enumerate() {
         match css_result {
             Ok(css) => {
-                if css.len() <= 512_000 && css_bytes_added + css.len() <= MAX_TOTAL_CSS_BUDGET {
+                if css.len() <= 2 * 1024 * 1024
+                    && css_bytes_added + css.len() <= MAX_TOTAL_CSS_BUDGET
+                {
                     inlined_css.push_str(&format!(
                         "\n<style data-inlined-from=\"{}\">\n{}\n</style>\n",
                         css_links[i].url, css
@@ -462,7 +472,7 @@ pub async fn inline_external_css_detailed(html: &str, base_url: &str) -> CssInli
                         url: css_links[i].url.clone(),
                         loaded: false,
                         size_bytes: css.len(),
-                        error: Some(format!("Trunkerad: {} bytes > 512KB", css.len())),
+                        error: Some(format!("Trunkerad: {} bytes > 2MB", css.len())),
                     });
                     css_failed += 1;
                 }

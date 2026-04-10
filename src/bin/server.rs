@@ -3661,8 +3661,19 @@ async fn fetch_render_handler(Json(req): Json<FetchRenderRequest>) -> impl IntoR
         );
     }
 
+    // Steg 1.5: Kör QuickJS på original HTML (INNAN CSS-inlining).
+    // Original-HTML är liten (typiskt 50–500 KB) → ArenaDom + QuickJS är snabb.
+    // CSS-inlining blåser upp HTML till 2–10 MB → JS-eval fungerar aldrig där.
+    // Genom att köra JS här applicerar vi DOMContentLoaded-mutationer (klassbyta,
+    // nav-toggle, visa/dölj element) INNAN CSS kompileras — Blitz renderar rätt state.
+    #[cfg(feature = "js-eval")]
+    let html_after_js: String = aether_agent::apply_js_mutations(html, req.width, req.height);
+    #[cfg(not(feature = "js-eval"))]
+    let html_after_js: String = html.to_string();
+    let html_for_css: &str = &html_after_js;
+
     // Steg 2: Inline extern CSS med detaljerad felrapportering
-    let css_result = fetch::inline_external_css_detailed(html, final_url).await;
+    let css_result = fetch::inline_external_css_detailed(html_for_css, final_url).await;
     let html_with_css = css_result.html.clone();
 
     // Steg 2b: Hämta och inlina externa scripts (SPA-stöd)

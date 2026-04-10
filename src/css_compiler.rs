@@ -53,7 +53,7 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
     let start = std::time::Instant::now();
 
     // Säkerhetsgräns — skip för extremt stor HTML
-    const MAX_HTML_FOR_COMPILE: usize = 5 * 1024 * 1024; // 5 MB
+    const MAX_HTML_FOR_COMPILE: usize = 8 * 1024 * 1024; // 8 MB
     if html.len() > MAX_HTML_FOR_COMPILE {
         return CssCompilerResult {
             html: html.to_string(),
@@ -64,17 +64,21 @@ pub fn compile_css(html: &str, viewport: &ViewportConfig) -> CssCompilerResult {
         };
     }
 
-    // Steg 1: Resolve CSS custom properties FÖRST (innan LightningCSS)
-    // LightningCSS resolvar inte var() — vi gör det manuellt.
-    let html_vars_resolved = resolve_css_variables(html);
+    // Steg 1: Lägg till system font fallbacks
+    let html_with_fonts = add_font_fallbacks(html);
 
-    // Steg 1.5: Lägg till system font fallbacks
-    let html_with_fonts = add_font_fallbacks(&html_vars_resolved);
-
-    // Steg 2+3: Extrahera <style>-block, transform med LightningCSS (Chrome 40
-    // downlevel), filtrera @media
-    let (html_with_transformed_css, blocks_processed, rules_count) =
+    // Steg 2+3: Extrahera <style>-block, transform med LightningCSS (Chrome 120),
+    // filtrera @media FÖRST — viktig ordning: @media-filtrering måste ske INNAN
+    // CSS-variabel-resolution. Annars extraherar resolve_css_variables CSS custom
+    // properties från @media (prefers-color-scheme: dark)-block och bakar in
+    // dark-mode-färger i light-mode-rendering (bug: Wikipedia mörk bakgrund).
+    let (html_media_filtered, blocks_processed, rules_count) =
         transform_and_filter_css(&html_with_fonts, viewport);
+
+    // Steg 3.5: Resolve CSS custom properties EFTER media-filtrering
+    // Nu är dark-mode @media-block borta → bara light-mode variabler extraheras.
+    // LightningCSS resolvar inte var() — vi gör det manuellt.
+    let html_with_transformed_css = resolve_css_variables(&html_media_filtered);
 
     // Steg 4: Inline all CSS till style="" med css-inline
     let final_html = inline_css_to_attributes(&html_with_transformed_css);
@@ -386,9 +390,12 @@ fn evaluate_single_media_feature(feature: &str, viewport: &ViewportConfig) -> bo
             // Statisk rendering — alltid "reduce"
             value == "reduce"
         }
-        // hover, pointer — matchar "none" (ingen mus i screenshot-kontext)
-        "hover" => value == "none",
-        "pointer" => value == "none" || value == "fine",
+        // hover, pointer — desktop-rendering: mus med hover och fin pekare.
+        // (hover: hover) matchar desktop, (hover: none) matchar pekskärm.
+        // Bug: gamla "value == none" strippade all CSS i @media (hover: hover),
+        // vilket tog bort hela desktop-navigationen (t.ex. Stack Overflow).
+        "hover" => value == "hover",
+        "pointer" => value == "fine",
         // Okända features — default till true (konservativt)
         _ => true,
     }

@@ -158,13 +158,25 @@ impl TfIdfIndex {
 
     /// Inkrementell uppdatering: ta bort gammal label och lägg till ny.
     pub fn update_node(&mut self, node_id: u32, old_label: &str, new_label: &str) {
-        // Ta bort gamla entries
+        // Ta bort gamla entries och minska df för varje unik gammal term
         let old_terms = tokenize(old_label);
+        let mut old_unique: std::collections::HashSet<String> = std::collections::HashSet::new();
         for term in &old_terms {
             if let Some(entries) = self.postings.get_mut(term) {
                 entries.retain(|(id, _)| *id != node_id);
                 if entries.is_empty() {
                     self.postings.remove(term);
+                }
+            }
+            old_unique.insert(term.clone());
+        }
+        // BUG-1 fix: decrement df for each unique old term so IDF stays accurate
+        for term in &old_unique {
+            if let Some(count) = self.df.get_mut(term) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    self.df.remove(term);
                 }
             }
         }
@@ -191,10 +203,27 @@ impl TfIdfIndex {
 
     /// Ta bort en nod helt från indexet
     pub fn remove_node(&mut self, node_id: u32) {
+        // BUG-1 fix: collect terms for this node before removing so we can decrement df
+        let mut terms_to_decrement: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for (term, entries) in &self.postings {
+            if entries.iter().any(|(id, _)| *id == node_id) {
+                terms_to_decrement.insert(term.clone());
+            }
+        }
         for entries in self.postings.values_mut() {
             entries.retain(|(id, _)| *id != node_id);
         }
         self.postings.retain(|_, entries| !entries.is_empty());
+        for term in &terms_to_decrement {
+            if let Some(count) = self.df.get_mut(term) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    self.df.remove(term);
+                }
+            }
+        }
         self.doc_len.remove(&node_id);
     }
 
