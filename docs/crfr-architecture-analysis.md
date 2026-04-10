@@ -880,3 +880,154 @@ HTML Input
 | Field cache | 1024 LRU (RAM) |
 | Domain registry | max 10 000 domäner |
 | Max field-noder | 10 000 |
+
+---
+
+## 8. Baseline vs Improved — 10-Site Evaluation (2026-04-10)
+
+### 8.1 Expressen (nyhetssida, svensk)
+
+**Goal:** `senaste nyheterna rubriker artiklar nyheter idag`
+
+| # | Baseline (pre-deploy) | After |
+|---|---|---|
+| 1 | `heading` "Senaste nytt – Nyheter" (1.43) | `link` "Senaste nytt" (1.23) |
+| 2 | `link` "Senaste nytt" (1.22) | `text` "Senaste nytt – Nyheter 12.05 Man skjuten..." (1.21) |
+| 3 | `heading` "Senaste nytt – Krönikörer" (1.22) | `link` "Storbrand på flygplats" (1.12) **CausalMemory** |
+| 4 | `link` "Chatta med AI-Getingen" (1.13) | `link` "Putins dieselartär i lågor" (1.10) **CausalMemory** |
+| 5 | `link` "Storbrand på flygplats" (1.12) | `link` "Tysk flygstrejk drabbar påskresenärer" (1.08) **CausalMemory** |
+| 6 | `heading` "Senaste nytt – Ekonomi" (1.10) | `link` "Enkla grytor du gör..." (1.07) |
+| 7 | `heading` "Senaste nytt – Livsstil" (1.10) | `link` "Här får bussresenärerna gratis glass" (1.06) **CausalMemory** |
+| 8 | `heading` "Senaste nytt – Nöje" (1.10) | `link` "Äntligen helg – recept..." (1.06) |
+
+**Resultat: 5 av 9 tomma headings → 0 tomma headings. Alla 8 noder är nu content.**
+
+Headings "Senaste nytt – Ekonomi", "Senaste nytt – Nöje" etc. försvann helt ur top-8.
+Istället fick vi faktiska nyhets-länkar med CausalMemory-resonans.
+
+### 8.2 HN (Hacker News)
+
+**Goal:** `top stories headlines articles trending posts`
+
+| # | Baseline | After |
+|---|---|---|
+| 1 | `link` "Afrika Bambaataa..." (1.67) | `link` "Afrika Bambaataa..." (1.67) |
+| 2 | `link` "Principles of Mechanical Sympathy" (1.65) | `link` "Principles of Mechanical Sympathy" (1.65) |
+| 3 | `link` "US plans to auto register..." (1.35) | `link` "Scientists invented a fake disease..." (1.29) |
+| 4 | `link` "Scientists invented a fake..." (1.29) | *(gap cut)* |
+| — | **4 noder returnerade (gap cut)** | **3 noder returnerade (tightare gap)** |
+
+**Resultat: Identiskt bra.** Alla noder är faktiska HN story-länkar.
+Gap cut tightare (3 vs 4) — "US plans..." föll ut pga skarpare gap-detektion.
+
+### 8.3 SVT Nyheter
+
+**Goal:** `senaste nyheterna rubriker artiklar nyheter idag`
+
+| # | Baseline | After |
+|---|---|---|
+| 1 | `generic` "Senaste avsnittet SVT Play" (1.75) | `generic` "Senaste avsnittet SVT Play" (1.75) |
+| 2 | `link` "Libanon bekräftar förhandlingar" (1.36) | `link` "Libanon bekräftar förhandlingar" (1.37) |
+| 3 | `text` "Rapport Idag 09:30" (1.34) | `text` "Rapport Idag 09:30" (1.35) |
+| 4 | `text` "Fler artiklar" (1.32) | `text` "Fler artiklar" (1.33) |
+| 5 | `generic` "Relaterade artiklar" (1.28) | `generic` "Relaterade artiklar" (1.29) |
+| 6 | `link` "Två barn bland dödade svenskar" (1.15) | `link` "Två barn bland dödade svenskar" (1.16) |
+| 7 | `link` "Trump: Israel trappar ner" (1.15) | `link` "Trump: Israel trappar ner" (1.16) |
+| 8 | `text` "Senaste nytt" (1.01) | `text` "Senaste nytt" (1.01) |
+
+**Resultat: Stabilt.** Inga heading-problem på SVT (headings hade redan barn).
+Nyhets-länkar rankas korrekt.
+
+### 8.4 BBC News
+
+**Goal:** `latest news headlines articles top stories`
+
+| Baseline | After |
+|---|---|
+| SSR JSON-data (`page.@"news",.sections...`) | SSR JSON-data (identiskt) |
+
+**Resultat: Oförändrat.** BBC returnerar SSR-data, inte renderad HTML.
+`ssr_json_only: true` — detta behöver `run_js: true` för att lösa,
+inte ranking-förbättringar.
+
+### 8.5 Wikipedia (Rust)
+
+**Goal:** `what is Rust programming language description overview`
+
+| Baseline | After |
+|---|---|
+| Fotnoter + kategorier dominerar | Identiskt |
+
+**Resultat: Oförändrat.** Wikipedia-problemet beror inte på headings utan
+på att fotnoter/citeringar matchar keyword "Rust programming language" bättre
+än intro-paragrafen. Detta kräver Wikipedia-specifik penalty (citering-pattern).
+
+### 8.6 GitHub (nickel.rs)
+
+| # | Baseline | After |
+|---|---|---|
+| 1 | "Repository files navigation README" (1.44) | Identiskt (1.44) |
+| 2 | meta.description (1.33) | Identiskt (1.33) |
+| 7 | — | +1 ny nod: "README.md" (1.06) |
+
+**Resultat: Marginellt bättre.** 7 → 8 noder. GitHub-fältet hade inga leaf-headings.
+
+### 8.7 Reddit (/r/rust)
+
+| Baseline | After |
+|---|---|
+| Sidebar-regler dominerar (top 5 = rules) | Identiskt |
+
+**Resultat: Oförändrat.** Reddit-problemet är att sidebar-regler matchar
+"posts"/"threads" keyword-mässigt. Kräver zone-penalty för sidebar-container,
+inte heading-fix.
+
+### 8.8 StackOverflow
+
+| # | Baseline | After |
+|---|---|---|
+| 1 | "He designed C++ to solve your code problems" (1.87) | `link` "Problem with recognizing patterns" (1.64) |
+| 2 | jsonLd "Newest 'rust' Questions" (1.63) | "He designed C++ to solve your code problems" (1.47) |
+
+**Resultat: Förbättrat.** En faktisk SO-fråga-länk klättrade till #1 (från icke-rankad).
+Annons-listitem sjönk från 1.87 → 1.47.
+
+### 8.9 Amazon (AirPods Pro 2)
+
+| Baseline | After |
+|---|---|
+| Reviews-noder dominerar, ingen price/title | Identiskt |
+
+**Resultat: Oförändrat.** Amazon-problemet: produktnamn/pris sitter inte i
+text-noder synliga utan JS-rendering. Kräver `run_js: true`.
+
+### 8.10 docs.rs (serde)
+
+| Baseline | After |
+|---|---|
+| 2 noder (gap cut) | 2 noder (gap cut) |
+
+**Resultat: Oförändrat.** `ssr_json_only: true` — docs.rs kräver JS-rendering.
+
+---
+
+### 8.11 Sammanfattning
+
+| Sajt | Baseline-problem | After | Förbättring |
+|------|------------------|-------|-------------|
+| **Expressen** | 5/9 tomma headings | 0/8 tomma headings | **Stark** |
+| **HN** | 4 bra links | 3 bra links (tightare gap) | Stabil |
+| **SVT** | Redan bra | Redan bra | Stabil |
+| **BBC** | SSR JSON-data | SSR JSON-data | Oförändrat (kräver run_js) |
+| **Wikipedia** | Fotnoter dominerar | Fotnoter dominerar | Oförändrat (kräver specifik penalty) |
+| **GitHub** | 7 noder | 8 noder (+1) | Marginellt |
+| **Reddit** | Sidebar-rules | Sidebar-rules | Oförändrat (kräver zone-penalty) |
+| **StackOverflow** | Annons #1 | Faktisk fråga #1 | **Förbättrat** |
+| **Amazon** | Reviews utan price | Reviews utan price | Oförändrat (kräver run_js) |
+| **docs.rs** | 2 noder (SSR) | 2 noder (SSR) | Oförändrat (kräver run_js) |
+
+**Netto: 2/10 sajter förbättrade (Expressen stark, SO förbättrad), 4/10 stabila, 4/10 kräver andra åtgärder (run_js, zone-penalty).**
+
+Headings-penaltyn löste exakt det identifierade Expressen-mönstret.
+AnswerZoneProfile och sibling-HDC har inget mätbart genomslag ännu
+(kräver feedback-iterationer för att bygga profil).
