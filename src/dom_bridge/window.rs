@@ -5077,6 +5077,188 @@ pub(super) fn register_window_with_viewport<'js>(
                 Object.defineProperty(this, 'size', { get: function() { return Object.keys(this._data).length; } });
             };
         }
+
+        // ─── Node.js / CommonJS compat-shims (webpack/Vite/CRA bundles) ──────
+        // React och de flesta bundlers läser process.env.NODE_ENV för att välja
+        // produktions- vs. utvecklingsläge. Utan denna shim kraschar bundles direkt.
+        if (typeof process === 'undefined') {
+            globalThis.process = {
+                env: { NODE_ENV: 'production' },
+                browser: true,
+                version: '',
+                versions: {},
+                platform: 'browser',
+                argv: [],
+                nextTick: function(fn) {
+                    if (typeof queueMicrotask !== 'undefined') {
+                        queueMicrotask(fn);
+                    } else if (typeof Promise !== 'undefined') {
+                        Promise.resolve().then(fn);
+                    }
+                }
+            };
+        }
+        // CommonJS module/exports/require — används av webpack-bundles internt.
+        if (typeof module === 'undefined') {
+            globalThis.module = { exports: {} };
+        }
+        if (typeof exports === 'undefined') {
+            globalThis.exports = globalThis.module ? globalThis.module.exports : {};
+        }
+        // require()-shim: returnerar kända moduler (React, ReactDOM) om de redan är
+        // laddade som globals, annars ett tomt objekt. Bundles som använder
+        // require() utan att bunta ihop det riktigt (t.ex. CJS externals) fungerar.
+        if (typeof require === 'undefined') {
+            globalThis.require = function require(id) {
+                if (id === 'react' || id === 'React') return globalThis.React || {};
+                if (id === 'react-dom' || id === 'ReactDOM') return globalThis.ReactDOM || {};
+                if (id === 'react-dom/client') return globalThis.ReactDOM || {};
+                if (id === 'react/jsx-runtime') {
+                    var R = globalThis.React || {};
+                    return { jsx: R.createElement, jsxs: R.createElement, Fragment: R.Fragment };
+                }
+                return {};
+            };
+        }
+
+        // ─── Webpack runtime-shims ──────────────────────────────────────────
+        // webpack injects __webpack_require__, __webpack_module_cache__ etc.
+        // before executing module code. Without these the bundle bootstrap crashes.
+        if (typeof __webpack_require__ === 'undefined') {
+            globalThis.__webpack_module_cache__ = {};
+            globalThis.__webpack_modules__ = {};
+            globalThis.__webpack_require__ = function __webpack_require__(moduleId) {
+                if (globalThis.__webpack_module_cache__[moduleId]) {
+                    return globalThis.__webpack_module_cache__[moduleId].exports;
+                }
+                var mod = { id: moduleId, loaded: false, exports: {} };
+                globalThis.__webpack_module_cache__[moduleId] = mod;
+                var fn = globalThis.__webpack_modules__[moduleId];
+                if (fn) {
+                    try { fn(mod, mod.exports, globalThis.__webpack_require__); } catch(e) {}
+                }
+                mod.loaded = true;
+                return mod.exports;
+            };
+            globalThis.__webpack_require__.m = globalThis.__webpack_modules__;
+            globalThis.__webpack_require__.c = globalThis.__webpack_module_cache__;
+            globalThis.__webpack_require__.d = function(exports, definition) {
+                for (var key in definition) {
+                    if (Object.prototype.hasOwnProperty.call(definition, key) &&
+                        !Object.prototype.hasOwnProperty.call(exports, key)) {
+                        Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+                    }
+                }
+            };
+            globalThis.__webpack_require__.r = function(exports) {
+                if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+                    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+                }
+                Object.defineProperty(exports, '__esModule', { value: true });
+            };
+            globalThis.__webpack_require__.o = function(obj, prop) {
+                return Object.prototype.hasOwnProperty.call(obj, prop);
+            };
+            globalThis.__webpack_require__.n = function(module) {
+                var getter = module && module.__esModule ?
+                    function() { return module['default']; } :
+                    function() { return module; };
+                globalThis.__webpack_require__.d(getter, { a: getter });
+                return getter;
+            };
+            globalThis.__webpack_require__.p = '/';
+            // Chunk loading stubs (webpack lazy chunks)
+            globalThis.__webpack_require__.e = function() { return Promise.resolve(); };
+            globalThis.__webpack_require__.f = {};
+            globalThis.__webpack_require__.u = function(id) { return id + '.js'; };
+        }
+        // Vite / Rollup global shim: '__vite_is_modern_browser' och liknande
+        if (typeof __vite_is_modern_browser === 'undefined') {
+            globalThis.__vite_is_modern_browser = true;
+        }
+
+        // ─── Web Worker no-op stubs ─────────────────────────────────────────
+        // Worker och SharedWorker kan inte köras i sandboxen. Dessa stubs
+        // säkerställer att sidor som registrerar workers inte kraschar.
+        if (typeof Worker === 'undefined') {
+            globalThis.Worker = function Worker(url, opts) {
+                this.url = String(url || '');
+                this.onmessage = null;
+                this.onerror = null;
+                this._listeners = {};
+                this.postMessage = function() {};
+                this.terminate = function() {};
+                this.addEventListener = function(t, cb) {
+                    if (!this._listeners[t]) this._listeners[t] = [];
+                    this._listeners[t].push(cb);
+                };
+                this.removeEventListener = function(t, cb) {
+                    if (!this._listeners[t]) return;
+                    this._listeners[t] = this._listeners[t].filter(function(c) { return c !== cb; });
+                };
+            };
+        }
+        if (typeof SharedWorker === 'undefined') {
+            globalThis.SharedWorker = function SharedWorker(url) {
+                this.url = String(url || '');
+                this.port = { postMessage: function() {}, start: function() {}, close: function() {} };
+                this.onerror = null;
+            };
+        }
+        // importScripts — används i service workers och workers, no-op i sandbox
+        if (typeof importScripts === 'undefined') {
+            globalThis.importScripts = function() {};
+        }
+
+        // ─── WebAssembly stub ───────────────────────────────────────────────
+        // WASM-moduler kan inte köras i QuickJS. Stub:en returnerar ett tomt
+        // module-objekt så att bundles som laddar WASM inte kraschar under init.
+        if (typeof WebAssembly === 'undefined') {
+            globalThis.WebAssembly = {
+                compile: function() { return Promise.reject(new Error('WebAssembly not supported in sandbox')); },
+                instantiate: function() { return Promise.reject(new Error('WebAssembly not supported in sandbox')); },
+                validate: function() { return false; },
+                Module: function() {},
+                Instance: function() {},
+                Memory: function() {},
+                Table: function() {}
+            };
+        }
+
+        // ─── IndexedDB stub ─────────────────────────────────────────────────
+        if (typeof indexedDB === 'undefined' || indexedDB === null) {
+            var _idbReq = function IDBRequest() {
+                this.result = null; this.error = null;
+                this.onsuccess = null; this.onerror = null;
+            };
+            globalThis.IDBFactory = function IDBFactory() {};
+            globalThis.IDBFactory.prototype.open = function() { return new _idbReq(); };
+            globalThis.IDBFactory.prototype.deleteDatabase = function() { return new _idbReq(); };
+            globalThis.IDBFactory.prototype.databases = function() { return Promise.resolve([]); };
+            globalThis.indexedDB = new globalThis.IDBFactory();
+        }
+
+        // ─── URL.createObjectURL stub ───────────────────────────────────────
+        if (typeof URL !== 'undefined' && !URL.createObjectURL) {
+            URL.createObjectURL = function() { return 'blob:sandbox/00000000-0000-0000-0000-000000000000'; };
+            URL.revokeObjectURL = function() {};
+        }
+        if (typeof URL === 'undefined') {
+            globalThis.URL = function URL(url, base) {
+                this.href = String(url || '');
+                this.origin = '';
+                this.pathname = '/';
+                this.search = '';
+                this.hash = '';
+                this.hostname = '';
+                this.host = '';
+                this.protocol = '';
+                this.port = '';
+                this.toString = function() { return this.href; };
+            };
+            globalThis.URL.createObjectURL = function() { return 'blob:sandbox/00000000-0000-0000-0000-000000000000'; };
+            globalThis.URL.revokeObjectURL = function() {};
+        }
     "#,
     )?;
 
