@@ -306,3 +306,171 @@ En nod som dykt upp 10 gånger men aldrig markerats som korrekt → ×0.15.
 `page_profile()` analyserar sidans rollfördelning:
 - Hög nav-densitet (>30%): content-noder ×1.1
 - Hög tabell-densitet (>15%): cell/data/row ×1.15
+
+---
+
+## 3. Wave Propagation — Fas 2: Chebyshev Spectral Filter
+
+Efter initial scoring sprids signalen genom DOM-trädets kanter
+via ett Chebyshev polynomfilter på graf-Laplacianen.
+
+### 3.1 Varför Chebyshev?
+
+Iterativ propagation (vågspridning i loopar) har problem:
+- Over-smoothing: alla noder konvergerar mot samma amplitud
+- Osäker konvergens: hur många iterationer räcker?
+- Ingen garanti för optimal spektral respons
+
+Chebyshev löser detta:
+- **Bevisbart optimal** low-pass filter
+- **Fixad O(K×|E|)** med K=2-4 (adaptivt)
+- **Ingen over-smoothing** (bevarar skarpa toppar)
+- **PPR-restart** matematiskt integrerat
+
+### 3.2 Hur det fungerar
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│            CHEBYSHEV SPECTRAL FILTER                                │
+│                                                                     │
+│   Seed signal (Fas 1 amplituder)                                    │
+│         │                                                           │
+│         ▼                                                           │
+│   T₀ = seed signal (identitet)              θ₀ = 0.50              │
+│   T₁ = (2/λ_max)·L̃·seed - seed            θ₁ = 0.30              │
+│   T₂ = 2·L̃_scaled·T₁ - T₀                 θ₂ = 0.12              │
+│   T₃ = 2·L̃_scaled·T₂ - T₁                 θ₃ = 0.05              │
+│   T₄ = 2·L̃_scaled·T₃ - T₂                 θ₄ = 0.03              │
+│         │                                                           │
+│         ▼                                                           │
+│   output = θ₀·T₀ + θ₁·T₁ + θ₂·T₂ + θ₃·T₃ + θ₄·T₄               │
+│         │                                                           │
+│         ▼                                                           │
+│   PPR restart: (1-α)·output + α·BM25_seed    α = 0.15             │
+│         │                                                           │
+│         ▼                                                           │
+│   propagation_boost = output - seed × θ₀                           │
+│   final = fas1_amplitude + propagation_boost                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**θ-koefficienter** = low-pass filter biased mot lokal signal:
+- θ₀=0.50: direkt signal (egen nod)
+- θ₁=0.30: 1-hop grannar (förälder + barn)
+- θ₂=0.12: 2-hop (farförälder, barnbarn, syskon)
+- θ₃=0.05: 3-hop
+- θ₄=0.03: 4-hop
+
+### 3.3 Adaptive K (Chebyshev-ordning)
+
+K anpassas efter DOM-storlek:
+
+| DOM-storlek | Max djup | K | Motivering |
+|-------------|----------|---|------------|
+| < 50 noder | - | 2 | Liten DOM, 2-hop räcker |
+| < 200 noder | - | 3 | Medel, 3-hop fångar struktur |
+| > 200 noder | > 15 | 4 | Djup/stor DOM, full 4-hop |
+| övrigt | - | 3 | Standard |
+
+**Storleksbegränsning:** För DOM:ar > 500 noder begränsas Chebyshev
+till topp-500 noder sorterade efter Fas 1-amplitud. Resten behåller
+sin Fas 1-amplitud utan propagation-boost.
+
+### 3.4 Laplacian-multiply: Kantvikter
+
+Varje parent→child-kant har **inlärda vikter**:
+
+```
+Normalized Laplacian:
+  L̃·x vid nod i = x_i - Σ_j∈grannar w_ij·x_j / √(d_i·d_j)
+
+Kantvikt (symmetrisk):
+  w_sym = √(w_down × w_up)
+
+  w_down = learned_weight("heading:down:news+latest", heuristic_down)
+  w_up   = learned_weight("text:up:news+latest", heuristic_up)
+```
+
+**Heuristiska priors (cold-start):**
+
+| Roll | Down-vikt | Up-vikt | Tolkning |
+|------|-----------|---------|----------|
+| heading, table, row, list | 1.2 | — | Sprider signal nedåt starkt |
+| text, paragraph, heading | — | 1.1 | Sprider signal uppåt |
+| price, data, cell | 0.7 | 1.3 | Data bubbles up, inte ner |
+| navigation, complementary | 0.3 | 0.3 | Låg spridning åt alla håll |
+
+**Inlärda vikter:** DCFR (Discounted CFR) regret matching.
+Varje riktning+roll+mål-kluster lagras som `(cum_positive, cum_negative)`.
+```
+signal = max(cum_pos, 0) / (max(cum_pos, 0) + |cum_neg| + 1)
+weight = heuristic × (0.5 + signal × 1.3)
+```
+
+### 3.5 RBP — Regret-Based Pruning
+
+Hela subträd kan pruneas om förälderns nedåt-propagation
+konsekvent misslyckas:
+
+```
+Om total_queries ≥ 5
+  OCH learned_down_weight < 0.3
+  OCH roll ∈ {navigation, complementary, contentinfo, banner}
+→ skippa hela subtreedet i Laplacian-multiply
+```
+
+### 3.6 Adaptive Fan-Out
+
+Inte alla barn propageras — storlek-beroende begränsning:
+
+```
+fan_out(children_count):
+  0 barn → 0
+  ≤ 8 barn → alla
+  > 8 barn → 4 + ln(N) × 8, max N
+```
+
+### 3.7 Post-Propagation: Multi-hop Micro-boost
+
+Efter Chebyshev körs två extra steg:
+
+**Value-matched micro-boost:**
+```
+Om en nod har amplitude > 0.3 OCH har value-data (href/action):
+  → Syskon: +15% av nodens amplitud
+  → Förälders syskon (2-hop): +8% av nodens amplitud
+```
+
+**Sibling pattern recognition:**
+```
+Om en nod har amplitude > 0.4 OCH finns i grupp med ≥3 syskon:
+  → Syskon med SAMMA roll: +10% av matched nodens amplitud
+```
+Hanterar produktlistor, artikellistor, tabellrader — om ett
+listelement matchar, får strukturellt identiska syskon en boost.
+
+### 3.8 Komplett Propagation-flöde (visuellt)
+
+```
+  Fas 1 amplituder                    Chebyshev K=4
+        │                                  │
+        ▼                                  ▼
+  ┌──────────┐    ┌──────────────┐   ┌──────────────┐
+  │ heading  │    │  heading     │   │  heading     │
+  │ amp=0.8  │───>│  +0.12 prop  │──>│  amp=0.92    │
+  └──────────┘    └──────────────┘   └──────────────┘
+        │                                  │
+        │ down w=1.2                       │
+        ▼                                  ▼
+  ┌──────────┐    ┌──────────────┐   ┌──────────────┐
+  │  text    │    │   text       │   │  text        │
+  │ amp=0.3  │───>│  +0.24 prop  │──>│  amp=0.54    │
+  └──────────┘    └──────────────┘   └──────────────┘
+        │                                  │
+        │ sibling                          │ value-match
+        ▼                                  ▼
+  ┌──────────┐    ┌──────────────┐   ┌──────────────┐
+  │  link    │    │   link       │   │  link        │
+  │ amp=0.0  │───>│  +0.08 sib   │──>│  amp=0.08    │
+  └──────────┘    └──────────────┘   └──────────────┘
+```
