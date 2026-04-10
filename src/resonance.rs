@@ -7,6 +7,7 @@
 /// The field supports multi-goal interference (constructive and destructive)
 /// and learns over time via causal feedback.
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -281,6 +282,23 @@ pub struct ResonanceField {
     /// Latency samples (last 50 propagation times in microseconds) for p95
     #[serde(default)]
     pub latency_samples: Vec<u64>,
+    /// Ordered keys for concept_memory (FIFO eviction order).
+    /// BUG-6 fix: HashMap iteration is non-deterministic; this Vec tracks insertion order
+    /// so the oldest concept is evicted first rather than an arbitrary one.
+    #[serde(default)]
+    concept_memory_order: VecDeque<String>,
+    /// Cached site-name words derived from the first few node labels.
+    /// OPT-2: computed once and reused across queries; invalidated by node mutations.
+    #[serde(skip)]
+    cached_site_words: Option<Vec<String>>,
+    /// Cached per-node answer shape scores (label structure, digit presence, length).
+    /// OPT-3: these depend only on labels/roles which change only on node mutations.
+    #[serde(skip)]
+    cached_shape_scores: Option<HashMap<u32, f32>>,
+    /// Cached per-node metadata+state-injection penalties.
+    /// OPT-3: same lifecycle as cached_shape_scores.
+    #[serde(skip)]
+    cached_meta_penalties: Option<HashMap<u32, f32>>,
 }
 
 /// Compute content hash from node labels (FNV-1a over all label text).
@@ -718,6 +736,10 @@ impl ResonanceField {
             total_chars_in: 0,
             total_chars_out: 0,
             latency_samples: Vec::new(),
+            concept_memory_order: VecDeque::new(),
+            cached_site_words: None,
+            cached_shape_scores: None,
+            cached_meta_penalties: None,
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
@@ -821,10 +843,13 @@ impl ResonanceField {
         }
 
         // #17 Hierarchical HDC: blend children's HVs into parent (structural context)
+        // OPT-1: Cap to first HDC_MAX_BUNDLE_CHILDREN children — additional children
+        // have diminishing returns on semantic representation while growing bundle cost.
         if !node.children.is_empty() && nodes.contains_key(&node.id) {
             let child_hvs: Vec<Hypervector> = node
                 .children
                 .iter()
+                .take(Self::HDC_MAX_BUNDLE_CHILDREN)
                 .filter_map(|child| nodes.get(&child.id).map(|s| s.text_hv.clone()))
                 .collect();
             if !child_hvs.is_empty() {
@@ -868,8 +893,40 @@ impl ResonanceField {
         self.nodes.contains_key(&id)
     }
 
+    /// OPT-1: Cap child bundle to first 8 children.
+    /// Hierarchical HDC: blend children's HVs into parent (structural context)
+    /// The first 8 children capture enough structural semantics; additional
+    /// children add diminishing returns while growing the bundle cost O(N×children).
+    const HDC_MAX_BUNDLE_CHILDREN: usize = 8;
+
     pub fn propagate(&mut self, goal: &str) -> Vec<ResonanceResult> {
         self.propagate_inner(goal, false).0
+    }
+
+    /// OPT-5: Build BM25 cache exactly once, shared across all propagation variants.
+    /// Extracted to eliminate the duplicated cache-build code in propagate_inner,
+    /// propagate_multi_variant, and multi_query_batch.
+    fn ensure_bm25_cache(&mut self) {
+        if self.bm25_cache.is_some() {
+            return;
+        }
+        // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
+        // #3: Label + values konkateneras per nod (ett dokument per nod)
+        let combined: Vec<(u32, String)> = self
+            .node_labels
+            .iter()
+            .map(|(&id, label)| {
+                let val = self.node_values.get(&id).map(|v| v.as_str()).unwrap_or("");
+                if val.is_empty() {
+                    (id, label.clone())
+                } else {
+                    // BM25F approximation: value appears twice = higher TF weight
+                    (id, format!("{} {} {}", label, val, val))
+                }
+            })
+            .collect();
+        let pairs: Vec<(u32, &str)> = combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
+        self.bm25_cache = Some(TfIdfIndex::build(&pairs));
     }
 
     fn propagate_inner(
@@ -878,6 +935,15 @@ impl ResonanceField {
         capture_trace: bool,
     ) -> (Vec<ResonanceResult>, Option<PropagationTrace>) {
         self.total_queries += 1;
+
+        // BUG-2 fix: reset all amplitudes to 0 before scoring each query.
+        // Without this, stale amplitudes from the previous propagation linger and
+        // cause feedback() to increment miss_count for nodes that were never part
+        // of the current result set.
+        for state in self.nodes.values_mut() {
+            state.amplitude = 0.0;
+        }
+
         let goal_hv = Hypervector::from_text_ngrams(goal);
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
@@ -918,26 +984,8 @@ impl ResonanceField {
         let template_match = self.structure_hash != 0 && self.structure_hash == current_structure;
         self.structure_hash = current_structure;
 
-        // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
-        // #3: Label + values konkateneras per nod (ett dokument per nod)
-        if self.bm25_cache.is_none() {
-            let combined: Vec<(u32, String)> = self
-                .node_labels
-                .iter()
-                .map(|(&id, label)| {
-                    let val = self.node_values.get(&id).map(|v| v.as_str()).unwrap_or("");
-                    if val.is_empty() {
-                        (id, label.clone())
-                    } else {
-                        // BM25F approximation: value appears twice = higher TF weight
-                        (id, format!("{} {} {}", label, val, val))
-                    }
-                })
-                .collect();
-            let pairs: Vec<(u32, &str)> =
-                combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
-            self.bm25_cache = Some(TfIdfIndex::build(&pairs));
-        }
+        // OPT-5: use shared helper to build BM25 cache exactly once
+        self.ensure_bm25_cache();
         let bm25_results = self
             .bm25_cache
             .as_ref()
@@ -959,41 +1007,61 @@ impl ResonanceField {
         let mut node_ids: Vec<u32> = self.nodes.keys().copied().collect();
         node_ids.sort_unstable();
 
-        // Pre-compute answer shape scores (avoids labels_ref clone)
-        let shape_scores: HashMap<u32, f32> = self
-            .node_labels
-            .iter()
-            .map(|(&id, label)| {
-                let role = self.nodes.get(&id).map(|s| s.role.as_str()).unwrap_or("");
-                let siblings = self
-                    .children_map
-                    .get(&self.parent_map.get(&id).copied().unwrap_or(0))
-                    .map(|c| c.len())
-                    .unwrap_or(0);
-                (id, answer_shape_score(label, role, siblings))
-            })
-            .collect();
-        // Pre-compute metadata + state injection penalties (avoids label lookup in hot loop)
-        let meta_penalties: HashMap<u32, f32> = self
-            .node_labels
-            .iter()
-            .map(|(&id, label)| (id, metadata_penalty(label) * state_injection_penalty(label)))
-            .collect();
+        // OPT-3: Use cached shape scores (computed once, reused across queries).
+        // These depend only on label structure and role — unchanged between queries
+        // unless a node is mutated (update_node/add_node/remove_node).
+        if self.cached_shape_scores.is_none() {
+            self.cached_shape_scores = Some(
+                self.node_labels
+                    .iter()
+                    .map(|(&id, label)| {
+                        let role = self.nodes.get(&id).map(|s| s.role.as_str()).unwrap_or("");
+                        let siblings = self
+                            .children_map
+                            .get(&self.parent_map.get(&id).copied().unwrap_or(0))
+                            .map(|c| c.len())
+                            .unwrap_or(0);
+                        (id, answer_shape_score(label, role, siblings))
+                    })
+                    .collect(),
+            );
+        }
+        // .take() moves the HashMap out of self, making it an owned value so the
+        // hot loop can simultaneously hold state = self.nodes.get_mut() without
+        // violating borrow rules.  We restore it at the end of propagate_inner.
+        let shape_scores = self.cached_shape_scores.take().unwrap();
 
-        // BUG-05: Extract site name for nav-artifact penalization
-        let site_words: Vec<String> = self
-            .node_labels
-            .values()
-            .take(3) // First few nodes often contain site name
-            .flat_map(|label| {
-                label
-                    .split_whitespace()
-                    .take(5)
-                    .map(|w| w.to_lowercase())
-                    .collect::<Vec<_>>()
-            })
-            .filter(|w| w.len() > 3)
-            .collect();
+        // OPT-3: Use cached meta penalties (same lifecycle as shape scores).
+        if self.cached_meta_penalties.is_none() {
+            self.cached_meta_penalties = Some(
+                self.node_labels
+                    .iter()
+                    .map(|(&id, label)| {
+                        (id, metadata_penalty(label) * state_injection_penalty(label))
+                    })
+                    .collect(),
+            );
+        }
+        let meta_penalties = self.cached_meta_penalties.take().unwrap();
+
+        // OPT-2: Use cached site-name words for nav-artifact penalization.
+        if self.cached_site_words.is_none() {
+            self.cached_site_words = Some(
+                self.node_labels
+                    .values()
+                    .take(3) // First few nodes often contain site name
+                    .flat_map(|label| {
+                        label
+                            .split_whitespace()
+                            .take(5)
+                            .map(|w| w.to_lowercase())
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|w| w.len() > 3)
+                    .collect(),
+            );
+        }
+        let site_words = self.cached_site_words.take().unwrap();
 
         // CASCADE Stage 1: BM25-only fast pre-filter (all N nodes → top 100)
         // Only nodes with BM25 > 0 proceed to expensive scoring
@@ -1606,6 +1674,12 @@ impl ResonanceField {
             None
         };
 
+        // OPT-2/3: Restore per-query caches (taken at the start of this function
+        // to avoid borrow conflicts with self.nodes.get_mut() in the hot loop).
+        self.cached_shape_scores = Some(shape_scores);
+        self.cached_meta_penalties = Some(meta_penalties);
+        self.cached_site_words = Some(site_words);
+
         (results, trace)
     }
 
@@ -1710,19 +1784,8 @@ impl ResonanceField {
             return self.propagate_top_k(goals[0], top_k);
         }
 
-        // #1 Batch optimization: ensure BM25 cache is built once, shared across all variants
-        if self.bm25_cache.is_none() {
-            let combined: Vec<(u32, String)> = self
-                .node_labels
-                .iter()
-                .map(|(&id, label)| match self.node_values.get(&id) {
-                    Some(val) => (id, format!("{} {} {}", label, val, val)),
-                    None => (id, label.clone()),
-                })
-                .collect();
-            let refs: Vec<(u32, &str)> = combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
-            self.bm25_cache = Some(TfIdfIndex::build(&refs));
-        }
+        // OPT-5: use shared helper — BM25 cache is built once, reused across all variants
+        self.ensure_bm25_cache();
 
         // Run variants — BM25 cache is warm, each propagate() skips rebuild
         let mut best: HashMap<u32, ResonanceResult> = HashMap::new();
@@ -1774,19 +1837,8 @@ impl ResonanceField {
             return self.propagate_top_k(goals[0], top_k);
         }
 
-        // Ensure BM25 cache is warm
-        if self.bm25_cache.is_none() {
-            let combined: Vec<(u32, String)> = self
-                .node_labels
-                .iter()
-                .map(|(&id, label)| match self.node_values.get(&id) {
-                    Some(val) => (id, format!("{} {} {}", label, val, val)),
-                    None => (id, label.clone()),
-                })
-                .collect();
-            let refs: Vec<(u32, &str)> = combined.iter().map(|(id, s)| (*id, s.as_str())).collect();
-            self.bm25_cache = Some(TfIdfIndex::build(&refs));
-        }
+        // OPT-5: use shared helper — BM25 cache built once, reused across all goal variants.
+        self.ensure_bm25_cache();
 
         // BM25 cache is now warm — each propagate() will reuse it.
         // Chebyshev filter parameters are computed per-goal inside propagate()
@@ -1876,32 +1928,26 @@ impl ResonanceField {
     }
 
     /// Apply normalized Laplacian operator: L̃·x = x - D^{-1/2} A_w D^{-1/2} x
-    /// where A_w uses learned directional weights.
+    /// where A_w uses the symmetric geometric-mean weight for each edge so that
+    /// the adjacency matrix is symmetric (required for Chebyshev's PSD assumption).
     /// Includes RBP (Regret-Based Pruning): skips subtrees with consistently
     /// negative regret to reduce computation.
+    ///
+    /// OPT-4: `degrees` is pre-computed once by chebyshev_filter and passed in,
+    /// avoiding O(N) degree recomputation on each of the K Chebyshev iterations.
     fn laplacian_multiply(
         &self,
         x: &HashMap<u32, f32>,
         down_keys: &HashMap<u32, String>,
         up_keys: &HashMap<u32, String>,
+        degrees: &HashMap<u32, f32>,
     ) -> HashMap<u32, f32> {
         let mut result: HashMap<u32, f32> = x.clone(); // Start with identity (diagonal of L)
 
-        // Compute weighted degree per node (for normalization)
-        let degrees: HashMap<u32, f32> = self
-            .nodes
-            .keys()
-            .map(|&id| {
-                let children_count = self.children_map.get(&id).map(|c| c.len()).unwrap_or(0);
-                let has_parent = self.parent_map.contains_key(&id);
-                (
-                    id,
-                    (children_count as f32 + if has_parent { 1.0 } else { 0.0 }).max(1.0),
-                )
-            })
-            .collect();
-
         // Subtract weighted adjacency: -D^{-1/2} A_w D^{-1/2} x
+        // BUG-5 fix: use w_sym = sqrt(w_down * w_up) for both edge directions so the
+        // effective adjacency matrix is symmetric — a requirement for the Chebyshev
+        // spectral filter (which assumes a PSD Laplacian).
         // Parent → child edges (downward), with RBP pruning
         for (&parent_id, children) in &self.children_map {
             let down_key = down_keys.get(&parent_id).map(|s| s.as_str()).unwrap_or("");
@@ -1928,11 +1974,7 @@ impl ResonanceField {
             for &child_id in &children[..fan] {
                 let d_child = degrees.get(&child_id).copied().unwrap_or(1.0);
                 let norm = 1.0 / (d_parent * d_child).sqrt();
-                let weighted = w_down * norm;
 
-                // Subtract from child (parent's signal flowing down)
-                *result.entry(child_id).or_insert(0.0) -= weighted * x_parent;
-                // Subtract from parent (child's signal flowing up)
                 let child_role = self
                     .nodes
                     .get(&child_id)
@@ -1943,8 +1985,13 @@ impl ResonanceField {
                     heuristic_up_weight(child_role),
                     &self.propagation_stats,
                 );
+                // BUG-5: symmetric geometric-mean weight → symmetric adjacency matrix
+                let w_sym = (w_down * w_up).sqrt();
+                let weighted = w_sym * norm;
+
                 let x_child = x.get(&child_id).copied().unwrap_or(0.0);
-                *result.entry(parent_id).or_insert(0.0) -= w_up * norm * x_child;
+                *result.entry(child_id).or_insert(0.0) -= weighted * x_parent;
+                *result.entry(parent_id).or_insert(0.0) -= weighted * x_child;
             }
         }
 
@@ -1966,11 +2013,26 @@ impl ResonanceField {
         // Rescaling: L̃_scaled = 2·L̃/λ_max - I = L̃ - I
         let lambda_max: f32 = 2.0;
 
+        // OPT-4: Compute degrees once here and pass to every laplacian_multiply call.
+        // Previously each call rebuilt the degrees HashMap in O(N), wasting O(K×N) time.
+        let degrees: HashMap<u32, f32> = self
+            .nodes
+            .keys()
+            .map(|&id| {
+                let children_count = self.children_map.get(&id).map(|c| c.len()).unwrap_or(0);
+                let has_parent = self.parent_map.contains_key(&id);
+                (
+                    id,
+                    (children_count as f32 + if has_parent { 1.0 } else { 0.0 }).max(1.0),
+                )
+            })
+            .collect();
+
         // T_0(L̃_scaled)·x = x  (identity)
         let t0: HashMap<u32, f32> = x_seed.clone();
 
         // T_1(L̃_scaled)·x = L̃_scaled·x = (2/λ_max)·L̃·x - x
-        let lx = self.laplacian_multiply(x_seed, down_keys, up_keys);
+        let lx = self.laplacian_multiply(x_seed, down_keys, up_keys, &degrees);
         let t1: HashMap<u32, f32> = self
             .nodes
             .keys()
@@ -1998,7 +2060,7 @@ impl ResonanceField {
 
         for k in 2..=order {
             // T_k = 2·L̃_scaled·T_{k-1} - T_{k-2}
-            let lt = self.laplacian_multiply(&t_curr, down_keys, up_keys);
+            let lt = self.laplacian_multiply(&t_curr, down_keys, up_keys, &degrees);
             let t_next: HashMap<u32, f32> = self
                 .nodes
                 .keys()
@@ -2108,25 +2170,29 @@ impl ResonanceField {
         let successful_set: std::collections::HashSet<u32> =
             successful_node_ids.iter().copied().collect();
 
+        // OPT-6: Apply DCFR discount only every 5th feedback call to amortize the
+        // O(N_stats) iteration cost across multiple feedback events.
         // Steg 0: LCFR (Linear CFR) discounting with separate exponents
         // Positive regrets discount slower (α=1.5) to preserve winning strategies.
         // Negative regrets discount faster (α=2.0) to forget failures quickly.
-        let t = self.total_queries as f32;
-        let pos_discount = if t > 1.0 {
-            let t_pow = t.powf(1.5);
-            t_pow / (t_pow + 1.0)
-        } else {
-            0.5
-        };
-        let neg_discount = if t > 1.0 {
-            let t_pow = t * t;
-            t_pow / (t_pow + 1.0)
-        } else {
-            0.5
-        };
-        for (cum_pos, cum_neg) in self.propagation_stats.values_mut() {
-            *cum_pos *= pos_discount;
-            *cum_neg *= neg_discount;
+        if self.total_feedback.is_multiple_of(5) {
+            let t = self.total_queries as f32;
+            let pos_discount = if t > 1.0 {
+                let t_pow = t.powf(1.5);
+                t_pow / (t_pow + 1.0)
+            } else {
+                0.5
+            };
+            let neg_discount = if t > 1.0 {
+                let t_pow = t * t;
+                t_pow / (t_pow + 1.0)
+            } else {
+                0.5
+            };
+            for (cum_pos, cum_neg) in self.propagation_stats.values_mut() {
+                *cum_pos *= pos_discount;
+                *cum_neg *= neg_discount;
+            }
         }
 
         // Steg 1: Kausalt minne per nod
@@ -2239,6 +2305,10 @@ impl ResonanceField {
                 for token in &goal_tokens {
                     // Store with cluster prefix AND without (for fallback)
                     let clustered_key = format!("{}:{}", token, concept_cluster);
+                    // BUG-6: track insertion order so eviction is FIFO (oldest first)
+                    if !self.concept_memory.contains_key(&clustered_key) {
+                        self.concept_memory_order.push_back(clustered_key.clone());
+                    }
                     let entry = self
                         .concept_memory
                         .entry(clustered_key)
@@ -2247,6 +2317,9 @@ impl ResonanceField {
                     let merged = Hypervector::bundle(&[&existing, &state.text_hv]);
                     *entry = HvData::from_hv(&merged);
                     // Also update non-clustered (global fallback)
+                    if !self.concept_memory.contains_key(token) {
+                        self.concept_memory_order.push_back(token.clone());
+                    }
                     let entry = self
                         .concept_memory
                         .entry(token.clone())
@@ -2258,13 +2331,18 @@ impl ResonanceField {
             }
         }
 
-        // Evicta äldsta concept entries om cap nådd
+        // BUG-6 fix: evict oldest concept (FIFO via concept_memory_order) instead of
+        // a random HashMap entry.  Keeps recently-learned concepts, evicts stale ones.
         while self.concept_memory.len() > MAX_CONCEPT_ENTRIES {
-            // Ta bort första (arbitrary men deterministisk)
-            if let Some(key) = self.concept_memory.keys().next().cloned() {
+            if let Some(key) = self.concept_memory_order.pop_front() {
                 self.concept_memory.remove(&key);
             } else {
-                break;
+                // order deque is empty but map is not — drain map directly
+                if let Some(key) = self.concept_memory.keys().next().cloned() {
+                    self.concept_memory.remove(&key);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -2311,8 +2389,13 @@ impl ResonanceField {
                     .count();
                 let ratio = overlap as f32 / label_words.len() as f32;
 
-                // Require >40% word overlap to count as implicit success
-                if ratio > 0.4 {
+                // BUG-7 fix: short labels have fewer words so the raw 40% threshold is
+                // too easy to meet by coincidence (e.g., "Price: $175" matches on 2/3
+                // words = 67% just because the response mentions "price").
+                // Apply a higher threshold for labels with fewer than 5 words, and
+                // require at least 2 matching words in all cases.
+                let threshold = if label_words.len() < 5 { 0.6 } else { 0.4 };
+                if overlap >= 2 && ratio > threshold {
                     Some(id)
                 } else {
                     None
@@ -2505,6 +2588,10 @@ impl ResonanceField {
                 idx.update_node(node_id, &old, &new_combined);
             }
         }
+        // OPT-2/3: Invalidate per-query caches since labels/roles changed.
+        self.cached_shape_scores = None;
+        self.cached_meta_penalties = None;
+        self.cached_site_words = None;
     }
 
     /// Add a new node to the field (AJAX-laddat innehåll).
@@ -2554,6 +2641,10 @@ impl ResonanceField {
             };
             idx.update_node(node_id, "", &combined); // Empty old_label = pure add
         }
+        // OPT-2/3: Invalidate per-query caches since node set changed.
+        self.cached_shape_scores = None;
+        self.cached_meta_penalties = None;
+        self.cached_site_words = None;
     }
 
     /// Remove a node from the field (DOM-deletion).
@@ -2571,6 +2662,10 @@ impl ResonanceField {
         if let Some(ref mut idx) = self.bm25_cache {
             idx.remove_node(node_id);
         }
+        // OPT-2/3: Invalidate per-query caches since node set changed.
+        self.cached_shape_scores = None;
+        self.cached_meta_penalties = None;
+        self.cached_site_words = None;
     }
 
     // ─── Cross-URL Transfer ─────────────────────────────────────────────
@@ -2739,15 +2834,16 @@ impl ResonanceField {
 const FIELD_CACHE_CAPACITY: usize = 1024;
 
 struct FieldCacheInner {
-    /// (url_hash, last_access_ms, field)
-    entries: Vec<(u64, u64, ResonanceField)>,
+    /// BUG-3 fix: use VecDeque so eviction (pop_front) is O(1) instead of O(N).
+    /// Oldest entry is at index 0; newest is at the back.
+    entries: VecDeque<(u64, u64, ResonanceField)>,
     capacity: usize,
 }
 
 impl FieldCacheInner {
     fn new(capacity: usize) -> Self {
         FieldCacheInner {
-            entries: Vec::with_capacity(capacity.min(256)),
+            entries: VecDeque::with_capacity(capacity.min(256)),
             capacity,
         }
     }
@@ -2755,7 +2851,7 @@ impl FieldCacheInner {
     /// Hämta ett fält via move (tar bort ur cache, noll-klon).
     fn take(&mut self, url_hash: u64) -> Option<ResonanceField> {
         if let Some(pos) = self.entries.iter().position(|(h, _, _)| *h == url_hash) {
-            let (_, _, field) = self.entries.remove(pos);
+            let (_, _, field) = self.entries.remove(pos)?;
             Some(field)
         } else {
             None
@@ -2771,14 +2867,23 @@ impl FieldCacheInner {
             .map(|(_, _, field)| field.clone())
     }
 
+    /// OPT-8: Serialize a cached field to JSON directly without a full clone.
+    /// Avoids the O(N) HashMap clone that peek() performs just to then call to_json().
+    fn peek_json(&self, url_hash: u64) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|(h, _, _)| *h == url_hash)
+            .and_then(|(_, _, field)| serde_json::to_string(field).ok())
+    }
+
     /// Spara ett fält (ersätt om redan finns, evicta äldsta om fullt)
     fn put(&mut self, url_hash: u64, field: ResonanceField) {
         self.entries.retain(|(h, _, _)| *h != url_hash);
-        // Evicta äldsta om fullt (LRU: position 0 = oldest)
+        // BUG-3 fix: pop_front() is O(1) for VecDeque vs O(N) remove(0) for Vec
         if self.entries.len() >= self.capacity {
-            self.entries.remove(0);
+            self.entries.pop_front();
         }
-        self.entries.push((url_hash, now_ms(), field));
+        self.entries.push_back((url_hash, now_ms(), field));
     }
 
     fn len(&self) -> usize {
@@ -2832,14 +2937,25 @@ impl DomainRegistry {
                 field_count: 0,
             });
 
-        // Merge field's propagation_stats into domain profile (running average)
+        // OPT-9 fix: weight each field's contribution by its total_feedback count so
+        // that fields with many real interactions dominate the profile over cold fields.
+        // Previously this was an unweighted running average that treated a field with
+        // 1 query the same as one with 100 — producing a misleading prior.
         profile.field_count += 1;
-        let n = profile.field_count as f32;
+        let field_weight = (field.total_feedback as f32).max(1.0);
+        let total_weight: f32 = profile
+            .stats
+            .values()
+            .map(|&(a, b)| a + b)
+            .sum::<f32>()
+            .max(1.0)
+            + field_weight;
+        let existing_w = (total_weight - field_weight) / total_weight;
+        let new_w = field_weight / total_weight;
         for (key, &(alpha, beta)) in &field.propagation_stats {
             let entry = profile.stats.entry(key.clone()).or_insert((1.0, 1.0));
-            // Weighted running average: blend new data with existing
-            entry.0 = entry.0 * ((n - 1.0) / n) + alpha / n;
-            entry.1 = entry.1 * ((n - 1.0) / n) + beta / n;
+            entry.0 = entry.0 * existing_w + alpha * new_w;
+            entry.1 = entry.1 * existing_w + beta * new_w;
         }
 
         // Merge concept memory (bundle HVs)
@@ -2922,6 +3038,11 @@ pub fn import_cached_fields(fields: Vec<ResonanceField>) {
 
 /// Get a cached field for feedback purposes — NO content hash validation.
 /// Used by crfr_feedback where we don't have the page HTML, just the URL.
+///
+/// **IMPORTANT**: This function removes the field from the in-memory cache.
+/// The caller MUST call `save_field(&field)` after mutating the returned field
+/// (e.g. calling `field.feedback(...)`) to persist the learning back into the cache.
+/// Failing to do so will silently discard all learned state for this URL.
 pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceField> {
     let variant_url = if js_variant {
         format!("{}#__js_eval", url)
@@ -3081,6 +3202,28 @@ pub fn peek_field(url: &str) -> Option<ResonanceField> {
         Err(poisoned) => poisoned.into_inner(),
     };
     cache.peek(js_hash)
+}
+
+/// OPT-8: Serialize a cached field directly to JSON without a full clone.
+/// Prefer this over peek_field() + to_json() when only the JSON is needed.
+pub fn peek_field_json(url: &str) -> Option<String> {
+    let url_hash = hash_url(url);
+    {
+        let cache = match FIELD_CACHE.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(json) = cache.peek_json(url_hash) {
+            return Some(json);
+        }
+    }
+    // Prova JS-variant
+    let js_hash = hash_url(&format!("{url}#__js_eval"));
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.peek_json(js_hash)
 }
 
 /// Get cache statistics (entries, capacity).

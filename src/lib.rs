@@ -1641,11 +1641,9 @@ pub fn parse_crfr_multi(html: &str, goals_json: &str, url: &str, top_n: u32) -> 
 /// Save CRFR field for a URL to a JSON string (for persistent storage).
 #[wasm_bindgen]
 pub fn crfr_save_field(url: &str) -> String {
-    // Read-only peek — does NOT remove from cache or corrupt content_hash
-    match resonance::peek_field(url) {
-        Some(field) => field
-            .to_json()
-            .unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#)),
+    // OPT-8: serialize in-place without cloning the full field
+    match resonance::peek_field_json(url) {
+        Some(json) => json,
         None => r#"{"error":"no cached field for this URL"}"#.to_string(),
     }
 }
