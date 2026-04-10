@@ -97,6 +97,50 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .uptime-pct{font-size:.85rem;font-weight:700;color:var(--green);font-family:var(--mono)}
 
 
+/* DOMAIN DETAIL */
+.domain-detail{display:none;max-width:1100px;margin:0 auto 2rem;padding:0 1.5rem}
+.domain-detail.active{display:block;animation:cardIn .5s ease forwards}
+.dd-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem}
+.dd-title{font-size:1.1rem;font-weight:700;letter-spacing:-0.02em}
+.dd-close{background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:.35rem .9rem;cursor:pointer;font-size:.75rem;font-family:var(--font);transition:all .2s}
+.dd-close:hover{border-color:var(--accent);color:#fff}
+.dd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1.5rem}
+.dd-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem;text-align:center}
+.dd-stat-value{font-size:1.4rem;font-weight:700;font-variant-numeric:tabular-nums}
+.dd-stat-label{font-size:.65rem;color:var(--muted);margin-top:.25rem;text-transform:uppercase;letter-spacing:.05em}
+.dd-section{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;margin-bottom:1rem}
+.dd-section-title{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:1rem}
+.dd-zone-row{display:grid;grid-template-columns:100px 70px 1fr 50px;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.78rem}
+.dd-zone-role{color:#ddd;font-weight:500;font-family:var(--mono);font-size:.72rem}
+.dd-zone-depth{color:#666;font-size:.68rem}
+.dd-zone-bar{height:6px;border-radius:3px;background:rgba(255,255,255,0.05)}
+.dd-zone-fill{height:100%;border-radius:3px;transition:width .8s ease}
+.dd-zone-pct{color:#888;font-family:var(--mono);font-size:.7rem;text-align:right}
+.dd-edge-row{display:grid;grid-template-columns:90px 40px 90px 1fr 45px;gap:.4rem;align-items:center;padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.75rem}
+.dd-edge-role{font-family:var(--mono);font-size:.7rem;color:#ccc}
+.dd-edge-dir{color:#555;font-size:.65rem;text-align:center}
+.dd-edge-bar{height:5px;border-radius:3px;background:rgba(255,255,255,0.05)}
+.dd-edge-fill{height:100%;border-radius:3px;transition:width .8s ease}
+.dd-edge-val{font-family:var(--mono);font-size:.68rem;color:#888;text-align:right}
+.dd-pruned{opacity:.4}
+.dd-cluster{display:inline-block;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:.4rem .75rem;margin:.25rem;font-size:.72rem}
+.dd-cluster-id{color:var(--accent);font-family:var(--mono);font-weight:600}
+.dd-cluster-roles{color:#888;font-size:.65rem;margin-top:.15rem}
+.dd-node-row{display:grid;grid-template-columns:1fr 70px 50px 50px 55px 40px;gap:.25rem;align-items:center;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.75rem}
+.dd-node-label{color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dd-node-role{font-family:var(--mono);font-size:.68rem;color:var(--accent)}
+.dd-node-stat{text-align:right;font-family:var(--mono);font-size:.7rem;color:#666}
+.dd-node-stat.good{color:var(--green)}
+.dd-node-stat.bad{color:var(--red)}
+.dd-url-row{display:grid;grid-template-columns:1fr 55px 55px 55px 60px;gap:.25rem;align-items:center;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.75rem}
+.dd-url-name{color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.72rem}
+.dd-compression{display:flex;align-items:center;gap:.5rem;margin-top:.75rem}
+.dd-comp-bar{flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,0.05);overflow:hidden}
+.dd-comp-fill{height:100%;border-radius:4px;background:var(--green);transition:width 1s ease}
+.dd-comp-label{font-family:var(--mono);font-size:.75rem;color:var(--green);font-weight:600;white-space:nowrap}
+.lb-row.clickable{cursor:pointer;transition:background .2s}
+.lb-row.clickable:hover{background:rgba(59,130,246,0.05)}
+
 /* RESPONSIVE */
 @media(max-width:768px){
   .dash-grid{grid-template-columns:1fr}
@@ -173,6 +217,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
     <div id="lb-rows"><div class="lb-row"><div class="lb-domain" style="color:#444">Loading...</div></div></div>
   </div>
 </div>
+
+<!-- DOMAIN DETAIL (injected dynamically) -->
+<div class="domain-detail" id="domain-detail"></div>
 
 <!-- INTELLIGENCE METRICS -->
 <div class="dash-grid">
@@ -313,7 +360,8 @@ function update(d){
     const pct = ((s.queries||0)/maxQ*100).toFixed(0);
     const lat = s.last_propagation_us ? (s.last_propagation_us/1000).toFixed(1)+'ms' : '—';
     const delay = (i * 60) + 'ms';
-    return '<div class="lb-row" style="animation-delay:'+delay+'">' +
+    const dh = s.domain_hash || '';
+    return '<div class="lb-row clickable" onclick="loadDomainDetail(\''+dh+'\')" style="animation-delay:'+delay+'">' +
       '<div class="lb-domain">'+esc(s.domain)+'<div class="lb-bar"><div class="lb-bar-fill" style="width:'+pct+'%"></div></div></div>' +
       '<div class="lb-stat">'+fmt(s.nodes)+'</div>' +
       '<div class="lb-stat highlight">'+s.queries+'</div>' +
@@ -331,6 +379,165 @@ async function fetchStats(){
     const r = await fetch('/api/live-stats');
     if(r.ok){ const d=await r.json(); update(d); }
   }catch(e){ document.getElementById('meta').textContent='offline'; }
+}
+
+// ─── Domain Intelligence Detail ──────────────────────────────────────
+async function loadDomainDetail(domainHash){
+  if(!domainHash) return;
+  const el = document.getElementById('domain-detail');
+  el.innerHTML = '<div style="text-align:center;color:#555;padding:2rem">Loading domain intelligence...</div>';
+  el.classList.add('active');
+  el.scrollIntoView({behavior:'smooth', block:'start'});
+  try {
+    const r = await fetch('/api/dashboard/domain-detail?domain_hash='+domainHash);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if(d.error){ el.innerHTML = '<div style="color:var(--red);padding:1rem">'+esc(d.error)+'</div>'; return; }
+    renderDomainDetail(d);
+  } catch(e){
+    el.innerHTML = '<div style="color:var(--red);padding:1rem">Failed to load: '+esc(e.message)+'</div>';
+  }
+}
+
+function closeDomainDetail(){
+  const el = document.getElementById('domain-detail');
+  el.classList.remove('active');
+  el.innerHTML = '';
+}
+
+function renderDomainDetail(d){
+  const el = document.getElementById('domain-detail');
+  const comp = d.compression_pct ? d.compression_pct.toFixed(1) : '0';
+  const avgLat = d.avg_latency_us ? (d.avg_latency_us/1000).toFixed(1) : '—';
+  const p95Lat = d.p95_latency_us ? (d.p95_latency_us/1000).toFixed(1) : '—';
+
+  let html = '';
+
+  // Header
+  html += '<div class="dd-header">';
+  html += '<div class="dd-title">'+esc(d.domain)+' <span style="color:var(--muted);font-weight:400;font-size:.8rem">Domain Intelligence</span></div>';
+  html += '<button class="dd-close" onclick="closeDomainDetail()">Close</button>';
+  html += '</div>';
+
+  // Stats row
+  html += '<div class="dd-stats">';
+  html += ddStat(d.total_queries, 'Queries', 'var(--accent)');
+  html += ddStat(d.total_feedback, 'Feedback events', 'var(--green)');
+  html += ddStat(d.total_learned_nodes, 'Learned nodes', 'var(--violet)');
+  html += ddStat(avgLat+'ms', 'Avg latency', 'var(--muted)');
+  html += '</div>';
+
+  // Compression bar
+  html += '<div class="dd-section">';
+  html += '<div class="dd-section-title">Token efficiency</div>';
+  html += '<div class="dd-compression">';
+  html += '<span style="font-size:.7rem;color:#555">'+fmt(d.total_chars_in||0)+' in</span>';
+  html += '<div class="dd-comp-bar"><div class="dd-comp-fill" style="width:'+comp+'%"></div></div>';
+  html += '<div class="dd-comp-label">'+comp+'% saved</div>';
+  html += '</div>';
+  html += '<div style="font-size:.65rem;color:#444;margin-top:.4rem">'+fmt(d.total_chars_in||0)+' chars in &rarr; '+fmt(d.total_chars_out||0)+' chars out &middot; p95: '+p95Lat+'ms</div>';
+  html += '</div>';
+
+  // Nivå 1: Answer Zones
+  const zones = (d.answer_zones||[]).filter(z=>z.observations>=1).sort((a,b)=>b.success_rate-a.success_rate);
+  if(zones.length > 0){
+    html += '<div class="dd-section">';
+    html += '<div class="dd-section-title">DOM Understanding &mdash; where answers live</div>';
+    html += '<div class="dd-zone-row" style="border:none;opacity:.5"><div class="dd-zone-role" style="font-size:.6rem">ROLE</div><div class="dd-zone-depth" style="font-size:.6rem">DEPTH</div><div></div><div style="text-align:right;font-size:.6rem">RATE</div></div>';
+    zones.forEach(z => {
+      const pct = (z.success_rate*100).toFixed(0);
+      const color = z.success_rate > 0.5 ? 'var(--green)' : z.success_rate > 0.2 ? 'var(--amber)' : 'var(--red)';
+      html += '<div class="dd-zone-row">';
+      html += '<div class="dd-zone-role">'+esc(z.role)+'</div>';
+      html += '<div class="dd-zone-depth">'+esc(z.depth_bucket)+'</div>';
+      html += '<div><div class="dd-zone-bar"><div class="dd-zone-fill" style="width:'+pct+'%;background:'+color+'"></div></div></div>';
+      html += '<div class="dd-zone-pct" style="color:'+color+'">'+pct+'%</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Nivå 2: Propagation Edges
+  const edges = (d.propagation_edges||[]).filter(e=>e.alpha+e.beta>0.5).slice(0,20);
+  if(edges.length > 0){
+    html += '<div class="dd-section">';
+    html += '<div class="dd-section-title">Signal propagation &mdash; how information flows</div>';
+    html += '<div class="dd-edge-row" style="border:none;opacity:.5"><div style="font-size:.6rem">FROM</div><div style="font-size:.6rem;text-align:center">DIR</div><div style="font-size:.6rem">CLUSTER</div><div></div><div style="text-align:right;font-size:.6rem">WEIGHT</div></div>';
+    edges.forEach(e => {
+      const pct = (e.mean*100).toFixed(0);
+      const color = e.pruned ? 'var(--red)' : e.mean > 0.6 ? 'var(--accent)' : 'var(--muted)';
+      const cls = e.pruned ? ' dd-pruned' : '';
+      html += '<div class="dd-edge-row'+cls+'">';
+      html += '<div class="dd-edge-role">'+esc(e.source_role)+'</div>';
+      html += '<div class="dd-edge-dir">'+esc(e.direction == 'down' ? '\u2193' : '\u2191')+'</div>';
+      html += '<div class="dd-edge-role" style="color:#666;font-size:.62rem">'+esc(e.cluster||'global')+'</div>';
+      html += '<div><div class="dd-edge-bar"><div class="dd-edge-fill" style="width:'+pct+'%;background:'+color+'"></div></div></div>';
+      html += '<div class="dd-edge-val">'+(e.mean).toFixed(2)+(e.pruned?' \u2718':'')+'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Nivå 3: Query Clusters
+  const clusters = (d.query_clusters||[]).slice(0,8);
+  if(clusters.length > 0){
+    html += '<div class="dd-section">';
+    html += '<div class="dd-section-title">Query intelligence &mdash; question types learned</div>';
+    clusters.forEach(c => {
+      html += '<div class="dd-cluster">';
+      html += '<div class="dd-cluster-id">'+esc(c.cluster_id)+'</div>';
+      html += '<div class="dd-cluster-roles">'+c.top_roles.map(r=>esc(r)).join(', ')+' &middot; '+c.edge_count+' edges</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Nivå 4: Node Leaderboard
+  const nodes = (d.top_nodes||[]).slice(0,15);
+  if(nodes.length > 0){
+    html += '<div class="dd-section">';
+    html += '<div class="dd-section-title">Node leaderboard &mdash; proven content regions</div>';
+    html += '<div class="dd-node-row" style="border:none;opacity:.5"><div style="font-size:.6rem">NODE</div><div style="font-size:.6rem">ROLE</div><div style="text-align:right;font-size:.6rem">HITS</div><div style="text-align:right;font-size:.6rem">MISS</div><div style="text-align:right;font-size:.6rem">RATE</div><div style="text-align:right;font-size:.6rem">SUP</div></div>';
+    nodes.forEach(n => {
+      const ratePct = (n.success_rate*100).toFixed(0);
+      const rateClass = n.success_rate > 0.5 ? 'good' : n.success_rate < 0.25 ? 'bad' : '';
+      html += '<div class="dd-node-row">';
+      html += '<div class="dd-node-label" title="'+esc(n.label)+'">'+esc(n.label)+'</div>';
+      html += '<div class="dd-node-role">'+esc(n.role)+'</div>';
+      html += '<div class="dd-node-stat">'+n.hit_count+'</div>';
+      html += '<div class="dd-node-stat">'+n.miss_count+'</div>';
+      html += '<div class="dd-node-stat '+rateClass+'">'+ratePct+'%</div>';
+      html += '<div class="dd-node-stat">'+(n.suppressed?'\u26a0':'')+'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Nivå 5: URLs
+  const urls = (d.urls||[]);
+  if(urls.length > 0){
+    html += '<div class="dd-section">';
+    html += '<div class="dd-section-title">Pages on this domain</div>';
+    html += '<div class="dd-url-row" style="border:none;opacity:.5"><div style="font-size:.6rem">URL</div><div style="text-align:right;font-size:.6rem">NODES</div><div style="text-align:right;font-size:.6rem">QUERIES</div><div style="text-align:right;font-size:.6rem">LEARNED</div><div style="text-align:right;font-size:.6rem">SAVED</div></div>';
+    urls.forEach(u => {
+      const path = u.url.replace(/^https?:\/\/[^/]+/,'') || '/';
+      const comp = u.compression_pct ? u.compression_pct.toFixed(0)+'%' : '—';
+      html += '<div class="dd-url-row">';
+      html += '<div class="dd-url-name" title="'+esc(u.url)+'">'+esc(path)+(u.template_match?' \u2713':'')+'</div>';
+      html += '<div class="dd-node-stat">'+u.node_count+'</div>';
+      html += '<div class="dd-node-stat">'+u.total_queries+'</div>';
+      html += '<div class="dd-node-stat">'+u.learned_nodes+'</div>';
+      html += '<div class="dd-node-stat" style="color:var(--green)">'+comp+'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function ddStat(value, label, color){
+  return '<div class="dd-stat"><div class="dd-stat-value" style="color:'+color+'">'+value+'</div><div class="dd-stat-label">'+label+'</div></div>';
 }
 
 fetchStats();

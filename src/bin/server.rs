@@ -6547,6 +6547,24 @@ async fn dashboard_weights_handler(Json(req): Json<DashboardWeightsRequest>) -> 
     (StatusCode::OK, result)
 }
 
+/// GET /api/dashboard/domain-detail?domain_hash=12345
+async fn dashboard_domain_detail_handler(
+    axum::extract::Query(params): axum::extract::Query<DomainDetailQuery>,
+) -> impl IntoResponse {
+    let result = aether_agent::dashboard_domain_detail(params.domain_hash);
+    (
+        StatusCode::OK,
+        [(axum::http::header::CACHE_CONTROL, "no-cache")],
+        result,
+    )
+}
+
+#[derive(Deserialize)]
+struct DomainDetailQuery {
+    #[serde(deserialize_with = "deser_u64_from_string_or_number")]
+    domain_hash: u64,
+}
+
 async fn dashboard_wpt_handler() -> impl IntoResponse {
     let result = aether_agent::dashboard_wpt();
     (StatusCode::OK, result)
@@ -6806,6 +6824,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/dashboard/persistence",
             get(dashboard_persistence_handler),
+        )
+        .route(
+            "/api/dashboard/domain-detail",
+            get(dashboard_domain_detail_handler),
         )
         // Fas 1: Semantic parsing
         .route("/api/parse", post(parse))
@@ -7149,6 +7171,7 @@ async fn live_stats_handler(
             serde_json::json!({
                 "url": f.url,
                 "domain": domain,
+                "domain_hash": f.domain_hash.to_string(),
                 "nodes": f.node_count,
                 "queries": f.total_queries,
                 "feedback": f.total_feedback,
