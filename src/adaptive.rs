@@ -612,16 +612,18 @@ fn sample_beta(alpha: f32, beta: f32) -> f32 {
         return (a / (a + b).max(f64::EPSILON)) as f32;
     }
 
-    // For very large a+b the Beta is tightly concentrated around its mean;
-    // a single-sample normal approximation is faster and accurate enough.
+    // For very large a+b the Beta is tightly concentrated around its mean.
+    // Use proper Box-Muller normal approximation (much faster than Jöhnk's rejection
+    // which has near-zero acceptance rate when both a and b are large).
     if a + b > 80.0 {
         let mean = a / (a + b);
         let var = (a * b) / ((a + b) * (a + b) * (a + b + 1.0));
         let std_dev = var.sqrt();
-        // Box-Muller approximation using one uniform draw
-        let u = rand_f64().max(f64::EPSILON);
-        let approx = mean + std_dev * (2.0 * u - 1.0) * 1.73; // ~N(0,1) range
-        return approx.clamp(0.01, 0.99) as f32;
+        // Box-Muller transform: (U1, U2) → Normal(0, 1)
+        let u1 = rand_f64().max(f64::EPSILON);
+        let u2 = rand_f64();
+        let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+        return (mean + std_dev * z).clamp(0.01, 0.99) as f32;
     }
 
     // Jöhnk's rejection sampling — typically accepts within 3-5 iterations
