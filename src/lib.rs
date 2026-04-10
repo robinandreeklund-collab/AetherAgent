@@ -1120,21 +1120,34 @@ fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResul
     if matched.is_empty() {
         return false;
     }
-    let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
-    // BUG-3: also detect JSON-like labels (key.path.name patterns)
+    // Räkna noder med "data" roll som INTE har semantisk label
+    // (hydraterade noder med title/description har nu heading/text-roller)
+    let raw_data_count = matched
+        .iter()
+        .filter(|(n, _)| {
+            n.role == "data"
+                && n.name
+                    .as_ref()
+                    .is_some_and(|name| name.contains('.') && name.contains('['))
+        })
+        .count();
+    // Noder som ser ut som rå JSON path-labels (page.@"news",.sections[2]...)
     let json_like = matched
         .iter()
         .filter(|(n, _)| {
             n.label.contains("__NEXT_DATA__")
                 || n.label.contains("__NUXT__")
                 || n.label.contains("initialState")
-                || n.label.contains("pageProps")
                 || n.label.contains("window.__data")
-                || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
+                || (n.role == "data"
+                    && n.name.as_ref().is_some_and(|name| {
+                        name.contains("page.@") || name.contains("navigation.")
+                    }))
         })
         .count();
     let total = matched.len() as f32;
-    (data_count as f32 / total > 0.5) || (json_like > 0 && data_count as f32 / total > 0.3)
+    // Bara flagga om >60% är RÅ JSON data (inte hydrerade content-noder)
+    (raw_data_count as f32 / total > 0.6) || (json_like > 0 && raw_data_count as f32 / total > 0.4)
 }
 
 fn goal_title_overlap(goal: &str, title: &str) -> f32 {
