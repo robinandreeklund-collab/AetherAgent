@@ -2202,6 +2202,15 @@ pub fn dashboard_persistence() -> String {
     result.to_string()
 }
 
+/// Get domain intelligence detail for a specific domain hash.
+pub fn dashboard_domain_detail(domain_hash: u64) -> String {
+    match resonance::domain_intelligence(domain_hash) {
+        Some(intel) => serde_json::to_string(&intel)
+            .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into()),
+        None => r#"{"error":"domain not found"}"#.to_string(),
+    }
+}
+
 /// Run a CRFR query with full trace for dashboard explorer.
 /// Uses the real CRFR pipeline: JS eval + field cache + wave propagation.
 pub fn dashboard_crfr_explore(

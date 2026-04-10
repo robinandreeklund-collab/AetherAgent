@@ -581,7 +581,7 @@ impl AetherMcpServer {
                 eprintln!("[MCP] WARN: Cannot read vocab '{vocab_path}'");
             }
 
-            let mut embedding_loaded = false;
+            let mut _embedding_loaded = false;
             if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
                 if let (Ok(mb), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
                     eprintln!(
@@ -592,7 +592,7 @@ impl AetherMcpServer {
                     match aether_agent::embedding::init_global(&mb, vt) {
                         Ok(()) => {
                             eprintln!("[MCP] Bi-encoder ready");
-                            embedding_loaded = true;
+                            _embedding_loaded = true;
                         }
                         Err(e) => eprintln!("[MCP] WARN: Bi-encoder load failed: {e}"),
                     }
@@ -1588,8 +1588,10 @@ async fn handle_parse_crfr(
                 "[MCP-COOKIE-BRIDGE] Challenge detected on {} — re-fetching",
                 current_url
             );
-            let mut rc = aether_agent::types::FetchConfig::default();
-            rc.cookies = tree.js_cookies.clone();
+            let mut rc = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
             for (k, v) in &extra_headers {
                 rc.extra_headers.insert(k.clone(), v.clone());
             }
@@ -1642,7 +1644,7 @@ async fn follow_relevant_links(
     original_result: &str,
     goal: &str,
     top_n: u32,
-    output_format: &str,
+    _output_format: &str,
 ) -> String {
     const MAX_FOLLOW_LINKS: usize = 3;
     const MIN_LINK_AMPLITUDE: f64 = 1.0;
@@ -1764,21 +1766,25 @@ async fn follow_relevant_links(
         );
 
         // Merga extra noder med markering
-        if let Some(existing_nodes) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-            for mut node in followed_nodes {
-                if let Some(obj) = node.as_object_mut() {
-                    obj.insert(
-                        "source".to_string(),
-                        serde_json::Value::String("followed_link".to_string()),
-                    );
+        // Beräkna count FÖRST, sedan insert (undvik dubbel mutable borrow)
+        let new_count = {
+            if let Some(existing_nodes) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+                for mut node in followed_nodes {
+                    if let Some(nobj) = node.as_object_mut() {
+                        nobj.insert(
+                            "source".to_string(),
+                            serde_json::Value::String("followed_link".to_string()),
+                        );
+                    }
+                    existing_nodes.push(node);
                 }
-                existing_nodes.push(node);
+                Some(existing_nodes.len())
+            } else {
+                None
             }
-            // Uppdatera node_count
-            obj.insert(
-                "node_count".to_string(),
-                serde_json::json!(existing_nodes.len()),
-            );
+        };
+        if let Some(count) = new_count {
+            obj.insert("node_count".to_string(), serde_json::json!(count));
         }
     }
 
@@ -1829,7 +1835,7 @@ async fn handle_fetch_parse(
     let api_responses =
         aether_agent::prefetch_api_urls(&fetch_result.body, &fetch_result.final_url, 10, 3000)
             .await;
-    let prefetched_count = api_responses.len();
+    let _prefetched_count = api_responses.len();
 
     let parse_start = std::time::Instant::now();
 
@@ -2728,7 +2734,7 @@ impl ServerHandler for AetherMcpServer {
                     && args
                         .and_then(|a| a.get("html"))
                         .and_then(|v| v.as_str())
-                        .map_or(true, |h| h.is_empty());
+                        .is_none_or(|h| h.is_empty());
                 if needs_fetch {
                     let result = handle_fetch_extract_links(args).await;
                     Ok(result)
@@ -2752,7 +2758,7 @@ impl ServerHandler for AetherMcpServer {
                     && args
                         .and_then(|a| a.get("html"))
                         .and_then(|v| v.as_str())
-                        .map_or(true, |h| h.is_empty());
+                        .is_none_or(|h| h.is_empty());
                 if needs_fetch {
                     let result = handle_fetch_parse_crfr_multi(args).await;
                     Ok(result)

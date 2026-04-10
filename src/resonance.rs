@@ -3568,6 +3568,333 @@ pub fn list_cached_fields() -> Vec<FieldSummary> {
         .collect()
 }
 
+// ─── Domain Intelligence ─────────────────────────────────────────────────
+
+/// Per-nod sammanfattning för node leaderboard
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeIntelligence {
+    pub node_id: u32,
+    pub role: String,
+    pub label: String,
+    pub depth: u32,
+    pub hit_count: u32,
+    pub miss_count: u32,
+    pub query_count: u32,
+    pub success_rate: f32,
+    pub suppressed: bool,
+}
+
+/// Answer zone bucket: roll + djup → success rate
+#[derive(Debug, Clone, Serialize)]
+pub struct ZoneBucket {
+    pub role: String,
+    pub depth_bucket: String,
+    pub successes: f32,
+    pub observations: f32,
+    pub success_rate: f32,
+}
+
+/// Propagation edge: roll+riktning → learned weight
+#[derive(Debug, Clone, Serialize)]
+pub struct PropagationEdge {
+    pub source_role: String,
+    pub direction: String,
+    pub cluster: String,
+    pub alpha: f32,
+    pub beta: f32,
+    pub mean: f32,
+    pub pruned: bool,
+}
+
+/// URL-detalj inom en domän
+#[derive(Debug, Clone, Serialize)]
+pub struct UrlDetail {
+    pub url: String,
+    pub node_count: usize,
+    pub total_queries: u32,
+    pub total_feedback: u32,
+    pub learned_nodes: usize,
+    pub total_chars_in: u64,
+    pub total_chars_out: u64,
+    pub compression_pct: f32,
+    pub p95_latency_us: u64,
+    pub template_match: bool,
+    pub max_depth: u32,
+}
+
+/// Komplett domain intelligence — alla 5 nivåer
+#[derive(Debug, Clone, Serialize)]
+pub struct DomainIntelligence {
+    // Meta
+    pub domain: String,
+    pub domain_hash: u64,
+    pub url_count: usize,
+    pub total_queries: u32,
+    pub total_feedback: u32,
+    pub total_learned_nodes: usize,
+    pub total_chars_in: u64,
+    pub total_chars_out: u64,
+    pub compression_pct: f32,
+    pub avg_latency_us: u64,
+    pub p95_latency_us: u64,
+
+    // Nivå 1: DOM Understanding (answer zones)
+    pub answer_zones: Vec<ZoneBucket>,
+
+    // Nivå 2: Signal Propagation (edge weights)
+    pub propagation_edges: Vec<PropagationEdge>,
+
+    // Nivå 3: Query Intelligence (goal clusters)
+    pub query_clusters: Vec<QueryCluster>,
+
+    // Nivå 4: Node Leaderboard
+    pub top_nodes: Vec<NodeIntelligence>,
+
+    // Nivå 5: URLs
+    pub urls: Vec<UrlDetail>,
+}
+
+/// Goal-cluster sammanfattning
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryCluster {
+    pub cluster_id: String,
+    pub edge_count: usize,
+    pub top_roles: Vec<String>,
+}
+
+/// Samla all intelligence för en domän. Aggregerar alla cached fields.
+pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence> {
+    let fields = list_cached_fields();
+    let domain_fields: Vec<&FieldSummary> = fields
+        .iter()
+        .filter(|f| f.domain_hash == target_domain_hash)
+        .collect();
+
+    if domain_fields.is_empty() {
+        return None;
+    }
+
+    // Domännamn från första URL:en
+    let first_url = &domain_fields[0].url;
+    let domain = first_url
+        .split("//")
+        .nth(1)
+        .unwrap_or(first_url)
+        .split('/')
+        .next()
+        .unwrap_or(first_url)
+        .replace("www.", "");
+
+    // Aggregera grunddata
+    let total_queries: u32 = domain_fields.iter().map(|f| f.total_queries).sum();
+    let total_feedback: u32 = domain_fields.iter().map(|f| f.total_feedback).sum();
+    let total_learned: usize = domain_fields.iter().map(|f| f.learned_nodes).sum();
+    let total_chars_in: u64 = domain_fields.iter().map(|f| f.total_chars_in).sum();
+    let total_chars_out: u64 = domain_fields.iter().map(|f| f.total_chars_out).sum();
+    let compression_pct = if total_chars_in > 0 {
+        ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0) as f32
+    } else {
+        0.0
+    };
+    let latencies: Vec<u64> = domain_fields
+        .iter()
+        .filter(|f| f.p95_latency_us > 0)
+        .map(|f| f.p95_latency_us)
+        .collect();
+    let avg_latency_us = if latencies.is_empty() {
+        0
+    } else {
+        latencies.iter().sum::<u64>() / latencies.len() as u64
+    };
+    let p95_latency_us = if latencies.is_empty() {
+        0
+    } else {
+        let mut sorted = latencies.clone();
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    };
+
+    // Nivå 1: Answer Zones — aggregera från domain profile
+    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+        if let Some(profile) = registry.get(target_domain_hash) {
+            profile
+                .answer_zone
+                .zone_hits
+                .iter()
+                .map(|(key, &(succ, total))| {
+                    let parts: Vec<&str> = key.splitn(2, ':').collect();
+                    ZoneBucket {
+                        role: parts.first().unwrap_or(&"?").to_string(),
+                        depth_bucket: parts.get(1).unwrap_or(&"?").to_string(),
+                        successes: succ,
+                        observations: total,
+                        success_rate: if total > 0.0 { succ / total } else { 0.0 },
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Nivå 2: Propagation edges — aggregera alla fälts propagation_stats
+    let mut merged_stats: HashMap<String, (f32, f32)> = HashMap::new();
+    for f in &domain_fields {
+        for (key, &(alpha, beta)) in &f.propagation_stats {
+            let entry = merged_stats.entry(key.clone()).or_insert((0.0, 0.0));
+            entry.0 += alpha;
+            entry.1 += beta;
+        }
+    }
+    let mut propagation_edges: Vec<PropagationEdge> = merged_stats
+        .iter()
+        .map(|(key, &(alpha, beta))| {
+            let parts: Vec<&str> = key.splitn(3, ':').collect();
+            let source_role = parts.first().unwrap_or(&"?").to_string();
+            let direction = parts.get(1).unwrap_or(&"?").to_string();
+            let cluster = parts.get(2).unwrap_or(&"").to_string();
+            let sum = alpha + beta;
+            let mean = if sum > 0.001 { alpha / sum } else { 0.5 };
+            PropagationEdge {
+                source_role,
+                direction,
+                cluster,
+                alpha,
+                beta,
+                mean,
+                pruned: mean < 0.3
+                    && parts.first().map(|r| {
+                        matches!(
+                            *r,
+                            "navigation" | "complementary" | "contentinfo" | "banner"
+                        )
+                    }) == Some(true),
+            }
+        })
+        .collect();
+    propagation_edges.sort_by(|a, b| b.mean.total_cmp(&a.mean));
+
+    // Nivå 3: Query clusters — extrahera unika clusters från propagation_stats keys
+    let mut cluster_map: HashMap<String, Vec<String>> = HashMap::new();
+    for key in merged_stats.keys() {
+        let parts: Vec<&str> = key.splitn(3, ':').collect();
+        if parts.len() >= 3 && !parts[2].is_empty() {
+            let cluster = parts[2].to_string();
+            let role = parts[0].to_string();
+            cluster_map.entry(cluster).or_default().push(role);
+        }
+    }
+    let mut query_clusters: Vec<QueryCluster> = cluster_map
+        .into_iter()
+        .map(|(cluster_id, mut roles)| {
+            roles.sort_unstable();
+            roles.dedup();
+            let edge_count = roles.len();
+            roles.truncate(5);
+            QueryCluster {
+                cluster_id,
+                edge_count,
+                top_roles: roles,
+            }
+        })
+        .collect();
+    query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
+
+    // Nivå 4: Node leaderboard — samla noder med causal memory
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    let mut all_nodes: Vec<NodeIntelligence> = Vec::new();
+    for (_, _, field) in &cache.entries {
+        if field.domain_hash != target_domain_hash {
+            continue;
+        }
+        for (&nid, state) in &field.nodes {
+            if state.hit_count > 0 || state.query_count >= 3 {
+                let label = field.node_labels.get(&nid).cloned().unwrap_or_default();
+                let label_trunc = if label.len() > 80 {
+                    format!("{}...", &label[..label.floor_char_boundary(77)])
+                } else {
+                    label
+                };
+                let sr = if state.query_count > 0 {
+                    state.hit_count as f32 / state.query_count as f32
+                } else {
+                    0.0
+                };
+                all_nodes.push(NodeIntelligence {
+                    node_id: nid,
+                    role: state.role.clone(),
+                    label: label_trunc,
+                    depth: state.depth,
+                    hit_count: state.hit_count,
+                    miss_count: state.miss_count,
+                    query_count: state.query_count,
+                    success_rate: sr,
+                    suppressed: state.query_count >= 3 && sr < 0.25,
+                });
+            }
+        }
+    }
+    all_nodes.sort_by(|a, b| b.hit_count.cmp(&a.hit_count));
+    all_nodes.truncate(30); // Top 30 noder
+
+    // Nivå 5: URL-lista
+    let structure_hashes: Vec<u64> = domain_fields.iter().map(|f| f.structure_hash).collect();
+    let urls: Vec<UrlDetail> = domain_fields
+        .iter()
+        .map(|f| {
+            let comp = if f.total_chars_in > 0 {
+                ((1.0 - f.total_chars_out as f64 / f.total_chars_in as f64) * 100.0) as f32
+            } else {
+                0.0
+            };
+            // Template match: minst en annan URL har samma structure_hash
+            let template_match = structure_hashes
+                .iter()
+                .filter(|&&h| h == f.structure_hash && h != 0)
+                .count()
+                > 1;
+            UrlDetail {
+                url: f.url.clone(),
+                node_count: f.node_count,
+                total_queries: f.total_queries,
+                total_feedback: f.total_feedback,
+                learned_nodes: f.learned_nodes,
+                total_chars_in: f.total_chars_in,
+                total_chars_out: f.total_chars_out,
+                compression_pct: comp,
+                p95_latency_us: f.p95_latency_us,
+                template_match,
+                max_depth: f.max_depth,
+            }
+        })
+        .collect();
+
+    Some(DomainIntelligence {
+        domain,
+        domain_hash: target_domain_hash,
+        url_count: domain_fields.len(),
+        total_queries,
+        total_feedback,
+        total_learned_nodes: total_learned,
+        total_chars_in,
+        total_chars_out,
+        compression_pct,
+        avg_latency_us,
+        p95_latency_us,
+        answer_zones,
+        propagation_edges,
+        query_clusters,
+        top_nodes: all_nodes,
+        urls,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
