@@ -474,3 +474,223 @@ listelement matchar, får strukturellt identiska syskon en boost.
   │ amp=0.0  │───>│  +0.08 sib   │──>│  amp=0.08    │
   └──────────┘    └──────────────┘   └──────────────┘
 ```
+
+---
+
+## 4. Output — Fas 3: Filtrering och Gap Detection
+
+### 4.1 Resultatsamling
+
+1. **Filtrera** — Bara noder med `amplitude > 0.01` inkluderas.
+2. **Sortera** — Amplitude DESC, node_id ASC (deterministisk tie-break).
+3. **Dedup** — Label-hash deduplicering: om två noder har samma
+   lowercased trimmed label (≥10 tecken), behåll den med högst kausal-boost.
+4. **Diversity** — Penalizera 4:e+ syskon från samma förälder med ×0.85
+   (bara i grupper med ≥5 syskon). Förhindrar att ett DOM-subträd
+   dominerar hela resultatet.
+
+### 4.2 Amplitude Gap Detection
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Gap Detection — Hittar naturlig "klyfta" i rankingen       │
+│                                                             │
+│  amplitude                                                  │
+│    1.2 ██████████████████████  nod 1                        │
+│    1.1 █████████████████████   nod 2                        │
+│    1.0 ████████████████████    nod 3                        │
+│    0.9 ███████████████████     nod 4                        │
+│    0.5 ██████████              nod 5  ← 44% drop → KLIPP   │
+│    0.3 ██████                  nod 6  (exkluderas)          │
+│    0.1 ██                      nod 7  (exkluderas)          │
+│                                                             │
+│  Regel: om nod[i].amp < nod[i-1].amp × 0.70 → klipp       │
+│  Min 3 noder, max top_k                                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Gap filter `GAP_RATIO_THRESHOLD = 0.30`: en 30% relativ drop
+indikerar att vi passerat det relevanta klustret.
+
+### 4.3 Post-Filter (`crfr_post_filter` i lib.rs)
+
+Sista steget innan output — tar bort brus som passerade scoring:
+
+| Filter | Vad det tar bort |
+|--------|------------------|
+| OG/meta tags | `og:`, `twitter.`, `fb:`, `article:` |
+| Cookie consent | "we use cookies", "cookie settings" |
+| Search placeholder | "search or jump to..." |
+| Wikipedia fotnoter | `^ "...Retrieved 20..."` |
+| JS placeholder | "loading...", "just a moment..." |
+| Substring-dedup | Noder vars label är substring av högre-rankad nod |
+
+### 4.4 Broad Mode (för abstrakta queries)
+
+Auto-detect: om top-5 amplituder har <25% spread (inga tydliga vinnare),
+aktiveras broad mode: ingen gap filter, returnera upp till top_k.
+Användbart för frågor om ton, sammanfattningar, argument.
+
+---
+
+## 5. Feedback & Learning — Hur CRFR lär sig
+
+### 5.1 Översikt: 5 lärande-mekanismer
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    5 LÄRANDE-MEKANISMER                             │
+│                                                                     │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐   │
+│  │  1. Kausalt      │  │  2. Suppression  │  │  3. Propagation  │   │
+│  │     Minne        │  │     Learning     │  │     Weights      │   │
+│  │                  │  │                  │  │                  │   │
+│  │  Per-nod HV som  │  │  Penalisera nod  │  │  DCFR regret     │   │
+│  │  ackumulerar     │  │  som syns men    │  │  per roll+dir    │   │
+│  │  framgångsrika   │  │  aldrig är rätt  │  │  +mål-kluster    │   │
+│  │  mål-vektorer    │  │                  │  │                  │   │
+│  └─────────────────┘  └─────────────────┘  └──────────────────┘   │
+│                                                                     │
+│  ┌─────────────────┐  ┌─────────────────┐                          │
+│  │  4. Concept      │  │  5. Domain       │                         │
+│  │     Memory       │  │     Transfer     │                         │
+│  │                  │  │                  │                         │
+│  │  Field-level     │  │  Warm-start nya  │                         │
+│  │  HV per goal-    │  │  URL:er med      │                         │
+│  │  token           │  │  domänens        │                         │
+│  │  (max 256)       │  │  aggregerade     │                         │
+│  │                  │  │  profil          │                         │
+│  └─────────────────┘  └─────────────────┘                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 Explicit Feedback: `feedback(goal, successful_node_ids)`
+
+Anropas med vilka noder som faktiskt innehöll rätt svar.
+
+**Steg 1 — Kausalt minne per nod:**
+```
+för varje framgångsrik nod:
+  om hit_count == 0:
+    causal_memory = goal_hv
+  annars:
+    causal_memory = bundle(causal_memory, goal_hv)
+  hit_count += 1
+
+  BTSP plasticity (snabbare feedback = starkare imprint):
+    < 1 sek sedan query: double-bundle (plasticity 1.5)
+    1-10 sek: normal
+    > 10 sek: weak imprint (0.5)
+```
+
+**Steg 1b — Suppression learning:**
+```
+för ALLA noder med amplitude > 0.01:
+  query_count += 1
+  om noden INTE var i successful_set:
+    miss_count += 1
+```
+
+**Steg 2 — DCFR propagation weights:**
+```
+LCFR discount (var 5:e feedback):
+  positiv_discount = t^1.5 / (t^1.5 + 1)  ← långsam decay (bevara vinster)
+  negativ_discount = t² / (t² + 1)        ← snabb decay (glöm misslyckanden)
+
+För varje parent→child kant:
+  regret = conf     (om child var successful)
+  regret = -(1-conf) (om child inte var successful)
+
+  propagation_stats["heading:down:news+latest"].cum_pos += regret (om > 0)
+  propagation_stats["heading:down:news+latest"].cum_neg += regret (om < 0)
+```
+
+**Steg 3 — Concept memory:**
+```
+för varje framgångsrik nod × varje goal-token:
+  concept_memory["news:news+latest"] = bundle(existing, nod.text_hv)
+  concept_memory["news"] = bundle(existing, nod.text_hv)  ← global fallback
+```
+
+### 5.3 Implicit Feedback: `implicit_feedback(goal, response_text)`
+
+Stänger lärande-loopen utan explicit feedback-anrop:
+```
+för varje nod:
+  label_words = tokenize(nod.label)
+  response_words = tokenize(LLM:ens svar)
+  overlap = |label_words ∩ response_words|
+  ratio = overlap / |label_words|
+
+  kort label (< 5 ord): threshold = 0.6
+  lång label (≥ 5 ord): threshold = 0.4
+
+  om overlap ≥ 2 OCH ratio > threshold:
+    → markera som successful
+```
+
+### 5.4 Domain-Level Transfer
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│               DOMAIN TRANSFER LEARNING                         │
+│                                                                │
+│  bbc.com/article-1                                             │
+│    ├── feedback → propagation_stats learned                    │
+│    └── save_field() → DomainRegistry.update(bbc_hash)          │
+│                            │                                   │
+│                            ▼                                   │
+│                    ┌──────────────────┐                         │
+│                    │  DomainProfile   │                         │
+│                    │  bbc.com         │                         │
+│                    │                  │                         │
+│                    │  stats: weighted │                         │
+│                    │  merge from all  │                         │
+│                    │  bbc.com fields  │                         │
+│                    │                  │                         │
+│                    │  concepts: HV    │                         │
+│                    │  bundle from all │                         │
+│                    │  successful      │                         │
+│                    └────────┬─────────┘                         │
+│                             │                                  │
+│                             ▼                                  │
+│  bbc.com/article-2 (NY URL)                                    │
+│    └── from_semantic_tree() → warm-start med DomainProfile     │
+│         propagation_stats = bbc profil                          │
+│         concept_memory = bbc profil                             │
+│         → Redan vid FÖRSTA frågan vet vi vilka                  │
+│           riktningar och koncept som funkar på BBC              │
+└────────────────────────────────────────────────────────────────┘
+
+Vikt: nya fälts contribution skalas med total_feedback.
+  → Fält med 100 feedback-anrop dominerar över fält med 1.
+  → Max 10 000 domäner i registret.
+```
+
+### 5.5 Cross-URL Transfer (explicit)
+
+`transfer_from(donor, min_similarity)`: överför kausalt minne
+från en annan URL (t.ex. SVT → Expressen) baserat på
+roll + label-likhet. Bara noder med `hit_count > 0` överförs.
+
+### 5.6 Konvergensegenskaper
+
+```
+  Precision
+     ▲
+  90%│                    ●────●────●
+     │               ●───●
+  80%│          ●───●
+     │     ●───●
+  70%│   ●
+     │ ●
+  60%│●
+     └──┬──┬──┬──┬──┬──┬──┬──┬──┬──► Feedback-iterationer
+        1  2  3  4  5  6  7  8  9 10
+
+  Typisk konvergens: 3-9 iterationer
+  - Kausalt minne: märkbar effekt från iteration 2-3
+  - Suppression: kickar in vid iteration 3 (min_queries=3)
+  - Domain transfer: omedelbari effekt vid ny URL
+  - Propagation weights: gradvis förbättring iteration 3-7
+```
