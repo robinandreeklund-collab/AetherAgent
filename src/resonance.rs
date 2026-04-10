@@ -58,6 +58,70 @@ const MAX_CONCEPT_ENTRIES: usize = 256;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
+/// Structural Pattern Memory: lär oss VAR i DOM:en svaret brukar finnas.
+/// Per roll+djup-bucket lagras (successes, total) för att bygga en dynamisk
+/// karta över informationsregioner. Uppdateras vid feedback.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnswerZoneProfile {
+    /// Per "role:depth_bucket" → (successes, observations)
+    /// depth_bucket: 0-1 = "shallow", 2-4 = "mid", 5+ = "deep"
+    zone_hits: HashMap<String, (f32, f32)>,
+}
+
+impl AnswerZoneProfile {
+    /// Depth → bucket-namn
+    fn depth_bucket(depth: u32) -> &'static str {
+        match depth {
+            0..=1 => "shallow",
+            2..=4 => "mid",
+            _ => "deep",
+        }
+    }
+
+    /// Registrera att en nod med given roll+djup var/inte var framgångsrik
+    fn record(&mut self, role: &str, depth: u32, success: bool) {
+        let key = format!("{}:{}", role, Self::depth_bucket(depth));
+        let entry = self.zone_hits.entry(key).or_insert((0.0, 0.0));
+        entry.1 += 1.0; // observation
+        if success {
+            entry.0 += 1.0; // success
+        }
+    }
+
+    /// Hämta success-rate för en roll+djup (None om inga observationer)
+    fn success_rate(&self, role: &str, depth: u32) -> Option<f32> {
+        let key = format!("{}:{}", role, Self::depth_bucket(depth));
+        self.zone_hits.get(&key).and_then(|&(succ, total)| {
+            if total >= 3.0 {
+                Some(succ / total)
+            } else {
+                None // Inte nog med data
+            }
+        })
+    }
+
+    /// Beräkna boost/penalty baserat på inlärd answer-zone profil.
+    /// Returnerar multiplikator (0.7–1.3).
+    fn zone_boost(&self, role: &str, depth: u32) -> f32 {
+        if let Some(rate) = self.success_rate(role, depth) {
+            // rate 0.0 → 0.7 (penalty), rate 0.5 → 1.0 (neutral), rate 1.0 → 1.3 (boost)
+            0.7 + rate * 0.6
+        } else {
+            1.0 // Ingen data → neutral
+        }
+    }
+
+    /// Temporal decay: alla observations degraderas sakta
+    fn decay(&mut self, factor: f32) {
+        for (succ, total) in self.zone_hits.values_mut() {
+            *succ *= factor;
+            *total *= factor;
+        }
+        // Ta bort entries med < 0.5 observations (utfasade)
+        self.zone_hits.retain(|_, &mut (_, total)| total >= 0.5);
+    }
+}
+
 /// Type of resonance that caused a node to appear in results
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ResonanceType {
@@ -287,6 +351,10 @@ pub struct ResonanceField {
     /// so the oldest concept is evicted first rather than an arbitrary one.
     #[serde(default)]
     concept_memory_order: VecDeque<String>,
+    /// Structural Pattern Memory: lär oss i vilka DOM-regioner (roll+djup)
+    /// svaret brukar finnas. Uppdateras vid feedback, appliceras som boost/penalty.
+    #[serde(default)]
+    answer_zone: AnswerZoneProfile,
     /// Cached site-name words derived from the first few node labels.
     /// OPT-2: computed once and reused across queries; invalidated by node mutations.
     #[serde(skip)]
@@ -384,8 +452,28 @@ fn adaptive_fan_out(children_count: usize) -> usize {
 
 /// Answer-shape scoring: how much does this node look like an answer?
 /// Pure structure + statistics — no semantics.
-fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
+fn answer_shape_score(
+    label: &str,
+    role: &str,
+    siblings_count: usize,
+    has_children: bool,
+    sibling_has_content: bool,
+) -> f32 {
     let mut score: f32 = 0.0;
+
+    // Leaf-heading penalty: headings utan barn är navigationsmarkörer,
+    // inte informationsbärare. Kontexten sitter i grannar/barn.
+    // "Senaste nytt – Nyheter" utan barn → penalty.
+    // Men en heading MED content-syskon lyfter syskonen istället (se propagation).
+    if role == "heading" && !has_children {
+        score -= 0.35;
+        // Partial mitigation: om headingens syskon har content-roller
+        // är headingen åtminstone en strukturell ledtråd
+        if sibling_has_content {
+            score += 0.10;
+        }
+    }
+
     // Contains numbers (prices, dates, populations, percentages)
     if label.bytes().any(|b| b.is_ascii_digit()) {
         score += 0.3;
@@ -708,6 +796,51 @@ impl ResonanceField {
             }
         }
 
+        // Sibling-context blending for leaf headings:
+        // En heading utan barn saknar child-context i sin HV.
+        // Blenda in syskonens HV:er så att headingen "känner" sin kontext.
+        // "Senaste nytt" heading bredvid [link:"Putin...", link:"Brand..."]
+        // → headingens HV inkluderar syskonnodernas semantik.
+        {
+            let heading_ids: Vec<u32> = nodes
+                .iter()
+                .filter(|(id, s)| {
+                    s.role == "heading"
+                        && !children_map.get(id).map(|c| !c.is_empty()).unwrap_or(false)
+                })
+                .map(|(&id, _)| id)
+                .collect();
+            for hid in heading_ids {
+                if let Some(&pid) = parent_map.get(&hid) {
+                    if let Some(siblings) = children_map.get(&pid) {
+                        let sib_hvs: Vec<Hypervector> = siblings
+                            .iter()
+                            .filter(|&&sid| sid != hid)
+                            .take(Self::HDC_MAX_BUNDLE_CHILDREN)
+                            .filter_map(|&sid| nodes.get(&sid).map(|s| s.text_hv.clone()))
+                            .collect();
+                        if !sib_hvs.is_empty() {
+                            let refs: Vec<&Hypervector> = sib_hvs.iter().collect();
+                            let sib_bundle = Hypervector::bundle(&refs);
+                            // 85% own text + 15% sibling context
+                            // (less than child-blend 80/20 since siblings are peers, not owned)
+                            if let Some(state) = nodes.get_mut(&hid) {
+                                let own = state.text_hv.clone();
+                                state.text_hv = Hypervector::bundle(&[
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &sib_bundle,
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // #3: Samla värde-data (action/href/value) per nod
         let mut node_values: HashMap<u32, String> = HashMap::new();
         Self::collect_values(tree_nodes, &mut node_values);
@@ -737,6 +870,7 @@ impl ResonanceField {
             total_chars_out: 0,
             latency_samples: Vec::new(),
             concept_memory_order: VecDeque::new(),
+            answer_zone: AnswerZoneProfile::default(),
             cached_site_words: None,
             cached_shape_scores: None,
             cached_meta_penalties: None,
@@ -756,6 +890,14 @@ impl ResonanceField {
                         .concept_memory
                         .entry(token.clone())
                         .or_insert_with(|| hv_data.clone());
+                }
+                // Warm-start answer zone from domain profile
+                for (key, &(succ, total)) in &profile.answer_zone.zone_hits {
+                    field
+                        .answer_zone
+                        .zone_hits
+                        .entry(key.clone())
+                        .or_insert((succ, total));
                 }
             }
         }
@@ -1016,12 +1158,49 @@ impl ResonanceField {
                     .iter()
                     .map(|(&id, label)| {
                         let role = self.nodes.get(&id).map(|s| s.role.as_str()).unwrap_or("");
-                        let siblings = self
+                        let parent_id = self.parent_map.get(&id).copied().unwrap_or(0);
+                        let sibling_ids = self.children_map.get(&parent_id);
+                        let siblings = sibling_ids.map(|c| c.len()).unwrap_or(0);
+                        let has_children = self
                             .children_map
-                            .get(&self.parent_map.get(&id).copied().unwrap_or(0))
-                            .map(|c| c.len())
-                            .unwrap_or(0);
-                        (id, answer_shape_score(label, role, siblings))
+                            .get(&id)
+                            .map(|c| !c.is_empty())
+                            .unwrap_or(false);
+                        // Kolla om syskon har content-roller (text, paragraph, listitem, etc.)
+                        let sibling_has_content = sibling_ids
+                            .map(|sibs| {
+                                sibs.iter().any(|&sid| {
+                                    sid != id
+                                        && self
+                                            .nodes
+                                            .get(&sid)
+                                            .map(|s| {
+                                                matches!(
+                                                    s.role.as_str(),
+                                                    "text"
+                                                        | "paragraph"
+                                                        | "listitem"
+                                                        | "link"
+                                                        | "price"
+                                                        | "data"
+                                                        | "cell"
+                                                        | "button"
+                                                )
+                                            })
+                                            .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        (
+                            id,
+                            answer_shape_score(
+                                label,
+                                role,
+                                siblings,
+                                has_children,
+                                sibling_has_content,
+                            ),
+                        )
                     })
                     .collect(),
             );
@@ -1281,6 +1460,12 @@ impl ResonanceField {
                                 * (success_ratio / SUPPRESSION_RATIO_THRESHOLD);
                         state.amplitude *= factor;
                     }
+                }
+
+                // Structural Pattern Memory: boost/penalize baserat på inlärd answer-zone
+                let zone_boost = self.answer_zone.zone_boost(&state.role, state.depth);
+                if (zone_boost - 1.0).abs() > 0.001 {
+                    state.amplitude *= zone_boost;
                 }
 
                 causal_boosts.insert(nid, causal_boost);
@@ -2241,6 +2426,24 @@ impl ResonanceField {
             }
         }
 
+        // Steg 1c: Structural Pattern Memory — lär oss var svaret sitter
+        // Registrera framgångsrika noders roll+djup i answer_zone-profilen
+        for &nid in successful_node_ids {
+            if let Some(state) = self.nodes.get(&nid) {
+                self.answer_zone.record(&state.role, state.depth, true);
+            }
+        }
+        // Registrera topp-synliga noder som INTE var framgångsrika (negativ signal)
+        for (&nid, state) in &self.nodes {
+            if state.amplitude > 0.3 && !successful_set.contains(&nid) {
+                self.answer_zone.record(&state.role, state.depth, false);
+            }
+        }
+        // Temporal decay var 10:e feedback (hindrar att gammal data dominerar)
+        if self.total_feedback.is_multiple_of(10) {
+            self.answer_zone.decay(0.9);
+        }
+
         // Steg 2: DCFR cumulative regret update.
         // Success → positive regret, Failure → negative regret.
         // Regret magnitude scales with confidence (amplitude).
@@ -2906,6 +3109,9 @@ pub struct DomainProfile {
     pub concepts: HashMap<String, HvData>,
     /// Number of fields that contributed to this profile
     pub field_count: u32,
+    /// Aggregated answer zone profile from all URLs on this domain
+    #[serde(default)]
+    pub answer_zone: AnswerZoneProfile,
 }
 
 struct DomainRegistry {
@@ -2935,6 +3141,7 @@ impl DomainRegistry {
                 stats: HashMap::new(),
                 concepts: HashMap::new(),
                 field_count: 0,
+                answer_zone: AnswerZoneProfile::default(),
             });
 
         // OPT-9 fix: weight each field's contribution by its total_feedback count so
@@ -2956,6 +3163,17 @@ impl DomainRegistry {
             let entry = profile.stats.entry(key.clone()).or_insert((1.0, 1.0));
             entry.0 = entry.0 * existing_w + alpha * new_w;
             entry.1 = entry.1 * existing_w + beta * new_w;
+        }
+
+        // Merge answer zone profile (weighted average of zone_hits)
+        for (key, &(succ, total)) in &field.answer_zone.zone_hits {
+            let entry = profile
+                .answer_zone
+                .zone_hits
+                .entry(key.clone())
+                .or_insert((0.0, 0.0));
+            entry.0 = entry.0 * existing_w + succ * new_w;
+            entry.1 = entry.1 * existing_w + total * new_w;
         }
 
         // Merge concept memory (bundle HVs)
